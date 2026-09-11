@@ -263,7 +263,7 @@ bisect-ppx-report html --coverage-path _coverage
 
 ## 9. 불변식
 
-- **INV-T1**: Hermetic Required 계층의 모든 테스트는 외부 GraphQL/ZAI credentials 없이 통과해야 한다.
+- **INV-T1**: Hermetic Required 계층의 모든 테스트는 외부 ZAI credentials 없이 통과해야 한다.
 - **INV-T2**: Env-gated 테스트는 필수 환경변수 부재 시 skip 또는 not run으로 처리한다. 실패가 아니다.
 - **INV-T3**: 구조 경계 테스트는 명령 문자열이나 도구 이름에서 권한 의미를 추론하지 않는다.
 - **INV-T4**: 한 Gate 요청의 pending/HITL 상태는 다른 Keeper 또는 같은 Keeper의 독립 작업 lane을 중단시키지 않는다.

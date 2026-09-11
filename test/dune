@@ -69,7 +69,6 @@
    ; workspace state. Tests that need a base path pass it explicitly.
    (MASC_BASE_PATH "")
    ; Avoid non-deterministic external network calls during unit tests.
-   (GRAPHQL_API_KEY "")
    (ZAI_API_KEY "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false)
    ; Standard tests keep the Docker playground disabled. A dedicated
@@ -438,7 +437,6 @@
   test_workspace_goal_index
   test_log_severity_outcome_level
   test_env_keeper_scrub
-  test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution
@@ -787,7 +785,6 @@
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
-  test_relation_materializer
   test_keeper_wire_capture
   test_board_rest_routes
   test_board_context_inference_resolution

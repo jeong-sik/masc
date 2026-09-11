@@ -3536,7 +3536,7 @@ let test_undeclared_producer_artifact_is_typed_missing () =
         | "artifact_unreadable" ->
           Some
             ( item |> member "reference" |> to_string
-            , item |> member "reason" |> to_string )
+            , item |> member "reason" |> member "code" |> to_string )
         | _ -> None)
     in
     Alcotest.(check (list (pair string string)))

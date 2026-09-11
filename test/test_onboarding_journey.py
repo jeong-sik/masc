@@ -31,6 +31,19 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_antigravity_context_observation_avoids_numeric_input(self):
+        source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
+                      credential_kind='file', credential_file='/private/account', provider_timeout_s=300.)
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            source='antigravity_statusline', model='selected-model', context=1048576, invocation_verified=False)), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run, \
+                patch.object(SETUP, 'pick') as picker, contextlib.redirect_stderr(io.StringIO()):
+            _, spec = SETUP.resolve_model_spec(source, dict(id='selected-model', context=None), 10, binary='/owned/masc')
+        self.assertEqual(spec['max_context'], 1048576)
+        self.assertTrue(spec['streaming'])
+        self.assertEqual(run.call_args.args[0][-2:], ['--model', 'selected-model'])
+        picker.assert_not_called()
+
     def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
         catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
                        models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])

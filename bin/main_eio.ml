@@ -2754,6 +2754,18 @@ let antigravity_models_cmd =
   Cmd.v (Cmd.info "runtime-antigravity-models" ~doc:"Refresh the selected Antigravity account's models without a model turn.")
     Term.(const run $ cli_path $ credential)
 
+let antigravity_context_cmd =
+  let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in
+  let credential = Arg.(required & opt (some string) None & info ["credential-file"] ~docv:"PRIVATE_REFERENCE") in
+  let model = Arg.(required & opt (some string) None & info ["model"] ~docv:"MODEL_ID") in
+  let run cli_path oauth_source model_id =
+    match Masc_cli_onboarding.python (Unix.realpath Sys.executable_name) with
+    | None -> prerr_endline "The installed Python helper is missing. Reinstall the complete MASC release."; 1
+    | Some python_path -> Masc_cli_antigravity.context ~python_path ~cli_path ~oauth_source ~model_id
+        ~timeout_s:runtime_probe_subscription_timeout_s in
+  Cmd.v (Cmd.info "runtime-antigravity-context" ~doc:"Read the selected account model's actual CLI context without a model prompt.")
+    Term.(const run $ cli_path $ credential $ model)
+
 let setup_server_cmd =
   let inspect base_path port = Masc_cli_owner_upgrade.inspect ~base_path ~port in
   Cmd.v (Cmd.info "setup-server" ~doc:"Inspect this setup port and offer an unused port without changing any server.")
@@ -2957,6 +2969,7 @@ let cmd =
     ; workspace_upgrade_cmd
     ; antigravity_account_cmd
     ; antigravity_models_cmd
+    ; antigravity_context_cmd
     ; setup_server_cmd
     ; setup_stop_owner_cmd
     ; doctor_cmd

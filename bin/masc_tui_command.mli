@@ -21,6 +21,7 @@ type t =
   | Help  (** [/help] — draw the command list into the pane. *)
   | About
       (** [/about] or [/splash] — display MASC Horned Reaper ASCII emblem and system telemetry. *)
+  | Lane_addons of string
   | Open_metrics
       (** [/metrics] or [/telemetry] — display multicore engine telemetry, scheduler latency, and fleet metrics. *)
   | Open_settings

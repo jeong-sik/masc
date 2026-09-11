@@ -43,8 +43,8 @@ ASSETS=(
   "masc-check-runtime-deployment-preflight-$ARCH"
   "masc-dashboard-$ARCH.tar.gz"
   "masc-release-dashboard-bundle-$ARCH.py"
+  "masc-runtime-$ARCH.tar.gz"
 )
-case "$ARCH" in macos-*) ASSETS+=("masc-runtime-$ARCH.tar.gz") ;; esac
 for a in "${ASSETS[@]}"; do
   [ -f "$BIN_DIR/$a" ] || { echo "install-smoke: missing release asset $BIN_DIR/$a" >&2; exit 2; }
 done

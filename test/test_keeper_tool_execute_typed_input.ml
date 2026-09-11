@@ -1072,7 +1072,14 @@ let test_an_ordinary_program_is_untouched () =
 ;;
 
 (* The tap hands back the typed finding, because a caller that wants to tell
-   the writer what to do needs the reason and not its name. *)
+   the writer what to do needs the reason and not its name.
+
+   The script is a substitution in program position. [cat $(echo foo)] used to
+   serve here and no longer does: the $( ) series parses a substituted
+   *argument* into [Shell_ir.Subst], so that script is now representable and
+   this case read "got 1" while the count was never the problem. A substituted
+   program name is the arm bash.ml documents as staying refused, so it is the
+   one that does not move under the same series. *)
 let test_a_finding_carries_its_rewrite () =
   let module Costume = Keeper_tooling.Shell_costume in
   let module Rewrite = Keeper_tooling.Subset_rewrite in

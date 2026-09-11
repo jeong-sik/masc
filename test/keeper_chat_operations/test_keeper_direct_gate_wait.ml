@@ -42,7 +42,7 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     let operation = admit store in
     Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
     suspend store operation |> ignore;
-    check bool "unresolved wait is not claimable" false (Store.has_claimable_queued store |> ok);
+    check bool "unresolved wait is not claimable" false (Store.has_claimable_queued store ~now:4. |> ok);
     check bool "no repeated waiting child" true (claim store = None);
     Store.submit store ~now:4. ~operation_id:other ~source ~input:(`String "independent work") |> ok |> ignore;
     let independent = match claim store with Some value -> value | None -> fail "independent work was blocked" in
@@ -82,7 +82,7 @@ let test_runtime_failure_retains_gate_obligations () = with_path (fun path -> wi
   Store.resolve_direct_gate store ~now:4. ~operation_id:original ~resolution |> ok |> ignore;
   let operation = match claim store with Some value -> value | None -> fail "resolved original missing" in
   Store.resume_direct_gate store ~now:5. ~operation_id:original ~waiting ~resolution |> ok;
-  let continuation = Semantic.runtime_retry ~checkpoint:(checkpoint "replay and failed provider")
+  let continuation = Semantic.runtime_retry ~not_before:None ~checkpoint:(checkpoint "replay and failed provider")
       ~assignment_id:"frozen" ~failed_runtime_id:"first" ~next_runtime_id:"alternate" ~later_runtime_ids:[] |> require in
   Store.defer_direct_runtime_retry store ~now:6. ~operation_id:original
     ~execution_digest:operation.execution_digest ~continuation |> ok |> ignore;
@@ -118,7 +118,7 @@ let test_session_scope_validation () =
 
 let test_fresh_gate_and_runtime_retry_restart () = with_path (fun path ->
   let reference = checkpoint "same original input completed effects and frozen runtime suffix" in
-  let retry = Semantic.runtime_retry ~checkpoint:reference ~assignment_id:"original-runtime-assignment"
+  let retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:"original-runtime-assignment"
     ~failed_runtime_id:"primary" ~next_runtime_id:"alternate" ~later_runtime_ids:["last"] |> require in
   let waiting = Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope:(Semantic.session_scope [] |> require) ~obligations:[obligation]
     ~runtime_retry:retry |> require in

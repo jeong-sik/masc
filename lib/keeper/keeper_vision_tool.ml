@@ -87,8 +87,11 @@ let vision_runtime_candidates ~now
      modality reroute, the capability gate, and this vision pick must share one
      predicate or a vision pick can land on a runtime the gate then rejects.
      The candidate order is the RFC-0440 set the keeper reroute walks
-     ([Runtime_agent.media_candidates] with no lane: [runtime.media_failover]
-     first, then the remaining declared runtimes). Only [Agent_core] runtimes
+     ([Runtime_agent.media_candidates] with no lane, which is
+     [runtime.media_failover] in declared order). A declared runtime outside
+     that list is not offered here: it is the one boot does not validate
+     dispatch caps for, and this tool dispatches what it is handed
+     (#34823). Only [Agent_core] runtimes
      qualify here because this tool calls the provider itself; an official
      client carries inline images for the reroute but has no provider config.
      The set is held in quota-window order ([Runtime_quota_window.demote_order],
@@ -301,10 +304,9 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
-let ok_json (reading : vision_reading) =
+let ok_data (reading : vision_reading) =
   record_vision_analyze_result ~result:"ok" ~reason:"ok";
-  Yojson.Safe.to_string
-    (`Assoc
+  (`Assoc
        [ "ok", `Bool true
        ; "text", `String reading.text
        ; "runtime_id", `String reading.runtime_id
@@ -648,6 +650,7 @@ let run_candidates_outcome
 let run_vision
     ?complete
     ?runtime_id
+    ?(exclude_runtime_ids = [])
     ~sw
     ~clock
     ~net
@@ -671,7 +674,29 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              let candidates = vision_runtime_candidates ~now:(Eio.Time.now clock) in
+              let all_candidates =
+                vision_runtime_candidates ~now:(Eio.Time.now clock)
+              in
+              (* Candidates the caller's own walk already spent this turn. The
+                 quota window pushes a candidate that answered a hard rejection
+                 behind the live ones but keeps it in the list, so without this
+                 the delegation calls the accounts that just refused to pay one
+                 more time before the text fallback starts (#34829). *)
+              let candidates =
+                match exclude_runtime_ids with
+                | [] -> all_candidates
+                | excluded ->
+                  List.filter
+                    (fun (id, _, _) -> not (List.mem id excluded))
+                    all_candidates
+              in
+              if List.is_empty candidates && not (List.is_empty all_candidates)
+              then
+                (* Distinct from "none configured": there are capable runtimes
+                   and the walk has already asked all of them. *)
+                Vo_no_runtime
+                  "every capable image runtime was already attempted in this turn"
+              else
               let selected = match runtime_id with
                 | None -> Ok candidates
                 | Some requested ->
@@ -710,7 +735,7 @@ let failed ~failure_class ?detail code =
 ;;
 
 let execution_of_vision_outcome = function
-  | Vo_ok text -> Keeper_tool_execution.success (ok_json text)
+  | Vo_ok text -> Keeper_tool_execution.success_data (ok_data text)
   | Vo_invalid_request detail ->
     failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
   | Vo_no_runtime detail ->

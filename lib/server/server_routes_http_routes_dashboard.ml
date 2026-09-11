@@ -1607,19 +1607,74 @@ let add_routes ~sw ~clock router =
            end) request reqd)
   |> Http.Router.get "/api/v1/setup/inventory" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
-           let observed = Runtime.load_config_observation () in
-           match observed with
-           | Error _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
-               (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd
-           | Ok observation ->
+         (fun state _agent_name req reqd ->
+           let base_path=(Mcp_server.workspace_config state).base_path in
+           match Runtime_setup_batch.observe_inventory ~base_path with
+           | Ok (revision,observation) ->
              (match Runtime_toml.parse_string observation.source_text with
               | Error _ -> Http.Response.json_value ~status:`Bad_request ~request:req
                   (`Assoc ["error", `String "Runtime configuration needs correction."]) reqd
               | Ok config -> Http.Response.json_value ~request:req
                   (match Runtime_wizard_inventory.to_json config with
-                   | `Assoc fields -> `Assoc (("source_revision", `String (Runtime.config_source_revision_to_string observation.source_revision)) :: fields)
-                   | value -> value) reqd)) request reqd)
+                   | `Assoc fields -> `Assoc (("setup_revision",`String (Runtime_setup_batch.revision_to_string revision))
+                       ::("source_revision",`String (Runtime.config_source_revision_to_string observation.source_revision))::fields)
+                   | value -> value) reqd)
+           | _ -> Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (`Assoc ["error", `String "Runtime configuration is unavailable."]) reqd) request reqd)
+  |> Http.Router.post "/api/v1/setup/models" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match Eio_context.get_net_opt () with
+               | None -> Error Server_runtime_setup_actions.Configuration_unavailable
+               | Some net ->
+                 (match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+                  | None -> Error Server_runtime_setup_actions.Invalid_request
+                  | Some json -> Server_runtime_setup_actions.discover ~binary:Sys.executable_name ~sw ~net
+                      ~base_path:(Mcp_server.workspace_config state).base_path json) in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/accounts/antigravity" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.import_account ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/context" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match Eio_context.get_net_opt () with
+               | None -> Error Server_runtime_setup_actions.Configuration_unavailable
+               | Some net ->
+                 (match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+                  | None -> Error Server_runtime_setup_actions.Invalid_request
+                  | Some json -> Server_runtime_setup_actions.context ~binary:Sys.executable_name ~net
+                      ~base_path:(Mcp_server.workspace_config state).base_path json) in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
+  |> Http.Router.post "/api/v1/setup/connections" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let result = match (try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None) with
+               | None -> Error Server_runtime_setup_actions.Invalid_request
+               | Some json -> Server_runtime_setup_actions.save ~binary:Sys.executable_name
+                   ~base_path:(Mcp_server.workspace_config state).base_path json in
+             match result with
+             | Ok json -> Http.Response.json_value ~request:req json reqd
+             | Error error -> Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd)) request reqd)
   |> Http.Router.post "/api/v1/setup/credential" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->

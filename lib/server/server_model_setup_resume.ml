@@ -9,6 +9,7 @@ let install ~sw ~base_path ~resume =
   let installed = Some {base_path;resume;lock=Eio.Mutex.create ()} in
   if not (Atomic.compare_and_set owner None installed) then
     invalid_arg "model setup resume already has an owner";
+  (* fire-and-forget: clears the owner only when this install still owns it. *)
   Eio.Switch.on_release sw (fun () -> ignore (Atomic.compare_and_set owner installed None))
 let request ~base_path =
   match Atomic.get owner with

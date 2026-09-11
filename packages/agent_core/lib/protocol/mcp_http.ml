@@ -56,7 +56,7 @@ let call_tool t ~name ~arguments =
     let content = Mcp.text_of_tool_result result in
     if Option.value ~default:false result.Mcp_schema.Sdk_types.is_error
     then Error { Types.message = content; recoverable = true; error_class = None }
-    else Ok { Types.content; _meta = None }
+    else Ok { Types.content; content_blocks = None; _meta = None }
 ;;
 
 let close t = ignore (Sdk_http_client.close t.client)

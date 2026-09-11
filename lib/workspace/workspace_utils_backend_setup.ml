@@ -93,10 +93,7 @@ let normalize_base_path path =
   else trimmed
 
 let running_under_test_executable () =
-  let executable =
-    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
-  in
-  String.starts_with ~prefix:"test_" executable
+  Host_config.is_test_mode (Host_config.host ()).test_mode
 
 let sync_test_base_path_env resolved_path =
   if running_under_test_executable () then

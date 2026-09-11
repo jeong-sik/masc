@@ -292,7 +292,7 @@ let request_captures_exact_redacted_tool_schemas () =
             ; required = true
             }
           ]
-        (fun _input -> Ok { Agent_core.Types.content = "ok"; _meta = None })
+        (fun _input -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
     in
     let raw_tools = `List [ Agent_core.Tool.schema_to_json tool ] in
     Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
@@ -347,7 +347,7 @@ let tools_blob_is_shared_across_requests () =
             ; required = true
             }
           ]
-        (fun _input -> Ok { Agent_core.Types.content = "ok"; _meta = None })
+        (fun _input -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
     in
     let capture ~turn_id =
       Wire.capture_request ~base_path:base ~masc_root:base

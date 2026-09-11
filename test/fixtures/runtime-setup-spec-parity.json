@@ -1,0 +1,164 @@
+[
+  {
+    "spec": {
+      "choice": "ollama",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "endpoint": "https://fixture.invalid/v1"
+    },
+    "runtime_id": "setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3.setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3_model",
+    "runtime_toml": "\n[\"providers\".\"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3\"]\n\"display-name\" = \"ollama / fixture-model\"\n\"protocol\" = \"ollama-http\"\n\"endpoint\" = \"https://fixture.invalid/v1\"\n\n[\"providers\".\"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3\".\"healthcheck\"]\n\"path\" = \"/api/tags\"\n\n[\"models\".\"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3\".\"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3_model\"]\n\"wizard-default\" = true\n\"num-ctx\" = 8192\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"fixture-model\"\n\"provider_name\" = \"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3\"\n\"base\" = \"ollama\"\n\"max_context_tokens\" = 8192\n\"supports_tools\" = true\n\"supports_native_streaming\" = true\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3\"\n\"kind\" = \"ollama\"\n\"base_url\" = \"https://fixture.invalid/v1\"\n\"request_path\" = \"/api/chat\"\n\"api_key_env\" = \"\"\n\"capabilities_base\" = \"ollama\"\n\n[[\"targets\"]]\n\"id\" = \"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3.setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3_model\"\n\"provider_ref\" = \"setup_ollama_70f9fad2681ea23f4ef66e4138928a45038fa795cfe3c52b7b8bceeccbf303d3\"\n\"model_id\" = \"fixture-model\"\n"
+  },
+  {
+    "spec": {
+      "choice": "llama_cpp",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "endpoint": "https://fixture.invalid/v1"
+    },
+    "runtime_id": "setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15.setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15_model",
+    "runtime_toml": "\n[\"providers\".\"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15\"]\n\"display-name\" = \"llama_cpp / fixture-model\"\n\"protocol\" = \"openai-compatible-http\"\n\"endpoint\" = \"https://fixture.invalid/v1\"\n\n[\"providers\".\"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15\".\"healthcheck\"]\n\"path\" = \"/models\"\n\n[\"models\".\"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15\".\"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"fixture-model\"\n\"provider_name\" = \"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15\"\n\"base\" = \"openai_chat\"\n\"max_context_tokens\" = 8192\n\"supports_tools\" = true\n\"supports_native_streaming\" = true\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15\"\n\"kind\" = \"openai_compat\"\n\"base_url\" = \"https://fixture.invalid/v1\"\n\"request_path\" = \"/chat/completions\"\n\"api_key_env\" = \"\"\n\"capabilities_base\" = \"openai_chat\"\n\n[[\"targets\"]]\n\"id\" = \"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15.setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15_model\"\n\"provider_ref\" = \"setup_llama_cpp_e318267de99f7d9df90fa01520cfcf7813e1a4181183c99807a4191037eeee15\"\n\"model_id\" = \"fixture-model\"\n"
+  },
+  {
+    "spec": {
+      "choice": "vllm",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "endpoint": "https://fixture.invalid/v1"
+    },
+    "runtime_id": "setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2.setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2_model",
+    "runtime_toml": "\n[\"providers\".\"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2\"]\n\"display-name\" = \"vllm / fixture-model\"\n\"protocol\" = \"openai-compatible-http\"\n\"endpoint\" = \"https://fixture.invalid/v1\"\n\n[\"providers\".\"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2\".\"healthcheck\"]\n\"path\" = \"/models\"\n\n[\"models\".\"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2\".\"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"fixture-model\"\n\"provider_name\" = \"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2\"\n\"base\" = \"openai_chat\"\n\"max_context_tokens\" = 8192\n\"supports_tools\" = true\n\"supports_native_streaming\" = true\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2\"\n\"kind\" = \"openai_compat\"\n\"base_url\" = \"https://fixture.invalid/v1\"\n\"request_path\" = \"/chat/completions\"\n\"api_key_env\" = \"\"\n\"capabilities_base\" = \"openai_chat\"\n\n[[\"targets\"]]\n\"id\" = \"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2.setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2_model\"\n\"provider_ref\" = \"setup_vllm_ceb0f39ad28124e6ac6aac993fe0d440a32ae553ed0a8ab2395fe2877fcb0dd2\"\n\"model_id\" = \"fixture-model\"\n"
+  },
+  {
+    "spec": {
+      "choice": "openai_compatible",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "endpoint": "https://fixture.invalid/v1"
+    },
+    "runtime_id": "setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9.setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9_model",
+    "runtime_toml": "\n[\"providers\".\"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9\"]\n\"display-name\" = \"openai_compatible / fixture-model\"\n\"protocol\" = \"openai-compatible-http\"\n\"endpoint\" = \"https://fixture.invalid/v1\"\n\n[\"providers\".\"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9\".\"healthcheck\"]\n\"path\" = \"/models\"\n\n[\"models\".\"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9\".\"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"fixture-model\"\n\"provider_name\" = \"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9\"\n\"base\" = \"openai_chat\"\n\"max_context_tokens\" = 8192\n\"supports_tools\" = true\n\"supports_native_streaming\" = true\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9\"\n\"kind\" = \"openai_compat\"\n\"base_url\" = \"https://fixture.invalid/v1\"\n\"request_path\" = \"/chat/completions\"\n\"api_key_env\" = \"\"\n\"capabilities_base\" = \"openai_chat\"\n\n[[\"targets\"]]\n\"id\" = \"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9.setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9_model\"\n\"provider_ref\" = \"setup_openai_compatible_9064b03421e94cbda7492c680689dc66b75443e386d6e5b1a828573834035ec9\"\n\"model_id\" = \"fixture-model\"\n"
+  },
+  {
+    "spec": {
+      "choice": "messages",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "endpoint": "https://fixture.invalid/v1",
+      "provider_kind": "anthropic"
+    },
+    "runtime_id": "setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356.setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356_model",
+    "runtime_toml": "\n[\"providers\".\"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356\"]\n\"display-name\" = \"messages / fixture-model\"\n\"protocol\" = \"messages-http\"\n\"endpoint\" = \"https://fixture.invalid/v1\"\n\n[\"providers\".\"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356\".\"healthcheck\"]\n\"path\" = \"/models\"\n\n[\"models\".\"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356\".\"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"fixture-model\"\n\"provider_name\" = \"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356\"\n\"base\" = \"anthropic\"\n\"max_context_tokens\" = 8192\n\"supports_tools\" = true\n\"supports_native_streaming\" = true\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356\"\n\"kind\" = \"anthropic\"\n\"base_url\" = \"https://fixture.invalid/v1\"\n\"request_path\" = \"/v1/messages\"\n\"api_key_env\" = \"\"\n\"capabilities_base\" = \"anthropic\"\n\n[[\"targets\"]]\n\"id\" = \"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356.setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356_model\"\n\"provider_ref\" = \"setup_messages_13d894618dbb5885cf8de8105d1aada67f94a32a4c6a9739e2170e522963b356\"\n\"model_id\" = \"fixture-model\"\n"
+  },
+  {
+    "spec": {
+      "choice": "claude_code",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true
+    },
+    "runtime_id": "setup_claude_code_8c5956845474f14a3d02868dbd3fef2f17b4e78d46b9462794aea86b73741b82.setup_claude_code_8c5956845474f14a3d02868dbd3fef2f17b4e78d46b9462794aea86b73741b82_model",
+    "runtime_toml": "\n[\"providers\".\"setup_claude_code_8c5956845474f14a3d02868dbd3fef2f17b4e78d46b9462794aea86b73741b82\"]\n\"display-name\" = \"claude_code / fixture-model\"\n\"protocol\" = \"claude-code\"\n\"command\" = \"claude\"\n\"is-non-interactive\" = true\n\n[\"models\".\"setup_claude_code_8c5956845474f14a3d02868dbd3fef2f17b4e78d46b9462794aea86b73741b82_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_claude_code_8c5956845474f14a3d02868dbd3fef2f17b4e78d46b9462794aea86b73741b82\".\"setup_claude_code_8c5956845474f14a3d02868dbd3fef2f17b4e78d46b9462794aea86b73741b82_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": ""
+  },
+  {
+    "spec": {
+      "choice": "codex",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true
+    },
+    "runtime_id": "setup_codex_fd24b245e5b2f0985c4de3ea00809995200a8f2c9b69f193f70efaa4501aec8a.setup_codex_fd24b245e5b2f0985c4de3ea00809995200a8f2c9b69f193f70efaa4501aec8a_model",
+    "runtime_toml": "\n[\"providers\".\"setup_codex_fd24b245e5b2f0985c4de3ea00809995200a8f2c9b69f193f70efaa4501aec8a\"]\n\"display-name\" = \"codex / fixture-model\"\n\"protocol\" = \"codex-app-server\"\n\"command\" = \"codex\"\n\"is-non-interactive\" = true\n\n[\"models\".\"setup_codex_fd24b245e5b2f0985c4de3ea00809995200a8f2c9b69f193f70efaa4501aec8a_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_codex_fd24b245e5b2f0985c4de3ea00809995200a8f2c9b69f193f70efaa4501aec8a\".\"setup_codex_fd24b245e5b2f0985c4de3ea00809995200a8f2c9b69f193f70efaa4501aec8a_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": ""
+  },
+  {
+    "spec": {
+      "choice": "antigravity",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "credential_file": "/fixture/private/oauth",
+      "timeout_s": 45.0
+    },
+    "runtime_id": "setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973.setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973_model",
+    "runtime_toml": "\n[\"providers\".\"setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973\"]\n\"display-name\" = \"antigravity / fixture-model\"\n\"protocol\" = \"antigravity-cli\"\n\"command\" = \"agy\"\n\"is-non-interactive\" = true\n\"timeout-s\" = 45.0\n\n[\"providers\".\"setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973\".\"credentials\"]\n\"type\" = \"file\"\n\"path\" = \"/fixture/private/oauth\"\n\n[\"models\".\"setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973\".\"setup_antigravity_79ce997703581921ec00e4611ab310bc2fdbd52f253ba8c210f2aa499cb59973_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": ""
+  },
+  {
+    "spec": {
+      "choice": "messages",
+      "model": "kimi-model",
+      "max_context": 16384,
+      "tools": true,
+      "streaming": false,
+      "endpoint": "https://fixture.invalid",
+      "provider_kind": "kimi",
+      "api_key_env": "FIXTURE_KEY"
+    },
+    "runtime_id": "setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245.setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245_model",
+    "runtime_toml": "\n[\"providers\".\"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\"]\n\"display-name\" = \"messages / kimi-model\"\n\"protocol\" = \"messages-http\"\n\"endpoint\" = \"https://fixture.invalid\"\n\n[\"providers\".\"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\".\"healthcheck\"]\n\"path\" = \"/models\"\n\n[\"providers\".\"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\".\"credentials\"]\n\"type\" = \"env\"\n\"key\" = \"FIXTURE_KEY\"\n\n[\"models\".\"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245_model\"]\n\"api-name\" = \"kimi-model\"\n\"max-context\" = 16384\n\"tools-support\" = true\n\"streaming\" = false\n\n[\"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\".\"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"kimi-model\"\n\"provider_name\" = \"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\"\n\"base\" = \"kimi\"\n\"max_context_tokens\" = 16384\n\"supports_tools\" = true\n\"supports_native_streaming\" = false\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\"\n\"kind\" = \"kimi\"\n\"base_url\" = \"https://fixture.invalid\"\n\"request_path\" = \"/v1/messages\"\n\"api_key_env\" = \"FIXTURE_KEY\"\n\"capabilities_base\" = \"kimi\"\n\n[[\"targets\"]]\n\"id\" = \"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245.setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245_model\"\n\"provider_ref\" = \"setup_messages_0f04df28b528aa5467216c1c95f56af723c233a6acc0a8496b2ca9a489c2b245\"\n\"model_id\" = \"kimi-model\"\n"
+  },
+  {
+    "spec": {
+      "choice": "openai_compatible",
+      "model": "model \"quoted\" 모델",
+      "max_context": 2048,
+      "tools": false,
+      "streaming": false,
+      "endpoint": "http://[::1]:8181/v1",
+      "provider_kind": "glm",
+      "credential_file": "/fixture/private/key",
+      "request_path": "/chat/completions"
+    },
+    "runtime_id": "setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f.setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f_model",
+    "runtime_toml": "\n[\"providers\".\"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\"]\n\"display-name\" = \"openai_compatible / model \\\"quoted\\\" 모델\"\n\"protocol\" = \"openai-compatible-http\"\n\"endpoint\" = \"http://[::1]:8181/v1\"\n\n[\"providers\".\"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\".\"healthcheck\"]\n\"path\" = \"/models\"\n\n[\"providers\".\"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\".\"credentials\"]\n\"type\" = \"file\"\n\"path\" = \"/fixture/private/key\"\n\n[\"models\".\"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f_model\"]\n\"api-name\" = \"model \\\"quoted\\\" 모델\"\n\"max-context\" = 2048\n\"tools-support\" = false\n\"streaming\" = false\n\n[\"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\".\"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": "\n[[\"models\"]]\n\"id_prefix\" = \"model \\\"quoted\\\" 모델\"\n\"provider_name\" = \"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\"\n\"base\" = \"glm\"\n\"max_context_tokens\" = 2048\n\"supports_tools\" = false\n\"supports_native_streaming\" = false\n\"supports_tool_choice\" = false\n\"supports_required_tool_choice\" = false\n\"supports_named_tool_choice\" = false\n\"supports_parallel_tool_calls\" = false\n\"supports_reasoning\" = false\n\"supports_response_format_json\" = false\n\"supports_structured_output\" = false\n\"supports_multimodal_inputs\" = false\n\"supports_image_input\" = false\n\"supports_audio_input\" = false\n\"supports_video_input\" = false\n\"supports_document_input\" = false\n\"supports_prompt_caching\" = false\n\"supports_top_k\" = false\n\"supports_min_p\" = false\n\"supports_seed\" = false\n\"thinking_control_format\" = \"none\"\n\"reasoning_streaming_format\" = \"none\"\n\n[[\"providers\"]]\n\"id\" = \"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\"\n\"kind\" = \"glm\"\n\"base_url\" = \"http://[::1]:8181/v1\"\n\"request_path\" = \"/chat/completions\"\n\"api_key_env\" = \"\"\n\"capabilities_base\" = \"glm\"\n\n[[\"targets\"]]\n\"id\" = \"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f.setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f_model\"\n\"provider_ref\" = \"setup_openai_compatible_169eaf782b468dcab958bb5a0b47010c68210cfda9cb56322e382ccdd12cd02f\"\n\"model_id\" = \"model \\\"quoted\\\" 모델\"\n"
+  },
+  {
+    "spec": {
+      "choice": "antigravity",
+      "model": "fixture-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": true,
+      "credential_file": "/fixture/private/oauth",
+      "timeout_s": 1e-05
+    },
+    "runtime_id": "setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d.setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d_model",
+    "runtime_toml": "\n[\"providers\".\"setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d\"]\n\"display-name\" = \"antigravity / fixture-model\"\n\"protocol\" = \"antigravity-cli\"\n\"command\" = \"agy\"\n\"is-non-interactive\" = true\n\"timeout-s\" = 1e-05\n\n[\"providers\".\"setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d\".\"credentials\"]\n\"type\" = \"file\"\n\"path\" = \"/fixture/private/oauth\"\n\n[\"models\".\"setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d_model\"]\n\"api-name\" = \"fixture-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = true\n\n[\"setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d\".\"setup_antigravity_02c674388771ae9b97b50a3e897d4a7573a6dff5041b9723fd0d88b4ecd7729d_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": ""
+  },
+  {
+    "spec": {
+      "choice": "codex",
+      "model": "custom-model",
+      "max_context": 8192,
+      "tools": true,
+      "streaming": false,
+      "command": "/fixture/bin/custom codex"
+    },
+    "runtime_id": "setup_codex_8c6e61d8e9938ff476d7c319f8826a99c4776cfc75fd3665f1e05a09e3af4dbe.setup_codex_8c6e61d8e9938ff476d7c319f8826a99c4776cfc75fd3665f1e05a09e3af4dbe_model",
+    "runtime_toml": "\n[\"providers\".\"setup_codex_8c6e61d8e9938ff476d7c319f8826a99c4776cfc75fd3665f1e05a09e3af4dbe\"]\n\"display-name\" = \"codex / custom-model\"\n\"protocol\" = \"codex-app-server\"\n\"command\" = \"/fixture/bin/custom codex\"\n\"is-non-interactive\" = true\n\n[\"models\".\"setup_codex_8c6e61d8e9938ff476d7c319f8826a99c4776cfc75fd3665f1e05a09e3af4dbe_model\"]\n\"api-name\" = \"custom-model\"\n\"max-context\" = 8192\n\"tools-support\" = true\n\"streaming\" = false\n\n[\"setup_codex_8c6e61d8e9938ff476d7c319f8826a99c4776cfc75fd3665f1e05a09e3af4dbe\".\"setup_codex_8c6e61d8e9938ff476d7c319f8826a99c4776cfc75fd3665f1e05a09e3af4dbe_model\"]\n\"wizard-default\" = true\n",
+    "model_overlay_toml": ""
+  }
+]

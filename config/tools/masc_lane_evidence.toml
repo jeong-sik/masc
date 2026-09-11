@@ -1,0 +1,25 @@
+name = "masc_lane_evidence"
+description = """
+Freeze selected Lane observations and original evidence.
+
+Evidence remains contextual material, never mandatory instructions or an approval gate. Preservation, delivery, consumption and actual action are distinct outcomes."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "instance_id"
+type = "string"
+required = true
+description = "Exact source Add-on instance."
+
+[[params]]
+name = "row_ids"
+type = "array"
+items = { type = "string" }
+required = true
+description = "Exact selected observation IDs owned by this instance."
+
+[[params]]
+name = "keeper_name"
+type = "string"
+description = "Optional recipient; omit to preserve evidence only. The Keeper may use, defer or ignore it."

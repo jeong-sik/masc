@@ -31,6 +31,47 @@ def observation(base=None, checks=()):
 
 
 class Journey(unittest.TestCase):
+    def test_antigravity_account_models_are_selectable_without_model_id_entry(self):
+        catalog = dict(source='antigravity_cli_models', account_availability_verified=False,
+                       models=[dict(id='exact-model-high', label='Exact model (High)', effective_context=None)])
+        rows = SETUP.antigravity_catalog_rows(catalog)
+        self.assertEqual(rows, [dict(id='exact-model-high', label='Exact model (High)', context=None)])
+        source = dict(choice='antigravity', command='/owned/agy', rows=[], endpoint='', api_key_env='',
+                      credential_file='/private/account', credential_kind='file', account_catalog=rows)
+        observed, _ = SETUP.source_models('/owned/masc', source, 10)
+        self.assertEqual(observed[0]['id'], 'exact-model-high')
+        self.assertIsNone(observed[0]['context'])  # architecture capacity is never substituted
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_antigravity_account_import_keeps_original_and_lists_exact_models(self):
+        with tempfile.TemporaryDirectory() as home:
+            base = Path(home, 'workspace')
+            (base / '.masc').mkdir(parents=True, mode=0o700)
+            original = Path(home, '.gemini/antigravity-cli/antigravity-oauth-token')
+            original.parent.mkdir(parents=True)
+            original.write_text('fixture-private-oauth-never-print')
+            original.chmod(0o600)
+            catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),
+                           command=dict(name='models', data=dict(models=[dict(id='account-only-id', label='Account only model')])))
+            client = Path(home, 'fake-agy')
+            client.write_text('#!/usr/bin/env python3\nimport json,os,sys\n'
+                              'assert sys.argv[1:] == ["--output-format","json","models"]\n'
+                              'assert os.environ["HOME"] != ' + repr(home) + '\n'
+                              'print(' + repr(json.dumps(catalog)) + ')\n')
+            client.chmod(0o700)
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home + '/config')
+            result = subprocess.run([BINARY, 'runtime-antigravity-account', '--base-path', str(base),
+                                     '--cli-path', str(client)], env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertFalse(receipt['invocation_verified'])
+            self.assertEqual(receipt['catalog']['models'][0]['id'], 'account-only-id')
+            selected = Path(receipt['credential_file'])
+            self.assertNotEqual(selected, original)
+            self.assertEqual(selected.read_bytes(), original.read_bytes())
+            self.assertEqual(selected.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(original.read_text(), 'fixture-private-oauth-never-print')
+            self.assertNotIn(original.read_text(), result.stdout + result.stderr)
     def test_upgrade_selection_uses_reviewed_digest_and_stops_after_failed_file(self):
         plans = [dict(keeper_name=name, plan=dict(activation_mode='on_demand', source_sha256=name + '-digest'))
                  for name in ('imp', 'helper', 'third')]

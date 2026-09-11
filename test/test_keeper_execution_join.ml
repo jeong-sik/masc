@@ -172,7 +172,7 @@ let test_tool_completed_stamps_execution_id () =
             { invocation
             ; agent_name = "keeper-x-agent"
             ; tool_name = "Read"
-            ; output = Ok { content = "ok"; _meta = None }
+            ; output = Ok { content = "ok"; content_blocks = None; _meta = None }
             }))
     |> Option.get
   in
@@ -199,7 +199,7 @@ let test_tool_completed_without_entry_omits_execution_id () =
             { invocation = invocation ~turn:2 "tu-5"
             ; agent_name = "agent_core-worker"
             ; tool_name = "Execute"
-            ; output = Ok { content = "ok"; _meta = None }
+            ; output = Ok { content = "ok"; content_blocks = None; _meta = None }
             }))
     |> Option.get
   in

@@ -95,7 +95,14 @@ type KeeperQuarantinedToolOccurrence = {
 
 type KeeperChatCustomEvent =
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
-  | { type: 'CUSTOM'; name: 'KEEPER_RUNTIME_ATTEMPT_STARTED'; value: null }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_RUNTIME_ATTEMPT_STARTED'
+      value: {
+        runtime_id?: string
+        attempt_index?: number
+      } | null
+    }
   // #29650 added these two to the name list above and to the SSE field table,
   // but not here, so a decoded frame could not be handed to a handler that
   // takes a KeeperChatStreamEvent. The fields match sse.ts's allowedFields.

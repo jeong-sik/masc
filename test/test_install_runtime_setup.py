@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -33,6 +34,14 @@ def spec(choice='vllm'):
             result['provider_kind'] = 'anthropic'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
+    return result
+
+
+def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/api/v1', key='OPENROUTER_API_KEY'):
+    result = dict(choice='openai_compatible', model=model_id, max_context=1000000, tools=True, streaming=True,
+                  endpoint=endpoint, api_key_env=key, provider_id=provider,
+                  provider_display_name=provider, model_key=SETUP.model_slug(model_id),
+                  provider_declared=False, thinking_disable_encodable=True, reasoning_effort='high')
     return result
 
 
@@ -105,6 +114,21 @@ class ModelSelection(unittest.TestCase):
             self.assertTrue(key.exists())
             self.assertEqual(key.stat().st_mode & 0o777, 0o600)
 
+    def test_antigravity_account_switch_drops_old_models_and_context(self):
+        source = dict(choice='antigravity', endpoint='', api_key_env='',
+                      credential_file='/private/new-account', credential_kind='file',
+                      credential_replaced=True, rows=[
+                          dict(id='old.shared', model='shared-model', max_context=8192),
+                          dict(id='old.exclusive', model='old-account-only', max_context=16384)])
+        with patch.object(SETUP, 'antigravity_models', return_value=[
+                dict(id='shared-model', label='Shared model', context=None),
+                dict(id='new-model', label='New model', context=65536)]):
+            models, _ = SETUP.source_models('/fixture/masc', source, 10)
+        self.assertEqual([model['id'] for model in models], ['shared-model', 'new-model'])
+        self.assertIsNone(models[0]['context'])
+        self.assertEqual(models[1]['context'], 65536)
+        self.assertTrue(all(model['existing'] is None for model in models))
+
     def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
                       api_key_env='', credential_file='/private/saved-key', credential_kind='file',
@@ -132,85 +156,66 @@ class ModelSelection(unittest.TestCase):
         self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
 
     def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
-        with tempfile.TemporaryDirectory() as directory:
-            Path(directory, 'models_cache.json').write_text(json.dumps({'models':[
-                {'slug':'observed-id','display_name':'Visible model','visibility':'list','context_window':4567},
-                {'slug':'hidden','visibility':'hide','context_window':99},
-                {'slug':'bad\nname','visibility':'list'},
-                {'slug':'observed-id','visibility':'list'}]}))
-            with patch.dict(os.environ, {'CODEX_HOME':directory}):
-                models, origin = SETUP.discover_models('codex')
-                self.assertEqual(models,[dict(id='observed-id',label='Visible model',context=4567)])
-                self.assertIn('cached',origin)
-                failed_lookup=subprocess.CompletedProcess([],1,'','')
-                with patch('subprocess.run',return_value=failed_lookup), patch('sys.stdin',io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
-                    selected=SETUP.select_model('/fixture/masc','codex')
-                self.assertEqual(selected,dict(model='observed-id',max_context=4567))
-                self.assertIn('No number to enter',terminal.getvalue())
+        # Cache filtering (visibility, duplicate ids, malformed names) is the
+        # binary's job now; the wizard only consumes runtime-model-list rows.
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='observed-id', label='Visible model', max_context=4567)]}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            selected = SETUP.select_model('/fixture/masc', 'codex')
+        self.assertEqual(selected, dict(model='observed-id', max_context=4567))
+        self.assertIn('Installed MASC model catalog', terminal.getvalue())
 
     def test_astra_uses_codex_effective_context_instead_of_api_maximum(self):
-        with tempfile.TemporaryDirectory() as directory:
-            Path(directory,'models_cache.json').write_text(json.dumps({'models':[{
-                'slug':'gpt-6-astra','display_name':'GPT-6-Astra','visibility':'list',
-                'context_window':272000,'max_context_window':872000}]}))
-            with patch.dict(os.environ,{'CODEX_HOME':directory}), patch('sys.stdin',io.StringIO('1\n')), patch('subprocess.run') as cli, contextlib.redirect_stderr(io.StringIO()):
-                selected=SETUP.select_model('/fixture/masc','codex')
-            self.assertEqual(selected,dict(model='gpt-6-astra',max_context=272000))
-            cli.assert_not_called()
+        # Effective-vs-architectural window resolution is the binary catalog's
+        # contract; the wizard keeps whatever window the row states.
+        def cli(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='gpt-6-astra', label='GPT-6-Astra', max_context=272000)]}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            selected = SETUP.select_model('/fixture/masc', 'codex')
+        self.assertEqual(selected, dict(model='gpt-6-astra', max_context=272000))
 
     def test_fresh_codex_uses_client_catalog_before_rendering_connection(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
-            def cli(argv, **kwargs):
-                if argv[0] == '/owned/codex':
-                    self.assertEqual(argv[1:], ['debug','models','--bundled'])
-                    self.assertNotEqual(kwargs['env']['CODEX_HOME'],directory)
-                    self.assertNotIn('UNRELATED_API_KEY',kwargs['env'])
-                    self.assertNotIn('OPENAI_API_KEY',kwargs['env'])
-                    self.assertEqual(kwargs['cwd'],kwargs['env']['HOME'])
-                    data={'models':[dict(slug='catalog-id',display_name='Client model',visibility='list',
-                                         context_window=272000,max_context_window=872000)]}
-                else:
-                    self.assertEqual(argv[1],'runtime-model-list')
-                    data={'models':[dict(id='catalog-id',label='API model',max_context=1050000)]}
-                return subprocess.CompletedProcess(argv,0,json.dumps(data),'')
-            source=dict(choice='codex',endpoint='',api_key_env='',command='/owned/codex',rows=[])
-            with patch.dict(os.environ,{'UNRELATED_API_KEY':'canary','OPENAI_API_KEY':'canary'}), patch('subprocess.run',side_effect=cli):
-                models,origin=SETUP.source_models('/fixture/masc',source,10)
-                _,selected=SETUP.resolve_model_spec(source,models[0],10)
-            self.assertEqual(selected['model'],'catalog-id')
-            self.assertEqual(selected['max_context'],272000)
-            self.assertEqual(selected['command'],'/owned/codex')
-            self.assertIn('CLI bundled',origin)
-            self.assertEqual(list(Path(directory).iterdir()),[])
+        # The vendor CLI is never driven from the wizard: one runtime-model-list
+        # call answers. Environment isolation around the vendor CLI is verified
+        # by the binary's own suite.
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps(
+                {'models': [dict(id='catalog-id', label='Client model', max_context=272000)]}), '')
+        source = dict(choice='codex', endpoint='', api_key_env='', command='/owned/codex', rows=[])
+        with patch('subprocess.run', side_effect=cli):
+            models, origin = SETUP.source_models('/fixture/masc', source, 10)
+            _, selected = SETUP.resolve_model_spec(source, models[0], 10)
+        self.assertEqual(selected['model'], 'catalog-id')
+        self.assertEqual(selected['max_context'], 272000)
+        self.assertEqual(selected['command'], '/owned/codex')
+        self.assertIn('MASC model catalog', origin)
 
     def test_unavailable_codex_catalog_does_not_inherit_api_capacity(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'CODEX_HOME':directory}):
-            def cli(argv, **kwargs):
-                if argv[1] == 'debug':
-                    return subprocess.CompletedProcess(argv,1,'','unsupported client command')
-                self.assertEqual(argv[1],'runtime-model-list')
-                return subprocess.CompletedProcess(argv,0,json.dumps({'models':[
-                    dict(id='catalog-id',label='API model',max_context=1050000)]}),'')
-            with patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('1\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
-                SETUP.select_model('/fixture/masc','codex')
+        # With no catalog and no discovery the wizard has nothing to offer:
+        # cancelling is the only honest path (no guessed capacity).
+        def cli(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-model-list')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'models': []}), '')
+        with patch('subprocess.run', side_effect=cli), patch('sys.stdin', io.StringIO('q\n')), \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
+            SETUP.select_model('/fixture/masc', 'codex')
 
     def test_http_models_offer_actual_server_id_and_configured_limit(self):
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-        import threading
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                assert self.path == '/v1/models'
-                payload=json.dumps({'data':[{'id':'served-model','max_model_len':8192}]}).encode()
-                self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
-            def log_message(self,*args): pass
-        with HTTPServer(('127.0.0.1',0),Handler) as server:
-            thread=threading.Thread(target=server.serve_forever);thread.start()
-            try:
-                with patch('sys.stdin',io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
-                    selected=SETUP.select_model('/unused','vllm','http://127.0.0.1:'+str(server.server_port)+'/v1')
-                self.assertEqual(selected,dict(model='served-model',max_context=8192))
-            finally:
-                server.shutdown();thread.join()
+        # Discovery is owned by the native runtime: the wizard calls the
+        # binary and trusts its observation. Wire-format parsing of /models
+        # (including max_model_len) is verified by the OCaml discovery suite.
+        def native(argv, **kwargs):
+            self.assertEqual(argv[1], 'runtime-discover-models')
+            return subprocess.CompletedProcess(argv, 0, json.dumps({
+                'source': 'account_or_server_model_list', 'account_availability_verified': False,
+                'models': [dict(id='served-model', label='served-model', context=8192)]}), '')
+        with patch('subprocess.run', side_effect=native), patch('sys.stdin', io.StringIO('1\n')), contextlib.redirect_stderr(io.StringIO()):
+            selected = SETUP.select_model('/fixture/masc', 'vllm', 'http://server.example/v1')
+        self.assertEqual(selected, dict(model='served-model', max_context=8192))
 
     def test_context_lookup_rejects_wrong_identity_and_bool(self):
         replies=[dict(model='another',max_context=123),dict(model='manual',max_context=True)]
@@ -347,6 +352,29 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
             SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
         self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
 
+    def test_unavailable_receipt_carries_the_configuration_detail(self):
+        # A workspace config the server cannot parse reports the class alone
+        # unless the detail travels with it, and the class reads as a model
+        # connection problem. The recurring cause is an overlay entry holding
+        # a capability field a later release removed (masc#34872).
+        detail = ('catalog overlay /w/.masc/config/agent-core-models-overlay.toml: '
+                  'model entry "GLM-5-Turbo" contains unknown field(s): '
+                  'supports_extended_thinking')
+        self.validator("""if sys.argv[1] == 'runtime-verify':
+ print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':sys.argv[4],
+                   'status':'unavailable',
+                   'checks':{'response':False,'tool_called':False,'tool_roundtrip':False},
+                   'failure':{'code':'invalid_configuration',
+                              'message':'The workspace runtime configuration could not be loaded.',
+                              'detail':""" + repr(detail) + """}}))
+ sys.exit(2)
+""")
+        with self.assertRaises(SETUP.VerificationError) as raised:
+            SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
+        self.assertEqual(raised.exception.failure['code'], 'invalid_configuration')
+        self.assertEqual(raised.exception.failure['detail'], detail)
+        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
+
     def test_real_verification_receipt_must_join_selected_identity(self):
         self.validator('''if sys.argv[1] == 'runtime-verify':
  print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':'another.runtime',
@@ -366,8 +394,237 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
         self.assertEqual(result['readiness'], 'verified')
         self.assertEqual(len(result['verifications']), 1)
 
+    def test_a_fresh_named_provider_claims_exactly_one_wizard_default(self):
+        # The fixture inventory declares original.model with no provider_id,
+        # so openrouter counts as a provider the workspace never configured
+        # and the first of two additions claims the wizard-default flag.
+        self.validator('')
+        specs = [named_spec('anthropic/claude-opus-5'), named_spec('deepseek/deepseek-v4-flash')]
+        result = SETUP.configure_many(self.binary, self.base, specs)
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertEqual(written.count('"wizard-default" = true'), 1)
+        # The provider section is written once even though two models were
+        # added; the second addition references the provider the first
+        # declared instead of defining the same table twice.
+        self.assertEqual(written.count('["providers"."openrouter"]'), 1)
+        self.assertIn('["openrouter"."openrouter-anthropic-claude-opus-5"]', written)
+        self.assertIn('["openrouter"."openrouter-deepseek-deepseek-v4-flash"]', written)
+        overlay = self.overlay.read_text()
+        self.assertEqual(overlay.count('[["targets"]]'), 2)
+        self.assertNotIn('[["models"]]', overlay)
+        self.assertNotIn('[["providers"]]', overlay)
 
-class MultipleSelection(unittest.TestCase):
+    def test_anonymous_specs_render_unchanged_after_the_named_normalization(self):
+        self.validator('')
+        result = SETUP.configure_many(self.binary, self.base, [spec()])
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertIn(b'setup_vllm_'.decode(), written)
+
+
+    def test_a_configured_provider_never_rewrites_its_section(self):
+        # The workspace already declares the provider; a named addition that
+        # re-declared it would fail TOML validation that cannot say why.
+        self.binary.write_text('#!' + sys.executable + '\nimport sys,json\n'
+                               "if sys.argv[1] == 'runtime-wizard-catalog':\n"
+                               " print(json.dumps({'runtimes':[{'id':'openrouter.openrouter-x','provider_id':'openrouter'}]})); sys.exit(0)\n")
+        self.binary.chmod(0o755)
+        result = SETUP.configure_many(self.binary, self.base, [named_spec('anthropic/claude-opus-5')])
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertNotIn('["providers"."openrouter"]', written)
+        self.assertIn('["openrouter"."openrouter-anthropic-claude-opus-5"]', written)
+        self.assertNotIn('wizard-default', written)
+
+    def test_two_models_slugging_to_one_entry_are_refused(self):
+        # "anthropic/claude.opus-5" and "anthropic/claude-opus-5" differ only
+        # in punctuation and slug to the same runtime entry.
+        self.validator('')
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.configure_many(self.binary, self.base,
+                                 [named_spec('anthropic/claude-opus-5'), named_spec('anthropic/claude.opus-5')])
+        self.assertIn('same runtime entry name', str(raised.exception))
+
+
+class CodexExplicitRefresh(unittest.TestCase):
+    def test_refresh_bypasses_cached_discovery_and_keeps_exact_context(self):
+        source = dict(choice='codex', command='/owned/codex', endpoint='', api_key_env='', rows=[])
+        receipt = dict(schema='masc.codex_model_refresh.v1', source='isolated_cli_cache',
+                       models=[dict(id='new-model', label='New model', context=272000, is_default=True)])
+        with patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt), '')) as run, \
+                patch.object(SETUP, 'catalog_models', return_value=[]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+        self.assertEqual(rows[0]['context'], 272000)
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'runtime-codex-models', '--cli-path', '/owned/codex'])
+        self.assertIn('refreshed', origin)
+
+    def test_unavailable_refresh_is_labeled_offline_fallback(self):
+        source = dict(choice='codex', command='codex', endpoint='', api_key_env='', rows=[])
+        with patch.object(SETUP, 'refresh_codex_models', side_effect=SETUP.SetupError('Online unavailable; cached fallback.')), \
+                patch.object(SETUP, 'catalog_models', return_value=[dict(id='cached', label='Cached', context=123)]):
+            rows, origin = SETUP.source_models('/owned/masc', source, 10, refresh=True)
+        self.assertEqual(rows[0]['id'], 'cached')
+        self.assertIn('cached fallback', origin)
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_refresh_has_no_old_cache_or_turn_and_preserves_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            original = home / '.codex'
+            original.mkdir()
+            (original / 'auth.json').write_text('{"fixture":"private"}')
+            (original / 'auth.json').chmod(0o600)
+            (original / 'models_cache.json').write_text('{"models":[{"slug":"stale","context_window":1}]}')
+            before = {p.name: p.read_bytes() for p in original.iterdir()}
+            client = home / 'fake-codex'
+            client.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+home = pathlib.Path(os.environ['CODEX_HOME'])
+assert home != pathlib.Path(os.environ['HOME']) / '.codex'
+assert not (home / 'models_cache.json').exists()
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request['method']
+    if method == 'initialized': continue
+    if method == 'initialize': result = {'userAgent':'fixture/1'}
+    elif method == 'account/read': result = {'account':{'type':'apiKey'}, 'requiresOpenaiAuth':True}
+    elif method == 'model/list':
+        (home / 'models_cache.json').write_text(json.dumps({'models':[{'slug':'fresh-model','context_window':272000}]}))
+        result = {'data':[{'id':'ui-id','model':'fresh-model','displayName':'Fresh model','isDefault':True}], 'nextCursor':None}
+    else: raise AssertionError('unexpected operation ' + method)
+    print(json.dumps({'id':request['id'],'result':result}), flush=True)
+''')
+            client.chmod(0o700)
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', str(client)],
+                env=dict(os.environ, HOME=str(home), CODEX_HOME=str(original)), capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertEqual(receipt['source'], 'isolated_cli_cache')
+            self.assertEqual(receipt['models'][0]['id'], 'fresh-model')
+            self.assertEqual(receipt['models'][0]['context'], 272000)
+            self.assertEqual(before, {p.name: p.read_bytes() for p in original.iterdir()})
+            self.assertNotIn('private', result.stdout)
+
+
+class NamedCatalogSources(unittest.TestCase):
+    INVENTORY = {'runtimes': [], 'integrations': [
+        {'id': 'openrouter', 'display_name': 'openrouter', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://openrouter.ai/api/v1',
+         'api_key_env': 'OPENROUTER_API_KEY', 'provider_kind': 'openai_compat'},
+        {'id': 'already', 'display_name': 'already', 'protocol': 'openai-compatible-http',
+         'origin': 'runtime_config', 'setup_support': 'existing_binding',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': 'ALREADY_API_KEY'},
+        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'messages-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test',
+         'api_key_env': 'EXAMPLE_API_KEY'},
+        {'id': 'nokey', 'display_name': 'nokey', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': ''},
+    ]}
+
+    def catalog_sources(self, inventory):
+        return [source for source in SETUP.connection_sources(inventory) if source.get('catalog_provider')]
+
+    def test_unconfigured_catalog_integrations_become_named_sources(self):
+        sources = self.catalog_sources(self.INVENTORY)
+        self.assertEqual([source['provider_id'] for source in sources], ['openrouter'])
+        source = sources[0]
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['api_key_env'], 'OPENROUTER_API_KEY')
+        self.assertEqual(source['credential_kind'], 'env')
+        self.assertEqual(source['rows'], [])
+
+    def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
+        self.assertEqual(self.catalog_sources({'runtimes': []}), [])
+
+    def test_render_names_the_provider_and_writes_a_target_only_overlay(self):
+        identity, runtime, overlay = SETUP.render(named_spec('anthropic/claude-opus-5'))
+        self.assertEqual(identity, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertIn(b'["providers"."openrouter"]', runtime)
+        self.assertIn(b'"display-name" = "openrouter"', runtime)
+        self.assertIn(b'"endpoint" = "https://openrouter.ai/api/v1"', runtime)
+        self.assertIn(b'["models"."openrouter-anthropic-claude-opus-5"]', runtime)
+        self.assertIn(b'"api-name" = "anthropic/claude-opus-5"', runtime)
+        self.assertIn(b'"reasoning-effort" = "high"', runtime)
+        # The catalog row owns the window; the runtime entry does not restate it.
+        self.assertNotIn(b'max-context', runtime)
+        self.assertIn(b'["openrouter"."openrouter-anthropic-claude-opus-5"]', runtime)
+        self.assertNotIn(b'"models"', overlay)
+        self.assertNotIn(b'"providers"', overlay)
+        self.assertIn(b'"targets"', overlay)
+        self.assertIn(b'"model_id" = "anthropic/claude-opus-5"', overlay)
+        self.assertIn(b'"enable_thinking" = false', overlay)
+
+    def test_render_skips_the_provider_section_the_workspace_config_declares(self):
+        _, runtime, overlay = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
+                                                thinking_disable_encodable=False, reasoning_effort=None))
+        self.assertNotIn(b'"providers"', runtime)
+        self.assertNotIn(b'reasoning-effort', runtime)
+        self.assertNotIn(b'wizard-default', runtime)
+        self.assertNotIn(b'enable_thinking', overlay)
+
+    def test_resolve_rejects_a_served_id_the_catalog_does_not_curate(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.resolve_model_spec(source, dict(id='vendor/uncurated', label='x', context=None, existing=None), 1)
+
+    def test_resolve_rejects_a_catalog_row_without_tool_support(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'google/gemma3-4b', 'label': 'google/gemma3-4b', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': None, 'supports_tools': False, 'supports_streaming': True}
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.resolve_model_spec(source, dict(id=catalog['id'], label='x', context=None,
+                                                  existing=None, catalog=catalog), 1)
+        self.assertIn('tool support', str(raised.exception))
+
+    def test_a_failed_catalog_read_is_an_error_not_an_empty_list(self):
+        failure = subprocess.CompletedProcess([], 1, '', 'provider listing exploded')
+        with patch('subprocess.run', return_value=failure):
+            with self.assertRaises(SETUP.SetupError) as raised:
+                SETUP.provider_catalog_models('binary', 'openrouter')
+        self.assertIn('provider listing exploded', str(raised.exception))
+
+    def test_resolve_builds_a_named_spec_from_the_catalog_row(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+                   'supports_tools': True, 'supports_streaming': True}
+        runtime_id, spec = SETUP.resolve_model_spec(
+            source, dict(id=catalog['id'], label='x', context=None, existing=None, catalog=catalog), 1)
+        self.assertEqual(runtime_id, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertEqual(spec['max_context'], 1000000)
+        self.assertTrue(spec['tools'])
+        self.assertTrue(spec['thinking_disable_encodable'])
+        self.assertEqual(spec['reasoning_effort'], 'high')
+
+    def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog_rows = [
+            {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+             'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+             'supports_tools': True, 'supports_streaming': True},
+        ]
+        with patch.object(SETUP, 'provider_catalog_models', return_value=catalog_rows), \
+             patch.object(SETUP, 'native_discover_models', return_value=(
+                 [dict(id='anthropic/claude-opus-5', label='claude opus', context=99),
+                  dict(id='vendor/uncurated', label='uncurated', context=7)],
+                 'Current account/server model list')):
+            rows, origin = SETUP.source_models('binary', source, 1)
+        self.assertEqual(rows[0]['id'], 'anthropic/claude-opus-5')
+        self.assertEqual(rows[0]['context'], 99)
+        self.assertEqual(rows[0]['catalog'], catalog_rows[0])
+        self.assertEqual(rows[1]['id'], 'vendor/uncurated')
+        self.assertNotIn('catalog', rows[1])
+
+    # test_discovery_reads_openrouters_context_length_field moved to the OCaml
+    # discovery suite (test/test_runtime_model_discovery.py): wire parsing of
+    # context_length/max_model_len belongs to the native runtime now.
     def test_terminal_arrows_space_and_enter_preserve_multiple_choices_and_restore_tty(self):
         master, slave = pty.openpty()
         original = termios.tcgetattr(slave)
@@ -409,39 +666,164 @@ class MultipleSelection(unittest.TestCase):
             os.close(master)
             os.close(slave)
 
+    def _picker_program(self, labels, multiple=False, guarded=False):
+        call = 'm.pick("Pick", ' + repr(labels) + (', multiple=True' if multiple else '') + ')'
+        if guarded:
+            body = ('try:\n'
+                    '    print(json.dumps(%s))\n'
+                    'except Exception as error:\n'
+                    '    print(json.dumps({"error": error.__class__.__name__}))' % call)
+        else:
+            body = 'print(json.dumps(%s))' % call
+        return ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+                repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n' + body)
+
+    def _drive_picker(self, program, steps):
+        """steps: (needle, keys, occurrences) triples; the picker redraws one
+        frame per key, so a repeated footer proves the key was consumed."""
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        terminal = b''
+        try:
+            for needle, keys, occurrences in steps:
+                deadline = time.monotonic() + 5
+                while terminal.count(needle) < occurrences:
+                    remaining = max(0.1, deadline - time.monotonic())
+                    self.assertTrue(select.select([master], [], [], remaining)[0],
+                                    'picker never showed ' + repr(needle) + '; tail: ' + repr(terminal[-300:]))
+                    terminal += os.read(master, 65536)
+                if keys:
+                    os.write(master, keys)
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            restored = termios.tcgetattr(slave)
+            restored[3] &= ~getattr(termios, 'PENDIN', 0)
+            original[3] &= ~getattr(termios, 'PENDIN', 0)
+            self.assertEqual(restored, original)
+            return json.loads(output), terminal
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdout.close()
+            os.close(master)
+            os.close(slave)
+
+    def test_filter_typing_narrows_and_returns_the_real_index(self):
+        result, terminal = self._drive_picker(self._picker_program(['Anthropic Claude', 'OpenAI GPT', 'Google Gemini']), [
+            (b'3/3 shown', b'gpt', 1),
+            (b'1/3 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+        self.assertIn(b'Filter: gpt', terminal)
+
+    def test_multiple_choices_made_under_a_filter_keep_real_indexes(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Alpha two', 'Beta one'], multiple=True), [
+            (('0 selected · 3/3 shown').encode(), b'alph', 1),
+            (b'2/3 shown', b' ', 1),
+            (('1 selected · 2/3 shown').encode(), b'\x1b', 1),
+            (('1 selected · 3/3 shown').encode(), b'\x1b[B\x1b[B', 1),
+            ('› [ ] Beta one'.encode(), b' ', 1),
+            ('› [x] Beta one'.encode(), b'\r', 1),
+        ])
+        self.assertEqual(result, [0, 2])
+
+    def test_enter_with_no_filter_matches_waits_instead_of_selecting(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Beta one']), [
+            (b'2/2 shown', b'zzz', 1),
+            (b'no matches', b'\r', 1),
+            # Enter must redraw instead of returning: a second frame with the
+            # same footer is the proof the key was consumed as a no-op.
+            (b'no matches', b'\x7f\x7f\x7f', 2),
+            (b'2/2 shown', b'\r', 2),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_esc_without_a_filter_still_cancels(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Beta one'], guarded=True), [
+            (b'2/2 shown', b'\x1b', 1),
+        ])
+        self.assertEqual(result, {'error': 'SetupError'})
+
+    def test_q_and_k_type_into_the_filter_instead_of_commanding(self):
+        # Model ids start with any letter (qwen, kimi): every printable byte
+        # is filter text, movement is arrows only and q no longer cancels.
+        result, terminal = self._drive_picker(self._picker_program(['qwen big', 'kimi-k3', 'beta one']), [
+            (b'3/3 shown', b'qwen', 1),
+            (b'Filter: qwen', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+        result, terminal = self._drive_picker(self._picker_program(['kimi-k3', 'beta one']), [
+            (b'2/2 shown', b'kimi', 1),
+            (b'Filter: kimi', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_a_byte_right_after_esc_clears_the_filter_and_is_kept(self):
+        result, _ = self._drive_picker(self._picker_program(['alpha one', 'golf two']), [
+            (b'2/2 shown', b'al', 1),
+            (b'Filter: al', b'\x1bg', 1),
+            (b'Filter: g', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+
+    def test_narrowing_then_clearing_keeps_the_cursor_on_its_row(self):
+        labels = ['opt-{}'.format(index) for index in range(10)] + ['needle row']
+        result, _ = self._drive_picker(self._picker_program(labels), [
+            (b'11/11 shown', b'needle', 1),
+            (b'1/11 shown', b'\x1b', 1),
+            (b'11/11 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [10])
+
     def test_accessible_number_input_selects_several_without_model_typing(self):
         with patch('sys.stdin', io.StringIO('1,3\n')), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.pick('Connections', ['Codex', 'Claude', 'Ollama'], multiple=True), [0, 2])
 
     def test_ollama_loads_only_selected_model_and_uses_effective_context(self):
-        responses = [{'capabilities':['completion','tools'], 'parameters':'',
-                      'model_info':{'qwen.context_length':999999}}, {},
-                     {'models':[{'name':'owned-qwen','context_length':16384}]}]
+        # The native serving-context observation owns load and the effective
+        # window; the wizard records what it reports, not the listed maximum.
         source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
-        with patch.object(SETUP, 'http_json', side_effect=responses) as requests:
-            identity, configured = SETUP.resolve_model_spec(source, {'id':'owned-qwen','context':999999}, 10)
+        with patch.object(SETUP, 'native_serving_context',
+                          return_value=dict(context=16384, tools=True)) as native:
+            identity, configured = SETUP.resolve_model_spec(source, {'id': 'owned-qwen', 'context': 999999}, 10,
+                                                            binary='/fixture/masc')
+        native.assert_called_once_with('/fixture/masc', source, 'owned-qwen', 10, load=True)
         self.assertEqual(configured['max_context'], 16384)
         self.assertIs(configured['tools'], True)
-        self.assertEqual(requests.call_args_list[1].args[-1], {'model':'owned-qwen','stream':False})
         self.assertIn(b'"num-ctx" = 16384', SETUP.render(configured)[1])
         self.assertEqual(identity, SETUP.render(configured)[0])
 
     def test_wizard_ollama_context_uses_native_private_reference(self):
         source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='',
                       credential_kind='file', credential_file='/private/key', command='')
-        with patch.object(SETUP, 'native_serving_context', return_value=dict(context=16384, tools=True)) as native, \
-                patch.object(SETUP, 'http_json') as legacy:
+        with patch.object(SETUP, 'native_serving_context',
+                          return_value=dict(context=16384, tools=True)) as native:
             _, configured = SETUP.resolve_model_spec(source, dict(id='owned-model', context=999999), 10,
                                                       binary='/fixture/masc')
         native.assert_called_once_with('/fixture/masc', source, 'owned-model', 10, load=True)
-        legacy.assert_not_called()
         self.assertEqual(configured['max_context'], 16384)
         self.assertEqual(configured['credential_file'], '/private/key')
 
     def test_ollama_architecture_maximum_never_becomes_effective_context(self):
-        responses = [{'parameters':'', 'model_info':{'qwen.context_length':999999}}, {'models':[]}]
-        with patch.object(SETUP, 'http_json', side_effect=responses):
-            self.assertIsNone(SETUP.ollama_model_details('http://localhost:11434', 'owned-qwen')['context'])
+        # The native observation owns the effective window. When it reports
+        # none, the wizard refuses to inherit the listed architecture maximum
+        # and only an explicit operator value may proceed.
+        with patch.object(SETUP, 'native_serving_context', return_value=dict(context=None, tools=True)):
+            source = dict(choice='ollama', endpoint='http://localhost:11434', api_key_env='', command='')
+            with patch('sys.stdin', io.StringIO('q\n')), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SETUP.SetupError):
+                SETUP.resolve_model_spec(source, dict(id='owned-qwen', context=None), 10, binary='/fixture/masc')
 
     def test_workspace_context_is_matched_to_same_connection_and_exact_model(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1', api_key_env='OWNED_KEY',
@@ -527,6 +909,26 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
         self.assertIn('No number to enter',terminal.getvalue())
         self.assertNotIn('Documented/configured context limit',terminal.getvalue())
+
+    def test_provider_mode_lists_curated_rows_for_a_named_catalog_provider(self):
+        result=subprocess.run([BINARY,'runtime-model-list','--provider','openrouter'],check=True,capture_output=True,text=True)
+        catalog=json.loads(result.stdout)
+        self.assertIs(catalog['account_availability_verified'],False)
+        flash=next(row for row in catalog['models'] if row['id']=='deepseek/deepseek-v4-flash')
+        self.assertEqual(flash['max_context'],1048576)
+        self.assertIn('none',flash['accepted_reasoning_efforts'])
+        self.assertEqual(flash['default_reasoning_effort'],'high')
+        self.assertIs(flash['supports_tools'],True)
+        self.assertIs(flash['supports_streaming'],True)
+
+    def test_provider_mode_rejects_unknown_ids_and_bare_invocations(self):
+        unknown=subprocess.run([BINARY,'runtime-model-list','--provider','not-a-provider'],capture_output=True,text=True)
+        self.assertNotEqual(unknown.returncode,0)
+        self.assertEqual(unknown.stdout,'')
+        self.assertIn('not-a-provider',unknown.stderr)
+        neither=subprocess.run([BINARY,'runtime-model-list'],capture_output=True,text=True)
+        self.assertNotEqual(neither.returncode,0)
+        self.assertEqual(neither.stdout,'')
 
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')

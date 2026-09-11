@@ -1,24 +1,14 @@
-(** MCP session persistence — capture and restore server connection info.
+(** MCP session capture for the checkpoint record.
 
-    MCP connections (OS process + stdio pipes) cannot be serialized.
-    This module captures the serializable parts: server specification
-    and discovered tool schemas.  On resume, the caller can reconnect
-    using the saved specs.
+    MCP connections (OS process + stdio pipes) cannot be serialized. This
+    module captures the serializable parts -- server specification and
+    discovered tool schemas -- which [Agent_checkpoint.build_checkpoint] puts
+    on [Checkpoint.mcp_sessions].
 
-    Intended lifecycle:
-    {[
-      (* Before checkpoint *)
-      let infos = Mcp_session.capture_all managed_list in
-      (* ... serialize infos into checkpoint JSON ... *)
-
-      (* On resume *)
-      let managed, failed_with_reasons = Mcp_session.reconnect_all ~sw ~mgr ~net infos in
-      List.iter (fun (info, err) ->
-        let _log = Log.create ~module_name:"mcp_session" () in
-        Log.warn _log "Failed to reconnect"
-          [S ("server", info.server_name); S ("error", err)]
-      ) failed_with_reasons;
-    ]} *)
+    Resume does not go through here. [Agent.resume] takes its tools from the
+    caller ([~tools]), and masc's own resume site passes [config.tools]
+    (lib/runtime/runtime_agent.ml), so the captured specs are written and never
+    read back into a connection. *)
 
 open Types
 open Result_syntax
@@ -72,54 +62,6 @@ let capture_all (managed_list : Mcp.managed list) : info list =
 ;;
 
 (** Convert session info back to a server_spec for reconnection. *)
-let to_server_spec (info : info) : Mcp.server_spec =
-  { command = info.command; args = info.args; env = info.env; name = info.server_name }
-;;
-
-let to_http_spec (info : info) : Mcp_http.http_spec option =
-  match info.http_base_url with
-  | Some base_url ->
-    Some { base_url; headers = info.http_headers; name = info.server_name }
-  | None -> None
-;;
-
-(** Reconnect to MCP servers from saved session info.
-    Returns a pair: (successfully connected, failed infos with error messages).
-    Failed connections do not abort the others. *)
-let reconnect_all ~sw ~mgr ~net (infos : info list)
-  : Mcp.managed list * (info * Error.t) list
-  =
-  List.fold_left
-    (fun (connected, failed) info ->
-       match info.transport_kind with
-       | Http ->
-         (match to_http_spec info with
-          | Some spec ->
-            (match Mcp_http.connect_and_load_managed ~sw ~net spec with
-             | Ok m -> m :: connected, failed
-             | Error e -> connected, (info, e) :: failed)
-          | None ->
-            let e =
-              Error.Mcp
-                (InitializeFailed
-                   { detail =
-                       Printf.sprintf
-                         "HTTP MCP server '%s' cannot be reconnected without \
-                          http_base_url"
-                         info.server_name
-                   })
-            in
-            connected, (info, e) :: failed)
-       | Stdio ->
-         let spec = to_server_spec info in
-         (match Mcp.connect_and_load ~sw ~mgr spec with
-          | Ok m -> m :: connected, failed
-          | Error e -> connected, (info, e) :: failed))
-    ([], [])
-    infos
-  |> fun (connected, failed) -> List.rev connected, List.rev failed
-;;
-
 (* ── JSON serialization ─────────────────────────────────────────── *)
 
 let env_pair_to_json (k, v) = `Assoc [ "key", `String k; "value", `String v ]

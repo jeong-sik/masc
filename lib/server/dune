@@ -13,7 +13,10 @@
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
+  masc.owner_process_identity
   masc
+  masc.fs_compat
+  masc.masc_process
   masc.sse_wire
   masc.agent_observation
   masc.browser_lane

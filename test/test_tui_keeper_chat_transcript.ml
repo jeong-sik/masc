@@ -268,12 +268,12 @@ let test_runtime_attempt_keeps_the_earlier_attempt_superseded () =
     ; tool_ended "call-kept"
     ; tool_result "call-kept" "exec-kept"
     ; Live.Text "still growing when the attempt turned over"
-    ; Live.Runtime_attempt_started
+    ; Live.Runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
     ; Live.Text "second attempt"
     ];
   check int "one retry" 1 (Transcript.attempt t);
   match Transcript.trail t with
-  | [ Transcript.Trail_superseded { attempt; items }; Transcript.Trail_text second ] ->
+  | [ Transcript.Trail_superseded { attempt; items; _ }; Transcript.Trail_text second ] ->
       check int "the block names the attempt it came from" 0 attempt;
       check string "the new attempt follows it at the top level" "second attempt" second;
       let texts =
@@ -305,7 +305,7 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
     ; tool_started "call-kept" "Read"
     ; tool_ended "call-kept"
     ; tool_result "call-kept" "exec-kept"
-    ; Live.Runtime_attempt_started
+    ; Live.Runtime_attempt_started { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ; Live.Thinking "fallback reasoning"
     ; Live.Text "fallback reply"
     ];
@@ -322,11 +322,11 @@ let test_runtime_attempt_restarts_the_per_attempt_totals () =
   (* A second retry folds only what came after the first boundary: the two
      superseded attempts sit side by side, each with its number, and neither
      block holds a block. *)
-  feed t [ Live.Runtime_attempt_started; Live.Text "third try" ];
+  feed t [ Live.Runtime_attempt_started { runtime_id = Some "deepseek-r1"; attempt_index = Some 2 }; Live.Text "third try" ];
   check int "two retries" 2 (Transcript.attempt t);
   match Transcript.trail t with
-  | [ Transcript.Trail_superseded { attempt = 0; items = first }
-    ; Transcript.Trail_superseded { attempt = 1; items = second }
+  | [ Transcript.Trail_superseded { attempt = 0; items = first; _ }
+    ; Transcript.Trail_superseded { attempt = 1; items = second; _ }
     ; Transcript.Trail_text "third try"
     ] ->
       let flat items =
@@ -455,7 +455,7 @@ let test_drawn_replaces_the_streamed_text_with_a_differing_reply () =
   feed t
     [ Live.Run_started
     ; Live.Text "first try"
-    ; Live.Runtime_attempt_started
+    ; Live.Runtime_attempt_started { runtime_id = None; attempt_index = None }
     ; Live.Text "Let me check."
     ; tool_started "c1" "read_file"
     ; tool_ended "c1"
@@ -1052,6 +1052,55 @@ let progress_text t =
   | (Transcript.Progress, text) :: _ -> text
   | rows -> failf "expected a progress row, got %d rows" (List.length rows)
 
+let test_runtime_failover_visibility_and_error_attribution () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 0 }
+    ];
+  check bool "connecting to runtime endpoint" true
+    (contains ~needle:"connecting to [claude-3-7-sonnet]" (progress_text t));
+  check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
+    (Transcript.current_runtime_id t);
+  feed t [ Live.Text "streaming token" ];
+  check bool "streaming from runtime endpoint" true
+    (contains ~needle:"streaming from [claude-3-7-sonnet]" (progress_text t));
+  feed t
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
+    ];
+  check bool "failover attempt is indicated" true
+    (contains ~needle:"failover: connecting to [gpt-4o] (attempt 1)" (progress_text t));
+  check (option string) "current runtime updated to failover" (Some "gpt-4o")
+    (Transcript.current_runtime_id t);
+  feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
+  check phase "error is attributed to active runtime"
+    (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
+    (Transcript.phase t)
+
+let test_drawn_items_carry_superseded_runtime_id () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 0 }
+    ; Live.Text "attempt zero reply"
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
+    ; Live.Text "attempt one reply"
+    ];
+  let items = Transcript.drawn t in
+  match items with
+  | [ first; second ] ->
+      check (option int) "first item is superseded attempt 0" (Some 0) first.superseded;
+      check (option string) "first item records superseded runtime"
+        (Some "claude-3-7-sonnet") first.superseded_runtime_id;
+      check (option int) "second item is current attempt" None second.superseded;
+      check (option string) "second item has no superseded runtime" None
+        second.superseded_runtime_id
+  | _ -> failf "expected 2 drawn items, got %d" (List.length items)
+
 let test_the_wait_says_why_once_the_server_has_said () =
   check bool "before the acceptance there is nothing to say but that it went out"
     true
@@ -1513,8 +1562,9 @@ let rec trail_item_to_string : Transcript.trail_item -> string = function
   | Transcript.Trail_tools block ->
       "tools(" ^ String.concat "\\n" (full_tool_rows block) ^ ")"
   | Transcript.Trail_text text -> "text(" ^ text ^ ")"
-  | Transcript.Trail_superseded { attempt; items } ->
-      Printf.sprintf "superseded(%d,[%s])" attempt
+  | Transcript.Trail_superseded { attempt; items; runtime_id } ->
+      Printf.sprintf "superseded(%d,%s,[%s])" attempt
+        (Option.value ~default:"-" runtime_id)
         (String.concat "; " (List.map trail_item_to_string items))
 
 let trail_item = testable (Fmt.of_to_string trail_item_to_string) ( = )
@@ -1529,7 +1579,7 @@ let test_of_log_equals_the_incremental_fold () =
     ; tool_ended "c1"
     ; tool_result "c1" "exec-c1"
     ; Live.Text "half "
-    ; Live.Runtime_attempt_started
+    ; Live.Runtime_attempt_started { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
     ; Live.Thinking "again"
     ; Live.Text "whole reply"
     ; reply_details ~reply:"whole reply" ()
@@ -2113,5 +2163,9 @@ let () =
             test_interrupt_is_recorded_as_a_signal_not_an_outcome
         ; test_case "unreadable lines are counted" `Quick
             test_unreadable_lines_are_counted_with_their_last_reason
+        ; test_case "runtime failover visibility and error attribution" `Quick
+            test_runtime_failover_visibility_and_error_attribution
+        ; test_case "drawn items carry superseded runtime id" `Quick
+            test_drawn_items_carry_superseded_runtime_id
         ] )
     ]

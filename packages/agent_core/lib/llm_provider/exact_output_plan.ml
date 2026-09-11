@@ -396,7 +396,8 @@ let preflight
       Prepared_completion_request.prepare ~config ~messages ?body_timeout_s ()
     in
     let request = Prepared_completion_request.request prepared in
-    let auth_headers = Provider_config.auth_headers_for_config config in
+    let* auth_headers = Provider_config.resolve_auth_headers config
+      |> Result.map_error (fun reason -> Provider_request_rejected (Http_client.AcceptRejected { reason })) in
     if request_uses_exact_cross_feature request
     then Error Unsupported_exact_cross_feature
     else if Option.is_some config.max_concurrent_requests
@@ -677,4 +678,29 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
   && String.equal
        (fingerprint anthropic_codec)
        agent_core_plan_v2_anthropic_fingerprint
+;;
+
+let%test "exact preflight freezes refreshed credentials until a new plan is prepared" =
+  let token = ref "first-fixture-token" in
+  let calls = ref 0 in
+  let config = Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+    ~base_url:"https://example.test" ~max_tokens:16
+    ~model_capabilities_override:Capabilities.default_capabilities
+    ~auth_scheme:Bearer_token
+    ~credential_source:(Refreshable_credential (fun () ->
+      incr calls; Ok (Secret.of_string !token))) () in
+  let prepare () = preflight ~config ~messages:[Types.user_msg "Hello"]
+    ~body_timeout_s:None ~anthropic_thinking_control:None in
+  match prepare () with
+  | Error _ -> false
+  | Ok first ->
+    token := "second-fixture-token";
+    let frozen = List.assoc_opt "Authorization" first.wire.headers in
+    let unchanged_without_new_preflight = !calls = 1 in
+    match prepare () with
+    | Error _ -> false
+    | Ok second ->
+      unchanged_without_new_preflight && !calls = 2
+      && frozen = Some "Bearer first-fixture-token"
+      && List.assoc_opt "Authorization" second.wire.headers = Some "Bearer second-fixture-token"
 ;;

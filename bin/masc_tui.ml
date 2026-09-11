@@ -1113,6 +1113,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
    another line onto it. *)
 let leave_keeper_message state ~drain_queue =
   save_message_draft state;
+  state.msg_history_inflight <- None;
   let target_registered =
     match state.msg_target_keeper_name with
     | Some keeper_name -> keeper_available_for_new_message state keeper_name
@@ -2595,24 +2596,29 @@ let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
 ;;
 
 let launch_keeper_turns_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_turns ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.keeper_turns_inflight then ()
+  else begin
+    state.keeper_turns_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_keeper_turns ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_turns_loaded result)
     in
-    enqueue_async mailbox (Keeper_turns_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_turns_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.keeper_turns_inflight <- false;
+        enqueue_async mailbox
+          (Keeper_turns_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
   let read, request = Snapshot_read.start ~intent state.gate_snapshot_read in
@@ -5563,46 +5569,59 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
         (Keeper_chat_older_loaded
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
 
-let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
+let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
-  let host = server_peer_host in
-  let port = state.port in
-  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
-  state.msg_older_loading <- false;
-  state.msg_memory_error <- None;
-  state.msg_memory_dropped <- 0;
-  let generation = state.msg_history_load_generation in
-  let run () =
-    let history_result =
-      try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    let memory_result =
-      try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox
-      (Keeper_chat_history_loaded
-         (generation, keeper_name, history_result, memory_result))
+  let already_inflight =
+    match state.msg_history_inflight with
+    | Some (_, inflight_keeper) when String.equal inflight_keeper keeper_name -> true
+    | Some _ | None -> false
   in
-  (match Eio_context.get_switch_opt () with
-   | Some sw ->
-       Eio.Fiber.fork_daemon ~sw (fun () ->
-           run ();
-           `Stop_daemon)
-   | None ->
-       enqueue_async mailbox
-         (Keeper_chat_history_loaded
-            ( generation
-            , keeper_name
-            , Error "Eio switch is unavailable"
-            , Error "Eio switch is unavailable" )));
-  (* Full tool detail owns the only lazy read. Compact chat remains byte- and
-     network-compatible; repeated history refreshes reuse this separate cache. *)
-  if load_file_changes then
-    launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
+  if already_inflight && not force then ()
+  else begin
+    let host = server_peer_host in
+    let port = state.port in
+    state.msg_history_load_generation <- state.msg_history_load_generation + 1;
+    state.msg_older_loading <- false;
+    state.msg_memory_error <- None;
+    state.msg_memory_dropped <- 0;
+    let generation = state.msg_history_load_generation in
+    state.msg_history_inflight <- Some (generation, keeper_name);
+    let run () =
+      let history_result =
+        try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      let memory_result =
+        try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox
+        (Keeper_chat_history_loaded
+           (generation, keeper_name, history_result, memory_result))
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw ->
+         Eio.Fiber.fork_daemon ~sw (fun () ->
+             run ();
+             `Stop_daemon)
+     | None ->
+         (match state.msg_history_inflight with
+          | Some (g, k) when g = generation && String.equal k keeper_name ->
+              state.msg_history_inflight <- None
+          | _ -> ());
+         enqueue_async mailbox
+           (Keeper_chat_history_loaded
+              ( generation
+              , keeper_name
+              , Error "Eio switch is unavailable"
+              , Error "Eio switch is unavailable" )));
+    (* Full tool detail owns the only lazy read. Compact chat remains byte- and
+       network-compatible; repeated history refreshes reuse this separate cache. *)
+    if load_file_changes then
+      launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
+  end
 
 (* One fiber per load, reading the journals one after another in the order
    the targets came -- newest turn first -- each from where the session's
@@ -12030,6 +12049,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
   | Keeper_turns_loaded result ->
+      state.keeper_turns_inflight <- false;
       (match result with
        | Ok rows ->
            let observed_at = Unix.gettimeofday () in
@@ -12265,6 +12285,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
+      (match state.msg_history_inflight with
+       | Some (g, k) when g = generation && String.equal k keeper_name ->
+           state.msg_history_inflight <- None
+       | _ -> ());
       (* The operator can switch while a previous GET is still in flight. The
          pane owns one loaded-history cache, so a late response for the old
          target or an older request for a target revisited since must not

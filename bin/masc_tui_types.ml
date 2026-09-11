@@ -3686,6 +3686,7 @@ type state = {
      for the operator to open the keeper list. *)
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
+  mutable keeper_turns_inflight: bool;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -4219,6 +4220,7 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
+  mutable msg_history_inflight: (int * string) option;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -5126,6 +5128,7 @@ let create_state
   keeper_tool_approvals_read = Snapshot_read.idle;
   keeper_turns = [];
   keeper_turns_error = None;
+  keeper_turns_inflight = false;
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -5417,6 +5420,7 @@ let create_state
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
+  msg_history_inflight = None;
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;

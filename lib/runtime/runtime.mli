@@ -103,6 +103,9 @@ type 'a config_lock_receipt = private
   ; warnings : config_lock_warning list
   }
 
+val config_observation : path:string -> string -> config_observation
+(** Pure source identity used inside callers' locked config edits. *)
+
 val config_source_revision_to_string : config_source_revision -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
@@ -824,3 +827,7 @@ val default_max_context : unit -> int
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and
     workspace readiness are managed independently by server bootstrap. *)
+
+val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) result) -> ('a, string) result
+(** Serialize an owner configuration activation with the existing file writers.
+    The action must not recursively invoke a config writer. *)

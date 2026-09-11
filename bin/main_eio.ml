@@ -1609,18 +1609,12 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
-     always emits failure.detail, so omitting the key here made a consumer's
-     read of it depend on which producer answered. [detail] is what the caller
-     was told and would otherwise drop. *)
   let unavailable ?detail code message =
-    print_endline (Yojson.Safe.to_string (`Assoc [
-      "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
-      "model", `Null; "observed_model", `Null; "status", `String "unavailable";
-      "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc [
-        "code", `String code; "message", `String message;
-        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
+    print_endline
+      (Yojson.Safe.to_string
+         (Runtime_verification.unavailable_to_json ?detail ~runtime_id ~code ~message ()));
+    2
+  in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -2512,30 +2506,44 @@ let wizard_model_context model entries =
 
 let runtime_model_list_cmd =
   let client =
-    Arg.(required & pos 0 (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
+    Arg.(value & pos 0 (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
   in
-  let run client =
-    match Llm_provider.Model_catalog.load_default () with
+  let provider =
+    Arg.(value & opt (some string) None & info [ "provider" ] ~docv:"PROVIDER"
+      ~doc:"List the catalog's curated rows for one named provider instead of a client's.")
+  in
+  let usage = "runtime-model-list: pass a CLIENT (claude-code, codex) or --provider PROVIDER, not both" in
+  let run client provider =
+    let models_result = match client, provider with
+      | Some _, Some _ | None, None -> Error usage
+      | Some client, None ->
+        (match Llm_provider.Model_catalog.load_default () with
+         | Error message -> Error message
+         | Ok catalog ->
+           let entries = wizard_model_entries client catalog in
+           Ok
+             (`List
+               (entries
+                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+                |> List.sort_uniq String.compare
+                |> List.filter_map (fun model ->
+                     Option.map (fun context -> `Assoc [ "id", `String model
+                                                       ; "label", `String model
+                                                       ; "max_context", `Int context ])
+                       (wizard_model_context model entries)))))
+      | None, Some provider_id -> Runtime_wizard_inventory.provider_model_rows provider_id
+    in
+    match models_result with
     | Error message -> prerr_endline message; 1
-    | Ok catalog ->
-      let entries = wizard_model_entries client catalog in
-      let models = entries
-        |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
-        |> List.sort_uniq String.compare
-        |> List.filter_map (fun model ->
-          Option.map (fun context -> `Assoc [ "id", `String model
-                                            ; "label", `String model
-                                            ; "max_context", `Int context ])
-            (wizard_model_context model entries))
-      in
+    | Ok models ->
       print_endline (Yojson.Safe.to_string (`Assoc [
         "source", `String "installed MASC model catalog";
         "account_availability_verified", `Bool false;
-        "models", `List models ]));
+        "models", models ]));
       0
   in
-  Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
-    Term.(const run $ client)
+  Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client or, with --provider, a named catalog provider; account availability is not verified.")
+    Term.(const run $ client $ provider)
 
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]

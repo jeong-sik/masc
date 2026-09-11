@@ -183,12 +183,44 @@ let with_authority config keeper_name f = protect (fun () ->
       match Keeper_lifecycle_reservation.acquire ~base_path:config.base_path
         ~keeper_name ~purpose:Configuration_removal with
       | Error (Already_reserved snapshot) -> Error (Conflict (Keeper_lifecycle_reservation.snapshot_to_string snapshot))
-      | Ok token -> Fun.protect ~finally:(fun () -> ignore (* fire-and-forget: reservation release on cleanup path, failure is non-fatal *) (Keeper_lifecycle_reservation.release token)) (fun () ->
-        let path = manifest_path config keeper_name in
-        match File_lock_eio.with_durable_lock_observed ~lock_path:(path ^ ".lock") f with
-        | Lock_not_acquired error -> Error (Storage_error (File_lock_eio.durable_lock_error_to_string error))
-        | Body_completed {value; release_error=None} -> value
-        | Body_completed {release_error=Some error; _} -> Error (Storage_error (File_lock_eio.durable_lock_error_to_string error)))) with
+      | Ok token ->
+        (* The reservation is released on every exit, including the ones that
+           leave the TOML in place. That is not what keeps a half-removed
+           Keeper from coming back -- the reservation is process-local by
+           contract, so a restart drops it either way. The durable record is
+           the receipt, and no boot or registration path reads it (#34768).
+
+           The outcome is not discarded, though. [Release_not_owner] says a
+           different owner holds the reservation this transaction acquired,
+           which the transaction cannot correct here and must not swallow.
+           [keeper_paused_work_source_terminal_transaction] carries the same
+           outcome into its error for the same reason. *)
+        let release_outcome = ref None in
+        let result =
+          Fun.protect
+            ~finally:(fun () ->
+              release_outcome := Some (Keeper_lifecycle_reservation.release token))
+            (fun () ->
+              let path = manifest_path config keeper_name in
+              match
+                File_lock_eio.with_durable_lock_observed ~lock_path:(path ^ ".lock") f
+              with
+              | Lock_not_acquired error ->
+                Error (Storage_error (File_lock_eio.durable_lock_error_to_string error))
+              | Body_completed { value; release_error = None } -> value
+              | Body_completed { release_error = Some error; _ } ->
+                Error (Storage_error (File_lock_eio.durable_lock_error_to_string error)))
+        in
+        (match !release_outcome with
+         | Some (Keeper_lifecycle_reservation.Release_not_owner snapshot) ->
+           Error
+             (Conflict
+                ("lifecycle reservation was taken over during configuration \
+                  removal: "
+                 ^ Keeper_lifecycle_reservation.snapshot_to_string snapshot))
+         | Some (Keeper_lifecycle_reservation.Released
+                | Keeper_lifecycle_reservation.Release_missing)
+         | None -> result)) with
   | Intake_committed result -> result
   | Intake_shutdown_reserved id -> Error (Conflict ("Keeper shutdown already owns intake: " ^ Id.to_string id)))
 

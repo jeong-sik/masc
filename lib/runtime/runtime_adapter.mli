@@ -14,6 +14,9 @@
     next to [api_key], and hidden from the dashboard's provider header list.
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
+val http_protocol_metadata : Runtime_schema.provider ->
+  ((Llm_provider.Provider_config.provider_kind * string), string) result
+(** Resolve the actual HTTP kind and request path without a model or credential. *)
 
 (** Uses the dispatch credential alias/registry resolution. A missing required
     credential is an error; anonymous access is allowed only without an

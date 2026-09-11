@@ -861,7 +861,7 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
            { invocation
            ; tool_name = "keeper_time_now"
            ; input = `Assoc []
-           ; output = Ok { Agent_core.Types.content = "ok"; _meta = None }
+           ; output = Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None }
            ; result_bytes = 2
            ; duration_ms = 1.0
            }

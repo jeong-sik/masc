@@ -955,7 +955,7 @@ let gate_state = function
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _); _}); _}
   | None -> None
 
-let claimable_queued_with_db db =
+let claimable_queued_with_db db ~now =
   let* executions = semantic_rows db ~active_only:true in
   let blocked = List.filter_map (fun (execution : Semantic.t) ->
     match gate_state (Some execution) with
@@ -963,6 +963,12 @@ let claimable_queued_with_db db =
     | Some {resolution=Some _; _} -> None
     | None -> (match execution.phase with
         | Semantic.Recovering {origin=Semantic.Gate_binding _; _} -> Some execution.id
+        (* A deferred runtime retry whose provider-throttle backoff is still
+           running is not claimable: claiming it would re-issue the very call
+           the provider just rejected, in a tight loop. The scheduled wake in
+           [Keeper_owner_registry] re-offers it once [not_before] passes. *)
+        | Semantic.Recovering {origin=Semantic.Runtime_retry {Semantic.not_before=Some not_before; _}; _}
+          when not_before > now -> Some execution.id
         | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
         | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
@@ -981,9 +987,41 @@ let claimable_queued_with_db db =
         else Error (Store_unavailable (sqlite_error db "read claimable original operations" rc)) in
       read ())
 
-let has_claimable_queued store =
+let has_claimable_queued store ~now =
   let* () = ensure_open store in
-  claimable_queued_with_db store.db |> Result.map Option.is_some
+  claimable_queued_with_db store.db ~now |> Result.map Option.is_some
+
+(* The wake scheduled at defer time rides the process's pool switch and dies
+   with it, and the Owner never polls: after a restart, a persisted future
+   [not_before] would sit until an unrelated mailbox event unless the owner
+   re-arms a wake for it. Several retries can be cooling at once (a cooling op
+   is Queued, so another op can claim, defer, and cool behind it); the owner
+   re-arms the earliest after start and after every drain wake, so each wake
+   chains to the next. *)
+let next_runtime_retry_wake store ~now =
+  let* () = ensure_open store in
+  semantic_rows store.db ~active_only:true
+  |> Result.map (fun executions ->
+    List.fold_left
+      (fun earliest (execution : Semantic.t) ->
+        match execution.phase with
+        | Semantic.Recovering { origin; _ } ->
+          (match origin with
+           | Semantic.Runtime_retry retry ->
+             (match retry.Semantic.not_before with
+              | Some not_before when not_before > now ->
+                (match earliest with
+                 | Some current when current <= not_before -> earliest
+                 | Some _ | None -> Some not_before)
+              | Some _ | None -> earliest)
+           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
+           | Semantic.Checkpointed _ | Semantic.Interrupted_execution
+           | Semantic.Gate_wait _ | Semantic.Gate_binding _ -> earliest)
+        | Semantic.Preparing | Semantic.Ready | Semantic.Running
+        | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+        | Semantic.Suspended _ | Semantic.Settled _ -> earliest)
+      None
+      executions)
 
 let claim_next store ~now =
   let* () = ensure_open store in
@@ -1000,7 +1038,7 @@ let claim_next store ~now =
       if Int64.compare running 0L > 0
       then Ok ()
       else
-        let* current = claimable_queued_with_db store.db in
+        let* current = claimable_queued_with_db store.db ~now in
         match current with
         | None -> Ok ()
         | Some current ->

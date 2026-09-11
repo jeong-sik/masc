@@ -172,6 +172,7 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
+  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -522,6 +523,7 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
+  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -5540,6 +5542,11 @@
  (name test_owner_process_identity)
  (modules test_owner_process_identity)
  (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
+
+(test
+ (name test_server_upgrade_preparation)
+ (modules test_server_upgrade_preparation)
+ (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
 (include stanzas/test_sandbox_prerequisites.inc)
 (include stanzas/test_onboarding_journey.inc)
 
@@ -5548,3 +5555,9 @@
 (include stanzas/test_docker_account_access.inc)
 
 (include stanzas/test_apple_container_install.inc)
+
+(test
+ (name test_lane_addon_worker)
+ (modules test_lane_addon_worker)
+ (libraries masc alcotest eio eio_main yojson unix))
+(include stanzas/test_runtime_model_discovery.inc)

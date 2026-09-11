@@ -15,6 +15,7 @@ let blocked_tool_result ~invocation ~tool_name ~input ~content =
   ; tool_name
   ; input
   ; content
+  ; content_blocks = None
   ; outcome =
       Types.Tool_failed
         { failure_kind = Types.Non_retryable_tool_error

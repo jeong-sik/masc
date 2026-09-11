@@ -121,13 +121,20 @@ let raw_bytes_of_image_data data =
    present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
    emits an unread placeholder. Provider cancellation, when configured, is
    owned by the shared Provider boundary. *)
-let eager_read ~media_type ~bytes : (string, string) result option =
+(* [exclude_runtime_ids] is required rather than optional: an optional argument
+   in front of labelled ones only cannot be erased (warning 16), and a new
+   caller of the read boundary should have to decide what its walk already
+   spent rather than inherit an empty set by default. *)
+let eager_read ~exclude_runtime_ids ~media_type ~bytes
+  : (string, string) result option
+  =
   match
     Eio_context.get_net_opt (), Eio_context.get_switch_opt (), Eio_context.get_clock_opt ()
   with
   | Some net, Some sw, Some clock ->
     (match
        Keeper_vision_tool.run_vision
+         ~exclude_runtime_ids
          ~sw
          ~clock
          ~net
@@ -266,7 +273,12 @@ let evict_blocks ~mode ~delegate ~keeper_name blocks =
          | Eager -> max_eager_reads_per_turn
          | Store_only -> 0)
     in
-    List.map (evict_block ~read:eager_read ~mode ~keeper_name ~eager_budget) blocks)
+    (* This path has no lane walk behind it, so nothing is spent yet. *)
+    List.map
+      (evict_block
+         ~read:(eager_read ~exclude_runtime_ids:[])
+         ~mode ~keeper_name ~eager_budget)
+      blocks)
   else blocks
 ;;
 
@@ -285,7 +297,7 @@ type image_projection =
   ; delegated_images : int
   }
 
-let fallback_projector_with_read ~read ~keeper_name () =
+let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name () =
   let cached = Hashtbl.create 8 in
   let eager_budget = ref max_eager_reads_per_turn in
   let project_image ~mode block =
@@ -302,7 +314,10 @@ let fallback_projector_with_read ~read ~keeper_name () =
           Agent_core.Types.Text
             (Printf.sprintf
                "[unread image file ID: %s; this runtime cannot view the image]" data)
-        | _ -> evict_block ~read ~mode ~keeper_name ~eager_budget block
+        | _ ->
+          evict_block
+            ~read:(read ~exclude_runtime_ids)
+            ~mode ~keeper_name ~eager_budget block
       in
       Hashtbl.add cached (mode, block) projected;
       projected
@@ -330,7 +345,8 @@ let fallback_projector_with_read ~read ~keeper_name () =
   project
 ;;
 
-let fallback_projector = fallback_projector_with_read ~read:eager_read
+let fallback_projector ?exclude_runtime_ids ~keeper_name () =
+  fallback_projector_with_read ?exclude_runtime_ids ~read:eager_read ~keeper_name ()
 
 module For_testing = struct
   let fallback_projector = fallback_projector_with_read

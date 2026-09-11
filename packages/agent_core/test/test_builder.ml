@@ -23,7 +23,7 @@ let with_net f =
 (** Helper: create a simple echo tool. *)
 let make_tool name =
   Tool.create ~name ~description:("tool:" ^ name) ~parameters:[] (fun input ->
-    Ok { Types.content = Yojson.Safe.to_string input; _meta = None })
+    Ok { Types.content = Yojson.Safe.to_string input; content_blocks = None; _meta = None })
 ;;
 
 

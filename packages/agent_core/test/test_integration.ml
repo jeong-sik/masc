@@ -141,7 +141,7 @@ let test_tool_use () =
       Tool.create ~name:"calculator" ~description:"add" ~parameters:[] (fun input ->
         let a = Yojson.Safe.Util.(input |> member "a" |> to_int) in
         let b = Yojson.Safe.Util.(input |> member "b" |> to_int) in
-        Ok { Types.content = string_of_int (a + b); _meta = None })
+        Ok { Types.content = string_of_int (a + b); content_blocks = None; _meta = None })
     in
     let provider_config =
       Provider_mock.local_provider_config

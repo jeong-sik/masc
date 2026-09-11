@@ -71,6 +71,7 @@ type keeper_profile_defaults =
   native_tool_posture : Runtime_native_tools.posture option;
   skill_names : string list option;
   attached_tool_allow : string list option;
+  tool_deny : string list;
   agent_core_env : (string * string) list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults

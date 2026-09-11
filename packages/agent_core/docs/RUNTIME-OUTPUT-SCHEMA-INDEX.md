@@ -27,7 +27,6 @@ Machine-readable catalog: `docs/schema-surfaces/runtime-output-surfaces.v1.json`
 | `agent_core.runtime_telemetry_report.v1` | *(removed in v0.217.x; telemetry type lives in `lib/sessions_types.mli`)* | `lib/sessions_types.mli` | Sessions type tests |
 | `agent_core.runtime_evidence_bundle.v1` | *(removed in v0.217.x)* | — | *(no shipped producer)* |
 | `agent_core.raw_trace_record.v1` | Raw trace JSONL rows | `lib/raw_trace.mli` | Raw trace roundtrip tests |
-| `agent_core.raw_trace_manifest.v1` | *(removed in v0.217.x; raw trace rows still written by `Runtime_store`)* | `lib/raw_trace.mli`, `lib/runtime_store.mli` | Raw trace roundtrip tests |
 | `agent_core.structured_schema.v1` | Structured output schema helper | `lib/structured.mli`, `lib/base/types.mli` | Structured schema tests |
 
 ## Rules

@@ -221,6 +221,15 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 
 (* --- Provider kind resolution --- *)
 
+let resolve_api_key ~provider_id ~credential =
+  let effective = effective_credential_reference ~provider_id credential in
+  match api_key_of_credential effective with
+  | Error _ as error -> error
+  | Ok value when Option.is_some effective && String.trim value = "" ->
+    Error "Required provider credential is unavailable"
+  | Ok value -> Ok (Llm_provider.Secret.of_string value)
+;;
+
 (* CLI subprocess provider kinds were removed in the agent_core pin bump
    (agent_core service-name migration). No provider kind is a subprocess CLI, so a
    CLI-transport provider can never resolve to a provider kind. The reason is

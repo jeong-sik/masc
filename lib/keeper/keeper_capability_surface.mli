@@ -1,9 +1,9 @@
 (** Immutable Tool and Skill authority for one Keeper turn.
 
     The caller supplies an already-frozen global catalog and Task selection.
-    This module applies the Keeper's Tool Group and Skill-name selections once;
-    ordinary Tools, instruction Skills, named compositions, and ad-hoc plans
-    must consume this value instead of reopening either catalog. *)
+    This module applies the Keeper's [tool_deny] and Skill-name selections
+    once; ordinary Tools, instruction Skills, named compositions, and ad-hoc
+    plans must consume this value instead of reopening either catalog. *)
 
 type t
 
@@ -50,11 +50,20 @@ type candidate =
   | Skill of skill_capability
 
 val create
-  :  skill_names:string list option
+  :  tool_deny:string list
+  -> skill_names:string list option
   -> global_skill_catalog:Keeper_skill_catalog.t
   -> skill_inventory:Keeper_skill_inventory.t
   -> task_skills:Keeper_skill_catalog.skill list
   -> t
+(** [tool_deny] holds model-visible tool names (e.g.
+    ["keeper_spawn"; "masc_keeper_delegate"]) the keeper's profile
+    refuses; matching descriptors leave the surface entirely, so the tool is
+    neither listed to the model nor present in the dispatch bundle built from
+    {!descriptors}. Names that match no model-visible descriptor deny
+    nothing -- the setup site logs them. A keeper with no selection passes
+    [[]]: the argument is mandatory because an optional here would sit in
+    front of only labelled arguments, which OCaml never erases. *)
 
 val descriptors : t -> Keeper_tool_descriptor.t list
 val skill_projection : t -> Keeper_skill_catalog.turn_projection

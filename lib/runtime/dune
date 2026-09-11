@@ -20,6 +20,7 @@
   unix
   logs
   eio
+  eio.unix
   cohttp
   cohttp-eio
   eqaf

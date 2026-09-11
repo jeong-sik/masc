@@ -2542,12 +2542,135 @@ let test_tool_image_followups_preserve_batch_order () =
      | _ -> false)
 ;;
 
+let test_tool_image_degrades_without_declared_capability () =
+  let open Yojson.Safe.Util in
+  let substring_present haystack needle =
+    let needle_length = String.length needle in
+    let rec from index =
+      if index + needle_length > String.length haystack then false
+      else if String.sub haystack index needle_length = needle then true
+      else from (index + 1)
+    in
+    from 0
+  in
+  let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
+  let image = image_block ~media_type:"image/png" ~data:png () in
+  let result blocks =
+    ToolResult { tool_use_id = "a"; content = "read a"; outcome = Tool_succeeded
+               ; json = None; content_blocks = blocks }
+  in
+  let messages =
+    [ msg User [ Text "Inspect the artifact" ]
+    ; msg Assistant [ ToolUse { id = "a"; name = "Read"; input = `Assoc [] } ]
+    ; msg Tool [ result (Some [ Text "the image"; image ]) ] ]
+  in
+  let omission =
+    "[image omitted: this model does not accept image input (media_type image/png)]"
+  in
+  let has_image_part item =
+    match item |> member "content" with
+    | `List parts ->
+      List.exists (fun part -> part |> member "image_url" <> `Null) parts
+    | _ -> false
+  in
+  let wire_roles body =
+    List.map (fun item -> item |> member "role" |> to_string)
+      (body |> member "messages" |> to_list)
+  in
+  (* The degrader itself: nested tool-result images are rewritten and
+     counted; a capable model's history passes through untouched. *)
+  let degraded_messages, degraded_count =
+    Api_common.degrade_image_messages ~supports_image_input:false messages
+  in
+  check_int "one image degraded" 1 degraded_count;
+  check_bool "placeholder replaces the nested image" true
+    (match (List.nth degraded_messages 2).content with
+     | [ ToolResult { content_blocks = Some [ Text _; Text text ]; _ } ] ->
+       text = omission
+     | _ -> false);
+  let capable_messages, capable_count =
+    Api_common.degrade_image_messages ~supports_image_input:true messages
+  in
+  check_int "capable model degrades nothing" 0 capable_count;
+  check_bool "capable history is untouched" true (capable_messages = messages);
+  (* OpenAI production boundary: the wire carries no image_url, names the
+     omission, and projects no image followup turn. *)
+  let text_only_caps =
+    { Capabilities.openai_compat_chat_capabilities with
+      supports_image_input = false }
+  in
+  let openai_config =
+    Provider_config.make
+      ~kind:OpenAI_compat ~model_id:"tool-image-text-only"
+      ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+      ~max_tokens:128
+      ~model_capabilities_override:text_only_caps
+      ()
+  in
+  let body =
+    Backend_openai_request.build_request ~config:openai_config ~messages ()
+    |> Yojson.Safe.from_string
+  in
+  check_bool "text-only wire carries no image_url" true
+    (not
+       (List.exists has_image_part
+          (body |> member "messages" |> to_list)));
+  check_bool "no image followup turn is projected" true
+    (wire_roles body = [ "user"; "assistant"; "tool" ]);
+  check_bool "omission is named on the OpenAI wire" true
+    (substring_present (Yojson.Safe.to_string body) omission);
+  (* Declared capability keeps the native projection on the same boundary. *)
+  let image_caps = Capabilities.openai_compat_chat_capabilities in
+  let openai_image_config =
+    Provider_config.make
+      ~kind:OpenAI_compat ~model_id:"tool-image-capable"
+      ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+      ~max_tokens:128
+      ~model_capabilities_override:image_caps
+      ()
+  in
+  let image_body =
+    Backend_openai_request.build_request ~config:openai_image_config
+      ~messages ()
+    |> Yojson.Safe.from_string
+  in
+  check_bool "capable wire still carries image_url" true
+    (List.exists has_image_part
+       (image_body |> member "messages" |> to_list));
+  check_bool "capable wire projects the followup turn" true
+    (wire_roles image_body = [ "user"; "assistant"; "tool"; "user" ]);
+  (* Gemini production boundary: same gate, inlineData instead of
+     image_url. *)
+  let gemini_config =
+    Provider_config.make
+      ~kind:Gemini ~model_id:"tool-image-text-only-gemini"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~max_tokens:128
+      ~model_capabilities_override:
+        { Capabilities.gemini_capabilities with supports_image_input = false }
+      ()
+  in
+  let gemini_body =
+    Backend_gemini.build_request ~config:gemini_config ~messages ()
+  in
+  check_bool "Gemini text-only wire carries no inlineData" true
+    (not (substring_present gemini_body "inlineData"));
+  check_bool "omission is named on the Gemini wire" true
+    (substring_present gemini_body omission);
+  check_bool "canonical image-bearing history unchanged" true
+    (match (List.nth messages 2).content with
+     | [ ToolResult { content_blocks = Some [ _; Image _ ]; _ } ] -> true
+     | _ -> false)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
     [ ( "serialize"
       , [ Alcotest.test_case "tool PNG followups keep parallel batch order" `Quick
             test_tool_image_followups_preserve_batch_order
+        ; Alcotest.test_case "tool images degrade without declared capability" `Quick
+            test_tool_image_degrades_without_declared_capability
         ; Alcotest.test_case
             "content parts cover modalities"
             `Quick

@@ -648,6 +648,21 @@ let build_request_artifact
       validate_projected_thought_signatures projection.messages;
       projection.messages
   in
+  (* Images must not reach [contents_of_messages] — and through it
+     [with_image_followups] — against a model that does not declare
+     [supports_image_input]: the projection would emit an inlineData part
+     the endpoint rejects or drops. Degrading to a named placeholder keeps
+     the turn live, mirroring the OpenAI-compatible request boundary. *)
+  let projected_messages, _images_degraded =
+    let caps =
+      match Provider_config.capabilities_for_config_model config with
+      | Some caps -> caps
+      | None -> Capabilities.gemini_capabilities
+    in
+    Api_common.degrade_image_messages
+      ~supports_image_input:caps.supports_image_input
+      projected_messages
+  in
   let contents, system_instruction = contents_of_messages projected_messages in
   (* Prepend system_prompt from config if present *)
   let system_instruction =

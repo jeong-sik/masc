@@ -15,6 +15,7 @@ open Time_compat
 module Pointer = Browser_pointer
 module Action = Browser_action
 module Upload_lease = Browser_upload_lease
+module Document = Browser_document
 
 type node_ref = { document_id : string; node_id : string }
 type scene_view = Content | Regions
@@ -29,6 +30,7 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
 type verb =
   | Tabs_list
   | Page_read of { tab_id : int option; max_chars : int option }
+  | Page_document of { tab_id : int }
   | Page_downloads of { tab_id : int }
   | Page_capture of { tab_id : int }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
@@ -47,6 +49,7 @@ type verb =
 let verb_to_string = function
   | Tabs_list -> "tabs.list"
   | Page_read _ -> "page.read"
+  | Page_document _ -> "page.document"
   | Page_downloads _ -> "page.downloads"
   | Page_capture _ -> "page.capture"
   | Page_scene _ -> "page.scene"
@@ -101,6 +104,9 @@ let verb_json = function
              ]
              |> List.filter_map Fun.id) )
       ]
+  | Page_document {tab_id} ->
+    `Assoc ["verb", `String "page.read";
+      "args", `Assoc ["tabId", `Int tab_id; "includeHtml", `Bool true]]
   | Page_downloads {tab_id} ->
     `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_scene {tab_id;max_chars;view;scope} ->
@@ -142,14 +148,14 @@ let verb_json = function
      Readers and explicit-tab interactions are supported. Session ownership
      and direct navigation remain with the automation backend. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_context _ | Page_downloads _
   | Session_status -> true
   | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ -> false
 ;;
 
 let verb_allowed_on_live = function
   | Page_context _ | Page_downloads _ -> false
-  | Tabs_list | Page_read _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_interact _ -> true
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_interact _ -> true
   (* The operator's browser owns itself, so it has no session to report on.
      Answering here would describe something the automation backend holds. *)
   | Session_open _ | Session_close | Session_status | Page_goto _ | Page_act _ -> false
@@ -277,7 +283,7 @@ let disconnect_client ~client_id =
     | None when Hashtbl.mem retired_clients key -> Ok ()
     | None -> Error "unknown_client"
     | Some client -> retire_unlocked key client; Ok ())
-let issue_live client ~verb ~timeout_sec =
+let issue_live ?(only_if_idle = false) client ~verb ~timeout_sec =
   if not (connected client) then Rejected_before_effect "client_not_connected"
   else if not (verb_allowed_on_live verb) then
     Rejected_before_effect "session ownership and direct navigation belong to the automation lane"
@@ -285,15 +291,22 @@ let issue_live client ~verb ~timeout_sec =
     Eio.Switch.run (fun sw ->
       let id = Uuidm.to_string (command_uuid ()) in
       let promise, resolver = Eio.Promise.create () in
-      Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.add client.waiters id resolver);
+      let accepted = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
+        if only_if_idle &&
+           (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
+        then false
+        else (Hashtbl.add client.waiters id resolver; true)) in
       Eio.Switch.on_release sw (fun () ->
         Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id));
-      Eio.Fiber.first
+      if not accepted then Refused "optional_document_observation_busy"
+      else Eio.Fiber.first
         (fun () -> Eio.Stream.add client.commands {id; verb_json=verb_json verb};
           Answered (Eio.Promise.await promise))
         (fun () -> Time_compat.sleep timeout_sec; Timed_out))
 let automation_executor : (verb -> answer) option Atomic.t = Atomic.make None
 let install_automation_executor executor = Atomic.set automation_executor executor
+let automation_document_observer : (tab_id:int -> answer) option Atomic.t = Atomic.make None
+let install_automation_document_observer observer = Atomic.set automation_document_observer observer
 let issue_for ~target ~verb ~timeout_sec =
   match target with
   | Live_client client -> issue_live client ~verb ~timeout_sec
@@ -306,3 +319,24 @@ let issue ~lane_name ~verb ~timeout_sec =
   match resolve_target ~lane_name ~client_id:None with
   | Error error -> Rejected_before_effect error
   | Ok target -> issue_for ~target ~verb ~timeout_sec
+
+(** Additional observations never queue behind an existing browser command.
+    Busy or missing browsers leave this optional source unavailable. The caller
+    supplies the same transport timeout used by existing browser reads. *)
+let issue_document_if_idle ~target ~tab_id ~timeout_sec =
+  match target with
+  | Live_client client ->
+    (match issue_live ~only_if_idle:true client ~verb:(Page_document {tab_id}) ~timeout_sec with
+     | Answered (`Assoc fields) ->
+       (match List.assoc_opt "data" fields with
+        | Some (`Assoc data) ->
+          let data = `Assoc (("clientId", `String (client_id_to_string client.info.client_id))
+                            :: List.remove_assoc "clientId" data) in
+          Answered (`Assoc (("data", data) :: List.remove_assoc "data" fields))
+        | Some _ | None -> Answered (`Assoc fields))
+     | answer -> answer)
+  | Automation ->
+    match Atomic.get automation_document_observer with
+    | None -> Lane_absent
+    | Some observe -> Eio.Fiber.first (fun () -> observe ~tab_id)
+        (fun () -> Time_compat.sleep timeout_sec; Timed_out)

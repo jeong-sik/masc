@@ -6640,11 +6640,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · READ-ONLY OBSERVATION"
+    | None -> "  Standalone LLM lanes · a appends a failover slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · READ-ONLY OBSERVATION · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · a appends a failover slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -6723,6 +6723,39 @@ let render_lanes_overview (state : state) =
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text detail));
+  (* The failover-candidate picker the "a" key opens. Same projection the
+     Runtime surface draws; the row order both render and the key handler
+     read is the picker's own, so the cursor and the drawing cannot drift. *)
+  (match Masc_tui_types.runtime_picker_projection state with
+   | None -> ()
+   | Some picker ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf
+            "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
+       if picker.Masc_tui_types.rlp_choices = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (runtime catalogue unread)"
+       else
+         List.iteri
+           (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
+              let note =
+                if List.exists (String.equal runtime.ro_id) picker.rlp_already
+                then "  (already a slot)"
+                else if not runtime.ro_dispatchable then "  (blocked)"
+                else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+                then "  (same provider as a current slot)"
+                else ""
+              in
+              let mark = if offset = state.runtime_lane_pick_cursor then ">" else " " in
+              box_line buf cols
+                (Printf.sprintf "  %s %s   %s / %s%s"
+                   mark
+                   (Terminal_text.single_line runtime.ro_id)
+                   (Terminal_text.single_line runtime.ro_provider)
+                   (Terminal_text.single_line runtime.ro_model)
+                   (Ansi.dim ^ note ^ Ansi.reset)))
+           picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do
     box_empty buf cols

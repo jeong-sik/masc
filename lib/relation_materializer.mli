@@ -1,5 +1,5 @@
-(** Relation_materializer — record agent collaboration edges to
-    Neo4j (via GraphQL) when MASC lifecycle events fire.
+(** Relation_materializer — agent collaboration hook surface.
+    Second Brain GraphQL / Neo4j materialization has been retired.
 
     Both entry points dispatch a single batched GraphQL mutation
     (alias-batched: 20 peers = 1 HTTP request) and detach into an

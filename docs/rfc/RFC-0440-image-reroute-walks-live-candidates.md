@@ -38,7 +38,9 @@ related: ["0414", "keeper-vision-delegation-tool", "0265"]
 
 ## 3. 판단
 
-- 후보 집합은 한 곳이 답한다. "키퍼 K 의 이미지 후보" 는 lane 의 이미지 후보 → `media_failover` → 나머지 선언 런타임 중 이미지를 받는 것(선언 순서)을 이어 붙이고 중복을 뺀 목록이다. 지금 `keeper_vision_tool` 이 쓰는 꼬리(선언 순서)를 그대로 포함하므로 도구 경로가 잃는 후보는 없고, reroute 는 lane 밖 후보를 얻는다. 두 경로가 같은 함수를 부른다.
+- 후보 집합은 한 곳이 답한다. "키퍼 K 의 이미지 후보" 는 lane 의 이미지 후보 → `media_failover`(선언 순서)를 이어 붙이고 중복을 뺀 목록이다. 두 경로가 같은 함수를 부른다.
+
+  이 문장은 원래 "→ 나머지 선언 런타임" 까지 포함했다. 그때 reroute 는 이 집합에서 후보를 **하나** 골랐고, #34720 이 걸음으로 바꾸면서 그 꼬리가 실제로 디스패치되기 시작했다. `Runtime.keeper_dispatch_runtime_ids` 는 배정된 뿌리와 `media_failover`, verifier exact slot 만 부팅에서 검사한다 — 선언만 된 런타임은 부팅을 막지 않으려고 일부러 뺀 것이다. 그래서 걸음이 닿는 목록과 부팅이 검사하는 목록이 어긋났고, 검사 안 받은 런타임의 per-attempt cap 이 `Config` 를 내면 rotate 대상이 아니라 그 뒤의 살아 있는 후보까지 멈췄다. 꼬리를 지워 둘을 같게 맞췄다 (#34823). 어떤 키퍼의 lane 에도 없는 런타임에 이미지를 맡기려면 `media_failover` 에 적는다.
 - reroute 는 걸음이다. 후보가 402·429·`insufficient_quota` 같은 `should_try_next` 오류로 끝나면 같은 걸음에서 다음 이미지 후보로 간다. 같은 턴에서 같은 후보를 다시 방문하지 않는다. lane 의 텍스트 failover 는 이미지를 받지 못하는 후보라 이 걸음에 끼지 않는다.
 - 바닥은 위임이다. 이미지를 받지 못하는 후보에 닿으면 드라이버가 후보마다 eager read 로 내려간다(이미 그렇다). 읽기 결과가 텍스트로 들어가므로 키퍼의 lane 은 그대로다.
 - 읽기 경로도 같은 창을 본다. `vision_runtime_candidates` 는 `Runtime_quota_window` 순서로 후보를 세우고, 읽기에서 받은 402 는 그 창에 기록하며, 답이 온 계정은 기록을 지운다. `delegates_media` 는 바꾸지 않는다(§2 정정).

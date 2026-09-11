@@ -29,6 +29,10 @@ type provider_kind = Provider_kind.t =
     helper to avoid the two fields drifting out of sync. *)
 val request_path_default_for_kind : provider_kind -> string
 
+(** Authentication is independent of the inference wire. Vertex uses the
+    Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
+type auth_scheme = Provider_default | Bearer_token
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -37,6 +41,8 @@ type t =
         known; AGENT_CORE never reconstructs a provider id from URL or model syntax. *)
   ; model_id : string
   ; base_url : string
+  ; auth_scheme : auth_scheme
+    (** Credential header contract, independent of request-body wire. *)
   ; api_key : Secret.t
     (** API key / token as an abstract secret.  Never log or serialize
         this field directly; use {!auth_headers_for_config} at HTTP request
@@ -213,6 +219,7 @@ val make
   -> model_id:string
   -> base_url:string
   -> ?provider_id:string
+  -> ?auth_scheme:auth_scheme
   -> ?api_key:string
   -> ?headers:(string * string) list
   -> ?request_path:string

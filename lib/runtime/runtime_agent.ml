@@ -756,10 +756,22 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
    therefore dropped the image while a capable runtime sat unused in
    [media_failover]. Order: the lane's own candidates first (the operator's
    preference for this keeper), then [runtime.media_failover] in declared
-   order, then every other declared runtime in declaration order. Ids are
-   unique, first occurrence wins. No capability or execution filter here: the
-   reroute filters by the modalities the turn actually requires, and the
-   vision tool narrows to [Agent_core] because it calls the provider itself. *)
+   order. Ids are unique, first occurrence wins. No capability or execution
+   filter here: the reroute filters by the modalities the turn actually
+   requires, and the vision tool narrows to [Agent_core] because it calls the
+   provider itself.
+
+   Every other declared runtime used to follow, and #34720 turned this set
+   from "pick one" into "dispatch each in turn", which made that tail
+   reachable. [Runtime.keeper_dispatch_runtime_ids] deliberately validates
+   only routed roots, [media_failover] and verifier exact slots, so a
+   declared-but-unassigned runtime does not refuse boot -- and the walk was
+   dispatching exactly the runtimes that skipped that check. Its per-attempt
+   cap check then answers [Config], which is not rotatable, so one unchecked
+   runtime in the tail stopped the walk before the live candidates behind it.
+   The reach is now the list boot validates. [media_failover] is where an
+   operator says a runtime should take images for keepers that do not
+   otherwise route to it (#34823). *)
 let media_candidates_of ~(lane : Runtime.t list) ~(runtimes : Runtime.t list)
     ~(media_failover : string list) : Runtime.t list =
   let by_id id =
@@ -773,7 +785,7 @@ let media_candidates_of ~(lane : Runtime.t list) ~(runtimes : Runtime.t list)
       if List.mem runtime.Runtime.id seen then dedupe seen rest
       else runtime :: dedupe (runtime.Runtime.id :: seen) rest
   in
-  dedupe [] (List.concat [ lane; List.filter_map by_id media_failover; runtimes ])
+  dedupe [] (List.concat [ lane; List.filter_map by_id media_failover ])
 
 let media_candidates ~lane =
   let runtimes, media_failover = Runtime.runtimes_and_media_failover () in

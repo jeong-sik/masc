@@ -26,11 +26,16 @@ let request_path_default_for_kind = function
   | Glm -> "/chat/completions"
 ;;
 
+(** Authentication is independent of the inference wire. Vertex uses the
+    Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
+type auth_scheme = Provider_default | Bearer_token
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
   ; model_id : string
   ; base_url : string
+  ; auth_scheme : auth_scheme
   ; api_key : Secret.t
   ; headers : (string * string) list
   ; request_path : string
@@ -77,6 +82,7 @@ let make
       ~model_id
       ~base_url
       ?provider_id
+      ?(auth_scheme = Provider_default)
       ?(api_key = "")
       ?(headers = [ "Content-Type", "application/json" ])
       ?request_path
@@ -136,6 +142,7 @@ let make
   ; provider_id
   ; model_id
   ; base_url
+  ; auth_scheme
   ; api_key = Secret.of_string api_key
   ; headers
   ; request_path
@@ -234,7 +241,12 @@ let auth_headers_for_kind_and_secret ~(kind : provider_kind) ~(api_key : Secret.
     Gemini keys are sent in the [x-goog-api-key] header and are never placed
     in the URL query string. *)
 let auth_headers_for_config (config : t) : (string * string) list =
-  auth_headers_for_kind_and_secret ~kind:config.kind ~api_key:config.api_key
+  match config.auth_scheme with
+  | Provider_default ->
+    auth_headers_for_kind_and_secret ~kind:config.kind ~api_key:config.api_key
+  | Bearer_token ->
+    if Secret.is_empty config.api_key then []
+    else [ "Authorization", "Bearer " ^ Secret.header_value config.api_key ]
 ;;
 
 (** Same as {!auth_headers_for_config} but takes the provider kind and raw key

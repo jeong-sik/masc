@@ -549,20 +549,6 @@ let test_handoff_inherits_injected_transport () =
   Alcotest.(check int) "all scripted responses consumed" 0 (List.length !responses)
 ;;
 
-(* --- 15. with_mcp_clients --- *)
-
-let test_with_mcp_clients () =
-  with_net
-  @@ fun net ->
-  let agent =
-    Builder.create ~net ~model:"claude-sonnet-5"
-    |> Builder.with_mcp_clients []
-    |> Builder.build_safe
-    |> Result.get_ok
-  in
-  Alcotest.(check int) "mcp_clients" 0 (List.length (Agent.options agent).mcp_clients)
-;;
-
 (* --- 17. with_contract composes prompt --- *)
 
 let test_with_contract_composes_prompt () =
@@ -815,6 +801,8 @@ let test_defaults_match_agent_create () =
 
 (* --- 30. build with tools merges mcp --- *)
 
+(* No setter puts managed MCP clients on a builder any more, so the merge this
+   pins is an explicit tool against the empty list every agent has (#34871). *)
 let test_build_with_tools_merges_mcp () =
   with_net
   @@ fun net ->
@@ -822,7 +810,6 @@ let test_build_with_tools_merges_mcp () =
   let agent =
     Builder.create ~net ~model:"claude-sonnet-5"
     |> Builder.with_tool t1
-    |> Builder.with_mcp_clients []
     |> Builder.build_safe
     |> Result.get_ok
   in
@@ -877,7 +864,6 @@ let () =
             "handoff inherits injected transport"
             `Quick
             test_handoff_inherits_injected_transport
-        ; Alcotest.test_case "mcp_clients" `Quick test_with_mcp_clients
         ; Alcotest.test_case
             "contract composes prompt"
             `Quick

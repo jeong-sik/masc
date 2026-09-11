@@ -607,6 +607,31 @@ let test_run_failure_and_finish_set_the_phase () =
   check phase "a finished run says so" Transcript.Stream_ended
     (Transcript.phase finished)
 
+(* The settle instant is the block's far end: it is stamped by the first
+   end-of-turn delta and never moved by the ones that follow, so a turn that
+   ran twenty minutes can say so while the deltas that closed it arrive
+   moments apart. A turn still working has no far end to name. *)
+let test_settled_at_takes_the_first_end_of_turn_delta () =
+  let settled = fresh () in
+  check (option float) "a working turn has not settled" None
+    (Transcript.settled_at settled);
+  feed ~now:(origin +. 120.) settled
+    [ Live.Run_started; Live.Run_finished ];
+  check (option float) "RUN_FINISHED stamps the settle instant"
+    (Some (origin +. 120.))
+    (Transcript.settled_at settled);
+  feed ~now:(origin +. 125.) settled [ reply_details () ];
+  check (option float) "a later reply does not move it" (Some (origin +. 120.))
+    (Transcript.settled_at settled)
+
+let test_settled_at_keeps_a_failure_instant_too () =
+  let failed = fresh () in
+  feed ~now:(origin +. 45.) failed
+    [ Live.Run_started; Live.Run_failed { message = "provider 429" } ];
+  check (option float) "a failed turn settled when it failed"
+    (Some (origin +. 45.))
+    (Transcript.settled_at failed)
+
 let test_a_finished_run_does_not_go_back_to_working () =
   let t = fresh () in
   feed t [ Live.Run_started; Live.Run_finished; Live.Run_started ];
@@ -1995,6 +2020,10 @@ let () =
     [ ( "content"
       , [ test_case "started_at keeps the dispatch instant" `Quick
             test_started_at_keeps_the_dispatch_instant
+        ; test_case "settled_at takes the first end-of-turn delta" `Quick
+            test_settled_at_takes_the_first_end_of_turn_delta
+        ; test_case "settled_at keeps a failure instant too" `Quick
+            test_settled_at_keeps_a_failure_instant_too
         ; test_case "text and reasoning accumulate separately" `Quick
             test_text_and_thinking_accumulate
         ; test_case "the whole reasoning trail is kept" `Quick

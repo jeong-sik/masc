@@ -1102,6 +1102,64 @@ let ts_of_entry (json : Yojson.Safe.t) : float option =
   | _ -> None
 ;;
 
+let fast_line_ts_opt (line : string) : float option =
+  let len = String.length line in
+  if len < 8 then None
+  else
+    let max_search = min (len - 5) 64 in
+    let rec find_key i =
+      if i > max_search then None
+      else if line.[i] = '"' && line.[i + 1] = 't' && line.[i + 2] = 's' && line.[i + 3] = '"' then
+        let colon = i + 4 in
+        let rec skip_ws j =
+          if j < len && (line.[j] = ' ' || line.[j] = ':') then skip_ws (j + 1)
+          else j
+        in
+        let num_start = skip_ws colon in
+        let rec find_num_end j =
+          if j < len && (
+            (line.[j] >= '0' && line.[j] <= '9')
+            || line.[j] = '.' || line.[j] = '-' || line.[j] = '+'
+            || line.[j] = 'e' || line.[j] = 'E')
+          then find_num_end (j + 1)
+          else j
+        in
+        let num_end = find_num_end num_start in
+        if num_end > num_start then
+          float_of_string_opt (String.sub line num_start (num_end - num_start))
+        else None
+      else find_key (i + 1)
+    in
+    find_key 0
+;;
+
+let fast_line_contains_substring ~needle haystack =
+  let n_len = String.length needle in
+  let h_len = String.length haystack in
+  if n_len = 0 then true
+  else if n_len > h_len then false
+  else
+    let rec check i j =
+      if j = n_len then true
+      else if String.unsafe_get haystack (i + j) = String.unsafe_get needle j then check i (j + 1)
+      else false
+    in
+    let max_i = h_len - n_len in
+    let rec loop i =
+      if i > max_i then false
+      else if check i 0 then true
+      else loop (i + 1)
+    in
+    loop 0
+;;
+
+let fast_line_might_match_keeper ?keeper_name (line : string) : bool =
+  match keeper_name with
+  | None -> true
+  | Some name ->
+    fast_line_contains_substring ~needle:("\"" ^ name ^ "\"") line
+;;
+
 let file_change_tally ?keeper_name ~(window_hours : float) () =
   if window_hours <= 0.0
   then Keeper_tool_call_file_change.empty_tally
@@ -1117,61 +1175,57 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
       Stdlib.Mutex.protect file_change_cache_mu (fun () ->
         let carried =
           match Hashtbl.find_opt file_change_cache key with
-          (* Reusable while the window floor has only moved forward, nothing
-             counted has fallen behind it, and the day files this entry read
-             are still the ones the window covers. *)
-          | Some entry
-            when carried_entry_answers
-                   ~entry_since_ts:entry.fcc_since_ts
-                   ~entry_oldest_row_ts:entry.fcc_oldest_row_ts
-                   ~since_ts
-                   ~since -> Some entry
+          | Some entry when entry.fcc_since_ts <= since_ts ->
+            let tally =
+              match entry.fcc_oldest_row_ts with
+              | Some oldest when oldest >= since_ts -> entry.fcc_tally
+              | _ -> Keeper_tool_call_file_change.prune_before ~since_ts entry.fcc_tally
+            in
+            Some (entry.fcc_cursors, tally)
           | Some _ | None -> None
         in
         let cursors, tally =
           match carried with
-          | Some entry -> entry.fcc_cursors, entry.fcc_tally
+          | Some (cursors, pruned_tally) -> cursors, pruned_tally
           | None -> [], Keeper_tool_call_file_change.empty_tally
         in
-        let oldest =
-          ref (match carried with Some entry -> entry.fcc_oldest_row_ts | None -> None)
-        in
         let tally, cursors =
-          Dated_jsonl.fold_range_appended
+          Dated_jsonl.fold_range_appended_raw
             store
             ~since
             ~until
             ~cursors
             ~init:tally
-            ~f:(fun tally json ->
-              let row_ts = ts_of_entry json in
-              let in_window =
-                match row_ts with
-                | Some ts -> ts >= since_ts
-                | None -> false
-              in
-              let keeper_ok =
-                match keeper_name with
-                | None -> true
-                | Some name -> keeper_matches name json
-              in
-              if in_window && keeper_ok
-              then begin
-                (match row_ts with
-                 | Some ts ->
-                   (match !oldest with
-                    | Some current when current <= ts -> ()
-                    | Some _ | None -> oldest := Some ts)
-                 | None -> ());
-                Keeper_tool_call_file_change.fold_row tally json
-              end
-              else tally)
+            ~f:(fun tally line ->
+              match fast_line_ts_opt line with
+              | Some ts when ts < since_ts -> tally
+              | _ ->
+                if not (fast_line_might_match_keeper ?keeper_name line) then tally
+                else
+                  (match Yojson.Safe.from_string line with
+                   | json ->
+                     let row_ts = ts_of_entry json in
+                     let in_window =
+                       match row_ts with
+                       | Some ts -> ts >= since_ts
+                       | None -> false
+                     in
+                     let keeper_ok =
+                       match keeper_name with
+                       | None -> true
+                       | Some name -> keeper_matches name json
+                     in
+                     if in_window && keeper_ok
+                     then Keeper_tool_call_file_change.fold_row tally json
+                     else tally
+                   | exception Yojson.Json_error _ -> tally))
         in
+        let oldest = Keeper_tool_call_file_change.oldest_row_ts tally in
         Hashtbl.replace
           file_change_cache
           key
           { fcc_since_ts = since_ts
-          ; fcc_oldest_row_ts = !oldest
+          ; fcc_oldest_row_ts = oldest
           ; fcc_cursors = cursors
           ; fcc_tally = tally
           };

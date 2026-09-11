@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -431,6 +432,126 @@ class MultipleSelection(unittest.TestCase):
             process.stdout.close()
             os.close(master)
             os.close(slave)
+
+    def _picker_program(self, labels, multiple=False, guarded=False):
+        call = 'm.pick("Pick", ' + repr(labels) + (', multiple=True' if multiple else '') + ')'
+        if guarded:
+            body = ('try:\n'
+                    '    print(json.dumps(%s))\n'
+                    'except Exception as error:\n'
+                    '    print(json.dumps({"error": error.__class__.__name__}))' % call)
+        else:
+            body = 'print(json.dumps(%s))' % call
+        return ('import importlib.util,json; s=importlib.util.spec_from_file_location("setup",' +
+                repr(str(ROOT / 'scripts/install-runtime-setup.py')) +
+                '); m=importlib.util.module_from_spec(s); s.loader.exec_module(m);\n' + body)
+
+    def _drive_picker(self, program, steps):
+        """steps: (needle, keys, occurrences) triples; the picker redraws one
+        frame per key, so a repeated footer proves the key was consumed."""
+        master, slave = pty.openpty()
+        original = termios.tcgetattr(slave)
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=slave, stderr=slave,
+                                   stdout=subprocess.PIPE, env=dict(os.environ, TERM='xterm'))
+        terminal = b''
+        try:
+            for needle, keys, occurrences in steps:
+                deadline = time.monotonic() + 5
+                while terminal.count(needle) < occurrences:
+                    remaining = max(0.1, deadline - time.monotonic())
+                    self.assertTrue(select.select([master], [], [], remaining)[0],
+                                    'picker never showed ' + repr(needle) + '; tail: ' + repr(terminal[-300:]))
+                    terminal += os.read(master, 65536)
+                if keys:
+                    os.write(master, keys)
+            while True:
+                ready = select.select([master, process.stdout], [], [], 5)[0]
+                self.assertTrue(ready, 'picker did not finish')
+                if master in ready:
+                    terminal += os.read(master, 65536)
+                if process.stdout in ready:
+                    break
+            output, _ = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, terminal)
+            restored = termios.tcgetattr(slave)
+            restored[3] &= ~getattr(termios, 'PENDIN', 0)
+            original[3] &= ~getattr(termios, 'PENDIN', 0)
+            self.assertEqual(restored, original)
+            return json.loads(output), terminal
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdout.close()
+            os.close(master)
+            os.close(slave)
+
+    def test_filter_typing_narrows_and_returns_the_real_index(self):
+        result, terminal = self._drive_picker(self._picker_program(['Anthropic Claude', 'OpenAI GPT', 'Google Gemini']), [
+            (b'3/3 shown', b'gpt', 1),
+            (b'1/3 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+        self.assertIn(b'Filter: gpt', terminal)
+
+    def test_multiple_choices_made_under_a_filter_keep_real_indexes(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Alpha two', 'Beta one'], multiple=True), [
+            (('0 selected · 3/3 shown').encode(), b'alph', 1),
+            (b'2/3 shown', b' ', 1),
+            (('1 selected · 2/3 shown').encode(), b'\x1b', 1),
+            (('1 selected · 3/3 shown').encode(), b'\x1b[B\x1b[B', 1),
+            ('› [ ] Beta one'.encode(), b' ', 1),
+            ('› [x] Beta one'.encode(), b'\r', 1),
+        ])
+        self.assertEqual(result, [0, 2])
+
+    def test_enter_with_no_filter_matches_waits_instead_of_selecting(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Beta one']), [
+            (b'2/2 shown', b'zzz', 1),
+            (b'no matches', b'\r', 1),
+            # Enter must redraw instead of returning: a second frame with the
+            # same footer is the proof the key was consumed as a no-op.
+            (b'no matches', b'\x7f\x7f\x7f', 2),
+            (b'2/2 shown', b'\r', 2),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_esc_without_a_filter_still_cancels(self):
+        result, _ = self._drive_picker(self._picker_program(['Alpha one', 'Beta one'], guarded=True), [
+            (b'2/2 shown', b'\x1b', 1),
+        ])
+        self.assertEqual(result, {'error': 'SetupError'})
+
+    def test_q_and_k_type_into_the_filter_instead_of_commanding(self):
+        # Model ids start with any letter (qwen, kimi): every printable byte
+        # is filter text, movement is arrows only and q no longer cancels.
+        result, terminal = self._drive_picker(self._picker_program(['qwen big', 'kimi-k3', 'beta one']), [
+            (b'3/3 shown', b'qwen', 1),
+            (b'Filter: qwen', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+        result, terminal = self._drive_picker(self._picker_program(['kimi-k3', 'beta one']), [
+            (b'2/2 shown', b'kimi', 1),
+            (b'Filter: kimi', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_a_byte_right_after_esc_clears_the_filter_and_is_kept(self):
+        result, _ = self._drive_picker(self._picker_program(['alpha one', 'golf two']), [
+            (b'2/2 shown', b'al', 1),
+            (b'Filter: al', b'\x1bg', 1),
+            (b'Filter: g', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+
+    def test_narrowing_then_clearing_keeps_the_cursor_on_its_row(self):
+        labels = ['opt-{}'.format(index) for index in range(10)] + ['needle row']
+        result, _ = self._drive_picker(self._picker_program(labels), [
+            (b'11/11 shown', b'needle', 1),
+            (b'1/11 shown', b'\x1b', 1),
+            (b'11/11 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [10])
 
     def test_accessible_number_input_selects_several_without_model_typing(self):
         with patch('sys.stdin', io.StringIO('1,3\n')), contextlib.redirect_stderr(io.StringIO()):

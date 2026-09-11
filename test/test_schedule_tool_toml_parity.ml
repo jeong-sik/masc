@@ -47,6 +47,8 @@ let test_the_published_order_is_unchanged () =
     ; "masc_schedule_list"
     ; "masc_schedule_get"
     ; "masc_schedule_cancel"
+    ; "masc_schedule_note_add"
+    ; "masc_schedule_notes_list"
     ]
     (List.map (fun (s : Masc_domain.tool_schema) -> s.name) published)
 ;;

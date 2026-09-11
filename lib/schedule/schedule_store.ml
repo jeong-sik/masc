@@ -5,6 +5,7 @@ type state =
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
   ; wakes : Schedule_domain.wake_record list
+  ; notes : Schedule_domain.schedule_note list
   }
 
 type store_error =
@@ -119,7 +120,12 @@ let recovery_path config = schedules_path config ^ ".last-good"
 let ensure_dirs config = Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
 let default_state () =
-  { version = 1; updated_at = now (); schedules = []; wakes = [] }
+  { version = 1
+  ; updated_at = now ()
+  ; schedules = []
+  ; wakes = []
+  ; notes = []
+  }
 ;;
 
 let state_to_yojson (state : state) =
@@ -132,6 +138,8 @@ let state_to_yojson (state : state) =
     ; ( "wakes"
       , `List
           (List.map Schedule_domain.wake_record_to_yojson state.wakes) )
+    ; ( "notes"
+      , `List (List.map Schedule_domain.schedule_note_to_yojson state.notes) )
     ]
 ;;
 
@@ -165,13 +173,25 @@ let state_of_yojson = function
     let* updated_at = Schedule_domain.float_field "updated_at" fields in
     let* schedules_json = list_field "schedules" fields in
     let* wakes_json = list_field "wakes" fields in
+    let* notes_json =
+      (* Back-compat: ledgers written before task-381 carry no [notes] list.
+         Decode the absent field as an empty list rather than failing the whole
+         state parse. *)
+      match List.assoc_opt "notes" fields with
+      | None -> Ok []
+      | Some (`List value) -> Ok value
+      | Some _ -> Error "expected list field: notes"
+    in
     let* schedules =
       collect_results Schedule_domain.schedule_request_of_yojson schedules_json
     in
     let* wakes =
       collect_results Schedule_domain.wake_record_of_yojson wakes_json
     in
-    Ok { version; updated_at; schedules; wakes }
+    let* notes =
+      collect_results Schedule_domain.schedule_note_of_yojson notes_json
+    in
+    Ok { version; updated_at; schedules; wakes; notes }
   | json -> Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 ;;
 
@@ -475,12 +495,13 @@ let prune_wakes ~now ~schedules wakes =
   live @ retained
 ;;
 
-let bump_state state ~schedules ~wakes =
+let bump_state state ~schedules ~wakes ~notes =
   let stamp = now () in
   { version = state.version + 1
   ; updated_at = stamp
   ; schedules
   ; wakes = prune_wakes ~now:stamp ~schedules wakes
+  ; notes
   }
 ;;
 
@@ -499,6 +520,59 @@ let replace_schedule schedules (updated : schedule_request) =
       else
         request)
     schedules
+;;
+
+(* Notes (task-381): the store owns identity and ordering. [note_id] is a
+   global counter (like [version]), so ids never collide after deletes or
+   across schedules, and [notes_for_schedule] can promise oldest-first
+   reading. Note appends intentionally bypass [bump_state]: notes must not be
+   pruned with terminal state, because their value is surviving it. *)
+let next_note_id state = string_of_int (state.version + 1)
+
+let make_note state ~schedule_id ~author_id ~author_kind ~body ~now =
+  let note_id = next_note_id state in
+  { Schedule_domain.note_id
+  ; schedule_id
+  ; author_id
+  ; author_kind
+  ; created_at = now
+  ; body
+  }
+;;
+
+let notes_for_schedule state ~schedule_id =
+  state.notes
+  |> List.filter (fun (note : Schedule_domain.schedule_note) ->
+      String.equal note.schedule_id schedule_id)
+  |> List.sort (fun left right ->
+      compare left.Schedule_domain.created_at right.Schedule_domain.created_at)
+;;
+
+let note_count_per_schedule state schedule_id =
+  notes_for_schedule state ~schedule_id |> List.length
+;;
+
+let append_note config ~schedule_id ~author_id ~author_kind ~body ~now =
+  let open Result in
+  let* state =
+    read_state_result config |> Result.map_error (fun read_err ->
+        Schedule_not_found)
+  in
+  match find_schedule state schedule_id with
+  | None -> Error Schedule_not_found
+  | Some _ ->
+    let note = make_note state ~schedule_id ~author_id ~author_kind ~body ~now in
+    let notes = state.notes @ [ note ] in
+    let next_state =
+      { version = state.version + 1
+      ; updated_at = now
+      ; schedules = state.schedules
+      ; wakes = state.wakes
+      ; notes
+      }
+    in
+    let* () = write_state config next_state in
+    Ok (note, note_count_per_schedule next_state schedule_id)
 ;;
 
 let is_due_wake_candidate (request : schedule_request) =
@@ -582,7 +656,7 @@ let insert_request config (request : Schedule_domain.schedule_request) =
       let* () = validate_initial_request request in
       let schedules = request :: state.schedules in
       let next_state =
-        bump_state state ~schedules ~wakes:state.wakes
+        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
       in
       let* () = write_state config next_state in
       Ok request)
@@ -598,7 +672,7 @@ let update_request config (request : Schedule_domain.schedule_request) =
        | Scheduled | Due ->
          let* () = validate_initial_request request in
          let schedules = replace_schedule state.schedules request in
-         let next_state = bump_state state ~schedules ~wakes:state.wakes in
+         let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
          let* () = write_state config next_state in
          Ok request
        | Running | Succeeded | Failed | Cancelled | Expired ->
@@ -632,7 +706,7 @@ let cancel_request config ~schedule_id =
           settle_wakes_for_cancelled_schedule ~now:(now ()) state.wakes ~schedule_id
         in
         let next_state =
-          bump_state state ~schedules ~wakes
+          bump_state state ~schedules ~wakes ~notes:state.notes
         in
         let* () = write_state config next_state in
         Ok updated_request)
@@ -658,7 +732,7 @@ let refresh_due config ~now =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~wakes:state.wakes
+        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
       in
       let* () = write_state config next_state in
       Ok (next_state, changed)))
@@ -688,7 +762,7 @@ let reschedule_due_recurring config ~now ~schedule_ids =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~wakes:state.wakes
+        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
       in
       let* () = write_state config next_state in
       Ok (next_state, changed)))
@@ -711,7 +785,7 @@ let start_due_candidate ?started_at config ~now ~schedule_id =
         let updated = { request with status = Running } in
         let schedules = replace_schedule state.schedules updated in
         let wakes = make_wake_record ~now:started_at request :: state.wakes in
-        let next_state = bump_state state ~schedules ~wakes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -754,7 +828,7 @@ let accept_running ?finished_at config ~now ~schedule_id ?detail () =
                ; error = None
                })
         in
-        let next_state = bump_state state ~schedules ~wakes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -796,7 +870,7 @@ let cancel_matching config ~should_cancel =
           state.wakes
           schedules
       in
-      write_state config (bump_state state ~schedules ~wakes)
+      write_state config (bump_state state ~schedules ~wakes ~notes:state.notes)
     else Ok ())
 ;;
 
@@ -822,7 +896,7 @@ let fail_running ?finished_at config ~now ~schedule_id ~error =
                ; error = Some error
                })
         in
-        let next_state = bump_state state ~schedules ~wakes in
+        let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -843,7 +917,7 @@ let retry_running ?finished_at config ~now ~schedule_id ~reason =
           update_latest_running_wake state.wakes ~schedule_id
             (fail_wake_for_recovery ~now:finished_at ~reason)
         in
-        let next_state = bump_state state ~schedules ~wakes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -895,7 +969,7 @@ let recover_running_on_startup config ~now =
     if recovered = 0 then
       Ok (state, 0)
     else
-      let next_state = bump_state state ~schedules ~wakes in
+      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
       let* () = write_state config next_state in
       Ok (next_state, recovered))
 ;;
@@ -922,7 +996,7 @@ let fail_due_candidate ?attempted_at config ~now ~schedule_id ~error =
         in
         let schedules = replace_schedule state.schedules updated in
         let wakes = wake :: state.wakes in
-        let next_state = bump_state state ~schedules ~wakes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -950,7 +1024,7 @@ let prune_completed config =
            List.mem wake.schedule_id remaining_ids)
         state.wakes
     in
-    let next_state = bump_state state ~schedules ~wakes in
+    let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
     let* () = write_state config next_state in
     Ok (next_state, pruned_count))
 ;;

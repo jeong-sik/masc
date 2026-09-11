@@ -10,3 +10,5 @@ val list : Masc_domain.tool_schema
 val get : Masc_domain.tool_schema
 val update : Masc_domain.tool_schema
 val cancel : Masc_domain.tool_schema
+val note_add : Masc_domain.tool_schema
+val notes_list : Masc_domain.tool_schema

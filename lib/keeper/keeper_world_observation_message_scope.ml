@@ -227,6 +227,37 @@ let render_recent_direct_conversation_context
 
 module StringSet = Set_util.StringSet
 
+(* An utterance answers a delivery only when it actually spoke. Checkpoint and
+   defer boundaries persist an empty-content assistant row as the carrier for
+   the typed status block, and a reasoning-only reply leaves no text either;
+   counting those rows as answers dropped the user message they followed
+   without it ever reaching a turn (2026-09-10 drain investigation). An audio
+   reply speaks without text, and a media-only reply (empty content carrying
+   Image/Attach/Voice blocks) is a delivered answer — the stream handler
+   completes those as Delivered, so excluding them would park their delivery
+   pending forever. [Status] blocks are the carrier itself, and [Thinking] /
+   [Trace] blocks are observability, not user-facing answer content. *)
+let block_is_answer_content = function
+  | Keeper_chat_blocks.Status _ | Keeper_chat_blocks.Thinking _ | Keeper_chat_blocks.Trace _ ->
+    false
+  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Heading _
+  | Keeper_chat_blocks.Unordered_list _ | Keeper_chat_blocks.Callout _
+  | Keeper_chat_blocks.Table _ | Keeper_chat_blocks.Code _
+  | Keeper_chat_blocks.Mermaid _ | Keeper_chat_blocks.Svg _
+  | Keeper_chat_blocks.Voice _ | Keeper_chat_blocks.Attach _
+  | Keeper_chat_blocks.Image _ | Keeper_chat_blocks.Link _
+  | Keeper_chat_blocks.Fusion _ ->
+    true
+;;
+
+let utterance_spoke (message : Keeper_chat_store.chat_message) =
+  String.trim message.content <> ""
+  || Option.is_some message.audio
+  || (match message.blocks with
+      | Some blocks -> List.exists block_is_answer_content blocks
+      | None -> false)
+;;
+
 let acknowledged_turn_refs messages =
   List.fold_left
     (fun refs (message : Keeper_chat_store.chat_message) ->
@@ -234,7 +265,9 @@ let acknowledged_turn_refs messages =
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Utterance,
         Some turn_ref ->
-        StringSet.add (Ids.Turn_ref.to_string turn_ref) refs
+        if utterance_spoke message
+        then StringSet.add (Ids.Turn_ref.to_string turn_ref) refs
+        else refs
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Transport_failure,
         _
@@ -255,7 +288,9 @@ let answered_delivery_keys messages =
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Utterance,
         Some provenance ->
-        Some provenance.Keeper_chat_delivery_identity.delivery_key
+        if utterance_spoke message
+        then Some provenance.Keeper_chat_delivery_identity.delivery_key
+        else None
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Transport_failure,
         _

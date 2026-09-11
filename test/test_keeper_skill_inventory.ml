@@ -117,13 +117,14 @@ let valid_named name inventory =
   | None -> failf "valid Skill %S missing from inventory" name
 ;;
 
-let capability_surface ?(skill_names = None) frozen =
+let capability_surface ?(tool_deny = []) ?(skill_names = None) frozen =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let global_skill_catalog, diagnostics =
     Masc.Keeper_skill_catalog.of_snapshot frozen
   in
   check int "catalog diagnostics" 0 (List.length diagnostics);
   Masc.Keeper_capability_surface.create
+    ~tool_deny
     ~skill_names
     ~global_skill_catalog
     ~skill_inventory:(Inventory.of_snapshot frozen)
@@ -717,6 +718,46 @@ let test_surface_digest_binds_exact_tool_input_schema () =
     (String.equal (Masc.Keeper_capability_surface.digest surface) altered_digest)
 ;;
 
+let test_tool_deny_removes_descriptors_from_surface () =
+  let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
+  let frozen = snapshot config [ [] ] in
+  let full = capability_surface frozen in
+  let denied =
+    capability_surface ~tool_deny:[ "keeper_spawn"; "masc_keeper_delegate" ] frozen
+  in
+  let model_names surface =
+    Masc.Keeper_capability_surface.descriptors surface
+    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+  in
+  check bool "spawn is model-visible without a deny" true
+    (List.mem "keeper_spawn" (model_names full));
+  check bool "delegate is model-visible without a deny" true
+    (List.mem "masc_keeper_delegate" (model_names full));
+  check bool "denied spawn leaves the surface" false
+    (List.mem "keeper_spawn" (model_names denied));
+  check bool "denied delegate leaves the surface" false
+    (List.mem "masc_keeper_delegate" (model_names denied));
+  check int "exactly the two named descriptors left"
+    (List.length (model_names full) - 2)
+    (List.length (model_names denied));
+  let capability_names surface =
+    Masc.Keeper_capability_surface.tool_capabilities surface
+    |> List.concat_map
+         (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
+           Masc.Keeper_tool_descriptor.keeper_model_names capability.descriptor)
+  in
+  check bool "denied spawn leaves the capability list too" false
+    (List.mem "keeper_spawn" (capability_names denied));
+  check bool "deny changes the surface digest" false
+    (String.equal
+       (Masc.Keeper_capability_surface.digest full)
+       (Masc.Keeper_capability_surface.digest denied));
+  let noop = capability_surface ~tool_deny:[ "no_such_tool" ] frozen in
+  check string "a deny entry naming nothing changes nothing"
+    (Masc.Keeper_capability_surface.digest full)
+    (Masc.Keeper_capability_surface.digest noop)
+;;
+
 let test_surface_digest_binds_exact_tool_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let surface = capability_surface (snapshot config [ [] ]) in
@@ -949,6 +990,8 @@ let () =
             test_surface_digest_binds_exact_tool_input_schema
         ; test_case "surface digest binds exact Tool reference" `Quick
             test_surface_digest_binds_exact_tool_reference
+        ; test_case "tool deny removes descriptors from surface" `Quick
+            test_tool_deny_removes_descriptors_from_surface
         ; test_case "surface digest is path independent" `Quick
             test_surface_digest_is_path_independent
         ; test_case "unreadable diagnostics stay public only" `Quick

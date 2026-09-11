@@ -689,6 +689,55 @@ let start
     if not (Atomic.exchange t.closed true)
     then Eio.Promise.resolve resolve_closed ()
   in
+  (* A cooling retry's wake rides the pool switch and dies with the process,
+     and the Owner never polls: after a restart, a persisted future
+     [not_before] would sit until an unrelated mailbox event. Wakes are
+     therefore re-armed at start and after every drain wake — a keeper can
+     hold more than one cooling retry (a cooling op is Queued, so another op
+     can claim, defer, and cool behind it), and each wake re-arms the next
+     earliest one. *)
+  let rearm_cooling_retry_wake () =
+    match
+      (* Not [run_operation_read]: a transient store error here must not poison
+         [t.store_error] — this scan is best-effort scheduling, not evidence
+         the store is gone. *)
+      run_operation_store ~label:"scan cooling retry wake" (fun () ->
+        Chat_operation_store.next_runtime_retry_wake t.operation_store ~now:(t.now ()))
+    with
+    | Error error ->
+      Log.Keeper.warn
+        "keeper_owner: cooling retry wake scan failed keeper=%s error=%s"
+        keeper_name
+        (Chat_operation_store.error_to_string error)
+    | Ok None -> ()
+    | Ok (Some not_before) ->
+      (match Eio_context.get_clock_opt () with
+       | None ->
+         Log.Keeper.warn
+           "keeper_owner: no clock to re-arm cooling retry wake keeper=%s"
+           keeper_name
+       | Some clock ->
+         (try
+            Eio.Fiber.fork_daemon ~sw (fun () ->
+              (try
+                 Eio.Time.sleep clock (Float.max 0.0 (not_before -. t.now ()));
+                 (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
+                 ignore (request t Wake_operation_drain)
+               with
+               | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+               | exn ->
+                 Log.Keeper.warn
+                   "keeper_owner: cooling retry wake fiber failed keeper=%s error=%s"
+                   keeper_name
+                   (Printexc.to_string exn));
+              `Stop_daemon)
+          with
+          | exn ->
+            Log.Keeper.warn
+              "keeper_owner: cooling retry wake not scheduled keeper=%s error=%s"
+              keeper_name
+              (Printexc.to_string exn)))
+  in
   Eio.Switch.on_release sw (fun () ->
     mark_no_longer_answering ();
     let projection = Atomic.get t.projection in
@@ -759,7 +808,7 @@ let start
         let inventory = Atomic.get t.operation_projection in
         let claimable = if inventory.queued_count = 0 then false else
           match run_operation_read t ~label:"read claimable Keeper operations"
-              (fun () -> Chat_operation_store.has_claimable_queued t.operation_store) with
+              (fun () -> Chat_operation_store.has_claimable_queued t.operation_store ~now:(t.now ())) with
           | Ok ready -> ready | Error _ -> false in
         if claimable && Option.is_none inventory.running_operation_id
         then (
@@ -1099,6 +1148,9 @@ let start
         | Command (Wake_operation_drain, resolve) ->
           Eio.Promise.resolve resolve (Ok ());
           start_child_if_needed state shutdown_operation_id;
+          (* The wake that just fired may have been the earliest of several
+             cooling retries; arm the next one. *)
+          rearm_cooling_retry_wake ();
           loop state shutdown_operation_id
         | Command (Begin_shutdown { operation_id }, resolve) ->
           (match shutdown_operation_id with
@@ -1279,6 +1331,8 @@ let start
     | exception exn ->
       mark_no_longer_answering ();
       raise exn);
+  (* The defer-time wake died with the previous process; re-arm it. *)
+  rearm_cooling_retry_wake ();
   Ok t))
 ;;
 

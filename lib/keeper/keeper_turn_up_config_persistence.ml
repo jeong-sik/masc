@@ -389,6 +389,14 @@ let full_fields
       ("tools.attached_allow", Keeper_toml_loader.Toml_string_array names) :: fields
     | None -> fields
   in
+  (* Same carry rule as [tools.attached_allow]: no [masc_keeper_up] argument
+     names this axis, so the file is its only source and dropping it here
+     would silently re-expose tools the operator denied. *)
+  let fields =
+    match parsed.profile_defaults.tool_deny with
+    | [] -> fields
+    | names -> ("tools.deny", Keeper_toml_loader.Toml_string_array names) :: fields
+  in
   let fields =
     match
       if parsed.native_tool_posture_present

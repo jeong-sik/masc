@@ -179,7 +179,7 @@ let call_tool t ~name ~arguments : Types.tool_result =
     let text = text_of_tool_result result in
     if Option.value ~default:false result.Sdk_types.is_error
     then Error { message = text; recoverable = true; error_class = None }
-    else Ok { content = text; _meta = None }
+    else Ok { content = text; content_blocks = None; _meta = None }
 ;;
 
 (** Convert MCP tools to SDK [Tool.t] list.

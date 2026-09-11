@@ -1609,12 +1609,18 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  let unavailable code message =
+  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
+     always emits failure.detail, so omitting the key here made a consumer's
+     read of it depend on which producer answered. [detail] is what the caller
+     was told and would otherwise drop. *)
+  let unavailable ?detail code message =
     print_endline (Yojson.Safe.to_string (`Assoc [
       "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
       "model", `Null; "observed_model", `Null; "status", `String "unavailable";
       "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+      "failure", `Assoc [
+        "code", `String code; "message", `String message;
+        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -1626,7 +1632,15 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       Runtime.load_list ~config_path
       with Env_config_core.Config_error message -> Error message in
     match loaded with
-    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    (* The Config_error names the file and the field that stopped the load --
+       an overlay entry with a removed capability field is the recurring case
+       (masc#34872) -- and reporting only the class sent operators looking for
+       a model connection problem. *)
+    | Error message ->
+      unavailable
+        ~detail:message
+        "invalid_configuration"
+        "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
       match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
@@ -2523,6 +2537,21 @@ let runtime_model_list_cmd =
   Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
     Term.(const run $ client)
 
+let runtime_discover_models_cmd =
+  let spec = Arg.(required & opt (some string) None & info ["spec"]
+    ~doc:"Private JSON connection specification containing credential references, never raw secrets.") in
+  let run path =
+    let parsed = try Runtime_model_discovery.connection_of_json (Yojson.Safe.from_file path)
+      with Sys_error _ | Yojson.Json_error _ -> Error Runtime_model_discovery.Invalid_connection in
+    match parsed with
+    | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1
+    | Ok connection -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        match Runtime_model_discovery.discover ~sw ~net:(Eio.Stdenv.net env) connection with
+        | Ok result -> print_endline (Yojson.Safe.to_string result); 0
+        | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1)) in
+  Cmd.v (Cmd.info "runtime-discover-models" ~doc:"Read account or server model metadata without creating a runtime.")
+    Term.(const run $ spec)
+
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
@@ -2763,6 +2792,7 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
+    ; runtime_discover_models_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd

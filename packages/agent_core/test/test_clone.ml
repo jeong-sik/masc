@@ -142,7 +142,7 @@ let test_clone_shares_tools () =
   @@ fun env ->
   let tool =
     Tool.create ~name:"echo" ~description:"echo" ~parameters:[] (fun _ ->
-      Ok { Types.content = "ok"; _meta = None })
+      Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create

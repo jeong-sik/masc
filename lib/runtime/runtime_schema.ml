@@ -13,6 +13,8 @@ type api_format =
   | Messages_api
   | Chat_completions_api
   | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
   | Codex_app_server_runtime
   | Antigravity_cli_runtime
   | Claude_code_runtime

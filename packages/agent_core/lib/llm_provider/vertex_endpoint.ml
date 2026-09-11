@@ -17,3 +17,13 @@ let base_url ~project ~location =
     Result.map (fun (host, region) ->
       Printf.sprintf "https://%s/v1/projects/%s/locations/%s/publishers/google"
         host project region) resolved
+
+let parse_base_url value =
+  let uri = Uri.of_string value in
+  match String.split_on_char '/' (Uri.path uri) with
+  | [""; "v1"; "projects"; project; "locations"; region; "publishers"; "google"] ->
+    let location = if region = "global" then Global else Regional region in
+    (match base_url ~project ~location with
+     | Ok expected when String.equal expected value -> Ok (project, location)
+     | _ -> Error "Vertex endpoint must be the canonical HTTPS Google publisher endpoint")
+  | _ -> Error "Vertex endpoint must include project, location and Google publisher"

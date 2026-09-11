@@ -436,8 +436,12 @@ let check_observations
   let matrix_expected = 18 in
   let live_expected = 3 in
 
-  let matrix_obs = List.filter (fun o -> o.execution_mode = "matrix") observations in
-  let live_obs = List.filter (fun o -> o.execution_mode = "live") observations in
+  let matrix_obs =
+    List.filter (fun (o : run_observation) -> o.execution_mode = "matrix") observations
+  in
+  let live_obs =
+    List.filter (fun (o : run_observation) -> o.execution_mode = "live") observations
+  in
 
   (* Group observations by run key: (case_id, repeat_index) *)
   let run_keys_matrix =
@@ -446,7 +450,7 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun o -> o.case_id, o.repeat_index) matrix_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index) matrix_obs)
   in
   let matrix_observed = List.length run_keys_matrix in
 
@@ -456,7 +460,7 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun o -> o.case_id, o.repeat_index) live_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index) live_obs)
   in
   let live_observed = List.length run_keys_live in
 
@@ -481,7 +485,8 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) ->
+             o.case_id = case_id && o.repeat_index = repeat_index)
            matrix_obs
        in
        let sorted_attempts =
@@ -718,7 +723,8 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) ->
+             o.case_id = case_id && o.repeat_index = repeat_index)
            live_obs
        in
        let sorted_attempts =
@@ -988,12 +994,17 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
       | Some rev -> Some rev
       | None -> target_revision
     in
+    let string_list_field key =
+      match json |> member key with
+      | `Null -> None
+      | value -> Some (List.map to_string (to_list value))
+    in
     let artifact_references =
-      match json |> member "artifact_references" |> to_list_option with
-      | Some list -> List.map to_string list
+      match string_list_field "artifact_references" with
+      | Some list -> list
       | None ->
-        (match json |> member "edited_target_files" |> to_list_option with
-         | Some list -> List.map to_string list
+        (match string_list_field "edited_target_files" with
+         | Some list -> list
          | None -> [])
     in
     let command_exit_code =

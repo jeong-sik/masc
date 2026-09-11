@@ -1127,7 +1127,7 @@ fi
 
 choose_install_base_path
 
-# macOS uses a checksummed private runtime, before invoking any Python (the
+# Releases use a checksummed private runtime before invoking Python (the
 # system python3 may be a Command Line Tools installer stub).
 installer_python_ready() {
   "$1" -c 'import json, tarfile, sys; sys.exit(0 if sys.version_info >= (3, 8) else "Python 3.8 or newer is required")'
@@ -1173,6 +1173,14 @@ if [ "$(uname -s)" = Darwin ]; then
     else
       DRY_RUN_WITHOUT_PYTHON=1
     fi
+  fi
+fi
+
+if [ "$(uname -s)" = Linux ] && [ "$DRY_RUN" -eq 1 ]; then
+  log "[dry-run] would verify and install bundled Linux Python; no package-manager installation required"
+  candidate=$(command -v python3 || true)
+  if [ -z "$candidate" ] || ! installer_python_ready "$candidate" >/dev/null 2>&1; then
+    DRY_RUN_WITHOUT_PYTHON=1
   fi
 fi
 
@@ -1314,7 +1322,7 @@ fetch_release_checksums() {
 
 # Bootstrap only release-checksummed regular files into a fresh private tree.
 # Even --allow-unverified never authorizes executing an unchecked interpreter.
-if [ "$(uname -s)" = Darwin ] && [ "$DRY_RUN" -eq 0 ]; then
+if [ "$DRY_RUN" -eq 0 ]; then
   require tar
   fetch_release_checksums
   [ "$CHECKSUMS_AVAILABLE" -eq 1 ] || die "bundled Python requires release checksums"
@@ -1324,7 +1332,7 @@ if [ "$(uname -s)" = Darwin ] && [ "$DRY_RUN" -eq 0 ]; then
   RUNTIME_STAGE=$(mktemp -d)
   RUNTIME_ARCHIVE="$RUNTIME_STAGE/runtime.tar.gz"
   curl -fL --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" --retry "$MASC_INSTALL_CURL_RETRIES" \
-    -o "$RUNTIME_ARCHIVE" "$RELEASE_BASE_URL/$VERSION/$runtime_asset" || die "could not download bundled macOS runtime"
+    -o "$RUNTIME_ARCHIVE" "$RELEASE_BASE_URL/$VERSION/$runtime_asset" || die "could not download bundled runtime"
   [ "$(sha256_file "$RUNTIME_ARCHIVE")" = "$runtime_expected" ] || die "bundled Python checksum differs"
   tar -tzf "$RUNTIME_ARCHIVE" > "$RUNTIME_STAGE/members" || die "invalid runtime archive"
   tar -tvzf "$RUNTIME_ARCHIVE" > "$RUNTIME_STAGE/types" || die "invalid runtime archive types"

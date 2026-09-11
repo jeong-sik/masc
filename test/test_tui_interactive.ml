@@ -1,7 +1,8 @@
 (* The contract is what later panes (DOS, a VM console, a browser surface)
-   will be written against, and what the focus model and the real-time
-   ticker will hang off. So the cases pin the contract, not the MSX
-   backend's looks: a frame fetched becomes pixels untouched, an escape
+   will be written against, so the cases pin the contract, not the MSX
+   backend's looks. It carried three more members for a focus model and a
+   real-time ticker that no host ever called, and they are gone until the
+   host that needs them arrives with them (#34791). What it pins: a frame fetched becomes pixels untouched, an escape
    hands focus back, a game key is pressed and consumed, a key the machine
    has no place for falls through to the host, and a refused press is not
    consumed — delivery failure must not eat the key. *)

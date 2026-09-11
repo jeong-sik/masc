@@ -2754,6 +2754,35 @@ let test_official_client_does_not_inherit_registry_api_key_scope () =
               ~scope:registry_api_key_scope
               ~now:100.0)))
 
+let test_attempt_loop_without_lane_id_does_not_update_sticky_preference () =
+  Runtime_lane_preference.reset_for_testing ();
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        attempt_without_effect (Ok runtime_id) None)
+      [ "media.fallback_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string)
+       "rerouted candidate can still serve turn"
+       "media.fallback_model"
+       runtime_id
+   | Error e ->
+     Alcotest.failf
+       "expected candidate success, got %s"
+       (Agent_core.Error.to_string e));
+  Alcotest.(check (list string))
+    "lane preference remains declared order without lane id"
+    [ "primary.text_model"; "media.fallback_model" ]
+    (Runtime_lane_preference.prefer_order
+       ~lane_id:"resilient"
+       [ "primary.text_model"; "media.fallback_model" ])
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
     [ Agent_core.Agent.After_assistant_collected
@@ -3588,6 +3617,10 @@ let () =
             "official client quota excludes registry API-key scope"
             `Quick
             test_official_client_does_not_inherit_registry_api_key_scope;
+          Alcotest.test_case
+            "attempt loop without lane id does not update sticky preference"
+            `Quick
+            test_attempt_loop_without_lane_id_does_not_update_sticky_preference;
           Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick

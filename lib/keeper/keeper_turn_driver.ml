@@ -1177,12 +1177,38 @@ let run_named
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()
   in
-  let project_images = Keeper_vision_ingest.fallback_projector ~keeper_name () in
+  (* The vision delegation must not spend this turn's candidates twice. Its own
+     candidate set is the global media list, and the quota window moves an
+     account that answered a hard rejection behind the live ones without
+     removing it -- so a walk that just collected 402s would ask those same
+     accounts once more through the projector before the text fallback starts
+     (#34829).
+     The excluded set is the walk's declared candidates rather than the prefix
+     it has reached: every one of them has either been dispatched to already or
+     is about to be by this same walk, so a delegation to either is work the
+     walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
+     signature and its mutable state out of the delegation. *)
+  let project_images =
+    Keeper_vision_ingest.fallback_projector
+      ~exclude_runtime_ids:lane_candidate_ids
+      ~keeper_name
+      ()
+  in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
-     move to the next candidate; on success we record completion and return. *)
+     move to the next candidate; on success we record completion and return.
+     Modality reroutes are capability routing decisions, not provider-failure
+     discoveries.  Do not let a media-only reroute update the lane-global
+     sticky failover preference; otherwise one keeper can pin unrelated later
+     text-only turns to a less-trusted fallback for the preference TTL. *)
+  let sticky_lane_id =
+    match reroute_decision with
+    | Runtime_agent.Reroute _ -> None
+    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
+      lane_id_opt
+  in
   attempt_runtime_candidates
     ~pre_tool_rejects
-    ?lane_id:lane_id_opt
+    ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred
     ?on_attempt_error:on_runtime_attempt_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->

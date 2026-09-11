@@ -15,6 +15,10 @@ let workspace_ok = function
   | Error error -> Alcotest.fail (D.masc_error_to_string error)
 
 let with_workspace_runtime f =
+  (* The verdict hook is part of the contract under test: the approval twin
+     wake reaches the producer queue through the installed runtime adapter
+     (Workspace_metric_hooks), not through any test-local stub. *)
+  Masc.Workspace_metric_hooks.install ();
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let base_path = Filename.temp_dir "masc-completion-repair-" "" in
@@ -165,7 +169,13 @@ let test_approval_has_no_repair_obligation () =
     check_pending config 0;
     reconcile config ~delivered:0 ~retained:0;
     Alcotest.(check int) "approval has no rejection stimulus" 0
-      (List.length (queue config));
+      (List.length
+         (List.filter
+            (fun stimulus ->
+               match stimulus.Keeper_event_queue.payload with
+               | Keeper_event_queue.Task_outcome _ -> false
+               | _ -> true)
+            (queue config)));
     (* The approval still reaches the producer in its own right: the twin wake
        carries the typed outcome, with no repair obligation behind it. *)
     Alcotest.(check (list string)) "approval wake carries the exact verification"

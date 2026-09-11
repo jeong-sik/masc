@@ -1,0 +1,154 @@
+name: Lane Add-on v0
+
+on:
+  push:
+    branches: ['codex/lane-addon-*']
+  pull_request:
+    paths:
+      - 'addons/**'
+      - 'lib/lane_addon/**'
+      - 'lib/server/server_routes_http_routes_lane_addons.*'
+      - 'config/tools/masc_lane_*.toml'
+      - 'lib/mcp_client_runtime*'
+      - 'packages/agent_core/lib/protocol/mcp.*'
+      - 'test/test_lane_addon*'
+      - 'bin/masc_tui_lane_addons.*'
+      - 'bin/masc_tui.ml'
+      - 'bin/masc_tui_render.ml'
+      - 'bin/masc_tui_types.ml'
+      - 'bin/masc_tui_command.*'
+      - 'dashboard/src/api/lane-addons.ts'
+      - 'dashboard/src/components/lane-addons-panel*'
+      - '.github/workflows/lane-addon.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# This workflow cannot cancel another feature's qualification or candidate.
+concurrency:
+  group: lane-addon-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  host:
+    name: Host behavior and Linux candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Start evidence directory
+        run: |
+          mkdir -p proof
+          git rev-parse HEAD > proof/SOURCE_COMMIT
+      - name: Set up OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Pin OCaml dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+      - name: Install dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: jq ripgrep
+      - name: Build feature tests and candidate executables
+        env:
+          DUNE_JOBS: '4'
+        run: |
+          set -euo pipefail
+          opam exec -- dune build --profile release \
+            test/test_lane_addon_worker.exe \
+            bin/main_eio.exe bin/masc_tui.exe 2>&1 | tee proof/build.log
+      - name: Run worker behavior tests
+        env:
+          ALCOTEST_VERBOSE: '1'
+        run: |
+          set -euo pipefail
+          _build/default/test/test_lane_addon_worker.exe 2>&1 | tee proof/worker-tests.log
+      - name: Package exact Linux candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          mkdir -p proof/candidate
+          cp _build/default/bin/main_eio.exe proof/candidate/masc
+          cp _build/default/bin/masc_tui.exe proof/candidate/masc-tui
+          ldd proof/candidate/masc > proof/server-libraries.txt
+          ldd proof/candidate/masc-tui > proof/tui-libraries.txt
+          tar -C proof/candidate -czf proof/masc-lane-addon-linux-x64.tar.gz masc masc-tui
+          sha256sum proof/masc-lane-addon-linux-x64.tar.gz > proof/SHA256SUMS
+          python3 - <<'PY'
+          import hashlib, json, os, platform, subprocess
+          from pathlib import Path
+          archive = Path('proof/masc-lane-addon-linux-x64.tar.gz')
+          receipt = {
+              'source_commit': os.environ['CANDIDATE_SHA'],
+              'source_tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'workflow_run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'platform': platform.platform(), 'architecture': platform.machine(),
+              'archive': archive.name, 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(),
+              'qualification': 'worker hermetic subprocess tests; Lane integration and live Keeper/game qualification remain separate',
+          }
+          Path('proof/candidate-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+          rm -r proof/candidate
+      - name: Upload host proof and candidate
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lane-addon-host-linux-x64-${{ env.CANDIDATE_SHA }}
+          path: proof/
+          if-no-files-found: error
+
+  packages:
+    name: Package contracts and Docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exercise package subprocess contracts
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          python3 -m unittest discover -s addons/tests -v 2>&1 | tee proof/package-tests.log
+      - name: Build and package manifest-named Docker images
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess, tomllib
+          from pathlib import Path
+          images = []
+          for manifest in sorted(Path('addons').glob('*/lane.toml')):
+              package = tomllib.loads(manifest.read_text())
+              image = package['image']
+              subprocess.run(['docker', 'build', '--label', 'org.opencontainers.image.revision=' + os.environ['CANDIDATE_SHA'],
+                  '--tag', image, '--file', str(manifest.parent / 'Dockerfile'), 'addons'], check=True)
+              inspected = json.loads(subprocess.check_output(['docker', 'image', 'inspect', image], text=True))[0]
+              images.append({'package': package['id'], 'revision': package['revision'],
+                  'tag': image, 'image_id': inspected['Id'], 'architecture': inspected['Architecture']})
+          if not images:
+              raise SystemExit('No Add-on package manifests found')
+          archive = Path('proof/lane-addon-images.tar')
+          subprocess.run(['docker', 'image', 'save', '--output', str(archive), *[image['tag'] for image in images]], check=True)
+          with archive.open('rb') as stream:
+              archive_digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          receipt = {'source_commit': os.environ['CANDIDATE_SHA'], 'images': images,
+              'archive': archive.name, 'sha256': archive_digest,
+              'qualification': 'package protocol tests and image build; kernel resource enforcement remains separate'}
+          Path('proof/images-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+      - name: Upload package proof and Docker images
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lane-addon-packages-linux-x64-${{ env.CANDIDATE_SHA }}
+          path: proof/
+          if-no-files-found: error

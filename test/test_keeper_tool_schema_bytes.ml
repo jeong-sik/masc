@@ -118,9 +118,8 @@ open Alcotest
    bytes to the previous 98,164 ceiling, retaining exactly 132 bytes of slack.
    This is schema measurement, not a runtime token or behavior gate. *)
 (* 2026-09-10: 100,456 across 113 tools, measured by targeted CI 34420702044
-   at 8ccf4d6938. Four merges moved the surface past the line above, none of
-   them arguing it, because this suite runs in the nightly lane and not on a
-   pull request:
+   at 8ccf4d6938. Four merges moved the surface past the line above and none
+   of them argued it:
 
      #34981  masc_fusion_decision, the 113th tool (+1,124 bytes of TOML)
      #34983  masc_fusion carries the original Task and Goal text  (+623)
@@ -131,7 +130,21 @@ open Alcotest
    formatting, so the serialized surface grew 1,648.
 
    Set to the measurement with no headroom. A ceiling that carries slack lets
-   the next unargued growth land silently, which is how these four did. *)
+   the next unargued growth land silently, which is how these four did.
+
+   The lines above this one say the cause is that this suite runs nightly and
+   not on a pull request. That was true when they were written and is not the
+   cause here. #34506 mapped config/tools to this suite on 2026-09-09 00:04Z,
+   and #34981 merged at 23:48Z the same day: its own check
+   (run 34417530502) ran this suite and printed
+
+     [FAIL] per-turn tool surface  0  stays under the ceiling.
+     [FAIL] surface golden         0  the surface is unchanged
+
+   and the step still reported success, because it carried
+   continue-on-error until #35025 removed it on 2026-09-10 05:25Z. The guard
+   ran, said so, and nothing was listening. From #35025 on, a pull request
+   that grows the surface fails its own check. *)
 let ceiling_bytes = 100_456
 
 let schema_json (schema : Masc_domain.tool_schema) =

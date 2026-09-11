@@ -192,3 +192,14 @@ module For_testing : sig
     -> string
     -> base_path_acquire_result
 end
+
+type owner_capture_error =
+  | Owner_lease_rejected of base_path_lock_rejection
+  | Owner_identity_unavailable of Owner_process_identity.error
+  | Current_process_owner
+val capture_existing_owner :
+  run_dir:string -> base_path:string -> (Owner_process_identity.t, owner_capture_error) result
+(** Validate the selected workspace's private lease and capture its kernel lock
+    owner. This never signals a process or trusts the PID file. Before using the
+    returned handle, the caller must authenticate as that workspace's admin and
+    obtain explicit restart selection. Does not close this process's own lease. *)

@@ -83,7 +83,7 @@ let greet_ctx_tool =
 let test_execute_success () =
   let input = `Assoc [ "name", `String "Vincent"; "shout", `Bool false ] in
   match Tool.execute greet_tool input with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     let greeting = Yojson.Safe.Util.(json |> member "greeting" |> to_string) in
     Alcotest.(check string) "greeting" "Hello, Vincent" greeting
@@ -93,7 +93,7 @@ let test_execute_success () =
 let test_execute_shout () =
   let input = `Assoc [ "name", `String "Vincent"; "shout", `Bool true ] in
   match Tool.execute greet_tool input with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     let greeting = Yojson.Safe.Util.(json |> member "greeting" |> to_string) in
     Alcotest.(check string) "uppercase" "HELLO, VINCENT" greeting
@@ -144,7 +144,7 @@ let test_typed_components_parse_error () =
 let test_canonical_tool_execution () =
   let input = `Assoc [ "name", `String "Bridge" ] in
   match Tool.execute greet_tool input with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     let greeting = Yojson.Safe.Util.(json |> member "greeting" |> to_string) in
     Alcotest.(check string) "canonical tool works" "Hello, Bridge" greeting
@@ -218,7 +218,7 @@ let test_context_handler () =
   Context.set ctx "prefix" (`String "Dear");
   let input = `Assoc [ "name", `String "Admin" ] in
   match Tool.execute ~context:ctx greet_ctx_tool input with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     let greeting = Yojson.Safe.Util.(json |> member "greeting" |> to_string) in
     Alcotest.(check string) "with prefix" "Dear Hello, Admin" greeting
@@ -237,7 +237,7 @@ let test_canonical_context_tool () =
   Context.set ctx "prefix" (`String "Hey");
   let input = `Assoc [ "name", `String "World" ] in
   match Tool.execute ~context:ctx greet_ctx_tool input with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     let greeting = Yojson.Safe.Util.(json |> member "greeting" |> to_string) in
     Alcotest.(check string) "context tool" "Hey Hello, World" greeting
@@ -255,10 +255,10 @@ let test_null_input_parse () =
     longer modelled here, this test will not compile. *)
 let test_meta_field_present () =
   let result : Types.tool_result =
-    Ok { content = "ok"; _meta = Some (`Assoc [ "source", `String "typed_tool" ]) }
+    Ok { content = "ok"; content_blocks = None; _meta = Some (`Assoc [ "source", `String "typed_tool" ]) }
   in
   match result with
-  | Ok { content; _meta = Some _ } ->
+  | Ok { content; _meta = Some _; _ } ->
     Alcotest.(check string) "content preserved" "ok" content
   | Ok { _meta = None; _ } -> Alcotest.fail "expected Some _meta"
   | Error _ -> Alcotest.fail "expected Ok"

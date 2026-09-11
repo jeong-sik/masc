@@ -14,14 +14,19 @@ There is no `deepseek-v4.1` or `-pro` variant on the gateway.
 |---|---|---|
 | context | 1,048,576 | 1,048,576 |
 | max completion tokens | 384,000 | 384,000 |
-| input $/1M | **0.15** | 0.088606 |
-| output $/1M | **0.60** | 0.177212 |
+| input $/1M | **0.30** | 0.088606 |
+| output $/1M | **1.20** | 0.177212 |
 | input modalities | **text, image** | text |
 | `parallel_tool_calls` in params | no | no |
 | `seed` / `top_k` / `min_p` in params | yes | yes |
 
+Prices are the gateway's top-level list price. This id also carries
+`overrides[]` windows at half that rate (UTC 22:00–04:00 and 06:00–10:00 on
+weekdays, all weekend); the row declares the list price, matching every other
+OpenRouter row, none of which transcribe their overrides.
+
 The window and the output ceiling are identical. What v4.1-flash adds is image
-input; what it costs is 1.7x the input and 3.4x the output price. It is
+input; what it costs is 3.4x the input and 6.8x the output list price. It is
 therefore not a cheaper replacement for the v4-flash row, and both rows stay.
 
 ## Measured on the wire

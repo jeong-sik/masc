@@ -1246,6 +1246,15 @@ let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
 
+let init_record_default =
+  let doc =
+    "Record this workspace as the default for later commands (in \
+     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     a throwaway workspace must not become the machine's default. `masc setup` \
+     and the installer pass it."
+  in
+  Arg.(value & flag & info [ "record-default" ] ~doc)
+
 let init_skills_only =
   let doc = "Install missing builtin Skills without changing runtime config files" in
   Arg.(value & flag & info ["skills-only"] ~doc)
@@ -1275,7 +1284,7 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force skills_only =
+let init_cmd_exit base_path force skills_only record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1308,8 +1317,13 @@ let init_cmd_exit base_path force skills_only =
      about, and until now nothing wrote it down: the operator had to re-supply
      --base-path or MASC_BASE_PATH on every command. Recorded on success only,
      and never fatal -- a workspace that seeded is worth more than a record of
-     it. *)
-  if result.failed = 0 then (
+     it.
+
+     Off unless asked. `init` is what suites and scripts call to make a
+     throwaway workspace, and a default recorded from one of those points the
+     next process at a directory that is about to vanish. Only the operator
+     paths ask: `masc setup`, and the installer's own seed. *)
+  if record_default && result.failed = 0 then (
     match Env_config.record_default_base_path base_path with
     | Env_config.Recorded path ->
       Printf.printf "default workspace recorded: %s\n" path
@@ -1342,7 +1356,10 @@ let init_cmd =
      always preserved."
   in
   let info = Cmd.info "init" ~doc in
-  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
+  Cmd.v info
+    Term.(
+      const init_cmd_exit $ base_path $ init_force $ init_skills_only
+      $ init_record_default)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -1536,7 +1553,7 @@ let runtime_wizard_parse_errors errors =
     Printf.sprintf "%s: %s" err.path err.message)
   |> String.concat "; "
 
-let runtime_wizard_catalog_cmd_exit base_path json private_credentials =
+let runtime_wizard_catalog_cmd_exit base_path json =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime_toml.parse_file runtime_config_path with
   | Error errors ->
@@ -1544,8 +1561,7 @@ let runtime_wizard_catalog_cmd_exit base_path json private_credentials =
         (runtime_wizard_parse_errors errors);
       1
   | Ok cfg when json ->
-      print_endline (Yojson.Safe.to_string (Runtime_wizard_inventory.to_json
-        ~include_credential_references:private_credentials cfg)); 0
+      print_endline (Yojson.Safe.to_string (Runtime_wizard_inventory.to_json cfg)); 0
   | Ok cfg ->
       (match runtime_wizard_catalog_records cfg with
        | Error msg ->
@@ -1561,9 +1577,7 @@ let runtime_wizard_catalog_cmd =
   in
   let info = Cmd.info "runtime-wizard-catalog" ~doc in
   let json = Arg.(value & flag & info [ "json" ] ~doc:"Print every enabled provider/model binding as JSON.") in
-  let private_credentials = Arg.(value & flag & info ["private-credentials"]
-    ~doc:"Local setup only: include protected credential file references in JSON, never their values.") in
-  Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path $ json $ private_credentials)
+  Cmd.v info Term.(const runtime_wizard_catalog_cmd_exit $ base_path $ json)
 
 (* A subscription runtime signs in through its own CLI. This asks whether it is
    signed in *right now*, reusing the same login checks the server's official-
@@ -1595,12 +1609,12 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  let unavailable code message =
-    print_endline (Yojson.Safe.to_string (`Assoc [
-      "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
-      "model", `Null; "observed_model", `Null; "status", `String "unavailable";
-      "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+  let unavailable ?detail code message =
+    print_endline
+      (Yojson.Safe.to_string
+         (Runtime_verification.unavailable_to_json ?detail ~runtime_id ~code ~message ()));
+    2
+  in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -1612,7 +1626,15 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       Runtime.load_list ~config_path
       with Env_config_core.Config_error message -> Error message in
     match loaded with
-    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    (* The Config_error names the file and the field that stopped the load --
+       an overlay entry with a removed capability field is the recurring case
+       (masc#34872) -- and reporting only the class sent operators looking for
+       a model connection problem. *)
+    | Error message ->
+      unavailable
+        ~detail:message
+        "invalid_configuration"
+        "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
       match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
@@ -2524,48 +2546,10 @@ let runtime_discover_models_cmd =
   Cmd.v (Cmd.info "runtime-discover-models" ~doc:"Read account or server model metadata without creating a runtime.")
     Term.(const run $ spec)
 
-let runtime_store_credential_cmd =
-  let run () =
-    if Unix.isatty Unix.stdin then (
-      prerr_endline "Use the hidden API-key field in masc setup. This command accepts a private stdin pipe.";
-      1)
-    else
-      match Runtime_setup_credentials.save ~secret:(In_channel.input_all stdin) () with
-      | Error error -> prerr_endline (Runtime_setup_credentials.error_message error); 1
-      | Ok pending ->
-        let path = Runtime_setup_credentials.reference_path pending in
-        (* The local setup caller owns the returned pending reference and
-           removes it if no configuration transaction commits it. *)
-        Runtime_setup_credentials.retain pending;
-        print_endline (Yojson.Safe.to_string (`Assoc [
-          "schema", `String "masc.private_credential_reference.v1";
-          "credential_file", `String path]));
-        0 in
-  Cmd.v (Cmd.info "runtime-store-credential" ~doc:"Save an API key from a private stdin pipe for local setup.")
-    Term.(const run $ const ())
-
-let runtime_serving_context_cmd =
-  let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private connection JSON with credential references.") in
-  let model = Arg.(required & opt (some string) None & info ["model"] ~doc:"Exact selected model ID.") in
-  let load = Arg.(value & flag & info ["load"] ~doc:"Preload only the selected Ollama model before observing its running context.") in
-  let run path model load =
-    let connection = try Runtime_model_discovery.connection_of_json (Yojson.Safe.from_file path)
-      with Sys_error _ | Yojson.Json_error _ -> Error Runtime_model_discovery.Invalid_connection in
-    match connection with
-    | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1
-    | Ok connection -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-        match Runtime_serving_context.observe ~sw ~net:(Eio.Stdenv.net env) connection ~model ~load with
-        | Ok observation -> print_endline (Yojson.Safe.to_string observation); 0
-        | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1)) in
-  Cmd.v (Cmd.info "runtime-serving-context" ~doc:"Observe a selected Ollama or llama.cpp serving window with its protected credential.")
-    Term.(const run $ spec $ model $ load)
-
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
-  let provider = Arg.(value & opt (some string) None & info ["provider"]
-    ~doc:"Limit exact catalog metadata to this provider identity; no endpoint or model-name inference.") in
-  let run model client provider =
+  let run model client =
     match Llm_provider.Model_catalog.load_default () with
     | Error message -> prerr_endline message; 1
     | Ok catalog ->
@@ -2573,14 +2557,6 @@ let runtime_model_info_cmd =
         | None -> Llm_provider.Model_catalog.model_entries catalog
         | Some client -> wizard_model_entries client catalog
       in
-      let entries = match provider with
-        | None -> entries
-        | Some provider -> (match Agent_core.Provider_runtime_binding.find provider with
-          | None -> []
-          | Some binding -> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-              match entry.provider_name with
-              | None -> true
-              | Some name -> name = binding.id || List.mem name binding.aliases) entries) in
       (* A generic family prefix is not evidence for the context of a model
          the installer does not know. Include provider-scoped exact rows, and
          reject conflicting declarations rather than pick a convenient one. *)
@@ -2590,7 +2566,7 @@ let runtime_model_info_cmd =
       | None -> 1
   in
   Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read an exact model's declared context size from the installed catalog.")
-    Term.(const run $ model $ client $ provider)
+    Term.(const run $ model $ client)
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
@@ -2630,11 +2606,13 @@ let setup_validate_runtime base_path =
           prerr_endline "The selected model did not pass its real response/tool check. Run masc runtime-verify for details or choose another connection in the installer.");
         code
 
-let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network_mode =
+let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
-  Masc_cli_setup.run_with_selection ~network_mode ~base_path ~port ~open_tui:(not no_tui)
+  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
-    ~initialize:(fun () -> init_cmd_exit base_path false false)
+    (* setup is an operator command: the workspace it prepares becomes the
+       default for later ones. *)
+    ~initialize:(fun () -> init_cmd_exit base_path false false true)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
@@ -2659,15 +2637,6 @@ let setup_preflight_cmd =
   let info = Cmd.info "setup-preflight"
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
-
-let sandbox_catalog_cmd =
-  let inspect requested =
-    let base_path = match requested with Some path -> Some path
-      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
-    print_endline (Yojson.Safe.to_string (Masc.Sandbox_readiness.inspect ~base_path));
-    0 in
-  Cmd.v (Cmd.info "sandbox-catalog" ~doc:"Inspect sandbox choices and host prerequisites without changing settings.")
-    Term.(const inspect $ run_base_path)
 
 let doctor_cmd =
   let json = Arg.(value & flag & info ["json"]
@@ -2739,34 +2708,24 @@ let setup_cmd =
     in
     Arg.(value & opt (some string) None & info [ "microvm-backend" ] ~docv:"BACKEND" ~doc)
   in
-  let network_mode = Arg.(value & opt (some string) None & info ["network-mode"]
-    ~doc:"Sandbox network mode: inherit, none, or policy where supported.") in
-  let run base_path port no_tui sandbox_profile microvm_backend network_mode =
-    let network = match network_mode with
-      | None -> Ok None
-      | Some value -> (match Keeper_types_profile_sandbox.network_mode_of_string value with
-        | Some mode -> Ok (Some mode)
-        | None -> Error "Unknown sandbox network mode. Use masc sandbox-catalog to see supported choices.") in
-    match network with
-    | Error message -> `Error (false, message)
-    | Ok network_mode ->
+  let run base_path port no_tui sandbox_profile microvm_backend =
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
     | `Ok (profile, backend) ->
-      if not no_tui && profile = None && backend = None && network_mode = None && stdio_is_a_terminal () then
+      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
         `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
       else
         let resolved = match base_path with
           | Some path -> Some path
           | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
         match resolved with
-        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend network_mode)
+        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
         | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
+    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
@@ -2808,13 +2767,6 @@ let sandbox_install_apple_verified_cmd =
     ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
     Term.(const execute $ source $ sha256 $ size)
 
-let prerequisite_actions_cmd =
-  let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
-  let action = Arg.(value & opt (some string) None & info ["execute"]
-    ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation and service actions for a sandbox or official client.")
-    Term.(const (fun dependency action -> Masc_cli_prerequisites.run ~dependency ~action) $ dependency $ action)
-
 let cmd =
   let doc =
     "MASC workspace: the fleet TUI on a terminal, the MCP server everywhere else"
@@ -2835,19 +2787,15 @@ let cmd =
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
     ; runtime_discover_models_cmd
-    ; runtime_store_credential_cmd
-    ; runtime_serving_context_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
     ; sandbox_install_apple_verified_cmd
-    ; prerequisite_actions_cmd
     ; setup_cmd
     ; setup_preflight_cmd
     ; doctor_cmd
-    ; sandbox_catalog_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

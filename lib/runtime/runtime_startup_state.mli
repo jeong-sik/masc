@@ -7,3 +7,8 @@ val set : t -> unit
 val requires_setup : unit -> bool
 val message : reason -> string
 val to_json : unit -> Yojson.Safe.t
+
+val note_runtime_loaded : unit -> unit
+(** Loading config cannot activate services skipped by an owner boot. *)
+val await_available : unit -> unit
+(** Suspend a deferred startup fiber until explicit runtime activation. *)

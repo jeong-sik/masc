@@ -186,6 +186,16 @@ PROVIDERS = {
                    kind="openai_compat",
                    request_path="/chat/completions",
                    capabilities_base="openai"),
+    # 한 계정 크레딧으로 여러 vendor 모델을 태우는 스윕 레인. 모델 id 에
+    # 슬래시가 들어가므로 --model openrouter/z-ai/glm-5.3 처럼 주면
+    # runtime_id 는 openrouter.z-ai/glm-5.3 이 된다. glm/deepseek 계열은
+    # fable 대비 입력 단가 1~2자릿수 아래라 넓은 매트릭스에 맞다.
+    "openrouter": dict(protocol="openai-compatible-http",
+                       endpoint="https://openrouter.ai/api/v1",
+                       api_key_env="OPENROUTER_API_KEY",
+                       kind="openai_compat",
+                       request_path="/chat/completions",
+                       capabilities_base="openai"),
     "kimi_coding": dict(protocol="openai-compatible-http",
                         endpoint="https://api.kimi.com/coding/v1",
                         api_key_env="KIMI_API_KEY",

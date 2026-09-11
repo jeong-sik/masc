@@ -36,3 +36,24 @@ MASC 하네스 자체를 벤치마크한다. 스펙: docs/superpowers/specs/2026
 - `openai/gpt-5.x` — harness reaches the API; the current OPENAI_API_KEY
   project has no credits and lacks gpt-5.5, so this lane is unverified past
   the request-build stage.
+- `openrouter/<vendor>/<model>` — 스윕 레인. `OPENROUTER_API_KEY`(크레딧 충전됨).
+  `BENCH_MODEL=openrouter/z-ai/glm-5.3 ./run_matrix.sh b,c,e 3` 처럼 쓴다.
+  glm/deepseek 계열 단가($0.09~1.4/1M)로 fable($10/$50) 매트릭스 전부를
+  돌리는 대신 넓게 여러 번 돌리는 용도. capabilities_base="openai" 라
+  reasoning_effort 노선으로 렌더된다.
+
+## 4.0 확인런 (매트릭스 승자 arm 용)
+
+2.0 매트릭스는 내부 절제 비교용으로 버전 일관성만 필요하다. 외부 닻과 비교하려면
+4.0 확인런을 승자 arm + Terminus 베이스라인(arm-a)에만:
+
+    harbor run -d terminal-bench@4.0 --agent agents.masc_agent:MascAgent \
+      -m anthropic/claude-fable-5 --ak arm=<winner> -k 3 \
+      --agent-setup-timeout-multiplier 5 --agent-timeout-multiplier 3 \
+      -o results/jobs-40 --job-name <winner>-40-$(date +%Y%m%d-%H%M%S)
+
+- 4.0 은 타임아웃이 8시간 플랫이고 saturated 태스크를 제거했다. multiplier 3
+  (45분) 유지 시 heavy 태스크는 여전히 못 끝내니, 비용을 감수하고 재려면
+  multiplier 를 키운다.
+- 비교 닻(Anthropic 공식, 4.0): Fable 5 42.0% / Opus 5 52.3% /
+  Fable 5.1 55.8% / Mythos 5.1 60.9%. 2.0 서브셋 숫자와 직접 비교하지 않는다.

@@ -101,9 +101,6 @@ type keeper_assignment_transaction
 type 'a config_lock_receipt = private
   { value : 'a
   ; warnings : config_lock_warning list
-
-val config_observation : path:string -> string -> config_observation
-(** Pure source identity used inside callers' locked config edits. *)
   }
 
 val config_source_revision_to_string : config_source_revision -> string

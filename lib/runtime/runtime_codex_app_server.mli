@@ -241,6 +241,14 @@ val probe_subscription :
 (** Start the official app-server and measure only [initialize] plus
     [account/read]. No thread or model turn is created. *)
 
+type listed_model = { id : string; model : string; display_name : string; is_default : bool }
+val list_models :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config -> (listed_model list, error) result
+(** Account admission followed by paginated model/list, without thread/start or
+    turn/start. The CLI owns cache policy; callers needing refresh use an isolated
+    connection home without a model cache. This response has no context window. *)
+
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->

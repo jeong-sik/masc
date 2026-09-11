@@ -55,6 +55,10 @@ type output_normalization_error =
 
 (** Run every pure exact-output contract check and freeze the final generation
     request before any provider-native token measurement can dispatch. *)
+(** Resolve credentials once and freeze them with the request. A delayed plan
+    does not renew expiring credentials during execution, because that would
+    invalidate its fingerprint. Callers must prepare a new plan when fresh
+    credentials are required. *)
 val preflight
   :  config:Provider_config.t
   -> messages:Types.message list

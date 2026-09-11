@@ -563,6 +563,9 @@ let complete_stream_http
                ; terminal
                }))
       in
+      let ( let* ) = Result.bind in
+      let* auth_headers = Provider_config.resolve_auth_headers config
+        |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
       match
         Http_client.with_post_stream
           ?cache:connection_cache
@@ -571,7 +574,7 @@ let complete_stream_http
           ~on_response_status
           ~net
           ~url
-          ~headers:(config.headers @ Provider_config.auth_headers_for_config config)
+          ~headers:(config.headers @ auth_headers)
           ~body:body_with_stream
           ~f:(fun reader ->
             emit_stream_event on_event Types.Connected;

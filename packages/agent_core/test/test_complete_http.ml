@@ -85,6 +85,7 @@ let start_mock_server
       ?clock
       ?capture_body
       ?capture_path
+      ?capture_headers
       ?on_request
       response_body
   =
@@ -97,6 +98,7 @@ let start_mock_server
     (match capture_path with
      | Some seen -> seen := Some (Cohttp.Request.uri req |> Uri.path)
      | None -> ());
+    (match capture_headers with Some seen -> seen := Some (Cohttp.Request.headers req) | None -> ());
     (match on_request with
      | Some f -> f ()
      | None -> ());
@@ -3948,10 +3950,82 @@ let test_anthropic_image_sources_on_http ~stream () =
   with Exit -> ()
 ;;
 
+let test_refresh_failure_prevents_http () =
+  Eio_main.run (fun env ->
+    try Eio.Switch.run (fun sw ->
+      let calls = ref 0 in
+      let endpoint = start_mock_server ~sw ~net:env#net ~on_request:(fun () -> incr calls)
+        (anthropic_response "must not arrive") in
+      let config = Provider_config.make ~kind:Gemini ~model_id:"fixture-gemini" ~base_url:endpoint
+        ~auth_scheme:Bearer_token ~api_key:"stale-token"
+        ~credential_source:(Refreshable_credential (fun () -> Error Credential_unavailable))
+        ~model_capabilities_override:Capabilities.gemini_capabilities () in
+      List.iter (fun stream ->
+        let result = if stream then Complete.complete_stream ~sw ~net:env#net ~config ~messages
+          ~on_event:(fun _ -> ()) () else Complete.complete ~sw ~net:env#net ~config ~messages () in
+        match result with
+        | Error (Http_client.AcceptRejected { reason }) ->
+          check string "safe refusal" "Provider credential refresh is unavailable" reason
+        | _ -> fail "refresh failure must reject before dispatch") [false; true];
+      check int "no stale or anonymous request" 0 !calls;
+      Eio.Switch.fail sw Exit)
+    with Exit -> ())
+;;
+
+let test_vertex_native_transport () =
+  List.iter (fun stream ->
+    Eio_main.run (fun env ->
+      try Eio.Switch.run (fun sw ->
+        let response = {|{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"inspect_workspace","args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}|} in
+        let response = if stream then "data: " ^ response ^ "\n\n" else response in
+        let seen_body = ref None and seen_path = ref None and seen_headers = ref None in
+        let endpoint = start_mock_server ~sw ~net:env#net ~capture_body:seen_body
+            ~capture_path:seen_path ~capture_headers:seen_headers response in
+        let refreshes = ref 0 in
+        let credential_source = Provider_config.Refreshable_credential (fun () ->
+          incr refreshes;
+          Ok (Secret.of_string "fixture-access-token")) in
+        let config = Provider_config.make ~kind:Gemini ~model_id:"fixture-gemini"
+            ~base_url:(endpoint ^ "/v1/projects/fixture/locations/global/publishers/google")
+            ~auth_scheme:Bearer_token ~api_key:"stale-token-must-not-be-used" ~credential_source
+            ~model_capabilities_override:Capabilities.gemini_capabilities () in
+        let tools = [`Assoc ["name", `String "inspect_workspace";
+          "description", `String "Inspect workspace";
+          "input_schema", `Assoc ["type", `String "object"; "properties", `Assoc []]]] in
+        let cache : Cache.t = {
+          get=(fun ~key:_ -> fail "refreshable account must not read a static response cache");
+          set=(fun ~key:_ ~ttl_sec:_ _ -> fail "refreshable account must not populate a static response cache") } in
+        let result = if stream then Complete.complete_stream ~sw ~net:env#net ~config
+            ~messages ~tools ~on_event:(fun _ -> ()) ()
+          else Complete.complete ~sw ~net:env#net ~config ~messages ~tools ~cache () in
+        (match result with
+         | Error _ -> fail "native Vertex-shaped transport failed"
+         | Ok response -> check bool "native function call survives transport" true
+             (response.Types.stop_reason = Types.StopToolUse));
+        check int "refresh executed at actual HTTP dispatch" 1 !refreshes;
+        let headers = Option.get !seen_headers in
+        check (option string) "OAuth Authorization" (Some "Bearer fixture-access-token")
+          (Cohttp.Header.get headers "authorization");
+        check (option string) "no Gemini API key header" None
+          (Cohttp.Header.get headers "x-goog-api-key");
+        check (option string) "native publisher method path"
+          (Some ("/v1/projects/fixture/locations/global/publishers/google/models/fixture-gemini:"
+            ^ if stream then "streamGenerateContent" else "generateContent")) !seen_path;
+        let body = Option.get !seen_body |> Yojson.Safe.from_string in
+        check bool "native contents, not chat-completions messages" true
+          (Yojson.Safe.Util.member "contents" body <> `Null
+           && Yojson.Safe.Util.member "messages" body = `Null);
+        check bool "native function declarations" true
+          (Yojson.Safe.Util.member "tools" body <> `Null);
+        Eio.Switch.fail sw Exit)
+      with Exit -> ())) [false; true]
+;;
+
 let () =
   run
     "complete_http"
-    [ ( "Responses tool image wire"
+    [ ( "Vertex native", [test_case "OAuth native sync and streaming tool response" `Quick test_vertex_native_transport; test_case "refresh failure blocks HTTP" `Quick test_refresh_failure_prevents_http] )
+    ; ( "Responses tool image wire"
       , [ test_case "sync native tool images and history" `Quick
             (test_responses_tool_images_on_http ~stream:false)
         ; test_case "stream native tool images and history" `Quick

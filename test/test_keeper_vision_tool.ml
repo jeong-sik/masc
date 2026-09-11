@@ -554,11 +554,18 @@ max-request-body-bytes = 65536
 (* Vision falls back to every image-capable runtime after explicit
    media_failover ordering. The uncapped fallback is therefore genuinely
    reachable even though neither [runtime].default nor media_failover names it. *)
+(* [p4.vision-a] is the image-capable runtime this case wants reached, and it
+   is named in [media_failover] because that is what declares a runtime as an
+   image candidate for a keeper that does not route to it. It used to be
+   reachable by being declared at all, which is the tail #34823 removed: that
+   tail was the set boot does not validate dispatch caps for. The capped
+   [p0.text] stays ahead of it, which is the point -- the vision path must not
+   inherit that cap. *)
 let uncapped_vision_fallback_runtime_toml =
   {|
 [runtime]
 default = "p0.text"
-media_failover = ["p0.text"]
+media_failover = ["p0.text", "p4.vision-a"]
 
 [providers.p0]
 protocol = "openai-compatible-http"

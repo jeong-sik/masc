@@ -69,7 +69,10 @@ type keeper_chat_event =
   | Reply_details of reply_details
   | Continuation_checkpoint of continuation_checkpoint
   | Agent_core_stream_connected
-  | Agent_core_runtime_attempt_started
+  | Agent_core_runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
   | Agent_core_stream_message_start of
       { provider_message_id : string
       ; model : string

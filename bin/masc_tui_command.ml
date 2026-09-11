@@ -7,6 +7,7 @@ type t =
   | Task_missing_title
   | Help
   | About
+  | Lane_addons of string
   | Open_metrics
   | Open_settings
   | Open_diff
@@ -70,6 +71,10 @@ let catalog =
   ; { word = "keeper"
     ; args = "<name>"
     ; summary = "switch this pane to another keeper"
+    }
+  ; { word = "addons"
+    ; args = "[inspect|attach JSON|observe ID|detach ID|slice JSON|evidence JSON]"
+    ; summary = "open optional cross-lane observations and package actions"
     }
   ; { word = "settings"
     ; args = ""
@@ -231,6 +236,7 @@ let parse text =
     | "task", title -> Task_for_keeper { title; body }
     | "help", _ -> Help
     | "about", _ | "splash", _ -> About
+    | "addons", arg -> Lane_addons arg
     | "metrics", _ | "telemetry", _ -> Open_metrics
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff

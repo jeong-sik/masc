@@ -26,11 +26,22 @@ let request_path_default_for_kind = function
   | Glm -> "/chat/completions"
 ;;
 
+(** Authentication is independent of the inference wire. Vertex uses the
+    Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
+type auth_scheme = Provider_default | Bearer_token
+
+type credential_refresh_error = Credential_unavailable | Invalid_credential_response
+type credential_source =
+  | Static_credential
+  | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
   ; model_id : string
   ; base_url : string
+  ; credential_source : credential_source
+  ; auth_scheme : auth_scheme
   ; api_key : Secret.t
   ; headers : (string * string) list
   ; request_path : string
@@ -77,6 +88,8 @@ let make
       ~model_id
       ~base_url
       ?provider_id
+      ?(credential_source = Static_credential)
+      ?(auth_scheme = Provider_default)
       ?(api_key = "")
       ?(headers = [ "Content-Type", "application/json" ])
       ?request_path
@@ -136,6 +149,8 @@ let make
   ; provider_id
   ; model_id
   ; base_url
+  ; credential_source
+  ; auth_scheme
   ; api_key = Secret.of_string api_key
   ; headers
   ; request_path
@@ -234,7 +249,12 @@ let auth_headers_for_kind_and_secret ~(kind : provider_kind) ~(api_key : Secret.
     Gemini keys are sent in the [x-goog-api-key] header and are never placed
     in the URL query string. *)
 let auth_headers_for_config (config : t) : (string * string) list =
-  auth_headers_for_kind_and_secret ~kind:config.kind ~api_key:config.api_key
+  match config.auth_scheme with
+  | Provider_default ->
+    auth_headers_for_kind_and_secret ~kind:config.kind ~api_key:config.api_key
+  | Bearer_token ->
+    if Secret.is_empty config.api_key then []
+    else [ "Authorization", "Bearer " ^ Secret.header_value config.api_key ]
 ;;
 
 (** Same as {!auth_headers_for_config} but takes the provider kind and raw key
@@ -728,4 +748,15 @@ let is_local (config : t) =
     let url = String.lowercase_ascii url in
     has_host_prefix ~url ~prefix:Constants.Endpoints.local_prefix
     || has_host_prefix ~url ~prefix:Constants.Endpoints.localhost_prefix
+;;
+
+let resolve_auth_headers config =
+  match config.credential_source with
+  | Static_credential -> Ok (auth_headers_for_config config)
+  | Refreshable_credential refresh ->
+    (match refresh () with
+     | Error Credential_unavailable -> Error "Provider credential refresh is unavailable"
+     | Error Invalid_credential_response -> Error "Provider credential refresh returned an invalid response"
+     | Ok token when Secret.is_empty token -> Error "Provider credential refresh returned an empty token"
+     | Ok api_key -> Ok (auth_headers_for_config { config with api_key }))
 ;;

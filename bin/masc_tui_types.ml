@@ -2393,7 +2393,8 @@ let turn_log_add ~now turn_log ~seq (delta : Masc_tui_keeper_chat_live.delta) =
   | Masc_tui_keeper_chat_live.External_effect_completed
   | Masc_tui_keeper_chat_live.Reply_details _ | Masc_tui_keeper_chat_live.Run_failed _
   | Masc_tui_keeper_chat_live.Run_finished
-  | Masc_tui_keeper_chat_live.Runtime_attempt_started
+  | Masc_tui_keeper_chat_live.Runtime_attempt_started _
+  | Masc_tui_keeper_chat_live.Stream_model_started _
   | Masc_tui_keeper_chat_live.Undecodable _ ->
       if Masc_tui_keeper_chat_log.add turn_log.tl_log ~seq delta
       then Masc_tui_keeper_chat_transcript.apply ~now turn_log.tl_transcript delta
@@ -3883,6 +3884,8 @@ type state = {
   mutable tools_skill_evidence: (string * Yojson.Safe.t) option;
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
+  mutable lane_addons: Masc_tui_lane_addons.t option;
+  mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
@@ -5222,6 +5225,8 @@ let create_state
   tools_skill_evidence = None;
   tools_async_observation = None;
   tools_async_observation_error = None;
+  lane_addons = None;
+  lane_addons_generation = 0;
   browser_lane = None;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
@@ -6205,16 +6210,36 @@ type runtime_picker_projection = {
   rlp_choices : Tui_decode.runtime_option list;
 }
 
+(* The picker serves both lane kinds. A conversation lane names its runtime id
+   and reads its current order from the runtime surface's resolved lanes; an
+   exact-output lane arrives as "exact/<name>" and reads its walk order from
+   the standalone-lane observation, which carries the admitted slots. *)
+let lane_picker_existing_slots (state : state) (lane : string) =
+  let exact_prefix = "exact/" in
+  if String.length lane > String.length exact_prefix
+     && String.equal (String.sub lane 0 (String.length exact_prefix)) exact_prefix
+  then
+    let name = String.sub lane (String.length exact_prefix) (String.length lane - String.length exact_prefix) in
+    match state.standalone_lanes with
+    | None -> []
+    | Some snapshot ->
+        snapshot.Tui_decode.sls_lanes
+        |> List.find_opt (fun (row : Tui_decode.standalone_lane) ->
+             String.equal row.Tui_decode.sl_lane_id name)
+        |> Option.map (fun row -> row.Tui_decode.sl_admitted_slots)
+        |> Option.value ~default:[]
+  else
+    match state.runtime_surface with
+    | None -> []
+    | Some snapshot ->
+        snapshot.Tui_decode.rss_resolved.rrs_lanes
+        |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
+        |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
+        |> Option.value ~default:[]
+
 let runtime_picker_projection (state : state) =
   Option.map (fun lane ->
-    let already = match state.runtime_surface with
-      | None -> []
-      | Some snapshot ->
-          snapshot.Tui_decode.rss_resolved.rrs_lanes
-          |> List.find_opt (fun row -> String.equal row.Tui_decode.rrl_id lane)
-          |> Option.map (fun row -> row.Tui_decode.rrl_runtime_ids)
-          |> Option.value ~default:[]
-    in
+    let already = lane_picker_existing_slots state lane in
     let providers = already |> List.filter_map (fun id ->
       state.runtime_catalog
       |> List.find_opt (fun runtime -> String.equal runtime.Tui_decode.ro_id id)
@@ -6830,6 +6855,7 @@ type palette_action =
   | Palette_browser_lane
   | Palette_hide_browser_lane
   | Palette_msx
+  | Palette_lane_addons
   | Palette_goto of surface
   | Palette_config of config_pane
   | Palette_gate_mode of gate_lane * Masc.Keeper_gate_mode.t
@@ -6935,6 +6961,7 @@ let palette_entries (state : state) =
       | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ [ "go Browser Lane", Palette_browser_lane ]
   @ [ "go MSX", Palette_msx ]
+  @ [ "go Lane Add-ons", Palette_lane_addons ]
   @ [ "go Logs", Palette_goto System_logs ]
   @ [ "go Metrics", Palette_goto Metrics ]
   @ [ "metrics", Palette_goto Metrics ]

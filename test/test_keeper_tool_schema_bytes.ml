@@ -145,7 +145,10 @@ open Alcotest
    continue-on-error until #35025 removed it on 2026-09-10 05:25Z. The guard
    ran, said so, and nothing was listening. From #35025 on, a pull request
    that grows the surface fails its own check. *)
-let ceiling_bytes = 100_456
+(* 2026-09-11: 103,716 across 119 tools. PR adds 6 lane tools: masc_lane_attach,
+   masc_lane_detach, masc_lane_evidence, masc_lane_inspect, masc_lane_observe,
+   masc_lane_slice (+3,260 bytes). What it bought: Codex lane-addon runtime operations. *)
+let ceiling_bytes = 103_716
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -297,6 +300,12 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_lane_attach"
+  ; "masc_lane_detach"
+  ; "masc_lane_evidence"
+  ; "masc_lane_inspect"
+  ; "masc_lane_observe"
+  ; "masc_lane_slice"
   ; "masc_msx_change_disk"
   ; "masc_msx_eject"
   ; "masc_msx_load"

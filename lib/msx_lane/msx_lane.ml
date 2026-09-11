@@ -98,6 +98,7 @@ let key_to_string : key -> string = function
 
 type machine = {
   m : Msx.t;
+  incarnation : string;
   mutable frame : int;
   mutable pixels : (int * int * string) option;
   (* Immutable RGB snapshot for this machine state, guarded by [lock]. *)
@@ -107,11 +108,15 @@ type machine = {
   media : (string * string) list;
   ledger_path : string;
   mutable entries : entry list;  (* newest first *)
+  mutable input_count : int;
 }
 
 let state : machine option ref = ref None
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
+(* Used only while holding [lock]. An incarnation names a newly installed
+   history, including a restore of the exact same checkpoint. *)
+let fresh_incarnation () = Random_id.uuid_v7 ()
 
 let with_machine f =
   locked (fun () ->
@@ -257,6 +262,7 @@ let entry_json (e : entry) : Yojson.Safe.t =
 
 let append_entry st e =
   st.entries <- e :: st.entries;
+  st.input_count <- st.input_count + 1;
   Out_channel.with_open_gen
     [ Open_append; Open_creat; Open_wronly ]
     0o644
@@ -344,6 +350,7 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
         Out_channel.with_open_bin ledger_path (fun _ -> ());
         let st =
           { m
+          ; incarnation = fresh_incarnation ()
           ; pixels = None
           ; frame = pre_frames
           ; cart =
@@ -354,6 +361,7 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
           ; media = []
           ; ledger_path
           ; entries = []
+          ; input_count = 0
           }
         in
         state := Some st;
@@ -550,6 +558,19 @@ let step_frame ~frames =
 let capture () = with_machine (fun st -> Ok (observe st, frame_of st))
 ;;
 
+type identified_capture = {
+  incarnation : string;
+  observation : observation;
+  frame : frame;
+  input_count : int;
+}
+
+let capture_with_identity () =
+  with_machine (fun st ->
+    Ok { incarnation = st.incarnation; observation = observe st;
+         frame = frame_of st; input_count = st.input_count })
+;;
+
 (* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------
    화면 판독은 "인간의 눈"으로 상태를 다시 읽는 비싼 우회다. 게임의 진실은
    메모리에 있고, 코어는 그 전체를 이미 들고 있다. peek은 논리 주소의 바이트를
@@ -731,7 +752,9 @@ let restore ~path ~ledger_dir =
       try
         let ledger_bytes = String.concat "" (List.map (fun e -> Yojson.Safe.to_string (entry_json e) ^ "\n") entries) in
         atomic_write ledger_path ledger_bytes;
-        let st = {m; pixels = None; frame; cart; disk; disk_id; media; ledger_path; entries = List.rev entries} in
+        let st = {m; incarnation = fresh_incarnation (); pixels = None; frame;
+                  cart; disk; disk_id; media; ledger_path; entries = List.rev entries;
+                  input_count = List.length entries} in
         state := Some st;
         Ok (observe st)
       with Sys_error message -> Error (Unreadable message))

@@ -1,3 +1,4 @@
+import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 // MASC Dashboard — Settings surface
 // Operator-facing settings only: runtime management, resolved paths, MCP server
 // health/inventory, notification thresholds, prompt/fusion/log/display controls.
@@ -51,6 +52,7 @@ import {
   isRemoteAccess,
 } from '../api/core'
 import type { DashboardConfigResolutionItem } from '../types'
+import { OnboardingSettings } from './onboarding-settings'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
@@ -1338,6 +1340,7 @@ export function SettingsSurface() {
   }
 
   async function finishRuntimeRoutingWrite(): Promise<void> {
+    await resumeSavedModelSetup()
     await refreshRuntimeSettingsSnapshot()
     await refreshRuntimeConfigConsumers()
   }
@@ -1559,6 +1562,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtime' && html`
+              <${OnboardingSettings} />
               <div class="settings-runtime-live" data-testid="runtime-settings-live">
                 <div class="settings-runtime-live-h">
                   <div>

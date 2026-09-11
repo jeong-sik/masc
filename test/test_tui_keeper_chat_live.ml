@@ -9,7 +9,11 @@ module Live = Masc_tui_keeper_chat_live
 
 let delta_to_string : Live.delta -> string = function
   | Live.Run_started -> "run_started"
-  | Live.Runtime_attempt_started -> "runtime_attempt_started"
+  | Live.Runtime_attempt_started { runtime_id; attempt_index } ->
+      Printf.sprintf "runtime_attempt_started(%s,%s)"
+        (Option.value ~default:"none" runtime_id)
+        (match attempt_index with Some i -> string_of_int i | None -> "none")
+  | Live.Stream_model_started { model } -> Printf.sprintf "stream_model_started(%s)" model
   | Live.Text text -> Printf.sprintf "text(%s)" text
   | Live.Thinking text -> Printf.sprintf "thinking(%s)" text
   | Live.Tool_started { occurrence; tool_name } ->
@@ -605,18 +609,43 @@ let test_acceptance_rejects_negative_queue_length () =
 
 let test_runtime_attempt_boundary_is_typed () =
   let body = sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" `Null) in
-  check (list delta) "runtime boundary is not silently dropped"
-    [ Live.Runtime_attempt_started ]
+  check (list delta) "runtime boundary without payload is parsed"
+    [ Live.Runtime_attempt_started { runtime_id = None; attempt_index = None } ]
+    (feed_whole body);
+  let body_with_fields =
+    sse
+      (custom "KEEPER_RUNTIME_ATTEMPT_STARTED"
+         (`Assoc [ "runtime_id", `String "claude-3-7-sonnet"; "attempt_index", `Int 1 ]))
+  in
+  check (list delta) "runtime boundary with payload is parsed"
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
+    ]
+    (feed_whole body_with_fields)
+
+let test_runtime_attempt_rejects_invalid_payload () =
+  let body =
+    sse
+      (custom "KEEPER_RUNTIME_ATTEMPT_STARTED"
+         (`Assoc [ "unexpected", `String "field" ]))
+  in
+  check (list delta) "runtime boundary payload rejects unexpected fields"
+    [ Live.Undecodable
+        "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED has unexpected fields"
+    ]
     (feed_whole body)
 
-let test_runtime_attempt_rejects_non_null_payload () =
+let test_stream_model_started_is_typed () =
   let body =
-    sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" (`Assoc []))
+    sse
+      (custom "KEEPER_STREAM_MESSAGE_START"
+         (`Assoc
+            [ "provider_message_id", `String "pm-1"
+            ; "model", `String "claude-3-7-sonnet"
+            ]))
   in
-  check (list delta) "runtime boundary payload is exact"
-    [ Live.Undecodable
-        "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null"
-    ]
+  check (list delta) "stream message start yields stream_model_started"
+    [ Live.Stream_model_started { model = "claude-3-7-sonnet" } ]
     (feed_whole body)
 
 let test_unknown_custom_event_is_reported () =
@@ -639,8 +668,10 @@ let () =
             test_checkpoint_and_external_effect_are_drawn
         ; test_case "runtime attempt boundary is typed" `Quick
             test_runtime_attempt_boundary_is_typed
-        ; test_case "runtime attempt rejects non-null payload" `Quick
-            test_runtime_attempt_rejects_non_null_payload
+        ; test_case "runtime attempt rejects invalid payload" `Quick
+            test_runtime_attempt_rejects_invalid_payload
+        ; test_case "stream message start model is typed" `Quick
+            test_stream_model_started_is_typed
         ] )
     ; ( "acceptance"
       , [ test_case "the three states are read" `Quick

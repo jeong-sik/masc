@@ -1390,7 +1390,7 @@ let acting_pane_changes (state : state) : Masc_tui_acting_pane.changes =
 
 let acting_pane_columns (state : state) ~terminal_cols =
   let modal =
-    state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
+    Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
   if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
@@ -6640,11 +6640,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · READ-ONLY OBSERVATION"
+    | None -> "  Standalone LLM lanes · a appends a failover slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · READ-ONLY OBSERVATION · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · a appends a failover slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -6723,6 +6723,39 @@ let render_lanes_overview (state : state) =
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.warn ())
          ("  " ^ Keeper_chat.terminal_safe_text detail));
+  (* The failover-candidate picker the "a" key opens. Same projection the
+     Runtime surface draws; the row order both render and the key handler
+     read is the picker's own, so the cursor and the drawing cannot drift. *)
+  (match Masc_tui_types.runtime_picker_projection state with
+   | None -> ()
+   | Some picker ->
+       box_line_styled buf cols ~style:(Theme.info ())
+         (Printf.sprintf
+            "  adding a failover candidate to %s — j/k move, Enter append, e cancel"
+            (Terminal_text.single_line picker.Masc_tui_types.rlp_lane));
+       if picker.Masc_tui_types.rlp_choices = [] then
+         box_line_styled buf cols ~style:(Theme.recede ())
+           "  (runtime catalogue unread)"
+       else
+         List.iteri
+           (fun offset (runtime : Masc.Tui_decode.runtime_option) ->
+              let note =
+                if List.exists (String.equal runtime.ro_id) picker.rlp_already
+                then "  (already a slot)"
+                else if not runtime.ro_dispatchable then "  (blocked)"
+                else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
+                then "  (same provider as a current slot)"
+                else ""
+              in
+              let mark = if offset = state.runtime_lane_pick_cursor then ">" else " " in
+              box_line buf cols
+                (Printf.sprintf "  %s %s   %s / %s%s"
+                   mark
+                   (Terminal_text.single_line runtime.ro_id)
+                   (Terminal_text.single_line runtime.ro_provider)
+                   (Terminal_text.single_line runtime.ro_model)
+                   (Ansi.dim ^ note ^ Ansi.reset)))
+           picker.Masc_tui_types.rlp_choices);
   let used_rows = count_frame_lines buf in
   for _ = 1 to max 0 (rows - used_rows - 2) do
     box_empty buf cols
@@ -9912,80 +9945,96 @@ let render_keeper_message (state : state) =
         List.filter_map Fun.id
         @@ List.mapi
              (fun entry_index (item : Keeper_chat_transcript.drawn_item) ->
-               let label text =
-                 match item.superseded with
-                 | Some attempt ->
-                     Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
-                 | None -> text
-               in
-               let markdown_source =
-                 Message_layout.Markdown_growing
-                   { keeper_name; request_id; entry_index }
-               in
-               let entry style role_label body =
-                 (* One alignment, on the label the row actually carries.
-                    Aligning the continuation mark and then aligning the
-                    result again pays the badge's width twice, so the second
-                    call trims what the first had already fitted. *)
-                 Some
-                   ({ style;
-                      timestamp = keeper_message_clock started_at;
-                      timeline_bucket;
-                      role_label =
-                        Message_layout.align_role_label
-                          ~column:role_label_column
-                          (* Same reasoning as the history rows above: the
-                             column says who, not a mark inside the label. *)
-                          ~style role_label;
-                      role_label_mark_cells =
-                        Message_layout.role_label_mark_cells
-                          ~column:role_label_column ~style ();
-                      request_label;
-                      body;
-                      markdown_source;
-                      turn_rail =
-                        turn_rail_of ~siding:None
-                          ~edge:Masc_tui_types.Turn_continues ~style;
-                      (* A live turn draws its Gate steps as status text the
-                         transcript composed, not as the store's argument, so
-                         there is no argument here to unfold. *)
-                      action = Message_layout.Action_none;
-                    }
-                     : Message_layout.entry)
-               in
-               match item.drawn with
-               | Keeper_chat_transcript.Drawn_thinking _
-                 when not
-                        (Masc_tui_types.reasoning_drawn
-                           state.msg_reasoning_visibility) ->
-                   None
-               | Keeper_chat_transcript.Drawn_thinking lines ->
-                   entry Message_layout.Thinking (label "THINKING")
-                     (if state.msg_reasoning_visibility = Reasoning_folded
+                let label text =
+                  match item.superseded with
+                  | Some attempt ->
+                      Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
+                  | None -> text
+                in
+                let annotate_body body =
+                  match item.superseded_runtime_id with
+                  | Some rid when String.trim rid <> "" ->
+                      let attempt_num =
+                        match item.superseded with
+                        | Some a -> a + 1
+                        | None -> 1
+                      in
+                      let prefix =
+                        Printf.sprintf "*(attempt %d: `%s`)*" attempt_num (String.trim rid)
+                      in
+                      if body = "" then prefix else prefix ^ "\n" ^ body
+                  | _ -> body
+                in
+                let markdown_source =
+                  Message_layout.Markdown_growing
+                    { keeper_name; request_id; entry_index }
+                in
+                let entry style role_label body =
+                  (* One alignment, on the label the row actually carries.
+                     Aligning the continuation mark and then aligning the
+                     result again pays the badge's width twice, so the second
+                     call trims what the first had already fitted. *)
+                  Some
+                    ({ style;
+                       timestamp = keeper_message_clock started_at;
+                       timeline_bucket;
+                       role_label =
+                         Message_layout.align_role_label
+                           ~column:role_label_column
+                           (* Same reasoning as the history rows above: the
+                              column says who, not a mark inside the label. *)
+                           ~style role_label;
+                       role_label_mark_cells =
+                         Message_layout.role_label_mark_cells
+                           ~column:role_label_column ~style ();
+                       request_label;
+                       body;
+                       markdown_source;
+                       turn_rail =
+                         turn_rail_of ~siding:None
+                           ~edge:Masc_tui_types.Turn_continues ~style;
+                       (* A live turn draws its Gate steps as status text the
+                          transcript composed, not as the store's argument, so
+                          there is no argument here to unfold. *)
+                       action = Message_layout.Action_none;
+                     }
+                      : Message_layout.entry)
+                in
+                match item.drawn with
+                | Keeper_chat_transcript.Drawn_thinking _
+                  when not
+                         (Masc_tui_types.reasoning_drawn
+                            state.msg_reasoning_visibility) ->
+                    None
+                | Keeper_chat_transcript.Drawn_thinking lines ->
+                    let body =
+                      if state.msg_reasoning_visibility = Reasoning_folded
                       then folded_thinking_summary (String.concat "\n" lines)
-                      else String.concat "\n" lines)
-               | Keeper_chat_transcript.Drawn_tools block ->
-                   let projection =
-                     Keeper_chat_transcript.project_tool_block
-                       (tool_projection_mode state) block
-                   in
-                   entry (tool_block_style projection) (label "TOOLS")
-                     (String.concat "\n" (projected_tool_rows projection))
-               | Keeper_chat_transcript.Drawn_skill skill ->
-                   entry
-                     (Message_layout.Skill (skill_tone_of_state skill.state))
-                     (label "SKILL")
-                     (String.concat "\n"
-                        (* Full on the block too: the same reason the
-                           committed skill rows are always full — the skill's
-                           delivery and observed actions are the feature this
-                           row reports, not a detail behind the tool toggle. *)
-                        (Keeper_chat_transcript.skill_rows ~full:true skill))
-               | Keeper_chat_transcript.Drawn_text text
-               | Keeper_chat_transcript.Drawn_reply text ->
-                   entry Message_layout.Keeper (label keeper_label) text
-               | Keeper_chat_transcript.Drawn_status text ->
-                   entry Message_layout.Status (label "STATUS") text)
+                      else String.concat "\n" lines
+                    in
+                    entry Message_layout.Thinking (label "THINKING") (annotate_body body)
+                | Keeper_chat_transcript.Drawn_tools block ->
+                    let projection =
+                      Keeper_chat_transcript.project_tool_block
+                        (tool_projection_mode state) block
+                    in
+                    let body = String.concat "\n" (projected_tool_rows projection) in
+                    entry (tool_block_style projection) (label "TOOLS") (annotate_body body)
+                | Keeper_chat_transcript.Drawn_skill skill ->
+                    entry
+                      (Message_layout.Skill (skill_tone_of_state skill.state))
+                      (label "SKILL")
+                      (String.concat "\n"
+                         (* Full on the block too: the same reason the
+                            committed skill rows are always full — the skill's
+                            delivery and observed actions are the feature this
+                            row reports, not a detail behind the tool toggle. *)
+                         (Keeper_chat_transcript.skill_rows ~full:true skill))
+                | Keeper_chat_transcript.Drawn_text text
+                | Keeper_chat_transcript.Drawn_reply text ->
+                    entry Message_layout.Keeper (label keeper_label) (annotate_body text)
+                | Keeper_chat_transcript.Drawn_status text ->
+                    entry Message_layout.Status (label "STATUS") text)
              (Keeper_chat_transcript.drawn transcript)
       in
       { lb_log = turn_log; lb_request_id = request_id; lb_insertion = insertion;
@@ -10519,8 +10568,14 @@ let render_keeper_message (state : state) =
            match Keeper_chat_transcript.phase live with
            | Keeper_chat_transcript.Waiting -> "○", "WAITING TO START"
            | Working ->
+               let heading =
+                 if Keeper_chat_transcript.attempt live > 0 then
+                   "FAILOVER IN PROGRESS"
+                 else
+                   "IN PROGRESS"
+               in
                Masc_tui_answering.running_glyph ~frame:state.activity_frame,
-               "IN PROGRESS"
+               heading
            | Stream_ended -> "○", "FINALIZING"
            | Stream_failed _ -> "!", "REQUEST ERROR"
          in
@@ -19489,6 +19544,16 @@ let render_terminal_too_small state ~rows ~cols =
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
+let render_lane_addons state (view : Masc_tui_lane_addons.t) =
+  let terminal_rows, cols = get_terminal_size () in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
+    ~title:(screen_title " MASC Lane Add-ons")
+    ~hints:"Tab:instances/rows  j/k:select  J/K:scroll  space:mark  e:preserve  o:observe  d:detach  r:inspect  :command  Esc:back"
+    ~body:(fun ~budget c ->
+      Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
+      |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
+      |> List.iter (fun line -> c.push (Terminal_text.single_line line)))
+
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
      over the whole terminal and the Activity feed already fills its own
@@ -19504,7 +19569,11 @@ let render (state : state) =
   then
     let frame, clamped = render_terminal_too_small state ~rows ~cols in
     (frame, clamped, None)
-  else if state.palette_open then
+  else match state.lane_addons with
+  | Some view ->
+    let frame, clamped = render_lane_addons state view in
+    (frame, clamped, None)
+  | None -> if state.palette_open then
     let frame, clamped = render_palette state in
     (frame, clamped, None)
   else if state.context_inspector_open then

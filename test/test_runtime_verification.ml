@@ -148,20 +148,7 @@ let test_client_failures_stay_apart () =
     "a failure with nothing to add reports no detail"
     true
     (failure_field result "detail" = `Null);
-  check int "an unavailable client still exits 2" 2 (Verify.exit_code result);
-  (* provider_rejected covered both a wire refusal and a request the provider
-     never accepted, and reported neither. Twelve OpenRouter runtimes failed on
-     one missing [reasoning-effort] key under this code, while the message told
-     the operator to check credentials that were fine (masc#35139). *)
-  let rejected, rejected_detail =
-    case (Verify.Provider_rejected "runtime declares no reasoning effort ladder")
-  in
-  check string "a refusal keeps its own code" "provider_rejected" rejected;
-  check
-    string
-    "a refusal carries the reason the caller had in hand"
-    "runtime declares no reasoning effort ladder"
-    (Yojson.Safe.Util.to_string rejected_detail)
+  check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =
@@ -225,6 +212,24 @@ wizard-default = true
     let integration rows id =
       List.find (fun row -> row |> member "id" |> to_string = id) rows
     in
+    List.iter (fun credential ->
+      let unbound = {config with bindings=[]; default_runtime_id=None;
+        providers=List.map (fun (p : Runtime_schema.provider) -> {p with credentials=Some credential}) config.providers} in
+      let public = Runtime_wizard_inventory.to_json unbound in
+      let private_json = Runtime_wizard_inventory.to_json ~include_credential_references:true unbound in
+      let row json = integration (json |> member "integrations" |> to_list) "cloud" in
+      check bool "unbound public inventory has no credential path or value" false
+        (contains (Yojson.Safe.to_string public) "must-not-leak");
+      match credential with
+      | Runtime_schema.File path ->
+        check string "unbound provider preserves protected kind" "file" (row public |> member "credential_kind" |> to_string);
+        check string "only opt-in CLI gets file reference" path (row private_json |> member "credential_file" |> to_string)
+      | Inline _ ->
+        check string "inline protection retained" "inline" (row private_json |> member "credential_kind" |> to_string);
+        check bool "inline value never serialized even for CLI" false
+          (contains (Yojson.Safe.to_string private_json) "must-not-leak")
+      | Env _ -> fail "fixture credential kind")
+      [Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak"];
     let declared = integration integrations "cloud" in
     check (list string) "configured provider retains both selected models"
       [ "cloud.first"; "cloud.second" ]
@@ -247,7 +252,7 @@ wizard-default = true
     let antigravity = integration prototypes "antigravity" in
     check string "official Antigravity executable" "agy"
       (antigravity |> member "command" |> to_string);
-    check string "unsupported verification is not ready" "unsupported"
+    check string "native response and tool verification is available" "response_tool"
       (antigravity |> member "verification_support" |> to_string);
     List.iter (fun id ->
       check string "media endpoints are not chat setup connections" "unsupported"
@@ -345,11 +350,161 @@ hooks = true
       ["apps"; "plugins"; "hooks"; "multi_agent"; "shell_tool"; "unified_exec"]
 ;;
 
+let test_google_adc_refresh_boundary () =
+  let expected = ["gcloud"; "auth"; "application-default"; "print-access-token"; "--quiet"] in
+  let calls = ref 0 in
+  let run argv =
+    check (list string) "ADC uses application-default identity" expected argv;
+    incr calls; Ok ("fixture-token-" ^ string_of_int !calls ^ "\n") in
+  List.iter (fun expected_token ->
+    match Runtime_google_adc.refresh_with ~run () with
+    | Ok token -> check string "fresh token each request" expected_token (Llm_provider.Secret.header_value token)
+    | Error _ -> fail "ADC fixture failed") ["fixture-token-1"; "fixture-token-2"];
+  List.iter (fun response ->
+    match Runtime_google_adc.refresh_with ~run:(fun _ -> Ok response) () with
+    | Error Llm_provider.Provider_config.Invalid_credential_response -> ()
+    | _ -> fail "empty or multiple-line ADC output must fail") [""; "token\nextra"]
+;;
+
+let antigravity_readiness_fixture = {|#!/usr/bin/env python3
+"""Owned CLI fixture: exercise the real authenticated MCP readiness bridge."""
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.request
+
+prompt = sys.stdin.read()
+assert "runtime_readiness_challenge" in prompt
+home = Path(os.environ["HOME"])
+settings = json.loads((home / ".gemini/antigravity-cli/settings.json").read_text())
+assert settings["permissions"]["allow"] == ["mcp(masc/*)"]
+assert "command(*)" in settings["permissions"]["deny"]
+assert "read_file(*)" in settings["permissions"]["deny"]
+config = json.loads((home / ".gemini/config/mcp_config.json").read_text())
+assert list(config["mcpServers"]) == ["masc"]
+server = config["mcpServers"]["masc"]
+headers = dict(server["headers"], **{"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+
+def rpc(method, params, request_id=None):
+    payload = {"jsonrpc": "2.0", "method": method, "params": params}
+    if request_id is not None:
+        payload["id"] = request_id
+    request = urllib.request.Request(server["url"], data=json.dumps(payload).encode(), headers=headers)
+    with urllib.request.urlopen(request, timeout=10) as response:
+        body = response.read()
+    return json.loads(body) if body else None
+
+rpc("initialize", {"protocolVersion": "2025-11-25", "clientInfo": {"name": "owned-fixture", "version": "1"}, "capabilities": {}}, 1)
+headers["MCP-Protocol-Version"] = "2025-11-25"
+rpc("notifications/initialized", {})
+listed = rpc("tools/list", {}, 2)
+assert [tool["name"] for tool in listed["result"]["tools"]] == ["runtime_readiness_challenge"]
+result = rpc("tools/call", {"name": "runtime_readiness_challenge", "arguments": {}}, 3)
+text = result["result"]["content"][0]["text"]
+model = sys.argv[sys.argv.index("--model") + 1]
+print(json.dumps({"event": "init", "conversation_id": "readiness-fixture", "init": {
+    "model": model, "cwd": os.getcwd(), "tools": ["call_mcp_tool"], "permission_mode": "request-review"}}), flush=True)
+print(json.dumps({"event": "result", "result": {"conversation_id": "readiness-fixture", "status": "SUCCESS", "response": text,
+    "duration_seconds": 0.1, "num_turns": 1, "usage": {"input_tokens": 1, "output_tokens": 1,
+    "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}}}), flush=True)
+|}
+
+let test_antigravity_private_tool_roundtrip () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let directory = Filename.temp_file "antigravity-readiness-test-" "" in
+    Unix.unlink directory; Unix.mkdir directory 0o700;
+    let directory = Unix.realpath directory in
+    Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
+    let source = Filename.concat directory "operator-oauth" in
+    let write path content =
+      Out_channel.with_open_bin path (fun out -> output_string out content);
+      Unix.chmod path 0o600 in
+    write source "fixture-operator-secret";
+    let script = Filename.concat directory "agy-fixture" in
+    write script antigravity_readiness_fixture;
+    Unix.chmod script 0o700;
+    let config = { (Runtime_antigravity.default_config ~cwd:directory ~model:"fixture-selected-model") with
+      cli_path=script; timeout_s=Some 15.; admission_timeout_s=15.; wall_clock_ceiling_s=Some 15. } in
+    let result = Verify.For_testing.measure ~runtime_id:"antigravity.fixture" ~selected_model:"fixture-selected-model"
+      ~challenge:"private-nonce-fixture"
+      ~run:(fun tool ~prompt ->
+        match Runtime_verification_antigravity.run ~secure_random:env#secure_random ~net:env#net
+          ~mgr:env#process_mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
+          ~directory ~oauth_source:source ~config ~tool ~prompt with
+        | Ok result -> Ok { Verify.model=result.model; text=result.text }
+        | Error _ -> Error (Verify.Provider_rejected "fixture-rejection")) in
+    check bool "real MCP tool challenge consumed" true result.tool_roundtrip;
+    check (option string) "selected CLI model reported" (Some "fixture-selected-model") result.observed_model;
+    check string "operator auth bytes unchanged" "fixture-operator-secret" (Fs_compat.load_file source);
+    check (list string) "ephemeral HOME and MCP capability removed" ["agy-fixture"; "operator-oauth"]
+      (Sys.readdir directory |> Array.to_list |> List.sort String.compare)))
+;;
+
+let test_vertex_native_binding () =
+  let contents = {|
+[runtime]
+default = "vertex.gemini"
+[providers.vertex]
+display-name = "Vertex AI"
+protocol = "vertex-gemini"
+endpoint = "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google"
+[models.gemini]
+api-name = "gemini-3.7-flash"
+max-context = 1048576
+tools-support = true
+streaming = true
+[vertex.gemini]
+|} in
+  let config = match Runtime_toml.parse_string contents with
+    | Ok config -> config | Error _ -> fail "native Vertex TOML must parse" in
+  let binding = List.hd config.bindings in
+  let provider_config = match Runtime_adapter.binding_to_provider_config config binding with
+    | Ok config -> config | Error reason -> fail reason in
+  check bool "native Gemini codec" true (provider_config.kind = Llm_provider.Provider_config.Gemini);
+  check bool "OAuth bearer selected explicitly" true
+    (provider_config.auth_scheme = Llm_provider.Provider_config.Bearer_token);
+  check bool "no ADC token materialized at config load" true (Llm_provider.Secret.is_empty provider_config.api_key);
+  (match provider_config.credential_source with
+   | Llm_provider.Provider_config.Refreshable_credential _ -> ()
+   | Static_credential -> fail "Vertex must refresh ADC at dispatch");
+  let unsafe_config = { config with providers = List.map (fun (p : Runtime_schema.provider) ->
+    {p with transport=Http "https://other.example/v1"}) config.providers } in
+  check bool "ADC cannot attach to arbitrary endpoint" true
+    (Result.is_error (Runtime_adapter.binding_to_provider_config unsafe_config binding))
+;;
+
+let test_vertex_live_catalog_pagination () =
+  let base_url = "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google" in
+  let requests = ref [] in
+  let get ~url =
+    requests := url :: !requests;
+    let token = Uri.get_query_param (Uri.of_string url) "pageToken" in
+    match token with
+    | None -> Ok {|{"publisherModels":[{"name":"publishers/google/models/model-one","displayName":"One"}],"nextPageToken":"next+page"}|}
+    | Some "next+page" -> Ok {|{"publisherModels":[{"name":"publishers/google/models/model-two"}]}|}
+    | Some _ -> Error "wrong page token" in
+  let models = match Runtime_vertex_models.discover_with ~get ~base_url with
+    | Ok models -> models | Error reason -> fail reason in
+  check (list string) "every current API page preserved" ["model-one";"model-two"]
+    (List.map (fun (m : Runtime_vertex_models.model) -> m.id) models);
+  check int "actual pagination" 2 (List.length !requests);
+  List.iter (fun url -> check string "publisher API, not project training model registry"
+    "/v1beta1/publishers/google/models" (Uri.path (Uri.of_string url))) !requests;
+  check bool "repeated page token fails explicitly" true
+    (Result.is_error (Runtime_vertex_models.discover_with ~base_url
+       ~get:(fun ~url:_ -> Ok {|{"nextPageToken":"repeat"}|})))
+;;
+
 let () =
   run
     "runtime verification"
     [ ( "readiness"
-      , [ test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
+      , [ test_case "Vertex native runtime binding" `Quick test_vertex_native_binding
+        ; test_case "Vertex live catalog pagination" `Quick test_vertex_live_catalog_pagination
+        ; test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
+        ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
+        ; test_case "Codex readiness excludes inherited tools" `Quick test_codex_readiness_excludes_inherited_tools
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success

@@ -1,6 +1,55 @@
 # Changelog
 
 
+## [0.35.10] - 2026-09-11
+
+### Added
+
+- Native Google Vertex Gemini bearer transport and live publisher model discovery (#35094).
+- Verify Antigravity official client response and private MCP challenge roundtrip (#35103).
+- Choose graceful server upgrade and free available ports in setup (#35133).
+- Observe Antigravity context without prompt in onboarding journey (#35135).
+- Append failover slot to standalone lanes from the Lanes screen (#35227).
+- Per-game MSX skills: Sangokushi-2 knowledge and end-command composition (#35228).
+
+### Fixed
+
+- Declare `ocaml-msx` in `dune-project` and regenerate `masc.opam` to fix CI native build failures (#35215).
+- Count unclassified event backlog entries whose keeper owner cannot be resolved in fleet health (#35214).
+- Add missing `--private-credentials` flag to `masc runtime-wizard-catalog` CLI (#35133).
+
+
+## [0.35.9] - 2026-09-11
+
+### Added
+
+- Keeper Chat TUI indicates active and failover runtime during turn execution and in history (#35224).
+  - Past attempts in chat history show supersession badges and earlier runtime IDs (`↺N (<runtime_id>)`, `*(attempt N: `<runtime_id>`)*`).
+  - Active turn phase text distinguishes between provider endpoint connection (`connecting to [<runtime_id>]`) and token streaming (`streaming from [<runtime_id>]`).
+  - Failover retries preserve the failover badge during multi-tool execution and reasoning phases (`failover [<runtime_id>] (attempt N)`).
+  - Rate limit (429) and execution errors unambiguously attribute the failed runtime ID (`[<runtime_id>] <message>`).
+- Native Google Vertex Gemini bearer transport primitives (#35087).
+- AWS Bedrock official SDK Converse streaming and discovery bridge (#35099).
+- Automatic Application Default Credentials (ADC) token refresh at provider HTTP boundaries (#35091).
+- Interactive Antigravity account and model discovery in `masc setup` (#35130, #35108).
+- Workspace upgrade recovery backup and restore prompts (#35127).
+- Model setup resumption in existing running workspace owner (#35123, #35111).
+- Model setup restoration from web settings (#35129).
+- Real-time search filter in installer runtime picker (#35206).
+- Automatic `masc` environment configuration in fresh shell sessions (#35126).
+- OpenRouter DeepSeek-v4.1-flash runtime and catalog row (#35150).
+- Automatic tracking of model release evidence and calendar recency (#35107).
+- Browser and MSX owner passive observation mode without taking control (#35120).
+
+### Fixed
+
+- Prevent file descriptor leak against dead server connections (#35046).
+- Gate media tool execution to verified runtimes only (#35179, #35136).
+- Recover chat dropped by empty carrier rows with exponential retry backoff (#35145).
+- Prevent MSX tick poll from leaving the Kitty pixel surface stale (#35199).
+- Stop discarding reservation release outcome upon keeper removal (#35212).
+- Demote historical tool results on uncapped runtimes (#35219).
+
 ## [0.35.8] - 2026-09-11
 
 ### Fixed

@@ -218,7 +218,7 @@ let prepare_server ~base_path ~port ~owned =
         | Ok () -> ()
         | Error `Timeout -> fail "Server is not ready yet; inspect its logs and rerun setup.")))
 
-let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login
+let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~resume_models
     ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend =
   let owned = ref None in
   Fun.protect
@@ -262,6 +262,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
          | _ -> require_ok "Sandbox image preparation" (fun () -> prepare_image ~selection));
         prepare_server ~base_path ~port ~owned;
         require_ok "Local operator sign-in" login;
+        require_ok "Activating saved model settings" resume_models;
         require_ok "Sandbox selection commit"
           (fun () -> match Sandbox.commit_staged ~path ~original ~staged with
             | Ok () -> 0 | Error reason -> prerr_endline reason; 1);

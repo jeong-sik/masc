@@ -36,6 +36,18 @@ transformation. Both files and directory entries are synced before the original
 configuration is atomically replaced. The receipt distinguishes a confirmed
 sync from an after-rename durability warning.
 
+Interactive setup lists known Keeper upgrades when its workspace check finds
+unsupported state. Select one or more Keepers to preserve their configuration
+and apply the known mapping. Each selected file has its own backup receipt;
+failure stops that selection and returns to assessment. Setup also offers
+existing validated configuration backups for restoration. A later edit prevents
+restoration from overwriting it.
+
+Advanced operators can inspect the same catalog with
+`masc workspace-upgrade --base-path WORKSPACE`. Apply uses `--apply KEEPER` and
+the displayed `--source-sha256 SHA256`; restore uses `--restore BACKUP_ID`.
+No path or digest entry is needed in the interactive selection flow.
+
 This is one file at a time, not a transaction spanning the entire workspace.
 Other files, including runtime and fallback assignments, Task, Board, Goal and
 Keeper memory, are untouched. The server must be stopped, and independent file

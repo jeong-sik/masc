@@ -304,7 +304,10 @@ let generate
      | Error _ as error -> error
      | Ok body ->
        let url = config.base_url ^ config.request_path in
-       let headers = config.headers @ Provider_config.auth_headers_for_config config in
+       let ( let* ) = Result.bind in
+       let* auth_headers = Provider_config.resolve_auth_headers config
+         |> Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) in
+       let headers = config.headers @ auth_headers in
        (match
           Http_client.post_sync
             ?cache:connection_cache

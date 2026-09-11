@@ -513,6 +513,7 @@ let validate_current_lease keys target =
 
 let rec ensure_with
           ~after_validation
+          ~before_claim
           ~before_prepare
           ~before_directory_fsync
           ?ownership_root
@@ -539,10 +540,12 @@ let rec ensure_with
     with
     | Error _ as error -> error
     | Ok () ->
+      before_claim ();
       (match claim components with
        | Already_durable ->
          ensure_with
            ~after_validation
+           ~before_claim
            ~before_prepare
            ~before_directory_fsync
            ?ownership_root
@@ -552,6 +555,7 @@ let rec ensure_with
           | Prepared | Retry ->
             ensure_with
               ~after_validation
+              ~before_claim
               ~before_prepare
               ~before_directory_fsync
               ?ownership_root
@@ -562,6 +566,7 @@ let rec ensure_with
           | Prepared | Retry ->
             ensure_with
               ~after_validation
+              ~before_claim
               ~before_prepare
               ~before_directory_fsync
               ?ownership_root
@@ -584,6 +589,7 @@ let rec ensure_with
             Eio_guard.check_if_ready ();
             ensure_with
               ~after_validation
+              ~before_claim
               ~before_prepare
               ~before_directory_fsync
               ?ownership_root
@@ -598,7 +604,7 @@ let rec ensure_with
             propagate_cancellation (Error failure))))
 ;;
 
-let ensure = ensure_with ~after_validation:(fun () -> ())
+let ensure = ensure_with ~after_validation:(fun () -> ()) ~before_claim:(fun () -> ())
 
 module For_testing = struct
   let ensure = ensure_with

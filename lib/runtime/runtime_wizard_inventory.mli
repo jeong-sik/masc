@@ -1,13 +1,16 @@
 (** JSON projection of every enabled declared binding, including runtimes whose
     credential or executable is unavailable. Credential values and file paths
-    are never projected. Undeclared context limits stay null.
+    are omitted by default; credential values are never projected. Undeclared context limits stay null.
 
     [integrations] independently projects configured providers, AGENT_CORE
     provider prototypes, and named CLI/local-server transports. Setup and
     verification support describe adapter capability, never account access or
     measured readiness. Unsupported protocols remain visible with null protocol
     or unsupported status. Catalog endpoint credentials are also redacted. *)
-val to_json : Runtime_schema.config -> Yojson.Safe.t
+val to_json : ?include_credential_references:bool -> Runtime_schema.config -> Yojson.Safe.t
+(** [include_credential_references] is for the local setup CLI only. It adds
+    file references, never secret values, so new model bindings can preserve
+    protected credentials. HTTP callers leave it false. *)
 
 val binding_for_provider
   :  Runtime_schema.config
@@ -18,3 +21,11 @@ val binding_for_provider
     the one [runtime].default already names. Anything else is a real choice
     the wizard will not guess. The installer and the seed-config guard read
     the same rule from here. *)
+
+val provider_model_rows : string -> (Yojson.Safe.t, string) result
+(** Curated catalog rows for one named provider, for the setup wizard's named
+    catalog sources: id, label, declared context, accepted reasoning efforts
+    with a default rung, and capabilities resolved against the provider's own
+    wire kind. Rows without a positive declared context are omitted — the
+    wizard cannot pin a runtime entry for them. An unknown provider id is an
+    [Error] naming the installed providers. *)

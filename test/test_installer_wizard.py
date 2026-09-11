@@ -125,26 +125,18 @@ print('init complete')
             self.assertFalse((base/'.masc/config/runtime.toml').exists())
             self.assertTrue((chosen/'.masc/config/runtime.toml').exists())
 
-    def test_selection_helper_keeps_terminal_input_and_captures_only_receipt(self):
+    def test_terminal_setup_uses_installed_journey_after_artifact_installation(self):
         with tempfile.TemporaryDirectory() as temporary:
-            helper = Path(temporary) / 'helper.py'
-            helper.write_text('''import json,sys
-assert '--wizard' in sys.argv
-assert sys.stdin.isatty() and sys.stderr.isatty()
-assert not sys.stdout.isatty()
-print('Choose several connections',file=sys.stderr)
-print(json.dumps({'readiness':'verified'}))
-''')
-            body = ('\nDRY_RUN=0\nDEST=/fixture/masc\n'
-                    'fetch_bundle_asset() { cp ' + shlex.quote(str(helper)) + ' "$2"; }\n'
-                    'run_selection_wizard "$BASE_PATH"\n')
+            binary = Path(temporary) / 'masc'
+            binary.write_text('#!/bin/sh\n[ -t 0 ] && [ -t 1 ] && [ -t 2 ] || exit 7\nprintf "journey=%s\\n" "$*"\n')
+            binary.chmod(0o755)
+            body = ('\nDRY_RUN=0\nDEST=' + shlex.quote(str(binary)) + '\nMASC_PORT=9876\n'
+                    'run_wizard "$BASE_PATH"\n'
+                    '[ "$RUN_SETUP_JOURNEY" -eq 1 ] || exit 8\n'
+                    'finish_setup_journey\n')
             result, terminal = run_shell(body, b'')
         self.assertEqual(result.returncode, 0, terminal)
-        self.assertIn('Choose several connections', terminal)
-        self.assertIn('passed response and tool checks', result.stdout)
-        self.assertNotIn('"readiness"', result.stdout)
-
-
+        self.assertIn('journey=setup --base-path /fixture --port 9876', terminal)
 
     def test_local_authentication_challenge_is_not_reported_as_stopped(self):
         class AuthRequired(http.server.BaseHTTPRequestHandler):

@@ -26,7 +26,6 @@ type info =
 
 val capture : Mcp.managed -> info
 val capture_all : Mcp.managed list -> info list
-val to_server_spec : info -> Mcp.server_spec
 
 (** {2 JSON serialization} *)
 

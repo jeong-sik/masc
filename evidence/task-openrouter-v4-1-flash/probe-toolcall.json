@@ -1,0 +1,7 @@
+
+         
+
+         
+
+         
+{"id":"gen-1789047619-cWUd8UubhlxV706j9ROE","object":"chat.completion","created":1789047619,"model":"deepseek/deepseek-v4.1-flash","provider":"Venice","system_fingerprint":null,"service_tier":null,"choices":[{"index":0,"logprobs":null,"finish_reason":"tool_calls","native_finish_reason":"tool_calls","message":{"role":"assistant","content":null,"refusal":null,"reasoning":"The user wants the weather in Seoul. I should call get_weather with city Seoul.","tool_calls":[{"type":"function","index":0,"id":"chatcmpl-tool-9bc2e18e0d8ccc35","function":{"name":"get_weather","arguments":"{\"city\": \"Seoul\"}"}}],"reasoning_details":[{"type":"reasoning.text","text":"The user wants the weather in Seoul. I should call get_weather with city Seoul.","format":"unknown","index":0}]}}],"usage":{"prompt_tokens":296,"completion_tokens":59,"total_tokens":355,"cost":0.00015246,"is_byok":false,"prompt_tokens_details":{"cached_tokens":128,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.00015246,"upstream_inference_prompt_cost":0.00006396,"upstream_inference_completions_cost":0.0000885},"completion_tokens_details":{"reasoning_tokens":18,"image_tokens":0,"audio_tokens":0}}}

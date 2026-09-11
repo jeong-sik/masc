@@ -9926,7 +9926,10 @@ let render_keeper_message (state : state) =
                         | Some a -> a + 1
                         | None -> 1
                       in
-                      Printf.sprintf "*(attempt %d: %s)*\n%s" attempt_num rid body
+                      let prefix =
+                        Printf.sprintf "*(attempt %d: `%s`)*" attempt_num (String.trim rid)
+                      in
+                      if body = "" then prefix else prefix ^ "\n" ^ body
                   | _ -> body
                 in
                 let markdown_source =

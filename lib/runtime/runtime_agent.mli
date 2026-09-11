@@ -254,10 +254,14 @@ val media_candidates_of :
   Runtime.t list
 (** RFC-0440 media candidate set, pure over its inputs: [lane] in its own
     order, then [media_failover] resolved against [runtimes] in declared order
-    (ids that resolve to nothing are skipped), then every other runtime in
-    [runtimes] in declaration order. Ids are unique; the first occurrence wins.
-    No capability or execution filter: callers admit by
-    [caps_admit_required_modalities] over [input_capabilities_of_runtime]. *)
+    (ids that resolve to nothing are skipped). Ids are unique; the first
+    occurrence wins. No capability or execution filter: callers admit by
+    [caps_admit_required_modalities] over [input_capabilities_of_runtime].
+
+    A declared runtime that is in neither list is not a candidate. It is also
+    the one boot does not validate dispatch caps for, and the walk dispatches
+    what it is given (#34823). An empty [lane] with no [media_failover] has no
+    candidates. *)
 
 val media_candidates : lane:Runtime.t list -> Runtime.t list
 (** [media_candidates_of] over the loaded runtime state

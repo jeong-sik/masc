@@ -56,6 +56,12 @@ val prepare
     not exist; an existing managed file must itself be an effective-user-owned
     regular 0600 file and is never overwritten by preparation. *)
 
+val prepare_for_login : runtime_root:string -> owner_leaf:string -> (t, error) result
+(** Prepare the private official-client HOME without fabricating an OAuth seed.
+    Only an explicit sign-in action may use it to launch the interactive CLI. *)
+val oauth_path : t -> string
+(** Private native reference for setup import; never include in HTTP receipts. *)
+
 val home_dir : t -> string
 
 val keychain_state : t -> keychain_state

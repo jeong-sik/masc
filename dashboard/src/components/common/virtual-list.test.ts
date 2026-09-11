@@ -184,8 +184,7 @@ describe('VirtualList', () => {
     Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
     el.scrollTop = 1700
     el.dispatchEvent(new Event('scroll'))
-    await new Promise((resolve) => { setTimeout(resolve, 30) })
-    expect(onEndReached).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => { expect(onEndReached).toHaveBeenCalledTimes(1) })
   })
 
   it('calls onEndReached once when scrolled near the bottom in dynamic mode', async () => {
@@ -206,8 +205,7 @@ describe('VirtualList', () => {
     Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
     el.scrollTop = 1550
     el.dispatchEvent(new Event('scroll'))
-    await new Promise((resolve) => { setTimeout(resolve, 30) })
-    expect(onEndReached).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => { expect(onEndReached).toHaveBeenCalledTimes(1) })
   })
 
   it('does not call onEndReached when not near the bottom', async () => {
@@ -228,6 +226,10 @@ describe('VirtualList', () => {
     Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
     el.scrollTop = 1000
     el.dispatchEvent(new Event('scroll'))
+    // A negative needs a settle rather than a condition wait: there is nothing
+    // to wait for. A window that is too short here fails open (the assertion
+    // passes because the call had no chance yet), which is a weak test rather
+    // than a flaky one, so it is left for a separate change.
     await new Promise((resolve) => { setTimeout(resolve, 30) })
     expect(onEndReached).not.toHaveBeenCalled()
   })
@@ -251,17 +253,19 @@ describe('VirtualList', () => {
 
     el.scrollTop = 1700
     el.dispatchEvent(new Event('scroll'))
-    await new Promise((resolve) => { setTimeout(resolve, 30) })
-    expect(onEndReached).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => { expect(onEndReached).toHaveBeenCalledTimes(1) })
 
     el.scrollTop = 1000
     el.dispatchEvent(new Event('scroll'))
+    // Scrolling away re-arms the latch, and the component exposes nothing that
+    // says it processed this event, so this one stays a settle. The assertion
+    // after the scroll back waits on the count instead of on a duration, so
+    // this is the only window left in the test.
     await new Promise((resolve) => { setTimeout(resolve, 30) })
 
     el.scrollTop = 1700
     el.dispatchEvent(new Event('scroll'))
-    await new Promise((resolve) => { setTimeout(resolve, 30) })
-    expect(onEndReached).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => { expect(onEndReached).toHaveBeenCalledTimes(2) })
   })
 
   it('updates measured heights via ResizeObserver in dynamic mode', async () => {
@@ -293,12 +297,14 @@ describe('VirtualList', () => {
       container,
     )
 
-    await new Promise((resolve) => { setTimeout(resolve, 30) })
+    await vi.waitFor(() => {
+      const rendered = container.querySelector('[data-vl-key]')
+      expect(rendered).not.toBeNull()
+      expect(observed.has(rendered as HTMLElement)).toBe(true)
+      expect(callbacks.length).toBeGreaterThan(0)
+    })
 
     const child = container.querySelector('[data-vl-key]') as HTMLElement
-    expect(child).not.toBeNull()
-    expect(observed.has(child)).toBe(true)
-    expect(callbacks.length).toBeGreaterThan(0)
 
     const mockEntry = {
       target: child,

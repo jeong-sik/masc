@@ -5574,3 +5574,4 @@
  (libraries masc alcotest eio eio_main yojson unix))
 (include stanzas/test_runtime_model_discovery.inc)
 
+(include stanzas/test_bedrock_sdk.inc)

@@ -664,6 +664,27 @@ module Ring = struct
       ) files
     end
 
+  (* The file sink is a JSONL contract: [dashboard/src/api/schemas/logs.ts]
+     and every operator tool decode it as UTF-8, line by line. A message is
+     assembled from external text (a provider error body, a Yojson lexer
+     message quoting the first bytes of a token) and can carry a multibyte
+     character cut in half; [Yojson.Safe.to_string] copies bytes without
+     validating, so one such entry made a whole day file undecodable for
+     every reader (system_log_2026-09-11.jsonl seq 33886532). The sink owns
+     the format, so it enforces it at write: a malformed sequence becomes
+     U+FFFD here, once, for every recording path. *)
+  let rec sanitize_json_strings (json : Yojson.Safe.t) : Yojson.Safe.t =
+    match json with
+    | `String s -> `String (String_util.sanitize_utf8 s)
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+               (String_util.sanitize_utf8 key, sanitize_json_strings value))
+             fields)
+    | `List items -> `List (List.map sanitize_json_strings items)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as leaf -> leaf
+
   (* RFC-0079: typed [push]. [~level] and [?source] are typed values, not
      strings. Legacy options [?raw_level] / [~normalized_level] /
      [?legacy_classified] are gone — they only existed to carry the
@@ -685,8 +706,12 @@ module Ring = struct
        used. Exact keeper-secret values cannot be masked at this layer —
        masc_log is a leaf and never sees keeper secret roots; those are
        masked upstream by [Keeper_secret_redaction]. *)
-    let message = Secret_patterns.redact_text message in
-    let details = Secret_patterns.redact_json_strings details in
+    let message =
+      Secret_patterns.redact_text message |> String_util.sanitize_utf8
+    in
+    let details =
+      Secret_patterns.redact_json_strings details |> sanitize_json_strings
+    in
     let seq = Atomic.fetch_and_add total 1 in
     let idx = seq mod capacity in
     let entry = {

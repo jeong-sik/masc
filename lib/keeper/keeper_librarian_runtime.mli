@@ -83,7 +83,9 @@ val fitted_messages
     [Exact_input_over_budget]. A slot whose projection is refused outright is
     excluded from the bound and returned in the report so the caller can say
     which slots the run is without; a ladder with no projectable slot at all
-    is [Exact_request_projection_failed], naming each refusal. *)
+    is [Exact_request_projection_failed], naming each refusal. An empty
+    ladder fits by definition and reports nothing -- the caller routes it to
+    the cli lane. *)
 
 
 (** Which failure kind this error records in the memory journal. The vocabulary

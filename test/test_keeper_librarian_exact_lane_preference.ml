@@ -277,7 +277,11 @@ let test_fit_decision_with_every_slot_refused_imposes_no_bound () =
       ]
   in
   check (list string) "no usable slot remains" [] fit.Runtime.usable;
-  check bool "an empty usable set is not a fit" false fit.fits
+  (* [fits] speaks only about usable slots, so an empty usable set is
+     vacuously true. The production caller guards emptiness itself and fails
+     there, naming every refusal; pinning the vacuous truth here keeps a
+     later "fix" from quietly changing what the exported field means. *)
+  check bool "an empty usable set is vacuously a fit" true fit.fits
 ;;
 
 (* 2026-09-11 regression: a failover slot whose request cannot be projected
@@ -311,8 +315,10 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
       Fixture.resolver_snapshot
         ~source:"librarian-preflight-exclusion"
         ~connect_timeouts:[ ("librarian-bad", -1.0) ]
+        ~request_body_limits:[ ("librarian-tight", 4096) ]
         [ { Fixture.id = "librarian-ok"; base_url = server.base_url }
         ; { Fixture.id = "librarian-bad"; base_url = server.base_url }
+        ; { Fixture.id = "librarian-tight"; base_url = server.base_url }
         ]
     in
     (match
@@ -368,7 +374,46 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
      check bool "the failure names the refusing slot" true
        (Astring.String.is_infix ~affix:"librarian-bad" text);
      check bool "the failure names the refusal reason" true
-       (Astring.String.is_infix ~affix:"invalid_connect_timeout" text))
+       (Astring.String.is_infix ~affix:"invalid_connect_timeout" text));
+  (* The over-budget error names the first slot that still imposes the bound,
+     not the first slot of the ladder: with the ladder head unusable, the
+     size verdict belongs to the first usable slot behind it. *)
+  let selected_slots = publish [ "librarian-bad"; "librarian-tight" ] in
+  let big = String.make 20_000 'x' in
+  (match
+     Runtime.fitted_messages
+       ~selected_slots
+       ~full_messages:[ message big ]
+       ~render_at:(fun _ -> Ok [ message big ])
+   with
+   | Ok _ -> fail "a prompt over the tight slot's budget fitted"
+   | Error error ->
+     let text = Runtime.extraction_error_to_string error in
+     check bool "the over-budget error names the usable slot" true
+       (Astring.String.is_infix ~affix:"librarian-tight" text);
+     check bool "the over-budget error is the size verdict" true
+       (Astring.String.is_infix ~affix:"request-body limit" text))
+;;
+
+(* The exported empty-ladder verdict, pinned: it fits and reports nothing,
+   exactly as the caller that routes an empty slot list to the cli lane
+   expects it to. *)
+let test_an_empty_ladder_fits_and_reports_nothing () =
+  let message =
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.User
+      [ Agent_core.Types.Text "one small prompt" ]
+  in
+  match
+    Runtime.fitted_messages
+      ~selected_slots:[]
+      ~full_messages:[ message ]
+      ~render_at:(fun _ -> fail "render_at must not run for an empty ladder")
+  with
+  | Ok ((_, None), unusable) ->
+    check (list (pair string string)) "nothing to exclude" [] unusable
+  | Ok (_, Some _) -> fail "an empty ladder reported a shrink"
+  | Error error -> fail (Runtime.extraction_error_to_string error)
 ;;
 
 let () =
@@ -390,6 +435,8 @@ let () =
             test_fit_decision_with_every_slot_refused_imposes_no_bound
         ; test_case "unusable slot leaves the usable slots running" `Quick
             test_unusable_slot_leaves_the_usable_slots_running
+        ; test_case "an empty ladder fits and reports nothing" `Quick
+            test_an_empty_ladder_fits_and_reports_nothing
         ] )
     ]
 ;;

@@ -382,6 +382,13 @@ let project_lane ~selected_slots ~messages : lane_fit =
    the caller can say in one line which slots the lane is running without. *)
 let fitted_messages ~selected_slots ~full_messages ~render_at =
   let open Result.Syntax in
+  (* An empty ladder fits and reports nothing, as the old pre-flight said:
+     the production caller routes an empty slot list to the cli lane before
+     it gets here, so the exported shape keeps that verdict rather than
+     failing with no slot to name and no reason to give. *)
+  match selected_slots with
+  | [] -> Ok ((full_messages, None), [])
+  | _ :: _ ->
   let full_lane = project_lane ~selected_slots ~messages:full_messages in
   let over_budget_slot =
     match full_lane.usable with

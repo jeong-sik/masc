@@ -2,7 +2,7 @@
     extracted from operator_control_snapshot.ml. *)
 
 (* Local copies of trivial helpers to avoid sibling -> parent cycle. *)
-let compact_runtime_trust_cache_ttl_sec = 3.0
+let compact_runtime_trust_cache_ttl_sec = 10.0
 
 (* Cache key for the per-keeper runtime-trust projection.
 
@@ -18,18 +18,18 @@ let compact_runtime_trust_cache_ttl_sec = 3.0
      /dashboard/cache-stats snapshot showed 22/48 entries (45%) of the
      same prefix, every one expired.  26 keepers × N turns/min ticked
      the LRU through the same pollution pattern, just slower.
-   - TTL was 1.0s, intended as the invalidation signal.  In practice
-     dashboard polls every 5-7s, so the cache NEVER hit — every refresh
-     paid 400-580ms for receipt file I/O per keeper.  Raising to 3.0s
-     keeps data fresh (at most 3s stale) while allowing cache reuse
-     between dashboard refresh cycles.  Measured impact: trust sub-op
-     drops from 400-580ms (miss) to ~43ms (hit) on warm cycles.
+   - TTL was 1.0s, then 3.0s, intended as the invalidation signal.
+     In practice dashboard polls every 5-7s, so 3.0s still missed on
+     every cadence tick — paying 400-580ms for receipt file I/O per keeper.
+     Raising to 10.0s keeps data reasonably fresh while reliably allowing
+     cache reuse between 5-7s dashboard refresh cycles.  Measured impact:
+     trust sub-op drops from 400-580ms (miss) to ~43ms (hit) on warm cycles.
 
    Identity bits the key keeps:
    - [meta.paused]: explicit pause/unpause toggle.
 
    Result: each keeper has exactly one cache slot.  Turn transitions
-   are picked up via the 3s TTL refresh.  Pollution shrinks from
+   are picked up via the 10s TTL refresh.  Pollution shrinks from
    N keepers × M turns_per_window to just N keepers. *)
 let compact_runtime_trust_cache_key
       ~(config : Workspace.config)

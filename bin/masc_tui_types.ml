@@ -3914,6 +3914,7 @@ type state = {
   mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
+  mutable repositories_inflight: bool;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
   mutable workspace_activity_repo: string option;
@@ -3921,6 +3922,7 @@ type state = {
   mutable workspace_activity_cursor: int;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
+  mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
@@ -4121,6 +4123,7 @@ type state = {
   mutable acting_detail_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
+  mutable verification_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* The request being read, not merely the current cursor position. A refresh
@@ -5250,6 +5253,7 @@ let create_state
   runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
+  repositories_inflight = false;
   repositories_scroll = 0;
   repositories_cursor = 0;
   workspace_activity_repo = None;
@@ -5257,6 +5261,7 @@ let create_state
   workspace_activity_cursor = 0;
   memory_health = None;
   memory_health_error = None;
+  memory_health_inflight = false;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   memory_facts_keeper = None;
@@ -5360,6 +5365,7 @@ let create_state
   acting_detail_scroll = 0;
   verification = None;
   verification_error = None;
+  verification_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_detail_request_id = None;

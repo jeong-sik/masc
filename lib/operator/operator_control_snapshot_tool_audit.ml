@@ -35,7 +35,9 @@ let cached_tool_audit_json
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
-  let ttl = 4.0 in
+  (* 10.0s TTL keeps tool audit projection fresh while reliably reusing
+     cache across 5-7s dashboard refresh cycles, avoiding dated jsonl disk scans. *)
+  let ttl = 10.0 in
   Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
     let ( recent_tool_names
         , latest_tool_names

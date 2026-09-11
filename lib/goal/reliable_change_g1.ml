@@ -278,12 +278,12 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
                 | 0 ->
                   let a_cost =
                     match a.usage with
-                    | Usage_reported r -> Option.value ~default:0.0 r.cost_usd
+                    | Usage_reported r -> (match r.cost_usd with Some c -> c | None -> 0.0)
                     | Usage_missing _ -> 0.0
                   in
                   let b_cost =
                     match b.usage with
-                    | Usage_reported r -> Option.value ~default:0.0 r.cost_usd
+                    | Usage_reported r -> (match r.cost_usd with Some c -> c | None -> 0.0)
                     | Usage_missing _ -> 0.0
                   in
                   Float.compare a_cost b_cost

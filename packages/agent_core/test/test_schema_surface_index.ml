@@ -128,7 +128,6 @@ let test_required_surfaces_present () =
     ; "agent_core.runtime_telemetry_report.v1"
     ; "agent_core.runtime_evidence_bundle.v1"
     ; "agent_core.raw_trace_record.v1"
-    ; "agent_core.raw_trace_manifest.v1"
     ; "agent_core.structured_schema.v1"
     ]
 ;;

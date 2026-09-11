@@ -693,6 +693,11 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
      fail "catalog reasoning stream override was not applied"
    | CAP.No_reasoning_streaming ->
      fail "catalog reasoning stream override disabled streaming"
+   | CAP.Delta_reasoning_field_and_details field ->
+     fail
+       (Printf.sprintf
+          "catalog reasoning stream override selected details streaming: %s"
+          field)
    | CAP.Template_reasoning_streaming ->
      fail "catalog reasoning stream override selected template parser");
   let dialect = RD.for_provider_config config in
@@ -703,7 +708,7 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
        (Printf.sprintf
           "ollama cloud OpenAI-compatible reasoning delta field drifted: %s"
           field)
-   | RD.Delta_reasoning_details ->
+   | RD.Delta_field_and_details _ ->
      fail "ollama cloud OpenAI-compatible should not use reasoning_details streaming"
    | RD.No_streaming_reasoning ->
      fail "ollama cloud OpenAI-compatible reasoning stream field was dropped"
@@ -910,7 +915,7 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
    | RD.Delta_field "reasoning_content" -> ()
    | RD.Delta_field other ->
      fail ("catalog qwen3.6 row resolved unexpected reasoning delta field: " ^ other)
-   | RD.No_streaming_reasoning | RD.Delta_reasoning_details | RD.Template_parser ->
+   | RD.No_streaming_reasoning | RD.Delta_field_and_details _ | RD.Template_parser ->
      fail "catalog qwen3.6 row must resolve the reasoning_content streaming dialect");
   let parse raw =
     match S.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming raw with
@@ -1431,6 +1436,52 @@ let test_anthropic_output_config_merges_format_and_effort () =
     (output_config |> member "format" |> member "type" |> to_string)
 ;;
 
+(* 2026-09-11: a catalog row that declares [ignored_sampling_parameters] for an
+   Anthropic-wire model must see the declaration honored on the wire — the API
+   rejects the request otherwise ("'temperature' may only be set to 1 when
+   thinking is enabled or in adaptive mode"). The Anthropic dialect arm used to
+   hardcode the transport shape and never consult the capability row. *)
+let anthropic_ignored_sampling_caps =
+  { CAP.anthropic_capabilities with
+    ignored_sampling_parameters = [ CAP.Temperature; CAP.Top_p ]
+  }
+;;
+
+let test_anthropic_declared_ignored_sampling_drops_fields () =
+  let config =
+    PC.make
+      ~kind:Anthropic
+      ~model_id:"claude-fable-5"
+      ~base_url:"https://api.anthropic.com"
+      ~max_tokens:16_000
+      ~model_capabilities_override:anthropic_ignored_sampling_caps
+      ~temperature:0.7
+      ~top_p:0.9
+      ~top_k:40
+      ()
+  in
+  let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
+  check_member_absent "temperature" json;
+  check_member_absent "top_p" json;
+  check int "top_k stays" 40 (json |> member "top_k" |> to_int)
+;;
+
+let test_anthropic_default_keeps_sampling_fields () =
+  let config =
+    PC.make
+      ~kind:Anthropic
+      ~model_id:"claude-sonnet-5"
+      ~base_url:"https://api.anthropic.com"
+      ~max_tokens:16_000
+      ~temperature:0.7
+      ~top_p:0.9
+      ()
+  in
+  let json = BAN.build_request ~config ~messages:[ user_msg "hi" ] () |> json_of_body in
+  check (float 0.001) "temperature" 0.7 (json |> member "temperature" |> to_float);
+  check (float 0.001) "top_p" 0.9 (json |> member "top_p" |> to_float)
+;;
+
 let test_gemini_reasoning_dialect_uses_thinking_config () =
   let config =
     PC.make
@@ -1629,6 +1680,14 @@ let () =
               "anthropic output_config merges format and effort"
               `Quick
               test_anthropic_output_config_merges_format_and_effort
+          ; test_case
+              "anthropic declared ignored sampling drops fields"
+              `Quick
+              test_anthropic_declared_ignored_sampling_drops_fields
+          ; test_case
+              "anthropic default keeps sampling fields"
+              `Quick
+              test_anthropic_default_keeps_sampling_fields
           ; test_case
               "gemini reasoning dialect uses thinking config"
               `Quick

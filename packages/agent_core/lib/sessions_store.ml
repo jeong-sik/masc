@@ -1,11 +1,9 @@
 (** Sessions store operations — file I/O, artifact retrieval, raw trace access.
 
     Read-from-store operations that bridge the runtime file layout
-    with the typed Sessions domain. JSON parsing lives in
-    {!Sessions_store_parsers}. *)
+    with the typed Sessions domain. *)
 
 open Sessions_types
-open Sessions_store_parsers
 open Result_syntax
 
 let make_store ?session_root () = Runtime_store.create ?root:session_root ()
@@ -32,31 +30,6 @@ let primary_alias aliases =
   | _blank_alias :: _ -> None
 ;;
 
-let latest_named_artifact artifacts name =
-  List.fold_left
-    (fun acc (artifact : Runtime.artifact) ->
-       if not (String.equal artifact.name name)
-       then acc
-       else (
-         match acc with
-         | None -> Some artifact
-         | Some current when artifact.created_at >= current.created_at -> Some artifact
-         | Some _ -> acc))
-    None
-    artifacts
-;;
-
-let get_named_artifact ?session_root ~session_id ~name () =
-  let* artifacts = Artifact_service.list ?session_root ~session_id () in
-  match latest_named_artifact artifacts name with
-  | Some artifact -> Ok artifact
-  | None ->
-    Error
-      (file_read_error
-         ~path:name
-         ~detail:(Printf.sprintf "Artifact '%s' not found in session %s" name session_id))
-;;
-
 let get_raw_trace_dir ?session_root ~session_id () =
   let* store = make_store ?session_root () in
   Ok (Runtime_store.raw_traces_dir store session_id)
@@ -74,20 +47,6 @@ let get_raw_trace_files ?session_root ~session_id () =
     |> List.sort String.compare
     |> List.map (fun name -> Filename.concat dir name)
     |> fun paths -> Ok paths
-;;
-
-let get_report ?session_root ~session_id () =
-  let* store = make_store ?session_root () in
-  let path = Runtime_store.report_json_path store session_id in
-  let* raw = Runtime_store.load_text path in
-  parse_runtime_json Runtime.report_of_yojson raw
-;;
-
-let get_proof ?session_root ~session_id () =
-  let* store = make_store ?session_root () in
-  let path = Runtime_store.proof_json_path store session_id in
-  let* raw = Runtime_store.load_text path in
-  parse_runtime_json Runtime.proof_of_yojson raw
 ;;
 
 let list_sessions ?session_root () =
@@ -128,62 +87,6 @@ let list_sessions ?session_root () =
 let get_session ?session_root session_id =
   let* store = make_store ?session_root () in
   Runtime_store.load_session store session_id
-;;
-
-let get_telemetry ?session_root ~session_id () =
-  let* artifact =
-    get_named_artifact ?session_root ~session_id ~name:"runtime-telemetry-json" ()
-  in
-  let* raw =
-    Artifact_service.get_text
-      ?session_root
-      ~session_id
-      ~artifact_id:artifact.artifact_id
-      ()
-  in
-  decode_json_with telemetry_of_json raw
-;;
-
-let get_telemetry_structured ?session_root ~session_id () =
-  let* artifact =
-    get_named_artifact ?session_root ~session_id ~name:"runtime-telemetry-json" ()
-  in
-  let* raw =
-    Artifact_service.get_text
-      ?session_root
-      ~session_id
-      ~artifact_id:artifact.artifact_id
-      ()
-  in
-  decode_json_with structured_telemetry_of_json raw
-;;
-
-let get_evidence ?session_root ~session_id () =
-  let* artifact =
-    get_named_artifact ?session_root ~session_id ~name:"runtime-evidence" ()
-  in
-  let* raw =
-    Artifact_service.get_text
-      ?session_root
-      ~session_id
-      ~artifact_id:artifact.artifact_id
-      ()
-  in
-  decode_json_with evidence_of_json raw
-;;
-
-let get_raw_trace_manifest ?session_root ~session_id () =
-  let* artifact =
-    get_named_artifact ?session_root ~session_id ~name:"runtime-raw-trace-json" ()
-  in
-  let* raw =
-    Artifact_service.get_text
-      ?session_root
-      ~session_id
-      ~artifact_id:artifact.artifact_id
-      ()
-  in
-  parse_runtime_json raw_trace_manifest_of_json raw
 ;;
 
 let get_raw_trace_runs ?session_root ~session_id () =

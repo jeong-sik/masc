@@ -41,11 +41,11 @@ let test_simple_tool () =
         ]
       (fun input ->
          let msg = Yojson.Safe.Util.(input |> member "msg" |> to_string) in
-         Ok { Types.content = msg; _meta = None })
+         Ok { Types.content = msg; content_blocks = None; _meta = None })
   in
   let input = `Assoc [ "msg", `String "hello" ] in
   match Tool.execute tool input with
-  | Ok { content; _meta = _ } -> Alcotest.(check string) "echo output" "hello" content
+  | Ok { content; _ } -> Alcotest.(check string) "echo output" "hello" content
   | Error _ -> Alcotest.fail "Tool execution failed"
 ;;
 
@@ -97,7 +97,7 @@ let test_extend_tools_widens_the_callable_set () =
   @@ fun env ->
   let tool name =
     Tool.create ~name ~description:name ~parameters:[] (fun _ ->
-      Ok { Types.content = name; _meta = None })
+      Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create
@@ -130,7 +130,7 @@ let test_extend_tools_does_not_rebind_an_existing_name () =
   @@ fun env ->
   let tool name body =
     Tool.create ~name ~description:name ~parameters:[] (fun _ ->
-      Ok { Types.content = body; _meta = None })
+      Ok { Types.content = body; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create
@@ -162,7 +162,7 @@ let test_a_widened_tool_reaches_the_next_request () =
   @@ fun env ->
   let tool name =
     Tool.create ~name ~description:name ~parameters:[] (fun _ ->
-      Ok { Types.content = name; _meta = None })
+      Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let agent =
     Agent.create

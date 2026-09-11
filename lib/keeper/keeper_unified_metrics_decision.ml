@@ -28,6 +28,7 @@ let append_decision_record
     ?(usage_resolution : Keeper_usage_resolution.t option = None)
     ?error
     ?terminal_reason
+    ?executed_runtime_id
     () : unit =
   let now_ts = Time_compat.now () in
   let channel =
@@ -127,8 +128,20 @@ let append_decision_record
             (Keeper_turn_terminal.severity_to_string
                terminal_reason.Keeper_turn_terminal.severity) );
         ("terminal_reason_source", `String terminal_reason.source);
-        ("provider_context", provider_context_json ~meta result);
+        ("provider_context", provider_context_json ~meta ?executed_runtime_id result);
         ("tool_surface", tool_surface_json result);
+        ( "tool_call_count",
+          match result with
+          | Some result -> `Int (Keeper_agent_result.tool_call_count result)
+          | None -> `Null );
+        ( "tools_used",
+          match result with
+          | Some result ->
+              `List
+                (List.map
+                   (fun name -> `String name)
+                   (Keeper_agent_result.tool_names result))
+          | None -> `Null );
         ("approval_queue_state", approval_queue_state);
         ("pending_approval_count", pending_approval_count);
         ( "channel",
@@ -342,7 +355,13 @@ let append_decision_record
                  what we know without collapsing skipped/cancelled/partial
                  outcomes into telemetry.outcome=error. *)
               `Assoc [
+                (* Same split as [provider_context]: the lane, then whoever
+                   answered on it. Absent a candidate report the answerer is
+                   unknown, and [null] says so rather than naming the head
+                   runtime (masc#35043). *)
                 ("runtime_id", `String (runtime_id_of_meta meta));
+                ("executed_runtime_id",
+                 Json_util.string_opt_to_json executed_runtime_id);
                 (* The terminal reason is the typed failure projection built at
                    the dispatch boundary. Persist its canonical code directly;
                    free-form provider/error prose is diagnostic data, never a

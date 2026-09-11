@@ -20,6 +20,10 @@ val error_to_string : error -> string
 val identity :
   approval_id:string -> evidence_fingerprint:string -> (identity, error) result
 
+val answered_ask_identity :
+  ask_id:string -> evidence_fingerprint:string -> (identity, error) result
+(** Independent typed Ask provenance; never aliases an approval identity. *)
+
 type admission =
   | Admission_new of Agent_core.Checkpoint.t
   | Admission_resume of Agent_core.Checkpoint.t

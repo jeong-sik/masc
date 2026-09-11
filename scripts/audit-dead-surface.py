@@ -773,8 +773,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 #       the six is also one of the agent entry points below.
 #    3  agent's other run entry points; "no caller in this tree" is not the
 #       same verdict for a library's headline API.
-#    1  mcp_session.reconnect_all -- the capture half of the same pair is
-#       live, so this is a half-wired feature, not a leftover (#34871).
 #    2  exact_output_plan.fingerprint_to_string and
 #       stop_reason_wire.is_unmatched_tool_calls -- an inline test is their
 #       only caller. Dropping the val turns the release build red, so they
@@ -788,7 +786,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # stop_reason_wire's fail-closed predicate was sugar over a variant that
 # pipeline.ml already pattern-matches, and exact_output_plan's fingerprint
 # reader stayed as annotated test support with its val dropped.
-DEAD_EXPORT_BASELINE = 31
+# 31 -> 25, measured on 2026-09-10. The six frozen sessions readers are gone
+# (#34858): their artifact writers were removed in v0.217.x, sessions_store.mli
+# recorded the readers as kept on purpose, and nothing called them. Six exports
+# and the 209-line parser module they alone reached went with them.
+# 25 -> 24, measured on 2026-09-10. mcp_session.reconnect_all is gone: the
+# note above called it half-wired, and the resume side turned out to have no
+# place to call it -- Agent.resume takes its tools from the caller and masc
+# passes config.tools (#34871).
+DEAD_EXPORT_BASELINE = 24
 
 
 def run_ratchet(count: int) -> int:

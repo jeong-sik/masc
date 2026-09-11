@@ -1,0 +1,16 @@
+{
+  "scope": "download_and_platform_signature_only",
+  "installation_executed": false,
+  "service_started": false,
+  "release": "1.4.1",
+  "metadata_url": "https://api.github.com/repos/apple/container/releases/latest",
+  "asset_url": "https://github.com/apple/container/releases/download/1.4.1/container-1.4.1-installer-signed.pkg",
+  "size": 117773865,
+  "sha256": "c0d2716afefbb194c93fae662e9cae7cc186bcbcf746816608ec673dd648a6a4",
+  "digest_verified": true,
+  "pkgutil_exit_code": 0,
+  "publisher": "Developer ID Installer: Apple Inc. - Containerization (UPBK2H6LZM)",
+  "leaf_certificate_sha256": "4519b43d00f55ec63138d403de1f3c542390eae3d82e59c1843846fbdfe14f5b",
+  "gatekeeper_exit_code": 0,
+  "gatekeeper_source": "Notarized Developer ID"
+}

@@ -19,10 +19,10 @@
     the registry observers) are hidden — callers consume only the
     entry points below. *)
 
-val resolve_prompt_markdown_dir :
-  workspace_path:string -> base_path:string -> string
-(** Return the prompt markdown directory,
-    {!Config_dir_resolver.prompts_dir}. *)
+val resolve_prompt_markdown_dir : base_path:string -> string
+(** Return the prompt markdown directory for [base_path],
+    {!Config_dir_resolver.prompts_dir_for_base_path}. Explicit
+    [MASC_CONFIG_DIR] still overrides; the process cwd does not. *)
 
 val bootstrap_runtime :
   workspace_path:string ->

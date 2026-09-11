@@ -41,3 +41,6 @@ val goal_proof_root_layout : t -> (string list, string) result
 val schemas : t -> Types_core.tool_schema list
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
+(** Lookup results are UTF-8 text. A backend returning non-text bytes is a
+    stated lookup failure, never a successful text observation. Binary image
+    evidence is delivered by the snapshot image-block path. *)

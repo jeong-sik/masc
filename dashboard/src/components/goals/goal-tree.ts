@@ -1,3 +1,4 @@
+import { GoalProofDetail } from './goal-proof'
 // Goal Manager — goal-first planning surface with explicit phase, detail, and evidence.
 
 import { html } from 'htm/preact'
@@ -905,6 +906,7 @@ function GoalDetailPanel({
       </div>
 
       <${GoalTaskRelationStrip} node=${selectedNode} />
+      <${GoalProofDetail} proof=${selectedNode.verification} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
       ${selectedNode.phase === 'awaiting_confirmation' || selectedNode.phase === 'completed' ? html`
         <${GoalConfirmationPanel} key=${selectedNode.id} goalId=${selectedNode.id}

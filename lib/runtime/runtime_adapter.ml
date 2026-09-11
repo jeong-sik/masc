@@ -174,25 +174,61 @@ let api_key_from_env key =
   |> Option.value ~default:""
 ;;
 
+let api_key_from_file path =
+  if Filename.is_relative path then
+    Error "API credential file must use an absolute path"
+  else
+    (* Keep filesystem diagnostics private: paths and exception messages can
+       contain credential material supplied by configuration. *)
+    match
+      Fs_compat.load_owned_regular_file_with_snapshot
+        ~ownership_root:(Filename.dirname path) path
+    with
+    | Error _ -> Error "API credential file could not be read as an owned regular file"
+    | Ok None -> Error "API credential file is missing"
+    | Ok (Some { snapshot; _ })
+      when snapshot.owner_uid <> Unix.geteuid () || snapshot.permissions land 0o077 <> 0 ->
+      Error "API credential file must be owned by the current user and private"
+    | Ok (Some { content; _ }) ->
+      let value = String.trim content in
+      if value = "" then Error "API credential file is empty"
+      else
+        let structured_json =
+          try
+            match Yojson.Safe.from_string value with
+            | `Assoc _ | `List _ -> true
+            | _ -> false
+          with Yojson.Json_error _ -> false
+        in
+        if structured_json then
+          Error "API credential file must contain a raw API key, not a JSON credential document"
+        else Ok value
+;;
+
 let api_key_of_credential ?registry_entry (credential : Runtime_schema.credential option) =
   match credential with
-  | Some (Env key) -> api_key_from_env key
-  | Some (Inline value) -> value
-  | Some (File _) -> ""
+  | Some (Env key) -> Ok (api_key_from_env key)
+  | Some (Inline value) -> Ok value
+  | Some (File path) -> api_key_from_file path
   | None ->
-    (match registry_entry with
-     | Some entry ->
-       let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
-       if env = ""
-       then ""
-       else
-         (* NDT-OK: credential materialization is the provider boundary;
-            catalog parsing stays deterministic. *)
-         api_key_from_env env
-     | None -> "")
+    Ok
+      (match registry_entry with
+       | Some entry ->
+         let env = entry.Llm_provider.Provider_registry.defaults.api_key_env in
+         if env = "" then "" else api_key_from_env env
+       | None -> "")
 ;;
 
 (* --- Provider kind resolution --- *)
+
+let resolve_api_key ~provider_id ~credential =
+  let effective = effective_credential_reference ~provider_id credential in
+  match api_key_of_credential effective with
+  | Error _ as error -> error
+  | Ok value when Option.is_some effective && String.trim value = "" ->
+    Error "Required provider credential is unavailable"
+  | Ok value -> Ok (Llm_provider.Secret.of_string value)
+;;
 
 (* CLI subprocess provider kinds were removed in the agent_core pin bump
    (agent_core service-name migration). No provider kind is a subprocess CLI, so a
@@ -444,6 +480,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
     ?max_request_body_bytes
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
+  let ( let* ) = Result.bind in
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   match provider.transport with
@@ -460,7 +497,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
        let request_path =
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in
-       let api_key = api_key_of_credential ?registry_entry provider.credentials in
+       let* api_key = api_key_of_credential ?registry_entry provider.credentials in
        let default_headers = Provider_binding.default_headers_for_kind kind in
        let custom_headers =
          match provider.headers with
@@ -525,6 +562,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
   | Cli _ ->
     (match provider_kind_of_cli_provider provider with
      | Ok kind ->
+       let* api_key = api_key_of_credential ?registry_entry provider.credentials in
        let model_capabilities_override =
          model_capabilities_override_of_model_spec
            ~wire:kind
@@ -538,7 +576,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
             ~provider_id:provider.id
             ~model_id:spec.api_name
             ~base_url:""
-            ~api_key:(api_key_of_credential ?registry_entry provider.credentials)
+            ~api_key
             ~headers:(Option.value ~default:[] provider.headers)
             ?max_context:spec.max_context
             ?supports_tool_choice_override

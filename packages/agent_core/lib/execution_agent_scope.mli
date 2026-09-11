@@ -25,6 +25,7 @@ type tool_result = private
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; outcome : Llm_provider.Types.tool_result_outcome
   }
 
@@ -221,7 +222,7 @@ val execute_phased
        (start_child:(agent_name:string -> (t, error) result)
         -> tool_name:string
         -> input:Yojson.Safe.t
-        -> (string * Llm_provider.Types.tool_result_outcome) * (unit -> unit))
+        -> (string * Llm_provider.Types.content_block list option * Llm_provider.Types.tool_result_outcome) * (unit -> unit))
   -> (execution, error) result
 
 val close_provider_attempt

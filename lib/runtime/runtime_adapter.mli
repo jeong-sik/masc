@@ -15,6 +15,15 @@
     Matching is case-insensitive on the trimmed key. *)
 val is_auth_header_key : string -> bool
 
+(** Uses the dispatch credential alias/registry resolution. A missing required
+    credential is an error; anonymous access is allowed only without an
+    effective credential reference. *)
+val resolve_api_key : provider_id:string -> credential:Runtime_schema.credential option ->
+  (Llm_provider.Secret.t, string) result
+(** Resolve the same protected API-key references used by HTTP bindings, for
+    model discovery before a model has been selected. Errors never contain the
+    credential's contents. This does not authenticate or verify account access. *)
+
 val effective_credential_reference :
   provider_id:string ->
   Runtime_schema.credential option ->
@@ -31,6 +40,12 @@ val binding_to_provider_config
   -> Runtime_schema.binding
   -> (Llm_provider.Provider_config.t, string) result
 (** Materialize one binding into the hot-path {!Llm_provider.Provider_config.t}.
+
+    HTTP file credentials contain one raw API key at an absolute path. The
+    process-owned regular file is read at materialization; whitespace is
+    trimmed. Missing, unreadable, empty, relative, and JSON document references
+    return a safe error without including their path or contents. CLI-owned
+    credentials retain their adapter-specific interpretation.
 
     Resolution chain (no routing):
     - [binding.provider_id] -> {!Runtime_schema.provider_of_id}

@@ -3313,34 +3313,39 @@ let code_scope_axes_of = function
 let code_scope_axes state = code_scope_axes_of state.code_scope
 
 let launch_code_entries_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let dir = state.code_dir in
-  (* Read here, not inside the daemon. The daemon runs later, and the scope it
-     read then was whichever one was current by then -- so a request made in
-     one scope could be sent under another. *)
-  let scope = state.code_scope in
-  let key = (scope, dir) in
-  let run () =
-    let result =
-      try
-        let keeper, repo = code_scope_axes_of scope in
-        Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
-          ~path:dir ()
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.code_entries_inflight then ()
+  else begin
+    state.code_entries_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let dir = state.code_dir in
+    (* Read here, not inside the daemon. The daemon runs later, and the scope it
+       read then was whichever one was current by then -- so a request made in
+       one scope could be sent under another. *)
+    let scope = state.code_scope in
+    let key = (scope, dir) in
+    let run () =
+      let result =
+        try
+          let keeper, repo = code_scope_axes_of scope in
+          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port
+            ~path:dir ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Code_entries_loaded (key, result))
     in
-    enqueue_async mailbox (Code_entries_loaded (key, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_entries_loaded (key, Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.code_entries_inflight <- false;
+        enqueue_async mailbox
+          (Code_entries_loaded (key, Error "Eio switch is unavailable"))
+  end
 
 let launch_code_file_load state ~mailbox ~path =
   match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
@@ -4164,23 +4169,28 @@ let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
         (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_connectors ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.connectors_inflight then ()
+  else begin
+    state.connectors_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_connectors ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Connectors_loaded result)
     in
-    enqueue_async mailbox (Connectors_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.connectors_inflight <- false;
+        enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
@@ -4955,22 +4965,28 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
         (Git_diff_loaded (path, Error "Eio switch is unavailable"))
 
 let launch_harness_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_harness ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.harness_inflight then ()
+  else begin
+    state.harness_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_harness ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Harness_loaded result)
     in
-    enqueue_async mailbox (Harness_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.harness_inflight <- false;
+        enqueue_async mailbox (Harness_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_fusion_runs_load state ~mailbox =
   match state.fusion_runs_inflight with
@@ -5066,66 +5082,81 @@ let launch_fusion_historical_detail_load state ~mailbox ~reference =
   end
 
 let launch_keeper_lanes_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let keeper_result =
-      try Masc_tui_loader.load_keeper_lanes ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.keeper_lanes_inflight then ()
+  else begin
+    state.keeper_lanes_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let keeper_result =
+        try Masc_tui_loader.load_keeper_lanes ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Lanes_loaded keeper_result)
     in
-    enqueue_async mailbox (Lanes_loaded keeper_result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.keeper_lanes_inflight <- false;
+        enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_lanes_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
-  let standalone_generation = state.standalone_lanes_generation in
-  let run () =
-    let standalone_result =
-      try Masc_tui_loader.load_standalone_lanes ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox
-      (Standalone_lanes_loaded (standalone_generation, standalone_result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
+  if state.standalone_lanes_inflight then ()
+  else begin
+    state.standalone_lanes_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
+    let standalone_generation = state.standalone_lanes_generation in
+    let run () =
+      let standalone_result =
+        try Masc_tui_loader.load_standalone_lanes ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
       enqueue_async mailbox
-        (Standalone_lanes_loaded
-           (standalone_generation, Error "Eio switch is unavailable"))
+        (Standalone_lanes_loaded (standalone_generation, standalone_result))
+    in
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.standalone_lanes_inflight <- false;
+        enqueue_async mailbox
+          (Standalone_lanes_loaded
+             (standalone_generation, Error "Eio switch is unavailable"))
+  end
 
 let launch_clients_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  state.clients_surface_generation <- state.clients_surface_generation + 1;
-  let generation = state.clients_surface_generation in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_clients ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.clients_surface_inflight then ()
+  else begin
+    state.clients_surface_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    state.clients_surface_generation <- state.clients_surface_generation + 1;
+    let generation = state.clients_surface_generation in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_clients ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Clients_loaded (generation, result))
     in
-    enqueue_async mailbox (Clients_loaded (generation, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Clients_loaded (generation, Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None ->
+        state.clients_surface_inflight <- false;
+        enqueue_async mailbox
+          (Clients_loaded (generation, Error "Eio switch is unavailable"))
+  end
 
 let launch_lane_runs_load ?before state ~mailbox ~lane_id =
   state.lane_runs_generation <- state.lane_runs_generation + 1;
@@ -11340,6 +11371,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (key, result) ->
+      state.code_entries_inflight <- false;
       if code_scope_path_equal key (state.code_scope, state.code_dir) then (
         match result with
         | Ok entries ->
@@ -12534,8 +12566,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
             | Loading _ | Idle | No_browser | Failed _ -> ())
        | None -> ())
-  | Connectors_loaded result -> (
-      match result with
+  | Connectors_loaded result ->
+      state.connectors_inflight <- false;
+      (match result with
       | Ok snapshot ->
           let previous_id =
             Option.bind state.connectors (fun previous ->
@@ -12757,8 +12790,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.changes_tree_diff <- Some diff;
             state.changes_tree_diff_error <- None
         | Error detail -> state.changes_tree_diff_error <- Some detail)
-  | Lanes_loaded result -> (
-      match result with
+  | Lanes_loaded result ->
+      state.keeper_lanes_inflight <- false;
+      (match result with
       | Ok (snapshot, secrets) ->
           state.lanes <- Some snapshot;
           state.keeper_secrets <- secrets;
@@ -12769,6 +12803,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              reading. *)
           state.lanes_error <- Some detail)
   | Standalone_lanes_loaded (generation, result) ->
+      state.standalone_lanes_inflight <- false;
       if generation = state.standalone_lanes_generation then (
         match result with
         | Ok snapshot ->
@@ -12783,6 +12818,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    (List.length snapshot.Tui_decode.sls_lanes - 1))
         | Error detail -> state.standalone_lanes_error <- Some detail)
   | Clients_loaded (generation, result) ->
+      state.clients_surface_inflight <- false;
       if generation = state.clients_surface_generation then (
         match result with
         | Ok snapshot ->
@@ -12838,8 +12874,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   Some "lane run detail response does not match the requested run"
             | Error detail -> state.lane_run_detail_error <- Some detail)
        | Lanes_run_detail _ | Lanes_overview | Lanes_run_list _ -> ())
-  | Harness_loaded result -> (
-      match result with
+  | Harness_loaded result ->
+      state.harness_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.harness <- Some snapshot;
           state.harness_error <- None;

@@ -883,7 +883,51 @@ def antigravity_context(binary, source, model_id):
         raise SetupError('Antigravity did not return a valid context for the selected model')
 
 
-def prerequisite_menu(binary, dependency):
+class SetupSessionFinished(Exception):
+    """The selected group session finished; the old-group parent must exit."""
+
+
+def docker_account_actions(binary):
+    result = subprocess.run([str(binary), 'docker-account-access'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if (result.returncode or catalog.get('schema') != 'masc.docker_account_actions.v1'
+                or not isinstance(catalog.get('actions'), list)):
+            raise ValueError('invalid actions')
+        return [dict(row, account_action=True) for row in catalog['actions']]
+    except (TypeError, ValueError):
+        raise SetupError('MASC could not inspect this account’s Docker access')
+
+
+def docker_account_action(binary, base_path, port, action):
+    # Native handoff redirects the child journey to the terminal; stdout remains
+    # its own typed outcome, never mixed with the child's interactive output.
+    result = subprocess.run([str(binary), 'docker-account-access', '--execute', action,
+                             '--base-path', str(base_path), '--port', str(port)],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+        if (receipt.get('schema') != 'masc.docker_account_action_result.v1'
+                or receipt.get('readiness') != 'not_checked'):
+            raise ValueError('invalid result')
+        state = receipt['status']
+        if state not in ('failed', 'recheck_required', 'session_finished', 'reauthentication_required'):
+            raise ValueError('unknown result')
+        if state == 'session_finished' and result.returncode == 0:
+            raise SetupSessionFinished()
+        if state == 'failed' or state == 'reauthentication_required' or result.returncode:
+            reason = receipt.get('reason')
+            print(terminal_text(reason) if isinstance(reason, str) and reason.strip()
+                  else 'Docker account setup did not complete. Saved model choices are kept; retry when ready.', file=sys.stderr)
+        else:
+            print('Account access updated. Choose Continue saved setup to enter the new group session.', file=sys.stderr)
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Docker account setup did not return a valid result; recheck account access')
+    return True
+
+
+def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
@@ -893,6 +937,11 @@ def prerequisite_menu(binary, dependency):
     except (TypeError, ValueError):
         raise SetupError('MASC could not inspect installation actions for this computer')
     actions = catalog['actions']
+    if dependency == 'docker' and base_path is not None:
+        account_actions = docker_account_actions(binary)
+        for row in account_actions:
+            print(terminal_text(row['detail']), file=sys.stderr)
+        actions = account_actions + actions
     labels = [row['label'] + (' · administrator permission' if row['requires_admin'] else '') for row in actions]
     choice = pick('Install or start the selected prerequisite', labels + ['Refresh detection', 'Back to setup choices'])[0]
     if choice == len(actions) + 1:
@@ -902,6 +951,8 @@ def prerequisite_menu(binary, dependency):
     selected = actions[choice]
     print(terminal_text(selected['detail']), file=sys.stderr)
     print('Source: ' + terminal_text(selected['source_url']), file=sys.stderr)
+    if selected.get('account_action'):
+        return docker_account_action(binary, base_path, port, selected['id'])
     # The selected native action owns commands and privilege boundaries. Child
     # password prompts and vendor output keep the terminal, not a hidden pipe.
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']],
@@ -1525,7 +1576,64 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
-def select_sandbox(binary, base_path):
+def select_setup_server(binary, base_path, port, require_new_owner=False):
+    while True:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            observed = json.loads(response.stdout)
+            if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
+                raise ValueError('invalid server observation')
+        except (TypeError, ValueError):
+            raise SetupError('The setup port could not be inspected. Existing servers were preserved.')
+        state = observed.get('status')
+        if state == 'free':
+            return port
+        if state == 'same_workspace':
+            server_version = observed['server_version']
+            choices = [('use', 'Continue with this running workspace'),
+                       ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
+                       ('later', 'Finish later')]
+            if require_new_owner:
+                print('This terminal has refreshed Docker access. The existing server keeps its earlier account groups; restart it to prepare the sandbox in this session.', file=sys.stderr)
+                choices = [('stop', 'Restart this workspace server with the refreshed Docker access'),
+                           ('later', 'Finish later and keep the existing server')]
+            elif server_version != observed['installed_version']:
+                choices[0], choices[1] = choices[1], choices[0]
+            selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
+                                    [label for _, label in choices])[0]][0]
+            if selected == 'use':
+                return port
+            if selected == 'later':
+                raise SetupError('setup paused; the existing workspace server was preserved')
+            result = subprocess.run([str(binary), 'setup-stop-previous-owner', '--base-path', str(base_path),
+                                     '--port', str(port), '--expected-version', server_version],
+                                    stdout=subprocess.PIPE, text=True)
+            try:
+                receipt = json.loads(result.stdout)
+                if result.returncode:
+                    if receipt.get('schema') == 'masc.setup_server_error.v1':
+                        print(terminal_text(receipt['error']), file=sys.stderr)
+                        return None
+                    raise ValueError('invalid error')
+                if receipt.get('schema') != 'masc.setup_server_stopped.v1' or receipt.get('owner_stopped') is not True:
+                    raise ValueError('invalid shutdown receipt')
+            except (TypeError, KeyError, ValueError):
+                raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
+            continue  # server or port might have changed during graceful drain
+        if state not in ('other_workspace', 'unknown_server'):
+            raise SetupError('MASC returned an unknown server observation')
+        if state == 'other_workspace':
+            print('Port ' + str(port) + ' belongs to ' + terminal_text(observed['server_workspace']), file=sys.stderr)
+        else:
+            print('Another service is using port ' + str(port), file=sys.stderr)
+        suggested = observed.get('suggested_port')
+        if not positive_integer(suggested) or suggested > 65535:
+            raise SetupError('MASC could not find an unused local port')
+        if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
+            raise SetupError('setup paused; existing services were preserved')
+        port = suggested
+def select_sandbox(binary, base_path, port=8945):
     advanced = False
     names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
              'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
@@ -1558,7 +1666,7 @@ def select_sandbox(binary, base_path):
         row = rows[action]
         if row['state'] != 'service_ready':
             print(terminal_text(row['reason']), file=sys.stderr)
-            prerequisite_menu(binary, row['id'])
+            prerequisite_menu(binary, row['id'], base_path=base_path, port=port)
             continue
         arguments = list(row['setup_args'])
         configured = catalog.get('configured_selection')
@@ -1615,7 +1723,15 @@ def journey(binary, base_path, port, timeout, resume=False):
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
-    sandbox_args = select_sandbox(binary, base)
+    return sandbox_journey(binary, base, port)
+
+
+def sandbox_journey(binary, base, port, refresh_owner=False):
+    if refresh_owner:
+        port = select_setup_server(binary, base, port, require_new_owner=True)
+        if port is None:
+            return 1
+    sandbox_args = select_sandbox(binary, base, port=port)
     if sandbox_args is None:
         print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
         return 0
@@ -1638,6 +1754,7 @@ def main():
     parser.add_argument('--binary', required=True)
     parser.add_argument('--base-path')
     parser.add_argument('--journey', action='store_true')
+    parser.add_argument('--sandbox-step', action='store_true', help='continue saved model setup at the sandbox step')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--port', type=int, default=8945)
     parser.add_argument('--spec')
@@ -1651,12 +1768,14 @@ def main():
     parser.add_argument('--discovery-timeout', type=float, default=10)
     args = parser.parse_args()
     try:
-        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check, args.journey))) != 1:
+        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check, args.journey, args.sandbox_step))) != 1:
             raise SetupError('choose exactly one setup operation')
         if not args.journey and not args.base_path:
             raise SetupError('--base-path is required for this setup operation')
         if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
             raise SetupError('discovery timeout must be positive')
+        if args.sandbox_step:
+            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port, refresh_owner=True))
         if args.journey:
             raise SystemExit(journey(args.binary, args.base_path, args.port, args.discovery_timeout, args.resume))
         if args.workspace_check:
@@ -1672,6 +1791,8 @@ def main():
         else:
             result = configure_many(args.binary, args.base_path, [json.loads(Path(args.spec).read_text())], verify=args.verify)
         print(json.dumps(result, ensure_ascii=False))
+    except SetupSessionFinished:
+        raise SystemExit(0)
     except (SetupError, OSError, ValueError, subprocess.SubprocessError) as error:
         raise SystemExit('runtime setup failed: ' + str(error))
 

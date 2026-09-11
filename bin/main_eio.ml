@@ -1230,7 +1230,7 @@ let front_door_cmd_exit
   with
   | Masc_front_door.Serve -> serve ()
   | Masc_front_door.Open_tui _ ->
-    Masc_cli_onboarding.run ~base_path ~port ~resume:true
+    Masc_cli_onboarding.run ~base_path ~port ~resume:true ~sandbox_step:false
 
 let start_cmd =
   let doc =
@@ -2875,7 +2875,7 @@ let setup_cmd =
     | `Error _ as error -> error
     | `Ok (profile, backend) ->
       if not no_tui && profile = None && backend = None && network_mode = None && stdio_is_a_terminal () then
-        `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
+        `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false ~sandbox_step:false)
       else
         let resolved = match base_path with
           | Some path -> Some path
@@ -2941,6 +2941,17 @@ let sandbox_install_docker_verified_cmd =
   Cmd.v (Cmd.info "sandbox-install-docker-verified" ~doc:"Internal privileged installation of the selected verified Docker package.")
     Term.(const run $ source $ sha256 $ size)
 
+let docker_account_access_cmd =
+  let action = Arg.(value & opt (some string) None & info ["execute"] ~docv:"ACTION") in
+  Cmd.v (Cmd.info "docker-account-access" ~doc:"Select ordinary-account Docker access or continue saved setup in a group session.")
+    Term.(const (fun action base_path port -> Masc_cli_docker_session.run ~action ~base_path ~port) $ action $ run_base_path $ port)
+
+let docker_session_resume_cmd =
+  let base = Arg.(required & opt (some string) None & info ["base-path"] ~docv:"PATH") in
+  let expected_uid = Arg.(required & opt (some int) None & info ["expected-uid"] ~docv:"UID") in
+  Cmd.v (Cmd.info "docker-session-resume" ~doc:"Internal same-account continuation after Docker group selection.")
+    Term.(const (fun base_path port expected_uid -> Masc_cli_docker_session.resume ~base_path ~port ~expected_uid) $ base $ port $ expected_uid)
+
 let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
@@ -2978,6 +2989,8 @@ let cmd =
     ; sandbox_image_cmd
     ; sandbox_install_apple_verified_cmd
     ; sandbox_install_docker_verified_cmd
+    ; docker_account_access_cmd
+    ; docker_session_resume_cmd
     ; prerequisite_actions_cmd
     ; setup_cmd
     ; setup_preflight_cmd

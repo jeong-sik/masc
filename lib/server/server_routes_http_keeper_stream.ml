@@ -1470,6 +1470,8 @@ let keeper_request_terminal_status_is_routine = function
 type keeper_stream_worker_event =
   | Stream_runtime_attempt_started of
       Keeper_chat_events.runtime_attempt_scope_disposition
+      * string
+      * int
   | Stream_event of int * Agent_core.Types.sse_event
   | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
@@ -1832,12 +1834,15 @@ let process_single_turn ~user_row_origin ~submission
   let on_tool_stream_observation observation =
     let result =
       match observation with
-      | Keeper_hooks_agent_core.Runtime_attempt_started _ ->
+      | Keeper_hooks_agent_core.Runtime_attempt_started
+          { runtime_id; lane_attempt_index; _ } ->
         Keeper_stream_media_accum.start_runtime_attempt worker_media_accum;
         let previous_scope =
           Keeper_stream_tool_accum.start_runtime_attempt worker_tool_accum
         in
-        push_worker_event (Stream_runtime_attempt_started previous_scope);
+        push_worker_event
+          (Stream_runtime_attempt_started
+             (previous_scope, runtime_id, lane_attempt_index));
         Ok ()
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
@@ -2480,10 +2485,12 @@ let process_single_turn ~user_row_origin ~submission
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
-    | `Worker_event (Stream_runtime_attempt_started previous_scope) ->
+    | `Worker_event
+        (Stream_runtime_attempt_started
+           (previous_scope, runtime_id, attempt_index)) ->
         let translated =
           Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
-            ~previous_scope bridge_state
+            ~runtime_id ~attempt_index ~previous_scope bridge_state
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state

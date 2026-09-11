@@ -176,8 +176,12 @@ let keeper_chat_event_to_json event =
       ([ "message", `String message ]
        @ json_opt "request_id" (Option.map (fun value -> `String value) request_id))
   | Agent_core_stream_connected -> type_tag "agent_core_stream_connected" []
-  | Agent_core_runtime_attempt_started ->
-    type_tag "agent_core_runtime_attempt_started" []
+  | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
+    type_tag
+      "agent_core_runtime_attempt_started"
+      (json_opt "runtime_id" (Option.map (fun value -> `String value) runtime_id)
+       @ json_opt "attempt_index"
+           (Option.map (fun value -> `Int value) attempt_index))
   | Agent_core_stream_message_start { provider_message_id; model; usage } ->
     type_tag
       "agent_core_stream_message_start"
@@ -354,7 +358,10 @@ let keeper_chat_event_of_json json =
            ; request_id = json |> member "request_id" |> to_string_option
            })
     | "agent_core_stream_connected" -> Ok Agent_core_stream_connected
-    | "agent_core_runtime_attempt_started" -> Ok Agent_core_runtime_attempt_started
+    | "agent_core_runtime_attempt_started" ->
+      let runtime_id = json |> member "runtime_id" |> to_string_option in
+      let attempt_index = json |> member "attempt_index" |> to_int_option in
+      Ok (Agent_core_runtime_attempt_started { runtime_id; attempt_index })
     | "agent_core_stream_message_start" ->
       let* usage = opt_member json "usage" api_usage_of_json in
       Ok

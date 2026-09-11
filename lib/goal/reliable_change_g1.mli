@@ -11,6 +11,7 @@ type scenario =
   | Usage_unreported
 
 val scenario_to_string : scenario -> string
+val scenario_of_string : string -> (scenario, string) result
 val scenario_of_string_opt : string -> scenario option
 
 type live_scenario =
@@ -19,6 +20,7 @@ type live_scenario =
   | Live_retry_success
 
 val live_scenario_to_string : live_scenario -> string
+val live_scenario_of_string : string -> (live_scenario, string) result
 val live_scenario_of_string_opt : string -> live_scenario option
 
 type usage_scope =
@@ -26,6 +28,7 @@ type usage_scope =
   | Cumulative_request_snapshot
 
 val usage_scope_to_string : usage_scope -> string
+val usage_scope_of_string : string -> (usage_scope, string) result
 val usage_scope_of_string_opt : string -> usage_scope option
 
 type reported_usage =

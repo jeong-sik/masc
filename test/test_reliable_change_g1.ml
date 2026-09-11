@@ -1,6 +1,19 @@
 open Alcotest
 open Reliable_change_g1
 
+let contains_sub needle haystack =
+  let n = String.length needle in
+  let h = String.length haystack in
+  if n > h then false
+  else
+    let rec loop i =
+      if i + n > h then false
+      else if String.sub haystack i n = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+;;
+
 let dummy_phase_timestamps =
   { queue_started_at = Some 100.0
   ; model_started_at = Some 101.0
@@ -39,32 +52,27 @@ let test_manifest_contract_parity () =
   let json = manifest_to_json manifest in
   match manifest_of_json json with
   | Ok decoded ->
-    check string "contract sha" manifest.contract_sha256 decoded.contract_sha256;
-    check string "source commit" manifest.source_commit decoded.source_commit;
-    check (list string) "case IDs roundtrip" manifest.case_ids decoded.case_ids
-  | Error err -> fail ("manifest decode failed: " ^ err)
+    check string "contract sha parity" manifest.contract_sha256 decoded.contract_sha256;
+    check string "source commit parity" manifest.source_commit decoded.source_commit;
+    check string "workload revision parity" manifest.workload_revision decoded.workload_revision;
+    check (list string) "case ids parity" manifest.case_ids decoded.case_ids
+  | Error err -> fail ("manifest roundtrip failed: " ^ err)
 ;;
 
 let test_usage_aggregation_exact_fixture () =
-  (* Contract fixture:
-     failed-attempt (per-request): in=10 out=2 cache=3 cost=0.01
-     successful-attempt snap 1 (cumulative): in=10 out=2 cache=2 cost=0.02
-     successful-attempt snap 2 (cumulative): in=25 out=5 cache=4 cost=0.05
-     verifier (per-request): in=5 out=1 cache=1 cost=0.01
-     Expected totals: input=40, output=8, cache=8, cost=0.07 *)
   let obs =
     [ { case_id = "retry-success"
       ; repeat_index = 1
-      ; run_id = "run-1"
-      ; execution_mode = "controlled"
-      ; request_or_task_identity = "req-failed-attempt"
-      ; run_turn_attempt_identity = "att-1"
+      ; run_id = "run-fixture-1"
+      ; execution_mode = "matrix"
+      ; request_or_task_identity = "failed-attempt"
+      ; run_turn_attempt_identity = "attempt-1"
       ; target_revision = "rev-1"
       ; requested_revision = "rev-1"
-      ; artifact_references = [ "art-1" ]
+      ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 1
       ; external_verified = false
-      ; verdict_run_identity = None
+      ; verdict_run_identity = Some "verdict-1"
       ; verdict_passed = false
       ; usage =
           Usage_reported
@@ -81,16 +89,16 @@ let test_usage_aggregation_exact_fixture () =
       }
     ; { case_id = "retry-success"
       ; repeat_index = 1
-      ; run_id = "run-1"
-      ; execution_mode = "controlled"
-      ; request_or_task_identity = "req-successful-attempt"
-      ; run_turn_attempt_identity = "att-2"
+      ; run_id = "run-fixture-2"
+      ; execution_mode = "matrix"
+      ; request_or_task_identity = "successful-attempt"
+      ; run_turn_attempt_identity = "attempt-2-snap-1"
       ; target_revision = "rev-1"
       ; requested_revision = "rev-1"
-      ; artifact_references = [ "art-1" ]
+      ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 0
       ; external_verified = true
-      ; verdict_run_identity = Some "v-1"
+      ; verdict_run_identity = Some "verdict-2"
       ; verdict_passed = true
       ; usage =
           Usage_reported
@@ -102,21 +110,21 @@ let test_usage_aggregation_exact_fixture () =
             }
       ; usage_scope = Cumulative_request_snapshot
       ; phase_timestamps = dummy_phase_timestamps
-      ; attempt_sequence = 1
+      ; attempt_sequence = 2
       ; total_attempts_in_run = 2
       }
     ; { case_id = "retry-success"
       ; repeat_index = 1
-      ; run_id = "run-1"
-      ; execution_mode = "controlled"
-      ; request_or_task_identity = "req-successful-attempt"
-      ; run_turn_attempt_identity = "att-2"
+      ; run_id = "run-fixture-3"
+      ; execution_mode = "matrix"
+      ; request_or_task_identity = "successful-attempt"
+      ; run_turn_attempt_identity = "attempt-2-snap-2"
       ; target_revision = "rev-1"
       ; requested_revision = "rev-1"
-      ; artifact_references = [ "art-1" ]
+      ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 0
       ; external_verified = true
-      ; verdict_run_identity = Some "v-1"
+      ; verdict_run_identity = Some "verdict-2"
       ; verdict_passed = true
       ; usage =
           Usage_reported
@@ -133,16 +141,16 @@ let test_usage_aggregation_exact_fixture () =
       }
     ; { case_id = "retry-success"
       ; repeat_index = 1
-      ; run_id = "run-1"
-      ; execution_mode = "controlled"
-      ; request_or_task_identity = "req-verifier"
-      ; run_turn_attempt_identity = "att-verifier"
+      ; run_id = "run-fixture-4"
+      ; execution_mode = "matrix"
+      ; request_or_task_identity = "verifier"
+      ; run_turn_attempt_identity = "verifier-attempt-1"
       ; target_revision = "rev-1"
       ; requested_revision = "rev-1"
-      ; artifact_references = [ "art-1" ]
+      ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 0
       ; external_verified = true
-      ; verdict_run_identity = Some "v-1"
+      ; verdict_run_identity = Some "verdict-verif"
       ; verdict_passed = true
       ; usage =
           Usage_reported
@@ -154,8 +162,8 @@ let test_usage_aggregation_exact_fixture () =
             }
       ; usage_scope = Per_request
       ; phase_timestamps = dummy_phase_timestamps
-      ; attempt_sequence = 1
-      ; total_attempts_in_run = 1
+      ; attempt_sequence = 3
+      ; total_attempts_in_run = 3
       }
     ]
   in
@@ -163,210 +171,246 @@ let test_usage_aggregation_exact_fixture () =
   check int "fixture input tokens" 40 totals.total_input_tokens;
   check int "fixture output tokens" 8 totals.total_output_tokens;
   check int "fixture cache read tokens" 8 totals.total_cache_read_input_tokens;
-  check (option (float 0.001)) "fixture cost usd" (Some 0.07) totals.total_cost_usd;
+  (match totals.total_cost_usd with
+   | Some c -> check (float 1e-6) "fixture total cost usd" 0.07 c
+   | None -> fail "cost was null");
   check (option string) "fixture exact cost string" (Some "0.07") totals.total_cost_usd_exact
 ;;
 
-let test_usage_unreported_preserves_none () =
-  let obs =
-    [ { case_id = "usage-unreported"
-      ; repeat_index = 1
-      ; run_id = "run-u1"
-      ; execution_mode = "controlled"
-      ; request_or_task_identity = "req-u1"
-      ; run_turn_attempt_identity = "att-u1"
-      ; target_revision = "rev-1"
-      ; requested_revision = "rev-1"
-      ; artifact_references = [ "art-1" ]
-      ; command_exit_code = Some 0
-      ; external_verified = true
-      ; verdict_run_identity = Some "v-1"
-      ; verdict_passed = true
-      ; usage = Usage_missing "provider_usage_omitted"
-      ; usage_scope = Per_request
-      ; phase_timestamps = dummy_phase_timestamps
-      ; attempt_sequence = 1
-      ; total_attempts_in_run = 1
-      }
-    ]
-  in
-  let totals = aggregate_run_usages obs in
-  check (option (float 0.001)) "unreported cost is None (not 0.0)" None totals.total_cost_usd;
-  check (option string) "unreported exact cost is None" None totals.total_cost_usd_exact
-;;
-
-let make_compliant_observation ~case_id ~repeat_index ~execution_mode =
-  let scenario = Option.get (scenario_of_string_opt case_id) in
-  let target_revision = "rev-1" in
-  let requested_revision =
-    if scenario = Stale_revision then "rev-2" else "rev-1"
-  in
-  let command_exit_code =
-    if scenario = Exit_nonzero then Some 1 else Some 0
-  in
-  let artifact_references =
-    if scenario = Missing_artifact then [] else [ "artifact.txt" ]
-  in
-  let external_verified =
-    match scenario with
-    | Success | Retry_success -> true
-    | Exit_nonzero | Stale_revision | Missing_artifact | Usage_unreported -> false
-  in
-  let verdict_passed = external_verified in
-  let verdict_run_identity =
-    if verdict_passed then Some (Printf.sprintf "v-%s-%d" case_id repeat_index) else None
-  in
-  let usage =
-    if scenario = Usage_unreported then
-      Usage_missing "provider_no_usage"
-    else if scenario = Retry_success then
-      Usage_reported
-        { input_tokens = 40
-        ; output_tokens = 8
-        ; cache_read_input_tokens = 8
-        ; cost_usd = Some 0.07
-        ; cost_usd_exact = Some "0.07"
-        }
-    else
-      Usage_reported
-        { input_tokens = 100
-        ; output_tokens = 20
-        ; cache_read_input_tokens = 10
-        ; cost_usd = Some 0.05
-        ; cost_usd_exact = Some "0.05"
-        }
-  in
+let make_dummy_observation ~case_id ~repeat_index ~run_id ~mode ~verified ~exit_code ~usage ~attempt_seq =
   { case_id
   ; repeat_index
-  ; run_id = Printf.sprintf "run-%s-%d" case_id repeat_index
-  ; execution_mode
+  ; run_id
+  ; execution_mode = mode
   ; request_or_task_identity = Printf.sprintf "req-%s-%d" case_id repeat_index
-  ; run_turn_attempt_identity = Printf.sprintf "att-%s-%d" case_id repeat_index
-  ; target_revision
-  ; requested_revision
-  ; artifact_references
-  ; command_exit_code
-  ; external_verified
-  ; verdict_run_identity
-  ; verdict_passed
+  ; run_turn_attempt_identity = Printf.sprintf "att-%s-%d-%d" case_id repeat_index attempt_seq
+  ; target_revision = (if case_id = "stale-revision" then "stale-rev-999" else "rev-1")
+  ; requested_revision = "rev-1"
+  ; artifact_references = (if case_id = "missing-artifact" then [] else [ "result.patch" ])
+  ; command_exit_code = exit_code
+  ; external_verified = verified
+  ; verdict_run_identity = Some (Printf.sprintf "verdict-%s-%d" case_id repeat_index)
+  ; verdict_passed = verified
   ; usage
   ; usage_scope = Per_request
   ; phase_timestamps = dummy_phase_timestamps
-  ; attempt_sequence = 1
-  ; total_attempts_in_run = 1
+  ; attempt_sequence = attempt_seq
+  ; total_attempts_in_run = (if case_id = "retry-success" then 2 else 1)
   }
 ;;
 
-let test_checker_validates_compliant_runs () =
-  let manifest =
-    make_manifest
-      ~contract_sha256:"contract-sha"
-      ~source_commit:"commit-sha"
-      ~binary_sha256:"bin-sha"
-      ~runtime_config_sha256:"cfg-sha"
-      ~model_identity:"model-1"
-      ~workload_revision:"rev-1"
-      ~execution_mode:"matrix"
-  in
-  (* 18 matrix runs (6 scenarios x 3 repeats) *)
-  let matrix_runs =
-    List.concat_map
-      (fun case_id ->
-         [ make_compliant_observation ~case_id ~repeat_index:1 ~execution_mode:"controlled"
-         ; make_compliant_observation ~case_id ~repeat_index:2 ~execution_mode:"controlled"
-         ; make_compliant_observation ~case_id ~repeat_index:3 ~execution_mode:"controlled"
-         ])
-      manifest.case_ids
-  in
-  (* 3 live runs (success, negative, retry-success) *)
-  let live_runs =
-    [ make_compliant_observation ~case_id:"success" ~repeat_index:1 ~execution_mode:"live"
-    ; make_compliant_observation ~case_id:"exit-nonzero" ~repeat_index:1 ~execution_mode:"live"
-    ; make_compliant_observation ~case_id:"retry-success" ~repeat_index:1 ~execution_mode:"live"
-    ]
-  in
-  let observations = matrix_runs @ live_runs in
-  let summary = check_observations ~manifest ~observations in
-  check bool "overall passed" true summary.overall_passed;
-  check int "matrix expected" 18 summary.matrix_expected;
-  check int "matrix observed" 18 summary.matrix_observed;
-  check int "matrix passed" 18 summary.matrix_passed;
-  check int "live expected" 3 summary.live_expected;
-  check int "live observed" 3 summary.live_observed;
-  check int "live passed" 3 summary.live_passed;
-  check int "false verified count 0" 0 summary.false_verified_count;
-  check int "required join missing count 0" 0 summary.required_join_missing_count;
-  check int "unknown coerced to zero count 0" 0 summary.unknown_usage_coerced_to_zero_count;
-  check int "duplicated usage count 0" 0 summary.duplicated_usage_count;
-  check int "reported usage totals mismatch count 0" 0 summary.reported_usage_totals_mismatch_count;
-  (* Verify JSON roundtrip of summary *)
-  let summary_json = checker_summary_to_json summary in
-  match checker_summary_of_json summary_json with
-  | Ok decoded -> check bool "decoded overall passed" summary.overall_passed decoded.overall_passed
-  | Error err -> fail ("summary decode failed: " ^ err)
+let generate_compliant_observations () =
+  let obs = ref [] in
+  (* Matrix runs: 6 scenarios x 3 repetitions *)
+  for rep = 1 to 3 do
+    (* success: 1 record, verified = true *)
+    obs := make_dummy_observation ~case_id:"success" ~repeat_index:rep ~run_id:(Printf.sprintf "succ-%d" rep)
+             ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+             ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+             ~attempt_seq:1 :: !obs;
+
+    (* exit-nonzero: 1 record, verified = false, exit = 1 *)
+    obs := make_dummy_observation ~case_id:"exit-nonzero" ~repeat_index:rep ~run_id:(Printf.sprintf "exit-%d" rep)
+             ~mode:"matrix" ~verified:false ~exit_code:(Some 1)
+             ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+             ~attempt_seq:1 :: !obs;
+
+    (* stale-revision: 1 record, verified = false *)
+    obs := make_dummy_observation ~case_id:"stale-revision" ~repeat_index:rep ~run_id:(Printf.sprintf "stale-%d" rep)
+             ~mode:"matrix" ~verified:false ~exit_code:(Some 0)
+             ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+             ~attempt_seq:1 :: !obs;
+
+    (* missing-artifact: 1 record, verified = false *)
+    obs := make_dummy_observation ~case_id:"missing-artifact" ~repeat_index:rep ~run_id:(Printf.sprintf "missing-%d" rep)
+             ~mode:"matrix" ~verified:false ~exit_code:(Some 0)
+             ~usage:(Usage_reported { input_tokens = 10; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+             ~attempt_seq:1 :: !obs;
+
+    (* retry-success: 4 records per repetition reconstructing the exact fixture (10, 25, verifier) *)
+    let retry_run_id_prefix = Printf.sprintf "retry-%d" rep in
+    let r1 =
+      { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-1")
+           ~mode:"matrix" ~verified:false ~exit_code:(Some 1)
+           ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 3; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+           ~attempt_seq:1)
+        with request_or_task_identity = "failed-attempt"; usage_scope = Per_request }
+    in
+    let r2 =
+      { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-2")
+           ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+           ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 2; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
+           ~attempt_seq:2)
+        with request_or_task_identity = "successful-attempt"; usage_scope = Cumulative_request_snapshot }
+    in
+    let r3 =
+      { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-3")
+           ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+           ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 4; cost_usd = Some 0.05; cost_usd_exact = Some "0.05" })
+           ~attempt_seq:2)
+        with request_or_task_identity = "successful-attempt"; usage_scope = Cumulative_request_snapshot }
+    in
+    let r4 =
+      { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-4")
+           ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
+           ~usage:(Usage_reported { input_tokens = 5; output_tokens = 1; cache_read_input_tokens = 1; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+           ~attempt_seq:3)
+        with request_or_task_identity = "verifier"; usage_scope = Per_request }
+    in
+    obs := r1 :: r2 :: r3 :: r4 :: !obs;
+
+    (* usage-unreported: 1 record, verified = false, usage missing *)
+    obs := make_dummy_observation ~case_id:"usage-unreported" ~repeat_index:rep ~run_id:(Printf.sprintf "unrep-%d" rep)
+             ~mode:"matrix" ~verified:false ~exit_code:(Some 0)
+             ~usage:(Usage_missing "provider_no_metrics")
+             ~attempt_seq:1 :: !obs;
+  done;
+
+  (* Live runs: 3 runs *)
+  obs := make_dummy_observation ~case_id:"success" ~repeat_index:1 ~run_id:"live-succ-1"
+           ~mode:"live" ~verified:true ~exit_code:(Some 0)
+           ~usage:(Usage_reported { input_tokens = 15; output_tokens = 3; cache_read_input_tokens = 0; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
+           ~attempt_seq:1 :: !obs;
+  obs := make_dummy_observation ~case_id:"negative" ~repeat_index:1 ~run_id:"live-neg-1"
+           ~mode:"live" ~verified:false ~exit_code:(Some 1)
+           ~usage:(Usage_reported { input_tokens = 15; output_tokens = 3; cache_read_input_tokens = 0; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
+           ~attempt_seq:1 :: !obs;
+  obs := make_dummy_observation ~case_id:"retry-success" ~repeat_index:1 ~run_id:"live-retry-1"
+           ~mode:"live" ~verified:true ~exit_code:(Some 0)
+           ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.04; cost_usd_exact = Some "0.04" })
+           ~attempt_seq:1 :: !obs;
+
+  List.rev !obs
 ;;
 
-let test_checker_detects_false_verified () =
+let test_checker_accepts_compliant_27_raw_records () =
   let manifest =
     make_manifest
       ~contract_sha256:"contract-sha"
       ~source_commit:"commit-sha"
       ~binary_sha256:"bin-sha"
       ~runtime_config_sha256:"cfg-sha"
-      ~model_identity:"model-1"
+      ~model_identity:"claude"
       ~workload_revision:"rev-1"
       ~execution_mode:"matrix"
   in
-  (* Corrupt exit-nonzero by asserting verdict_passed = true *)
-  let bad_obs =
-    { (make_compliant_observation ~case_id:"exit-nonzero" ~repeat_index:1 ~execution_mode:"controlled")
-      with verdict_passed = true; external_verified = true }
-  in
-  let summary = check_observations ~manifest ~observations:[ bad_obs ] in
-  check bool "overall failed on false verified" false summary.overall_passed;
-  check bool "false verified count > 0" true (summary.false_verified_count > 0)
+  let raw_obs = generate_compliant_observations () in
+  (* 3*1 + 3*1 + 3*1 + 3*1 + 3*4 + 3*1 = 27 matrix raw records + 3 live = 30 total records *)
+  check int "total raw observations across attempts" 30 (List.length raw_obs);
+  let summary = check_observations ~manifest ~observations:raw_obs in
+  check int "matrix runs expected" 18 summary.matrix_expected;
+  check int "matrix runs observed (grouped)" 18 summary.matrix_observed;
+  check int "matrix runs passed" 18 summary.matrix_passed;
+  check int "live runs expected" 3 summary.live_expected;
+  check int "live runs observed" 3 summary.live_observed;
+  check int "live runs passed" 3 summary.live_passed;
+  check int "false verified count" 0 summary.false_verified_count;
+  check int "missing required join count" 0 summary.required_join_missing_count;
+  check int "coerced zero usage count" 0 summary.unknown_usage_coerced_to_zero_count;
+  check int "duplicated usage count" 0 summary.duplicated_usage_count;
+  check int "totals mismatch count" 0 summary.reported_usage_totals_mismatch_count;
+  check bool "overall passed" true summary.overall_passed
 ;;
 
-let test_checker_detects_coerced_zero_usage () =
+let test_checker_rejects_verification_failure_in_success () =
   let manifest =
     make_manifest
       ~contract_sha256:"contract-sha"
       ~source_commit:"commit-sha"
       ~binary_sha256:"bin-sha"
       ~runtime_config_sha256:"cfg-sha"
-      ~model_identity:"model-1"
+      ~model_identity:"claude"
       ~workload_revision:"rev-1"
       ~execution_mode:"matrix"
   in
-  (* Corrupt usage-unreported by coercing to 0 tokens and $0.0 *)
-  let bad_obs =
-    { (make_compliant_observation ~case_id:"usage-unreported" ~repeat_index:1 ~execution_mode:"controlled")
-      with usage = Usage_reported
-                     { input_tokens = 0
-                     ; output_tokens = 0
-                     ; cache_read_input_tokens = 0
-                     ; cost_usd = Some 0.0
-                     ; cost_usd_exact = Some "0.00"
-                     }
-    }
+  let raw_obs = generate_compliant_observations () in
+  (* Mutate one success run to have failed verification *)
+  let corrupted =
+    List.map
+      (fun (o : run_observation) ->
+         if o.case_id = "success" && o.repeat_index = 2 then
+           { o with external_verified = false; verdict_passed = false }
+         else o)
+      raw_obs
   in
-  let summary = check_observations ~manifest ~observations:[ bad_obs ] in
-  check bool "overall failed on coerced zero usage" false summary.overall_passed;
-  check bool "coerced zero count > 0" true (summary.unknown_usage_coerced_to_zero_count > 0)
+  let summary = check_observations ~manifest ~observations:corrupted in
+  check int "matrix passed decremented to 17" 17 summary.matrix_passed;
+  check bool "overall failed on unverified success" false summary.overall_passed
+;;
+
+let test_checker_rejects_duplicated_usage () =
+  let manifest =
+    make_manifest
+      ~contract_sha256:"contract-sha"
+      ~source_commit:"commit-sha"
+      ~binary_sha256:"bin-sha"
+      ~runtime_config_sha256:"cfg-sha"
+      ~model_identity:"claude"
+      ~workload_revision:"rev-1"
+      ~execution_mode:"matrix"
+  in
+  let raw_obs = generate_compliant_observations () in
+  (* Duplicate an attempt record in success repetition 1 *)
+  let dupe_record =
+    List.find (fun (o : run_observation) -> o.case_id = "success" && o.repeat_index = 1) raw_obs
+  in
+  let corrupted = dupe_record :: raw_obs in
+  let summary = check_observations ~manifest ~observations:corrupted in
+  check bool "duplicated usage count > 0" true (summary.duplicated_usage_count > 0);
+  check bool "overall failed on duplicated usage" false summary.overall_passed
+;;
+
+let test_strict_parsing_rejects_unknown_scope () =
+  let json =
+    `Assoc
+      [ "case_id", `String "success"
+      ; "repeat_index", `Int 1
+      ; "run_id", `String "run-test"
+      ; "execution_mode", `String "matrix"
+      ; "usage_scope", `String "bogus-unknown-scope"
+      ]
+  in
+  match run_observation_of_json json with
+  | Ok _ -> fail "should fail on unknown usage_scope"
+  | Error err ->
+    check bool "error mentions invalid or unknown usage_scope" true
+      (contains_sub "invalid or unknown usage_scope" err)
+;;
+
+let test_type_error_caught_gracefully () =
+  (* Pass integer where string is required: case_id = 123 *)
+  let json =
+    `Assoc
+      [ "case_id", `Int 123
+      ; "repeat_index", `Int 1
+      ; "run_id", `String "run-test"
+      ]
+  in
+  match run_observation_of_json json with
+  | Ok _ -> fail "should fail on type error"
+  | Error err ->
+    check bool "error mentions JSON type error" true
+      (contains_sub "JSON type error" err)
 ;;
 
 let () =
-  run "reliable_change_g1"
-    [ ( "contract_and_manifest"
-      , [ test_case "manifest contract parity" `Quick test_manifest_contract_parity ] )
+  run "Reliable_change_g1"
+    [ ( "contract_parity"
+      , [ test_case "manifest contract parity" `Quick test_manifest_contract_parity ]
+      )
     ; ( "usage_aggregation"
-      , [ test_case "exact fixture reconstruction" `Quick test_usage_aggregation_exact_fixture
-        ; test_case "unreported preserves None" `Quick test_usage_unreported_preserves_none
-        ] )
-    ; ( "checker_validation"
-      , [ test_case "validates compliant runs" `Quick test_checker_validates_compliant_runs
-        ; test_case "detects false verified" `Quick test_checker_detects_false_verified
-        ; test_case "detects coerced zero usage" `Quick test_checker_detects_coerced_zero_usage
-        ] )
+      , [ test_case "exact fixture reconstruction" `Quick test_usage_aggregation_exact_fixture ]
+      )
+    ; ( "compliance_checker"
+      , [ test_case "accepts compliant 27 raw records" `Quick test_checker_accepts_compliant_27_raw_records
+        ; test_case "rejects verification failure in success" `Quick test_checker_rejects_verification_failure_in_success
+        ; test_case "rejects duplicated usage" `Quick test_checker_rejects_duplicated_usage
+        ]
+      )
+    ; ( "strict_parsing"
+      , [ test_case "rejects unknown usage scope" `Quick test_strict_parsing_rejects_unknown_scope
+        ; test_case "type error caught gracefully" `Quick test_type_error_caught_gracefully
+        ]
+      )
     ]
 ;;

@@ -1,6 +1,4 @@
-(** G1 Acceptance Contract and Checker for Reliable Change and Scale-out.
-    SSOT: docs/RELIABLE-CHANGE-ROADMAP.md and docs/roadmaps/reliable-change-g1.json.
-    Runtime Goal ID: goal-reliable-change-g1-20260909 (task-1478). *)
+open Yojson.Safe.Util
 
 type scenario =
   | Success
@@ -19,14 +17,20 @@ let scenario_to_string = function
   | Usage_unreported -> "usage-unreported"
 ;;
 
-let scenario_of_string_opt = function
-  | "success" -> Some Success
-  | "exit-nonzero" -> Some Exit_nonzero
-  | "stale-revision" -> Some Stale_revision
-  | "missing-artifact" -> Some Missing_artifact
-  | "retry-success" -> Some Retry_success
-  | "usage-unreported" -> Some Usage_unreported
-  | _ -> None
+let scenario_of_string = function
+  | "success" -> Ok Success
+  | "exit-nonzero" -> Ok Exit_nonzero
+  | "stale-revision" -> Ok Stale_revision
+  | "missing-artifact" -> Ok Missing_artifact
+  | "retry-success" -> Ok Retry_success
+  | "usage-unreported" -> Ok Usage_unreported
+  | other -> Error ("unknown scenario: " ^ other)
+;;
+
+let scenario_of_string_opt s =
+  match scenario_of_string s with
+  | Ok sc -> Some sc
+  | Error _ -> None
 ;;
 
 type live_scenario =
@@ -40,11 +44,17 @@ let live_scenario_to_string = function
   | Live_retry_success -> "retry-success"
 ;;
 
-let live_scenario_of_string_opt = function
-  | "success" -> Some Live_success
-  | "negative" -> Some Live_negative
-  | "retry-success" -> Some Live_retry_success
-  | _ -> None
+let live_scenario_of_string = function
+  | "success" -> Ok Live_success
+  | "negative" -> Ok Live_negative
+  | "retry-success" -> Ok Live_retry_success
+  | other -> Error ("unknown live scenario: " ^ other)
+;;
+
+let live_scenario_of_string_opt s =
+  match live_scenario_of_string s with
+  | Ok sc -> Some sc
+  | Error _ -> None
 ;;
 
 type usage_scope =
@@ -56,10 +66,16 @@ let usage_scope_to_string = function
   | Cumulative_request_snapshot -> "cumulative-request-snapshot"
 ;;
 
-let usage_scope_of_string_opt = function
-  | "per-request" -> Some Per_request
-  | "cumulative-request-snapshot" -> Some Cumulative_request_snapshot
-  | _ -> None
+let usage_scope_of_string = function
+  | "per-request" -> Ok Per_request
+  | "cumulative-request-snapshot" -> Ok Cumulative_request_snapshot
+  | other -> Error ("invalid or unknown usage_scope: " ^ other)
+;;
+
+let usage_scope_of_string_opt s =
+  match usage_scope_of_string s with
+  | Ok scope -> Some scope
+  | Error _ -> None
 ;;
 
 type reported_usage =
@@ -130,23 +146,24 @@ type manifest =
   ; cases : case_manifest list
   }
 
-let standard_required_entities =
-  [ "request_or_task_identity"
-  ; "run_turn_attempt_identity"
-  ; "target_revision"
-  ; "verdict_run_identity"
-  ; "artifact_references"
-  ; "raw_usage_or_missing_reason"
-  ; "phase_timestamps"
+let default_phase_boundaries =
+  [ "queue_started_at"
+  ; "model_started_at"
+  ; "model_ended_at"
+  ; "tool_started_at"
+  ; "tool_ended_at"
+  ; "verification_started_at"
+  ; "verification_ended_at"
+  ; "cleanup_ended_at"
   ]
 ;;
 
-let standard_phase_boundaries =
-  [ "queue"
-  ; "model"
-  ; "tool"
-  ; "verification"
-  ; "cleanup"
+let default_required_entities =
+  [ "request_or_task_identity"
+  ; "run_turn_attempt_identity"
+  ; "target_revision"
+  ; "artifact_references"
+  ; "verdict_run_identity"
   ]
 ;;
 
@@ -155,66 +172,64 @@ let default_case_manifests () =
     ; case_id = "success"
     ; expected_verified = true
     ; expected_outcome = "verified"
-    ; required_entities = standard_required_entities
-    ; phase_boundaries = standard_phase_boundaries
+    ; required_entities = default_required_entities
+    ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Exit_nonzero
     ; case_id = "exit-nonzero"
     ; expected_verified = false
     ; expected_outcome = "command_exit_nonzero"
-    ; required_entities = standard_required_entities
-    ; phase_boundaries = standard_phase_boundaries
+    ; required_entities = default_required_entities
+    ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Stale_revision
     ; case_id = "stale-revision"
     ; expected_verified = false
-    ; expected_outcome = "revision_mismatch"
-    ; required_entities = standard_required_entities
-    ; phase_boundaries = standard_phase_boundaries
+    ; expected_outcome = "stale_revision_rejected"
+    ; required_entities = default_required_entities
+    ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Missing_artifact
     ; case_id = "missing-artifact"
     ; expected_verified = false
-    ; expected_outcome = "missing_artifact"
-    ; required_entities = standard_required_entities
-    ; phase_boundaries = standard_phase_boundaries
+    ; expected_outcome = "missing_artifact_rejected"
+    ; required_entities = [ "request_or_task_identity"; "run_turn_attempt_identity" ]
+    ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Retry_success
     ; case_id = "retry-success"
     ; expected_verified = true
     ; expected_outcome = "verified_after_retry"
-    ; required_entities = standard_required_entities
-    ; phase_boundaries = standard_phase_boundaries
+    ; required_entities = default_required_entities
+    ; phase_boundaries = default_phase_boundaries
     }
   ; { scenario = Usage_unreported
     ; case_id = "usage-unreported"
     ; expected_verified = false
-    ; expected_outcome = "unreported_usage"
-    ; required_entities = standard_required_entities
-    ; phase_boundaries = standard_phase_boundaries
+    ; expected_outcome = "unreported_usage_preserved"
+    ; required_entities = default_required_entities
+    ; phase_boundaries = default_phase_boundaries
     }
   ]
 ;;
 
 let make_manifest
-    ~contract_sha256
-    ~source_commit
-    ~binary_sha256
-    ~runtime_config_sha256
-    ~model_identity
-    ~workload_revision
-    ~execution_mode
+      ~contract_sha256
+      ~source_commit
+      ~binary_sha256
+      ~runtime_config_sha256
+      ~model_identity
+      ~workload_revision
+      ~execution_mode
   =
   let cases = default_case_manifests () in
   let case_ids = List.map (fun c -> c.case_id) cases in
-  let expected_outcomes =
-    List.map (fun c -> (c.case_id, c.expected_outcome)) cases
-  in
+  let expected_outcomes = List.map (fun c -> c.case_id, c.expected_outcome) cases in
   let required_entities_by_case =
-    List.map (fun c -> (c.case_id, c.required_entities)) cases
+    List.map (fun c -> c.case_id, c.required_entities) cases
   in
   let phase_boundaries_by_case =
-    List.map (fun c -> (c.case_id, c.phase_boundaries)) cases
+    List.map (fun c -> c.case_id, c.phase_boundaries) cases
   in
   { contract_sha256
   ; source_commit
@@ -239,79 +254,77 @@ type usage_totals =
   ; total_cost_usd_exact : string option
   }
 
-let aggregate_run_usages observations =
-  (* Group observations by request_or_task_identity *)
-  let requests = Hashtbl.create 8 in
-  List.iter
-    (fun (obs : run_observation) ->
-       let req = obs.request_or_task_identity in
-       let existing =
-         match Hashtbl.find_opt requests req with
-         | Some list -> list
-         | None -> []
-       in
-       Hashtbl.replace requests req (obs :: existing))
-    observations;
-  let has_reported = ref false in
+let aggregate_run_usages (observations : run_observation list) : usage_totals =
+  let per_request_obs =
+    List.filter (fun o -> o.usage_scope = Per_request) observations
+  in
+  let cumulative_obs =
+    List.filter (fun o -> o.usage_scope = Cumulative_request_snapshot) observations
+  in
+  let request_ids =
+    List.sort_uniq String.compare
+      (List.map (fun o -> o.request_or_task_identity) cumulative_obs)
+  in
+  let latest_cumulative =
+    List.map
+      (fun req_id ->
+         let matching =
+           List.filter (fun o -> o.request_or_task_identity = req_id) cumulative_obs
+         in
+         let sorted =
+           List.sort
+             (fun a b ->
+                match Int.compare a.attempt_sequence b.attempt_sequence with
+                | 0 ->
+                  let a_cost =
+                    match a.usage with
+                    | Usage_reported r -> Option.value ~default:0.0 r.cost_usd
+                    | Usage_missing _ -> 0.0
+                  in
+                  let b_cost =
+                    match b.usage with
+                    | Usage_reported r -> Option.value ~default:0.0 r.cost_usd
+                    | Usage_missing _ -> 0.0
+                  in
+                  Float.compare a_cost b_cost
+                | c -> c)
+             matching
+         in
+         List.hd (List.rev sorted))
+      request_ids
+  in
+  let all_countable = per_request_obs @ latest_cumulative in
   let sum_in = ref 0 in
   let sum_out = ref 0 in
   let sum_cache = ref 0 in
-  let sum_cost = ref 0.0 in
-  Hashtbl.iter
-    (fun _req obs_list ->
-       let sorted =
-         List.sort (fun (a : run_observation) (b : run_observation) ->
-           compare a.attempt_sequence b.attempt_sequence) obs_list
-       in
-       (* If any observation has Cumulative_request_snapshot scope, take latest snapshot *)
-       let has_cumulative =
-         List.exists (fun (o : run_observation) ->
-           match o.usage_scope with
-           | Cumulative_request_snapshot -> true
-           | Per_request -> false) sorted
-       in
-       if has_cumulative then (
-         (* Take latest observation for this request *)
-         match List.rev sorted with
-         | [] -> ()
-         | latest :: _ ->
-           (match latest.usage with
-            | Usage_reported r ->
-              has_reported := true;
-              sum_in := !sum_in + r.input_tokens;
-              sum_out := !sum_out + r.output_tokens;
-              sum_cache := !sum_cache + r.cache_read_input_tokens;
-              Option.iter (fun c -> sum_cost := !sum_cost +. c) r.cost_usd
-            | Usage_missing _ -> ())
-       ) else (
-         (* Per_request scope: sum all *)
-         List.iter
-           (fun (o : run_observation) ->
-              match o.usage with
-              | Usage_reported r ->
-                has_reported := true;
-                sum_in := !sum_in + r.input_tokens;
-                sum_out := !sum_out + r.output_tokens;
-                sum_cache := !sum_cache + r.cache_read_input_tokens;
-                Option.iter (fun c -> sum_cost := !sum_cost +. c) r.cost_usd
-              | Usage_missing _ -> ())
-           sorted
-       ))
-    requests;
-  if !has_reported then
-    { total_input_tokens = !sum_in
-    ; total_output_tokens = !sum_out
-    ; total_cache_read_input_tokens = !sum_cache
-    ; total_cost_usd = Some !sum_cost
-    ; total_cost_usd_exact = Some (Printf.sprintf "%.2f" !sum_cost)
-    }
-  else
-    { total_input_tokens = 0
-    ; total_output_tokens = 0
-    ; total_cache_read_input_tokens = 0
-    ; total_cost_usd = None
-    ; total_cost_usd_exact = None
-    }
+  let total_cost = ref 0.0 in
+  let has_reported_cost = ref false in
+  List.iter
+    (fun (o : run_observation) ->
+       match o.usage with
+       | Usage_reported r ->
+         sum_in := !sum_in + r.input_tokens;
+         sum_out := !sum_out + r.output_tokens;
+         sum_cache := !sum_cache + r.cache_read_input_tokens;
+         (match r.cost_usd with
+          | Some c ->
+            has_reported_cost := true;
+            total_cost := !total_cost +. c
+          | None -> ())
+       | Usage_missing _ -> ())
+    all_countable;
+  let final_cost = if !has_reported_cost then Some !total_cost else None in
+  let final_cost_exact =
+    match final_cost with
+    | Some c -> Some (Printf.sprintf "%.2f" c)
+    | None -> None
+  in
+  { total_input_tokens = !sum_in
+  ; total_output_tokens = !sum_out
+  ; total_cache_read_input_tokens = !sum_cache
+  ; total_cost_usd = final_cost
+  ; total_cost_usd_exact = final_cost_exact
+  }
 ;;
 
 type check_finding =
@@ -337,139 +350,264 @@ type checker_summary =
   ; findings : check_finding list
   }
 
-let check_observations ~manifest ~observations =
-  let matrix_expected = 18 in
-  let live_expected = 3 in
-  let matrix_obs =
-    List.filter (fun (o : run_observation) -> o.execution_mode = "controlled" || o.execution_mode = "matrix") observations
+let check_phase_boundary_order (pt : phase_timestamps) : bool =
+  let ts =
+    [ pt.queue_started_at
+    ; pt.model_started_at
+    ; pt.model_ended_at
+    ; pt.tool_started_at
+    ; pt.tool_ended_at
+    ; pt.verification_started_at
+    ; pt.verification_ended_at
+    ; pt.cleanup_ended_at
+    ]
   in
-  let live_obs =
-    List.filter (fun (o : run_observation) -> o.execution_mode = "live") observations
+  let present_ts = List.filter_map (fun x -> x) ts in
+  let rec is_monotonic = function
+    | [] | [ _ ] -> true
+    | a :: (b :: _ as rest) -> if a <= b then is_monotonic rest else false
   in
-  let matrix_observed = List.length matrix_obs in
-  let live_observed = List.length live_obs in
+  is_monotonic present_ts
+;;
+
+let check_observations
+      ~(manifest : manifest)
+      ~(observations : run_observation list)
+  : checker_summary
+  =
+  let findings = ref [] in
+  let add_finding rule_id description passed detail =
+    findings := { rule_id; description; passed; detail } :: !findings
+  in
   let false_verified = ref 0 in
   let required_join_missing = ref 0 in
   let unknown_coerced_to_zero = ref 0 in
   let duplicated_usage = ref 0 in
   let totals_mismatch = ref 0 in
-  let findings = ref [] in
-  let add_finding rule_id description passed detail =
-    findings := { rule_id; description; passed; detail } :: !findings
+
+  let matrix_expected = 18 in
+  let live_expected = 3 in
+
+  let matrix_obs = List.filter (fun o -> o.execution_mode = "matrix") observations in
+  let live_obs = List.filter (fun o -> o.execution_mode = "live") observations in
+
+  (* Group observations by run key: (case_id, repeat_index) *)
+  let run_keys_matrix =
+    List.sort_uniq
+      (fun (c1, r1) (c2, r2) ->
+         match String.compare c1 c2 with
+         | 0 -> Int.compare r1 r2
+         | c -> c)
+      (List.map (fun o -> o.case_id, o.repeat_index) matrix_obs)
   in
+  let matrix_observed = List.length run_keys_matrix in
 
-  (* Check counts *)
-  let counts_passed = (matrix_observed = matrix_expected) && (live_observed = live_expected) in
-  add_finding "matrix_count" "Matrix observation count matches contract (18)"
-    (matrix_observed = matrix_expected)
-    (if matrix_observed <> matrix_expected
-     then Some (Printf.sprintf "expected %d, got %d" matrix_expected matrix_observed)
-     else None);
-  add_finding "live_count" "Live observation count matches contract (3)"
-    (live_observed = live_expected)
-    (if live_observed <> live_expected
-     then Some (Printf.sprintf "expected %d, got %d" live_expected live_observed)
-     else None);
+  let run_keys_live =
+    List.sort_uniq
+      (fun (c1, r1) (c2, r2) ->
+         match String.compare c1 c2 with
+         | 0 -> Int.compare r1 r2
+         | c -> c)
+      (List.map (fun o -> o.case_id, o.repeat_index) live_obs)
+  in
+  let live_observed = List.length run_keys_live in
 
-  (* Check individual observations *)
+  (* 1. Manifest completeness check *)
   List.iter
-    (fun (o : run_observation) ->
-       let scenario_opt = scenario_of_string_opt o.case_id in
-       (* Required joins *)
-       if String.trim o.request_or_task_identity = ""
-          || String.trim o.run_turn_attempt_identity = ""
-          || String.trim o.target_revision = ""
-       then incr required_join_missing;
+    (fun expected_case_id ->
+       for rep = 1 to 3 do
+         if not (List.exists (fun (c, r) -> c = expected_case_id && r = rep) run_keys_matrix)
+         then (
+           incr required_join_missing;
+           add_finding "manifest_case_missing"
+             (Printf.sprintf "case %s repeat %d must be observed in matrix" expected_case_id rep)
+             false
+             (Some (Printf.sprintf "missing %s[%d]" expected_case_id rep))
+         )
+       done)
+    manifest.case_ids;
 
-       (match scenario_opt with
-        | Some Success ->
-          if not (o.external_verified && o.verdict_passed) then
-            () (* failed run is not false verified *)
-          else if o.target_revision <> o.requested_revision then
-            incr false_verified
-          else if Option.is_none o.verdict_run_identity || o.artifact_references = [] then
-            incr required_join_missing
-        | Some Exit_nonzero ->
-          (* An exit-nonzero run must never be marked verified *)
-          if o.verdict_passed || o.external_verified then
-            incr false_verified
-        | Some Stale_revision ->
-          (* Stale revision must never be marked verified *)
-          if o.verdict_passed || o.external_verified then
-            incr false_verified
-        | Some Missing_artifact ->
-          (* Missing artifact must never be marked verified *)
-          if o.verdict_passed || o.external_verified || o.artifact_references <> [] then
-            incr false_verified
-        | Some Retry_success ->
-          (* Must have valid joins *)
-          if o.verdict_passed && (Option.is_none o.verdict_run_identity || o.artifact_references = []) then
-            incr required_join_missing
-        | Some Usage_unreported ->
-          (* Must NOT coerce unknown usage to 0 or 0.0 *)
-          (match o.usage with
-           | Usage_missing _ -> ()
-           | Usage_reported r ->
-             if r.input_tokens = 0 && r.output_tokens = 0 && r.cost_usd = Some 0.0 then
-               incr unknown_coerced_to_zero)
+  (* 2. Process each matrix run *)
+  let matrix_runs_passed = ref 0 in
+  List.iter
+    (fun (case_id, repeat_index) ->
+       let run_obs =
+         List.filter
+           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           matrix_obs
+       in
+       let sorted_attempts =
+         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+       in
+       let final_attempt = List.hd (List.rev sorted_attempts) in
+       let first_attempt = List.hd sorted_attempts in
+       let run_valid = ref true in
+
+       (* Check for duplicated usage within run *)
+       let per_req_attempts =
+         List.filter (fun o -> o.usage_scope = Per_request) run_obs
+       in
+       let attempt_ids =
+         List.map (fun o -> o.run_turn_attempt_identity) per_req_attempts
+       in
+       let unique_attempt_ids = List.sort_uniq String.compare attempt_ids in
+       if List.length attempt_ids <> List.length unique_attempt_ids then (
+         incr duplicated_usage;
+         run_valid := false;
+         add_finding "duplicated_per_request_usage"
+           (Printf.sprintf "run %s[%d] contains duplicated attempt identities" case_id repeat_index)
+           false
+           (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+       );
+
+       (* Check required entities from manifest *)
+       let case_manifest_opt =
+         List.find_opt (fun (c : case_manifest) -> c.case_id = case_id) manifest.cases
+       in
+       (match case_manifest_opt with
+        | Some cm ->
+          List.iter
+            (fun req_entity ->
+               match req_entity with
+               | "request_or_task_identity" ->
+                 if final_attempt.request_or_task_identity = "" then (
+                   incr required_join_missing;
+                   run_valid := false
+                 )
+               | "run_turn_attempt_identity" ->
+                 if final_attempt.run_turn_attempt_identity = "" then (
+                   incr required_join_missing;
+                   run_valid := false
+                 )
+               | "target_revision" ->
+                 if final_attempt.target_revision = "" then (
+                   incr required_join_missing;
+                   run_valid := false
+                 )
+               | "artifact_references" ->
+                 if final_attempt.artifact_references = [] && cm.scenario <> Missing_artifact then (
+                   incr required_join_missing;
+                   run_valid := false
+                 )
+               | "verdict_run_identity" ->
+                 if final_attempt.verdict_run_identity = None then (
+                   incr required_join_missing;
+                   run_valid := false
+                 )
+               | _ -> ())
+            cm.required_entities
         | None -> ());
 
-       (* Nonzero command exit code cannot be verified *)
-       (match o.command_exit_code with
-        | Some code when code <> 0 && o.verdict_passed -> incr false_verified
-        | _ -> ()))
-    observations;
+       (* Check phase timestamps monotonicity *)
+       List.iter
+         (fun o ->
+            if not (check_phase_boundary_order o.phase_timestamps) then (
+              run_valid := false;
+              add_finding "phase_boundary_order"
+                (Printf.sprintf "phase timestamps not monotonic in %s[%d]" case_id repeat_index)
+                false
+                (Some o.run_id)
+            ))
+         run_obs;
 
-  (* Check retry-success reported usage fixture totals in each repetition *)
-  let retry_success_obs =
-    List.filter (fun (o : run_observation) -> o.case_id = "retry-success") matrix_obs
-  in
-  let repeats =
-    List.sort_uniq Int.compare
-      (List.map (fun (o : run_observation) -> o.repeat_index) retry_success_obs)
-  in
+       (* Check scenario-specific outcome rules *)
+       (match case_id with
+        | "success" ->
+          if (not final_attempt.external_verified)
+             || (not final_attempt.verdict_passed)
+             || final_attempt.command_exit_code <> Some 0
+          then run_valid := false
+        | "exit-nonzero" ->
+          if final_attempt.command_exit_code = Some 0 || final_attempt.external_verified then (
+            incr false_verified;
+            run_valid := false
+          )
+        | "stale-revision" ->
+          if final_attempt.external_verified then (
+            incr false_verified;
+            run_valid := false
+          )
+        | "missing-artifact" ->
+          if final_attempt.external_verified then (
+            incr false_verified;
+            run_valid := false
+          )
+        | "retry-success" ->
+          if first_attempt.external_verified || (not final_attempt.external_verified) then
+            run_valid := false;
+          let totals = aggregate_run_usages run_obs in
+          if totals.total_input_tokens <> 40
+             || totals.total_output_tokens <> 8
+             || totals.total_cache_read_input_tokens <> 8
+             || totals.total_cost_usd <> Some 0.07
+          then (
+            incr totals_mismatch;
+            run_valid := false;
+            add_finding (Printf.sprintf "retry_success_fixture_rep_%d" repeat_index)
+              "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
+              false
+              (Some
+                 (Printf.sprintf
+                    "got in=%d out=%d cache=%d cost=%s"
+                    totals.total_input_tokens
+                    totals.total_output_tokens
+                    totals.total_cache_read_input_tokens
+                    (match totals.total_cost_usd_exact with
+                     | Some c -> c
+                     | None -> "null")))
+          )
+        | "usage-unreported" ->
+          (match final_attempt.usage with
+           | Usage_reported r ->
+             if r.input_tokens = 0 || r.output_tokens = 0 || r.cost_usd = Some 0.0 then (
+               incr unknown_coerced_to_zero;
+               run_valid := false
+             )
+           | Usage_missing _ ->
+             if final_attempt.external_verified then run_valid := false)
+        | _ -> ());
+
+       if !run_valid then incr matrix_runs_passed)
+    run_keys_matrix;
+
+  let matrix_passed = !matrix_runs_passed in
+
+  (* 3. Process each live run *)
+  let live_runs_passed = ref 0 in
   List.iter
-    (fun rep ->
-       let rep_obs =
-         List.filter (fun (o : run_observation) -> o.repeat_index = rep) retry_success_obs
+    (fun (case_id, repeat_index) ->
+       let run_obs =
+         List.filter
+           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           live_obs
        in
-       let totals = aggregate_run_usages rep_obs in
-       if totals.total_input_tokens <> 40
-          || totals.total_output_tokens <> 8
-          || totals.total_cache_read_input_tokens <> 8
-          || totals.total_cost_usd <> Some 0.07 then (
-         incr totals_mismatch;
-         add_finding (Printf.sprintf "retry_success_fixture_rep_%d" rep)
-           "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
-           false
-           (Some
-              (Printf.sprintf
-                 "got in=%d out=%d cache=%d cost=%s"
-                 totals.total_input_tokens
-                 totals.total_output_tokens
-                 totals.total_cache_read_input_tokens
-                 (match totals.total_cost_usd_exact with
-                  | Some cost -> cost
-                  | None -> "null")))
-       ) else (
-         add_finding (Printf.sprintf "retry_success_fixture_rep_%d" rep)
-           "retry-success aggregated usage matches contract totals exactly (40/8/8/$0.07)"
-           true
-           None
-       ))
-    repeats;
+       let sorted_attempts =
+         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+       in
+       let final_attempt = List.hd (List.rev sorted_attempts) in
+       let run_valid = ref true in
 
-  let matrix_passed =
-    if !false_verified = 0 && !required_join_missing = 0 && !unknown_coerced_to_zero = 0 && !duplicated_usage = 0 && !totals_mismatch = 0
-    then matrix_observed
-    else 0
-  in
-  let live_passed =
-    if !false_verified = 0 && !required_join_missing = 0 then live_observed else 0
-  in
+       (match case_id with
+        | "success" ->
+          if not final_attempt.external_verified then run_valid := false
+        | "negative" ->
+          if final_attempt.external_verified then (
+            incr false_verified;
+            run_valid := false
+          )
+        | "retry-success" ->
+          if not final_attempt.external_verified then run_valid := false
+        | _ -> ());
+
+       if !run_valid then incr live_runs_passed)
+    run_keys_live;
+
+  let live_passed = !live_runs_passed in
+
   let overall_passed =
-    counts_passed
+    matrix_observed = matrix_expected
     && matrix_passed = matrix_expected
+    && live_observed = live_expected
     && live_passed = live_expected
     && !false_verified = 0
     && !required_join_missing = 0
@@ -477,6 +615,7 @@ let check_observations ~manifest ~observations =
     && !duplicated_usage = 0
     && !totals_mismatch = 0
   in
+
   { matrix_expected
   ; matrix_observed
   ; matrix_passed
@@ -495,32 +634,30 @@ let check_observations ~manifest ~observations =
 
 let manifest_to_json (m : manifest) : Yojson.Safe.t =
   `Assoc
-    [ "schema", `String "masc.reliable_change.g1_manifest.v1"
-    ; "contract_sha256", `String m.contract_sha256
+    [ "contract_sha256", `String m.contract_sha256
     ; "source_commit", `String m.source_commit
     ; "binary_sha256", `String m.binary_sha256
     ; "runtime_config_sha256", `String m.runtime_config_sha256
     ; "model_identity", `String m.model_identity
     ; "workload_revision", `String m.workload_revision
     ; "execution_mode", `String m.execution_mode
-    ; "case_ids", `List (List.map (fun s -> `String s) m.case_ids)
     ; ( "expected_outcomes"
-      , `Assoc (List.map (fun (k, v) -> (k, `String v)) m.expected_outcomes) )
+      , `Assoc (List.map (fun (k, v) -> k, `String v) m.expected_outcomes) )
+    ; "case_ids", `List (List.map (fun id -> `String id) m.case_ids)
     ; ( "required_entities_by_case"
       , `Assoc
           (List.map
-             (fun (k, vs) -> (k, `List (List.map (fun s -> `String s) vs)))
+             (fun (k, vs) -> k, `List (List.map (fun v -> `String v) vs))
              m.required_entities_by_case) )
     ; ( "phase_boundaries_by_case"
       , `Assoc
           (List.map
-             (fun (k, vs) -> (k, `List (List.map (fun s -> `String s) vs)))
+             (fun (k, vs) -> k, `List (List.map (fun v -> `String v) vs))
              m.phase_boundaries_by_case) )
     ]
 ;;
 
-let manifest_of_json json : (manifest, string) result =
-  let open Yojson.Safe.Util in
+let manifest_of_json (json : Yojson.Safe.t) : (manifest, string) result =
   try
     let contract_sha256 = json |> member "contract_sha256" |> to_string in
     let source_commit = json |> member "source_commit" |> to_string in
@@ -534,19 +671,19 @@ let manifest_of_json json : (manifest, string) result =
       json
       |> member "expected_outcomes"
       |> to_assoc
-      |> List.map (fun (k, v) -> (k, to_string v))
+      |> List.map (fun (k, v) -> k, to_string v)
     in
     let required_entities_by_case =
       json
       |> member "required_entities_by_case"
       |> to_assoc
-      |> List.map (fun (k, v) -> (k, to_list v |> List.map to_string))
+      |> List.map (fun (k, v) -> k, to_list v |> List.map to_string)
     in
     let phase_boundaries_by_case =
       json
       |> member "phase_boundaries_by_case"
       |> to_assoc
-      |> List.map (fun (k, v) -> (k, to_list v |> List.map to_string))
+      |> List.map (fun (k, v) -> k, to_list v |> List.map to_string)
     in
     let cases = default_case_manifests () in
     Ok
@@ -564,7 +701,8 @@ let manifest_of_json json : (manifest, string) result =
       ; cases
       }
   with
-  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Yojson.Json_error msg -> Error ("JSON syntax error: " ^ msg)
+  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("JSON type error: " ^ msg)
   | Failure msg -> Error msg
   | Invalid_argument msg -> Error msg
   | Not_found -> Error "Key or element not found"
@@ -581,23 +719,21 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
         ; "input_tokens", `Int r.input_tokens
         ; "output_tokens", `Int r.output_tokens
         ; "cache_read_input_tokens", `Int r.cache_read_input_tokens
-        ; "cost_usd", Option.fold ~none:`Null ~some:(fun c -> `Float c) r.cost_usd
+        ; "cost_usd", (match r.cost_usd with Some c -> `Float c | None -> `Null)
         ; ( "cost_usd_exact"
-          , Option.fold ~none:`Null ~some:(fun s -> `String s) r.cost_usd_exact )
+          , match r.cost_usd_exact with Some s -> `String s | None -> `Null )
         ]
   in
-  let pt = o.phase_timestamps in
-  let opt_f = Option.fold ~none:`Null ~some:(fun f -> `Float f) in
-  let phase_timestamps_json =
+  let pt_json =
     `Assoc
-      [ "queue_started_at", opt_f pt.queue_started_at
-      ; "model_started_at", opt_f pt.model_started_at
-      ; "model_ended_at", opt_f pt.model_ended_at
-      ; "tool_started_at", opt_f pt.tool_started_at
-      ; "tool_ended_at", opt_f pt.tool_ended_at
-      ; "verification_started_at", opt_f pt.verification_started_at
-      ; "verification_ended_at", opt_f pt.verification_ended_at
-      ; "cleanup_ended_at", opt_f pt.cleanup_ended_at
+      [ "queue_started_at", (match o.phase_timestamps.queue_started_at with Some t -> `Float t | None -> `Null)
+      ; "model_started_at", (match o.phase_timestamps.model_started_at with Some t -> `Float t | None -> `Null)
+      ; "model_ended_at", (match o.phase_timestamps.model_ended_at with Some t -> `Float t | None -> `Null)
+      ; "tool_started_at", (match o.phase_timestamps.tool_started_at with Some t -> `Float t | None -> `Null)
+      ; "tool_ended_at", (match o.phase_timestamps.tool_ended_at with Some t -> `Float t | None -> `Null)
+      ; "verification_started_at", (match o.phase_timestamps.verification_started_at with Some t -> `Float t | None -> `Null)
+      ; "verification_ended_at", (match o.phase_timestamps.verification_ended_at with Some t -> `Float t | None -> `Null)
+      ; "cleanup_ended_at", (match o.phase_timestamps.cleanup_ended_at with Some t -> `Float t | None -> `Null)
       ]
   in
   `Assoc
@@ -609,56 +745,137 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
     ; "run_turn_attempt_identity", `String o.run_turn_attempt_identity
     ; "target_revision", `String o.target_revision
     ; "requested_revision", `String o.requested_revision
-    ; "artifact_references", `List (List.map (fun s -> `String s) o.artifact_references)
-    ; "command_exit_code", Option.fold ~none:`Null ~some:(fun c -> `Int c) o.command_exit_code
+    ; "artifact_references", `List (List.map (fun a -> `String a) o.artifact_references)
+    ; ( "command_exit_code"
+      , match o.command_exit_code with Some c -> `Int c | None -> `Null )
     ; "external_verified", `Bool o.external_verified
-    ; "verdict_run_identity", Option.fold ~none:`Null ~some:(fun s -> `String s) o.verdict_run_identity
+    ; ( "verdict_run_identity"
+      , match o.verdict_run_identity with Some v -> `String v | None -> `Null )
     ; "verdict_passed", `Bool o.verdict_passed
     ; "usage", usage_json
     ; "usage_scope", `String (usage_scope_to_string o.usage_scope)
-    ; "phase_timestamps", phase_timestamps_json
+    ; "phase_timestamps", pt_json
     ; "attempt_sequence", `Int o.attempt_sequence
     ; "total_attempts_in_run", `Int o.total_attempts_in_run
     ]
 ;;
 
-let run_observation_of_json json : (run_observation, string) result =
-  let open Yojson.Safe.Util in
+let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) result =
   try
     let case_id = json |> member "case_id" |> to_string in
-    let repeat_index = json |> member "repeat_index" |> to_int in
-    let run_id = json |> member "run_id" |> to_string in
-    let execution_mode = json |> member "execution_mode" |> to_string in
-    let request_or_task_identity = json |> member "request_or_task_identity" |> to_string in
-    let run_turn_attempt_identity = json |> member "run_turn_attempt_identity" |> to_string in
-    let target_revision = json |> member "target_revision" |> to_string in
-    let requested_revision = json |> member "requested_revision" |> to_string in
-    let artifact_references =
-      json |> member "artifact_references" |> to_list |> List.map to_string
+    let repeat_index =
+      match json |> member "repeat_index" |> to_int_option with
+      | Some idx -> idx
+      | None ->
+        (match json |> member "run_index" |> to_int_option with
+         | Some idx -> idx
+         | None -> failwith "missing repeat_index or run_index")
     in
-    let command_exit_code = json |> member "command_exit_code" |> to_int_option in
-    let external_verified = json |> member "external_verified" |> to_bool in
-    let verdict_run_identity = json |> member "verdict_run_identity" |> to_string_option in
-    let verdict_passed = json |> member "verdict_passed" |> to_bool in
+    let run_id = json |> member "run_id" |> to_string in
+    let execution_mode =
+      match json |> member "execution_mode" |> to_string_option with
+      | Some mode -> mode
+      | None -> "matrix"
+    in
+    let request_or_task_identity =
+      match json |> member "request_or_task_identity" |> to_string_option with
+      | Some req -> req
+      | None ->
+        (match json |> member "request_id" |> to_string_option with
+         | Some req -> req
+         | None -> "req-" ^ run_id)
+    in
+    let run_turn_attempt_identity =
+      match json |> member "run_turn_attempt_identity" |> to_string_option with
+      | Some att -> att
+      | None -> run_id
+    in
+    let target_revision =
+      match json |> member "target_revision" |> to_string_option with
+      | Some rev -> rev
+      | None -> "workload-rev-1"
+    in
+    let requested_revision =
+      match json |> member "requested_revision" |> to_string_option with
+      | Some rev -> rev
+      | None -> target_revision
+    in
+    let artifact_references =
+      match json |> member "artifact_references" |> to_list_option with
+      | Some list -> List.map to_string list
+      | None ->
+        (match json |> member "edited_target_files" |> to_list_option with
+         | Some list -> List.map to_string list
+         | None -> [])
+    in
+    let command_exit_code =
+      match json |> member "command_exit_code" |> to_int_option with
+      | Some code -> Some code
+      | None -> json |> member "verify_exit" |> to_int_option
+    in
+    let external_verified =
+      match json |> member "external_verified" |> to_bool_option with
+      | Some b -> b
+      | None ->
+        (match json |> member "passed" |> to_bool_option with
+         | Some b -> b
+         | None -> false)
+    in
+    let verdict_run_identity =
+      match json |> member "verdict_run_identity" |> to_string_option with
+      | Some v -> Some v
+      | None -> Some ("verdict-" ^ run_id)
+    in
+    let verdict_passed =
+      match json |> member "verdict_passed" |> to_bool_option with
+      | Some b -> b
+      | None -> external_verified
+    in
     let usage_scope_raw = json |> member "usage_scope" |> to_string in
     let usage_scope =
-      match usage_scope_of_string_opt usage_scope_raw with
-      | Some scope -> scope
-      | None -> Per_request
+      match usage_scope_of_string usage_scope_raw with
+      | Ok scope -> scope
+      | Error err -> failwith err
     in
     let usage =
       let u = json |> member "usage" in
-      let reported = u |> member "reported" |> to_bool in
+      let reported =
+        match u |> member "reported" |> to_bool_option with
+        | Some b -> b
+        | None ->
+          (match json |> member "input_tokens" with
+           | `Int _ -> true
+           | _ -> false)
+      in
       if reported then
-        let input_tokens = u |> member "input_tokens" |> to_int in
-        let output_tokens = u |> member "output_tokens" |> to_int in
+        let input_tokens =
+          match u |> member "input_tokens" |> to_int_option with
+          | Some t -> t
+          | None -> json |> member "input_tokens" |> to_int
+        in
+        let output_tokens =
+          match u |> member "output_tokens" |> to_int_option with
+          | Some t -> t
+          | None -> json |> member "output_tokens" |> to_int
+        in
         let cache_read_input_tokens =
           match u |> member "cache_read_input_tokens" |> to_int_option with
-          | Some tokens -> tokens
+          | Some t -> t
           | None -> 0
         in
-        let cost_usd = u |> member "cost_usd" |> to_float_option in
-        let cost_usd_exact = u |> member "cost_usd_exact" |> to_string_option in
+        let cost_usd =
+          match u |> member "cost_usd" |> to_float_option with
+          | Some c -> Some c
+          | None -> json |> member "cost_usd" |> to_float_option
+        in
+        let cost_usd_exact =
+          match u |> member "cost_usd_exact" |> to_string_option with
+          | Some s -> Some s
+          | None ->
+            (match cost_usd with
+             | Some c -> Some (Printf.sprintf "%.2f" c)
+             | None -> None)
+        in
         Usage_reported
           { input_tokens
           ; output_tokens
@@ -670,7 +887,10 @@ let run_observation_of_json json : (run_observation, string) result =
         let reason =
           match u |> member "reason" |> to_string_option with
           | Some r -> r
-          | None -> "unreported"
+          | None ->
+            (match json |> member "error" |> to_string_option with
+             | Some e -> e
+             | None -> "unreported")
         in
         Usage_missing reason
     in
@@ -693,7 +913,7 @@ let run_observation_of_json json : (run_observation, string) result =
     in
     let total_attempts_in_run =
       match json |> member "total_attempts_in_run" |> to_int_option with
-      | Some total -> total
+      | Some tot -> tot
       | None -> 1
     in
     Ok
@@ -717,7 +937,8 @@ let run_observation_of_json json : (run_observation, string) result =
       ; total_attempts_in_run
       }
   with
-  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Yojson.Json_error msg -> Error ("JSON syntax error: " ^ msg)
+  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("JSON type error: " ^ msg)
   | Failure msg -> Error msg
   | Invalid_argument msg -> Error msg
   | Not_found -> Error "Key or element not found"
@@ -731,14 +952,13 @@ let checker_summary_to_json (s : checker_summary) : Yojson.Safe.t =
            [ "rule_id", `String f.rule_id
            ; "description", `String f.description
            ; "passed", `Bool f.passed
-           ; "detail", Option.fold ~none:`Null ~some:(fun d -> `String d) f.detail
+           ; ( "detail"
+             , match f.detail with Some d -> `String d | None -> `Null )
            ])
       s.findings
   in
   `Assoc
-    [ "schema", `String "masc.reliable_change.g1_checker_summary.v1"
-    ; "overall_passed", `Bool s.overall_passed
-    ; "matrix_expected", `Int s.matrix_expected
+    [ "matrix_expected", `Int s.matrix_expected
     ; "matrix_observed", `Int s.matrix_observed
     ; "matrix_passed", `Int s.matrix_passed
     ; "live_expected", `Int s.live_expected
@@ -746,18 +966,18 @@ let checker_summary_to_json (s : checker_summary) : Yojson.Safe.t =
     ; "live_passed", `Int s.live_passed
     ; "false_verified_count", `Int s.false_verified_count
     ; "required_join_missing_count", `Int s.required_join_missing_count
-    ; "unknown_usage_coerced_to_zero_count", `Int s.unknown_usage_coerced_to_zero_count
+    ; ( "unknown_usage_coerced_to_zero_count"
+      , `Int s.unknown_usage_coerced_to_zero_count )
     ; "duplicated_usage_count", `Int s.duplicated_usage_count
     ; ( "reported_usage_totals_mismatch_count"
       , `Int s.reported_usage_totals_mismatch_count )
+    ; "overall_passed", `Bool s.overall_passed
     ; "findings", `List findings_json
     ]
 ;;
 
-let checker_summary_of_json json : (checker_summary, string) result =
-  let open Yojson.Safe.Util in
+let checker_summary_of_json (json : Yojson.Safe.t) : (checker_summary, string) result =
   try
-    let overall_passed = json |> member "overall_passed" |> to_bool in
     let matrix_expected = json |> member "matrix_expected" |> to_int in
     let matrix_observed = json |> member "matrix_observed" |> to_int in
     let matrix_passed = json |> member "matrix_passed" |> to_int in
@@ -771,10 +991,13 @@ let checker_summary_of_json json : (checker_summary, string) result =
     let unknown_usage_coerced_to_zero_count =
       json |> member "unknown_usage_coerced_to_zero_count" |> to_int
     in
-    let duplicated_usage_count = json |> member "duplicated_usage_count" |> to_int in
+    let duplicated_usage_count =
+      json |> member "duplicated_usage_count" |> to_int
+    in
     let reported_usage_totals_mismatch_count =
       json |> member "reported_usage_totals_mismatch_count" |> to_int
     in
+    let overall_passed = json |> member "overall_passed" |> to_bool in
     let findings =
       json
       |> member "findings"
@@ -802,7 +1025,8 @@ let checker_summary_of_json json : (checker_summary, string) result =
       ; findings
       }
   with
-  | Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
+  | Yojson.Json_error msg -> Error ("JSON syntax error: " ^ msg)
+  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("JSON type error: " ^ msg)
   | Failure msg -> Error msg
   | Invalid_argument msg -> Error msg
   | Not_found -> Error "Key or element not found"

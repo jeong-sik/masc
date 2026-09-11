@@ -62,10 +62,6 @@ let capture_all (managed_list : Mcp.managed list) : info list =
 ;;
 
 (** Convert session info back to a server_spec for reconnection. *)
-let to_server_spec (info : info) : Mcp.server_spec =
-  { command = info.command; args = info.args; env = info.env; name = info.server_name }
-;;
-
 (* ── JSON serialization ─────────────────────────────────────────── *)
 
 let env_pair_to_json (k, v) = `Assoc [ "key", `String k; "value", `String v ]

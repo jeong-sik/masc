@@ -812,6 +812,80 @@ let bounded_model_input_projection
        | Some inner -> inner windowed)
 ;;
 
+(* RFC-0363: on an uncapped runtime, no byte capacity ceiling applies, so atom
+   tail windowing (dropping older conversation atoms) is omitted and all
+   messages are retained. However, historical tool results from prior turns
+   (before [ctx.initial_messages]) are still demoted to content-addressed blob
+   markers to prevent request bloat on long-running keepers. Provider-specific
+   dialect formatting (e.g. reasoning block projection) is applied, and any
+   underlying [ctx.model_input_projection] is chained. *)
+let uncapped_model_input_projection
+      (ctx : try_provider_ctx)
+      ~(provider_config : Llm_provider.Provider_config.t)
+  : Agent_core.Agent.model_input_projection
+  =
+  let measure_message_bytes = memoize_message_measurement (message_measurer ()) in
+  let fallback_reported = ref false in
+  fun messages ->
+    let messages =
+      match
+        Agent_core.Llm_provider.Complete_common.transmitted_history
+          ~config:provider_config
+          messages
+      with
+      | Ok transmitted -> transmitted
+      | Error error ->
+        if not !fallback_reported
+        then (
+          fallback_reported := true;
+          Log.Keeper.warn
+            "%s: model input measured against durable shape; reasoning \
+             projection declined: %s"
+            ctx.keeper_name
+            (Agent_core.Llm_provider.Reasoning_history_projection
+             .error_to_string
+                error));
+        messages
+    in
+    let demote_enabled =
+      Feature_flag_registry.get_bool "MASC_KEEPER_MODEL_INPUT_DEMOTION_ENABLED"
+      && not (String.equal ctx.base_path "")
+    in
+    let messages =
+      if not demote_enabled
+      then messages
+      else
+        let demote_before =
+          Runtime_model_input_tail_window.first_atom_at_or_after
+            messages
+            ~message_index:(List.length ctx.initial_messages)
+        in
+        if demote_before <= 0
+        then messages
+        else
+          let planned =
+            offload_model_input_cpu (fun () ->
+              Keeper_model_input_demotion.plan
+                ~measure_message_bytes
+                ~demote_before
+                messages)
+          in
+          match planned.Keeper_model_input_demotion.pending with
+          | [] -> messages
+          | pending ->
+            let outcome =
+              Keeper_model_input_demotion.materialize
+                ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
+                ~pending
+                planned.Keeper_model_input_demotion.messages
+            in
+            outcome.Keeper_model_input_demotion.messages
+    in
+    match ctx.model_input_projection with
+    | None -> Ok messages
+    | Some inner -> inner messages
+;;
+
 let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate =
   (* Named so the trace attributes runs during the provider attempt (request
      assembly, streaming, tool loop) to [turn:provider]. *)
@@ -952,10 +1026,14 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
         model_input_projection =
           (match ctx.recovery_view, ctx.model_input_capacity_bytes with
            | Some _, _ -> ctx.model_input_projection
-           | None, None -> ctx.model_input_projection
+           | None, None ->
+             Some
+               (uncapped_model_input_projection ctx
+                  ~provider_config:config.Runtime_agent.provider_cfg)
            | None, Some capacity_bytes ->
-             Some (bounded_model_input_projection ctx ~capacity_bytes
-               ~provider_config:config.Runtime_agent.provider_cfg))
+             Some
+               (bounded_model_input_projection ctx ~capacity_bytes
+                  ~provider_config:config.Runtime_agent.provider_cfg))
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's

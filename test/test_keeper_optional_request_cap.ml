@@ -162,7 +162,114 @@ candidates = ["overflow.sample", "fixture.sample"]
   check int "the next uncapped candidate completes the same lane turn" 3
     (Exact_output_fixture.post_count server)
 
+let test_uncapped_runtime_demotes_historical_tool_results () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Model_catalog.global () in
+  let base_path = Filename.temp_file "keeper-optional-cap-demote-" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o700;
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    (match catalog_snapshot with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
+    remove base_path);
+  let server = Exact_output_fixture.start_server
+    ~sw ~net:env#net ~clock:env#clock
+    (Exact_output_fixture.Reply
+      (Exact_output_fixture.openai_response (`Assoc ["answer", `String "accepted"]))) in
+  let model_id = "optional-cap-demote" in
+  let catalog_path = Filename.concat base_path "models.toml" in
+  let catalog_row provider = Printf.sprintf
+    "[[models]]\nid_prefix = %S\nprovider_name = %S\nbase = \"openai_chat\"\nmax_context_tokens = 1048576\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n"
+    model_id provider in
+  write catalog_path (catalog_row "fixture");
+  (match Llm_provider.Model_catalog.load_file catalog_path with
+   | Error detail -> fail detail
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+  let config_path = Filename.concat base_path "runtime.toml" in
+  let config_text = Printf.sprintf {|[runtime]
+default = "fixture.sample"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.sample]
+api-name = %S
+max-context = 1048576
+streaming = false
+[fixture.sample]
+|} server.base_url model_id in
+  write config_path config_text;
+  (match Runtime.init_default_degraded_report ~config_path with
+   | Ok Runtime.Initialized -> ()
+   | Ok (Runtime.Initialized_degraded _) -> fail "fixture catalog unexpectedly unavailable"
+   | Error error -> fail (Runtime.strict_init_error_to_string error));
+  let historical_payload = String.make 4000 'z' in
+  let initial_messages : Agent_core.Types.message list =
+    [ { role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.Text "call tool" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; { role = Agent_core.Types.Tool
+      ; content =
+          [ Agent_core.Types.ToolResult
+              { tool_use_id = "call-demote-1"
+              ; content = historical_payload
+              ; outcome = Agent_core.Types.Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; name = None
+      ; tool_call_id = Some "call-demote-1"
+      ; metadata = []
+      }
+    ]
+  in
+  let result =
+    Keeper_turn_driver.run_named
+      ~system_prompt:"Demotion fixture."
+      ~runtime_id:"fixture.sample"
+      ~keeper_name:"demote-proof"
+      ~base_path
+      ~agent_core_tools:[]
+      ~goal:"new turn goal"
+      ~initial_messages
+      ~sw ~net:env#net ()
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check int "uncapped Keeper reaches HTTP peer" 1
+    (Exact_output_fixture.post_count server);
+  let body = List.hd (Exact_output_fixture.request_bodies server) in
+  check bool "historical tool body was demoted and not sent inline" false
+    (String.contains body 'z');
+  let messages = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "messages" |> to_list) in
+  check bool "demoted tool message carries blob marker" true
+    (List.exists
+       (fun msg ->
+          Yojson.Safe.Util.member "role" msg = `String "tool"
+          && Tool_output.is_marker (Yojson.Safe.Util.member "content" msg |> Yojson.Safe.Util.to_string))
+       messages);
+  check bool "current turn goal remains verbatim" true
+    (List.exists
+       (fun msg ->
+          Yojson.Safe.Util.member "role" msg = `String "user"
+          && Yojson.Safe.Util.member "content" msg = `String "new turn goal")
+       messages)
+
 let () =
   Alcotest.run "keeper_optional_request_cap"
-    [ "actual-dispatch", [test_case "optional cap and exact explicit admission" `Quick
-        test_optional_cap_reaches_real_http_and_explicit_cap_stops_before_io] ]
+    [ "actual-dispatch",
+      [ test_case "optional cap and exact explicit admission" `Quick
+          test_optional_cap_reaches_real_http_and_explicit_cap_stops_before_io
+      ; test_case "uncapped runtime demotes historical tool results" `Quick
+          test_uncapped_runtime_demotes_historical_tool_results
+      ]
+    ]

@@ -62,13 +62,14 @@ let test_manifest_contract_parity () =
 let test_usage_aggregation_exact_fixture () =
   let obs =
     [ { case_id = "retry-success"
+      ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-1"
       ; execution_mode = "matrix"
-      ; request_or_task_identity = "failed-attempt"
-      ; run_turn_attempt_identity = "attempt-1"
-      ; target_revision = "rev-1"
-      ; requested_revision = "rev-1"
+      ; request_or_task_identity = Some "failed-attempt"
+      ; run_turn_attempt_identity = Some "attempt-1"
+      ; target_revision = Some "rev-1"
+      ; requested_revision = Some "rev-1"
       ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 1
       ; external_verified = false
@@ -82,19 +83,20 @@ let test_usage_aggregation_exact_fixture () =
             ; cost_usd = Some 0.01
             ; cost_usd_exact = Some "0.01"
             }
-      ; usage_scope = Per_request
+      ; usage_scope = Some Per_request
       ; phase_timestamps = dummy_phase_timestamps
       ; attempt_sequence = 1
       ; total_attempts_in_run = 2
       }
     ; { case_id = "retry-success"
+      ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-2"
       ; execution_mode = "matrix"
-      ; request_or_task_identity = "successful-attempt"
-      ; run_turn_attempt_identity = "attempt-2-snap-1"
-      ; target_revision = "rev-1"
-      ; requested_revision = "rev-1"
+      ; request_or_task_identity = Some "successful-attempt"
+      ; run_turn_attempt_identity = Some "attempt-2-snap-1"
+      ; target_revision = Some "rev-1"
+      ; requested_revision = Some "rev-1"
       ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 0
       ; external_verified = true
@@ -108,19 +110,20 @@ let test_usage_aggregation_exact_fixture () =
             ; cost_usd = Some 0.02
             ; cost_usd_exact = Some "0.02"
             }
-      ; usage_scope = Cumulative_request_snapshot
+      ; usage_scope = Some Cumulative_request_snapshot
       ; phase_timestamps = dummy_phase_timestamps
       ; attempt_sequence = 2
       ; total_attempts_in_run = 2
       }
     ; { case_id = "retry-success"
+      ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-3"
       ; execution_mode = "matrix"
-      ; request_or_task_identity = "successful-attempt"
-      ; run_turn_attempt_identity = "attempt-2-snap-2"
-      ; target_revision = "rev-1"
-      ; requested_revision = "rev-1"
+      ; request_or_task_identity = Some "successful-attempt"
+      ; run_turn_attempt_identity = Some "attempt-2-snap-2"
+      ; target_revision = Some "rev-1"
+      ; requested_revision = Some "rev-1"
       ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 0
       ; external_verified = true
@@ -134,19 +137,20 @@ let test_usage_aggregation_exact_fixture () =
             ; cost_usd = Some 0.05
             ; cost_usd_exact = Some "0.05"
             }
-      ; usage_scope = Cumulative_request_snapshot
+      ; usage_scope = Some Cumulative_request_snapshot
       ; phase_timestamps = dummy_phase_timestamps
       ; attempt_sequence = 2
       ; total_attempts_in_run = 2
       }
     ; { case_id = "retry-success"
+      ; scenario = Matrix_scenario Retry_success
       ; repeat_index = 1
       ; run_id = "run-fixture-4"
       ; execution_mode = "matrix"
-      ; request_or_task_identity = "verifier"
-      ; run_turn_attempt_identity = "verifier-attempt-1"
-      ; target_revision = "rev-1"
-      ; requested_revision = "rev-1"
+      ; request_or_task_identity = Some "verifier"
+      ; run_turn_attempt_identity = Some "verifier-attempt-1"
+      ; target_revision = Some "rev-1"
+      ; requested_revision = Some "rev-1"
       ; artifact_references = [ "solution.patch" ]
       ; command_exit_code = Some 0
       ; external_verified = true
@@ -160,7 +164,7 @@ let test_usage_aggregation_exact_fixture () =
             ; cost_usd = Some 0.01
             ; cost_usd_exact = Some "0.01"
             }
-      ; usage_scope = Per_request
+      ; usage_scope = Some Per_request
       ; phase_timestamps = dummy_phase_timestamps
       ; attempt_sequence = 3
       ; total_attempts_in_run = 3
@@ -178,21 +182,27 @@ let test_usage_aggregation_exact_fixture () =
 ;;
 
 let make_dummy_observation ~case_id ~repeat_index ~run_id ~mode ~verified ~exit_code ~usage ~attempt_seq =
+  let scenario =
+    match run_scenario_of_string ~execution_mode:mode case_id with
+    | Ok sc -> sc
+    | Error err -> failwith err
+  in
   { case_id
+  ; scenario
   ; repeat_index
   ; run_id
   ; execution_mode = mode
-  ; request_or_task_identity = Printf.sprintf "req-%s-%d" case_id repeat_index
-  ; run_turn_attempt_identity = Printf.sprintf "att-%s-%d-%d" case_id repeat_index attempt_seq
-  ; target_revision = (if case_id = "stale-revision" then "stale-rev-999" else "rev-1")
-  ; requested_revision = "rev-1"
+  ; request_or_task_identity = Some (Printf.sprintf "req-%s-%d" case_id repeat_index)
+  ; run_turn_attempt_identity = Some (Printf.sprintf "att-%s-%d-%d" case_id repeat_index attempt_seq)
+  ; target_revision = Some (if case_id = "stale-revision" then "stale-rev-999" else "rev-1")
+  ; requested_revision = Some "rev-1"
   ; artifact_references = (if case_id = "missing-artifact" then [] else [ "result.patch" ])
   ; command_exit_code = exit_code
   ; external_verified = verified
   ; verdict_run_identity = Some (Printf.sprintf "verdict-%s-%d" case_id repeat_index)
   ; verdict_passed = verified
   ; usage
-  ; usage_scope = Per_request
+  ; usage_scope = Some Per_request
   ; phase_timestamps = dummy_phase_timestamps
   ; attempt_sequence = attempt_seq
   ; total_attempts_in_run = (if case_id = "retry-success" then 2 else 1)
@@ -234,28 +244,28 @@ let generate_compliant_observations () =
            ~mode:"matrix" ~verified:false ~exit_code:(Some 1)
            ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 3; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
            ~attempt_seq:1)
-        with request_or_task_identity = "failed-attempt"; usage_scope = Per_request }
+        with request_or_task_identity = Some "failed-attempt"; usage_scope = Some Per_request }
     in
     let r2 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-2")
            ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 2; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
            ~attempt_seq:2)
-        with request_or_task_identity = "successful-attempt"; usage_scope = Cumulative_request_snapshot }
+        with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot }
     in
     let r3 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-3")
            ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 4; cost_usd = Some 0.05; cost_usd_exact = Some "0.05" })
            ~attempt_seq:2)
-        with request_or_task_identity = "successful-attempt"; usage_scope = Cumulative_request_snapshot }
+        with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot }
     in
     let r4 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-4")
            ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 5; output_tokens = 1; cache_read_input_tokens = 1; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
            ~attempt_seq:3)
-        with request_or_task_identity = "verifier"; usage_scope = Per_request }
+        with request_or_task_identity = Some "verifier"; usage_scope = Some Per_request }
     in
     obs := r1 :: r2 :: r3 :: r4 :: !obs;
 
@@ -266,7 +276,7 @@ let generate_compliant_observations () =
              ~attempt_seq:1 :: !obs;
   done;
 
-  (* Live runs: 3 runs *)
+  (* Live runs: 3 runs. Rule 68: retry-success requires an observed failed attempt and subsequent success *)
   obs := make_dummy_observation ~case_id:"success" ~repeat_index:1 ~run_id:"live-succ-1"
            ~mode:"live" ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 15; output_tokens = 3; cache_read_input_tokens = 0; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
@@ -275,15 +285,21 @@ let generate_compliant_observations () =
            ~mode:"live" ~verified:false ~exit_code:(Some 1)
            ~usage:(Usage_reported { input_tokens = 15; output_tokens = 3; cache_read_input_tokens = 0; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
            ~attempt_seq:1 :: !obs;
-  obs := make_dummy_observation ~case_id:"retry-success" ~repeat_index:1 ~run_id:"live-retry-1"
+  (* Live retry attempt 1: failed *)
+  obs := make_dummy_observation ~case_id:"retry-success" ~repeat_index:1 ~run_id:"live-retry-1-att1"
+           ~mode:"live" ~verified:false ~exit_code:(Some 1)
+           ~usage:(Usage_reported { input_tokens = 10; output_tokens = 2; cache_read_input_tokens = 0; cost_usd = Some 0.01; cost_usd_exact = Some "0.01" })
+           ~attempt_seq:1 :: !obs;
+  (* Live retry attempt 2: verified success *)
+  obs := make_dummy_observation ~case_id:"retry-success" ~repeat_index:1 ~run_id:"live-retry-1-att2"
            ~mode:"live" ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 0; cost_usd = Some 0.04; cost_usd_exact = Some "0.04" })
-           ~attempt_seq:1 :: !obs;
+           ~attempt_seq:2 :: !obs;
 
   List.rev !obs
 ;;
 
-let test_checker_accepts_compliant_27_raw_records () =
+let test_checker_accepts_compliant_records () =
   let manifest =
     make_manifest
       ~contract_sha256:"contract-sha"
@@ -295,8 +311,8 @@ let test_checker_accepts_compliant_27_raw_records () =
       ~execution_mode:"matrix"
   in
   let raw_obs = generate_compliant_observations () in
-  (* 3*1 + 3*1 + 3*1 + 3*1 + 3*4 + 3*1 = 27 matrix raw records + 3 live = 30 total records *)
-  check int "total raw observations across attempts" 30 (List.length raw_obs);
+  (* 27 matrix raw records + 4 live records = 31 total records *)
+  check int "total raw observations across attempts" 31 (List.length raw_obs);
   let summary = check_observations ~manifest ~observations:raw_obs in
   check int "matrix runs expected" 18 summary.matrix_expected;
   check int "matrix runs observed (grouped)" 18 summary.matrix_observed;
@@ -335,7 +351,9 @@ let test_checker_rejects_verification_failure_in_success () =
   in
   let summary = check_observations ~manifest ~observations:corrupted in
   check int "matrix passed decremented to 17" 17 summary.matrix_passed;
-  check bool "overall failed on unverified success" false summary.overall_passed
+  check bool "overall failed on unverified success" false summary.overall_passed;
+  check bool "finding recorded for failure" true
+    (List.exists (fun f -> contains_sub "success_verification_failed" f.rule_id) summary.findings)
 ;;
 
 let test_checker_rejects_duplicated_usage () =
@@ -377,6 +395,22 @@ let test_strict_parsing_rejects_unknown_scope () =
       (contains_sub "invalid or unknown usage_scope" err)
 ;;
 
+let test_strict_parsing_rejects_unknown_scenario () =
+  let json =
+    `Assoc
+      [ "case_id", `String "nonexistent-scenario"
+      ; "repeat_index", `Int 1
+      ; "run_id", `String "run-test"
+      ; "execution_mode", `String "matrix"
+      ]
+  in
+  match run_observation_of_json json with
+  | Ok _ -> fail "should fail on unknown scenario"
+  | Error err ->
+    check bool "error mentions unknown scenario" true
+      (contains_sub "unknown scenario" err)
+;;
+
 let test_type_error_caught_gracefully () =
   (* Pass integer where string is required: case_id = 123 *)
   let json =
@@ -393,6 +427,112 @@ let test_type_error_caught_gracefully () =
       (contains_sub "JSON type error" err)
 ;;
 
+let test_harness_output_decoding () =
+  (* Real evidence row JSON as generated by scripts/harness_coding_eval.sh *)
+  let json_str =
+    {|{
+      "case_id": "success",
+      "run_index": 1,
+      "run_id": "harness-run-42",
+      "provider": "openrouter",
+      "model": "deepseek-chat",
+      "status": "ok",
+      "verify_exit": 0,
+      "regression_exit": 0,
+      "edited_source_files": ["src/fix.ml"],
+      "edited_target_files": ["src/target.ml"],
+      "build_exit": 0,
+      "passed": true,
+      "duration_ms": 12500,
+      "recorded_at": 1726000000,
+      "tool_calls": ["bash", "edit"],
+      "input_tokens": 1500,
+      "output_tokens": 300,
+      "cost_usd": 0.005,
+      "error": null,
+      "usage_scope": "cumulative-request-snapshot",
+      "request_or_task_identity": "task-harness-run-42",
+      "run_turn_attempt_identity": "harness-run-42-1",
+      "target_revision": "deepseek-chat",
+      "requested_revision": "deepseek-chat",
+      "verdict_run_identity": "verdict-harness-run-42",
+      "artifact_references": ["src/target.ml"],
+      "execution_mode": "live"
+    }|}
+  in
+  let json = Yojson.Safe.from_string json_str in
+  match run_observation_of_json json with
+  | Ok obs ->
+    check string "case_id" "success" obs.case_id;
+    check int "repeat_index" 1 obs.repeat_index;
+    check string "run_id" "harness-run-42" obs.run_id;
+    check (option string) "request_identity" (Some "task-harness-run-42") obs.request_or_task_identity;
+    check bool "external_verified" true obs.external_verified;
+    (match obs.usage with
+     | Usage_reported r ->
+       check int "input tokens" 1500 r.input_tokens;
+       check int "output tokens" 300 r.output_tokens;
+       (match r.cost_usd with
+        | Some c -> check (float 1e-6) "cost" 0.005 c
+        | None -> fail "cost missing")
+     | Usage_missing _ -> fail "expected reported usage");
+    check bool "scope matches" true (obs.usage_scope = Some Cumulative_request_snapshot)
+  | Error err -> fail ("harness row decode failed: " ^ err)
+;;
+
+let test_roadmap_fixture_string_cost_decoding () =
+  (* Roadmap JSON fixture with string decimal cost per Rule 75 *)
+  let json_str =
+    {|{
+      "case_id": "retry-success",
+      "run_index": 1,
+      "request": "failed-attempt",
+      "scope": "per-request",
+      "input_tokens": 10,
+      "output_tokens": 2,
+      "cache_read_input_tokens": 3,
+      "cost_usd": "0.01",
+      "execution_mode": "matrix"
+    }|}
+  in
+  let json = Yojson.Safe.from_string json_str in
+  match run_observation_of_json json with
+  | Ok obs ->
+    (match obs.usage with
+     | Usage_reported r ->
+       check int "input" 10 r.input_tokens;
+       check (option string) "cost exact" (Some "0.01") r.cost_usd_exact;
+       (match r.cost_usd with
+        | Some c -> check (float 1e-6) "cost float" 0.01 c
+        | None -> fail "cost float missing")
+     | Usage_missing _ -> fail "expected reported usage");
+    check bool "scope parsed from 'scope' key" true (obs.usage_scope = Some Per_request)
+  | Error err -> fail ("roadmap fixture decode failed: " ^ err)
+;;
+
+let test_roundtrip_observation () =
+  let obs =
+    make_dummy_observation
+      ~case_id:"success"
+      ~repeat_index:1
+      ~run_id:"roundtrip-1"
+      ~mode:"matrix"
+      ~verified:true
+      ~exit_code:(Some 0)
+      ~usage:(Usage_reported { input_tokens = 100; output_tokens = 20; cache_read_input_tokens = 5; cost_usd = Some 0.02; cost_usd_exact = Some "0.02" })
+      ~attempt_seq:1
+  in
+  let json = run_observation_to_json obs in
+  match run_observation_of_json json with
+  | Ok decoded ->
+    check string "case_id" obs.case_id decoded.case_id;
+    check int "repeat_index" obs.repeat_index decoded.repeat_index;
+    check string "run_id" obs.run_id decoded.run_id;
+    check bool "verified" obs.external_verified decoded.external_verified;
+    check (option string) "request_id" obs.request_or_task_identity decoded.request_or_task_identity
+  | Error err -> fail ("observation roundtrip failed: " ^ err)
+;;
+
 let () =
   run "Reliable_change_g1"
     [ ( "contract_parity"
@@ -402,14 +542,18 @@ let () =
       , [ test_case "exact fixture reconstruction" `Quick test_usage_aggregation_exact_fixture ]
       )
     ; ( "compliance_checker"
-      , [ test_case "accepts compliant 27 raw records" `Quick test_checker_accepts_compliant_27_raw_records
+      , [ test_case "accepts compliant records" `Quick test_checker_accepts_compliant_records
         ; test_case "rejects verification failure in success" `Quick test_checker_rejects_verification_failure_in_success
         ; test_case "rejects duplicated usage" `Quick test_checker_rejects_duplicated_usage
         ]
       )
     ; ( "strict_parsing"
       , [ test_case "rejects unknown usage scope" `Quick test_strict_parsing_rejects_unknown_scope
+        ; test_case "rejects unknown scenario" `Quick test_strict_parsing_rejects_unknown_scenario
         ; test_case "type error caught gracefully" `Quick test_type_error_caught_gracefully
+        ; test_case "harness output decoding" `Quick test_harness_output_decoding
+        ; test_case "roadmap fixture string cost decoding" `Quick test_roadmap_fixture_string_cost_decoding
+        ; test_case "observation roundtrip" `Quick test_roundtrip_observation
         ]
       )
     ]

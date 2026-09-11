@@ -580,7 +580,15 @@ evidence_row() {
       input_tokens: $input_tokens,
       output_tokens: $output_tokens,
       cost_usd: $cost_usd,
-      error: $error
+      error: $error,
+      usage_scope: (if $input_tokens != null then "cumulative-request-snapshot" else null end),
+      request_or_task_identity: ("task-" + $run_id),
+      run_turn_attempt_identity: ($run_id + "-" + ($run_index | tostring)),
+      target_revision: $model,
+      requested_revision: $model,
+      verdict_run_identity: ("verdict-" + $run_id),
+      artifact_references: $edited_target_files,
+      execution_mode: "live"
     }'
 }
 

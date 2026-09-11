@@ -57,6 +57,27 @@ let live_scenario_of_string_opt s =
   | Error _ -> None
 ;;
 
+type run_scenario =
+  | Matrix_scenario of scenario
+  | Live_scenario of live_scenario
+
+let run_scenario_to_string = function
+  | Matrix_scenario sc -> scenario_to_string sc
+  | Live_scenario lsc -> live_scenario_to_string lsc
+;;
+
+let run_scenario_of_string ~execution_mode s =
+  match execution_mode with
+  | "live" ->
+    (match live_scenario_of_string s with
+     | Ok lsc -> Ok (Live_scenario lsc)
+     | Error err -> Error err)
+  | _ ->
+    (match scenario_of_string s with
+     | Ok sc -> Ok (Matrix_scenario sc)
+     | Error err -> Error err)
+;;
+
 type usage_scope =
   | Per_request
   | Cumulative_request_snapshot
@@ -103,20 +124,21 @@ type phase_timestamps =
 
 type run_observation =
   { case_id : string
+  ; scenario : run_scenario
   ; repeat_index : int
   ; run_id : string
   ; execution_mode : string
-  ; request_or_task_identity : string
-  ; run_turn_attempt_identity : string
-  ; target_revision : string
-  ; requested_revision : string
+  ; request_or_task_identity : string option
+  ; run_turn_attempt_identity : string option
+  ; target_revision : string option
+  ; requested_revision : string option
   ; artifact_references : string list
   ; command_exit_code : int option
   ; external_verified : bool
   ; verdict_run_identity : string option
   ; verdict_passed : bool
   ; usage : usage_observation
-  ; usage_scope : usage_scope
+  ; usage_scope : usage_scope option
   ; phase_timestamps : phase_timestamps
   ; attempt_sequence : int
   ; total_attempts_in_run : int
@@ -256,20 +278,46 @@ type usage_totals =
 
 let aggregate_run_usages (observations : run_observation list) : usage_totals =
   let per_request_obs =
-    List.filter (fun o -> o.usage_scope = Per_request) observations
+    List.filter (fun o -> o.usage_scope = Some Per_request) observations
   in
   let cumulative_obs =
-    List.filter (fun o -> o.usage_scope = Cumulative_request_snapshot) observations
+    List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) observations
+  in
+  let distinct_per_request =
+    List.fold_left
+      (fun acc (o : run_observation) ->
+         let key =
+           match o.run_turn_attempt_identity with
+           | Some id -> id
+           | None -> o.run_id
+         in
+         if List.exists (fun (k, _) -> k = key) acc then acc
+         else (key, o) :: acc)
+      [] per_request_obs
+    |> List.map snd
   in
   let request_ids =
     List.sort_uniq String.compare
-      (List.map (fun o -> o.request_or_task_identity) cumulative_obs)
+      (List.map
+         (fun o ->
+            match o.request_or_task_identity with
+            | Some r -> r
+            | None -> o.run_id)
+         cumulative_obs)
   in
   let latest_cumulative =
     List.map
       (fun req_id ->
          let matching =
-           List.filter (fun o -> o.request_or_task_identity = req_id) cumulative_obs
+           List.filter
+             (fun o ->
+                let r =
+                  match o.request_or_task_identity with
+                  | Some r -> r
+                  | None -> o.run_id
+                in
+                r = req_id)
+             cumulative_obs
          in
          let sorted =
            List.sort
@@ -293,7 +341,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
          List.hd (List.rev sorted))
       request_ids
   in
-  let all_countable = per_request_obs @ latest_cumulative in
+  let all_countable = distinct_per_request @ latest_cumulative in
   let sum_in = ref 0 in
   let sum_out = ref 0 in
   let sum_cache = ref 0 in
@@ -445,17 +493,43 @@ let check_observations
 
        (* Check for duplicated usage within run *)
        let per_req_attempts =
-         List.filter (fun o -> o.usage_scope = Per_request) run_obs
+         List.filter (fun o -> o.usage_scope = Some Per_request) run_obs
        in
-       let attempt_ids =
-         List.map (fun o -> o.run_turn_attempt_identity) per_req_attempts
+       let per_req_ids =
+         List.filter_map (fun o -> o.run_turn_attempt_identity) per_req_attempts
        in
-       let unique_attempt_ids = List.sort_uniq String.compare attempt_ids in
-       if List.length attempt_ids <> List.length unique_attempt_ids then (
+       let unique_per_req_ids = List.sort_uniq String.compare per_req_ids in
+       if List.length per_req_ids <> List.length unique_per_req_ids then (
          incr duplicated_usage;
          run_valid := false;
          add_finding "duplicated_per_request_usage"
-           (Printf.sprintf "run %s[%d] contains duplicated attempt identities" case_id repeat_index)
+           (Printf.sprintf "run %s[%d] contains duplicated per-request attempt identities" case_id repeat_index)
+           false
+           (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+       );
+       let cumulative_attempts =
+         List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) run_obs
+       in
+       let cumulative_keys =
+         List.map
+           (fun o ->
+              ( (match o.request_or_task_identity with Some r -> r | None -> o.run_id)
+              , o.attempt_sequence ))
+           cumulative_attempts
+       in
+       let unique_cumulative_keys =
+         List.sort_uniq
+           (fun (r1, s1) (r2, s2) ->
+              match String.compare r1 r2 with
+              | 0 -> Int.compare s1 s2
+              | c -> c)
+           cumulative_keys
+       in
+       if List.length cumulative_keys <> List.length unique_cumulative_keys then (
+         incr duplicated_usage;
+         run_valid := false;
+         add_finding "duplicated_cumulative_usage"
+           (Printf.sprintf "run %s[%d] contains duplicated cumulative snapshots" case_id repeat_index)
            false
            (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
        );
@@ -470,29 +544,49 @@ let check_observations
             (fun req_entity ->
                match req_entity with
                | "request_or_task_identity" ->
-                 if final_attempt.request_or_task_identity = "" then (
+                 if Option.is_none final_attempt.request_or_task_identity then (
                    incr required_join_missing;
-                   run_valid := false
+                   run_valid := false;
+                   add_finding "missing_required_join"
+                     (Printf.sprintf "missing request_or_task_identity in %s[%d]" case_id repeat_index)
+                     false
+                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
                  )
                | "run_turn_attempt_identity" ->
-                 if final_attempt.run_turn_attempt_identity = "" then (
+                 if Option.is_none final_attempt.run_turn_attempt_identity then (
                    incr required_join_missing;
-                   run_valid := false
+                   run_valid := false;
+                   add_finding "missing_required_join"
+                     (Printf.sprintf "missing run_turn_attempt_identity in %s[%d]" case_id repeat_index)
+                     false
+                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
                  )
                | "target_revision" ->
-                 if final_attempt.target_revision = "" then (
+                 if Option.is_none final_attempt.target_revision then (
                    incr required_join_missing;
-                   run_valid := false
+                   run_valid := false;
+                   add_finding "missing_required_join"
+                     (Printf.sprintf "missing target_revision in %s[%d]" case_id repeat_index)
+                     false
+                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
                  )
                | "artifact_references" ->
                  if final_attempt.artifact_references = [] && cm.scenario <> Missing_artifact then (
                    incr required_join_missing;
-                   run_valid := false
+                   run_valid := false;
+                   add_finding "missing_required_join"
+                     (Printf.sprintf "missing artifact_references in %s[%d]" case_id repeat_index)
+                     false
+                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
                  )
                | "verdict_run_identity" ->
-                 if final_attempt.verdict_run_identity = None then (
+                 if Option.is_none final_attempt.verdict_run_identity then (
                    incr required_join_missing;
-                   run_valid := false
+                   run_valid := false;
+                   add_finding "missing_required_join"
+                     (Printf.sprintf "missing verdict_run_identity in %s[%d]" case_id repeat_index)
+                     false
+                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
                  )
                | _ -> ())
             cm.required_entities
@@ -510,31 +604,60 @@ let check_observations
             ))
          run_obs;
 
-       (* Check scenario-specific outcome rules *)
-       (match case_id with
-        | "success" ->
+       (* Check scenario-specific outcome rules using typed scenario variant *)
+       (match final_attempt.scenario with
+        | Matrix_scenario Success ->
           if (not final_attempt.external_verified)
              || (not final_attempt.verdict_passed)
              || final_attempt.command_exit_code <> Some 0
-          then run_valid := false
-        | "exit-nonzero" ->
+          then (
+            run_valid := false;
+            add_finding (Printf.sprintf "success_verification_failed_%d" repeat_index)
+              (Printf.sprintf "matrix success run %d failed verification or exited nonzero" repeat_index)
+              false
+              (Some (Printf.sprintf "verified=%b passed=%b exit=%s"
+                       final_attempt.external_verified
+                       final_attempt.verdict_passed
+                       (match final_attempt.command_exit_code with Some c -> string_of_int c | None -> "none")))
+          )
+        | Matrix_scenario Exit_nonzero ->
           if final_attempt.command_exit_code = Some 0 || final_attempt.external_verified then (
             incr false_verified;
-            run_valid := false
-          )
-        | "stale-revision" ->
-          if final_attempt.external_verified then (
-            incr false_verified;
-            run_valid := false
-          )
-        | "missing-artifact" ->
-          if final_attempt.external_verified then (
-            incr false_verified;
-            run_valid := false
-          )
-        | "retry-success" ->
-          if first_attempt.external_verified || (not final_attempt.external_verified) then
             run_valid := false;
+            add_finding (Printf.sprintf "exit_nonzero_false_verified_%d" repeat_index)
+              (Printf.sprintf "matrix exit-nonzero run %d was falsely verified or exited 0" repeat_index)
+              false
+              (Some (Printf.sprintf "verified=%b exit=%s"
+                       final_attempt.external_verified
+                       (match final_attempt.command_exit_code with Some c -> string_of_int c | None -> "none")))
+          )
+        | Matrix_scenario Stale_revision ->
+          if final_attempt.external_verified then (
+            incr false_verified;
+            run_valid := false;
+            add_finding (Printf.sprintf "stale_revision_false_verified_%d" repeat_index)
+              (Printf.sprintf "matrix stale-revision run %d was falsely verified" repeat_index)
+              false
+              (Some (Printf.sprintf "rev=%s" (match final_attempt.target_revision with Some r -> r | None -> "none")))
+          )
+        | Matrix_scenario Missing_artifact ->
+          if final_attempt.external_verified then (
+            incr false_verified;
+            run_valid := false;
+            add_finding (Printf.sprintf "missing_artifact_false_verified_%d" repeat_index)
+              (Printf.sprintf "matrix missing-artifact run %d was falsely verified" repeat_index)
+              false
+              (Some (Printf.sprintf "run_id=%s" final_attempt.run_id))
+          )
+        | Matrix_scenario Retry_success ->
+          if first_attempt.external_verified || (not final_attempt.external_verified) then (
+            run_valid := false;
+            add_finding (Printf.sprintf "retry_success_sequence_invalid_%d" repeat_index)
+              (Printf.sprintf "matrix retry-success run %d first attempt must fail and final must verify" repeat_index)
+              false
+              (Some (Printf.sprintf "first_verified=%b final_verified=%b"
+                       first_attempt.external_verified final_attempt.external_verified))
+          );
           let totals = aggregate_run_usages run_obs in
           if totals.total_input_tokens <> 40
              || totals.total_output_tokens <> 8
@@ -556,16 +679,33 @@ let check_observations
                      | Some c -> c
                      | None -> "null")))
           )
-        | "usage-unreported" ->
+        | Matrix_scenario Usage_unreported ->
           (match final_attempt.usage with
            | Usage_reported r ->
              if r.input_tokens = 0 || r.output_tokens = 0 || r.cost_usd = Some 0.0 then (
                incr unknown_coerced_to_zero;
-               run_valid := false
+               run_valid := false;
+               add_finding (Printf.sprintf "usage_unreported_coerced_zero_%d" repeat_index)
+                 "usage-unreported run coerced unknown usage to 0"
+                 false
+                 (Some (Printf.sprintf "tokens=%d cost=%s"
+                          r.input_tokens
+                          (match r.cost_usd with Some c -> string_of_float c | None -> "none")))
              )
            | Usage_missing _ ->
-             if final_attempt.external_verified then run_valid := false)
-        | _ -> ());
+             if final_attempt.external_verified then (
+               run_valid := false;
+               add_finding (Printf.sprintf "usage_unreported_unexpected_verify_%d" repeat_index)
+                 "usage-unreported run was marked verified unexpectedly"
+                 false
+                 None
+             ))
+        | Live_scenario _ ->
+          run_valid := false;
+          add_finding (Printf.sprintf "invalid_live_scenario_in_matrix_%d" repeat_index)
+            "matrix observation has live_scenario variant"
+            false
+            None);
 
        if !run_valid then incr matrix_runs_passed)
     run_keys_matrix;
@@ -585,19 +725,54 @@ let check_observations
          List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
        in
        let final_attempt = List.hd (List.rev sorted_attempts) in
+       let first_attempt = List.hd sorted_attempts in
        let run_valid = ref true in
 
-       (match case_id with
-        | "success" ->
-          if not final_attempt.external_verified then run_valid := false
-        | "negative" ->
+       (match final_attempt.scenario with
+        | Live_scenario Live_success ->
+          if not final_attempt.external_verified then (
+            run_valid := false;
+            add_finding (Printf.sprintf "live_success_failed_%d" repeat_index)
+              "live success run failed external verification"
+              false
+              (Some final_attempt.run_id)
+          )
+        | Live_scenario Live_negative ->
           if final_attempt.external_verified then (
             incr false_verified;
-            run_valid := false
+            run_valid := false;
+            add_finding (Printf.sprintf "live_negative_false_verified_%d" repeat_index)
+              "live negative run was falsely verified"
+              false
+              (Some final_attempt.run_id)
           )
-        | "retry-success" ->
-          if not final_attempt.external_verified then run_valid := false
-        | _ -> ());
+        | Live_scenario Live_retry_success ->
+          (* Rule 68: The live retry needs an observed failed attempt and a real subsequent successful attempt. *)
+          if List.length sorted_attempts < 2 then (
+            run_valid := false;
+            add_finding (Printf.sprintf "live_retry_missing_attempts_%d" repeat_index)
+              "live retry requires at least 2 attempts (failed attempt + subsequent success)"
+              false
+              (Some (Printf.sprintf "attempts=%d" (List.length sorted_attempts)))
+          ) else if first_attempt.external_verified then (
+            run_valid := false;
+            add_finding (Printf.sprintf "live_retry_first_attempt_not_failed_%d" repeat_index)
+              "live retry first attempt must be an observed failed attempt"
+              false
+              None
+          ) else if not final_attempt.external_verified then (
+            run_valid := false;
+            add_finding (Printf.sprintf "live_retry_final_attempt_not_success_%d" repeat_index)
+              "live retry final attempt must be verified"
+              false
+              None
+          )
+        | Matrix_scenario _ ->
+          run_valid := false;
+          add_finding (Printf.sprintf "invalid_matrix_scenario_in_live_%d" repeat_index)
+            "live observation has matrix_scenario variant"
+            false
+            None);
 
        if !run_valid then incr live_runs_passed)
     run_keys_live;
@@ -741,10 +916,14 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
     ; "repeat_index", `Int o.repeat_index
     ; "run_id", `String o.run_id
     ; "execution_mode", `String o.execution_mode
-    ; "request_or_task_identity", `String o.request_or_task_identity
-    ; "run_turn_attempt_identity", `String o.run_turn_attempt_identity
-    ; "target_revision", `String o.target_revision
-    ; "requested_revision", `String o.requested_revision
+    ; ( "request_or_task_identity"
+      , match o.request_or_task_identity with Some s -> `String s | None -> `Null )
+    ; ( "run_turn_attempt_identity"
+      , match o.run_turn_attempt_identity with Some s -> `String s | None -> `Null )
+    ; ( "target_revision"
+      , match o.target_revision with Some s -> `String s | None -> `Null )
+    ; ( "requested_revision"
+      , match o.requested_revision with Some s -> `String s | None -> `Null )
     ; "artifact_references", `List (List.map (fun a -> `String a) o.artifact_references)
     ; ( "command_exit_code"
       , match o.command_exit_code with Some c -> `Int c | None -> `Null )
@@ -753,7 +932,8 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
       , match o.verdict_run_identity with Some v -> `String v | None -> `Null )
     ; "verdict_passed", `Bool o.verdict_passed
     ; "usage", usage_json
-    ; "usage_scope", `String (usage_scope_to_string o.usage_scope)
+    ; ( "usage_scope"
+      , match o.usage_scope with Some s -> `String (usage_scope_to_string s) | None -> `Null )
     ; "phase_timestamps", pt_json
     ; "attempt_sequence", `Int o.attempt_sequence
     ; "total_attempts_in_run", `Int o.total_attempts_in_run
@@ -771,33 +951,41 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
          | Some idx -> idx
          | None -> failwith "missing repeat_index or run_index")
     in
-    let run_id = json |> member "run_id" |> to_string in
+    let run_id =
+      match json |> member "run_id" |> to_string_option with
+      | Some id -> id
+      | None ->
+        (match json |> member "request" |> to_string_option with
+         | Some r -> r
+         | None -> Printf.sprintf "%s-%d" case_id repeat_index)
+    in
     let execution_mode =
       match json |> member "execution_mode" |> to_string_option with
       | Some mode -> mode
       | None -> "matrix"
     in
+    let scenario =
+      match run_scenario_of_string ~execution_mode case_id with
+      | Ok sc -> sc
+      | Error err -> failwith err
+    in
     let request_or_task_identity =
       match json |> member "request_or_task_identity" |> to_string_option with
-      | Some req -> req
+      | Some req -> Some req
       | None ->
         (match json |> member "request_id" |> to_string_option with
-         | Some req -> req
-         | None -> "req-" ^ run_id)
+         | Some req -> Some req
+         | None -> json |> member "request" |> to_string_option)
     in
     let run_turn_attempt_identity =
-      match json |> member "run_turn_attempt_identity" |> to_string_option with
-      | Some att -> att
-      | None -> run_id
+      json |> member "run_turn_attempt_identity" |> to_string_option
     in
     let target_revision =
-      match json |> member "target_revision" |> to_string_option with
-      | Some rev -> rev
-      | None -> "workload-rev-1"
+      json |> member "target_revision" |> to_string_option
     in
     let requested_revision =
       match json |> member "requested_revision" |> to_string_option with
-      | Some rev -> rev
+      | Some rev -> Some rev
       | None -> target_revision
     in
     let artifact_references =
@@ -822,20 +1010,25 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
          | None -> false)
     in
     let verdict_run_identity =
-      match json |> member "verdict_run_identity" |> to_string_option with
-      | Some v -> Some v
-      | None -> Some ("verdict-" ^ run_id)
+      json |> member "verdict_run_identity" |> to_string_option
     in
     let verdict_passed =
       match json |> member "verdict_passed" |> to_bool_option with
       | Some b -> b
       | None -> external_verified
     in
-    let usage_scope_raw = json |> member "usage_scope" |> to_string in
     let usage_scope =
-      match usage_scope_of_string usage_scope_raw with
-      | Ok scope -> scope
-      | Error err -> failwith err
+      let raw_opt =
+        match json |> member "usage_scope" |> to_string_option with
+        | Some s -> Some s
+        | None -> json |> member "scope" |> to_string_option
+      in
+      match raw_opt with
+      | Some raw ->
+        (match usage_scope_of_string raw with
+         | Ok sc -> Some sc
+         | Error err -> failwith err)
+      | None -> None
     in
     let usage =
       let u = json |> member "usage" in
@@ -845,7 +1038,10 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
         | None ->
           (match json |> member "input_tokens" with
            | `Int _ -> true
-           | _ -> false)
+           | _ ->
+             (match u |> member "input_tokens" with
+              | `Int _ -> true
+              | _ -> false))
       in
       if reported then
         let input_tokens =
@@ -861,20 +1057,36 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
         let cache_read_input_tokens =
           match u |> member "cache_read_input_tokens" |> to_int_option with
           | Some t -> t
-          | None -> 0
+          | None ->
+            (match json |> member "cache_read_input_tokens" |> to_int_option with
+             | Some t -> t
+             | None -> 0)
+        in
+        let parse_cost json_node =
+          match json_node with
+          | `Float f -> Some f
+          | `Int i -> Some (float_of_int i)
+          | `String s -> (try Some (float_of_string s) with Failure _ -> None)
+          | _ -> None
         in
         let cost_usd =
-          match u |> member "cost_usd" |> to_float_option with
+          match parse_cost (u |> member "cost_usd") with
           | Some c -> Some c
-          | None -> json |> member "cost_usd" |> to_float_option
+          | None -> parse_cost (json |> member "cost_usd")
         in
         let cost_usd_exact =
           match u |> member "cost_usd_exact" |> to_string_option with
           | Some s -> Some s
           | None ->
-            (match cost_usd with
-             | Some c -> Some (Printf.sprintf "%.2f" c)
-             | None -> None)
+            (match u |> member "cost_usd" with
+             | `String s -> Some s
+             | _ ->
+               (match json |> member "cost_usd" with
+                | `String s -> Some s
+                | _ ->
+                  (match cost_usd with
+                   | Some c -> Some (Printf.sprintf "%.2f" c)
+                   | None -> None)))
         in
         Usage_reported
           { input_tokens
@@ -918,6 +1130,7 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
     in
     Ok
       { case_id
+      ; scenario
       ; repeat_index
       ; run_id
       ; execution_mode

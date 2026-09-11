@@ -23,6 +23,13 @@ val live_scenario_to_string : live_scenario -> string
 val live_scenario_of_string : string -> (live_scenario, string) result
 val live_scenario_of_string_opt : string -> live_scenario option
 
+type run_scenario =
+  | Matrix_scenario of scenario
+  | Live_scenario of live_scenario
+
+val run_scenario_to_string : run_scenario -> string
+val run_scenario_of_string : execution_mode:string -> string -> (run_scenario, string) result
+
 type usage_scope =
   | Per_request
   | Cumulative_request_snapshot
@@ -56,20 +63,21 @@ type phase_timestamps =
 
 type run_observation =
   { case_id : string
+  ; scenario : run_scenario
   ; repeat_index : int
   ; run_id : string
   ; execution_mode : string
-  ; request_or_task_identity : string
-  ; run_turn_attempt_identity : string
-  ; target_revision : string
-  ; requested_revision : string
+  ; request_or_task_identity : string option
+  ; run_turn_attempt_identity : string option
+  ; target_revision : string option
+  ; requested_revision : string option
   ; artifact_references : string list
   ; command_exit_code : int option
   ; external_verified : bool
   ; verdict_run_identity : string option
   ; verdict_passed : bool
   ; usage : usage_observation
-  ; usage_scope : usage_scope
+  ; usage_scope : usage_scope option
   ; phase_timestamps : phase_timestamps
   ; attempt_sequence : int
   ; total_attempts_in_run : int

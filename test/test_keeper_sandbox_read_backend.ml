@@ -2574,7 +2574,7 @@ let test_complete_binary_failure_has_safe_diagnostic () =
     let base_path = temp_dir () in
     Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let config = Workspace.default_config base_path in
-      let meta = { (make_meta ~name:"binary-error" ~sandbox:Masc.Keeper_types_profile_sandbox.Docker)
+      let meta = { (make_meta ~name:"binary-error" ~sandbox:Keeper_types_profile_sandbox.Docker)
         with sandbox_image = Some "alpine:test" } in
       let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "partial.png" in
       match Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path:path ~timeout_sec:5. () with
@@ -2582,8 +2582,8 @@ let test_complete_binary_failure_has_safe_diagnostic () =
       | Error detail ->
         Alcotest.(check bool) "diagnostic contains no binary byte" false (String.contains detail '\255');
         Alcotest.(check bool) "metadata records complete failed output size" true
-          (Masc.String_util.contains_substring detail "binary_bytes=4");
-        Alcotest.(check bool) "exit preserved" true (Masc.String_util.contains_substring detail "exit=1")))
+          (String_util.contains_substring detail "binary_bytes=4");
+        Alcotest.(check bool) "exit preserved" true (String_util.contains_substring detail "exit=1")))
 
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"

@@ -340,44 +340,15 @@ let degrade_audio_messages ~supports_audio_input messages =
 ;;
 
 let degrade_image_messages ~supports_image_input messages =
-  let degraded = ref 0 in
-  let rewrite_block block =
-    match block with
-    | Image { media_type; _ } when not supports_image_input ->
-      incr degraded;
-      image_omitted_placeholder ~media_type
-    | ToolResult ({ content_blocks = Some blocks; _ } as result)
-      when not supports_image_input ->
-      (* Some wires read only the canonical [content] string for tool
-         results (Gemini's functionResponse), so the omission has to be
-         named there too — the degrade is not silent on any wire. Wires
-         that serialize [content_blocks] (OpenAI-compatible tool content)
-         carry the placeholder block itself. *)
-      let omissions = ref [] in
-      let rewrite_inner block =
-        match block with
-        | Image { media_type; _ } ->
-          incr degraded;
-          omissions := image_omitted_note ~media_type :: !omissions;
-          image_omitted_placeholder ~media_type
-        | _ -> block
-      in
-      let blocks = List.map rewrite_inner blocks in
-      let content =
-        match List.rev !omissions with
-        | [] -> result.content
-        | notes ->
-          let notes = String.concat "\n" notes in
-          if result.content = "" then notes else result.content ^ "\n" ^ notes
-      in
-      ToolResult { result with content; content_blocks = Some blocks }
-    | _ -> block
-  in
-  let rewrite (message : Types.message) =
-    { message with content = List.map rewrite_block message.content }
-  in
-  let messages = List.map rewrite messages in
-  messages, !degraded
+  degrade_blocks_messages
+    (fun block ->
+       match block with
+       | Image { media_type; _ } when not supports_image_input ->
+         Some
+           ( image_omitted_note ~media_type
+           , image_omitted_placeholder ~media_type )
+       | _ -> None)
+    messages
 ;;
 
 type tool_result_content_style =

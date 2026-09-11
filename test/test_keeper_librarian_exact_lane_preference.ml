@@ -358,7 +358,7 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
        "the refused slot is reported, not fatal"
        [ ("librarian-bad", "wire_admission_rejected:invalid_connect_timeout") ]
        unusable
-   | Ok (_, Some _) -> fail "a fitting prompt reported a shrink"
+   | Ok ((_, Some _), _) -> fail "a fitting prompt reported a shrink"
    | Error error ->
      fail (Runtime.extraction_error_to_string error));
   let selected_slots = publish [ "librarian-bad" ] in
@@ -412,7 +412,7 @@ let test_an_empty_ladder_fits_and_reports_nothing () =
   with
   | Ok ((_, None), unusable) ->
     check (list (pair string string)) "nothing to exclude" [] unusable
-  | Ok (_, Some _) -> fail "an empty ladder reported a shrink"
+  | Ok ((_, Some _), _) -> fail "an empty ladder reported a shrink"
   | Error error -> fail (Runtime.extraction_error_to_string error)
 ;;
 

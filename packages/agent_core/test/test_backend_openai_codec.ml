@@ -2824,8 +2824,8 @@ let test_tool_document_audio_degrade_without_declared_capability () =
   check_bool "capable wire's media turn still carries input_audio" true
     (List.exists (has_part_field "input_audio")
        (media_body |> member "messages" |> to_list));
-  (* Gemini production boundary: documents have no native form there, audio
-     needs the declared capability — both must degrade with named omissions. *)
+  (* Gemini production boundary: when capabilities are absent, both document
+     and audio must degrade with named omissions. *)
   let gemini_config =
     Provider_config.make
       ~kind:Gemini ~model_id:"tool-doc-audio-text-only-gemini"
@@ -2833,7 +2833,9 @@ let test_tool_document_audio_degrade_without_declared_capability () =
       ~max_tokens:128
       ~model_capabilities_override:
         { Capabilities.gemini_capabilities with
-          supports_image_input = false; supports_audio_input = false }
+          supports_image_input = false
+        ; supports_audio_input = false
+        ; supports_document_input = false }
       ()
   in
   let gemini_body =
@@ -2845,6 +2847,26 @@ let test_tool_document_audio_degrade_without_declared_capability () =
     (substring_present gemini_body doc_omission);
   check_bool "audio omission is named on the Gemini wire" true
     (substring_present gemini_body audio_omission);
+  (* When Gemini declares document capability, native inlineData is preserved. *)
+  let gemini_doc_config =
+    Provider_config.make
+      ~kind:Gemini ~model_id:"tool-doc-capable-gemini"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~max_tokens:128
+      ~model_capabilities_override:
+        { Capabilities.gemini_capabilities with
+          supports_image_input = true
+        ; supports_audio_input = false
+        ; supports_document_input = true }
+      ()
+  in
+  let gemini_doc_body =
+    Backend_gemini.build_request ~config:gemini_doc_config ~messages ()
+  in
+  check_bool "capable Gemini wire preserves document inlineData" true
+    (substring_present gemini_doc_body "inlineData");
+  check_bool "document omission is not named on capable Gemini wire" true
+    (not (substring_present gemini_doc_body doc_omission));
   check_bool "canonical document+audio history unchanged" true
     (match (List.nth messages 2).content with
      | [ ToolResult { content_blocks = Some [ _; Image _; Document _; Audio _ ]; _ } ] ->

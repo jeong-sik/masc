@@ -665,15 +665,14 @@ let build_request_artifact
         projected_messages
     in
     (* Same boundary for documents and audio: [media_parts] projects
-       tool-result Document/Audio blocks alongside images, so a capability the
-       wire cannot carry (documents have no native Gemini form; audio needs
-       [supports_audio_input]) would reach [contents_of_messages]
-       unrepresentable. Degrading here — before projection — mirrors the image
-       rule above. *)
+       tool-result Document/Audio blocks alongside images, so a model lacking
+       declared capability ([supports_document_input] / [supports_audio_input])
+       would reach [contents_of_messages] unrepresentable. Degrading here —
+       before projection — mirrors the image rule above. *)
     let projected_messages, _documents_degraded =
       Api_common.degrade_document_messages
-        ~wire_form:Api_common.Document_unrepresentable
-        ~supports_document_input:false
+        ~wire_form:Api_common.Document_inline_data
+        ~supports_document_input:caps.supports_document_input
         projected_messages
     in
     let projected_messages, _audio_degraded =

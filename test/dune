@@ -2375,6 +2375,7 @@
 
 (include stanzas/test_goal_verification_agent.inc)
 (include stanzas/test_goal_verification_run_registry.inc)
+(include stanzas/test_reliable_change_g1.inc)
 
 
 

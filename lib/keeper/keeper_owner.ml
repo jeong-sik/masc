@@ -738,6 +738,52 @@ let start
               keeper_name
               (Printexc.to_string exn)))
   in
+  (* A transient (non-throttle) failure defers with no cooling time: the
+     continuation is immediately claimable again, but the Owner never polls
+     on its own, so the retry waits for whatever ambient wake happens to
+     arrive next. On 2026-09-12 the live msx-retro-mania chat showed what
+     that costs: a glm-5.3 connection reset made each failed attempt wait
+     out the ambient scheduled wakes (~9 minutes apart), and one chat
+     operation burned 45-77 minutes in that loop before the provider
+     recovered. This short-fused wake closes that gap for the defer that
+     just happened.
+
+     The fuse is deliberately nonzero: a zero-delay wake would turn a dead
+     provider into a tight re-claim loop (the throttle classes carry real
+     backoff; a network-class failure has none). 20 seconds bounds a
+     persistent outage to three re-claims per minute while cutting the
+     transient-failure recovery from one ambient-wake interval to seconds.
+     One sleeper arms per defer, so concurrent deferring operations each
+     carry their own fuse; every resulting drain is a cheap claim attempt. *)
+  let transient_retry_wake_sec = 20.0 in
+  let rearm_transient_retry_wake () =
+    match Eio_context.get_clock_opt () with
+    | None ->
+      Log.Keeper.warn
+        "keeper_owner: no clock to re-arm transient retry wake keeper=%s"
+        keeper_name
+    | Some clock ->
+      (try
+         Eio.Fiber.fork_daemon ~sw (fun () ->
+           (try
+              Eio.Time.sleep clock transient_retry_wake_sec;
+              (* fire-and-forget: the sleeper exists only to deliver the wake; if the owner has closed by then there is nothing to wake. *)
+              ignore (request t Wake_operation_drain)
+            with
+            | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+            | exn ->
+              Log.Keeper.warn
+                "keeper_owner: transient retry wake fiber failed keeper=%s error=%s"
+                keeper_name
+                (Printexc.to_string exn));
+           `Stop_daemon)
+       with
+       | exn ->
+         Log.Keeper.warn
+           "keeper_owner: transient retry wake not scheduled keeper=%s error=%s"
+           keeper_name
+           (Printexc.to_string exn))
+  in
   Eio.Switch.on_release sw (fun () ->
     mark_no_longer_answering ();
     let projection = Atomic.get t.projection in
@@ -953,6 +999,16 @@ let start
           let response = run_operation_command t ~label:"defer direct runtime continuation" (fun () ->
             Chat_operation_store.defer_direct_runtime_retry t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~continuation) |> Result.map fst in
+          (* A defer with no [not_before] is immediately claimable, and
+             without this wake it waits for the next ambient event — the
+             minutes-long stall this sleeper exists to remove. The cooling
+             re-arm below only covers [not_before] in the future, so an
+             immediate retry needs its own fuse. *)
+          (match response with
+           | Ok _ when continuation.Keeper_semantic_execution.not_before = None ->
+             rearm_transient_retry_wake ()
+           | _ -> ());
+          rearm_cooling_retry_wake ();
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Resume_direct_runtime_retry {operation_id; observed}, resolve) ->

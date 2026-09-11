@@ -17,12 +17,8 @@
 
     Internal helpers stay private at this boundary
     ([all_agent_statuses] / [valid_agent_status_strings]
-    re-exports, [neo4j_identity_cache] /
-    [neo4j_cache_loaded] / [neo4j_cache_mu] /
-    [populate_neo4j_identity_cache_locked] internal
-    cache state and loader, the every-other-let
+    re-exports, the every-other-let
     accumulator helpers consumed only inside
-    [lookup_neo4j_profile] /
     [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
@@ -76,7 +72,7 @@ type agent_profile = {
 }
 
 val get_agent_profile : string -> agent_profile
-(** Resolves the agent's profile through Neo4j and an identity fallback. *)
+(** Resolves the agent's profile representation for dashboard surfaces. *)
 
 (** {1 JSON envelope helpers} *)
 

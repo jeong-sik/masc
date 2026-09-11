@@ -109,6 +109,12 @@ val is_valid_utf8 : string -> bool
 (** [is_valid_utf8 s]: whether every byte of [s] decodes as UTF-8. Used at
     process boundaries whose reader rejects invalid sequences. *)
 
+val sanitize_utf8 : string -> string
+(** [sanitize_utf8 s]: [s] itself when {!is_valid_utf8} holds; otherwise a
+    copy in which every malformed byte sequence is replaced by U+FFFD. For a
+    write boundary whose format promises UTF-8 (a JSONL sink) and whose input
+    arrives assembled from external text. *)
+
 val utf8_prefix : max_bytes:int -> string -> string
 (** [utf8_prefix ~max_bytes s]: returns at most [max_bytes] bytes of [s],
     cutting at a UTF-8 character boundary. Returns [""] when

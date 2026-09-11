@@ -99,7 +99,7 @@ check_rule "R1-masc-path" 0 \
 check_rule "R2-loopback-literal" 0 \
   "Masc_network_defaults.masc_http_default_host" \
   '"127\.0\.0\.1"' \
-  'masc_network_defaults|server_auth|graphql_endpoint' \
+  'masc_network_defaults|server_auth' \
   lib
 
 # SSOT-R4 — config filename literal bypasses Config_dir_resolver.

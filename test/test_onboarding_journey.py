@@ -29,8 +29,12 @@ def observation(base=None, checks=()):
     return dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
                 base_path=base, checks=[dict(id=name, condition=value) for name, value in checks])
 
-
 class Journey(unittest.TestCase):
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        renderer.start()
+        self.addCleanup(renderer.stop)
+
     def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
@@ -122,6 +126,7 @@ class Journey(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn('Welcome', result.stdout + result.stderr)
             self.assertFalse(Path(home, '.masc').exists())
+
 
     def test_antigravity_context_observation_avoids_numeric_input(self):
         source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
@@ -449,7 +454,7 @@ class Journey(unittest.TestCase):
         spec = dict(choice='claude_code', command='/owned/claude', model='account-model',
                     max_context=100000, tools=True, streaming=False)
         runtime = SETUP.render(spec)[0]
-        with patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[])), \
+        with patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision="a" * 64)), \
                 patch.object(SETUP, 'select_connections', return_value=([runtime], [spec], {runtime: 'Claude'})) as select, \
                 patch.object(SETUP, 'pick', side_effect=[[0], [4]]), \
                 patch.object(SETUP, 'configure_many', side_effect=[SETUP.VerificationError(runtime), dict(readiness='verified')]) as verify, \

@@ -2553,6 +2553,20 @@ let runtime_codex_models_cmd =
   Cmd.v (Cmd.info "runtime-codex-models" ~doc:"Refresh selected Codex model metadata in an isolated connection home without a model turn.")
     Term.(const run $ cli)
 
+let runtime_setup_render_cmd =
+  let spec = Arg.(required & opt (some string) None & info ["spec"] ~doc:"Private setup JSON file.") in
+  Cmd.v (Cmd.info "runtime-setup-render" ~doc:"Render a native runtime specification for local setup.")
+    Term.(const (fun spec_path -> Masc_cli_runtime_setup.render ~spec_path) $ spec)
+
+let runtime_setup_inventory_cmd =
+  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read local setup choices and their configuration revision together.")
+    Term.(const (fun base_path -> Masc_cli_runtime_setup.inventory ~base_path) $ base_path)
+
+let runtime_setup_batch_cmd =
+  let request = Arg.(required & opt (some string) None & info ["request"] ~doc:"Private setup selection JSON file.") in
+  Cmd.v (Cmd.info "runtime-setup-batch" ~doc:"Validate and save the selected runtimes against their original revision.")
+    Term.(const (fun base_path request_path -> Masc_cli_runtime_setup.configure ~base_path ~request_path) $ base_path $ request)
+
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]
     ~doc:"Private JSON connection specification containing credential references, never raw secrets.") in
@@ -2979,6 +2993,9 @@ let cmd =
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
+    ; runtime_setup_render_cmd
+    ; runtime_setup_inventory_cmd
+    ; runtime_setup_batch_cmd
     ; runtime_discover_models_cmd
     ; runtime_store_credential_cmd
     ; runtime_serving_context_cmd

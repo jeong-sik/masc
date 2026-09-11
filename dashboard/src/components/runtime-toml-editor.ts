@@ -1,3 +1,5 @@
+import { ModelSetupResumeControl } from './model-setup-resume-control'
+import { resumeSavedModelSetup } from '../lib/model-setup-resume'
 import { html } from 'htm/preact'
 import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -205,6 +207,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     setConfig(saved)
     setDraft(saved.source_text)
     const applicationNotice = runtimeConfigCommitReceiptNotice(saved)
+    await resumeSavedModelSetup()
     try {
       await refreshRuntimeConfigConsumers()
       setNotice(applicationNotice)
@@ -805,6 +808,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     return html`
       <div class="rt-overlay" data-testid="runtime-toml-editor" onClick=${onClose}>
         <div class="rt-overlay-content" onClick=${stopOverlayContentClick}>
+          <${ModelSetupResumeControl} disabled=${saving} />
           ${body}
         </div>
       </div>
@@ -818,6 +822,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       testId="runtime-toml-editor"
       right=${statusPill}
     >
+      <${ModelSetupResumeControl} disabled=${saving} />
       ${body}
     <//>
   `

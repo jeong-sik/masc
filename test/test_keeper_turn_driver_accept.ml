@@ -468,6 +468,35 @@ let test_a_rejected_response_leaves_the_checkpoint_either_way () =
   | Masc.Keeper_turn_driver_try_provider.For_testing.Recovery_not_applicable ->
     Alcotest.fail "the rejected response must leave the checkpoint"
 
+(* 2026-09-11: the no-thinking truncation retry re-dispatches the same
+   candidate; with the runtime declaring reasoning-effort the retry died in
+   request validation ("cannot set reasoning_effort when enable_thinking=false")
+   instead of continuing the turn — observed on the Terminal-Bench anthropic
+   smoke against v0.35.7. Effort is a thinking modifier, so the retry strips
+   it from the candidate it re-dispatches. *)
+let test_truncation_retry_candidate_drops_reasoning_effort () =
+  let cfg =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"claude-fable-5"
+      ~base_url:"https://api.anthropic.com"
+      ~reasoning_effort:Llm_provider.Reasoning_effort.High
+      ()
+  in
+  let stripped =
+    Masc.Keeper_turn_driver_try_provider.For_testing.candidate_without_reasoning_effort
+      (Runtime_candidate.of_provider_config cfg)
+    |> Runtime_candidate.provider_cfg
+  in
+  Alcotest.(check bool)
+    "effort dropped"
+    true
+    (stripped.Llm_provider.Provider_config.reasoning_effort = None);
+  Alcotest.(check string)
+    "model preserved"
+    "claude-fable-5"
+    stripped.Llm_provider.Provider_config.model_id
+
 (* The cut has to reach the durable checkpoint, or the rejected text is back
    as input next turn: fixture_worker carried the same 31 KB collapse four times,
    2026-09-05 (#33267). The drop is persisted through the keeper's own sink
@@ -2248,6 +2277,10 @@ let () =
             "a rejected response leaves the checkpoint either way"
             `Quick
             test_a_rejected_response_leaves_the_checkpoint_either_way;
+          Alcotest.test_case
+            "truncation retry candidate drops reasoning effort"
+            `Quick
+            test_truncation_retry_candidate_drops_reasoning_effort;
           Alcotest.test_case
             "truncation recovery is scoped to max-tokens rejections"
             `Quick

@@ -18,6 +18,15 @@ type turn_state =
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
+  ; last_dispatched_runtime_id : string option
+    (** The candidate that actually dispatched and errored, as the runtime
+        walk saw it. [last_execution] and [deferred_runtime_lane] both name
+        the lane the turn was budgeted under, which sticky ordering can route
+        to a different candidate; a failure with no deferral hint left no
+        record of who answered at all. The decision record named the keeper's
+        head runtime in that case, so 162 payment-required errors were filed
+        against a provider that was serving normally (masc#35043). [None]
+        until a candidate errors. *)
   }
 
 val require_last_execution_for_finalize :

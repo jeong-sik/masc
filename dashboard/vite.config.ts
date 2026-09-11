@@ -223,7 +223,30 @@ export default defineConfig(({ command }) => {
             '/api': proxyTarget,
             '/mcp': { target: proxyTarget, changeOrigin: true },
             '/sse': { target: proxyTarget },
-            '/ws': { target: proxyTarget, ws: true, changeOrigin: true },
+            '/ws': {
+              target: proxyTarget,
+              ws: true,
+              changeOrigin: true,
+              configure(proxy) {
+                proxy.on('proxyReqWs', (proxyReq, req, socket) => {
+                  // Preserve the browser's same-origin boundary before translating
+                  // both authority headers to the configured development backend.
+                  const origin = req.headers.origin
+                  let sameOrigin = false
+                  try {
+                    const parsed = new URL(origin ?? '')
+                    sameOrigin = (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+                      && parsed.host === req.headers.host
+                  } catch { /* Missing or malformed browser origins are refused. */ }
+                  if (!sameOrigin) {
+                    proxyReq.destroy()
+                    socket.destroy()
+                    return
+                  }
+                  proxyReq.setHeader('origin', new URL(proxyTarget).origin)
+                })
+              },
+            },
             '/yjs': { target: proxyTarget, ws: true },
           },
         }

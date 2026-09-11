@@ -93,14 +93,15 @@ let success_payload ~target ~(meta : keeper_meta) fields : Yojson.Safe.t =
        @ [ "via", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) ])
 ;;
 
-let handle_with_endpoint
+let handle_content_with_endpoint
+      ~content
       ~(endpoint : Keeper_sandbox_remote.t)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
+  let content () = match content with Some bytes -> bytes | None -> invalid_arg "Patch has no replacement content" in
   let path = Safe_ops.json_string ~default:"" "path" args in
-  let content = Safe_ops.json_string ~default:"" "content" args in
   let failure ?class_ ~target message =
     Keeper_tool_execution.failure ?class_ (error_json ~fields:[ "path", `String target ] message)
   in
@@ -186,11 +187,11 @@ let handle_with_endpoint
                 (fun () ->
                   match mode with
                   | Overwrite ->
-                    write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:content
+                    write ~content_mode:Replace_whole ~mode_label:"overwrite" ~body:(content ())
                       ~extra_fields:[]
-                      ~evidence:(Some (Keeper_file_change_evidence.written content))
+                      ~evidence:(Some (Keeper_file_change_evidence.written (content ())))
                   | Append ->
-                    write ~content_mode:Append_tail ~mode_label:"append" ~body:content
+                    write ~content_mode:Append_tail ~mode_label:"append" ~body:(content ())
                       ~extra_fields:[] ~evidence:None
                   | Patch ->
                     let old_string = Safe_ops.json_string ~default:"" "old_string" args in
@@ -214,7 +215,8 @@ let handle_with_endpoint
                          (match
                             Keeper_tool_patch.apply_patch ~old_string ~new_string ~replace_all current
                           with
-                          | Error message -> failure ~target message
+                          | Error message ->
+                            failure ~class_:Tool_result.Workflow_rejection ~target message
                           | Ok application when String.equal current application.updated ->
                             Keeper_tool_execution.success_data
                               (success_payload ~target ~meta
@@ -241,6 +243,15 @@ let handle_with_endpoint
                               (describe_status status)
                               (Keeper_sandbox_remote.name endpoint)
                               (Exec_policy.truncate_for_log stderr))))))
+;;
+
+let handle_with_endpoint ~endpoint ~config ~meta ~args =
+  match Keeper_write_content.of_args args with
+  | Error error -> Keeper_write_content.failure error
+  | Ok source ->
+    (match Keeper_write_content.bytes ~config source with
+     | Error error -> Keeper_write_content.failure error
+     | Ok content -> handle_content_with_endpoint ~content ~endpoint ~config ~meta ~args)
 ;;
 
 let handle ~turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~args =

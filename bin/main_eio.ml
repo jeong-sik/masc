@@ -1229,13 +1229,8 @@ let front_door_cmd_exit
       ~is_executable:path_is_executable
   with
   | Masc_front_door.Serve -> serve ()
-  | Masc_front_door.Open_tui { binary; argv } ->
-    Printf.printf "masc: opening %s — `masc start` runs the server alone\n%!" binary;
-    (try Unix.execv binary (Array.of_list argv) with
-     | Unix.Unix_error (err, _, _) ->
-       Printf.eprintf "masc: could not run %s (%s); starting the server instead\n%!"
-         binary (Unix.error_message err);
-       serve ())
+  | Masc_front_door.Open_tui _ ->
+    Masc_cli_onboarding.run ~base_path ~port ~resume:true
 
 let start_cmd =
   let doc =
@@ -1614,12 +1609,18 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  let unavailable code message =
+  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
+     always emits failure.detail, so omitting the key here made a consumer's
+     read of it depend on which producer answered. [detail] is what the caller
+     was told and would otherwise drop. *)
+  let unavailable ?detail code message =
     print_endline (Yojson.Safe.to_string (`Assoc [
       "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
       "model", `Null; "observed_model", `Null; "status", `String "unavailable";
       "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+      "failure", `Assoc [
+        "code", `String code; "message", `String message;
+        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -1631,7 +1632,15 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       Runtime.load_list ~config_path
       with Env_config_core.Config_error message -> Error message in
     match loaded with
-    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    (* The Config_error names the file and the field that stopped the load --
+       an overlay entry with a removed capability field is the recurring case
+       (masc#34872) -- and reporting only the class sent operators looking for
+       a model connection problem. *)
+    | Error message ->
+      unavailable
+        ~detail:message
+        "invalid_configuration"
+        "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
       match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
@@ -2528,6 +2537,21 @@ let runtime_model_list_cmd =
   Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
     Term.(const run $ client)
 
+let runtime_discover_models_cmd =
+  let spec = Arg.(required & opt (some string) None & info ["spec"]
+    ~doc:"Private JSON connection specification containing credential references, never raw secrets.") in
+  let run path =
+    let parsed = try Runtime_model_discovery.connection_of_json (Yojson.Safe.from_file path)
+      with Sys_error _ | Yojson.Json_error _ -> Error Runtime_model_discovery.Invalid_connection in
+    match parsed with
+    | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1
+    | Ok connection -> Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+        match Runtime_model_discovery.discover ~sw ~net:(Eio.Stdenv.net env) connection with
+        | Ok result -> print_endline (Yojson.Safe.to_string result); 0
+        | Error error -> prerr_endline (Runtime_model_discovery.error_message error); 1)) in
+  Cmd.v (Cmd.info "runtime-discover-models" ~doc:"Read account or server model metadata without creating a runtime.")
+    Term.(const run $ spec)
+
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
@@ -2693,12 +2717,21 @@ let setup_cmd =
   let run base_path port no_tui sandbox_profile microvm_backend =
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
-    | `Ok (profile, backend) -> `Ok (setup_cmd_exit base_path port no_tui profile backend)
+    | `Ok (profile, backend) ->
+      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
+        `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
+      else
+        let resolved = match base_path with
+          | Some path -> Some path
+          | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+        match resolved with
+        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
+        | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
+    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
@@ -2715,6 +2748,30 @@ let setup_gc () =
       (* 4M words ~= 32 MiB on 64-bit *)
       if gc.minor_heap_size < desired_minor_words then
         Gc.set { gc with minor_heap_size = desired_minor_words }
+
+(* Internal elevation endpoint: no workspace, login, or model initialization. *)
+let sandbox_install_apple_verified_cmd =
+  let run argv = match argv with
+    | [] -> Error ()
+    | executable :: _ ->
+      try
+        let channel = Unix.open_process_args_in executable (Array.of_list argv) in
+        let status = ref None in
+        let output = Fun.protect
+          ~finally:(fun () -> status := Some (Unix.close_process_in channel))
+          (fun () -> In_channel.input_all channel) in
+        (match !status with Some (Unix.WEXITED 0) -> Ok output | _ -> Error ())
+      with Unix.Unix_error _ | Sys_error _ -> Error () in
+  let execute source sha256 size =
+    match Masc.Apple_container_install.install_privileged ~run ~source ~sha256 ~size with
+    | Ok () -> print_endline "Package installed. Sandbox service and guest execution still require verification."; Cmd.Exit.ok
+    | Error error -> prerr_endline (Masc.Apple_container_install.error_message error); Cmd.Exit.some_error in
+  let source = Arg.(required & opt (some string) None & info ["source"]) in
+  let sha256 = Arg.(required & opt (some string) None & info ["sha256"]) in
+  let size = Arg.(required & opt (some int) None & info ["size"]) in
+  Cmd.v (Cmd.info "sandbox-install-apple-verified"
+    ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
+    Term.(const execute $ source $ sha256 $ size)
 
 let cmd =
   let doc =
@@ -2735,11 +2792,13 @@ let cmd =
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
+    ; runtime_discover_models_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
+    ; sandbox_install_apple_verified_cmd
     ; setup_cmd
     ; setup_preflight_cmd
     ; doctor_cmd

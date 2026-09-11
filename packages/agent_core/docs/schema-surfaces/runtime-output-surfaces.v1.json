@@ -122,21 +122,6 @@
       "notes": "Records run, assistant block, tool execution, hook, and terminal trace events. Raw_trace remains live via Runtime_store."
     },
     {
-      "id": "agent_core.raw_trace_manifest.v1",
-      "kind": "json_schema",
-      "owner": "AGENT_CORE",
-      "producer": "removed in v0.217.x (was Runtime_evidence; Raw_trace rows still written via Runtime_store)",
-      "consumer": ["session evidence readers", "downstream raw trace tooling"],
-      "wire_or_artifact": "runtime-raw-trace-json artifact",
-      "schema_source": ["lib/raw_trace.mli", "lib/runtime_store.mli"],
-      "validator": "Sessions.raw_trace_manifest_of_yojson plus raw trace run validation",
-      "tests": ["test/test_sessions_types.ml", "test/test_raw_trace.ml"],
-      "stability": "frozen",
-      "version_field": null,
-      "notes": "Raw trace rows remain live via Runtime_store, but the manifest writer (Runtime_evidence.build_raw_trace_manifest) was removed in v0.217.x. Sessions.raw_trace_manifest_of_yojson reader is retained for historical decode.",
-      "removed_in": "v0.217.x"
-    },
-    {
       "id": "agent_core.structured_schema.v1",
       "kind": "ocaml_interface",
       "owner": "AGENT_CORE",

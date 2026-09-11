@@ -146,7 +146,7 @@ let test_throwing_handoff_observer_preserves_result () =
           incr handoffs;
           failwith "observer failure")
         (fun _input ->
-          Ok { Agent_core.Types.content = "effect-complete"; _meta = None })
+          Ok { Agent_core.Types.content = "effect-complete"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"call-handoff-observer" (`Assoc []) in
     check int "observer called once" 1 !handoffs;
@@ -160,7 +160,7 @@ let test_raw_start_failure_does_not_block_tool () =
     let tool, terminal_error =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
-        Ok { Agent_core.Types.content = "effect-complete"; _meta = None })
+        Ok { Agent_core.Types.content = "effect-complete"; content_blocks = None; _meta = None })
     in
     break_trace_path path;
     let result = tool.call ~call_id:"call-start-failure" (`Assoc []) in
@@ -216,7 +216,7 @@ let test_raw_finish_failure_does_not_reverse_tool_success () =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
         break_trace_path path;
-        Ok { Agent_core.Types.content = "effect-committed"; _meta = None })
+        Ok { Agent_core.Types.content = "effect-committed"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"call-finish-failure" (`Assoc []) in
     check int "effect executed once" 1 !executions;
@@ -340,7 +340,7 @@ let test_scoped_boundary_spans_official_attempts () =
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
             ~repetition_execution:(Some execution) ~tool_calls:!calls)
         (fun _ -> incr executions;
-          Ok { Agent_core.Types.content = "same-output"; _meta = None })
+          Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"new-provider-first-call" (`Assoc []) in
       check int (runtime_label ^ " executes once") 1 !executions;
@@ -387,7 +387,7 @@ let test_moving_output_input_loop_aborts_at_input_threshold () =
         (fun _input ->
           Ok { Agent_core.Types.content =
                  Printf.sprintf "appended line %d" (!appended + 1)
-             ; _meta = None })
+             ; content_blocks = None; _meta = None })
       in
       ignore (tool.call ~call_id:"input-loop-call-1" (`Assoc []));
       ignore (tool.call ~call_id:"input-loop-call-2" (`Assoc []));
@@ -457,7 +457,7 @@ let test_autonomous_official_boundary_stops_execute_loop_without_scope () =
                 ~repetition_execution:None ~tool_calls:!calls)
             (fun _input ->
               incr executions;
-              Ok { Agent_core.Types.content = output_text !executions; _meta = None })
+              Ok { Agent_core.Types.content = output_text !executions; content_blocks = None; _meta = None })
         in
         let call index =
           tool.call ~call_id:(Printf.sprintf "%s-%d" label index) execute_script_input
@@ -508,7 +508,7 @@ let test_scoped_boundary_error_stops_immediately () =
         ~on_tool_boundary:(fun () ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
             ~repetition_execution:(Some execution) ~tool_calls:[])
-        (fun _ -> Ok { Agent_core.Types.content = "effect returned"; _meta = None })
+        (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
       check bool "boundary error is latched" true (Option.is_some !terminal_error);
@@ -545,7 +545,7 @@ let test_scoped_boundary_preserves_terminal_priority () =
           ; diagnostic = "exact committed effect failure" })
       ~on_tool_boundary:(fun () -> incr checks;
         Ok (Some (Host.Repeated_tool_call { tool_name = "effect"; repeated_count = 3 })))
-      (fun _ -> Ok { Agent_core.Types.content = "effect returned"; _meta = None })
+      (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"terminal-priority" (`Assoc []) in
     check int "terminal boundary still observes scope" 1 !checks;
@@ -561,7 +561,7 @@ let test_scoped_boundary_replaces_local_counter () =
     let checks = ref 0 in
     let tool, _ = one_dynamic_tool ~active
       ~on_tool_boundary:(fun () -> incr checks; Ok None)
-      (fun _ -> Ok { Agent_core.Types.content = "same"; _meta = None })
+      (fun _ -> Ok { Agent_core.Types.content = "same"; content_blocks = None; _meta = None })
     in
     List.iter (fun index ->
       let result = tool.call ~call_id:(string_of_int index) (`Assoc []) in
@@ -1659,7 +1659,7 @@ let test_pre_tool_reject_is_recorded () =
     let tool, _terminal_error =
       one_dynamic_tool ~hooks ~pre_tool_rejects ~active (fun _input ->
         incr executions;
-        Ok { Agent_core.Types.content = "never"; _meta = None })
+        Ok { Agent_core.Types.content = "never"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"call-reject-1" (`Assoc [ "k", `String "v" ]) in
     check bool "reject surfaces as a failed tool result" false result.success;
@@ -1696,7 +1696,7 @@ let approval_tool ~active ?tool_approval ~executions () =
   in
   one_dynamic_tool ~hooks ?tool_approval ~active (fun _input ->
     incr executions;
-    Ok { Agent_core.Types.content = "ran"; _meta = None })
+    Ok { Agent_core.Types.content = "ran"; content_blocks = None; _meta = None })
 
 let test_approved_tool_runs () =
   with_active_raw_trace (fun ~path:_ ~active ->
@@ -1763,7 +1763,7 @@ let test_a_failed_hook_is_a_turn_level_reject () =
     let tool, terminal_error =
       one_dynamic_tool ~hooks ~active (fun _input ->
         incr executions;
-        Ok { Agent_core.Types.content = "never"; _meta = None })
+        Ok { Agent_core.Types.content = "never"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"call-hook-failed" (`Assoc []) in
     check bool "the call fails" false result.success;

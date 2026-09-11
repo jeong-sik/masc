@@ -25,14 +25,15 @@ Runner 이름은 [GitHub 공식 목록](https://github.com/actions/runner-images
 
 설치 스크립트는 Bash, curl, tar, `sha256sum` 또는 `shasum`을 사용합니다.
 macOS는 Python과 실행 라이브러리를 함께 제공하므로 Homebrew나 별도 Python 설치가
-필요하지 않습니다. Linux는 아래 Python 3 및 시스템 패키지를 사용합니다.
+필요하지 않습니다. Linux x64와 ARM64도 검증된 Python을 함께 제공합니다.
+아래 시스템 라이브러리는 여전히 필요합니다.
 OCaml/opam/Dune, Node.js/pnpm은 **바이너리 설치에 필요하지 않습니다**.
 
 Ubuntu 24.04:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl python3 libffi8 libgmp10 libpq5 \
+sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
   libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
@@ -45,7 +46,7 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 ## 설치
 
 ```bash
-TAG=v0.35.5
+TAG=v0.35.8
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

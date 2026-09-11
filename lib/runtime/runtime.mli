@@ -820,3 +820,7 @@ val default_max_context : unit -> int
     endpoint (RFC-0206 single-binding). Replaces the deleted
     [Runtime_runtime.default_local_model_label_and_id]. Falls back to ["auto"]
     before {!init_default} runs. *)
+
+val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
+(** Clear model dispatch state after startup configuration failure. Owner and
+    workspace readiness are managed independently by server bootstrap. *)

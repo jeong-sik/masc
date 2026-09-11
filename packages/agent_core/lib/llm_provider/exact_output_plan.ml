@@ -181,6 +181,14 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
 
 let caller_supplied_header_name = function
   | [] -> None
+    (* The default header list [Provider_config.make] injects when the caller
+       passes no ~headers is configuration, not caller supply: it is exactly
+       the wire-owned application/json pair and carries no caller identity.
+       Treating it as caller-supplied rejects every exact preflight, including
+       the credential-freeze preflight #35091 added. Any other non-empty list
+       still names its first header, so genuine caller headers (Authorization
+       included) keep failing admission. *)
+  | [ ("Content-Type", "application/json") ] -> None
   | (name, _) :: _ -> Some name
 ;;
 
@@ -703,4 +711,21 @@ let%test "exact preflight freezes refreshed credentials until a new plan is prep
       unchanged_without_new_preflight && !calls = 2
       && frozen = Some "Bearer first-fixture-token"
       && List.assoc_opt "Authorization" second.wire.headers = Some "Bearer second-fixture-token"
+;;
+
+let%test "exact preflight still rejects genuinely caller-supplied headers" =
+  let rejects_with name headers =
+    let config =
+      Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+        ~base_url:"https://example.test" ~max_tokens:16
+        ~model_capabilities_override:Capabilities.default_capabilities
+        ~auth_scheme:Bearer_token ~headers () in
+    match
+      preflight ~config ~messages:[Types.user_msg "Hello"]
+        ~body_timeout_s:None ~anthropic_thinking_control:None
+    with
+    | Error (Caller_supplied_header_not_allowed reported) -> reported = name
+    | Error _ | Ok _ -> false in
+  rejects_with "X-Custom" [ ("X-Custom", "v") ]
+  && rejects_with "Content-Type" [ ("Content-Type", "text/event-stream") ]
 ;;

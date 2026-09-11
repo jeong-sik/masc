@@ -30,11 +30,17 @@ let request_path_default_for_kind = function
     Gemini codec with OAuth bearer tokens; Gemini Developer API uses its key. *)
 type auth_scheme = Provider_default | Bearer_token
 
+type credential_refresh_error = Credential_unavailable | Invalid_credential_response
+type credential_source =
+  | Static_credential
+  | Refreshable_credential of (unit -> (Secret.t, credential_refresh_error) result)
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
   ; model_id : string
   ; base_url : string
+  ; credential_source : credential_source
   ; auth_scheme : auth_scheme
   ; api_key : Secret.t
   ; headers : (string * string) list
@@ -82,6 +88,7 @@ let make
       ~model_id
       ~base_url
       ?provider_id
+      ?(credential_source = Static_credential)
       ?(auth_scheme = Provider_default)
       ?(api_key = "")
       ?(headers = [ "Content-Type", "application/json" ])
@@ -142,6 +149,7 @@ let make
   ; provider_id
   ; model_id
   ; base_url
+  ; credential_source
   ; auth_scheme
   ; api_key = Secret.of_string api_key
   ; headers
@@ -740,4 +748,15 @@ let is_local (config : t) =
     let url = String.lowercase_ascii url in
     has_host_prefix ~url ~prefix:Constants.Endpoints.local_prefix
     || has_host_prefix ~url ~prefix:Constants.Endpoints.localhost_prefix
+;;
+
+let resolve_auth_headers config =
+  match config.credential_source with
+  | Static_credential -> Ok (auth_headers_for_config config)
+  | Refreshable_credential refresh ->
+    (match refresh () with
+     | Error Credential_unavailable -> Error "Provider credential refresh is unavailable"
+     | Error Invalid_credential_response -> Error "Provider credential refresh returned an invalid response"
+     | Ok token when Secret.is_empty token -> Error "Provider credential refresh returned an empty token"
+     | Ok api_key -> Ok (auth_headers_for_config { config with api_key }))
 ;;

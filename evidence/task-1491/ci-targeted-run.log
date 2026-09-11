@@ -1,0 +1,32 @@
+# task-1491 CI targeted run receipt — run 34623835070
+dispatch: gh workflow run test.yml --ref main -f suite=test_keeper_tool_matrix,test_keeper_tool_dispatch_runtime,test_mcp_tool_matrix (by polisher)
+head: c197fe5 (main tip) = 84e37b8 + 3cc9e11(#35155) + c197fe5(#35244); git log -- test/ between: empty
+verifier note: dispatch raced main movement; local 8-suite anchor is 84e37b8
+--- run summary (gh api json) ---
+{"conclusion":"failure","createdAt":"2026-09-11T16:45:36Z","event":"workflow_dispatch","headSha":"c197fe57391ea9c93daba3bbcb310f9a3f794080","status":"completed"}
+--- suite result lines (raw grep of fetched log) ---
+test suite	Test	2026-09-11T16:47:05.6690447Z ^[[36;1m         log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s"^[[0m
+test suite	Test	2026-09-11T16:47:05.6691155Z ^[[36;1m    *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"^[[0m
+test suite	Test	2026-09-11T16:47:05.6733986Z ^[[36;1m    0)   log "[targeted] ${suite_path}: OK in ${elapsed}s" ;;^[[0m
+test suite	Test	2026-09-11T16:47:05.6734653Z ^[[36;1m         log "[targeted] ${suite_path}: TIMEOUT exit ${rc} after ${elapsed}s;" \^[[0m
+test suite	Test	2026-09-11T16:47:05.6735825Z ^[[36;1m    *)   log "[targeted] ${suite_path}: FAIL exit ${rc} in ${elapsed}s"^[[0m
+test suite	Test	2026-09-11T16:50:32.8491794Z [targeted] test/test_keeper_tool_matrix: FAIL exit 1 in 23s
+test suite	Test	2026-09-11T16:50:38.5037088Z [targeted] test/test_keeper_tool_dispatch_runtime: OK in 6s
+test suite	Test	2026-09-11T16:50:57.8635567Z [targeted] test/test_mcp_tool_matrix: FAIL exit 1 in 19s
+--- FAIL signatures (raw grep) ---
+test suite	Test	2026-09-11T16:50:09.8486948Z ASSERT masc_fusion schema is materialized
+test suite	Test	2026-09-11T16:50:09.8488098Z ASSERT masc_fusion schema declares web_tools (descriptor<->handler parity)
+test suite	Test	2026-09-11T16:50:09.8488604Z ASSERT masc_fusion web_tools schema type matches handler bool parser
+test suite	Test	2026-09-11T16:50:09.9468067Z ASSERT masc_fusion Tool.t is materialized
+test suite	Test	2026-09-11T16:50:14.3888686Z ASSERT keeper_artifact_transfer raised during keeper case: Failure("missing keeper arguments contract for keeper_artifact_transfer")
+test suite	Test	2026-09-11T16:50:14.3889495Z   [FAIL]        matrix            15   016_keeper_artifact_transfer.
+test suite	Test	2026-09-11T16:50:27.2620595Z ASSERT masc_lane_attach neither succeeded nor refused -- unknown: realpath tool-matrix: No such file or directory
+test suite	Test	2026-09-11T16:50:27.2623097Z   [FAIL]        matrix            88   089_masc_lane_attach.
+test suite	Test	2026-09-11T16:50:27.4291728Z ASSERT masc_lane_detach neither succeeded nor refused -- unknown: unknown retained instance
+test suite	Test	2026-09-11T16:50:27.4294142Z   [FAIL]        matrix            89   090_masc_lane_detach.
+test suite	Test	2026-09-11T16:50:27.5977225Z ASSERT masc_lane_evidence neither succeeded nor refused -- unknown: unknown retained instance
+test suite	Test	2026-09-11T16:50:27.5979667Z   [FAIL]        matrix            90   091_masc_lane_evidence.
+test suite	Test	2026-09-11T16:50:27.9288816Z ASSERT masc_lane_observe neither succeeded nor refused -- unknown: unknown active instance
+test suite	Test	2026-09-11T16:50:27.9291404Z   [FAIL]        matrix            92   093_masc_lane_observe.
+test suite	Test	2026-09-11T16:50:32.8430733Z │ [FAIL]        matrix            15   016_keeper_artifact_transfer.           │
+test suite	Test	2026-09-11T16:50:32.8435895Z │ [FAIL]        matrix            88   089_masc_lane_attach.                   │

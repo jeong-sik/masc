@@ -1,0 +1,9 @@
+HEAD=84e37b836e1e107ec6cda664e029a77669e93c72
+Testing `[1mkeeper_system_prompt_bytes[0m'.
+[2mThis run has ID `0NNLKVJO'.
+
+[0m  [32m[OK][0m          [36mgolden[0m          0   assembled prompt matches golden bytes.
+  [32m[OK][0m          [36mgolden[0m          1   assembled prompt carries required anchors.
+
+Full test results in `[36m/masc-work/polisher/masc-t1491/_build/_tests/keeper_system_prompt_bytes[0m'.
+[32mTest Successful[0m in 0.006s. 2 tests run.

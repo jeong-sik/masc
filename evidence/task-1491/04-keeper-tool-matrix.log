@@ -1,0 +1,157 @@
+HEAD=84e37b836e1e107ec6cda664e029a77669e93c72
+[2026-09-11 17:25:53] [INFO] [MCP] Tag registry initialized: 160 tools registered
+[keeper_tool_matrix] registering 121 matrix cases, per-case timeout=60s
+Testing `[1mkeeper_tool_matrix[0m'.
+[2mThis run has ID `XA8H51SL'.
+
+[0m  [32m[OK][0m          [36minventory[0m          0   keeper inventory is unique.
+  [32m[OK][0m          [36minventory[0m          1   keeper inventory has case contracts.
+  [32m[OK][0m          [36minventory[0m          2   keeper inventory materializes masc_fus...
+  [32m[OK][0m          [36minventory[0m          3   masc_fusion schema declares web_tools.
+  [32m[OK][0m          [36minventory[0m          4   keeper AGENT_CORE bundle materializes ...
+  [32m[OK][0m          [36mmatrix[0m             0   001_BrowserAct.
+  [32m[OK][0m          [36mmatrix[0m             1   002_BrowserGoto.
+  [32m[OK][0m          [36mmatrix[0m             2   003_BrowserInteract.
+  [32m[OK][0m          [36mmatrix[0m             3   004_BrowserRead.
+  [32m[OK][0m          [36mmatrix[0m             4   005_BrowserSession.
+  [32m[OK][0m          [36mmatrix[0m             5   006_BrowserTabs.
+  [32m[OK][0m          [36mmatrix[0m             6   007_Edit.
+[1m[31m>[0;1m[0m [31m[FAIL][0m        [36mmatrix[0m             7   008_Execute.
+  [31m[FAIL][0m        [36mmatrix[0m             8   009_Grep.
+  [31m[FAIL][0m        [36mmatrix[0m             9   010_Read.
+  [32m[OK][0m          [36mmatrix[0m            10   011_WebFetch.
+  [32m[OK][0m          [36mmatrix[0m            11   012_WebSearch.
+  [31m[FAIL][0m        [36mmatrix[0m            12   013_Write.
+  [32m[OK][0m          [36mmatrix[0m            13   014_keeper_analyze_image.
+  [32m[OK][0m          [36mmatrix[0m            14   015_keeper_artifact_read.
+  [32m[OK][0m          [36mmatrix[0m            15   016_keeper_broadcast.
+  [32m[OK][0m          [36mmatrix[0m            16   017_keeper_capability_search.
+  [32m[OK][0m          [36mmatrix[0m            17   018_keeper_code_query.
+  [32m[OK][0m          [36mmatrix[0m            18   019_keeper_context_status.
+  [31m[FAIL][0m        [36mmatrix[0m            19   020_keeper_ide_annotate.
+  [32m[OK][0m          [36mmatrix[0m            20   021_keeper_lane_status.
+  [32m[OK][0m          [36mmatrix[0m            21   022_keeper_library_read.
+  [32m[OK][0m          [36mmatrix[0m            22   023_keeper_library_search.
+  [32m[OK][0m          [36mmatrix[0m            23   024_keeper_memory_retract.
+  [32m[OK][0m          [36mmatrix[0m            24   025_keeper_memory_search.
+  [32m[OK][0m          [36mmatrix[0m            25   026_keeper_memory_write.
+  [32m[OK][0m          [36mmatrix[0m            26   027_keeper_person_note_set.
+  [31m[FAIL][0m        [36mmatrix[0m            27   028_keeper_spawn.
+  [32m[OK][0m          [36mmatrix[0m            28   029_keeper_spawn_read.
+  [32m[OK][0m          [36mmatrix[0m            29   030_keeper_spawn_stop.
+  [32m[OK][0m          [36mmatrix[0m            30   031_keeper_spawn_wait.
+  [32m[OK][0m          [36mmatrix[0m            31   032_keeper_surface_post.
+  [32m[OK][0m          [36mmatrix[0m            32   033_keeper_surface_read.
+  [32m[OK][0m          [36mmatrix[0m            33   034_keeper_task_cancel.
+  [32m[OK][0m          [36mmatrix[0m            34   035_keeper_task_claim.
+  [32m[OK][0m          [36mmatrix[0m            35   036_keeper_task_create.
+  [32m[OK][0m          [36mmatrix[0m            36   037_keeper_task_done.
+  [32m[OK][0m          [36mmatrix[0m            37   038_keeper_task_release.
+  [32m[OK][0m          [36mmatrix[0m            38   039_keeper_tasks_audit.
+  [32m[OK][0m          [36mmatrix[0m            39   040_keeper_tasks_list.
+  [32m[OK][0m          [36mmatrix[0m            40   041_keeper_time_now.
+  [32m[OK][0m          [36mmatrix[0m            41   042_keeper_tools_list.
+  [32m[OK][0m          [36mmatrix[0m            42   043_keeper_voice_agent.
+  [32m[OK][0m          [36mmatrix[0m            43   044_keeper_voice_listen.
+  [32m[OK][0m          [36mmatrix[0m            44   045_keeper_voice_session_end.
+  [32m[OK][0m          [36mmatrix[0m            45   046_keeper_voice_session_start.
+  [32m[OK][0m          [36mmatrix[0m            46   047_keeper_voice_sessions.
+  [32m[OK][0m          [36mmatrix[0m            47   048_keeper_voice_speak.
+  [32m[OK][0m          [36mmatrix[0m            48   049_keeper_webmcp_call.
+  [32m[OK][0m          [36mmatrix[0m            49   050_keeper_webmcp_list.
+  [32m[OK][0m          [36mmatrix[0m            50   051_keeper_workspace_memory_read.
+  [32m[OK][0m          [36mmatrix[0m            51   052_masc_agent_fitness.
+  [32m[OK][0m          [36mmatrix[0m            52   053_masc_ask.
+  [32m[OK][0m          [36mmatrix[0m            53   054_masc_ask_status.
+  [32m[OK][0m          [36mmatrix[0m            54   055_masc_ask_withdraw.
+  [32m[OK][0m          [36mmatrix[0m            55   056_masc_board_cleanup.
+  [32m[OK][0m          [36mmatrix[0m            56   057_masc_board_comment.
+  [32m[OK][0m          [36mmatrix[0m            57   058_masc_board_comment_vote.
+  [32m[OK][0m          [36mmatrix[0m            58   059_masc_board_curation_read.
+  [32m[OK][0m          [36mmatrix[0m            59   060_masc_board_curation_submit.
+  [32m[OK][0m          [36mmatrix[0m            60   061_masc_board_delete.
+  [32m[OK][0m          [36mmatrix[0m            61   062_masc_board_hearths.
+  [32m[OK][0m          [36mmatrix[0m            62   063_masc_board_list.
+  [32m[OK][0m          [36mmatrix[0m            63   064_masc_board_post.
+  [32m[OK][0m          [36mmatrix[0m            64   065_masc_board_post_get.
+  [32m[OK][0m          [36mmatrix[0m            65   066_masc_board_post_update.
+  [32m[OK][0m          [36mmatrix[0m            66   067_masc_board_profile.
+  [32m[OK][0m          [36mmatrix[0m            67   068_masc_board_reaction.
+  [32m[OK][0m          [36mmatrix[0m            68   069_masc_board_search.
+  [32m[OK][0m          [36mmatrix[0m            69   070_masc_board_stats.
+  [32m[OK][0m          [36mmatrix[0m            70   071_masc_board_vote.
+  [32m[OK][0m          [36mmatrix[0m            71   072_masc_config.
+  [32m[OK][0m          [36mmatrix[0m            72   073_masc_dashboard.
+  [32m[OK][0m          [36mmatrix[0m            73   074_masc_file_delete.
+  [32m[OK][0m          [36mmatrix[0m            74   075_masc_file_list.
+  [32m[OK][0m          [36mmatrix[0m            75   076_masc_file_upload.
+  [32m[OK][0m          [36mmatrix[0m            76   077_masc_fusion.
+  [32m[OK][0m          [36mmatrix[0m            77   078_masc_fusion_decision.
+  [32m[OK][0m          [36mmatrix[0m            78   079_masc_fusion_status.
+  [32m[OK][0m          [36mmatrix[0m            79   080_masc_gc.
+  [32m[OK][0m          [36mmatrix[0m            80   081_masc_get_metrics.
+  [32m[OK][0m          [36mmatrix[0m            81   082_masc_goal_list.
+  [32m[OK][0m          [36mmatrix[0m            82   083_masc_goal_transition.
+  [32m[OK][0m          [36mmatrix[0m            83   084_masc_goal_upsert.
+  [32m[OK][0m          [36mmatrix[0m            84   085_masc_keeper_delegate.
+  [32m[OK][0m          [36mmatrix[0m            85   086_masc_keeper_delegate_cancel.
+  [32m[OK][0m          [36mmatrix[0m            86   087_masc_keeper_delegate_status.
+  [31m[FAIL][0m        [36mmatrix[0m            87   088_masc_lane_attach.
+  [31m[FAIL][0m        [36mmatrix[0m            88   089_masc_lane_detach.
+  [31m[FAIL][0m        [36mmatrix[0m            89   090_masc_lane_evidence.
+  [32m[OK][0m          [36mmatrix[0m            90   091_masc_lane_inspect.
+  [31m[FAIL][0m        [36mmatrix[0m            91   092_masc_lane_observe.
+  [32m[OK][0m          [36mmatrix[0m            92   093_masc_lane_slice.
+  [32m[OK][0m          [36mmatrix[0m            93   094_masc_library_add.
+  [32m[OK][0m          [36mmatrix[0m            94   095_masc_library_list.
+  [32m[OK][0m          [36mmatrix[0m            95   096_masc_msx_change_disk.
+  [32m[OK][0m          [36mmatrix[0m            96   097_masc_msx_eject.
+  [32m[OK][0m          [36mmatrix[0m            97   098_masc_msx_load.
+  [32m[OK][0m          [36mmatrix[0m            98   099_masc_msx_peek.
+  [32m[OK][0m          [36mmatrix[0m            99   100_masc_msx_press.
+  [32m[OK][0m          [36mmatrix[0m           100   101_masc_msx_ram_diff.
+  [32m[OK][0m          [36mmatrix[0m           101   102_masc_msx_restore.
+  [32m[OK][0m          [36mmatrix[0m           102   103_masc_msx_save.
+  [32m[OK][0m          [36mmatrix[0m           103   104_masc_msx_screen.
+  [32m[OK][0m          [36mmatrix[0m           104   105_masc_msx_step.
+  [32m[OK][0m          [36mmatrix[0m           105   106_masc_msx_step_until_change.
+  [32m[OK][0m          [36mmatrix[0m           106   107_masc_plan_clear_task.
+  [32m[OK][0m          [36mmatrix[0m           107   108_masc_plan_get_task.
+  [32m[OK][0m          [36mmatrix[0m           108   109_masc_run_get.
+  [32m[OK][0m          [36mmatrix[0m           109   110_masc_run_init.
+  [32m[OK][0m          [36mmatrix[0m           110   111_masc_run_list.
+  [32m[OK][0m          [36mmatrix[0m           111   112_masc_run_plan.
+  [32m[OK][0m          [36mmatrix[0m           112   113_masc_schedule_cancel.
+  [32m[OK][0m          [36mmatrix[0m           113   114_masc_schedule_create.
+  [32m[OK][0m          [36mmatrix[0m           114   115_masc_schedule_get.
+  [32m[OK][0m          [36mmatrix[0m           115   116_masc_schedule_list.
+  [32m[OK][0m          [36mmatrix[0m           116   117_masc_schedule_note_add.
+  [32m[OK][0m          [36mmatrix[0m           117   118_masc_schedule_notes_list.
+  [32m[OK][0m          [36mmatrix[0m           118   119_masc_schedule_update.
+  [32m[OK][0m          [36mmatrix[0m           119   120_masc_task_history.
+  [32m[OK][0m          [36mmatrix[0m           120   121_masc_task_set_goal.
+
+[2m┌──────────────────────────────────────────────────────────────────────────────┐[0m
+[2m│ [0m[31m[FAIL][0m        [36mmatrix[0m             7   008_Execute.[2m                            │[0m
+[2m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[keeper_tool_matrix] building test sandbox image masc-test-tool-matrix:fixture
+[exception] Unix.Unix_error(Unix.ENOENT, "create_process", "docker")
+            Raised by primitive operation at Unix.create_process_gen.(fun) in file "unix.ml", line 924, characters 15-68
+            Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+            Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+            Called from Unix.open_proc in file "unix.ml", line 947, characters 4-58
+            Called from Unix.open_process_args_out in file "unix.ml", line 970, characters 6-75
+            Re-raised at Unix.open_process_args_out in file "unix.ml", line 974, characters 4-11
+            Called from Dune__exe__Test_keeper_tool_matrix.sandbox_image_preparation in file "test/test_keeper_tool_matrix.ml", line 428, characters 18-58
+            Called from CamlinternalLazy.do_force_block in file "camlinternalLazy.ml", line 49, characters 17-27
+            Re-raised at CamlinternalLazy.do_force_block in file "camlinternalLazy.ml", line 56, characters 4-11
+            Called from CamlinternalLazy.force_lazy_block in file "camlinternalLazy.ml" (inlined), line 78, characters 27-67
+            Called from Dune__exe__Test_keeper_tool_matrix.run_tool_case_or_fail in file "test/test_keeper_tool_matrix.ml", line 440, characters 7-43
+            Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+            Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+            
+Logs saved to `[36m/masc-work/polisher/masc-t1491/_build/_tests/keeper_tool_matrix/matrix.007.output[0m'.
+ [2m──────────────────────────────────────────────────────────────────────────────[0m
+
+Full test results in `[36m/masc-work/polisher/masc-t1491/_build/_tests/keeper_tool_matrix[0m'.
+[31m10 failures![0m in 14.775s. 126 tests run.

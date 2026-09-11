@@ -1,0 +1,42 @@
+HEAD=84e37b836e1e107ec6cda664e029a77669e93c72
+Testing `[1mTools Coverage[0m'.
+[2mThis run has ID `GSUL1JR3'.
+
+[0m  [32m[OK][0m          [36mschema_structure[0m                 0   not_empty.
+  [32m[OK][0m          [36mschema_structure[0m                 1   required_fields.
+  [32m[OK][0m          [36mschema_structure[0m                 2   unique_names.
+  [32m[OK][0m          [36mschema_structure[0m                 3   masc_prefix.
+  [32m[OK][0m          [36mschema_inventory_lookup[0m          0   existing.
+  [32m[OK][0m          [36mschema_inventory_lookup[0m          1   not_found.
+  [32m[OK][0m          [36mschema_inventory_lookup[0m          2   case_sensitive.
+  [32m[OK][0m          [36minput_schema[0m                     0   type_is_object.
+  [32m[OK][0m          [36minput_schema[0m                     1   has_properties.
+  [32m[OK][0m          [36minput_schema[0m                     2   required_is_list.
+  [32m[OK][0m          [36mcore_tools[0m                       0   masc_start.
+  [32m[OK][0m          [36mcore_tools[0m                       1   masc_status.
+  [32m[OK][0m          [36mcore_tools[0m                       2   masc_broadcast.
+  [32m[OK][0m          [36mcore_tools[0m                       3   broadcast cache signal s...
+  [32m[OK][0m          [36mcore_tools[0m                       4   masc_transition.
+  [32m[OK][0m          [36mcore_tools[0m                       5   masc_run schemas share S...
+  [32m[OK][0m          [36mcore_tools[0m                       6   masc_run schemas strict ...
+  [32m[OK][0m          [36mcore_tools[0m                       7   masc_add_task.
+  [32m[OK][0m          [36mcore_tools[0m                       8   masc_batch_add_tasks.
+  [32m[OK][0m          [36mcore_tools[0m                       9   masc_board_post supports...
+  [32m[OK][0m          [36mgoal_tools[0m                       0   goal_list.
+  [32m[OK][0m          [36mgoal_tools[0m                       1   goal_upsert.
+  [32m[OK][0m          [36mgoal_tools[0m                       2   goal_transition.
+  [32m[OK][0m          [36mkeeper_runtime_tools[0m             0   keeper-up.
+  [32m[OK][0m          [36mdashboard_tools[0m                  0   dashboard.
+  [32m[OK][0m          [36mdashboard_tools[0m                  1   dashboard scope enum mat...
+  [32m[OK][0m          [36mdashboard_tools[0m                  2   keeper_waiting_inventory.
+  [32m[OK][0m          [36mdashboard_tools[0m                  3   agent_fitness.
+  [32m[OK][0m          [36mdashboard_tools[0m                  4   get_metrics.
+  [32m[OK][0m          [36mdashboard_tools[0m                  5   agent_card.
+  [32m[OK][0m          [36medge_cases[0m                       0   description_not_short.
+  [32m[OK][0m          [36medge_cases[0m                       1   description_not_long.
+  [32m[OK][0m          [36medge_cases[0m                       2   no_duplicate_props.
+  [32m[OK][0m          [36medge_cases[0m                       3   valid_prop_types.
+  [32m[OK][0m          [36mkeeper_front_door[0m                0   clear_stays_internal.
+
+Full test results in `[36m/masc-work/polisher/masc-t1491/_build/_tests/Tools Coverage[0m'.
+[32mTest Successful[0m in 0.006s. 35 tests run.

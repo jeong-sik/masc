@@ -276,7 +276,7 @@ let test_mcp_tool_to_agent_core_tool () =
   let call_fn input : Types.tool_result =
     let open Yojson.Safe.Util in
     let text = input |> member "text" |> to_string in
-    Ok { content = "echo: " ^ text; _meta = None }
+    Ok { content = "echo: " ^ text; content_blocks = None; _meta = None }
   in
   let agent_core_tool = Mcp.mcp_tool_to_agent_core_tool ~call_fn mcp_tool in
   Alcotest.(check string) "tool name" "echo" agent_core_tool.schema.name;
@@ -285,7 +285,7 @@ let test_mcp_tool_to_agent_core_tool () =
   let input = `Assoc [ "text", `String "hello" ] in
   let result = Tool.execute agent_core_tool input in
   match result with
-  | Ok { content; _meta = _ } -> Alcotest.(check string) "execution" "echo: hello" content
+  | Ok { content; _ } -> Alcotest.(check string) "execution" "echo: hello" content
   | Error _ -> Alcotest.fail "expected Ok"
 ;;
 

@@ -230,6 +230,11 @@ Accepted `reasoning_streaming_format` values are:
 - `none`
 - `template_parser`
 - `delta:<field>` (parse the named streaming delta field as reasoning)
+- `delta_details:<field>` (parse that field *and* the sibling
+  `reasoning_details` array). Use it when a model can send the typed item
+  without readable text: gpt-5.5 through OpenRouter streams
+  `reasoning: null` with its encrypted item in `reasoning_details`, so a
+  plain `delta:` row reads the null and drops the item.
 
 Accepted `accepted_reasoning_efforts` values are:
 

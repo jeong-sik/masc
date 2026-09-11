@@ -1304,3 +1304,20 @@ let acquire_base_path_lock =
 module For_testing = struct
   let acquire_base_path_lock = acquire_base_path_lock_with
 end
+
+type owner_capture_error =
+  | Owner_lease_rejected of base_path_lock_rejection
+  | Owner_identity_unavailable of Owner_process_identity.error
+  | Current_process_owner
+let capture_existing_owner ~run_dir ~base_path =
+  match prepare_base_path_lock ~run_dir base_path with
+  | Error rejection -> Error (Owner_lease_rejected rejection)
+  | Ok prepared ->
+    Mutex.protect base_path_lease_mu (fun () ->
+      if Hashtbl.mem base_path_leases prepared.path then Error Current_process_owner
+      else match open_lease_file prepared with
+        | Error rejection -> Error (Owner_lease_rejected rejection)
+        | Ok fd ->
+          Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+            Owner_process_identity.capture ~lease_fd:fd
+            |> Result.map_error (fun error -> Owner_identity_unavailable error)))

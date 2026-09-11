@@ -11895,6 +11895,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 if request.poll_view == !msx_poll_view && request.poll_port = state.port
                    && state.msx_open && not state.msx_menu_open then begin
                   state.msx_frame <- frame;
+                  msx_surface_frame := frame;
                   state.msx_last_poll_ns <- Mtime_clock.elapsed_ns ();
                   Masc_tui_msx.render ~write:write_to_terminal ?notice:state.msx_notice
                     ~connection:state.connection_status state.msx_frame (msx_surface_current ())

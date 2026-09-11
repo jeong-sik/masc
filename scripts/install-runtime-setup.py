@@ -788,6 +788,19 @@ def select_connections(binary, inventory, timeout):
     return selected, specs, names
 
 
+def login_command(runtime_id, specs, inventory):
+    spec = next((spec for spec in specs if render(spec)[0] == runtime_id), None)
+    if spec:
+        choice, command = spec['choice'], spec.get('command') or CHOICES[spec['choice']][1]
+    else:
+        row = next((row for row in inventory['runtimes'] if row['id'] == runtime_id), None)
+        if row is None:
+            return None
+        choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
+    arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
+    return [command] + arguments if command and arguments else None
+
+
 def wizard(binary, base_path, timeout):
     while True:
         try:
@@ -826,14 +839,21 @@ def wizard(binary, base_path, timeout):
                         print(terminal_text(error.failure['code']) + ': ' + terminal_text(error.failure['message']), file=sys.stderr)
                     if model_text(error.failure.get('detail')):
                         print('  ' + terminal_text(error.failure['detail']), file=sys.stderr)
-                    action = pick('Keep your choices and decide how to continue',
-                                  ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later'])[0]
+                    login = login_command(error.runtime_id, specs, inventory)
+                    actions = ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later']
+                    if login:
+                        actions.append('Sign in with the official CLI, then retry these choices')
+                    action = pick('Keep your choices and decide how to continue', actions)[0]
                     if action == 1:
                         ordered.remove(error.runtime_id)
                     elif action == 2:
                         break
                     elif action == 3:
                         return dict(configured=False, readiness='deferred', base_path=str(base_path))
+                    elif action == 4 and login:
+                        print('The official client will handle sign-in. MASC does not ask for your password.', file=sys.stderr)
+                        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
+                            print('Sign-in did not finish. Your model choices are still selected.', file=sys.stderr)
         except (SetupError, OSError, ValueError, URLError) as error:
             if not isinstance(error, SetupError):
                 error = SetupError('the selected server did not return usable model details; check its connection and try again')
@@ -878,10 +898,76 @@ def workspace_check(binary, base_path):
         base = candidate
 
 
+def onboarding_status(binary, base_path=None):
+    argv = [str(binary), 'doctor', '--json']
+    if base_path is not None:
+        argv += ['--base-path', str(base_path)]
+    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        state = json.loads(response.stdout)
+    except ValueError:
+        raise SetupError('MASC could not inspect this workspace. Run masc doctor for recovery details.')
+    if (response.returncode != 0 or not isinstance(state, dict)
+            or state.get('schema') != 'masc.onboarding_status.v1'
+            or state.get('scope') != 'configuration_observation'
+            or not isinstance(state.get('checks'), list)):
+        raise SetupError('MASC returned an unsupported setup observation; reinstall the complete release.')
+    return state
+
+
+def open_workspace(binary, base_path, port):
+    sibling = Path(binary).resolve().parent / 'masc-tui'
+    tui = str(sibling) if os.access(str(sibling), os.X_OK) else shutil.which('masc-tui')
+    if not tui:
+        raise SetupError('The terminal UI is missing. Reinstall the complete MASC release, then run masc again.')
+    return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
+
+
+def journey(binary, base_path, port, timeout, resume=False):
+    state = onboarding_status(binary, base_path)
+    conditions = {check['id']: check['condition'] for check in state['checks']}
+    # Persistence permits opening existing history, never a readiness badge.
+    # The TUI observes/reconnects the server and reports current execution.
+    if (resume and state.get('base_path') and conditions.get('workspace') == 'satisfied'
+            and conditions.get('keeper_persistence') == 'satisfied'
+            and 'invalid' not in conditions.values()):
+        return open_workspace(binary, state['base_path'], port)
+    print('\nWelcome. Let’s make a home for you and imp.\n'
+          'Choose with arrows and Enter; Space selects several connections.', file=sys.stderr)
+    proposed = state.get('base_path') or str(Path.home() / 'MASC')
+    selection = pick('1 · Your workspace', ['Use ' + proposed, 'Choose another directory', 'Finish later'])[0]
+    if selection == 2:
+        return 0
+    base = proposed if selection == 0 else ask_text('Workspace directory')
+    base = workspace_check(binary, base)['base_path']
+    if subprocess.run([str(binary), 'init', '--base-path', base], stdout=sys.stderr).returncode != 0:
+        raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
+    print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
+    configured = wizard(binary, base, timeout)
+    if configured.get('readiness') != 'verified':
+        print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
+        return 0
+    print('\n3 · Prepare imp’s sandbox\n4 · Open your first conversation', file=sys.stderr)
+    while True:
+        # Native setup owns staging, image preparation, server/operator login,
+        # and imp boot. --no-tui avoids re-entering this interactive journey.
+        code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
+                               '--no-tui'], stdout=sys.stderr).returncode
+        if code == 0:
+            return open_workspace(binary, base, port)
+        action = pick('imp is not running yet. Keep your workspace and continue when ready.',
+                      ['Retry preparation', 'Finish later'])[0]
+        if action == 1:
+            return code
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True)
-    parser.add_argument('--base-path', required=True)
+    parser.add_argument('--base-path')
+    parser.add_argument('--journey', action='store_true')
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--port', type=int, default=8945)
     parser.add_argument('--spec')
     parser.add_argument('--wizard', action='store_true')
     parser.add_argument('--workspace-check', action='store_true')
@@ -893,10 +979,14 @@ def main():
     parser.add_argument('--discovery-timeout', type=float, default=10)
     args = parser.parse_args()
     try:
-        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check))) != 1:
-            raise SetupError('choose exactly one of --spec, --batch-spec, --wizard or --select-model')
+        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check, args.journey))) != 1:
+            raise SetupError('choose exactly one setup operation')
+        if not args.journey and not args.base_path:
+            raise SetupError('--base-path is required for this setup operation')
         if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
             raise SetupError('discovery timeout must be positive')
+        if args.journey:
+            raise SystemExit(journey(args.binary, args.base_path, args.port, args.discovery_timeout, args.resume))
         if args.workspace_check:
             result = workspace_check(args.binary, args.base_path)
         elif args.wizard:

@@ -51,7 +51,7 @@ let rich_input_schema : Yojson.Safe.t =
     ]
 ;;
 
-let noop_handler _input = Ok { Types.content = ""; _meta = None }
+let noop_handler _input = Ok { Types.content = ""; content_blocks = None; _meta = None }
 
 let json =
   testable
@@ -585,7 +585,7 @@ let test_authoritative_schema_rides_an_execution_env_handler () =
   let seen_invocation = ref None in
   let handler execution_env _input =
     seen_invocation := Tool.Execution_env.invocation execution_env;
-    Ok { Types.content = "ok"; _meta = None }
+    Ok { Types.content = "ok"; content_blocks = None; _meta = None }
   in
   let tool =
     match
@@ -637,7 +637,7 @@ let test_context_handler_still_refuses_a_missing_context () =
          ~parameters:[]
          ())
       (Tool.requiring_context (fun _context _input ->
-         Ok { Types.content = "unexpected"; _meta = None }))
+         Ok { Types.content = "unexpected"; content_blocks = None; _meta = None }))
   in
   match Tool.execute tool `Null with
   | Ok _ -> fail "expected the missing context to be refused"

@@ -147,6 +147,14 @@ val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
 val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
 
+val retry_backoff_sec :
+  cap_sec:float -> retry_after_hint:float option -> cadence_sec:float -> float
+(** Capped backoff for a retryable provider failure route (#26068). Prefers
+    the provider's [Retry-After] hint when above the cadence, falls back to a
+    bounded default, and clamps the result to [cap_sec] so a misread header
+    can never park the lane. Shared by the heartbeat cycle sleep and the chat
+    lane's deferred-retry [not_before] so both back off by the same rule. *)
+
 val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
     "exhausted_visible_alive"]. *)

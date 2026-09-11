@@ -598,7 +598,9 @@ let run_cmd host port cli_base_path accept_store_quarantine =
    | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
      (match Env_config.record_default_base_path canonical_base_path with
       | Env_config.Recorded _ -> ()
-      | Env_config.No_record_location | Env_config.Record_failed _ ->
+      | Env_config.No_record_location
+      | Env_config.Refused_under_test
+      | Env_config.Record_failed _ ->
         (* Not fatal, and not worth a line on every boot: the server is
            starting on a path the operator just supplied. *)
         ())
@@ -1227,13 +1229,8 @@ let front_door_cmd_exit
       ~is_executable:path_is_executable
   with
   | Masc_front_door.Serve -> serve ()
-  | Masc_front_door.Open_tui { binary; argv } ->
-    Printf.printf "masc: opening %s — `masc start` runs the server alone\n%!" binary;
-    (try Unix.execv binary (Array.of_list argv) with
-     | Unix.Unix_error (err, _, _) ->
-       Printf.eprintf "masc: could not run %s (%s); starting the server instead\n%!"
-         binary (Unix.error_message err);
-       serve ())
+  | Masc_front_door.Open_tui _ ->
+    Masc_cli_onboarding.run ~base_path ~port ~resume:true
 
 let start_cmd =
   let doc =
@@ -1248,6 +1245,15 @@ let start_cmd =
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
+
+let init_record_default =
+  let doc =
+    "Record this workspace as the default for later commands (in \
+     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     a throwaway workspace must not become the machine's default. `masc setup` \
+     and the installer pass it."
+  in
+  Arg.(value & flag & info [ "record-default" ] ~doc)
 
 let init_skills_only =
   let doc = "Install missing builtin Skills without changing runtime config files" in
@@ -1278,7 +1284,7 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force skills_only =
+let init_cmd_exit base_path force skills_only record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1311,8 +1317,13 @@ let init_cmd_exit base_path force skills_only =
      about, and until now nothing wrote it down: the operator had to re-supply
      --base-path or MASC_BASE_PATH on every command. Recorded on success only,
      and never fatal -- a workspace that seeded is worth more than a record of
-     it. *)
-  if result.failed = 0 then (
+     it.
+
+     Off unless asked. `init` is what suites and scripts call to make a
+     throwaway workspace, and a default recorded from one of those points the
+     next process at a directory that is about to vanish. Only the operator
+     paths ask: `masc setup`, and the installer's own seed. *)
+  if record_default && result.failed = 0 then (
     match Env_config.record_default_base_path base_path with
     | Env_config.Recorded path ->
       Printf.printf "default workspace recorded: %s\n" path
@@ -1324,7 +1335,14 @@ let init_cmd_exit base_path force skills_only =
       Printf.printf
         "default workspace not recorded: could not write %s (%s); pass --base-path \
          to later commands\n"
-        record reason);
+        record reason
+    | Env_config.Refused_under_test ->
+      (* Says so rather than staying silent: a suite that expected a default
+         to exist should fail on the missing default, not on its absence
+         being invisible. *)
+      Printf.printf
+        "default workspace not recorded: a test executable does not write the \
+         operator's default\n");
   if result.failed > 0 then 1 else 0
 
 let init_cmd =
@@ -1338,7 +1356,10 @@ let init_cmd =
      always preserved."
   in
   let info = Cmd.info "init" ~doc in
-  Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force $ init_skills_only)
+  Cmd.v info
+    Term.(
+      const init_cmd_exit $ base_path $ init_force $ init_skills_only
+      $ init_record_default)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -1588,12 +1609,18 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  let unavailable code message =
+  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
+     always emits failure.detail, so omitting the key here made a consumer's
+     read of it depend on which producer answered. [detail] is what the caller
+     was told and would otherwise drop. *)
+  let unavailable ?detail code message =
     print_endline (Yojson.Safe.to_string (`Assoc [
       "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
       "model", `Null; "observed_model", `Null; "status", `String "unavailable";
       "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc ["code", `String code; "message", `String message]])); 2 in
+      "failure", `Assoc [
+        "code", `String code; "message", `String message;
+        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
@@ -1605,7 +1632,15 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       Runtime.load_list ~config_path
       with Env_config_core.Config_error message -> Error message in
     match loaded with
-    | Error _ -> unavailable "invalid_configuration" "The workspace runtime configuration could not be loaded."
+    (* The Config_error names the file and the field that stopped the load --
+       an overlay entry with a removed capability field is the recurring case
+       (masc#34872) -- and reporting only the class sent operators looking for
+       a model connection problem. *)
+    | Error message ->
+      unavailable
+        ~detail:message
+        "invalid_configuration"
+        "The workspace runtime configuration could not be loaded."
     | Ok (runtimes, _, _, _, _) ->
       match List.find_opt (fun (runtime : Runtime.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
@@ -2564,13 +2599,15 @@ let setup_validate_runtime base_path =
 
 let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
-  Masc_cli_setup.run ~base_path ~port ~open_tui:(not no_tui)
+  Masc_cli_setup.run_with_selection ~network_mode:None ~base_path ~port ~open_tui:(not no_tui)
     ~sandbox_profile ~microvm_backend
-    ~initialize:(fun () -> init_cmd_exit base_path false false)
+    (* setup is an operator command: the workspace it prepares becomes the
+       default for later ones. *)
+    ~initialize:(fun () -> init_cmd_exit base_path false false true)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
-    (* The image builder already takes a backend; setup passed None, which
-       means Docker, whatever profile imp was on. *)
-    ~prepare_image:(fun () -> sandbox_image_cmd_exit false None (Ok microvm_backend))
+    ~prepare_image:(fun ~selection ->
+      let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
+      sandbox_image_cmd_exit false None (Ok runtime))
     ~login:(fun () ->
       match Auth_login.read_persisted_token ~base_path ~agent_name:default_login_agent with
       | Some token when (match Auth.verify_token base_path ~agent_name:default_login_agent ~token with
@@ -2591,6 +2628,23 @@ let setup_preflight_cmd =
   let info = Cmd.info "setup-preflight"
     ~doc:"Read existing Keeper and Goal state without initialization or writes." in
   Cmd.v info Term.(const Masc_cli_setup.preflight_cmd_exit $ base_path)
+
+let doctor_cmd =
+  let json = Arg.(value & flag & info ["json"]
+    ~doc:"Print the shared read-only onboarding state as JSON.") in
+  let inspect requested json =
+    let selected = match requested with
+      | Some path -> Some path
+      | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+    let state = Onboarding_status.inspect ~base_path:selected in
+    print_endline (if json then Yojson.Safe.to_string (Onboarding_status.to_json state)
+                   else Onboarding_status.to_text state);
+    (* Reporting incomplete preparation is successful observation, never a
+       claim that authentication, model calls or sandbox execution passed. *)
+    0
+  in
+  Cmd.v (Cmd.info "doctor" ~doc:"Show workspace and imp preparation without starting models or changing files.")
+    Term.(const inspect $ run_base_path $ json)
 
 (* cmdliner cannot fail a flag on the value of another flag, so the pairing
    rule (a backend only means something under microvm) is checked here and
@@ -2648,12 +2702,21 @@ let setup_cmd =
   let run base_path port no_tui sandbox_profile microvm_backend =
     match setup_sandbox_selection sandbox_profile microvm_backend with
     | `Error _ as error -> error
-    | `Ok (profile, backend) -> `Ok (setup_cmd_exit base_path port no_tui profile backend)
+    | `Ok (profile, backend) ->
+      if not no_tui && profile = None && backend = None && stdio_is_a_terminal () then
+        `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false)
+      else
+        let resolved = match base_path with
+          | Some path -> Some path
+          | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+        match resolved with
+        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend)
+        | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
+    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
@@ -2670,6 +2733,30 @@ let setup_gc () =
       (* 4M words ~= 32 MiB on 64-bit *)
       if gc.minor_heap_size < desired_minor_words then
         Gc.set { gc with minor_heap_size = desired_minor_words }
+
+(* Internal elevation endpoint: no workspace, login, or model initialization. *)
+let sandbox_install_apple_verified_cmd =
+  let run argv = match argv with
+    | [] -> Error ()
+    | executable :: _ ->
+      try
+        let channel = Unix.open_process_args_in executable (Array.of_list argv) in
+        let status = ref None in
+        let output = Fun.protect
+          ~finally:(fun () -> status := Some (Unix.close_process_in channel))
+          (fun () -> In_channel.input_all channel) in
+        (match !status with Some (Unix.WEXITED 0) -> Ok output | _ -> Error ())
+      with Unix.Unix_error _ | Sys_error _ -> Error () in
+  let execute source sha256 size =
+    match Masc.Apple_container_install.install_privileged ~run ~source ~sha256 ~size with
+    | Ok () -> print_endline "Package installed. Sandbox service and guest execution still require verification."; Cmd.Exit.ok
+    | Error error -> prerr_endline (Masc.Apple_container_install.error_message error); Cmd.Exit.some_error in
+  let source = Arg.(required & opt (some string) None & info ["source"]) in
+  let sha256 = Arg.(required & opt (some string) None & info ["sha256"]) in
+  let size = Arg.(required & opt (some int) None & info ["size"]) in
+  Cmd.v (Cmd.info "sandbox-install-apple-verified"
+    ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
+    Term.(const execute $ source $ sha256 $ size)
 
 let cmd =
   let doc =
@@ -2695,8 +2782,10 @@ let cmd =
     ; keeper_create_cmd
     ; keeper_github_cmd
     ; sandbox_image_cmd
+    ; sandbox_install_apple_verified_cmd
     ; setup_cmd
     ; setup_preflight_cmd
+    ; doctor_cmd
     ; token_cmd
     ; build_commit_cmd
     ]

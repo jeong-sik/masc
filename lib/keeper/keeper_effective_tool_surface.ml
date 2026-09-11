@@ -30,6 +30,7 @@ type t =
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
   ; skill_names : string list option
+  ; tool_deny : string list
   ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
   ; current_task_id : string option
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
@@ -116,6 +117,7 @@ let project
       ~official_client_kind
       ~tool_delivery
       ~native_posture
+      ~tool_deny
       ~skill_names
       ~current_task_id
       ~task_skill_references
@@ -144,6 +146,7 @@ let project
   | Ok task_selection ->
     let capability_surface =
       Keeper_capability_surface.create
+        ~tool_deny
         ~skill_names
         ~global_skill_catalog
         ~skill_inventory:(Keeper_skill_inventory.of_snapshot skill_snapshot)
@@ -280,6 +283,7 @@ let project
       ; tool_delivery
       ; native_posture
       ; skill_names
+      ; tool_deny
       ; unavailable_skill_names =
           Keeper_skill_catalog.configured_names_unavailable turn_skill_projection
       ; current_task_id
@@ -463,6 +467,7 @@ let resolve ~config ~keeper_name =
                      ~official_client_kind:(client_kind runtime)
                      ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
+                     ~tool_deny:profile_defaults.tool_deny
                      ~skill_names:profile_defaults.skill_names
                      ~current_task_id
                      ~skills_left_out
@@ -561,6 +566,7 @@ let to_yojson = function
               [ "mode", `String "names"
               ; "names", string_list names
               ] )
+      ; "tool_deny", string_list surface.tool_deny
       ; ( "unavailable_skill_names"
         , `List
             (List.map

@@ -99,7 +99,7 @@ let test_card_json_export () =
       ~parameters:
         [ { name = "query"; description = "Query"; param_type = String; required = true }
         ]
-      (fun _input -> Ok { Types.content = "results"; _meta = None })
+      (fun _input -> Ok { Types.content = "results"; content_blocks = None; _meta = None })
   in
   let agent =
     Builder.create ~net:env#net ~model:"claude-sonnet-5"

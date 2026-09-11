@@ -72,6 +72,7 @@ let rejected_results ~turn ~schedule ~completion ~id ~name ~input scheduled =
        ; tool_name = name tool_use
        ; input = input tool_use
        ; content
+       ; content_blocks = None
        ; outcome =
            Tool_failed
              { failure_kind = Validation_error; error_class = Some Types.Deterministic }

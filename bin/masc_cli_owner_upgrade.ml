@@ -63,13 +63,16 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
         if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed else
         let* () = Upgrade.request_termination owner in
         prerr_endline "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.";
-        let rec wait () =
+        let rec wait attempts =
           let* state = Upgrade.replacement_readiness ~run_dir ~base_path ~port in
           match state with
-          | Owner_draining -> Eio.Time.sleep clock 0.2; wait ()
-          | Port_busy -> Ok false
+          | Owner_draining when attempts > 0 ->
+            Eio.Time.sleep clock 0.2; wait (attempts - 1)
+          | Port_busy when attempts > 0 ->
+            Eio.Time.sleep clock 0.2; wait (attempts - 1)
+          | Owner_draining | Port_busy -> Ok false
           | Replacement_can_start -> Ok true in
-        wait ()))
+        wait 25))
     with Unix.Unix_error _ | Sys_error _ -> Error Upgrade.Owner_unavailable in
   match result with
   | Error error -> emit (`Assoc ["schema", `String "masc.setup_server_error.v1";

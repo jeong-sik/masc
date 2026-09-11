@@ -45,7 +45,7 @@ let execute ~capture ~reader =
           capture
       | "keeper_analyze_image" -> reader input
       | name -> failf "unexpected tool: %s" name in
-    Executor.dispatch_result result in
+    Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect result in
   let result = Executor.execute ~plan:(plan ()) ~run_id:(Plan.Run_id.fresh ())
       ~dispatch () in
   !dispatched, result
@@ -104,9 +104,11 @@ let test_reader_failure_keeps_capture () =
         ~class_:Tool_result.Runtime_failure "no capable vision runtime" in
     let _, result = execute ~capture ~reader:(fun _ -> failure) in
     match result with
-    | Error { cause = Executor.Tool_did_not_complete node; settled = [captured; _]; _ } ->
+    | Error { cause = Executor.Tool_did_not_complete node; effect_disposition; settled = [captured; _]; _ } ->
         check bool "reading failure remains a failure" true
           (Tool_result.to_json node.result = Tool_result.to_json failure);
+        check string "effect disposition is proven_pre_effect" "proven_pre_effect"
+          (Tool_result.failure_effect_disposition_to_string effect_disposition);
         check bool "capture evidence survives reading failure" true
           (Tool_result.to_json captured.result = Tool_result.to_json capture)
     | Ok _ | Error _ -> fail "reading failure lost snapshot evidence")

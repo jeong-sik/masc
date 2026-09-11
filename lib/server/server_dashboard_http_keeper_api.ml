@@ -14,6 +14,16 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
 let keeper_hot_path_cache_ttl_s = 30.0
 let keeper_composite_cache_ttl_s = 5.0
+let keeper_file_changes_cache_ttl_s = 10.0
+
+let keeper_file_changes_cache_key ~masc_root ~keeper_name ~window_hours =
+  Printf.sprintf
+    "keeper:file-changes:%s:%s:%.1f:%d"
+    masc_root
+    keeper_name
+    window_hours
+    (Keeper_tool_call_log.committed_revision ())
+;;
 
 let tool_calls_fleet_cache_revision_mu = Stdlib.Mutex.create ()
 let tool_calls_fleet_cache_revisions : (string, int) Hashtbl.t = Hashtbl.create 4
@@ -939,34 +949,50 @@ let handle_keeper_get_subroutes state req request reqd =
       with
       | Error detail -> respond_error reqd detail
       | Ok window_hours ->
-      (* Folds what the store gained since the last call rather than reading
-         the window again: this route answered 1.8-8.8s per call on
-         2026-09-06 and was the profile's top allocator. *)
-      let tally =
-        Keeper_tool_call_log.file_change_tally ~keeper_name:name ~window_hours ()
+      let config = Mcp_server.workspace_config state in
+      let masc_root = Workspace.masc_root_dir config in
+      let cache_key =
+        keeper_file_changes_cache_key ~masc_root ~keeper_name:name ~window_hours
       in
       let json =
-        `Assoc
-          [ ("keeper", `String name)
-            (* The window this answer covers, and how many of the keeper's
-               calls fell inside it. Both are stated because the changes alone
-               do not say what was looked at: no changes in an hour and no
-               calls in an hour are different facts. *)
-          ; ("window_hours", `Float window_hours)
-            (* From the tally, not the row list: the three outcomes partition
-               what was read, and a caller that folds rows as it reads them
-               does not keep the list to measure. *)
-          ; ( "calls_in_window"
-            , `Int (Keeper_tool_call_file_change.rows_counted tally) )
-          ; ( "changes"
-            , `List (List.map Keeper_tool_call_file_change.to_json tally.Keeper_tool_call_file_change.changes) )
-            (* Both counts ride the answer rather than a log line. A reader
-               drawing changes has to be able to say that a turn wrote more
-               than it can show: over_budget rows are changes whose text the
-               log did not keep. *)
-          ; ("over_budget", `Int tally.Keeper_tool_call_file_change.over_budget)
-          ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
-          ]
+        Dashboard_cache.get_or_compute
+          cache_key
+          ~ttl:keeper_file_changes_cache_ttl_s
+          (fun () ->
+            Domain_pool_ref.submit_io_or_inline (fun () ->
+              (* Folds what the store gained since the last call rather than reading
+                 the window again: this route answered 1.8-8.8s per call on
+                 2026-09-06 and was the profile's top allocator. *)
+              let tally =
+                Keeper_tool_call_log.file_change_tally
+                  ~keeper_name:name
+                  ~window_hours
+                  ()
+              in
+              `Assoc
+                [ ("keeper", `String name)
+                  (* The window this answer covers, and how many of the keeper's
+                     calls fell inside it. Both are stated because the changes alone
+                     do not say what was looked at: no changes in an hour and no
+                     calls in an hour are different facts. *)
+                ; ("window_hours", `Float window_hours)
+                  (* From the tally, not the row list: the three outcomes partition
+                     what was read, and a caller that folds rows as it reads them
+                     does not keep the list to measure. *)
+                ; ( "calls_in_window"
+                  , `Int (Keeper_tool_call_file_change.rows_counted tally) )
+                ; ( "changes"
+                  , `List
+                      (List.map
+                         Keeper_tool_call_file_change.to_json
+                         tally.Keeper_tool_call_file_change.changes) )
+                  (* Both counts ride the answer rather than a log line. A reader
+                     drawing changes has to be able to say that a turn wrote more
+                     than it can show: over_budget rows are changes whose text the
+                     log did not keep. *)
+                ; ("over_budget", `Int tally.Keeper_tool_call_file_change.over_budget)
+                ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
+                ]))
       in
       Http.Response.json_value ~status:`OK ~compress:true ~request:req json reqd
   else if ends_with keeper_suffix_paused_work then

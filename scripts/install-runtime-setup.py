@@ -1469,6 +1469,8 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                     raise ValueError('invalid shutdown receipt')
             except (TypeError, KeyError, ValueError):
                 raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
+            if receipt.get('port_available') is True:
+                return port
             continue  # server or port might have changed during graceful drain
         if state not in ('other_workspace', 'unknown_server'):
             raise SetupError('MASC returned an unknown server observation')

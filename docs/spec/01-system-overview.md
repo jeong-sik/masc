@@ -64,7 +64,7 @@ MASC가 명시적으로 **하지 않는 것**:
 ```
 
 - **Trust model**: localhost 전제. 모든 MCP 클라이언트는 신뢰할 수 있다고 가정.
-- **Persistence**: runtime workspace collaboration state는 로컬 `.masc/` filesystem/JSONL을 source of truth로 사용한다. Supabase pgvector와 Neo4j 같은 외부 지식 서비스는 별도 integration이며 Board/session runtime backend가 아니다.
+- **Persistence**: runtime workspace collaboration state는 로컬 `.masc/` filesystem/JSONL을 source of truth로 사용한다.
 - **Remote access**: Cloudflare Tunnel을 통해 원격 브라우저에서 dashboard 접근 가능. Origin은 HTTP/1.1, Cloudflare가 브라우저에 HTTP/2를 제공.
 - **단일 인스턴스**: MASC 서버는 한 대만 실행. 수평 확장 미지원.
 
@@ -81,7 +81,6 @@ MASC가 명시적으로 **하지 않는 것**:
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |
 | Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST. |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |
-| GraphQL | HTTP client | Neo4j 접근은 Railway GraphQL API 경유. |
 | AI | agent_core (agent core) | Finite Agent.run, typed providers, tools, reasoning, multimodal values. |
 | Inference | Runtime | llama (local) -> GLM Cloud/Coding Plan (fallback) -> skip. |
 | Build | dune 3.13+ | `dune-project` 기반. opam package: `masc`. |
@@ -157,11 +156,9 @@ MASC의 현재 canonical front door는 3가지다.
 
 | Service | Location | Protocol | 용도 | 비고 |
 |---------|----------|----------|------|------|
-| Neo4j | Railway (`turntable.proxy.rlwy.net:11490`) | Bolt (via GraphQL) | Agent 그래프, COLLABORATED_WITH 관계, Person 노드 | 직접 Cypher 접근 금지. GraphQL API 경유. |
 | Supabase pgvector | Supabase Cloud | PostgreSQL | Vector search (wiki, retrospectives) | `$SUPABASE_DB_URL` |
 | agent core Agent SDK | In-process (OCaml library) | Function call | Finite Agent.run, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
 | Langfuse | Cloud API | HTTP | LLM 호출 tracing, cost attribution | 선택적 활성화. |
-| GraphQL API | Railway (`second-brain-graphql-production.up.railway.app`) | HTTP | Agent 정보 로드, collaboration edge 기록 | `$GRAPHQL_API_KEY` 인증. Query cost limit 2000. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTP -> HTTPS | 원격 dashboard 접근 | Origin HTTP/1.1. Cloudflare가 HTTP/2 변환. |
 | local runtime | configured local endpoint | Provider-D-compatible API | 로컬 LLM 추론 (Runtime 1순위) | agent core discovery endpoint. |
 | GLM Cloud / Coding Plan | Z.AI API | HTTP | Cloud LLM 추론 (Runtime 2순위) | `sb glm-text` 또는 `glm-coding` runtime 경로. |

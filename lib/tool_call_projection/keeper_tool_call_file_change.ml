@@ -465,30 +465,28 @@ let prune_before ~since_ts tally =
   }
 ;;
 
+let min_opt a b =
+  match a, b with
+  | None, None -> None
+  | Some x, None | None, Some x -> Some x
+  | Some x, Some y -> Some (Float.min x y)
+;;
+
 let oldest_row_ts tally =
   let oldest_change =
     List.fold_left
-      (fun acc c ->
-         match acc with
-         | Some min_ts when min_ts <= c.at -> acc
-         | _ -> Some c.at)
+      (fun acc (c : t) -> min_opt acc (Some c.at))
       None
       tally.changes
   in
   let oldest_unreadable =
     List.fold_left
-      (fun acc u ->
-         match acc with
-         | Some min_ts when min_ts <= u.ur_at -> acc
-         | _ -> Some u.ur_at)
+      (fun acc u -> min_opt acc (Some u.ur_at))
       oldest_change
       tally.unreadable_rows
   in
   List.fold_left
-    (fun acc ts ->
-       match acc with
-       | Some min_ts when min_ts <= ts -> acc
-       | _ -> Some ts)
+    (fun acc ts -> min_opt acc (Some ts))
     oldest_unreadable
     tally.not_file_changes_ts
 ;;

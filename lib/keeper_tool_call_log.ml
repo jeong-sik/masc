@@ -1112,7 +1112,7 @@ let fast_line_ts_opt (line : string) : float option =
       else if line.[i] = '"' && line.[i + 1] = 't' && line.[i + 2] = 's' && line.[i + 3] = '"' then
         let colon = i + 4 in
         let rec skip_ws j =
-          if j < len && (line.[j] = ' ' || line.[j] = ':') then skip_ws (j + 1)
+          if j < len && (line.[j] = ' ' || line.[j] = '\t' || line.[j] = ':') then skip_ws (j + 1)
           else j
         in
         let num_start = skip_ws colon in
@@ -1153,11 +1153,10 @@ let fast_line_contains_substring ~needle haystack =
     loop 0
 ;;
 
-let fast_line_might_match_keeper ?keeper_name (line : string) : bool =
-  match keeper_name with
+let fast_line_might_match_keeper ?keeper_needle (line : string) : bool =
+  match keeper_needle with
   | None -> true
-  | Some name ->
-    fast_line_contains_substring ~needle:("\"" ^ name ^ "\"") line
+  | Some needle -> fast_line_contains_substring ~needle line
 ;;
 
 let file_change_tally ?keeper_name ~(window_hours : float) () =
@@ -1172,6 +1171,7 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
       let since = iso_date_of_unix since_ts in
       let until = iso_date_of_unix now in
       let key = Option.value keeper_name ~default:"", window_hours in
+      let keeper_needle = Option.map (fun name -> "\"" ^ name ^ "\"") keeper_name in
       Stdlib.Mutex.protect file_change_cache_mu (fun () ->
         let carried =
           match Hashtbl.find_opt file_change_cache key with
@@ -1200,7 +1200,7 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
               match fast_line_ts_opt line with
               | Some ts when ts < since_ts -> tally
               | _ ->
-                if not (fast_line_might_match_keeper ?keeper_name line) then tally
+                if not (fast_line_might_match_keeper ?keeper_needle line) then tally
                 else
                   (match Yojson.Safe.from_string line with
                    | json ->

@@ -4708,12 +4708,17 @@ let launch_workspace_activity state ~mailbox ~repo_id =
             | None -> []
             | Some r -> r.rp_keepers
       in
+      let fleet_keepers =
+        List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
+        |> List.sort_uniq String.compare
+      in
       let keepers =
         match assigned_keepers with
-        | [] ->
-            List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
-            |> List.sort_uniq String.compare
-        | ks -> List.sort_uniq String.compare ks
+        | [] -> fleet_keepers
+        | ks ->
+            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
+            if active = [] then fleet_keepers
+            else List.sort_uniq String.compare active
       in
       let run () =
         let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->

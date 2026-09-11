@@ -170,7 +170,7 @@ let sample_echo_tool =
       ]
     (fun input ->
        let msg = Yojson.Safe.Util.(input |> member "msg" |> to_string) in
-       Ok { Types.content = msg; _meta = None })
+       Ok { Types.content = msg; content_blocks = None; _meta = None })
 ;;
 
 let message ?(metadata = []) role content : Types.message =
@@ -235,13 +235,81 @@ let test_image_carriers_remain_canonical () =
       (restored.messages = messages)
 ;;
 
+(* Real tool dispatch transports a PNG into the next model request, including
+   after checkpoint reload. No claim about semantic image recognition. *)
+let test_tool_image_survives_dispatch_and_checkpoint () =
+  Eio_main.run @@ fun env ->
+  let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" in
+  let summary = "artifact.png: original PNG bytes" in
+  let blocks = [ Types.image_block ~media_type:"image/png" ~data:png () ] in
+  let calls = ref 0 in
+  let tool =
+    Tool.create ~name:"inspect_image" ~description:"Read an image" ~parameters:[]
+      (fun _ ->
+         incr calls;
+         Ok { Types.content = summary; content_blocks = Some blocks; _meta = None })
+  in
+  let agent =
+    Agent.create ~config:(Types.default_config ~model:"test-model")
+      ~net:(Eio.Stdenv.net env) ~tools:[ tool ] ()
+  in
+  let options = Agent.options agent in
+  let uses = [ Types.ToolUse { id = "image-1"; name = "inspect_image"; input = `Assoc [] } ] in
+  let report =
+    Agent_tools.execute_tools
+      ~context:(Agent.context agent) ~tools:[ tool ] ~hooks:options.hooks
+      ~event_bus:None ~tracer:options.tracer ~agent_name:"image-review"
+      ~turn_count:0 ~usage:Types.empty_usage uses
+    |> Result.get_ok
+  in
+  let results = Agent_turn.make_tool_results report.completed_results in
+  let message role content : Types.message =
+    { role; content; name = None; tool_call_id = None; metadata = [] }
+  in
+  let messages = [ message Types.User [ Types.Text "Inspect" ]; message Types.Assistant uses; message Types.Tool results ] in
+  let original = make_checkpoint ~messages () in
+  let restored = Checkpoint.of_json (Checkpoint.to_json original) |> Result.get_ok in
+  Alcotest.(check int) "one real tool invocation" 1 !calls;
+  List.iter
+    (fun checkpoint ->
+       match List.rev checkpoint.Checkpoint.messages with
+       | { Types.content = [ Types.ToolResult { content; content_blocks = Some actual; _ } ]; _ } :: _ ->
+         Alcotest.(check string) "independent summary survives" summary content;
+         Alcotest.(check bool) "exact image survives" true (actual = blocks)
+       | _ -> Alcotest.fail "image result missing")
+    [ original; restored ];
+  let config =
+    Llm_provider.Provider_config.make ~kind:Anthropic ~model_id:"test-model"
+      ~base_url:"https://api.anthropic.com" ~max_tokens:1024 ()
+  in
+  let request checkpoint =
+    Llm_provider.Backend_anthropic.build_request ~config
+      ~messages:checkpoint.Checkpoint.messages () |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool) "next provider request identical after resume" true
+    (request original = request restored);
+  let rec image_data = function
+    | `Assoc fields ->
+      (match List.assoc_opt "type" fields, List.assoc_opt "source" fields with
+       | Some (`String "image"), Some (`Assoc source) ->
+         List.assoc_opt "data" source = Some (`String png)
+       | _ -> List.exists (fun (_, value) -> image_data value) fields)
+    | `List items -> List.exists image_data items
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false
+  in
+  Alcotest.(check bool) "provider receives PNG as image, not text" true
+    (image_data (request restored))
+;;
+
 let () =
   let open Alcotest in
   run
     "Checkpoint"
     [ ( "media replay"
       , [ test_case "image carriers remain canonical" `Quick
-            test_image_carriers_remain_canonical ] )
+            test_image_carriers_remain_canonical
+        ; test_case "tool PNG reaches provider after checkpoint" `Quick
+            test_tool_image_survives_dispatch_and_checkpoint ] )
     ; ( "version"
       , [ test_case "checkpoint_version is 11" `Quick (fun () ->
             check int "version" 11 Checkpoint.checkpoint_version)
@@ -822,6 +890,7 @@ let () =
                  ; tool_name = "Execute"
                  ; input = `Assoc [ "cwd", `String "/missing" ]
                  ; content = "working directory is unavailable"
+                 ; content_blocks = None
                  ; outcome =
                      Tool_failed
                        { failure_kind = Agent_tools.Validation_error

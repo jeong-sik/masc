@@ -263,7 +263,7 @@ let load ~keeper_name ~agent_cell ~entries ~usage ~receipts ~invocation requeste
              | _ -> ["not in the list: " ^ String.concat ", " unknown]
            in
            { Agent_core.Types.content = String.concat "\n" (loaded @ available @ missing)
-           ; _meta = None })
+           ; content_blocks = None; _meta = None })
         loaded
 ;;
 

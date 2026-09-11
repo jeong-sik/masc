@@ -13,6 +13,30 @@ const response = { window_minutes: 60,
     total_input_tokens: 1234, total_output_tokens: 0, p50_latency_ms: 125, p95_latency_ms: 900,
     usage_sample_count: 6, usage_missing_count: 2, telemetry_sample_count: 5, telemetry_missing_count: 3 }],
 }
+it('keeps stale values explicit until a refresh returns fresh cache metadata', async () => {
+  vi.mocked(get).mockResolvedValueOnce({ ...response,
+    cache: { state: 'stale_refreshing', generated_at: 10000, age_s: 2228.4,
+      last_error: 'cost ledger temporarily unreadable' } })
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText(/집계 갱신 중 · 이전 집계 표시/)).toBeTruthy())
+  expect(view.getByText(/응답 시점의 집계 경과/).textContent).toContain('2,228.4초')
+  expect(view.getByRole('alert').textContent).toContain('cost ledger temporarily unreadable')
+  expect(view.getByRole('table').textContent).toContain('입력 1,234')
+  vi.mocked(get).mockResolvedValueOnce({ ...response,
+    cache: { state: 'fresh', generated_at: 10001, age_s: 0 } })
+  fireEvent.click(view.getByRole('button', { name: '통계 새로 읽기' }))
+  await waitFor(() => expect(view.getByText(/서버가 최근 갱신한 집계/)).toBeTruthy())
+  expect(view.getByText(/응답 시점의 집계 경과/).textContent).toContain('0초')
+  expect(view.queryByText(/이전 집계 표시/)).toBeNull()
+  expect(view.queryByRole('alert')).toBeNull()
+})
+it('does not invent freshness from absent or unsupported cache metadata', async () => {
+  vi.mocked(get).mockResolvedValue({ ...response, cache: { state: 'unknown', age_s: -1 } })
+  const view = render(html`<${OverviewRuntimeStats} />`)
+  await waitFor(() => expect(view.getByText('집계 갱신 상태 미보고')).toBeTruthy())
+  expect(view.queryByText(/서버가 최근 갱신한 집계/)).toBeNull()
+  expect(view.queryByText(/응답 시점의 집계 경과/)).toBeNull()
+})
 it('shows lane measurements and provenance with a direct detail route', async () => {
   vi.mocked(get).mockResolvedValue(response)
   const view = render(html`<${OverviewRuntimeStats} />`)

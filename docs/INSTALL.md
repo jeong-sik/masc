@@ -26,14 +26,15 @@ follow the [official GitHub list](https://github.com/actions/runner-images).
 
 The install script uses Bash, curl, tar, and `sha256sum` or `shasum`.
 macOS includes its Python and shared-library runtime; Homebrew and a preinstalled
-Python are not required. Linux uses Python 3 and the system packages below.
+Python are not required. Linux x64 and ARM64 also include verified Python; the
+system libraries below are still required.
 OCaml/opam/Dune and Node.js/pnpm are **not needed for a binary install**.
 
 Ubuntu 24.04:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y ca-certificates curl python3 libffi8 libgmp10 libpq5 \
+sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
   libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
@@ -46,7 +47,7 @@ If startup fails, use the executable path and raw stderr shown by the installer 
 ## Install
 
 ```bash
-TAG=v0.35.5
+TAG=v0.35.8
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

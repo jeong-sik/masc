@@ -31,20 +31,30 @@ let source_projection ~original ~observed ~bound_scope =
     Error "source projection changed the admitted source identity"
   else Ok { original; observed; bound_scope }
 
+let valid_time value = Float.is_finite value && value >= 0.
+
 type runtime_retry =
   { checkpoint : Keeper_checkpoint_ref.t
   ; assignment_id : string
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
+  ; not_before : float option
   }
-let runtime_retry ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
+let runtime_retry ~not_before ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
   if List.exists (fun value -> String.trim value = "")
       (assignment_id :: failed_runtime_id :: next_runtime_id :: later_runtime_ids)
   then Error "runtime retry identities must be nonblank"
-  else Ok {checkpoint; assignment_id; failed_runtime_id; next_runtime_id; later_runtime_ids}
+  else match not_before with
+    | Some value when not (valid_time value) ->
+      Error "runtime retry not_before must be a finite nonnegative time"
+    | _ -> Ok {checkpoint; assignment_id; failed_runtime_id; next_runtime_id; later_runtime_ids; not_before}
 
 let equal_runtime_retry left right =
+  (* not_before is scheduling metadata, not part of the continuation's
+     identity: the store's idempotent defer check compares a freshly rebuilt
+     continuation (carrying a new backoff) against the persisted one, and the
+     two must still match. *)
   Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
   && left.assignment_id = right.assignment_id
   && left.failed_runtime_id = right.failed_runtime_id
@@ -159,7 +169,6 @@ let is_terminal execution = match execution.phase with
   | Settled _ -> true
   | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _ | Recovering _ | Suspended _ -> false
 let scope execution = execution.id
-let valid_time value = Float.is_finite value && value >= 0.
 let valid_terminal = function Failed detail -> String.trim detail <> "" | Completed | Cancelled -> true
 
 let validate_sources sources =
@@ -381,7 +390,8 @@ let runtime_retry_json (retry : runtime_retry) =
              ; "assignment_id", `String retry.assignment_id
              ; "failed_runtime_id", `String retry.failed_runtime_id
              ; "next_runtime_id", `String retry.next_runtime_id
-             ; "later_runtime_ids", `List (List.map (fun id -> `String id) retry.later_runtime_ids) ]
+             ; "later_runtime_ids", `List (List.map (fun id -> `String id) retry.later_runtime_ids)
+             ; "not_before", (match retry.not_before with None -> `Null | Some value -> `Float value) ]
 let gate_obligation_json value = `Assoc ["approval_id", `String value.approval_id;
   "tool_name", `String value.tool_name; "input_hash", `String value.input_hash]
 let runtime_suffix_json (suffix : runtime_suffix) = `Assoc [
@@ -496,8 +506,13 @@ let gate_obligation_of_json json =
   let* input_hash = string "input_hash" fields in
   gate_obligation ~approval_id ~tool_name ~input_hash
 let runtime_retry_of_json json =
-      let* fields = exact ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
-          "next_runtime_id"; "later_runtime_ids"] json in
+      let names = match json with
+        | `Assoc fields when List.mem_assoc "not_before" fields ->
+          ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
+           "next_runtime_id"; "later_runtime_ids"; "not_before"]
+        | _ -> ["kind"; "checkpoint"; "assignment_id"; "failed_runtime_id";
+                "next_runtime_id"; "later_runtime_ids"] in
+      let* fields = exact names json in
       let* kind = string "kind" fields in
       let* () = if kind = "runtime_retry" then Ok () else Error "invalid frozen runtime retry kind" in
       let* checkpoint = checkpoint_of_json (field "checkpoint" fields) in
@@ -509,7 +524,14 @@ let runtime_retry_of_json json =
           List.fold_right (fun value result -> let* ids = result in match value with
             | `String id -> Ok (id :: ids) | _ -> Error "runtime suffix identity must be a string") values (Ok [])
         | _ -> Error "runtime suffix must be a list" in
-      runtime_retry ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
+      (* Records persisted before [not_before] existed simply lack the field;
+         they decode to [None] and stay immediately claimable, exactly the
+         behaviour they had when written. *)
+      let* not_before = match List.assoc_opt "not_before" fields with
+        | None | Some `Null -> Ok None
+        | Some (`Float _ | `Int _) -> let* value = time "not_before" fields in Ok (Some value)
+        | Some _ -> Error "not_before must be a finite nonnegative time" in
+      runtime_retry ~not_before ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
 let gate_wait_of_json json =
   let json = match json with
     | `Assoc fields when not (List.mem_assoc "runtime_retry" fields) -> `Assoc (("runtime_retry", `Null) :: fields)

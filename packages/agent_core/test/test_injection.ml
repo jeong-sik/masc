@@ -44,7 +44,7 @@ let test_injector_returns_some () =
      injector
        ~tool_name:"bash"
        ~input:`Null
-       ~output:(Ok { Types.content = "ok"; _meta = None })
+       ~output:(Ok { Types.content = "ok"; content_blocks = None; _meta = None })
    with
    | Some inj -> check int "1 update" 1 (List.length inj.context_updates)
    | None -> fail "expected Some");
@@ -52,7 +52,7 @@ let test_injector_returns_some () =
     injector
       ~tool_name:"calc"
       ~input:`Null
-      ~output:(Ok { Types.content = "42"; _meta = None })
+      ~output:(Ok { Types.content = "42"; content_blocks = None; _meta = None })
   with
   | Some _ -> fail "expected None for calc"
   | None -> ()
@@ -78,7 +78,7 @@ let test_injector_with_extra_messages () =
     injector
       ~tool_name:"any"
       ~input:`Null
-      ~output:(Ok { Types.content = ""; _meta = None })
+      ~output:(Ok { Types.content = ""; content_blocks = None; _meta = None })
   with
   | Some inj -> check int "1 extra message" 1 (List.length inj.extra_messages)
   | None -> fail "expected Some"

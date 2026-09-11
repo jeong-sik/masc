@@ -5,9 +5,7 @@
    bindings keep working — the spectator's "any other key repaints" stays
    the host's decision, not the surface's. *)
 
-type frame =
-  | Pixels of { width : int; height : int; rgb : string }
-  | Rows of string
+type frame = Pixels of { width : int; height : int; rgb : string }
 
 module type S = sig
   val title : string
@@ -15,12 +13,6 @@ module type S = sig
   val current : unit -> frame option
 
   val handle_input : string -> bool
-
-  val focus_changed : bool -> unit
-
-  val tick : dt:float -> unit
-
-  val stop : unit -> unit
 end
 
 (* Keys the shared machine understands. The press sink reports delivery;
@@ -49,13 +41,5 @@ let msx ~fetch ~press =
       else if machine_key key then press key
       else false
     ;;
-
-    (* The spectator feed arrives by poll, so there is nothing to pause or
-       push yet; the real-time ticker will make these mean something. *)
-    let focus_changed _focused = ()
-
-    (* fire-and-forget: no ticker payload yet; see the module comment above. *)
-    let tick ~dt = ignore dt
-    let stop () = ()
   end : S)
 ;;

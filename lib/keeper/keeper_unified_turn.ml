@@ -542,6 +542,7 @@ let run_keeper_cycle
     ; runtime_rotation_attempts = []
     ; failure_reason = None
     ; retry_phase_started_at = None
+    ; last_dispatched_runtime_id = None
     }
   in
   let turn_state =
@@ -1363,6 +1364,13 @@ let run_keeper_cycle
                       (Option.map EC.degraded_retry_reason_to_string fallback_reason)
                     ~error:e_str
                     ~terminal_reason
+                    (* The runtime walk's own name for the candidate that
+                       answered with this error. [runtime_attribution] above
+                       resolves the same question for the log line, but only
+                       from a deferral hint; without one it falls back to the
+                       lane id. The record takes the walk's report or nothing
+                       (masc#35043). *)
+                    ?executed_runtime_id:turn_state.last_dispatched_runtime_id
                     ();
                   commit_turn_runtime_or_raise
                     ~config

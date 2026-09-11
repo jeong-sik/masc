@@ -10,7 +10,7 @@ let execute_typed ~parse ~handler ~encode json =
      | Error message -> Error { Types.message; recoverable = false; error_class = None }
      | Ok output ->
        let content = output |> encode |> Yojson.Safe.to_string in
-       Ok { Types.content; _meta = None })
+       Ok { Types.content; content_blocks = None; _meta = None })
 ;;
 
 let create ~name ~description ~params ~parse ~handler ~encode ?descriptor ?strict () =

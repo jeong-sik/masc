@@ -136,7 +136,7 @@ let trace_event actor (event : Agent_core.Event_bus.event) =
     let tool_use_id, turn, planned_index = trace_invocation_fields invocation in
     let completion =
       match output with
-      | Ok { Agent_core.Types.content; _meta = _ } ->
+      | Ok { Agent_core.Types.content; _ } ->
         Fusion_types.Tool_trace_succeeded
           (bounded_trace_preview
              ~max_bytes:tool_trace_output_preview_bytes content)

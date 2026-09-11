@@ -19,6 +19,7 @@ type turn_state =
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
+  ; last_dispatched_runtime_id : string option
   }
 
 let require_last_execution_for_finalize ~keeper_name turn_state =

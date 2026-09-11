@@ -14,7 +14,7 @@ let tool name =
     ~name
     ~description:("fixture tool " ^ name)
     ~parameters:[]
-    (fun (_ : Yojson.Safe.t) -> Ok { Agent_core.Types.content = ""; _meta = None })
+    (fun (_ : Yojson.Safe.t) -> Ok { Agent_core.Types.content = ""; content_blocks = None; _meta = None })
 ;;
 
 let names tools =

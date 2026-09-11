@@ -50,6 +50,7 @@ type tool_result =
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; outcome : Llm_provider.Types.tool_result_outcome
   }
 
@@ -660,7 +661,7 @@ let provider_invocations_settled provider =
 ;;
 
 let tool_result_of_block durable = function
-  | Llm_provider.Types.ToolResult { tool_use_id; content; outcome; _ }
+  | Llm_provider.Types.ToolResult { tool_use_id; content; content_blocks; outcome; _ }
     when String.equal
            tool_use_id
            (Tool_contract.Invocation.tool_use_id durable.Settlement.invocation) ->
@@ -669,6 +670,7 @@ let tool_result_of_block durable = function
       ; tool_name = durable.tool_name
       ; input = durable.input
       ; content
+      ; content_blocks
       ; outcome
       }
   | Llm_provider.Types.Text _
@@ -751,7 +753,7 @@ let execute_phased invocation ~invoke =
           transact invocation.scope.writer (Tx.start_run ~parent_attempt ~agent_name ())
           |> Result.map (fun (run, _event) -> { writer = invocation.scope.writer; run })
         in
-        let (content, outcome), after_settle =
+        let (content, content_blocks, outcome), after_settle =
           invoke ~start_child ~tool_name:durable.tool_name ~input:durable.input
         in
         Settlement.phased_effect
@@ -761,7 +763,7 @@ let execute_phased invocation ~invoke =
                ; content
                ; outcome
                ; json = None
-               ; content_blocks = None
+               ; content_blocks
                })
           ~after_settle)
     |> Result.map_error (fun error -> Settlement_failed error)
@@ -777,7 +779,8 @@ let execute_phased invocation ~invoke =
 
 let execute invocation ~invoke =
   execute_phased invocation ~invoke:(fun ~start_child ~tool_name ~input ->
-    invoke ~start_child ~tool_name ~input, Fun.id)
+    let content, outcome = invoke ~start_child ~tool_name ~input in
+    (content, None, outcome), Fun.id)
 ;;
 
 let close_node writer node terminal =

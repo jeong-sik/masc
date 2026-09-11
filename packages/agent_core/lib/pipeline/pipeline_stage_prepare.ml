@@ -103,7 +103,7 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
 (* Agent Core contract WP8 Inc1. [Agent_turn.last_tool_results_from] routes
    [ToolResult] blocks through [Canonical_tool.tool_result_of_block] and lowers
    the projection back to [Types.tool_result]. A result carrying a [json] (WP4
-   structured) payload must still lower to [Ok { content; _meta = None }] — the
+   structured) payload must still lower to [Ok { content; content_blocks = None; _meta = None }] — the
    projection surfaces [structured_content] without disturbing the existing
    string contract.
 
@@ -139,7 +139,7 @@ let%test "last_tool_results_from routes through canonical projection (with json)
     ]
   in
   match Agent_turn.last_tool_results_from msgs with
-  | [ Ok { content = "ok payload"; _meta = _ }
+  | [ Ok { content = "ok payload"; _ }
     ; Error { message = "boom"; recoverable = false; error_class = None }
     ] -> true
   | _ -> false

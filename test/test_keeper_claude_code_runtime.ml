@@ -599,7 +599,7 @@ let test_keeper_projects_masc_tool () =
       ~parameters:[ marker_param ]
       (fun input ->
         observed := input;
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -683,7 +683,7 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
       ~name:"masc_probe"
       ~description:"Return a deterministic fixture marker"
       ~parameters:[ marker_param ]
-      (fun _ -> Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+      (fun _ -> Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   let native_actions = ref [] in
   Fun.protect
@@ -800,7 +800,7 @@ let test_keeper_streams_text_and_tool_events () =
       ~description:"Return a deterministic fixture marker"
       ~parameters:[ marker_param ]
       (fun _ ->
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -865,7 +865,7 @@ let test_tools_support_false_omits_mcp_bridge () =
       ~parameters:[]
       (fun _ ->
         called := true;
-        Ok { Agent_core.Types.content = "unexpected"; _meta = None })
+        Ok { Agent_core.Types.content = "unexpected"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -1008,7 +1008,7 @@ let test_post_effect_transport_enters_recovery () =
       ~parameters:[ marker_param ]
       (fun _input ->
         incr call_count;
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -1082,7 +1082,7 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
       ~parameters:[ marker_param ]
       (fun _input ->
         incr call_count;
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -1321,7 +1321,7 @@ let test_quota_after_tool_effect_remains_fenced () =
       ~parameters:[ marker_param ]
       (fun _input ->
         incr call_count;
-        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
   in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
@@ -1570,7 +1570,7 @@ let repeated_tool () =
         }
       ]
     (fun _ ->
-      Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+      Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
 ;;
 
 (* A blank composition must not reach [Runtime_claude_code.config.system_prompt]

@@ -269,9 +269,9 @@ streaming = false
     (Exact_output_fixture.post_count server);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
   check bool "historical tool body was demoted and not sent inline" false
-    (String.contains second_body 'z');
+    (String_util.contains_substring second_body historical_payload);
   check bool "current-turn tool body remained verbatim inline" true
-    (String.contains second_body 'w');
+    (String_util.contains_substring second_body active_payload);
   let messages = Yojson.Safe.Util.(Yojson.Safe.from_string second_body |> member "messages" |> to_list) in
   let tool_messages =
     List.filter

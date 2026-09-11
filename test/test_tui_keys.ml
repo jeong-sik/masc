@@ -87,7 +87,7 @@ let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
     (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =

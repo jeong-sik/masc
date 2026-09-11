@@ -568,7 +568,11 @@ let handle_notes_list ~tool_name ~start_time ctx args =
   match required_string args "schedule_id" with
   | Error msg -> workflow_error ~tool_name ~start_time msg
   | Ok schedule_id ->
-    let raw_limit = optional_int args "limit" |> Option.value ~default:50 in
+    let raw_limit =
+      (* DET-OK: read-only list pagination default, mirroring handle_list;
+         it does not change what is computed or the oldest-first order. *)
+      optional_int args "limit" |> Option.value ~default:50
+    in
     let limit = min 200 (max 1 raw_limit) in
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err

@@ -42,3 +42,9 @@ val original_message : resolved_message -> Types.message
 val content : resolved_message -> (Types.content_block * string option) list
 
 val error_to_string : error -> string
+
+(** Request-only projection for wires whose tool response is text-only. Image
+    results keep their text/outcome in the tool response and place the original
+    image blocks in a labelled user-media message after the contiguous tool
+    result batch. Canonical messages and checkpoints remain unchanged. *)
+val with_image_followups : Types.message list -> Types.message list

@@ -310,6 +310,17 @@ let build_request_assoc_artifact
       ~supports_document_input:caps.Capabilities.supports_document_input
       messages
   in
+  (* Same boundary for images: a tool-result image must not reach
+     [with_image_followups] against a model without
+     [supports_image_input], which would project it as an image_url part the
+     endpoint rejects or drops. Degrading here — before serialization —
+     keeps every later turn of a history that already holds the image
+     live, mirroring the document rule above. *)
+  let messages, _images_degraded =
+    Api_common.degrade_image_messages
+      ~supports_image_input:caps.Capabilities.supports_image_input
+      messages
+  in
   let provider_messages =
     let history =
       match

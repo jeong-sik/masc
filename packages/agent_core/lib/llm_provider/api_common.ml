@@ -255,6 +255,70 @@ let degrade_document_messages ~wire_form ~supports_document_input messages =
   messages, !degraded
 ;;
 
+(* Same boundary, image side. [Tool_result_projection.with_image_followups]
+   projects every tool-result image onto the wire (image_url for OpenAI-
+   compatible, inlineData for Gemini) regardless of the model's declared
+   input capability, so a text-only row would either get the request
+   rejected by the endpoint or the image silently dropped by it. Rejecting
+   at serialization time instead would sink every later turn of a history
+   that already holds the image — the retroactive failure the document
+   degrader above exists to prevent — so an image a model without
+   [supports_image_input] cannot carry is replaced with a visible text
+   block naming what was dropped. Images nested in ToolResult
+   [content_blocks] are rewritten too, because that is where the projection
+   reads them from; a model that declares the capability keeps its native
+   bytes untouched. *)
+let image_omitted_note ~media_type =
+  Printf.sprintf
+    "[image omitted: this model does not accept image input (media_type %s)]"
+    media_type
+;;
+
+let image_omitted_placeholder ~media_type =
+  Text (image_omitted_note ~media_type)
+;;
+
+let degrade_image_messages ~supports_image_input messages =
+  let degraded = ref 0 in
+  let rewrite_block block =
+    match block with
+    | Image { media_type; _ } when not supports_image_input ->
+      incr degraded;
+      image_omitted_placeholder ~media_type
+    | ToolResult ({ content_blocks = Some blocks; _ } as result)
+      when not supports_image_input ->
+      (* Some wires read only the canonical [content] string for tool
+         results (Gemini's functionResponse), so the omission has to be
+         named there too — the degrade is not silent on any wire. Wires
+         that serialize [content_blocks] (OpenAI-compatible tool content)
+         carry the placeholder block itself. *)
+      let omissions = ref [] in
+      let rewrite_inner block =
+        match block with
+        | Image { media_type; _ } ->
+          incr degraded;
+          omissions := image_omitted_note ~media_type :: !omissions;
+          image_omitted_placeholder ~media_type
+        | _ -> block
+      in
+      let blocks = List.map rewrite_inner blocks in
+      let content =
+        match List.rev !omissions with
+        | [] -> result.content
+        | notes ->
+          let notes = String.concat "\n" notes in
+          if result.content = "" then notes else result.content ^ "\n" ^ notes
+      in
+      ToolResult { result with content; content_blocks = Some blocks }
+    | _ -> block
+  in
+  let rewrite (message : Types.message) =
+    { message with content = List.map rewrite_block message.content }
+  in
+  let messages = List.map rewrite messages in
+  messages, !degraded
+;;
+
 type tool_result_content_style =
   | Tool_result_content_string
   | Tool_result_content_text_blocks

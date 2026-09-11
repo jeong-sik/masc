@@ -2926,6 +2926,18 @@ let sandbox_install_apple_verified_cmd =
     ~doc:"Internal root-only installer for an explicitly selected Apple Container package.")
     Term.(const execute $ source $ sha256 $ size)
 
+let sandbox_install_docker_verified_cmd =
+  let source = Arg.(required & opt (some string) None & info ["source"] ~docv:"PATH") in
+  let sha256 = Arg.(required & opt (some string) None & info ["sha256"] ~docv:"SHA256") in
+  let size = Arg.(required & opt (some int) None & info ["size"] ~docv:"BYTES") in
+  let run source sha256 size =
+    match Masc.Docker_desktop_install.install_privileged ~run:Masc.Prerequisite_terminal_runner.capture ~source ~sha256 ~size with
+    | Ok completion ->
+      print_endline (Yojson.Safe.to_string (Masc.Docker_desktop_install.completion_to_json completion)); 0
+    | Error error -> prerr_endline (Masc.Docker_desktop_install.error_message error); 1 in
+  Cmd.v (Cmd.info "sandbox-install-docker-verified" ~doc:"Internal privileged installation of the selected verified Docker package.")
+    Term.(const run $ source $ sha256 $ size)
+
 let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
@@ -2962,6 +2974,7 @@ let cmd =
     ; keeper_github_cmd
     ; sandbox_image_cmd
     ; sandbox_install_apple_verified_cmd
+    ; sandbox_install_docker_verified_cmd
     ; prerequisite_actions_cmd
     ; setup_cmd
     ; setup_preflight_cmd

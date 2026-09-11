@@ -1,7 +1,9 @@
 module Sandbox = Masc.Sandbox_readiness
 module Prerequisites = Masc.Sandbox_prerequisites
 module Apple = Masc.Apple_container_install
+module Docker = Masc.Docker_desktop_install
 type action = Standard of Prerequisites.action | Verified_apple_install
+  | Verified_docker_install | Verified_docker_launch
 let dependency = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
@@ -20,7 +22,10 @@ let capture argv =
   match Process_eio.run_argv_with_status_split_or_refusal argv with
   | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
   | Ok _ | Error _ -> Error ()
-let id = function Standard action -> action.Prerequisites.id | Verified_apple_install -> "apple_container_verified_install"
+let id = function Standard action -> action.Prerequisites.id
+  | Verified_apple_install -> "apple_container_verified_install"
+  | Verified_docker_install -> "docker_desktop_verified_install"
+  | Verified_docker_launch -> "docker_desktop_verified_launch"
 let actions host dependency =
   let distribution = try
     In_channel.with_open_text "/etc/os-release" In_channel.input_all
@@ -30,21 +35,33 @@ let actions host dependency =
   match host, dependency with
   | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
     Verified_apple_install :: standard
+  | Sandbox.Macos _, Prerequisites.Sandbox Docker ->
+    Verified_docker_install :: Verified_docker_launch :: standard
   | _ -> standard
 let to_json actions =
-  let standard = List.filter_map (function Standard action -> Some action | Verified_apple_install -> None) actions in
+  let standard = List.filter_map (function Standard action -> Some action
+    | Verified_apple_install | Verified_docker_install | Verified_docker_launch -> None) actions in
   let json = Prerequisites.to_json standard in
+  let custom = List.filter_map (fun action ->
+    let description = match action with
+      | Standard _ -> None
+      | Verified_apple_install -> Some ("Install Apple Container (verify the signed package)",
+        "Download Apple's signed package, check its digest and publisher, then open the administrator installation step. Service and guest checks follow separately.",
+        "https://github.com/apple/container/releases/latest", true, "verified_package_install")
+      | Verified_docker_install -> Some ("Install Docker Desktop (verify the official installer)",
+        "Download Docker's official installer, verify its checksum and publisher, then install with administrator access. Docker presents its own license and startup steps when you open it.",
+        "https://docs.docker.com/desktop/setup/install/mac-install/", true, "verified_package_install")
+      | Verified_docker_launch -> Some ("Open Docker Desktop and complete its startup steps",
+        "Verify the installed Docker app and open it. Complete Docker's license or account prompts, then refresh setup to check engine access.",
+        "https://docs.docker.com/desktop/setup/install/mac-install/", false, "vendor_startup") in
+    Option.map (fun (label, detail, source_url, requires_admin, kind) -> `Assoc [
+      "id", `String (id action); "label", `String label; "detail", `String detail;
+      "source_url", `String source_url; "requires_admin", `Bool requires_admin;
+      "effect", `Assoc ["kind", `String kind]; "completion", `String "recheck_required"]) description) actions in
   match json with
-  | `Assoc fields when List.mem Verified_apple_install actions ->
-    let row = `Assoc ["id", `String (id Verified_apple_install);
-      "label", `String "Install Apple Container (verify the signed package)";
-      "detail", `String "Download Apple's signed package, check its digest and publisher, then open the administrator installation step. Service and guest checks follow separately.";
-      "source_url", `String "https://github.com/apple/container/releases/latest";
-      "requires_admin", `Bool true;
-      "effect", `Assoc ["kind", `String "verified_package_install"];
-      "completion", `String "recheck_required"] in
+  | `Assoc fields ->
     (match List.assoc_opt "actions" fields with
-     | Some (`List rows) -> `Assoc (("actions", `List (row :: rows)) :: List.remove_assoc "actions" fields)
+     | Some (`List rows) -> `Assoc (("actions", `List (custom @ rows)) :: List.remove_assoc "actions" fields)
      | _ -> json)
   | json -> json
 let execute host = function
@@ -61,6 +78,27 @@ let execute host = function
                  ~run:capture ~elevate:run_terminal artifact with
          | Ok () -> Prerequisites.Commands_completed_recheck_required
          | Error error -> Prerequisites.Failed {step=2; reason=Apple.error_message error}))
+  | Verified_docker_install ->
+    prerr_endline "Downloading and verifying the official Docker Desktop installer…";
+    (match Docker.acquire ~host ~run:capture with
+     | Error error -> Prerequisites.Failed {step=1; reason=Docker.error_message error}
+     | Ok artifact -> Fun.protect ~finally:(fun () -> Docker.remove artifact) (fun () ->
+       match Docker.install ~host ~executable_path:Sys.executable_name ~run:Masc.Prerequisite_terminal_runner.capture
+         ~probe_run:Sandbox.system_runner
+         ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+         ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) artifact with
+       | Error error -> Prerequisites.Failed {step=2; reason=Docker.error_message error}
+       | Ok result ->
+         (match result.completion.cleanup with Docker.Cleaned -> ()
+          | Pending directory -> Printf.eprintf "Installation completed; installer cleanup remains at %s.\n" directory);
+         prerr_endline "Docker is installed. Choose Open Docker Desktop, complete its startup steps, then refresh detection.";
+         Prerequisites.Commands_completed_recheck_required))
+  | Verified_docker_launch ->
+    (match Docker.launch_and_recheck ~host ~run:capture ~probe_run:Sandbox.system_runner
+      ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+      ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) () with
+     | Error error -> Prerequisites.Failed {step=1; reason=Docker.error_message error}
+     | Ok _ -> Prerequisites.External_step_pending)
 let run ~dependency:name ~action =
   match dependency name with
   | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1

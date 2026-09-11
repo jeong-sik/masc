@@ -169,22 +169,21 @@ let docker_shares_a_temp_workspace =
   lazy
     (let dir = temp_dir "mount-premise" in
      let sentinel = Filename.concat dir "mount-premise" in
-     let out = open_out sentinel in
-     output_string out "visible";
-     close_out out;
      let shared =
-       (try
-          Sys.command
-            (Printf.sprintf
-               "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
-                /masc-mount-premise/mount-premise >/dev/null 2>&1"
-               (Filename.quote dir)
-               (Filename.quote Keeper_sandbox_image.default_tag))
-          = 0
-        with _ -> false)
+       try
+         Fun.protect
+           ~finally:(fun () -> cleanup_dir dir)
+           (fun () ->
+              write_file sentinel "visible";
+              Sys.command
+                (Printf.sprintf
+                   "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
+                    /masc-mount-premise/mount-premise >/dev/null 2>&1"
+                   (Filename.quote dir)
+                   (Filename.quote Keeper_sandbox_image.default_tag))
+              = 0)
+       with _ -> false
      in
-     (try Sys.remove sentinel with Sys_error _ -> ());
-     (try Unix.rmdir dir with Unix.Unix_error _ -> ());
      if not shared
      then
        Printf.eprintf

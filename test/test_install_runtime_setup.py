@@ -35,6 +35,14 @@ def spec(choice='vllm'):
     return result
 
 
+def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/api/v1', key='OPENROUTER_API_KEY'):
+    result = dict(choice='openai_compatible', model=model_id, max_context=1000000, tools=True, streaming=True,
+                  endpoint=endpoint, api_key_env=key, provider_id=provider,
+                  provider_display_name=provider, model_key=SETUP.model_slug(model_id),
+                  provider_declared=False, thinking_disable_encodable=True, reasoning_effort='high')
+    return result
+
+
 class ModelSelection(unittest.TestCase):
     def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -293,6 +301,152 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
         result = SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
         self.assertEqual(result['readiness'], 'verified')
         self.assertEqual(len(result['verifications']), 1)
+
+    def test_a_fresh_named_provider_claims_exactly_one_wizard_default(self):
+        # The fixture inventory declares original.model with no provider_id,
+        # so openrouter counts as a provider the workspace never configured
+        # and the first of two additions claims the wizard-default flag.
+        self.validator('')
+        specs = [named_spec('anthropic/claude-opus-5'), named_spec('deepseek/deepseek-v4-flash')]
+        result = SETUP.configure_many(self.binary, self.base, specs)
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertEqual(written.count('"wizard-default" = true'), 1)
+        # The provider section is written once even though two models were
+        # added; the second addition references the provider the first
+        # declared instead of defining the same table twice.
+        self.assertEqual(written.count('["providers"."openrouter"]'), 1)
+        self.assertIn('["openrouter"."openrouter-anthropic-claude-opus-5"]', written)
+        self.assertIn('["openrouter"."openrouter-deepseek-deepseek-v4-flash"]', written)
+        overlay = self.overlay.read_text()
+        self.assertEqual(overlay.count('[["targets"]]'), 2)
+        self.assertNotIn('[["models"]]', overlay)
+        self.assertNotIn('[["providers"]]', overlay)
+
+    def test_anonymous_specs_render_unchanged_after_the_named_normalization(self):
+        self.validator('')
+        result = SETUP.configure_many(self.binary, self.base, [spec()])
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertIn(b'setup_vllm_'.decode(), written)
+
+
+class NamedCatalogSources(unittest.TestCase):
+    INVENTORY = {'runtimes': [], 'integrations': [
+        {'id': 'openrouter', 'display_name': 'openrouter', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://openrouter.ai/api/v1',
+         'api_key_env': 'OPENROUTER_API_KEY', 'provider_kind': 'openai_compat'},
+        {'id': 'already', 'display_name': 'already', 'protocol': 'openai-compatible-http',
+         'origin': 'runtime_config', 'setup_support': 'existing_binding',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': 'ALREADY_API_KEY'},
+        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'messages-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test',
+         'api_key_env': 'EXAMPLE_API_KEY'},
+        {'id': 'nokey', 'display_name': 'nokey', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': ''},
+    ]}
+
+    def catalog_sources(self, inventory):
+        return [source for source in SETUP.connection_sources(inventory) if source.get('catalog_provider')]
+
+    def test_unconfigured_catalog_integrations_become_named_sources(self):
+        sources = self.catalog_sources(self.INVENTORY)
+        self.assertEqual([source['provider_id'] for source in sources], ['openrouter'])
+        source = sources[0]
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['api_key_env'], 'OPENROUTER_API_KEY')
+        self.assertEqual(source['credential_kind'], 'env')
+        self.assertEqual(source['rows'], [])
+
+    def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
+        self.assertEqual(self.catalog_sources({'runtimes': []}), [])
+
+    def test_render_names_the_provider_and_writes_a_target_only_overlay(self):
+        identity, runtime, overlay = SETUP.render(named_spec('anthropic/claude-opus-5'))
+        self.assertEqual(identity, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertIn(b'["providers"."openrouter"]', runtime)
+        self.assertIn(b'"display-name" = "openrouter"', runtime)
+        self.assertIn(b'"endpoint" = "https://openrouter.ai/api/v1"', runtime)
+        self.assertIn(b'["models"."openrouter-anthropic-claude-opus-5"]', runtime)
+        self.assertIn(b'"api-name" = "anthropic/claude-opus-5"', runtime)
+        self.assertIn(b'"reasoning-effort" = "high"', runtime)
+        # The catalog row owns the window; the runtime entry does not restate it.
+        self.assertNotIn(b'max-context', runtime)
+        self.assertIn(b'["openrouter"."openrouter-anthropic-claude-opus-5"]', runtime)
+        self.assertNotIn(b'"models"', overlay)
+        self.assertNotIn(b'"providers"', overlay)
+        self.assertIn(b'"targets"', overlay)
+        self.assertIn(b'"model_id" = "anthropic/claude-opus-5"', overlay)
+        self.assertIn(b'"enable_thinking" = false', overlay)
+
+    def test_render_skips_the_provider_section_the_workspace_config_declares(self):
+        _, runtime, overlay = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
+                                                thinking_disable_encodable=False, reasoning_effort=None))
+        self.assertNotIn(b'"providers"', runtime)
+        self.assertNotIn(b'reasoning-effort', runtime)
+        self.assertNotIn(b'wizard-default', runtime)
+        self.assertNotIn(b'enable_thinking', overlay)
+
+    def test_resolve_rejects_a_served_id_the_catalog_does_not_curate(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.resolve_model_spec(source, dict(id='vendor/uncurated', label='x', context=None, existing=None), 1)
+
+    def test_resolve_builds_a_named_spec_from_the_catalog_row(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+                   'supports_tools': True, 'supports_streaming': True}
+        runtime_id, spec = SETUP.resolve_model_spec(
+            source, dict(id=catalog['id'], label='x', context=None, existing=None, catalog=catalog), 1)
+        self.assertEqual(runtime_id, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertEqual(spec['max_context'], 1000000)
+        self.assertTrue(spec['tools'])
+        self.assertTrue(spec['thinking_disable_encodable'])
+        self.assertEqual(spec['reasoning_effort'], 'high')
+
+    def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog_rows = [
+            {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+             'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+             'supports_tools': True, 'supports_streaming': True},
+        ]
+        with patch.object(SETUP, 'provider_catalog_models', return_value=catalog_rows), \
+             patch.object(SETUP, 'discover_models', return_value=(
+                 [dict(id='anthropic/claude-opus-5', label='claude opus', context=99),
+                  dict(id='vendor/uncurated', label='uncurated', context=7)],
+                 'Your server /models response')):
+            rows, origin = SETUP.source_models('binary', source, 1)
+        self.assertEqual(rows[0]['id'], 'anthropic/claude-opus-5')
+        self.assertEqual(rows[0]['context'], 99)
+        self.assertEqual(rows[0]['catalog'], catalog_rows[0])
+        self.assertEqual(rows[1]['id'], 'vendor/uncurated')
+        self.assertNotIn('catalog', rows[1])
+
+    def test_discovery_reads_openrouters_context_length_field(self):
+        payload = json.dumps({'data': [
+            {'id': 'vendor/model-a', 'name': 'Model A', 'context_length': 12345},
+            {'id': 'vendor/model-b', 'name': 'Model B', 'max_model_len': 777, 'context_length': 888},
+        ]}).encode()
+
+        class Opener:
+            def open(self, request, timeout=None):
+                return io.BytesIO(payload)
+
+        with patch.object(SETUP, 'build_opener', return_value=Opener()), \
+             patch.dict(os.environ, {'TEST_CATALOG_API_KEY': 'x'}):
+            models, origin = SETUP.discover_models('openai_compatible', 'https://example.test/v1',
+                                                   'TEST_CATALOG_API_KEY')
+        self.assertEqual(models[0]['context'], 12345)
+        self.assertEqual(models[1]['context'], 777)
+        self.assertEqual(origin, 'Your server /models response')
 
 
 class MultipleSelection(unittest.TestCase):
@@ -556,6 +710,26 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertEqual(sonnet['max_context'],1000000)
         self.assertTrue(all(row['id'].startswith('claude-') and row['max_context']>0 for row in models))
         self.assertNotIn('claude_code',{row['id'] for row in models})
+
+    def test_provider_mode_lists_curated_rows_for_a_named_catalog_provider(self):
+        result=subprocess.run([BINARY,'runtime-model-list','--provider','openrouter'],check=True,capture_output=True,text=True)
+        catalog=json.loads(result.stdout)
+        self.assertIs(catalog['account_availability_verified'],False)
+        flash=next(row for row in catalog['models'] if row['id']=='deepseek/deepseek-v4-flash')
+        self.assertEqual(flash['max_context'],1048576)
+        self.assertIn('none',flash['accepted_reasoning_efforts'])
+        self.assertEqual(flash['default_reasoning_effort'],'high')
+        self.assertIs(flash['supports_tools'],True)
+        self.assertIs(flash['supports_streaming'],True)
+
+    def test_provider_mode_rejects_unknown_ids_and_bare_invocations(self):
+        unknown=subprocess.run([BINARY,'runtime-model-list','--provider','not-a-provider'],capture_output=True,text=True)
+        self.assertNotEqual(unknown.returncode,0)
+        self.assertEqual(unknown.stdout,'')
+        self.assertIn('not-a-provider',unknown.stderr)
+        neither=subprocess.run([BINARY,'runtime-model-list'],capture_output=True,text=True)
+        self.assertNotEqual(neither.returncode,0)
+        self.assertEqual(neither.stdout,'')
         index=models.index(sonnet)+1
         with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
             selected=SETUP.select_model(BINARY,'claude_code')

@@ -221,10 +221,19 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
     let shutdown_fenced_backlog_count =
       queue_assoc_int "shutdown_fenced_backlog_count" fields
     in
+    (* Entries whose keeper's owner lifecycle could not be read. Not a state
+       the operator chose -- the classifier did not get an answer -- so it
+       belongs with [recoverable], not with the deliberate pauses below.
+       [counts_complete] only reports whether the queue file was read, so a
+       keeper whose meta loads but whose lifecycle answers Unknown left this
+       count standing while every predicate read zero and the section reported
+       ok with work in it (#34753). *)
+    let unclassified_backlog_count = queue_assoc_int "unclassified_count" fields in
     (* Only part of the non-runnable backlog is something an operator can act
-       on.  [recoverable] clears once the owner fiber is restored and
-       [shutdown_fenced] clears once the shutdown completes, so both warrant a
-       prompt.  [retained_disabled] and [paused_dead] are the operator's own
+       on.  [recoverable] clears once the owner fiber is restored,
+       [shutdown_fenced] clears once the shutdown completes, and
+       [unclassified] clears once the lifecycle reads again, so all three
+       warrant a prompt.  [retained_disabled] and [paused_dead] are the operator's own
        standing decision -- a keeper deliberately paused, or autoboot /
        proactive turned off.  Counting those as actionable pinned
        [operator_action_required] to true for as long as the decision held, so
@@ -233,7 +242,9 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
        [status_reasons], so the backlog stays visible without demanding
        action. *)
     let actionable_backlog_count =
-      recoverable_backlog_count + shutdown_fenced_backlog_count
+      recoverable_backlog_count
+      + shutdown_fenced_backlog_count
+      + unclassified_backlog_count
     in
     (* [backlog_clean] answers a different question than [work_action_required]:
        it reports whether the queue holds anything at all, so an operator-paused
@@ -303,6 +314,7 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
       |> backlog_reason "retained_disabled_backlog" retained_disabled_backlog_count
       |> backlog_reason "paused_dead_backlog" paused_dead_backlog_count
       |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
+      |> backlog_reason "unclassified_backlog" unclassified_backlog_count
       |> List.rev
     in
     (* The subset an operator has to answer, which is not the same list as what
@@ -319,6 +331,7 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
       storage_reasons
       |> backlog_reason "recoverable_backlog" recoverable_backlog_count
       |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
+      |> backlog_reason "unclassified_backlog" unclassified_backlog_count
       |> List.rev
     in
     let without name fields = List.remove_assoc name fields in

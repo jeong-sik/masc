@@ -1,10 +1,5 @@
 module Catalog_binding = Agent_core.Provider_runtime_binding
 
-let http_fields provider = match Runtime_adapter.http_protocol_metadata provider with
-  | Error _ -> []
-  | Ok (kind, path) -> ["provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind kind);
-                        "request_path", `String path]
-
 type setup_support = Existing_binding | New_connection | Unsupported
 
 let setup_support_json = function
@@ -52,16 +47,7 @@ let protocol_of_catalog_kind = function
   | Gemini -> None
 ;;
 
-let credential_fields ~include_credential_references = function
-  | Some (Runtime_schema.Env name) ->
-    [ "credential_kind", `String "env"; "api_key_env", `String name ]
-  | Some (Runtime_schema.File path) ->
-    [ "credential_kind", `String "file" ]
-    @ (if include_credential_references then [ "credential_file", `String path ] else [])
-  | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
-  | None -> [ "credential_kind", `String "none" ]
-
-let integrations_json ~include_credential_references (config : Runtime_schema.config) =
+let integrations_json (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
     List.map (fun (provider : Runtime_schema.provider) ->
@@ -76,10 +62,14 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         | Runtime_schema.Http endpoint -> endpoint_fields endpoint
         | Cli command -> [ "command", `String command ]
       in
-      let credential = credential_fields ~include_credential_references provider.credentials in
+      let credential =
+        match provider.credentials with
+        | Some (Runtime_schema.Env name) -> [ "api_key_env", `String name ]
+        | Some (File _ | Inline _) | None -> []
+      in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
-        (fields @ credential @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
+        (fields @ credential @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -129,7 +119,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
   `List (configured @ prototypes @ clients)
 ;;
 
-let to_json ?(include_credential_references=false) (config : Runtime_schema.config) =
+let to_json (config : Runtime_schema.config) =
   let runtimes =
     List.filter_map
       (fun (binding : Runtime_schema.binding) ->
@@ -151,7 +141,14 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                | Runtime_schema.Cli command -> [ "command", `String command ]
                | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
-             let credential = credential_fields ~include_credential_references provider.credentials in
+             let credential =
+               match provider.credentials with
+               | Some (Runtime_schema.Env name) ->
+                 [ "credential_kind", `String "env"; "api_key_env", `String name ]
+               | Some (Runtime_schema.File _) -> [ "credential_kind", `String "file" ]
+               | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
+               | None -> [ "credential_kind", `String "none" ]
+             in
              Some
                (`Assoc
                    ([ "id", `String (Runtime_schema.binding_key binding)
@@ -167,7 +164,6 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
                     ; "streaming", `Bool model.streaming
                     ]
                     @ transport
-                    @ http_fields provider
                     @ credential))
            | _ -> None))
       config.bindings
@@ -178,7 +174,7 @@ let to_json ?(include_credential_references=false) (config : Runtime_schema.conf
         | None -> `Null
         | Some id -> `String id )
     ; "runtimes", `List runtimes
-    ; "integrations", integrations_json ~include_credential_references config
+    ; "integrations", integrations_json config
     ]
 ;;
 
@@ -233,4 +229,93 @@ let binding_for_provider (cfg : Runtime_schema.config)
                 provider.id
                 (List.length defaults)
                 provider.id))
+;;
+
+(* Rows the setup wizard can offer for one named catalog provider. The entries
+   come from the embedded catalog scoped to [provider_name]; capabilities are
+   resolved against the provider's own wire kind, so a row that only inherits
+   from the provider base still reports the capabilities it will actually run
+   with. A row without a positive declared context is not wizard-offerable —
+   the wizard writes a runtime entry that needs a context — and stays out of
+   the list. The loaded catalog is installed as the global before resolving
+   capabilities, so entries and capabilities provably read one catalog
+   whatever a caller left in the global before this call. *)
+let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result =
+  match Llm_provider.Model_catalog.load_default () with
+  | Error message -> Error message
+  | Ok catalog ->
+    Llm_provider.Model_catalog.set_global catalog;
+    let providers = Catalog_binding.all () in
+    let provider =
+      providers
+      |> List.find_opt (fun (entry : Catalog_binding.t) -> String.equal entry.id provider_id)
+    in
+    (match provider with
+     | None ->
+       let available =
+         providers
+         |> List.map (fun (entry : Catalog_binding.t) -> entry.id)
+         |> List.sort_uniq String.compare
+       in
+       Error
+         (Printf.sprintf "unknown provider %S; installed catalog providers: %s"
+            provider_id (String.concat ", " available))
+     | Some provider ->
+       let rows =
+         Llm_provider.Model_catalog.model_entries catalog
+         |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+              match entry.provider_name with
+              | Some name -> String.equal name provider_id
+              | None -> false)
+         |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+              match entry.max_context_tokens with
+              | Some context when context > 0 ->
+                (match
+                   Llm_provider.Capabilities.for_provider_model_id
+                     ~wire:(Some provider.kind)
+                     ~allow_bare_fallback:false
+                     ~provider_label:provider.id
+                     ~model_id:entry.id_prefix
+                 with
+                 | None -> None
+                 | Some capabilities ->
+                   (* "high" is the effort the seed rows pin. When a row's
+                      accepted ladder does not carry it, take the strongest
+                      rung that still reasons -- "none" is the disable, not a
+                      default -- and a ladder of only "none" takes "none",
+                      because that is all the row can encode. *)
+                   let default_effort =
+                     match entry.accepted_reasoning_efforts with
+                     | None | Some [] -> `Null
+                     | Some rungs ->
+                       let chosen =
+                         if List.exists (String.equal "high") rungs
+                         then "high"
+                         else
+                           (match
+                              List.rev (List.filter (fun rung -> not (String.equal "none" rung)) rungs)
+                            with
+                            | top :: _ -> top
+                            | [] -> "none")
+                       in
+                       `String chosen
+                   in
+                   Some
+                     (`Assoc
+                        [ ("id", `String entry.id_prefix)
+                        ; ("label", `String (match entry.base_label with
+                                               Some label -> label
+                                             | None -> entry.id_prefix))
+                        ; ("max_context", `Int context)
+                        ; ( "accepted_reasoning_efforts"
+                          , (match entry.accepted_reasoning_efforts with
+                             | None -> `Null
+                             | Some rungs -> `List (List.map (fun rung -> `String rung) rungs)) )
+                        ; ("default_reasoning_effort", default_effort)
+                        ; ("supports_tools", `Bool capabilities.supports_tools)
+                        ; ("supports_streaming", `Bool capabilities.supports_native_streaming)
+                        ]))
+              | _ -> None)
+       in
+       Ok (`List rows))
 ;;

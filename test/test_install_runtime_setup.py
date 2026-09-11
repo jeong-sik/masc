@@ -28,110 +28,22 @@ MODULE.loader.exec_module(SETUP)
 
 def spec(choice='vllm'):
     result = dict(choice=choice, model='operator/model-exact', max_context=8192, tools=True, streaming=False)
-    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
+    if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
         result['endpoint'] = 'http://127.0.0.1:9/v1'
-        if choice == 'messages':
-            result['provider_kind'] = 'anthropic'
     elif choice == 'antigravity':
         result.update(credential_file='/operator/token-file', timeout_s=180)
     return result
 
 
+def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/api/v1', key='OPENROUTER_API_KEY'):
+    result = dict(choice='openai_compatible', model=model_id, max_context=1000000, tools=True, streaming=True,
+                  endpoint=endpoint, api_key_env=key, provider_id=provider,
+                  provider_display_name=provider, model_key=SETUP.model_slug(model_id),
+                  provider_declared=False, thinking_disable_encodable=True, reasoning_effort='high')
+    return result
+
+
 class ModelSelection(unittest.TestCase):
-    def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
-        inventory = dict(runtimes=[], integrations=[dict(
-            id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
-            endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
-            origin='agent_core_catalog', setup_support='new_connection', provider_kind='openai_compat')])
-        rows = SETUP.connection_sources(inventory)
-        source = next(row for row in rows if row['provider_id'] == 'openrouter')
-        self.assertEqual(source['choice'], 'openai_compatible')
-        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
-        self.assertEqual(source['rows'], [])
-
-    def test_integration_only_private_auth_is_preserved_or_explicitly_protected(self):
-        for kind in ('file', 'inline'):
-            integration = dict(id='private-provider', display_name='Private', protocol='openai-compatible-http',
-                               endpoint='https://example.com/v1', origin='runtime_config',
-                               setup_support='new_connection', credential_kind=kind)
-            if kind == 'file':
-                integration['credential_file'] = '/private/owned-api-key'
-            source = SETUP.connection_sources(dict(runtimes=[], integrations=[integration]))[0]
-            self.assertEqual(source['credential_kind'], kind)
-            if kind == 'file':
-                with patch.object(SETUP, 'native_discover_models', return_value=([], 'server')) as discover:
-                    SETUP.source_models('/fixture', source, 10)
-                self.assertEqual(discover.call_args.args[1]['credential_file'], '/private/owned-api-key')
-                _, selected = SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
-                self.assertEqual(selected['credential_file'], '/private/owned-api-key')
-                self.assertNotIn('api_key_env', selected)
-            else:
-                with patch.object(SETUP, 'native_discover_models', side_effect=AssertionError('anonymous request')):
-                    self.assertEqual(SETUP.source_models('/fixture', source, 10)[0], [])
-                with self.assertRaisesRegex(SETUP.SetupError, 'protected credential'):
-                    SETUP.resolve_model_spec(source, dict(id='new-model',context=8192), 10)
-
-    def test_private_key_is_piped_and_removed_when_setup_does_not_commit(self):
-        with tempfile.TemporaryDirectory() as directory:
-            key = Path(directory, 'pending-key')
-            def save(argv, **kwargs):
-                self.assertEqual(argv, ['/fixture/masc', 'runtime-store-credential'])
-                self.assertEqual(kwargs['input'], 'hidden-secret')
-                self.assertNotIn('hidden-secret', str(argv))
-                key.write_text(kwargs['input'])
-                key.chmod(0o600)
-                return subprocess.CompletedProcess(argv, 0, json.dumps(dict(
-                    schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
-            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
-                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
-                    patch.object(SETUP.subprocess, 'run', side_effect=save), \
-                    SETUP.PendingCredentials('/fixture/masc') as credentials:
-                self.assertEqual(credentials.save(), str(key))
-                self.assertTrue(key.exists())
-            self.assertFalse(key.exists())
-
-    def test_successfully_committed_key_remains_private(self):
-        with tempfile.TemporaryDirectory() as directory:
-            key = Path(directory, 'committed-key')
-            key.write_text('hidden-secret')
-            key.chmod(0o600)
-            result = subprocess.CompletedProcess([], 0, json.dumps(dict(
-                schema='masc.private_credential_reference.v1', credential_file=str(key))), '')
-            with patch.object(SETUP.sys.stdin, 'isatty', return_value=True), \
-                    patch.object(SETUP.getpass, 'getpass', return_value='hidden-secret'), \
-                    patch.object(SETUP.subprocess, 'run', return_value=result), \
-                    SETUP.PendingCredentials('/fixture/masc') as credentials:
-                path = credentials.save()
-                credentials.retain([dict(credential_file=path)])
-            self.assertTrue(key.exists())
-            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
-
-    def test_replaced_key_creates_new_binding_instead_of_reusing_old_env_auth(self):
-        source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1',
-                      api_key_env='', credential_file='/private/saved-key', credential_kind='file',
-                      credential_replaced=True, rows=[dict(id='old.binding', model='same-model',
-                      max_context=8192, tools=True)])
-        with patch.object(SETUP, 'native_discover_models', return_value=(
-                [dict(id='same-model', label='Model', context=None)], 'server')):
-            models, _ = SETUP.source_models('/fixture/masc', source, 10)
-        self.assertEqual(len(models), 1)
-        self.assertIsNone(models[0]['existing'])
-        runtime, selected = SETUP.resolve_model_spec(source, models[0], 10)
-        self.assertNotEqual(runtime, 'old.binding')
-        self.assertEqual(selected['credential_file'], '/private/saved-key')
-        self.assertNotIn('api_key_env', selected)
-
-    def test_messages_kind_and_path_are_preserved_in_native_catalog_overlay(self):
-        import tomllib
-        configured = dict(spec('messages'), credential_file='/private/saved-key', request_path='/v1/messages')
-        _, runtime, overlay = SETUP.render(configured)
-        self.assertNotIn(b'hidden-secret', runtime + overlay)
-        catalog = tomllib.loads(overlay.decode())
-        self.assertEqual(catalog['providers'][0]['kind'], 'anthropic')
-        self.assertEqual(catalog['providers'][0]['request_path'], '/v1/messages')
-        providers = tomllib.loads(runtime.decode())['providers']
-        self.assertEqual(next(iter(providers.values()))['credentials'], dict(type='file', path='/private/saved-key'))
-
     def test_codex_cache_filters_hidden_models_and_preserves_exact_id(self):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, 'models_cache.json').write_text(json.dumps({'models':[
@@ -221,8 +133,41 @@ class ModelSelection(unittest.TestCase):
             with self.subTest(reply=reply), patch('subprocess.run',side_effect=cli), patch('sys.stdin',io.StringIO('manual\nq\n')), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SETUP.SetupError):
                 SETUP.select_model('/fixture/masc','claude_code')
 
+    def test_independent_catalog_sources_are_visible_without_runtime_bindings(self):
+        inventory = dict(runtimes=[], integrations=[dict(
+            id='openrouter', display_name='OpenRouter', protocol='openai-compatible-http',
+            endpoint='https://openrouter.ai/api/v1', api_key_env='OPENROUTER_API_KEY',
+            origin='agent_core_catalog', setup_support='new_connection',
+            verification_support='response_tool', provider_kind='openai_compat')])
+        rows = SETUP.connection_sources(inventory)
+        source = next(row for row in rows if row['provider_id'] == 'openrouter')
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['rows'], [])
 
-class RuntimeSetup(unittest.TestCase):
+    def test_catalog_integrations_stay_env_only_and_skip_discovery_without_keys(self):
+        # Catalog integrations never surface private credentials: the source is
+        # env-kind and discovery runs only through the declared env var, so no
+        # secret is read from disk or sent anywhere by the wizard.
+        integration = dict(id='private-provider', display_name='Private', protocol='openai-compatible-http',
+                           endpoint='https://example.com/v1', origin='runtime_config', api_key_env='PRIVATE_API_KEY',
+                           setup_support='new_connection', verification_support='response_tool',
+                           credential_kind='file', credential_file='/private/owned-api-key')
+        source = SETUP.connection_sources(dict(runtimes=[], integrations=[integration]))[0]
+        self.assertEqual(source['credential_kind'], 'env')
+        self.assertNotIn('credential_file', source)
+        def empty_catalog(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'models': []}), '')
+        with patch.object(SETUP, 'discover_models', return_value=([], 'server')) as discover, \
+                patch.object(SETUP.subprocess, 'run', side_effect=empty_catalog):
+            rows, origin = SETUP.source_models('/fixture', source, 10)
+        self.assertEqual(source['api_key_env'], 'PRIVATE_API_KEY')
+        self.assertEqual(rows, [])
+        self.assertEqual(origin, 'server')
+
+
+
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='runtime-setup-test-')
         self.addCleanup(self.temp.cleanup)
@@ -248,7 +193,7 @@ class RuntimeSetup(unittest.TestCase):
                 self.assertIn('setup_' + choice, identity)
                 self.assertIn(b'operator/model-exact', runtime)
                 self.assertIn(b'"max-context" = 8192', runtime)
-                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama', 'messages'):
+                if choice in ('vllm', 'llama_cpp', 'openai_compatible', 'ollama'):
                     self.assertIn(('"provider_name" = ' + SETUP.toml(identity.split('.')[0])).encode(), overlay)
                     self.assertIn(b'"supports_tools" = true', overlay)
                     self.assertIn(b'"supports_reasoning" = false', overlay)
@@ -389,6 +334,191 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
         result = SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
         self.assertEqual(result['readiness'], 'verified')
         self.assertEqual(len(result['verifications']), 1)
+
+    def test_a_fresh_named_provider_claims_exactly_one_wizard_default(self):
+        # The fixture inventory declares original.model with no provider_id,
+        # so openrouter counts as a provider the workspace never configured
+        # and the first of two additions claims the wizard-default flag.
+        self.validator('')
+        specs = [named_spec('anthropic/claude-opus-5'), named_spec('deepseek/deepseek-v4-flash')]
+        result = SETUP.configure_many(self.binary, self.base, specs)
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertEqual(written.count('"wizard-default" = true'), 1)
+        # The provider section is written once even though two models were
+        # added; the second addition references the provider the first
+        # declared instead of defining the same table twice.
+        self.assertEqual(written.count('["providers"."openrouter"]'), 1)
+        self.assertIn('["openrouter"."openrouter-anthropic-claude-opus-5"]', written)
+        self.assertIn('["openrouter"."openrouter-deepseek-deepseek-v4-flash"]', written)
+        overlay = self.overlay.read_text()
+        self.assertEqual(overlay.count('[["targets"]]'), 2)
+        self.assertNotIn('[["models"]]', overlay)
+        self.assertNotIn('[["providers"]]', overlay)
+
+    def test_anonymous_specs_render_unchanged_after_the_named_normalization(self):
+        self.validator('')
+        result = SETUP.configure_many(self.binary, self.base, [spec()])
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertIn(b'setup_vllm_'.decode(), written)
+
+    def test_a_configured_provider_never_rewrites_its_section(self):
+        # The workspace already declares the provider; a named addition that
+        # re-declared it would fail TOML validation that cannot say why.
+        self.binary.write_text('#!' + sys.executable + '\nimport sys,json\n'
+                               "if sys.argv[1] == 'runtime-wizard-catalog':\n"
+                               " print(json.dumps({'runtimes':[{'id':'openrouter.openrouter-x','provider_id':'openrouter'}]})); sys.exit(0)\n")
+        self.binary.chmod(0o755)
+        result = SETUP.configure_many(self.binary, self.base, [named_spec('anthropic/claude-opus-5')])
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertNotIn('["providers"."openrouter"]', written)
+        self.assertIn('["openrouter"."openrouter-anthropic-claude-opus-5"]', written)
+        self.assertNotIn('wizard-default', written)
+
+    def test_two_models_slugging_to_one_entry_are_refused(self):
+        # "anthropic/claude.opus-5" and "anthropic/claude-opus-5" differ only
+        # in punctuation and slug to the same runtime entry.
+        self.validator('')
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.configure_many(self.binary, self.base,
+                                 [named_spec('anthropic/claude-opus-5'), named_spec('anthropic/claude.opus-5')])
+        self.assertIn('same runtime entry name', str(raised.exception))
+
+
+class NamedCatalogSources(unittest.TestCase):
+    INVENTORY = {'runtimes': [], 'integrations': [
+        {'id': 'openrouter', 'display_name': 'openrouter', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://openrouter.ai/api/v1',
+         'api_key_env': 'OPENROUTER_API_KEY', 'provider_kind': 'openai_compat'},
+        {'id': 'already', 'display_name': 'already', 'protocol': 'openai-compatible-http',
+         'origin': 'runtime_config', 'setup_support': 'existing_binding',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': 'ALREADY_API_KEY'},
+        {'id': 'wrongwire', 'display_name': 'wrongwire', 'protocol': 'messages-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test',
+         'api_key_env': 'EXAMPLE_API_KEY'},
+        {'id': 'nokey', 'display_name': 'nokey', 'protocol': 'openai-compatible-http',
+         'origin': 'agent_core_catalog', 'setup_support': 'new_connection',
+         'verification_support': 'response_tool', 'endpoint': 'https://example.test/v1',
+         'api_key_env': ''},
+    ]}
+
+    def catalog_sources(self, inventory):
+        return [source for source in SETUP.connection_sources(inventory) if source.get('catalog_provider')]
+
+    def test_unconfigured_catalog_integrations_become_named_sources(self):
+        sources = self.catalog_sources(self.INVENTORY)
+        self.assertEqual([source['provider_id'] for source in sources], ['openrouter'])
+        source = sources[0]
+        self.assertEqual(source['choice'], 'openai_compatible')
+        self.assertEqual(source['endpoint'], 'https://openrouter.ai/api/v1')
+        self.assertEqual(source['api_key_env'], 'OPENROUTER_API_KEY')
+        self.assertEqual(source['credential_kind'], 'env')
+        self.assertEqual(source['rows'], [])
+
+    def test_an_older_binary_without_integrations_yields_no_catalog_sources(self):
+        self.assertEqual(self.catalog_sources({'runtimes': []}), [])
+
+    def test_render_names_the_provider_and_writes_a_target_only_overlay(self):
+        identity, runtime, overlay = SETUP.render(named_spec('anthropic/claude-opus-5'))
+        self.assertEqual(identity, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertIn(b'["providers"."openrouter"]', runtime)
+        self.assertIn(b'"display-name" = "openrouter"', runtime)
+        self.assertIn(b'"endpoint" = "https://openrouter.ai/api/v1"', runtime)
+        self.assertIn(b'["models"."openrouter-anthropic-claude-opus-5"]', runtime)
+        self.assertIn(b'"api-name" = "anthropic/claude-opus-5"', runtime)
+        self.assertIn(b'"reasoning-effort" = "high"', runtime)
+        # The catalog row owns the window; the runtime entry does not restate it.
+        self.assertNotIn(b'max-context', runtime)
+        self.assertIn(b'["openrouter"."openrouter-anthropic-claude-opus-5"]', runtime)
+        self.assertNotIn(b'"models"', overlay)
+        self.assertNotIn(b'"providers"', overlay)
+        self.assertIn(b'"targets"', overlay)
+        self.assertIn(b'"model_id" = "anthropic/claude-opus-5"', overlay)
+        self.assertIn(b'"enable_thinking" = false', overlay)
+
+    def test_render_skips_the_provider_section_the_workspace_config_declares(self):
+        _, runtime, overlay = SETUP.render(dict(named_spec('z-ai/glm-5.3'), provider_declared=True,
+                                                thinking_disable_encodable=False, reasoning_effort=None))
+        self.assertNotIn(b'"providers"', runtime)
+        self.assertNotIn(b'reasoning-effort', runtime)
+        self.assertNotIn(b'wizard-default', runtime)
+        self.assertNotIn(b'enable_thinking', overlay)
+
+    def test_resolve_rejects_a_served_id_the_catalog_does_not_curate(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.resolve_model_spec(source, dict(id='vendor/uncurated', label='x', context=None, existing=None), 1)
+
+    def test_resolve_rejects_a_catalog_row_without_tool_support(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'google/gemma3-4b', 'label': 'google/gemma3-4b', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': None, 'supports_tools': False, 'supports_streaming': True}
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.resolve_model_spec(source, dict(id=catalog['id'], label='x', context=None,
+                                                  existing=None, catalog=catalog), 1)
+        self.assertIn('tool support', str(raised.exception))
+
+    def test_a_failed_catalog_read_is_an_error_not_an_empty_list(self):
+        failure = subprocess.CompletedProcess([], 1, '', 'provider listing exploded')
+        with patch('subprocess.run', return_value=failure):
+            with self.assertRaises(SETUP.SetupError) as raised:
+                SETUP.provider_catalog_models('binary', 'openrouter')
+        self.assertIn('provider listing exploded', str(raised.exception))
+
+    def test_resolve_builds_a_named_spec_from_the_catalog_row(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+                   'supports_tools': True, 'supports_streaming': True}
+        runtime_id, spec = SETUP.resolve_model_spec(
+            source, dict(id=catalog['id'], label='x', context=None, existing=None, catalog=catalog), 1)
+        self.assertEqual(runtime_id, 'openrouter.openrouter-anthropic-claude-opus-5')
+        self.assertEqual(spec['max_context'], 1000000)
+        self.assertTrue(spec['tools'])
+        self.assertTrue(spec['thinking_disable_encodable'])
+        self.assertEqual(spec['reasoning_effort'], 'high')
+
+    def test_source_models_leads_with_curated_rows_and_keeps_discovery_extras(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog_rows = [
+            {'id': 'anthropic/claude-opus-5', 'label': 'anthropic/claude-opus-5', 'max_context': 1000000,
+             'accepted_reasoning_efforts': ['none', 'high'], 'default_reasoning_effort': 'high',
+             'supports_tools': True, 'supports_streaming': True},
+        ]
+        with patch.object(SETUP, 'provider_catalog_models', return_value=catalog_rows), \
+             patch.object(SETUP, 'discover_models', return_value=(
+                 [dict(id='anthropic/claude-opus-5', label='claude opus', context=99),
+                  dict(id='vendor/uncurated', label='uncurated', context=7)],
+                 'Your server /models response')):
+            rows, origin = SETUP.source_models('binary', source, 1)
+        self.assertEqual(rows[0]['id'], 'anthropic/claude-opus-5')
+        self.assertEqual(rows[0]['context'], 99)
+        self.assertEqual(rows[0]['catalog'], catalog_rows[0])
+        self.assertEqual(rows[1]['id'], 'vendor/uncurated')
+        self.assertNotIn('catalog', rows[1])
+
+    def test_discovery_reads_openrouters_context_length_field(self):
+        payload = json.dumps({'data': [
+            {'id': 'vendor/model-a', 'name': 'Model A', 'context_length': 12345},
+            {'id': 'vendor/model-b', 'name': 'Model B', 'max_model_len': 777, 'context_length': 888},
+        ]}).encode()
+
+        class Opener:
+            def open(self, request, timeout=None):
+                return io.BytesIO(payload)
+
+        with patch.object(SETUP, 'build_opener', return_value=Opener()), \
+             patch.dict(os.environ, {'TEST_CATALOG_API_KEY': 'x'}):
+            models, origin = SETUP.discover_models('openai_compatible', 'https://example.test/v1',
+                                                   'TEST_CATALOG_API_KEY')
+        self.assertEqual(models[0]['context'], 12345)
+        self.assertEqual(models[1]['context'], 777)
+        self.assertEqual(origin, 'Your server /models response')
 
 
 class MultipleSelection(unittest.TestCase):
@@ -578,7 +708,7 @@ class MultipleSelection(unittest.TestCase):
     def test_workspace_context_is_matched_to_same_connection_and_exact_model(self):
         source = dict(choice='openai_compatible', endpoint='https://provider.invalid/v1', api_key_env='OWNED_KEY',
                       rows=[dict(id='glm.model', model='glm-5.3', max_context=200000, tools=True)])
-        with patch.object(SETUP, 'native_discover_models', return_value=([
+        with patch.object(SETUP, 'discover_models', return_value=([
                 dict(id='glm-5.3',label='GLM',context=None), dict(id='different-model',label='Other',context=None)], 'server')):
             rows, _ = SETUP.source_models('/fixture/masc', source, 10)
         self.assertEqual(rows[0]['context'], 200000)
@@ -592,7 +722,7 @@ class MultipleSelection(unittest.TestCase):
         source = dict(choice='openai_compatible', endpoint='http://localhost:8080/v1', api_key_env='', rows=[
             dict(id='provider.small', model='same-model', max_context=8192, tools=True),
             dict(id='provider.large', model='same-model', max_context=16384, tools=True)])
-        with patch.object(SETUP, 'native_discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
+        with patch.object(SETUP, 'discover_models', return_value=([dict(id='same-model',label='Model',context=None)], 'server')):
             models, _ = SETUP.source_models('/fixture', source, 10)
         self.assertEqual([row['existing']['id'] for row in models], ['provider.small','provider.large'])
         self.assertEqual([row['context'] for row in models], [8192,16384])
@@ -658,6 +788,26 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
         self.assertIn('No number to enter',terminal.getvalue())
         self.assertNotIn('Documented/configured context limit',terminal.getvalue())
+
+    def test_provider_mode_lists_curated_rows_for_a_named_catalog_provider(self):
+        result=subprocess.run([BINARY,'runtime-model-list','--provider','openrouter'],check=True,capture_output=True,text=True)
+        catalog=json.loads(result.stdout)
+        self.assertIs(catalog['account_availability_verified'],False)
+        flash=next(row for row in catalog['models'] if row['id']=='deepseek/deepseek-v4-flash')
+        self.assertEqual(flash['max_context'],1048576)
+        self.assertIn('none',flash['accepted_reasoning_efforts'])
+        self.assertEqual(flash['default_reasoning_effort'],'high')
+        self.assertIs(flash['supports_tools'],True)
+        self.assertIs(flash['supports_streaming'],True)
+
+    def test_provider_mode_rejects_unknown_ids_and_bare_invocations(self):
+        unknown=subprocess.run([BINARY,'runtime-model-list','--provider','not-a-provider'],capture_output=True,text=True)
+        self.assertNotEqual(unknown.returncode,0)
+        self.assertEqual(unknown.stdout,'')
+        self.assertIn('not-a-provider',unknown.stderr)
+        neither=subprocess.run([BINARY,'runtime-model-list'],capture_output=True,text=True)
+        self.assertNotEqual(neither.returncode,0)
+        self.assertEqual(neither.stdout,'')
 
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')

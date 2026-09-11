@@ -86,6 +86,12 @@ def render(spec):
     allowed |= {'endpoint', 'api_key_env'} if default_command is None else {'command'}
     if choice == 'antigravity':
         allowed |= {'credential_file', 'timeout_s'}
+    named = 'provider_id' in spec
+    if named:
+        if default_command is not None:
+            raise SetupError('a named catalog provider is an HTTP connection')
+        allowed |= {'provider_id', 'provider_display_name', 'model_key', 'provider_declared',
+                    'reasoning_effort', 'thinking_disable_encodable', 'wizard_default'}
     if set(spec) - allowed:
         raise SetupError('unexpected setup fields: ' + ', '.join(sorted(set(spec) - allowed)))
     model = text(spec, 'model')
@@ -95,6 +101,50 @@ def render(spec):
     for key in ('tools', 'streaming'):
         if type(spec.get(key)) is not bool:
             raise SetupError(key + ' must be an explicitly declared boolean')
+    if named:
+        # A named catalog provider writes the provider's own section name, so
+        # the runtime resolves against the catalog instead of an anonymous
+        # setup_* identity. provider_declared skips the section when the
+        # workspace runtime.toml already declares the provider.
+        endpoint = text(spec, 'endpoint')
+        try:
+            url = urlsplit(endpoint)
+            valid = url.scheme in ('http', 'https') and url.hostname and not (url.username or url.password or url.query or url.fragment)
+            _ = url.port
+        except ValueError:
+            valid = False
+        if not valid:
+            raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
+        key = text(spec, 'api_key_env')
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+            raise SetupError('api_key_env must name an environment variable, not a credential value')
+        provider = text(spec, 'provider_id')
+        model_key = provider + '-' + text(spec, 'model_key')
+        runtime = ''
+        if spec.get('provider_declared') is not True:
+            runtime += table(('providers', provider), {'display-name': text(spec, 'provider_display_name'),
+                                                       'protocol': protocol, 'endpoint': endpoint})
+            runtime += table(('providers', provider, 'healthcheck'),
+                             {'path': '/api/tags' if choice == 'ollama' else '/models'})
+            runtime += table(('providers', provider, 'credentials'), {'type': 'env', 'key': key})
+        model_fields = {'api-name': model, 'tools-support': spec['tools'], 'streaming': spec['streaming']}
+        # No max-context here: the catalog row owns the window, exactly like
+        # the seed's OpenRouter entries.
+        if spec.get('reasoning_effort'):
+            model_fields.update(**{'thinking-support': True, 'reasoning-effort': text(spec, 'reasoning_effort')})
+        runtime += table(('models', model_key), model_fields)
+        binding = {'wizard-default': True} if spec.get('wizard_default') is True else {}
+        runtime += table((provider, model_key), binding)
+        # Overlay targets only. The catalog already declares the provider and
+        # its curated rows, and an overlay [[models]] row would shadow the
+        # curated one because overlay rows win the merge. enable_thinking is
+        # only written where the row accepts the "none" effort, so the
+        # disable is always encodable on the wire.
+        target = {'id': provider + '.' + model_key, 'provider_ref': provider, 'model_id': model}
+        if spec.get('thinking_disable_encodable') is True:
+            target['enable_thinking'] = False
+        overlay = table(('targets',), target, array=True)
+        return provider + '.' + model_key, runtime.encode(), overlay.encode()
     # A connection/model is an identity, not a singleton slot per CLI kind.
     # Include explicit capabilities and limits so changed operator settings do
     # not silently mutate a runtime another Keeper may already use.
@@ -213,6 +263,8 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         raise SetupError('runtime_ids must be a list of runtime identifiers')
     if default_id is not None and not model_text(default_id):
         raise SetupError('default_runtime_id must be a runtime identifier')
+    # Ids only: named ids are provider+slug and do not depend on the
+    # wizard-default flag applied inside the transaction below.
     rendered = [render(spec) for spec in specs]
     selected = list(dict.fromkeys(selected_ids if selected_ids is not None else [row[0] for row in rendered]))
     if not selected:
@@ -235,6 +287,44 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
             raise SetupError('runtime.toml is missing; initialize the workspace first')
         inventory = configured_inventory(binary, base)
         existing_ids = {row['id'] for row in inventory['runtimes']}
+        # A provider the workspace has never configured gets exactly one
+        # wizard-default binding among the new additions, or the wizard later
+        # refuses it for having several enabled bindings and no default. The
+        # first addition of that provider claims the flag; providers that
+        # already run keep whatever their own config declares. Doing this at
+        # the transactional boundary also covers the verification-retry path,
+        # where an earlier spec can drop out of the active set.
+        configured_providers = {row.get('provider_id') for row in inventory['runtimes']}
+        defaulted_providers = set()
+        claimed_named_keys = set()
+        normalized = []
+        for spec in specs:
+            provider_id = spec.get('provider_id') if isinstance(spec, dict) else None
+            if provider_id:
+                # Two model ids that differ only in punctuation would slug to
+                # the same runtime entry; the second would silently overwrite
+                # the first in the additions below. Refuse the pair instead.
+                key = (provider_id, spec.get('model_key'))
+                if key in claimed_named_keys:
+                    raise SetupError('two of the selected models render the same runtime entry name '
+                                     + repr(str(spec.get('model_key'))) + '; choose one of them')
+                claimed_named_keys.add(key)
+            if provider_id and provider_id in configured_providers:
+                # The provider section already exists in the workspace config;
+                # writing it again would declare the same table twice and fail
+                # validation that cannot say why.
+                spec = dict(spec, provider_declared=True, wizard_default=False)
+            elif provider_id:
+                first = provider_id not in defaulted_providers
+                defaulted_providers.add(provider_id)
+                # The first addition of a fresh provider writes the provider
+                # section and claims wizard-default; later additions of the
+                # same provider must not write the section a second time, or
+                # the appended config would define one table twice.
+                spec = dict(spec, wizard_default=first,
+                            provider_declared=spec.get('provider_declared') is True or not first)
+            normalized.append(spec)
+        rendered = [render(spec) for spec in normalized]
         additions = {}
         for runtime_id, runtime_text, overlay_text in rendered:
             if runtime_id not in existing_ids:
@@ -432,7 +522,10 @@ def discover_models(choice, endpoint='', api_key_env='', timeout=10, command='co
             detail = 'HTTP ' + str(error.code) if isinstance(error, HTTPError) else 'unavailable or invalid response'
             return [], 'Server /models: ' + detail + '. Start the server/check authentication, or copy its exact served model ID.'
         origin = 'Your server /models response'
-        models = [dict(id=row['id'], label=row.get('name'), context=row.get('max_model_len'))
+        # vLLM names the window max_model_len; OpenRouter names it
+        # context_length. Take the first one the row actually carries.
+        models = [dict(id=row['id'], label=row.get('name'),
+                       context=next((row[key] for key in ('max_model_len', 'context_length') if key in row), None))
                   for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
     else:
         return [], ('Open Claude Code and use /model to find your model ID.' if choice == 'claude_code'
@@ -467,6 +560,29 @@ def catalog_models(binary, choice):
                 and positive_integer(row.get('max_context'))]
     except (ValueError, KeyError, TypeError):
         return []
+
+
+def provider_catalog_models(binary, provider_id):
+    """Curated rows for a named catalog provider, from the installed binary."""
+    result = subprocess.run([binary, 'runtime-model-list', '--provider', provider_id],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        # A failed catalog read must not masquerade as "no curated models":
+        # every later pick would be refused with a message about the catalog
+        # instead of the actual failure.
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' failed: '
+                         + (result.stderr.strip() or 'no diagnostics'))
+    try:
+        rows = json.loads(result.stdout)['models']
+    except (ValueError, KeyError, TypeError):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    if not isinstance(rows, list):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    return [row for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
+
+
+def model_slug(model_id):
+    return re.sub(r'[^A-Za-z0-9-]+', '-', model_id).strip('-').lower()
 
 
 def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
@@ -686,6 +802,21 @@ def connection_sources(inventory):
                           credential_kind=row.get('credential_kind', 'unknown'), rows=[])
             sources.append(source)
         source['rows'].append(row)
+    # Named catalog providers the workspace has not configured yet -- the same
+    # integrations rows the wizard catalog advertises as new connections. A
+    # provider that already runs appears through its runtimes rows above, so
+    # this list never duplicates a configured provider. The integrations key
+    # is absent from older binaries; that simply yields no catalog sources.
+    for row in inventory.get('integrations', []):
+        if not (row.get('setup_support') == 'new_connection'
+                and row.get('verification_support') == 'response_tool'
+                and row.get('protocol') in PROTOCOL_CHOICES
+                and row.get('api_key_env') and row.get('endpoint')):
+            continue
+        sources.append(dict(provider_id=row['id'], label=row.get('display_name') or row['id'],
+                            choice=PROTOCOL_CHOICES[row['protocol']], endpoint=row['endpoint'],
+                            command='', api_key_env=row['api_key_env'], credential_kind='env',
+                            rows=[], catalog_provider=dict(declared=row.get('origin') == 'runtime_config')))
     # These are local server connection suggestions, never guessed model IDs.
     for choice, label, endpoint in [('ollama', 'Ollama on this computer', 'http://localhost:11434'),
                                      ('llama_cpp', 'llama.cpp on this computer', 'http://localhost:8080/v1')]:
@@ -716,7 +847,22 @@ def source_models(binary, source, timeout):
     observed, origin = discover_models(choice, source['endpoint'], source['api_key_env'], timeout,
                                       command=source.get('command') or 'codex') if can_discover else ([], 'Configured models')
     rows = []
+    curated = provider_catalog_models(binary, source['provider_id']) if source.get('catalog_provider') else []
+    curated_ids = set()
+    if curated:
+        # A named catalog source leads with its curated rows: they carry the
+        # context, efforts and capabilities the runtime entry needs. Served
+        # ids the catalog does not curate still list below, uncurated.
+        curated_ids = {row['id'] for row in curated}
+        for row in curated:
+            discovered = next((item for item in observed if item['id'] == row['id']), None)
+            context = (discovered['context'] if discovered and positive_integer(discovered.get('context'))
+                       else row.get('max_context'))
+            rows.append(dict(id=row['id'], label=row.get('label') or row['id'],
+                             context=context, existing=None, catalog=row))
     for model in observed:
+        if model['id'] in curated_ids:
+            continue
         existing_rows = [row for row in source['rows'] if row['model'] == model['id']]
         # A workspace declaration is relevant only in this exact connection.
         if existing_rows:
@@ -749,6 +895,33 @@ def resolve_model_spec(source, model, timeout):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
     if choice is None or choice == 'antigravity':
         raise SetupError('this connection needs runtime-specific configuration; choose an existing tool-enabled runtime')
+    if source.get('catalog_provider'):
+        # A named catalog source writes named provider sections that resolve
+        # against the installed catalog. A served id the catalog does not
+        # curate cannot resolve an exact-output target, so it is refused here
+        # rather than written as a binding that quietly cannot dispatch.
+        catalog = model.get('catalog')
+        if not catalog:
+            raise SetupError(model['id'] + ' is not in the installed catalog for this provider; '
+                             'choose a curated model or use "Add another server URL" for arbitrary endpoints')
+        if not positive_integer(catalog.get('max_context')):
+            raise SetupError(model['id'] + ' declares no context in the installed catalog')
+        if catalog.get('supports_tools') is not True:
+            # Refuse early with the real reason: a toolless row would pass
+            # configuration and only fail live verification later.
+            raise SetupError(model['id'] + ' declares no tool support in the installed catalog; '
+                             'select a tool-capable model')
+        spec = dict(choice=choice, model=model['id'], max_context=catalog['max_context'],
+                    tools=catalog.get('supports_tools') is True,
+                    streaming=catalog.get('supports_streaming') is True,
+                    endpoint=source['endpoint'], api_key_env=source['api_key_env'],
+                    provider_id=source['provider_id'], provider_display_name=source['label'],
+                    model_key=model_slug(model['id']),
+                    provider_declared=source['catalog_provider'].get('declared') is True,
+                    thinking_disable_encodable='none' in (catalog.get('accepted_reasoning_efforts') or []))
+        if catalog.get('default_reasoning_effort'):
+            spec['reasoning_effort'] = catalog['default_reasoning_effort']
+        return render(spec)[0], spec
     context = model.get('context')
     if choice == 'ollama':
         details = ollama_model_details(source['endpoint'], model['id'], source['api_key_env'], timeout, load=True)

@@ -1,0 +1,60 @@
+name: Linux portable Python
+on:
+  pull_request:
+    paths:
+      - 'scripts/package-linux-runtime.py'
+      - 'scripts/package-macos-runtime.py'
+      - 'scripts/portable-python-runtime.lock.json'
+      - 'scripts/install.sh'
+      - 'test/test_installer_dependencies.py'
+      - '.github/workflows/linux-portable-python.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  interpreter:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restricted-PATH installer contract
+        run: python3 test/test_installer_dependencies.py
+      - name: Exercise pinned native Linux interpreter and immutable payload
+        env:
+          TEST_PLATFORM: ${{ matrix.platform }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, tempfile
+          platform = os.environ['TEST_PLATFORM']
+          commit = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          with tempfile.TemporaryDirectory() as temporary:
+              root = pathlib.Path(temporary)
+              dist, stage = root/'dist', root/'stage'
+              dist.mkdir()
+              # Only the Python bytes are native evidence in this fixture. The
+              # release workflow repeats packaging with actual MASC executables.
+              for name in ('masc','masc-tui','masc-browser-host','masc-deployment-preflight-helper','masc-check-runtime-deployment-preflight'):
+                  path = dist/(name+'-'+platform)
+                  path.write_text('#!/bin/sh\nprintf "%s\\n" '+commit+'\n')
+                  path.chmod(0o755)
+              subprocess.run(['python3','scripts/package-linux-runtime.py','--dist',str(dist),'--stage',str(stage),
+                              '--platform',platform,'--source-commit',commit],check=True)
+              def snapshot():
+                  return {str(p.relative_to(stage)):hashlib.sha256(p.read_bytes()).hexdigest()
+                          for p in stage.rglob('*') if p.is_file()}
+              before = snapshot()
+              subprocess.run([str(stage/'python/bin/python3'),'-I','-c',
+                              'import json,tarfile,ssl,urllib.request; assert urllib.request.urlopen("https://example.com",timeout=30).status == 200'],check=True)
+              assert snapshot() == before, 'runtime bytes changed during use'
+              receipt = json.loads((stage/'runtime-provenance.json').read_text())
+              assert receipt['source_commit'] == commit and receipt['platform'] == platform
+          PY

@@ -416,6 +416,7 @@ let empty_turn_state : Unified_types.turn_state =
     (* [empty_turn_state] is the pre-execution state: no runtime has failed, so
        there is no deferred failover lane to carry. *)
   ; deferred_runtime_lane = None
+  ; last_dispatched_runtime_id = None
   }
 ;;
 

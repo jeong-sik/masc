@@ -92,7 +92,7 @@ let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
     match invocations, tool_uses, tool_results with
     | ( authority :: invocations
       , ToolUse { id; name; input } :: tool_uses
-      , ToolResult { tool_use_id; content; outcome; _ } :: tool_results ) ->
+      , ToolResult { tool_use_id; content; content_blocks; outcome; _ } :: tool_results ) ->
       let* () =
         Execution_agent_scope.validate_invocation_authority
           authority
@@ -112,6 +112,7 @@ let recovered_report ~response ~turn ~invocations ~tool_results tool_uses =
            ; tool_name = authority.tool_name
            ; input = authority.input
            ; content
+           ; content_blocks
            ; outcome
            }
            :: acc)

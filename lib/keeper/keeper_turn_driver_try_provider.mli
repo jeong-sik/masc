@@ -253,6 +253,11 @@ module For_testing : sig
     -> Agent_core.Checkpoint.t
     -> (unit, string) result
 
+  (** The candidate a no-thinking truncation retry dispatches to: identical
+      but for [reasoning_effort = None], because the wires that admit effort
+      reject it with thinking disabled. *)
+  val candidate_without_reasoning_effort : Runtime_candidate.t -> Runtime_candidate.t
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->

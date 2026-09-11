@@ -186,17 +186,29 @@ type persisted_default =
   | No_record
   | Usable of { record : string; base_path : string }
   | Stale of { record : string; recorded_path : string }
+  | Unread_under_test of { record : string }
 
 (** Shared user configuration location, derived from XDG_CONFIG_HOME or HOME. *)
 val default_base_path_record_path_opt : unit -> string option
 
 val persisted_default_base_path : unit -> persisted_default
 (** [Stale] is kept apart from [No_record] so the "not set" error can say that
-    a recorded default was found and ignored, and why. *)
+    a recorded default was found and ignored, and why.
+
+    [Unread_under_test] is the read counterpart of {!record_default_base_path}'s
+    [Refused_under_test]: a test binary neither writes nor reads the record
+    under the operator's HOME, so a suite cannot resolve a base path from
+    whatever workspace the machine last named. A suite that means to exercise
+    the record points [XDG_CONFIG_HOME] at a temp dir, which is not the
+    operator's location and is both written and read. *)
 
 type record_outcome =
   | Recorded of string
   | No_record_location
+  | Refused_under_test
+      (** A test executable asked. It never writes the operator's default:
+          a suite that seeds a workspace in a temp dir would otherwise leave
+          that path as the machine's default until the directory vanished. *)
   | Record_failed of { record : string; reason : string }
 
 val record_default_base_path : string -> record_outcome

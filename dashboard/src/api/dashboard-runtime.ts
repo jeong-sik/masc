@@ -419,6 +419,11 @@ export type RuntimeCostLedgerRead =
   | { state: 'unavailable'; detail: string | null }
 
 export interface DashboardRuntimeModelMetricsResponse {
+  cache?: {
+    state: 'fresh' | 'stale_refreshing' | 'warming'
+    age_s: number | null
+    last_error: string | null
+  } | null
   cost_ledger_read?: RuntimeCostLedgerRead | null
   window_minutes?: number
   bucket_minutes?: number
@@ -947,6 +952,14 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
   const models = raw.models.map(decodeRuntimeModelMetric)
   if (models.some(model => model === null)) return null
   const ledger = isRecord(raw.cost_ledger_read) ? raw.cost_ledger_read : null
+  const cache = isRecord(raw.cache) ? raw.cache : null
+  const cacheState = cache?.state
+  const age = asNumber(cache?.age_s)
+  const cacheRead: DashboardRuntimeModelMetricsResponse['cache'] =
+    cacheState === 'fresh' || cacheState === 'stale_refreshing' || cacheState === 'warming'
+      ? { state: cacheState, age_s: age != null && age >= 0 ? age : null,
+          last_error: asNullableString(cache?.last_error) }
+      : null
   const costLedgerRead: RuntimeCostLedgerRead | null = ledger?.state === 'pending'
     ? { state: 'pending' }
     : ledger?.state === 'available'
@@ -957,6 +970,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
       ? { state: 'unavailable', detail: asNullableString(ledger.detail) }
       : null
   return {
+    cache: cacheRead,
     cost_ledger_read: costLedgerRead,
     window_minutes: asNumber(raw.window_minutes),
     bucket_minutes: asNumber(raw.bucket_minutes),

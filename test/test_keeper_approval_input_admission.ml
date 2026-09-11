@@ -182,9 +182,51 @@ let stable_replay_identity () = with_directory (fun root ->
   let projected_missing = Replay.project_model_input ~base_path:root recovered [] |> unwrap in
   Alcotest.(check int) "windowed evidence restored on wire" 1 (List.length projected_missing))
 
+let gate_and_answer_co_admission () = with_directory (fun root ->
+  let session_dir = Filename.concat root "session" in
+  let answer = Agent_core.Types.user_msg
+      "event=ask_answered post_id=keeper-ask:schedule author=operator preview=2026-10-17 / 전시실" in
+  let ask_identity = Admission.answered_ask_identity ~ask_id:"approval-a"
+      ~evidence_fingerprint:"answer-v1" |> unwrap in
+  let co_inputs = [ask_identity, answer] in
+  let admit cp = Masc.Keeper_approval_input_checkpoint.admit ~co_inputs
+      ~session_dir ~identity:(identity "receipt-a") ~message:input cp |> unwrap in
+  let first = admit (checkpoint []) in
+  Alcotest.(check int) "Gate and Ask committed together, distinct typed identities" 2
+    (List.length first.messages);
+  let disk = Masc.Keeper_checkpoint_store.load_agent_core
+      ~session_dir ~session_id:first.session_id |> unwrap in
+  Alcotest.(check bool) "Gate persisted" true
+    (Admission.contains ~identity:(identity "receipt-a") ~message:input disk.messages);
+  Alcotest.(check bool) "complete Ask persisted" true
+    (Admission.contains ~identity:ask_identity ~message:answer disk.messages);
+  let later = { disk with turn_count = 12;
+    messages = disk.messages @ List.init 10 (fun _ -> Agent_core.Types.user_msg "Continue.") } in
+  ignore (Masc.Keeper_checkpoint_store.save_agent_core_classified ~session_dir later |> unwrap);
+  let retried = admit (checkpoint []) in
+  Alcotest.(check int) "same Gate and Ask retry retains ten later turns without duplication" 12
+    (List.length retried.messages);
+  let second = Agent_core.Types.user_msg "operator corrected the room" in
+  let second_identity = Admission.answered_ask_identity ~ask_id:"new-ask"
+      ~evidence_fingerprint:"answer-v2" |> unwrap in
+  let after = Masc.Keeper_approval_input_checkpoint.admit
+      ~co_inputs:[second_identity, second] ~session_dir
+      ~identity:(identity "receipt-a") ~message:input (checkpoint []) |> unwrap in
+  Alcotest.(check int) "already admitted Gate admits new Ask once" 13 (List.length after.messages);
+  let conflict = Admission.answered_ask_identity ~ask_id:"approval-a"
+      ~evidence_fingerprint:"different-answer" |> unwrap in
+  (match Masc.Keeper_approval_input_checkpoint.admit ~co_inputs:[conflict, second]
+      ~session_dir ~identity:(Admission.identity ~approval_id:"new-gate" ~evidence_fingerprint:"receipt-new" |> unwrap) ~message:input after with
+   | Error _ -> () | Ok _ -> Alcotest.fail "conflicting co-input was accepted");
+  let unchanged = Masc.Keeper_checkpoint_store.load_agent_core
+      ~session_dir ~session_id:after.session_id |> unwrap in
+  Alcotest.(check bool) "failed co-admission changes neither input" true
+    (unchanged.messages = after.messages))
+
 let () = Alcotest.run "approval input admission"
   [ "durable conversation", List.map (fun (name, test) -> Alcotest.test_case name `Quick test)
-      [ "restart", restart; "newer history", newer_history; "removed evidence", removed
+      [ "Gate and answered Ask atomic admission", gate_and_answer_co_admission
+      ; "restart", restart; "newer history", newer_history; "removed evidence", removed
       ; "rewritten evidence", rewritten; "conflicting effect", conflict
       ; "malformed marker", malformed; "duplicate admission", duplicate
       ; "durable restart with newer history", durable_restart

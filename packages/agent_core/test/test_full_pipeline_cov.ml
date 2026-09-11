@@ -239,7 +239,7 @@ let test_tool_call_loop () =
           ]
         (fun input ->
            let x = Yojson.Safe.Util.(input |> member "x" |> to_int) in
-           Ok { Types.content = string_of_int x; _meta = None })
+           Ok { Types.content = string_of_int x; content_blocks = None; _meta = None })
     in
     let agent = make_agent ~net:env#net ~tools:[ tool ] url in
     match Agent.run ~sw agent "calc 42" with
@@ -276,7 +276,7 @@ let test_multi_content_tool () =
             ; required = true
             }
           ]
-        (fun _input -> Ok { Types.content = "hello"; _meta = None })
+        (fun _input -> Ok { Types.content = "hello"; content_blocks = None; _meta = None })
     in
     let agent = make_agent ~net:env#net ~tools:[ tool ] url in
     match Agent.run ~sw agent "greet" with
@@ -446,7 +446,7 @@ let test_pre_tool_block () =
     let url = start_multi ~sw ~net:env#net ~port:21013 responses in
     let tool =
       Tool.create ~name:"blocked" ~description:"Blocked" ~parameters:[] (fun _input ->
-        Ok { Types.content = "should not run"; _meta = None })
+        Ok { Types.content = "should not run"; content_blocks = None; _meta = None })
     in
     let hooks =
       { Hooks.empty with pre_tool_use = Some (fun _e -> Hooks.Block "blocked") }
@@ -654,7 +654,7 @@ let test_context_tool () =
              ]
            ())
         (Tool.requiring_context (fun _ctx _input ->
-           Ok { Types.content = "ctx_result"; _meta = None }))
+           Ok { Types.content = "ctx_result"; content_blocks = None; _meta = None }))
     in
     let agent = make_agent ~net:env#net ~tools:[ tool ] url in
     match Agent.run ~sw agent "ctx" with

@@ -33,7 +33,15 @@ type keeper_profile_defaults = {
       (** RFC-0403. Which of the attached services' tools this keeper takes.
           [None] is the whole offering, which is what a keeper got before
           this field existed; [Some []] is none of them. Attached tools
-          only -- built-in tools choose through [defer_loading]. *)
+          only -- built-ins defer globally through [defer_loading] or per
+          keeper through [tool_deny]. *)
+  tool_deny : string list;
+      (** Built-in tools this keeper never offers the model, named by their
+          model-visible name (e.g. ["keeper_spawn";
+          "masc_keeper_delegate"]). Absent and explicit [] both deny nothing,
+          so unlike [skill_names] this is a plain list. The capability
+          surface drops the descriptor entirely: the tool is neither listed
+          to the model nor present in the turn's dispatch bundle. *)
   (* Keeper runtime assignment lives in runtime.toml [[runtime.assignments]]. *)
   agent_core_env : (string * string) list;
 }

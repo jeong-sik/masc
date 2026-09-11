@@ -102,6 +102,7 @@ type tool_execution_result =
     (** Exact input received from the typed [ToolUse] block. Validation never
         rewrites this value. *)
   ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; outcome : Types.tool_result_outcome
   }
 

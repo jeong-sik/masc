@@ -1,0 +1,14 @@
+id = "web-project"
+revision = "0.1.0"
+title = "Web project revision observations"
+contributions = ["observe", "derive"]
+image = "masc-lane-web-project:0.1.0"
+command = ["python3", "server.py"]
+
+# Resource isolation applies to this observer, never to Keeper activity.
+# Qualification records the effective limits and measures host impact.
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304

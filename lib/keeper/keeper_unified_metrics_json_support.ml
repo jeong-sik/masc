@@ -22,23 +22,36 @@ let tool_call_detail_to_json
   : Yojson.Safe.t =
   Keeper_agent_run.tool_call_detail_to_json detail
 
-let provider_context_json ~(meta : keeper_meta)
+let provider_context_json ~(meta : keeper_meta) ?executed_runtime_id
     (result : Keeper_agent_run.run_result option) =
   match result with
   | Some r ->
-      let runtime_id =
+      let observed_runtime_id =
         match r.runtime_observation with
-        | Some observation ->
-            observation.runtime_id
+        | Some observation -> Some observation.runtime_id
+        | None -> None
+      in
+      let runtime_id =
+        match observed_runtime_id with
+        | Some runtime_id -> runtime_id
         | None -> runtime_id_of_meta meta
+      in
+      (* A run that reported an observation names its own answerer; the
+         caller's [executed_runtime_id] covers the runs that did not. *)
+      let executed_runtime_id =
+        match observed_runtime_id with
+        | Some _ as observed -> observed
+        | None -> executed_runtime_id
       in
       `Assoc
         [ ("runtime_id", `String runtime_id)
+        ; ("executed_runtime_id", Json_util.string_opt_to_json executed_runtime_id)
         ; "selected_model", `Null
         ]
   | None ->
       `Assoc
         [ ("runtime_id", `String (runtime_id_of_meta meta))
+        ; ("executed_runtime_id", Json_util.string_opt_to_json executed_runtime_id)
         ; ("selected_model", `Null)
         ]
 

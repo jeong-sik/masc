@@ -107,6 +107,12 @@ vi.mock('../api/dashboard.js', async () => {
   }
 })
 
+vi.mock('../api/onboarding', () => ({
+  fetchSetupStatus: vi.fn(async () => ({ schema: 'masc.onboarding_status.v1', base_path: '/fixture', selected_model: null, selected_runtime: null, checks: [] })),
+  fetchSetupInventory: vi.fn(async () => ({ source_revision: 'fixture-revision', runtimes: [] })),
+  saveSetupCredential: vi.fn(),
+}))
+
 vi.mock('../api/dashboard-config', () => ({
   fetchDashboardConfig: apiMock.fetchDashboardConfig,
 }))

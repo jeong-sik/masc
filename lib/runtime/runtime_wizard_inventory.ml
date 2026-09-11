@@ -1,5 +1,10 @@
 module Catalog_binding = Agent_core.Provider_runtime_binding
 
+let http_fields provider = match Runtime_adapter.http_protocol_metadata provider with
+  | Error _ -> []
+  | Ok (kind, path) -> ["provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind kind);
+                        "request_path", `String path]
+
 type setup_support = Existing_binding | New_connection | Unsupported
 
 let setup_support_json = function
@@ -47,7 +52,16 @@ let protocol_of_catalog_kind = function
   | Gemini -> None
 ;;
 
-let integrations_json (config : Runtime_schema.config) =
+let credential_fields ~include_credential_references = function
+  | Some (Runtime_schema.Env name) ->
+    [ "credential_kind", `String "env"; "api_key_env", `String name ]
+  | Some (Runtime_schema.File path) ->
+    [ "credential_kind", `String "file" ]
+    @ (if include_credential_references then [ "credential_file", `String path ] else [])
+  | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
+  | None -> [ "credential_kind", `String "none" ]
+
+let integrations_json ~include_credential_references (config : Runtime_schema.config) =
   let catalog = Catalog_binding.all () in
   let configured =
     List.map (fun (provider : Runtime_schema.provider) ->
@@ -62,14 +76,10 @@ let integrations_json (config : Runtime_schema.config) =
         | Runtime_schema.Http endpoint -> endpoint_fields endpoint
         | Cli command -> [ "command", `String command ]
       in
-      let credential =
-        match provider.credentials with
-        | Some (Runtime_schema.Env name) -> [ "api_key_env", `String name ]
-        | Some (File _ | Inline _) | None -> []
-      in
+      let credential = credential_fields ~include_credential_references provider.credentials in
       integration_json config ~id:provider.id ~display_name:provider.display_name
         ~protocol:(Some provider.protocol) ~origin:"runtime_config" ~supported
-        (fields @ credential @ [ "enabled", `Bool provider.enabled ])) config.providers
+        (fields @ credential @ http_fields provider @ [ "enabled", `Bool provider.enabled ])) config.providers
   in
   let declared id =
     List.exists (fun (provider : Runtime_schema.provider) -> String.equal provider.id id)
@@ -119,7 +129,7 @@ let integrations_json (config : Runtime_schema.config) =
   `List (configured @ prototypes @ clients)
 ;;
 
-let to_json (config : Runtime_schema.config) =
+let to_json ?(include_credential_references=false) (config : Runtime_schema.config) =
   let runtimes =
     List.filter_map
       (fun (binding : Runtime_schema.binding) ->
@@ -141,14 +151,7 @@ let to_json (config : Runtime_schema.config) =
                | Runtime_schema.Cli command -> [ "command", `String command ]
                | Runtime_schema.Http endpoint -> endpoint_fields endpoint
              in
-             let credential =
-               match provider.credentials with
-               | Some (Runtime_schema.Env name) ->
-                 [ "credential_kind", `String "env"; "api_key_env", `String name ]
-               | Some (Runtime_schema.File _) -> [ "credential_kind", `String "file" ]
-               | Some (Runtime_schema.Inline _) -> [ "credential_kind", `String "inline" ]
-               | None -> [ "credential_kind", `String "none" ]
-             in
+             let credential = credential_fields ~include_credential_references provider.credentials in
              Some
                (`Assoc
                    ([ "id", `String (Runtime_schema.binding_key binding)
@@ -164,6 +167,7 @@ let to_json (config : Runtime_schema.config) =
                     ; "streaming", `Bool model.streaming
                     ]
                     @ transport
+                    @ http_fields provider
                     @ credential))
            | _ -> None))
       config.bindings
@@ -174,7 +178,7 @@ let to_json (config : Runtime_schema.config) =
         | None -> `Null
         | Some id -> `String id )
     ; "runtimes", `List runtimes
-    ; "integrations", integrations_json config
+    ; "integrations", integrations_json ~include_credential_references config
     ]
 ;;
 

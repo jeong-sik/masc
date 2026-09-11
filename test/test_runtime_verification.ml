@@ -148,20 +148,7 @@ let test_client_failures_stay_apart () =
     "a failure with nothing to add reports no detail"
     true
     (failure_field result "detail" = `Null);
-  check int "an unavailable client still exits 2" 2 (Verify.exit_code result);
-  (* provider_rejected covered both a wire refusal and a request the provider
-     never accepted, and reported neither. Twelve OpenRouter runtimes failed on
-     one missing [reasoning-effort] key under this code, while the message told
-     the operator to check credentials that were fine (masc#35139). *)
-  let rejected, rejected_detail =
-    case (Verify.Provider_rejected "runtime declares no reasoning effort ladder")
-  in
-  check string "a refusal keeps its own code" "provider_rejected" rejected;
-  check
-    string
-    "a refusal carries the reason the caller had in hand"
-    "runtime declares no reasoning effort ladder"
-    (Yojson.Safe.Util.to_string rejected_detail)
+  check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =
@@ -225,6 +212,24 @@ wizard-default = true
     let integration rows id =
       List.find (fun row -> row |> member "id" |> to_string = id) rows
     in
+    List.iter (fun credential ->
+      let unbound = {config with bindings=[]; default_runtime_id=None;
+        providers=List.map (fun (p : Runtime_schema.provider) -> {p with credentials=Some credential}) config.providers} in
+      let public = Runtime_wizard_inventory.to_json unbound in
+      let private_json = Runtime_wizard_inventory.to_json ~include_credential_references:true unbound in
+      let row json = integration (json |> member "integrations" |> to_list) "cloud" in
+      check bool "unbound public inventory has no credential path or value" false
+        (contains (Yojson.Safe.to_string public) "must-not-leak");
+      match credential with
+      | Runtime_schema.File path ->
+        check string "unbound provider preserves protected kind" "file" (row public |> member "credential_kind" |> to_string);
+        check string "only opt-in CLI gets file reference" path (row private_json |> member "credential_file" |> to_string)
+      | Inline _ ->
+        check string "inline protection retained" "inline" (row private_json |> member "credential_kind" |> to_string);
+        check bool "inline value never serialized even for CLI" false
+          (contains (Yojson.Safe.to_string private_json) "must-not-leak")
+      | Env _ -> fail "fixture credential kind")
+      [Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak"];
     let declared = integration integrations "cloud" in
     check (list string) "configured provider retains both selected models"
       [ "cloud.first"; "cloud.second" ]

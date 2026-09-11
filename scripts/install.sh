@@ -77,6 +77,7 @@ ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
 WIZARD_PROVIDER=""
 SHELL_PATH_MODE=auto
+RUN_SETUP_JOURNEY=0
 # Whether the config root was already here before this run. This is what makes
 # the setup wizard a first-time step rather than one that runs on every install.
 CONFIG_PREEXISTING=0
@@ -666,34 +667,23 @@ ping_provider() {
   return 0
 }
 
-run_selection_wizard() {
-  local base_path="$1" helper receipt
+finish_setup_journey() {
+  [ "$RUN_SETUP_JOURNEY" -eq 1 ] || return 0
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would offer multiple connections and verify selected models before saving"
+    log "[dry-run] would open the installed workspace, model and sandbox setup journey"
     return 0
   fi
-  helper=$(mktemp)
-  receipt=$(mktemp)
-  PARTIAL_FILES+=("$helper" "$receipt")
-  fetch_bundle_asset install-runtime-setup.py "$helper"
-  with_terminal_input python3 "$helper" --binary "$DEST" --base-path "$base_path" --wizard \
-    --discovery-timeout "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" > "$receipt" \
-    || die "model setup stopped; existing connections were preserved"
-  python3 - "$receipt" <<'PYRECEIPT'
-import json, sys
-result = json.load(open(sys.argv[1]))
-if result.get('readiness') == 'verified':
-    print('Selected model connections passed response and tool checks. Run masc setup to prepare imp and its sandbox.')
-else:
-    print('Model setup deferred. Run the installer with --wizard when your connection is ready.')
-PYRECEIPT
+  if ! "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2; then
+    warn "MASC is installed; imp preparation is incomplete. Run masc setup to resume."
+    return 1
+  fi
 }
 
 run_wizard() {
   local base_path="$1"
   local provider_idx key source
   if [ -z "$WIZARD_PROVIDER" ] && is_tty; then
-    run_selection_wizard "$base_path"
+    RUN_SETUP_JOURNEY=1
     return
   fi
   load_provider_catalog "$base_path"

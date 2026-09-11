@@ -2528,14 +2528,15 @@ let runtime_model_list_cmd =
          | Ok catalog ->
            let entries = wizard_model_entries client catalog in
            Ok
-             (entries
-              |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
-              |> List.sort_uniq String.compare
-              |> List.filter_map (fun model ->
-                   Option.map (fun context -> `Assoc [ "id", `String model
-                                                     ; "label", `String model
-                                                     ; "max_context", `Int context ])
-                     (wizard_model_context model entries))))
+             (`List
+               (entries
+                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+                |> List.sort_uniq String.compare
+                |> List.filter_map (fun model ->
+                     Option.map (fun context -> `Assoc [ "id", `String model
+                                                       ; "label", `String model
+                                                       ; "max_context", `Int context ])
+                       (wizard_model_context model entries)))))
       | None, Some provider_id -> Runtime_wizard_inventory.provider_model_rows provider_id
     in
     match models_result with

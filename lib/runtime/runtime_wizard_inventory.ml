@@ -269,8 +269,9 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
               match entry.max_context_tokens with
               | Some context when context > 0 ->
                 (match
-                   Llm_provider.Capabilities.for_provider_model_id_row
+                   Llm_provider.Capabilities.for_provider_model_id
                      ~wire:(Some provider.kind)
+                     ~allow_bare_fallback:false
                      ~provider_label:provider.id
                      ~model_id:entry.id_prefix
                  with

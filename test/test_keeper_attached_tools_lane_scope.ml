@@ -97,6 +97,7 @@ let with_bundle ?(history = []) ?(attached = true) ?(with_loader = true) f =
   in
   let capability_surface =
     Keeper_capability_surface.create
+      ~tool_deny:[]
       ~skill_names:None
       ~global_skill_catalog:Keeper_skill_catalog.empty
       ~skill_inventory:(Keeper_skill_inventory.of_snapshot snapshot)

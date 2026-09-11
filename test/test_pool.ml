@@ -94,7 +94,11 @@ let test_default_config_connect_timeout_reasonable () =
   Alcotest.(check bool) "connect_timeout_seconds > 0"
     true (c.connect_timeout_seconds > 0.0);
   Alcotest.(check bool) "connect_timeout_seconds <= 30s"
-    true (c.connect_timeout_seconds <= 30.0)
+    true (c.connect_timeout_seconds <= 30.0);
+  Alcotest.(check bool) "connect_failure_cooldown_seconds > 0"
+    true (c.connect_failure_cooldown_seconds > 0.0);
+  Alcotest.(check bool) "connect_failure_cooldown_seconds <= 30s"
+    true (c.connect_failure_cooldown_seconds <= 30.0)
 
 (* ── http_method polymorphic variant exhaustiveness ──────────── *)
 

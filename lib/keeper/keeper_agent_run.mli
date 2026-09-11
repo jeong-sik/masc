@@ -247,6 +247,7 @@ val run_turn
   -> ?user_blocks:Agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
+  -> ?answered_ask_inputs:(string * string) list
   -> ?history_user_source:string
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string
@@ -266,6 +267,10 @@ val run_turn
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_runtime_retry_deferred:
        (Keeper_turn_driver.deferred_runtime_lane -> unit)
+  -> ?on_runtime_attempt_failed:(runtime_id:string -> unit)
+       (* Called once per candidate that dispatched and errored, with that
+          candidate's own id. A failure returns no [run_result], so this is
+          the only place the caller learns who answered. *)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t

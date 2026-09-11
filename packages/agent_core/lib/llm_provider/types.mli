@@ -37,12 +37,6 @@ type param_type =
 val param_type_to_string : param_type -> string
 
 (** Tool execution result types. *)
-type tool_output =
-  { content : string
-  ; _meta : Yojson.Safe.t option
-    (** Optional structured metadata forwarded to the MCP [tool_result._meta]
-        field. [None] omits the field on the wire. *)
-  }
 
 type tool_error_class =
   | Transient
@@ -85,10 +79,6 @@ type tool_error =
   ; error_class : tool_error_class option
   }
 
-type tool_result = (tool_output, tool_error) result
-
-(** Lower an authoritative outcome to the hook/event-facing tool result. *)
-val tool_result_of_outcome : content:string -> tool_result_outcome -> tool_result
 
 type tool_param =
   { name : string
@@ -310,6 +300,22 @@ type content_block =
       ; source_type : media_source_kind
       }
 [@@deriving show]
+
+type tool_output =
+  { content : string
+  ; content_blocks : content_block list option
+    (** Model-visible structured content. [None] denotes text-only output. *)
+  ; _meta : Yojson.Safe.t option
+    (** Optional structured metadata forwarded to the MCP [tool_result._meta]
+        field. [None] omits the field on the wire. *)
+  }
+
+type tool_result = (tool_output, tool_error) result
+
+(** Lower an authoritative outcome to the hook/event-facing tool result. *)
+val tool_result_of_outcome :
+  ?content_blocks:content_block list -> content:string -> tool_result_outcome -> tool_result
+
 
 (** [reasoning_details_text ~reasoning_content ~details] projects provider
     reasoning details to their textual reasoning channel. Non-empty

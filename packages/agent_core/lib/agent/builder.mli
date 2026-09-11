@@ -48,7 +48,6 @@ val with_max_tool_rounds : int -> t -> t
 
 val with_tools : Tool.t list -> t -> t
 val with_tool : Tool.t -> t -> t
-val with_mcp_clients : Mcp.managed list -> t -> t
 
 (** {2 Runtime options} *)
 

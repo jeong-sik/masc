@@ -85,6 +85,16 @@ describe('KeeperWorkspaceRoster', () => {
   const selectStatusSort = () =>
     fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, { target: { value: 'status' } })
 
+  it('shows an unstarted declaration with both independent preparation checks', () => {
+    keepers.value = [mk({ name: 'imp', status: 'unbooted', declaration_only: true,
+      preparation_requirements: ['runtime_check_required', 'sandbox_check_required'] })]
+    render(html`<${KeeperWorkspaceRoster} activeName="imp" />`, host)
+    expect(host.querySelectorAll('.kw-kp-row')).toHaveLength(1)
+    expect(host.textContent).toContain('아직 시작하지 않음')
+    expect(host.textContent).toContain('모델 연결 확인 필요')
+    expect(host.textContent).toContain('샌드박스 확인 필요')
+  })
+
   it('renders each keeper once in lifecycle groups while attention stays a row signal', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     selectStatusSort()

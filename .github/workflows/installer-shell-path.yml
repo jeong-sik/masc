@@ -1,0 +1,29 @@
+name: Installer shell PATH
+on:
+  pull_request:
+    paths:
+      - 'scripts/install.sh'
+      - 'test/test_installer_shell_path.py'
+      - 'test/test_release_dashboard_bundle.py'
+      - 'scripts/release-dashboard-bundle.py'
+      - '.github/workflows/installer-shell-path.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fresh-terminal:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test shell on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Test new terminal and piped installer behavior
+        run: python3 test/test_installer_shell_path.py

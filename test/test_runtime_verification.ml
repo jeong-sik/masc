@@ -97,7 +97,10 @@ let test_invalid_call_and_errors () =
        let result = measure (fun _ ~prompt:_ -> Error failure) in
        check bool "provider/config failure not success" false result.tool_roundtrip;
        check bool "no response fabricated" false result.response)
-    [ Verify.Provider_rejected; Timed_out; Unavailable Missing_credential ]
+    [ Verify.Provider_rejected "the provider returned HTTP 400"
+    ; Timed_out
+    ; Unavailable Missing_credential
+    ]
 ;;
 
 (* The three client failures used to fold into one code with one message, so a

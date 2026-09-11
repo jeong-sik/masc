@@ -1061,3 +1061,15 @@ describe('keeper profile config error boundary', () => {
     })
   })
 })
+
+describe('declaration-only roster', () => {
+  it('preserves unstarted lifecycle and both independent preparation observations', () => {
+    const [keeper] = normalizeKeepers([{ name: 'imp', status: 'unbooted', phase: 'Offline',
+      declaration_only: true, preparation_requirements: ['runtime_check_required', 'sandbox_check_required'] }])
+    expect(keeper).toBeDefined()
+    if (!keeper) throw new Error('declared Keeper was dropped')
+    expect(keeper.declaration_only).toBe(true)
+    expect(keeper.preparation_requirements).toEqual(['runtime_check_required', 'sandbox_check_required'])
+    expect(keeper.lifecycle_phase).toBe('Offline')
+  })
+})

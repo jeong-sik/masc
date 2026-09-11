@@ -38,7 +38,12 @@ bin/main_eio.ml
 # interface, not structured server logging.
 bin/masc_trace.ml
 bin/masc_tui_loader.ml
-bin/masc_cost.ml# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
+bin/masc_cost.ml
+# masc_cli_onboarding spawns the Python setup journey and reports its own
+# startup failures to the operator's terminal before any runtime exists;
+# user-facing CLI output, not server logging.
+bin/masc_cli_onboarding.ml
+# gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml
 
@@ -128,3 +133,8 @@ lib/keeper/keeper_github_identity.ml
 # terminal before any server or log sink starts. Routing this command output
 # through server logging would hide the read-only preflight result.
 bin/masc_cli_setup.ml
+
+# prerequisite-actions prints human guidance (download progress, elevation
+# prompts, catalog errors) straight to the operator's terminal; it runs before
+# any server or log sink exists, like the setup CLI above.
+bin/masc_cli_prerequisites.ml

@@ -291,14 +291,18 @@ jobs:
             --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
             --source-commit "$(git rev-parse HEAD)"
 
+      - name: Bundle Linux Python
+        if: runner.os == 'Linux'
+        run: |
+          python3 scripts/package-linux-runtime.py --dist dist \
+            --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
+            --source-commit "$(git rev-parse HEAD)"
+
       - name: Package binary-matched dashboard distribution
         run: |
           git diff --exit-code
-          runtime_args=()
-          if [ "${{ runner.os }}" = macOS ]; then
-            runtime_args=(--runtime-archive "dist/masc-runtime-${{ matrix.arch }}.tar.gz"
-                          --runtime-root "$RUNNER_TEMP/masc-portable-stage")
-          fi
+          runtime_args=(--runtime-archive "dist/masc-runtime-${{ matrix.arch }}.tar.gz"
+                        --runtime-root "$RUNNER_TEMP/masc-portable-stage")
           python3 scripts/release-dashboard-bundle.py package \
             --binary "dist/masc-${{ matrix.arch }}" \
             --binary-asset "masc-${{ matrix.arch }}" \
@@ -462,7 +466,7 @@ jobs:
               cp "dist/$asset" "release-assets/$asset"
             done
           done
-          for arch in macos-arm64 macos-x64; do
+          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
             asset="masc-runtime-$arch.tar.gz"
             test -f "dist/$asset"
             cp "dist/$asset" "release-assets/$asset"

@@ -1492,7 +1492,11 @@ let resume_model_configuration () =
   | Some path ->
     let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
       let catalog_ready =
-        try ignore (configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()); true
+        try
+          let (_ : string option) =
+            configure_agent_core_model_catalog_overlay ~config_root:(Filename.dirname path) ()
+          in
+          true
         with Env_config_core.Config_error _ -> false
       in
       if not catalog_ready then Error "configuration unavailable" else

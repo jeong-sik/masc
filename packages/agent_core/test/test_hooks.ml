@@ -73,7 +73,7 @@ let test_hook_receives_event () =
 let test_post_tool_use_event () =
   let received_output = ref "" in
   let hook = function
-    | Hooks.PostToolUse { output = Ok { content; _meta = _ }; _ } ->
+    | Hooks.PostToolUse { output = Ok { content; _ }; _ } ->
       received_output := content;
       Hooks.Continue
     | _ -> Hooks.Continue
@@ -85,7 +85,7 @@ let test_post_tool_use_event () =
          { invocation = invocation ~tool_use_id:"tu-echo" ()
          ; tool_name = "echo"
          ; input = `Null
-         ; output = Ok { Types.content = "hello"; _meta = None }
+         ; output = Ok { Types.content = "hello"; content_blocks = None; _meta = None }
          ; result_bytes = 5
          ; duration_ms = 1.0
          })
@@ -175,7 +175,7 @@ let dummy_post_tool_use =
     { invocation = invocation ~tool_use_id:"tu-1" ~turn:1 ()
     ; tool_name = "t"
     ; input = `Null
-    ; output = Ok { Types.content = "ok"; _meta = None }
+    ; output = Ok { Types.content = "ok"; content_blocks = None; _meta = None }
     ; result_bytes = 2
     ; duration_ms = 1.0
     }

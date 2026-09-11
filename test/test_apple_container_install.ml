@@ -17,7 +17,6 @@ let platform_runner ?(publisher=A.expected_publisher) ?(gatekeeper=true) calls a
   match argv with
   | ["/usr/bin/env";"LC_ALL=C";"/usr/sbin/pkgutil";"--check-signature";_] -> Ok ("Certificate Chain:\n    1. " ^ publisher ^ "\n    2. Developer ID Certification Authority\n")
   | ["/usr/sbin/spctl";"--assess";"--type";"install";_] -> if gatekeeper then Ok "" else Error ()
-  | ["/usr/bin/sudo";_;"sandbox-install-apple-verified";"--source";_;"--sha256";_;"--size";_] -> Ok "installer: succeeded"
   | _ -> fail "unexpected platform command"
 let test_metadata () =
   List.iter (fun json -> check bool "untrusted or unsigned release refused" true
@@ -40,15 +39,25 @@ let test_platform_and_publisher () = with_package @@ fun path ->
 let test_install_revalidates () = with_package @@ fun path ->
   let calls = ref [] in
   let run = platform_runner calls in
+  let elevations = ref 0 in
+  let elevate = function
+    | ["/usr/bin/sudo";_;"sandbox-install-apple-verified";"--source";actual;"--sha256";sha;"--size";size] ->
+      check string "terminal installer uses verified package" path actual;
+      check string "verified hash survives boundary" Digestif.SHA256.(to_hex (digest_string payload)) sha;
+      check string "verified size survives boundary" (string_of_int (String.length payload)) size;
+      incr elevations; Ok ()
+    | _ -> fail "verification must use captured output, only elevation uses terminal" in
   let artifact = match A.verify ~run ~release:(release ()) ~path with
     | Ok artifact -> artifact | Error _ -> fail "fixture verification" in
   check bool "verified download does not attest installation" true
     (Yojson.Safe.Util.member "installation" (A.to_json artifact) = `String "not_attested");
-  check bool "explicit installation invokes verified package" true (A.install ~executable_path:Sys.executable_name ~run artifact = Ok ());
+  check bool "explicit installation invokes verified package" true (A.install ~executable_path:Sys.executable_name ~run ~elevate artifact = Ok ());
+  check int "exactly one terminal elevation" 1 !elevations;
   let before = List.length !calls in
   Out_channel.with_open_bin path (fun channel -> output_string channel "changed");
-  check bool "changed file blocks installer" true (A.install ~executable_path:Sys.executable_name ~run artifact = Error A.Digest_mismatch);
-  check int "changed file makes no further command" before (List.length !calls)
+  check bool "changed file blocks installer" true (A.install ~executable_path:Sys.executable_name ~run ~elevate artifact = Error A.Digest_mismatch);
+  check int "changed file makes no further command" before (List.length !calls);
+  check int "changed file never reaches elevation" 1 !elevations
 let test_acquisition () =
   let calls = ref [] in
   let download = ref None in

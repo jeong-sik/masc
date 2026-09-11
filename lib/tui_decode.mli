@@ -21,7 +21,10 @@ type task = {
           projected field. *)
 }
 
+type keeper_origin = Persisted_keeper | Declared_keeper of Keeper_declared_roster.requirement list
+
 type keeper = {
+  k_origin : keeper_origin;
   k_name : string;
   k_trace_id : string;
   k_paused : bool;
@@ -2812,3 +2815,5 @@ val decode_async_request_observation :
 
 val sgr_left_release : string -> char -> (int * int) option
 (** Plain SGR left release position for screenshot click/drag gestures. *)
+
+val keeper_of_declaration : Keeper_declared_roster.t -> keeper

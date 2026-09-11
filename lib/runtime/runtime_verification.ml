@@ -8,7 +8,7 @@ type unavailable =
 
 type failure =
   | Unavailable of unavailable
-  | Provider_rejected
+  | Provider_rejected of string
   | Timed_out
   | Tool_not_called
   | Tool_result_not_consumed
@@ -37,7 +37,7 @@ let failure_code = function
   | Unavailable (Invalid_configuration _) -> "invalid_configuration"
   | Unavailable (Client_not_authenticated _) -> "client_not_authenticated"
   | Unavailable (Client_not_started _) -> "client_not_started"
-  | Provider_rejected -> "provider_rejected"
+  | Provider_rejected _ -> "provider_rejected"
   | Timed_out -> "timed_out"
   | Tool_not_called -> "tool_not_called"
   | Tool_result_not_consumed -> "tool_result_not_consumed"
@@ -57,7 +57,7 @@ let failure_message = function
     "The configured client reports no sign-in. Sign in with the client itself, or \
      export its credential variables."
   | Unavailable (Client_not_started _) -> "The configured client could not be started."
-  | Provider_rejected ->
+  | Provider_rejected _ ->
     "The selected model request failed; check model access, endpoint and authentication."
   | Timed_out -> "The selected runtime did not finish verification before its deadline."
   | Tool_not_called -> "The model answered without calling the readiness tool."
@@ -72,14 +72,43 @@ let failure_message = function
 let failure_detail = function
   | Unavailable (Invalid_configuration detail)
   | Unavailable (Client_not_authenticated detail)
-  | Unavailable (Client_not_started detail) -> Some detail
+  | Unavailable (Client_not_started detail)
+  | Provider_rejected detail -> Some detail
   | Unavailable (Missing_credential | Unsupported_runtime | Tools_not_declared)
-  | Provider_rejected
   | Timed_out
   | Tool_not_called
   | Tool_result_not_consumed
   | Empty_response
   | Model_unreported -> None
+;;
+
+(* Why the run stopped short of completing. A verification run declares one
+   tool and asks one question, so every yield here is a refusal to answer it,
+   and the operator needs to know which. *)
+let unfinished_run_reason (stop_reason : Runtime_agent.stop_reason) =
+  match stop_reason with
+  | Runtime_agent.Completed -> "the run completed"
+  | Runtime_agent.Yielded_to_operation_queued { turns_used } ->
+    Printf.sprintf "the run yielded to a queued operation after %d turns" turns_used
+  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
+    Printf.sprintf "the run yielded to a durable stimulus after %d turns" turns_used
+  | Runtime_agent.Yielded_after_repeated_tool_call
+      { turns_used; tool_name; repeated_count } ->
+    Printf.sprintf
+      "the run yielded after calling %s %d times in %d turns"
+      tool_name
+      repeated_count
+      turns_used
+  | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; repeated_count } ->
+    Printf.sprintf
+      "the run yielded after repeating the same reply %d times in %d turns"
+      repeated_count
+      turns_used
+  | Runtime_agent.InputRequired { turns_used; request } ->
+    Printf.sprintf
+      "the run asked for operator input after %d turns: %s"
+      turns_used
+      request.Agent_core.Error.question
 ;;
 
 let to_json result =
@@ -115,6 +144,31 @@ let to_json result =
                 | None -> `Null
                 | Some detail -> `String detail )
             ] )
+    ]
+;;
+
+let unavailable_to_json ?detail ~runtime_id ~code ~message () =
+  `Assoc
+    [ "schema", `String "masc.runtime_verification.v1"
+    ; "runtime_id", `String runtime_id
+    ; "model", `Null
+    ; "observed_model", `Null
+    ; "status", `String "unavailable"
+    ; ( "checks"
+      , `Assoc
+          [ "response", `Bool false
+          ; "tool_called", `Bool false
+          ; "tool_roundtrip", `Bool false
+          ] )
+    ; ( "failure"
+      , `Assoc
+          [ "code", `String code
+          ; "message", `String message
+          ; ( "detail"
+            , match detail with
+              | None -> `Null
+              | Some d -> `String d )
+          ] )
     ]
 ;;
 
@@ -256,7 +310,7 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
               let handler input =
                 let result = tool.call ~call_id:"readiness" input in
                 if result.success
-                then Ok { Agent_core.Types.content = result.content; _meta = None }
+                then Ok { Agent_core.Types.content = result.content; content_blocks = None; _meta = None }
                 else
                   Error
                     { Agent_core.Types.message = result.content
@@ -278,7 +332,8 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
                   ~tools
               in
               (match Runtime_agent.run ~sw ~net ~config prompt with
-               | Error _ -> Error Provider_rejected
+               | Error error ->
+                 Error (Provider_rejected (Agent_core.Error.to_string error))
                | Ok result ->
                  (match result.stop_reason with
                   | Runtime_agent.Completed ->
@@ -286,7 +341,8 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
                       { model = result.response.model
                       ; text = Agent_core.Types.text_of_response result.response
                       }
-                  | _ -> Error Provider_rejected))))
+                  | stop_reason ->
+                    Error (Provider_rejected (unfinished_run_reason stop_reason))))))
       | Runtime_execution.Claude_code execution ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
@@ -320,7 +376,8 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
              (Unavailable
                 (Invalid_configuration (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Timeout _) -> Error Timed_out
-         | Error _ -> Error Provider_rejected)
+         | Error error ->
+           Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
       | Runtime_execution.Codex_app_server execution ->
         (match Runtime_verification_codex_home.prepare ~directory:cwd_path with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
@@ -364,7 +421,9 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
                 (Invalid_configuration
                    (Runtime_codex_app_server.error_to_string error)))
          | Error (Runtime_codex_app_server.Timeout _) -> Error Timed_out
-         | Error _ -> Error Provider_rejected)))
+         | Error error ->
+           Error
+             (Provider_rejected (Runtime_codex_app_server.error_to_string error)))))
   in
   measure
     ~runtime_id:runtime.id
@@ -373,7 +432,8 @@ let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) 
     ~run:(fun tool ~prompt ->
       try Eio.Time.with_timeout_exn clock timeout_s (fun () -> run tool ~prompt) with
       | Eio.Time.Timeout -> Error Timed_out
-      | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> Error Provider_rejected)
+      | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
+        Error (Provider_rejected (Printexc.to_string exn)))
 ;;
 
 module For_testing = struct

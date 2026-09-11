@@ -288,8 +288,9 @@ let test_fit_decision_with_every_slot_refused_imposes_no_bound () =
    at all -- a structural refusal, not a size -- must not fail the lane's
    pre-flight. The appended openrouter.openrouter-deepseek-v4-flash refused
    projection on every librarian run of that evening and took the healthy
-   slots down with it. A negative connect timeout is one structural refusal
-   the real projection reports, so this exercises the production path. *)
+   slots down with it. A model with enable_thinking=true but no thinking
+   capability contract is the exact structural refusal (request_serialization_rejected)
+   that hit openrouter-deepseek-v4-flash in production. *)
 let test_unusable_slot_leaves_the_usable_slots_running () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -314,7 +315,7 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
     let snapshot =
       Fixture.resolver_snapshot
         ~source:"librarian-preflight-exclusion"
-        ~connect_timeouts:[ ("librarian-bad", -1.0) ]
+        ~enable_thinkings:[ ("librarian-bad", true) ]
         ~request_body_limits:[ ("librarian-tight", 4096) ]
         [ { Fixture.id = "librarian-ok"; base_url = server.base_url }
         ; { Fixture.id = "librarian-bad"; base_url = server.base_url }
@@ -356,7 +357,7 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
    | Ok ((_, None), unusable) ->
      check (list (pair string string))
        "the refused slot is reported, not fatal"
-       [ ("librarian-bad", "wire_admission_rejected:invalid_connect_timeout") ]
+       [ ("librarian-bad", "wire_admission_rejected:target_request_rejected") ]
        unusable
    | Ok ((_, Some _), _) -> fail "a fitting prompt reported a shrink"
    | Error error ->
@@ -374,7 +375,7 @@ let test_unusable_slot_leaves_the_usable_slots_running () =
      check bool "the failure names the refusing slot" true
        (Astring.String.is_infix ~affix:"librarian-bad" text);
      check bool "the failure names the refusal reason" true
-       (Astring.String.is_infix ~affix:"invalid_connect_timeout" text));
+       (Astring.String.is_infix ~affix:"target_request_rejected" text));
   (* The over-budget error names the first slot that still imposes the bound,
      not the first slot of the ladder: with the ladder head unusable, the
      size verdict belongs to the first usable slot behind it. *)

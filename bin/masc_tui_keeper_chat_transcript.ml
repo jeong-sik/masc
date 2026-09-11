@@ -1344,9 +1344,11 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
 
 (* The first end-of-turn delta owns the settle instant: Run_finished,
    Run_failed and Reply_details arrive within moments of each other and the
-   second arrival says nothing the first did not. Journalled replays fold at
-   each line's own ts, so a rebuilt turn keeps the instant it really
-   settled. *)
+   second arrival says nothing the first did not. A journal replay fed line
+   by line (turn_log_add_journaled) folds each entry at the line's own ts
+   and keeps the instant the turn really settled; [of_log] folds a whole
+   held log under one [now] and so dates a refold's settle at the refold --
+   it has no production caller. *)
 let settle t ~now =
   if t.settled_at = None then t.settled_at <- Some now
 ;;

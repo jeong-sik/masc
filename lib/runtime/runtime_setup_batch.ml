@@ -28,7 +28,9 @@ let json_object = function
   | _ -> None
 let paths base =
   let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config" in
-  config, Filename.concat config "runtime.toml", Filename.concat config "agent-core-models-overlay.toml"
+  config,
+  Filename.concat config Config_dir_resolver.runtime_toml_filename,
+  Filename.concat config "agent-core-models-overlay.toml"
 let read root path =
   match Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root path with
   | Ok value -> Ok value | Error _ -> Error Configuration_unavailable

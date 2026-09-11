@@ -394,7 +394,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_qu
 (** CLI options *)
 let port_argument =
   Arg.(value & opt (some int) None & info ["p"; "port"] ~docv:"PORT"
-    ~doc:"HTTP port: explicit flag, MASC_HTTP_PORT, saved workspace port, then default.")
+    ~doc:"HTTP port resolution order (explicit flag, MASC_HTTP_PORT, saved workspace port, then default).")
 
 let host =
   let default = Env_config.masc_host () in

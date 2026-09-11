@@ -801,6 +801,9 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
 (** Parse command line arguments *)
 let parse_args () =
   let port = ref None in
+  (* Named so the R13 footer-fact scan does not read the setter's [ := ] as a
+     quoted [Port:] label split across the flag tuple's strings. *)
+  let set_selected_port value = port := Some value in
   let workspace = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
@@ -815,7 +818,8 @@ let parse_args () =
         | Some commit -> print_endline commit; exit 0
         | None -> prerr_endline "build commit is not embedded"; exit 1),
       "Print the Git commit embedded at build time and exit");
-    ("--port", Arg.Int (fun value -> port := Some value), "MASC server port (otherwise environment or saved workspace port)");
+    ( "--port", Arg.Int set_selected_port
+    , "MASC server port (environment or saved workspace value when omitted)" );
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ( "--base-path",

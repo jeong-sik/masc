@@ -541,7 +541,7 @@ def ask_text(label):
 
 
 def pick(title, labels, multiple=False, defaults=()):
-    """TTY arrows/Space picker; numbered input for accessible/scripted terminals."""
+    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals."""
     if not labels:
         raise SetupError('there are no options to select')
     selected = set(defaults)
@@ -568,19 +568,39 @@ def pick(title, labels, multiple=False, defaults=()):
     fd = sys.stdin.fileno()
     original = termios.tcgetattr(fd)
     drawn = 0
+    # The filter changes what is displayed, never the index space: selected
+    # and current keep real indexes into labels, so a choice made under a
+    # filter still names the same row after the filter is cleared.
+    query = bytearray()
     try:
         tty.setcbreak(fd)
         while True:
             width, height = shutil.get_terminal_size()
-            count = max(1, height - 5)
-            start = min(max(0, current - count + 1), max(0, len(labels) - count))
+            text_query = bytes(query).decode('utf-8', 'ignore')
+            needle = text_query.strip().casefold()
+            visible = [index for index, label in enumerate(labels)
+                       if not needle or needle in terminal_text(label).casefold()]
+            if visible and current not in visible:
+                current = visible[0]
+            position = visible.index(current) if current in visible else 0
+            count = max(1, height - 6)
+            start = min(max(0, position - count + 1), max(0, len(visible) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            lines = [terminal_text(title), '↑/↓ move · Space select · Enter continue · q cancel' if multiple else '↑/↓ move · Enter select · q cancel']
-            for index in range(start, min(len(labels), start + count)):
+            hint = ('↑/↓ move · Space select · Enter continue · type to filter · Esc clears · q cancel' if multiple
+                    else '↑/↓ move · Enter select · type to filter · Esc clears · q cancel')
+            lines = [terminal_text(title), hint, 'Filter: ' + text_query]
+            for slot in range(start, min(len(visible), start + count)):
+                index = visible[slot]
                 marker = '[x]' if index in selected else '[ ]'
                 lines.append(('› ' if index == current else '  ') + (marker + ' ' if multiple else '') + terminal_text(labels[index]))
-            lines.append('{} selected'.format(len(selected)) if multiple else '{}/{}'.format(current + 1, len(labels)))
+            if not visible:
+                footer = 'no matches'
+            elif multiple:
+                footer = '{} selected · {}/{} shown'.format(len(selected), len(visible), len(labels))
+            else:
+                footer = '{}/{} shown'.format(len(visible), len(labels))
+            lines.append(footer)
             for line in lines:
                 print('\r\x1b[2K' + line[:max(1, width - 1)], file=sys.stderr)
             sys.stderr.flush()
@@ -596,21 +616,39 @@ def pick(title, labels, multiple=False, defaults=()):
                     if prefix == b'[' and select.select([fd], [], [], 0.1)[0]:
                         direction = os.read(fd, 1)
                         key = b'k' if direction == b'A' else b'j' if direction == b'B' else b''
+                elif query:
+                    del query[:]
+                    key = b''
                 else:
                     key = b'q'
             if key in (b'q', b'\x03', b'\x04'):
                 raise SetupError('setup cancelled; existing connections were preserved')
             elif key == b'k':
-                current = (current - 1) % len(labels)
+                if len(visible) > 1:
+                    current = visible[(position - 1) % len(visible)]
             elif key == b'j':
-                current = (current + 1) % len(labels)
+                if len(visible) > 1:
+                    current = visible[(position + 1) % len(visible)]
             elif multiple and key == b' ':
-                selected.symmetric_difference_update([current])
+                if current in visible:
+                    selected.symmetric_difference_update([current])
             elif key in (b'\r', b'\n'):
+                # An empty filter must not hand back a row the operator cannot
+                # see; Enter waits for a match instead.
+                if not visible:
+                    continue
                 if not multiple:
                     return [current]
                 if selected:
                     return sorted(selected)
+            elif key == b'\x7f':
+                if query:
+                    query.pop()
+            elif key >= b' ':
+                # Space toggles in multiple mode, so a filter cannot contain a
+                # space there; single mode types it. Bytes at 0x80 and above
+                # are UTF-8 continuation bytes on their way into the query.
+                query.extend(key)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, original)
 

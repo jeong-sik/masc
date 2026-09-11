@@ -2888,14 +2888,6 @@ max_output_tokens = 128000
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
 
 [[models]]
-id_prefix = "o3-mini"
-base = "openai_chat"
-max_context_tokens = 200000
-max_output_tokens = 100000
-input_per_million = 1.1
-output_per_million = 4.4
-
-[[models]]
 id_prefix = "glm-coding-plan:glm-5-turbo"
 base = "glm"
 max_context_tokens = 200000
@@ -3043,3 +3035,284 @@ supports_reasoning = true
 supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OpenRouter Models
+#
+# OpenRouter is a gateway: one OpenAI-compatible endpoint in front of many
+# vendors. Rows are provider-scoped (provider_name = "openrouter") because the
+# gateway's ids carry a vendor segment ("anthropic/claude-opus-5") and its wire
+# behavior is the gateway's, not the vendor's direct API. Provider-scoped
+# lookup is an exact id match, so each id needs its own row.
+#
+# Every value below came from one of two sources on 2026-09-10, and the
+# per-row comments say which:
+#   - OpenRouter's own GET /api/v1/models metadata (context, output ceiling,
+#     price, accepted parameters) — evidence/task-openrouter-support/
+#     models-raw.json, summarized in models-curated.txt
+#   - a live request against /chat/completions — the probe artifacts and
+#     PROBE-SUMMARY.md in the same directory
+#
+# The effort ladder is per-endpoint and was measured rung by rung, 12 models
+# x 7 rungs (probe7-*): every model took minimal/low/medium/high/xhigh/max,
+# and five refused "none" with HTTP 400 "Reasoning is mandatory for this
+# endpoint and cannot be disabled". Declaring the ladder is not optional here:
+# with accepted_reasoning_efforts absent, sending any effort on this wire
+# raises Undeclared_reasoning_effort_capability rather than degrading.
+#
+# Reasoning axes, measured across all 12 models:
+#   - The gateway normalizes readable reasoning to message.reasoning and
+#     mirrors it into message.reasoning_details[]. No model answered on
+#     reasoning_content, the DeepSeek-direct spelling.
+#   - Streaming puts the text in delta.reasoning and the typed item in
+#     delta.reasoning_details. gpt-5.5 sends delta.reasoning = null with the
+#     real item (reasoning.encrypted, format openai-responses-v1) only in
+#     delta.reasoning_details, so a plain "delta:reasoning" row would read the
+#     null and drop the item. Hence delta_details:reasoning on every row.
+#   - Replaying a prior turn's reasoning_details is accepted (HTTP 200,
+#     probe5-t2-with-encrypted-replay.json) and is not required — stripping it
+#     also answers (probe5-t2-stripped.json). Declaring the tool-call replay
+#     keeps an encrypted chain intact instead of silently restarting it.
+#
+# Two rules govern what a row restates. Parameter support follows the
+# gateway's own supported_parameters list in both directions, since that list
+# is what the endpoint will and will not forward. Input modalities only ever
+# go down: a row lowers a base claim the gateway contradicts (the text-only
+# ids below) and never raises one, so audio, video and document input stay off
+# even where the gateway advertises them, because no probe here sent one.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[models]]
+id_prefix = "anthropic/claude-opus-5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 25.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "anthropic/claude-sonnet-5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 10.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "openai/gpt-5.5"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 5.0
+output_per_million = 30.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "openai/gpt-5.6-sol"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1050000
+max_output_tokens = 128000
+input_per_million = 2.0
+output_per_million = 10.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "google/gemini-3.8-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+input_per_million = 0.75
+output_per_million = 3.75
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_top_k = false
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "x-ai/grok-4.6"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 500000
+max_output_tokens = 450000
+input_per_million = 2.0
+output_per_million = 6.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "moonshotai/kimi-k3"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 943718
+input_per_million = 3.0
+output_per_million = 15.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "z-ai/glm-5.3-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1310720
+max_output_tokens = 131072
+input_per_million = 0.075
+output_per_million = 0.25
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+
+[[models]]
+id_prefix = "z-ai/glm-5.3"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1310720
+max_output_tokens = 943718
+input_per_million = 1.4
+output_per_million = 4.4
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+# Gateway input modalities are text only for this id.
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_parallel_tool_calls = true
+
+[[models]]
+id_prefix = "deepseek/deepseek-v4-flash"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 384000
+input_per_million = 0.088606
+output_per_million = 0.177212
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+# Gateway input modalities are text only for this id.
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "deepseek/deepseek-v4-pro"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1048576
+max_output_tokens = 384000
+input_per_million = 0.95526
+output_per_million = 1.91052
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# All seven rungs answered 200; "none" billed 0 reasoning tokens,
+# so the disable rung is real and not just accepted (probe7).
+accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_parallel_tool_calls = false
+# Gateway input modalities are text only for this id.
+supports_multimodal_inputs = false
+supports_image_input = false
+
+[[models]]
+id_prefix = "qwen/qwen3.8-max-0902"
+provider_name = "openrouter"
+base = "openai_chat_extended"
+max_context_tokens = 1000000
+max_output_tokens = 131072
+input_per_million = 2.0
+output_per_million = 6.0
+reasoning_output_format = "split_reasoning_fields"
+reasoning_streaming_format = "delta_details:reasoning"
+reasoning_replay = "drop_without_tool"
+# This endpoint refuses "none": HTTP 400 "Reasoning is mandatory
+# for this endpoint and cannot be disabled" (probe7). Every other
+# rung answered 200.
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh", "max"]
+supports_seed = true
+supports_min_p = false
+supports_parallel_tool_calls = false
+# Alibaba refuses tool_choice required/object while thinking is on:
+# HTTP 400 invalid_parameter_error "The tool_choice parameter does not
+# support being set to required or object in thinking mode" (measured,
+# probe2-qwen38-max-toolcall.json). The base preset claims both; left
+# unchanged a required-tool turn fails the request instead of degrading.
+supports_required_tool_choice = false
+supports_named_tool_choice = false

@@ -5841,8 +5841,13 @@ let keeper_message_identity ~max_cells state keeper_name =
       in
       (match runtime with
        | None ->
-           fit_identity
-             (status ^ Ansi.dim ^ " \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset)
+           let detail = match keeper.k_origin with
+             | Tui_decode.Declared_keeper requirements ->
+               "아직 시작하지 않음 · " ^ String.concat " · "
+                 (List.map Masc.Keeper_declared_roster.requirement_label requirements)
+             | Persisted_keeper -> status ^ " · —"
+           in
+           fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
            let runtime_id = Terminal_text.single_line row.kr_runtime_id in
            let prefix =
@@ -7831,6 +7836,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Runtime section *)
     add_section "Runtime Stats";
+    (match k.k_origin with
+     | Tui_decode.Persisted_keeper -> ()
+     | Declared_keeper requirements ->
+       add_row "Preparation:" (String.concat " · "
+         (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
     add_row "Total Turns:" (string_of_int k.k_total_turns);
     add_row "Total Tokens:" (string_of_int k.k_total_tokens);
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
@@ -10278,6 +10288,57 @@ let render_keeper_message (state : state) =
         ~keeper_name
       |> keeper_message_pending_preview
     in
+    (* The pending rows say when a line was typed and what it says; what they
+       were missing is what each line is behind. "Pending" reads the same
+       behind this Keeper's turn that is still out and behind another queued
+       line, and the difference is whether the wait is ordinary. Computed
+       here rather than in the queue module: the answer needs the in-flight
+       list, and the queue cannot see it without a dependency cycle through
+       [masc_tui_types]. *)
+    let pending_behind (item : Masc_tui_keeper_chat_queue.item) =
+      let keeper_name =
+        item.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
+      in
+      let held =
+        List.length
+          (List.filter
+             (fun (entry : Masc_tui_types.inflight) ->
+                String.equal entry.Masc_tui_types.sent_request.keeper_name
+                  keeper_name)
+             state.msg_inflight)
+      in
+      let ahead =
+        List.filter
+          (fun (waiting : Masc_tui_keeper_chat_queue.item) ->
+             String.equal
+               waiting.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
+               keeper_name
+             && waiting.submission_seq > item.submission_seq
+             &&
+             (* A steer precedes ordinary input whatever its seq; a NEXT line
+                ahead of a steer is not ahead at all. *)
+             (match (waiting.intent, item.intent) with
+              | Steer_after_interrupt, Next -> true
+              | Next, Steer_after_interrupt -> false
+              | _ -> waiting.submission_seq > item.submission_seq))
+          (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
+      in
+      match (item.intent, held, ahead) with
+      | Masc_tui_keeper_chat_queue.Steer_after_interrupt, 0, [] ->
+          Some "after the interrupted turn settles"
+      | Masc_tui_keeper_chat_queue.Steer_after_interrupt, _, _ ->
+          Some "behind this Keeper's turn still out"
+      | Masc_tui_keeper_chat_queue.Next, 0, [] -> None
+      | Masc_tui_keeper_chat_queue.Next, 0, waiting_ahead :: _ -> (
+          match waiting_ahead.intent with
+          | Steer_after_interrupt -> Some "behind a queued steer"
+          | Next -> Some "behind an earlier queued message")
+      | Masc_tui_keeper_chat_queue.Next, 1, _ ->
+          Some "behind this Keeper's running turn"
+      | Masc_tui_keeper_chat_queue.Next, held, _ ->
+          Some
+            (Printf.sprintf "behind this Keeper's %d running turns" held)
+    in
     List.iter
       (function
         | Pending_preview_item (position, item) ->
@@ -10287,10 +10348,15 @@ let render_keeper_message (state : state) =
               | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
                   "STEER", Theme.warn ()
             in
+            let suffix =
+              match pending_behind item with
+              | Some reason -> " · " ^ reason
+              | None -> ""
+            in
             let request = item.Masc_tui_keeper_chat_queue.request in
             box_line_styled chat_buf chat_cols ~style
-              (Printf.sprintf "  %s %d · %s" intent position
-                 (keeper_message_clock item.submitted_at));
+              (Printf.sprintf "  %s %d · %s%s" intent position
+                 (keeper_message_clock item.submitted_at) suffix);
             box_line_styled chat_buf chat_cols ~style
               ("    " ^ Terminal_text.single_line request.Keeper_chat.message)
         | Pending_preview_omitted omitted ->

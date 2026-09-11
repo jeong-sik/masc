@@ -64,6 +64,8 @@ val connect
   -> command:string
   -> args:string list
   -> ?env:string array
+  -> ?max_response_bytes:int
+  -> ?stderr:Eio.Flow.sink_ty Eio.Resource.t
   -> unit
   -> (t, Error.t) result
 
@@ -75,6 +77,17 @@ val is_alive : t -> bool
 
 val list_tools : t -> (mcp_tool list, Error.t) result
 val call_tool : t -> name:string -> arguments:Yojson.Safe.t -> Types.tool_result
+
+(** Unabridged SDK values, including outputSchema and structuredContent.
+    [list_tools_full] reads one page; it does not accumulate unbounded pages
+    from an optional server. [list_tools] retains its all-pages behavior.
+    [call_tool_full] preserves [is_error]; callers must inspect it.
+    A connection's optional [max_response_bytes] is enforced by the NDJSON
+    reader before allocating/parsing a complete server message. *)
+val list_tools_full : t -> (Mcp_schema.Sdk_types.tool list, Error.t) result
+val call_tool_full :
+  t -> name:string -> arguments:Yojson.Safe.t ->
+  (Mcp_schema.Sdk_types.tool_result, Error.t) result
 
 (** {1 Resource and prompt operations} *)
 

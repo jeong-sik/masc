@@ -97,7 +97,10 @@ let test_invalid_call_and_errors () =
        let result = measure (fun _ ~prompt:_ -> Error failure) in
        check bool "provider/config failure not success" false result.tool_roundtrip;
        check bool "no response fabricated" false result.response)
-    [ Verify.Provider_rejected; Timed_out; Unavailable Missing_credential ]
+    [ Verify.Provider_rejected "the provider returned HTTP 400"
+    ; Timed_out
+    ; Unavailable Missing_credential
+    ]
 ;;
 
 (* The three client failures used to fold into one code with one message, so a
@@ -145,7 +148,20 @@ let test_client_failures_stay_apart () =
     "a failure with nothing to add reports no detail"
     true
     (failure_field result "detail" = `Null);
-  check int "an unavailable client still exits 2" 2 (Verify.exit_code result)
+  check int "an unavailable client still exits 2" 2 (Verify.exit_code result);
+  (* provider_rejected covered both a wire refusal and a request the provider
+     never accepted, and reported neither. Twelve OpenRouter runtimes failed on
+     one missing [reasoning-effort] key under this code, while the message told
+     the operator to check credentials that were fine (masc#35139). *)
+  let rejected, rejected_detail =
+    case (Verify.Provider_rejected "runtime declares no reasoning effort ladder")
+  in
+  check string "a refusal keeps its own code" "provider_rejected" rejected;
+  check
+    string
+    "a refusal carries the reason the caller had in hand"
+    "runtime declares no reasoning effort ladder"
+    (Yojson.Safe.Util.to_string rejected_detail)
 ;;
 
 let test_inventory_keeps_all_models_and_no_secrets () =
@@ -205,6 +221,41 @@ wizard-default = true
       [ Runtime_schema.File "/private/must-not-leak"; Inline "must-not-leak" ];
     let json = Runtime_wizard_inventory.to_json config in
     let open Yojson.Safe.Util in
+    let integrations = json |> member "integrations" |> to_list in
+    let integration rows id =
+      List.find (fun row -> row |> member "id" |> to_string = id) rows
+    in
+    let declared = integration integrations "cloud" in
+    check (list string) "configured provider retains both selected models"
+      [ "cloud.first"; "cloud.second" ]
+      (declared |> member "configured_runtime_ids" |> to_list |> List.map to_string);
+    check string "configured connection remains distinct" "runtime_config"
+      (declared |> member "origin" |> to_string);
+    let empty_config = { config with providers = []; bindings = []; default_runtime_id = None } in
+    let empty_inventory = Runtime_wizard_inventory.to_json empty_config in
+    check int "no runtime bindings invented" 0
+      (empty_inventory |> member "runtimes" |> to_list |> List.length);
+    let prototypes = empty_inventory |> member "integrations" |> to_list in
+    List.iter (fun id ->
+      let row = integration prototypes id in
+      check (list string) "unconfigured catalog entry has no runtime" []
+        (row |> member "configured_runtime_ids" |> to_list |> List.map to_string);
+      check bool "catalog is not account verification" false
+        (row |> member "account_availability_verified" |> to_bool))
+      [ "openrouter"; "glm-coding"; "codex"; "claude-code"; "ollama"
+      ; "vllm"; "rapid-mlx"; "llama-cpp"; "unsloth" ];
+    let antigravity = integration prototypes "antigravity" in
+    check string "official Antigravity executable" "agy"
+      (antigravity |> member "command" |> to_string);
+    check string "unsupported verification is not ready" "unsupported"
+      (antigravity |> member "verification_support" |> to_string);
+    List.iter (fun id ->
+      check string "media endpoints are not chat setup connections" "unsupported"
+        (integration prototypes id |> member "setup_support" |> to_string))
+      [ "openai-image"; "zai-image"; "openai-speech" ];
+    let gemini = integration prototypes "gemini" in
+    check string "missing native Gemini protocol is explicit" "unsupported"
+      (gemini |> member "setup_support" |> to_string);
     let rows = json |> member "runtimes" |> to_list in
     check int "all bindings, not one per provider" 2 (List.length rows);
     List.iter

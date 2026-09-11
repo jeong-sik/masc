@@ -1,0 +1,9 @@
+
+         
+
+         
+
+         
+
+         
+{"id":"gen-1789029089-Smh1OtY26foWl9WpULeF","object":"chat.completion","created":1789029089,"model":"z-ai/glm-5.3","provider":"Wafer","system_fingerprint":null,"service_tier":null,"choices":[{"index":0,"logprobs":null,"finish_reason":"stop","native_finish_reason":"stop","message":{"role":"assistant","content":"17 × 23 = 391\n\n(17 × 20 = 340, plus 17 × 3 = 51, giving 391.)","refusal":null,"reasoning":"17*23 = 391.","reasoning_details":[{"type":"reasoning.text","text":"17*23 = 391.","format":"unknown","index":0}]}}],"usage":{"prompt_tokens":47,"completion_tokens":43,"total_tokens":90,"cost":0.00024513,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.00024513,"upstream_inference_prompt_cost":0.00005593,"upstream_inference_completions_cost":0.0001892},"completion_tokens_details":{"reasoning_tokens":9,"image_tokens":0,"audio_tokens":0}}}

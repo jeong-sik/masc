@@ -172,6 +172,7 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
+  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -522,6 +523,7 @@
   test_log_ring_encoder
   test_eio_context_fiber_local
   test_pool
+  test_pool_dead_server_fd
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -1135,6 +1137,11 @@
  (name test_keeper_tool_error_text_bounded)
  (modules test_keeper_tool_error_text_bounded)
  (libraries alcotest ast_grep masc_test_deps masc.masc_core))
+
+(test
+ (name test_keeper_hook_thinking_authority)
+ (modules test_keeper_hook_thinking_authority)
+ (libraries alcotest ast_grep))
 
 (test
  (name test_keeper_structured_output_schema)
@@ -5512,5 +5519,47 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+
+(rule
+ (alias runtest-test_model_independent_owner)
+ (deps test_model_independent_owner.py ../bin/main_eio.exe)
+ (action
+  (run python3 %{dep:test_model_independent_owner.py} --binary %{dep:../bin/main_eio.exe})))
+
+(test
+ (name test_released_workspace_upgrade)
+ (modules test_released_workspace_upgrade)
+ (libraries masc masc.server fs_compat alcotest unix yojson))
+
+(test
+ (name test_keeper_declared_roster)
+ (modules test_keeper_declared_roster)
+ (libraries masc_test_deps))
+(include stanzas/test_onboarding_status.inc)
+(include stanzas/test_sandbox_readiness.inc)
+
+(test
+ (name test_owner_process_identity)
+ (modules test_owner_process_identity)
+ (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
+
+(test
+ (name test_server_upgrade_preparation)
+ (modules test_server_upgrade_preparation)
+ (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
+(include stanzas/test_sandbox_prerequisites.inc)
+(include stanzas/test_onboarding_journey.inc)
+
+(include stanzas/test_docker_desktop_install.inc)
+
+(include stanzas/test_docker_account_access.inc)
+
+(include stanzas/test_apple_container_install.inc)
+
+(test
+ (name test_lane_addon_worker)
+ (modules test_lane_addon_worker)
+ (libraries masc alcotest eio eio_main yojson unix))
+(include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)

@@ -411,10 +411,16 @@ val handle_masc_fusion_status
   -> string
 
 (** RFC-keeper-vision-delegation-tool §2.6 — [handle_analyze_image_with_outcome].
-    Thin delegate to [Keeper_vision_tool.handle_with_outcome]; needs the Eio
-    [net]/[clock] for the vision sub-call. *)
+    Accepts exactly one stored [artifact] or sandbox [path]. A path is read
+    through the existing sandbox runner, validated and stored for this Keeper
+    before the ordinary vision sub-call. Requires [config] and Eio context for
+    path ingestion; never reads arbitrary host files. [complete] is the existing
+    provider injection used by feature tests. *)
 val handle_analyze_image_with_outcome
-  :  ?sw:Eio.Switch.t
+  :  ?complete:Keeper_vision_tool.complete_fn
+  -> ?config:Workspace.config
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> meta:Keeper_meta_contract.keeper_meta

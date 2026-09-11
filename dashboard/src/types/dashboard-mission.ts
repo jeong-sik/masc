@@ -222,6 +222,8 @@ export interface OperatorNamespaceSnapshot {
 export type OperatorContextMetricsUnavailable = KeeperContextMetricsUnavailable
 
 export interface OperatorKeeperSnapshot {
+  declaration_only?: boolean
+  preparation_requirements?: Array<'runtime_check_required' | 'sandbox_check_required' | 'declaration_invalid'>
   name: string
   runtime_class?: 'keeper'
   phase?: string | null

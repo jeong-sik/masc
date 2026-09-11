@@ -350,7 +350,7 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
                      let prior = Atomic.fetch_and_add entered_count 1 in
                      if prior = 1 then Eio.Promise.resolve resolve_both_entered ();
                      Eio.Promise.await release;
-                     Ok { Agent_core.Types.content = "barrier passed"; _meta = None })
+                     Ok { Agent_core.Types.content = "barrier passed"; content_blocks = None; _meta = None })
               }
             in
             let tools =

@@ -375,7 +375,7 @@ let test_resolve_params_with_tool_results () =
   in
   Alcotest.(check int) "1 tool result captured" 1 (List.length !captured_results);
   match List.hd !captured_results with
-  | Ok { content; _meta = _ } -> Alcotest.(check string) "content" "found it" content
+  | Ok { content; _ } -> Alcotest.(check string) "content" "found it" content
   | Error _ -> Alcotest.fail "expected Ok result"
 ;;
 
@@ -471,6 +471,7 @@ let test_context_injection_sets_values () =
       ; tool_name = "search"
       ; input = `Assoc []
       ; content = "result text"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -512,6 +513,7 @@ let test_context_injection_none () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "ok"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -561,6 +563,7 @@ let test_context_injection_extra_messages () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "ok"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]
@@ -596,6 +599,7 @@ let test_context_injection_error_result () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "something went wrong"
+      ; content_blocks = None
       ; outcome =
           Tool_failed
             { failure_kind = Agent_tools.Recoverable_tool_error; error_class = None }
@@ -633,6 +637,7 @@ let test_context_injection_raises () =
       ; tool_name = "tool"
       ; input = `Assoc []
       ; content = "ok"
+      ; content_blocks = None
       ; outcome = Tool_succeeded
       }
     ]

@@ -1530,6 +1530,9 @@ let reasoning_streaming_format_json
   | No_reasoning_streaming -> `Assoc [ "kind", `String "none" ]
   | Delta_reasoning_field field ->
     `Assoc [ "kind", `String "delta-reasoning-field"; "field", `String field ]
+  | Delta_reasoning_field_and_details field ->
+    `Assoc
+      [ "kind", `String "delta-reasoning-field-and-details"; "field", `String field ]
   | Template_reasoning_streaming -> `Assoc [ "kind", `String "template" ]
 ;;
 
@@ -2123,9 +2126,18 @@ let runtime_resolution_json (config : Workspace.config) =
   in
   let prompt_markdown_dir =
     Prompt_registry.get_markdown_dir ()
-    |> Option.value ~default:(Config_dir_resolver.prompts_dir ())
+    |> Option.value
+         ~default:
+           (Config_dir_resolver.prompts_dir_for_base_path
+              ~base_path:config.base_path)
   in
-  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
+  (* The registry is filled by [Prompt_defaults.bootstrap_runtime], which
+     resolves against the server's base path. Comparing it to a cwd-resolved
+     directory reported a mismatch whenever the server ran from anywhere but
+     its own workspace (masc#35146). *)
+  let expected_prompt_dir =
+    Config_dir_resolver.prompts_dir_for_base_path ~base_path:config.base_path
+  in
   let prompt_dir_mismatch =
     prompt_markdown_dir <> ""
     && not (String.equal prompt_markdown_dir expected_prompt_dir)
@@ -2357,7 +2369,10 @@ let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) 
   in
   let prompt_markdown_dir =
     Prompt_registry.get_markdown_dir ()
-    |> Option.value ~default:(Config_dir_resolver.prompts_dir ())
+    |> Option.value
+         ~default:
+           (Config_dir_resolver.prompts_dir_for_base_path
+              ~base_path:config.base_path)
   in
   let server_repo_path = Build_identity.repo_root () in
   let server_workspace_mismatch =

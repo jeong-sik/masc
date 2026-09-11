@@ -1217,7 +1217,8 @@ let front_door_cmd_exit
         provenance_sha256 provenance_device provenance_inode record_default
   in
   let deployment_flags_present =
-    accept_store_quarantine
+    record_default
+    || accept_store_quarantine
     || Option.is_some provenance_path
     || Option.is_some provenance_sha256
     || Option.is_some provenance_device

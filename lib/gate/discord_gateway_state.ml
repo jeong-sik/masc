@@ -1132,14 +1132,23 @@ let handle_connect_failed t ~now_mono ~reason =
         (Printf.sprintf
            "Connect_failed (%s) outside a pending connection; ignoring" reason)
 
+(* Heartbeats start at Hello ([handle_heartbeat_tick] sends them in
+   Identifying and Resuming as well as Connected), so a missing ack is a
+   dead socket in every state that sends one: the gateway guide says to
+   close with a non-1000 code and reconnect. Before Connected there is no
+   session to resume unless a resume was already in flight, so [resumable]
+   follows [capture_resume_context]. Ignoring the timeout here left one
+   Identify that never received READY parked from 10:49:25Z to 12:07:07Z on
+   2026-09-11: 114 timeouts logged and ignored, no reconnect until the
+   server itself restarted. *)
 let handle_heartbeat_ack_timeout t ~now_mono =
   match t.state with
-  | Connected _ ->
+  | Connected _ | Identifying | Resuming ->
       let resume_context = capture_resume_context t in
+      let resumable = Option.is_some resume_context in
       let delay_ms = backoff_ms ~attempts:t.reconnect_attempts in
       let t' =
-        make_reconnect_pending t ~now_mono ~delay_ms ~resumable:true
-          ~resume_context
+        make_reconnect_pending t ~now_mono ~delay_ms ~resumable ~resume_context
       in
       ( t'
       , [ Close_wss { code = 4000; reason = "heartbeat ack timeout" }
@@ -1148,14 +1157,14 @@ let handle_heartbeat_ack_timeout t ~now_mono =
             { level = `Warn
             ; message =
                 Printf.sprintf
-                  "heartbeat ack timeout; closing and resuming in %dms"
-                  delay_ms
+                  "heartbeat ack timeout; closing and reconnecting in %dms \
+                   (resumable=%b)"
+                  delay_ms resumable
             }
         ] )
-  | Disconnected | Awaiting_hello | Identifying | Resuming
-  | Reconnect_pending _ | Failed _ ->
+  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ ->
       log_warn t
-        "Heartbeat_ack_timeout outside Connected state; ignoring"
+        "Heartbeat_ack_timeout before Hello or without a socket; ignoring"
 
 let handle_backoff_elapsed t ~now_mono =
   match t.state with

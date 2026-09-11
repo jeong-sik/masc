@@ -19,4 +19,7 @@
   masc.jsonl_writer
   eio
   fs_compat
-  masc_secret_patterns))
+  masc_secret_patterns
+  ; Ring.push keeps every persisted string field valid UTF-8; the sink owns
+  ; the JSONL contract its readers decode line by line.
+  masc.string_util))

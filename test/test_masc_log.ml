@@ -175,6 +175,59 @@ let test_push_masks_secrets_in_details () =
   Alcotest.(check bool) "marker present" true
     (contains_substring rendered "[REDACTED]")
 
+(* A message assembled from external text can carry a multibyte character
+   cut in half: a provider error body quoting the first 34 bytes of a token
+   did exactly that, [Yojson.Safe.to_string] copied the bytes through, and
+   the day file stopped decoding as UTF-8 for every reader
+   (system_log_2026-09-11.jsonl seq 33886532). The sink owns the JSONL
+   contract, so the sink is what keeps the line valid. *)
+let test_sink_line_stays_valid_utf8_json () =
+  let module_name = "TestLogUtf8Sink" in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-log-utf8-%d-%d" (Unix.getpid ()) (Random.bits ()))
+  in
+  Log.Ring.init_file_sink dir;
+  (* 가 is EA B0 80; the last byte is missing, as after a byte-budget cut. *)
+  let cut = "\xEA\xB0" in
+  let message =
+    Printf.sprintf
+      "vision parse error: Invalid token '```json {\"text\": \"%s' %f"
+      cut (Unix.gettimeofday ())
+  in
+  Log.emit Log.Error ~module_name
+    ~details:(`Assoc [ ("raw", `String ("\xFF" ^ "tail")) ])
+    message;
+  let entry = newest_entry ~module_name in
+  Alcotest.(check bool) "ring message is valid UTF-8" true
+    (String.is_valid_utf_8 entry.message);
+  Alcotest.(check bool) "the cut character became U+FFFD" true
+    (contains_substring entry.message "\xEF\xBF\xBD");
+  Alcotest.(check bool) "details leaf is valid UTF-8" true
+    (String.is_valid_utf_8 (Yojson.Safe.to_string entry.details));
+  let lines =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+    |> List.concat_map (fun name ->
+         In_channel.with_open_bin (Filename.concat dir name) In_channel.input_all
+         |> String.split_on_char '\n')
+    |> List.filter (fun line -> contains_substring line module_name)
+  in
+  match lines with
+  | [] -> Alcotest.fail "the sink wrote no line for the entry"
+  | line :: _ ->
+    Alcotest.(check bool) "the persisted line is valid UTF-8" true
+      (String.is_valid_utf_8 line);
+    (match Yojson.Safe.from_string line with
+     | exception Yojson.Json_error detail ->
+       Alcotest.failf "the persisted line does not parse: %s" detail
+     | json ->
+       Alcotest.(check string) "the persisted message carries the entry"
+         entry.message
+         Yojson.Safe.Util.(json |> member "message" |> to_string))
+
 let () =
   Alcotest.run "Masc_log" [
     ( "ring",
@@ -195,5 +248,7 @@ let () =
           test_push_masks_github_token_in_message;
         Alcotest.test_case "push masks secrets in details" `Quick
           test_push_masks_secrets_in_details;
+        Alcotest.test_case "sink line stays valid UTF-8 JSON" `Quick
+          test_sink_line_stays_valid_utf8_json;
       ] );
   ]

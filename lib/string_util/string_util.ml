@@ -293,6 +293,30 @@ let utf8_prefix ~max_bytes s =
     if len <= max_bytes then s
     else String.sub s 0 (utf8_char_boundary s max_bytes)
 
+(* U+FFFD REPLACEMENT CHARACTER: what Unicode designates for a malformed
+   sequence a decoder had to give up on. *)
+let utf8_replacement_char = "\xEF\xBF\xBD"
+
+let sanitize_utf8 s =
+  if is_valid_utf8 s then s
+  else begin
+    let len = String.length s in
+    let buf = Buffer.create (len + 8) in
+    let rec loop i =
+      if i < len then begin
+        let dec = String.get_utf_8_uchar s i in
+        (* [utf_decode_length] is strictly positive for a malformed decode
+           too: the bytes the decoder consumed before it gave up. *)
+        let dlen = max 1 (Uchar.utf_decode_length dec) in
+        if Uchar.utf_decode_is_valid dec then Buffer.add_substring buf s i dlen
+        else Buffer.add_string buf utf8_replacement_char;
+        loop (i + dlen)
+      end
+    in
+    loop 0;
+    Buffer.contents buf
+  end
+
 let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v

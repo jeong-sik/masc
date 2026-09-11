@@ -204,7 +204,7 @@ let add_agent_api_routes router =
           Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 
-  (* Agent relations -- collaboration network + trust edges *)
+  (* Agent relations -- deterministic empty feed *)
   |> Http.Router.get "/api/v1/agent-relations" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let agent_name =

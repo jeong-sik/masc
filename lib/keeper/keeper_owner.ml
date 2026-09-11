@@ -486,7 +486,7 @@ let read_operation_inventory operation_store =
   |> Result.map_error owner_error_of_operation_error
 ;;
 
-let reopen_operation_store_if_missing t =
+let probe_and_heal_store_error t =
   let path = Chat_operation_store.path t.operation_store in
   let path_exists =
     run_operation_store ~label:"probe Keeper chat operation store path" (fun () ->
@@ -494,7 +494,6 @@ let reopen_operation_store_if_missing t =
   in
   match path_exists with
   | Error error -> Error (owner_error_of_operation_error error)
-  | Ok true -> Ok ()
   | Ok false ->
     let prepare_parent =
       run_operation_store ~label:"recreate Keeper chat operation store parent" (fun () ->
@@ -532,10 +531,45 @@ let reopen_operation_store_if_missing t =
               | Ok inventory ->
                 t.operation_store <- operation_store;
                 t.store_error := None;
-                Atomic.set
-                  t.operation_projection
-                  (operation_projection_of_inventory inventory);
+                let projection = operation_projection_of_inventory inventory in
+                publish_operation_projection t projection;
                 Ok ()))))
+  | Ok true ->
+    match !(t.store_error) with
+    | None -> Ok ()
+    | Some _ ->
+      (match read_operation_inventory t.operation_store with
+       | Ok inventory ->
+         t.store_error := None;
+         let projection = operation_projection_of_inventory inventory in
+         publish_operation_projection t projection;
+         Ok ()
+       | Error _ ->
+         (match
+            run_operation_store ~label:"close unhealable Keeper chat operation store" (fun () ->
+              Chat_operation_store.close t.operation_store)
+          with
+          | Error error -> Error (owner_error_of_operation_error error)
+          | Ok () ->
+            (match
+               run_operation_store ~label:"reopen unhealable Keeper chat operation store" (fun () ->
+                 Chat_operation_store.open_or_create ~path)
+             with
+             | Error error -> Error (owner_error_of_operation_error error)
+             | Ok operation_store ->
+               (match read_operation_inventory operation_store with
+                | Error error ->
+                  ignore (Chat_operation_store.close operation_store : (unit, _) result);
+                  Error error
+                | Ok inventory ->
+                  t.operation_store <- operation_store;
+                  t.store_error := None;
+                  let projection = operation_projection_of_inventory inventory in
+                  publish_operation_projection t projection;
+                  Ok ()))))
+;;
+
+let reopen_operation_store_if_missing t = probe_and_heal_store_error t
 ;;
 
 let mark_operation_store_unavailable t =
@@ -544,6 +578,14 @@ let mark_operation_store_unavailable t =
 ;;
 
 let run_operation_command t ~label f =
+  let ensure_ready =
+    if not (Sys.file_exists (Chat_operation_store.path t.operation_store))
+    then probe_and_heal_store_error t
+    else Ok ()
+  in
+  match ensure_ready with
+  | Error error -> Error error
+  | Ok () ->
   match !(t.store_error) with
   | Some detail -> Error (Store_unavailable detail)
   | None ->
@@ -573,6 +615,14 @@ let run_operation_command t ~label f =
 ;;
 
 let run_operation_read t ~label f =
+  let ensure_ready =
+    if not (Sys.file_exists (Chat_operation_store.path t.operation_store))
+    then probe_and_heal_store_error t
+    else Ok ()
+  in
+  match ensure_ready with
+  | Error error -> Error error
+  | Ok () ->
   match
     run_operation_store ~label f
     |> Result.map_error owner_error_of_operation_error
@@ -907,10 +957,15 @@ let start
           loop state shutdown_operation_id
         | Command (Apply_meta command, resolve) ->
           let operation_store_ready =
-            match command, (Keeper_owner_reducer.projection state).meta with
-            | Keeper_owner_reducer.Create _, None ->
+            match command with
+            | Keeper_owner_reducer.Create _
+            | Resume _
+            | Reset_latch _ ->
               reopen_operation_store_if_missing t
-            | _ -> Ok ()
+            | _ ->
+              if not (Sys.file_exists (Chat_operation_store.path t.operation_store))
+              then reopen_operation_store_if_missing t
+              else Ok ()
           in
           (match operation_store_ready with
            | Error error ->

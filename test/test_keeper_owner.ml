@@ -2403,6 +2403,93 @@ let test_same_process_recreate_reopens_purged_operation_store () =
          (Option.is_some (owner_ok (Owner.exact_operation owner operation_id))))
 ;;
 
+let test_store_error_heals_on_recovery_command () =
+  Eio_main.run @@ fun _env ->
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let keeper_name = "store-heal-recovery" in
+       let keeper_dir = Filename.concat base_path keeper_name in
+       mkdir_p keeper_dir;
+       let operation_store_path =
+         Filename.concat keeper_dir Keeper_chat_operation_store.database_file
+       in
+       let persisted = ref None in
+       let store : Owner.store =
+         { replace = (fun meta -> persisted := Some meta; Ok ())
+         ; remove = (fun _meta -> persisted := None; Ok ())
+         }
+       in
+       let meta = make_meta keeper_name in
+       let owner =
+         owner_ok
+           (Owner.start
+              ~sw
+              ~store
+              ~operation_store_path
+              ~now:(fun () -> 42.0)
+              ~operation_runner:None
+              ~on_turn_slot_released:None
+              ~keeper_name
+              ~initial_meta:(Some meta))
+       in
+       let op_id_1 = operation_id "kmsg-heal-1" in
+       ignore
+         (owner_ok
+            (Owner.submit_operation
+               owner
+               ~operation_id:op_id_1
+               ~source:operation_source
+               ~input:(operation_input "initial ok")));
+       Fun.protect
+         ~finally:Keeper_chat_operation_store.For_testing.clear_commit_fault
+         (fun () ->
+            Keeper_chat_operation_store.For_testing.fail_next_commit
+              Keeper_chat_operation_store.For_testing.Fail_before_commit;
+            let op_id_fault = operation_id "kmsg-heal-fault" in
+            (match
+               Owner.submit_operation
+                 owner
+                 ~operation_id:op_id_fault
+                 ~source:operation_source
+                 ~input:(operation_input "must fail")
+             with
+             | Error (Owner.Store_unavailable _) -> ()
+             | Error error -> fail ("wrong store error: " ^ Owner.error_to_string error)
+             | Ok _ -> fail "injected fault operation was acknowledged");
+            (match
+               Owner.apply_meta
+                 owner
+                 (Set_activation_mode { mode = Masc.Keeper_activation_mode.Autonomous; updated_at = "must-fence" })
+             with
+             | Error (Owner.Store_unavailable _) -> ()
+             | Error error -> fail ("wrong fence error: " ^ Owner.error_to_string error)
+             | Ok _ -> fail "store failure did not fence normal mutation");
+            (match
+               owner_ok
+                 (Owner.apply_meta
+                    owner
+                    (Reducer.Resume { updated_at = "healed-resume" }))
+             with
+             | Some updated_meta ->
+               check bool "healed resume unpaused" false updated_meta.paused
+             | None -> fail "resume did not yield meta");
+            let op_id_2 = operation_id "kmsg-heal-2" in
+            ignore
+              (owner_ok
+                 (Owner.submit_operation
+                    owner
+                    ~operation_id:op_id_2
+                    ~source:operation_source
+                    ~input:(operation_input "healed ok")));
+            check bool
+              "operation after heal is readable"
+              true
+              (Option.is_some (owner_ok (Owner.exact_operation owner op_id_2)))))
+;;
+
 let test_root_inventory_loads_and_extends_exactly_once () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3299,6 +3386,10 @@ let () =
             "same-process recreate reopens purged operation store"
             `Quick
             test_same_process_recreate_reopens_purged_operation_store
+        ; test_case
+            "recovery command heals store error without restart"
+            `Quick
+            test_store_error_heals_on_recovery_command
         ; test_case
             "agent delegate submits owner operation without waiting"
             `Quick

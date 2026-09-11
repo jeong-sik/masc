@@ -81,7 +81,6 @@ RUN_SETUP_JOURNEY=0
 # Whether the config root was already here before this run. This is what makes
 # the setup wizard a first-time step rather than one that runs on every install.
 CONFIG_PREEXISTING=0
-RUN_SETUP_JOURNEY=0
 TEAM="${MASC_TEAM_PRESET:-}"
 WIZARD_SANDBOX="${MASC_SANDBOX_PROFILE:-}"
 
@@ -1797,6 +1796,16 @@ BUNDLE_TRANSACTION_ACTIVE=0
 configure_shell_path
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
+# do not default-disable Runtime_events. If the operator supplied an override,
+# preserve it; otherwise let the binary's default-on contract apply.
+runtime_events_start_env=""
+if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
+  runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
+fi
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+if [ -n "$catalog_hint" ]; then
+  start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
+fi
 
 cat <<EOF
 
@@ -1805,21 +1814,47 @@ ${c_grn}masc ${VERSION} installed.${c_off}
 Installed:
   server + TUI + dashboard + browser host + deployment preflight tools
   workspace: $BASE_PATH
-  next: check your model account and prepare imp’s sandbox
+  provider credentials, Keeper creation and execution backend setup are separate
   browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
 
-Start or resume your workspace:
-  "$DEST"
+Next: start your first conversation with imp:
+  ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
+  ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
+  ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
 
-Choose model connections and prepare imp's sandbox:
-  "$DEST" setup
+  ${c_dim}# install/start Docker Desktop (macOS) or Docker Engine (Linux), then:${c_off}
+  ${c_dim}# prepare the sandbox, start imp, and open the conversation workspace${c_off}
+  $start_env "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT"
 
-Inspect what still needs attention:
-  "$DEST" doctor
+  ${c_dim}# optional: mint a worker bearer for a separate MCP client${c_off}
+  eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 
-Advanced setup and separate MCP clients:
-  https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
+  ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
+  ${c_dim}# the server here when nothing is answering the port${c_off}
+  $start_env "$DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
+  $start_env "$DEST" start --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# to change provider or model later, edit:${c_off}
+  #   $BASE_PATH/.masc/config/runtime.toml
+
+  ${c_dim}# sanity check in a second terminal while the server is running${c_off}
+  curl http://127.0.0.1:${MASC_PORT}/health
+
+  ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
+  ${c_dim}# a fresh root seeds one Keeper, imp, with autoboot off: start it from the Keepers view once a model and a sandbox exist (or reinstall with --team)${c_off}
+  "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# or create one non-interactively once the server is up:${c_off}
+  ${c_dim}# $DEST keeper-create --help${c_off}
+
+  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
+  "$DEST" sandbox-image
+  ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
+  # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
+
+  ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
+  See: https://github.com/$REPO#mcp-client-setup
 
 EOF
-
-finish_setup_journey

@@ -104,8 +104,8 @@ let last_tool_results messages =
       Some
         (List.filter_map
            (function
-             | Agent_core.Types.ToolResult { content; outcome; _ } ->
-               Some (Agent_core.Types.tool_result_of_outcome ~content outcome)
+             | Agent_core.Types.ToolResult { content; content_blocks; outcome; _ } ->
+               Some (Agent_core.Types.tool_result_of_outcome ?content_blocks ~content outcome)
              | _ -> None)
            message.content)
     | System | User | Assistant -> None)

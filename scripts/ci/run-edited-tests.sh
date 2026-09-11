@@ -85,7 +85,28 @@ select_sources() {
   tools_changed=$( { printf '%s\n' "${changed}" \
     | grep -E '^config/tools/' || [ $? -eq 1 ]; } | head -1)
   tool_definition_guards="test/test_keeper_tool_definition_source.ml
-test/test_keeper_tool_schema_bytes.ml"
+test/test_keeper_tool_schema_bytes.ml
+test/test_tools_coverage.ml"
+
+  # The per-description bound, one axis in from the whole-surface ceiling.
+  # test_tools_coverage reads Masc.Config.raw_all_tool_schemas -- the embedded
+  # config/tools set -- and bounds each description at max_description_chars.
+  # Nightly 34384710653 failed it on masc_browser_interact at 1,634 chars
+  # against a 1,080 limit, and the pull request that grew it edited no
+  # test/*.ml.
+
+  # config/prompts is the same shape a third time. Every keeper turn is built
+  # from the assembled system prompt, and test_keeper_system_prompt_bytes pins
+  # it byte for byte for fixed inputs; it is the one suite that resolves the
+  # repository's own config/prompts rather than a temp dir it wrote. The 44
+  # other suites that name that directory pin the registry so the build does
+  # not raise inside the dune sandbox, and assert nothing about what ships
+  # there, so mapping them here would spend the whole budget on suites the
+  # change cannot break. The same nightly measured the golden at 4,998 bytes
+  # against an assembled 8,083.
+  prompts_changed=$( { printf '%s\n' "${changed}" \
+    | grep -E '^config/prompts/' || [ $? -eq 1 ]; } | head -1)
+  prompt_guard="test/test_keeper_system_prompt_bytes.ml"
 
 
   # A source edit runs the suites named after it. Before this, only editing a
@@ -104,16 +125,27 @@ test/test_keeper_tool_schema_bytes.ml"
   # Measured over origin/main's last 60 commits: 18 pick up at least one suite,
   # the largest picks up 6, and none reaches the max_suites cap above. Of the
   # 673 modules that match at all, the per-module cap drops 26.
+  #
+  # packages/*/lib is in the scope for the same reason bin and lib are. It was
+  # not, and neither test root was searched but the top one, so no edit under
+  # agent_core selected a suite by name at all. Measured 2026-09-10: of 223
+  # package sources, 94 name a suite, 79 of those within the per-module cap,
+  # median 1. The 15 over the cap are the namespace modules the cap is for --
+  # base/tool.ml names 61 suites, runtime.ml 31.
   max_suites_per_module=4
   module_suites=""
   changed_sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '^(bin|lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '^(bin|lib|packages/[^/]+/lib)/.*\.ml$' || [ $? -eq 1 ]; } | sort -u)
   while IFS= read -r changed_source; do
     [ -n "${changed_source}" ] || continue
     stem=$(basename "${changed_source}" .ml)
     stem=${stem#masc_}
-    # Both spellings: the suite named for the module, and the family under it.
-    matches=$( { ls "test/test_${stem}.ml" "test/test_${stem}"_*.ml 2>/dev/null \
+    # Both spellings, in both test roots: the suite named for the module, and
+    # the family under it.
+    matches=$( { ls \
+      "test/test_${stem}.ml" "test/test_${stem}"_*.ml \
+      "packages/agent_core/test/test_${stem}.ml" \
+      "packages/agent_core/test/test_${stem}"_*.ml 2>/dev/null \
       || true; } | sort -u)
     [ -n "${matches}" ] || continue
     matched=$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')
@@ -132,17 +164,33 @@ SOURCES
   # A structural guard is named after what it asserts, not after the module it
   # reads, so the name mapping above cannot find it -- and the modules those
   # guards watch are the umbrella ones it deliberately skips. But such a guard
-  # states its own input: every Ast_grep call carries ~module_path:"<file>".
-  # Take the dependency from the declaration rather than from the name.
+  # names its own input: it has the path in a string literal, because it opens
+  # the file. Take the dependency from the literal rather than from the name.
   #
   # The regression this exists for: #35011 changed bin/masc_tui_render.ml,
-  # which test_tui_http_ast watches through 52 such declarations, and the name
-  # mapping looks for test_tui_render_* instead. The pull request merged green
-  # and main was red on that suite until #35019.
+  # which test_tui_http_ast watches through 52 Ast_grep ~module_path
+  # declarations, and the name mapping looks for test_tui_render_* instead. The
+  # pull request merged green and main was red on that suite until #35019.
   #
-  # Measured 2026-09-10: 23 source files are named this way across 30 suites,
-  # at most 5 suites per file. The per-module cap above does not apply -- it
-  # guards against a name that is a namespace, and these are declarations.
+  # Matching the bare literal rather than ~module_path: reaching only through
+  # that one helper made the rule about which API a guard uses. A guard that
+  # opens the file itself watches its input just as much: 52 suites read a real
+  # repository source without ever calling Ast_grep -- among them
+  # test_blocker_class_mirror, which extracts the blocker class list straight
+  # out of lib/keeper/keeper_meta_contract.ml.
+  #
+  # Every changed file, not the .ml subset the name mapping needs. A guard over
+  # a shell script or a config file names it exactly the same way. The asset
+  # and tool triggers above stay: they fire for any file under a directory,
+  # which a named literal cannot say.
+  # Measured 2026-09-10: 44 non-.ml files are named by a suite and exist --
+  # 28 .sh, 3 .json, 2 .py, 2 .toml, 1 .ts, 1 .c -- the widest being
+  # config/runtime.toml at 9 suites, inside the max_suites bound.
+  #
+  # Measured 2026-09-10: 132 source files are named this way across 78 suites;
+  # 110 of them by exactly one suite, and bin/masc_tui_render.ml by the most, 8.
+  # The per-module cap above does not apply -- it guards against a name that is
+  # a namespace, and these are exact paths. max_suites still bounds the run.
   declared_suites=""
   while IFS= read -r changed_source; do
     # Trimmed, unlike the loop above: the heredoc indents its first line, and
@@ -152,13 +200,16 @@ SOURCES
     changed_source=$(printf '%s' "${changed_source}" \
       | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     [ -n "${changed_source}" ] || continue
-    watchers=$( { grep -rl "~module_path:\"${changed_source}\"" \
+    # -F: the path carries a dot before the extension, and as a regex that
+    # dot matches any character, so lib/foo.ml would also select a suite that
+    # names lib/fooXml.
+    watchers=$( { grep -rlF "\"${changed_source}\"" \
       test packages/agent_core/test --include='test_*.ml' 2>/dev/null \
       || true; } | sort -u)
     [ -n "${watchers}" ] || continue
     declared_suites=$(printf '%s\n%s\n' "${declared_suites}" "${watchers}")
   done <<DECLARED
-  ${changed_sources}
+  ${changed}
 DECLARED
 
   declared_suites=$( { printf '%s\n' "${declared_suites}" \
@@ -174,9 +225,24 @@ DECLARED
   echo "test sources this pull request edits: ${count}"
   printf '%s\n' "${sources}" | sed 's/^/  /'
 
+  # Past the cap the name-derived lists are dropped and the run continues, so
+  # the path-derived guards below still go. This used to return here, which
+  # meant a pull request over the cap ran nothing at all -- including the
+  # guards over config assets, which cannot be a wrong reading of the
+  # changed-file list. #35025 turned this step from a report into a gate, so
+  # running nothing is now a pull request passing the gate without a suite.
+  # Measured 2026-09-09: #34889 renamed across more than twelve suites and the
+  # log said NOT RUN.
+  #
+  # module_suites and declared_suites go with it. Both are derived from the
+  # same changed-file list the cap distrusts, and both scale with its length;
+  # a prefix match on config/tools does neither.
   if [ "${count}" -gt "${max_suites}" ]; then
-    echo "NOT RUN: more than ${max_suites} suites, which reads as a wrong list"
-      return 1
+    echo "DROPPED: more than ${max_suites} edited suites, which reads as a wrong list"
+    echo "  name-derived lists go with it; the path-derived guards below do not"
+    sources=""
+    module_suites=""
+    declared_suites=""
   fi
 
   # After the cap, not before. The cap is a heuristic against a wrong
@@ -197,6 +263,12 @@ DECLARED
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  if [ -n "${prompts_changed}" ]; then
+    echo "this pull request changes prompt assets; adding ${prompt_guard}"
+    sources=$(printf '%s\n%s\n' "${sources}" "${prompt_guard}" \
+      | grep -v '^[[:space:]]*$' | sort -u)
+  fi
+
   if [ -n "${module_suites}" ]; then
     echo "suites named after the sources this pull request edits:"
     printf '%s\n' "${module_suites}" | sed 's/^/  /'
@@ -211,6 +283,13 @@ DECLARED
       | grep -v '^[[:space:]]*$' | sort -u)
   fi
 
+  # The cap can leave nothing behind: a wide pull request that touches no
+  # config asset drops its whole list here. The caller reads a return of 1 as
+  # "this pull request has no suite to run", which is what that is.
+  if [ -z "$(printf '%s\n' "${sources}" | grep -v '^[[:space:]]*$')" ]; then
+    echo "no suite left to run"
+    return 1
+  fi
 }
 
 # Fixtures for --self-test. Each is a changed-file list and the suites it must
@@ -247,27 +326,80 @@ self_test() {
   # still selects is the four guards that name the file themselves. The name
   # mapping and the declared mapping answer different questions, and only the
   # first one has to stay quiet here.
+  # test_tui_decode is here for a path inside a JSON fixture rather than a
+  # read: it is one of the two such entries in 170 (source, suite) pairs, and
+  # narrowing the match to exclude it would cost the guards that assign the
+  # path to a plain let-binding.
   check "an umbrella module selects only the guards that name it" \
-    "test/test_tui_agenda.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_http_ast.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
   # test_tui_http_ast watches it through 52 ~module_path declarations, and the
   # name mapping looks for test_tui_render_* instead. Both mappings answer
   # here, and the guard is in the answer.
   check "a watched source reaches the guard that declares it" \
-    "test/test_tui_agenda.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_row_wiring.ml" \
     "bin/masc_tui_render.ml"
-  check "a doc-only change selects nothing" "" \
-    "docs/x.md"
+  # A guard that reads its input with open_in instead of Ast_grep is watching
+  # it just the same. test_blocker_class_mirror pulls the blocker class list
+  # out of this file and compares it to the dashboard mirror; the name mapping
+  # looks for test_keeper_meta_contract_*, and there is no suite by that name,
+  # so before this the only edit that ran the mirror was an edit to itself.
+  check "a guard that opens its input is selected too" \
+    "test/test_blocker_class_mirror.ml" \
+    "lib/keeper/keeper_meta_contract.ml"
+  # A package source names its suites the same way, in whichever test root
+  # holds them. event_bus has one in each, which is why it is the fixture:
+  # before this, an edit under packages/ selected nothing by name.
+  check "a package source selects its suites in both test roots" \
+    "packages/agent_core/test/test_event_bus.ml test/test_event_bus_subscription_contract.ml" \
+    "packages/agent_core/lib/event_bus.ml"
+  # The path matters: "docs/x.md" used to be the fixture here and stopped
+  # meaning "no suite names this" -- test_tui_memory_facts_explorer carries it
+  # as a source-fact path in its own fixture data. That is the coincidence any
+  # literal match pays for, and it is one extra suite, not a wrong verdict.
+  check "a doc no suite names selects nothing" "" \
+    "docs/no-suite-names-this.md"
+  # A guard can watch a document. Four do, among them the RFC-0086 namespace
+  # invariant and this one, and before the declared mapping took every changed
+  # path they were selected by nothing.
+  check "a document a suite reads selects that suite" \
+    "test/test_tui_render_memory.ml" \
+    "docs/constitution.xml"
   # A tool definition reaches both: the one that says the asset embeds and
   # syncs, and the one that says its first line fits the line it is offered in.
+  # Past the cap the name-derived list is dropped, and the path-derived guards
+  # are not: config/tools cannot be a wrong reading of the changed-file list.
+  # Before this, the cap returned before the guard blocks and the whole run was
+  # nothing -- which #35025 turned from a quiet report into a gate a wide pull
+  # request passes without running a suite.
+  # The other side of the same drop: nothing else changed, so nothing is left
+  # and the caller is told there is no suite -- the behaviour the cap had, kept
+  # for the case the cap was written for.
+  check "past the cap with no asset there is nothing left" \
+    "" \
+    test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
+    test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
+    test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
+    test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml \
+    test/test_wide_13.ml
+
+  check "past the cap a tool definition still reaches its guards" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
+    test/test_wide_01.ml test/test_wide_02.ml test/test_wide_03.ml \
+    test/test_wide_04.ml test/test_wide_05.ml test/test_wide_06.ml \
+    test/test_wide_07.ml test/test_wide_08.ml test/test_wide_09.ml \
+    test/test_wide_10.ml test/test_wide_11.ml test/test_wide_12.ml \
+    test/test_wide_13.ml config/tools/foo.toml
+
   check "a tool definition reaches every guard over it" \
-    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+    "test/test_keeper_tool_definition_source.ml test/test_keeper_tool_schema_bytes.ml test/test_managed_assets_sync_from_binary.ml test/test_tools_coverage.ml" \
     "config/tools/foo.toml"
   # Only tool definitions reach the second one; a prompt asset has no first
   # line to fit.
-  check "a prompt asset reaches only the asset guard" \
-    "test/test_managed_assets_sync_from_binary.ml" "config/prompts/foo.md"
+  check "a prompt asset reaches the asset guard and the prompt golden" \
+    "test/test_keeper_system_prompt_bytes.ml test/test_managed_assets_sync_from_binary.ml" \
+    "config/prompts/foo.md"
   check "an edited test is still selected on its own" \
     "test/test_tui_graphics.ml" "test/test_tui_graphics.ml"
   # Both halves together, deduplicated.

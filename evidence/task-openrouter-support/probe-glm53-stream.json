@@ -1,0 +1,14 @@
+data: {"id":"gen-1789029086-CaDHRLLc5Bwu5cKfyUQq","object":"chat.completion.chunk","created":1789029086,"model":"z-ai/glm-5.3","provider":"Novita","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":"The","reasoning_details":[{"type":"reasoning.text","text":"The","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1789029086-CaDHRLLc5Bwu5cKfyUQq","object":"chat.completion.chunk","created":1789029086,"model":"z-ai/glm-5.3","provider":"Novita","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" user has asked me to reply","reasoning_details":[{"type":"reasoning.text","text":" user has asked me to reply","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1789029086-CaDHRLLc5Bwu5cKfyUQq","object":"chat.completion.chunk","created":1789029086,"model":"z-ai/glm-5.3","provider":"Novita","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":" with exactly \"OK","reasoning_details":[{"type":"reasoning.text","text":" with exactly \"OK","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1789029086-CaDHRLLc5Bwu5cKfyUQq","object":"chat.completion.chunk","created":1789029086,"model":"z-ai/glm-5.3","provider":"Novita","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":"\". This is a simple","reasoning_details":[{"type":"reasoning.text","text":"\". This is a simple","format":"unknown","index":0}]},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1789029086-CaDHRLLc5Bwu5cKfyUQq","object":"chat.completion.chunk","created":1789029086,"model":"z-ai/glm-5.3","provider":"Novita","choices":[{"index":0,"delta":{"content":"","role":"assistant","reasoning":null},"finish_reason":"length","native_finish_reason":"length"}]}
+
+data: {"id":"gen-1789029086-CaDHRLLc5Bwu5cKfyUQq","object":"chat.completion.chunk","created":1789029086,"model":"z-ai/glm-5.3","provider":"Novita","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"length","native_finish_reason":"length"}],"usage":{"prompt_tokens":17,"completion_tokens":16,"total_tokens":33,"cost":0.000073476,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.000073476,"upstream_inference_prompt_cost":0.000018564,"upstream_inference_completions_cost":0.000054912},"completion_tokens_details":{"reasoning_tokens":17,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+

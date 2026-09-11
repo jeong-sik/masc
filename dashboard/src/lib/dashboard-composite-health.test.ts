@@ -96,6 +96,38 @@ describe('projectDashboardCompositeHealth', () => {
     })
   })
 
+  // #34895: a section at warning with operator_action_required=false raises the
+  // grade and contributes nothing to operator_action_reasons, so the card used
+  // to say only that the grade had moved.
+  it('names what raised the grade when nothing needs an answer', () => {
+    const result = projectDashboardCompositeHealth({
+      overall_status: 'warning',
+      operator_action_required: false,
+      operator_action_reasons: [],
+      overall_status_reasons: ['keeper_event_queue:runnable_backlog=18'],
+      full_health_snapshot: null,
+    })
+
+    expect(result.issues[0]?.detail).toContain('keeper_event_queue:runnable_backlog=18')
+  })
+
+  it('does not repeat a reason the action list already carries', () => {
+    const result = projectDashboardCompositeHealth({
+      overall_status: 'degraded',
+      operator_action_required: true,
+      operator_action_reasons: ['keeper_event_queue:recoverable_backlog=105'],
+      overall_status_reasons: [
+        'keeper_event_queue:recoverable_backlog=105',
+        'keeper_event_queue:paused_dead_backlog=41',
+      ],
+      full_health_snapshot: null,
+    })
+
+    const detail = result.issues[0]?.detail ?? ''
+    expect(detail).toContain('keeper_event_queue:paused_dead_backlog=41')
+    expect(detail.split('keeper_event_queue:recoverable_backlog=105').length - 1).toBe(1)
+  })
+
   it('preserves a decoded top-level status when the detailed snapshot is absent', () => {
     expect(projectDashboardCompositeHealth({
       overall_status: 'degraded',

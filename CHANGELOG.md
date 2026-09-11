@@ -1,6 +1,47 @@
 # Changelog
 
 
+## [0.35.8] - 2026-09-11
+
+### Fixed
+
+- The max-tokens truncation recovery no longer dies in request validation on runtimes that declare `reasoning-effort`. The recovery retries the turn with thinking disabled, but the re-dispatched candidate still carried the runtime's `reasoning_effort`, which the Anthropic wire rejects (`cannot set reasoning_effort when enable_thinking=false`) — the retry now strips effort from the candidate alongside `enable_thinking`/`preserve_thinking`, so the continuation it was built to rescue actually runs (#35195).
+
+## [0.35.7] - 2026-09-11
+
+### Fixed
+
+- Anthropic keeper lanes no longer fail every turn with `Invalid request: 'temperature' may only be set to 1 when thinking is enabled or in adaptive mode` for models whose capability row declares `ignored_sampling_parameters`. The Anthropic reasoning-dialect arm hardcoded its transport shape and never consulted the model's capability record, so the declaration was silently dropped and `temperature`/`top_p` reached the wire unconditionally; the dialect now derives its sampling policy from the capability record, and the Anthropic request builder routes `temperature`/`top_p`/`top_k` through the shared sampling-field gate (a dropped field logs the existing one-shot WARN) (#35193).
+
+## [0.35.6] - 2026-09-10
+
+### Fixed
+
+- Anthropic keeper lanes no longer fail every turn with `400: input_schema does not support oneOf, allOf, or anyOf at the top level`. The Anthropic request builder now projects each tool's `input_schema` to drop top-level combinators (the `tool_execute` argv-or-script rule rendered one); nested combinators and the dispatcher's own validation are unchanged, the Kimi endpoint served through the same backend keeps its schema verbatim, and a combinator-only schema gains a synthesized `type: "object"` (#35168).
+
+### Added
+
+- Keeper TOML gains `[keeper.tools] deny = [...]`: a per-keeper list of model-visible built-in tool names (e.g. `keeper_spawn`, `masc_keeper_delegate`) removed from the keeper's capability surface entirely — unlisted to the model, absent from the turn's dispatch bundle, and refused by the frozen-surface admission if named anyway. Deny entries matching no model-visible tool are logged as `keeper_tool_deny_unnamed`, and the dashboard effective-tool-surface projection reports the active list (#35169).
+
+## [0.35.5] - 2026-09-10
+
+### Installation
+
+- Run `masc` and `masc start` without repeating `--base-path` or exporting `MASC_BASE_PATH`. `masc setup` and `masc init` record the workspace they prepared, an explicit `masc start --base-path` records it too, and the server accepts that recorded workspace at startup. A record whose path no longer holds a `.masc` directory is ignored, and the error says which record was skipped and why.
+- Choose the sandbox imp runs its turns on: `masc setup --sandbox-profile docker|microvm|remote_ssh`, with `--microvm-backend` for the microVM runtime. The chosen profile is written into imp's keeper file, and setup checks what that profile needs on this host. With no flag it reads the profile imp already declares instead of asking for Docker regardless.
+- Read what a missing sandbox dependency was. An absent `docker` reported `create_process docker: No such file or directory`; it now names Docker and points at Apple Container together with the flags that move imp onto it.
+
+### Health
+
+- See which section set the overall status, and read only the reasons an operator has to answer.
+
+## [0.35.4] - 2026-09-10
+
+### Installation and startup
+
+- Start up when a saved model catalog overlay carries entries the current binary no longer understands. Unknown fields and dead entries are skipped with a warning that names the file and the entry, instead of refusing to boot — a fresh install over an older workspace hit that refusal.
+- Say when a failure is the configuration, not the model connection. A config load error now names the file and the parse problem instead of the blanket "Model connection failed" that pointed operators at the wrong fix.
+
 ## [0.35.3] - 2026-09-10
 
 ### Installation
@@ -2776,6 +2817,22 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Changed
 
+- **Running turns now yield to waiting connector conversations, and the
+  dashboard no longer misreads a queued send as a dead stream (#25898).** A
+  nonempty-wake turn's post-tool boundary probe chain gains a third probe:
+  a pending ambient `Connector_attention` stimulus (a new Slack/Discord
+  conversation message) now preempts the in-flight source turn at its next
+  tool boundary, closing the same class of priority inversion #20849
+  measured for owner messages. Pure decision exposed as
+  `Keeper_unified_turn.connector_attention_preemption_request` and covered in
+  `test_keeper_hitl_replay_delivery`. RFC-0441 states the policy.
+- **Live chat sends poll the queued operation for liveness while waiting.**
+  `sendKeeperThreadMessage` now marks the stream-liveness signal from the
+  chat operation's `queued`/`running` state during the silent gap between
+  `ACCEPTED` and the first reply event — the same evidence the hydrate path
+  already used — so the composer's 15s stall hint no longer reads a
+  healthily-working keeper as "스트림 지연" while the operator's message waits
+  behind a running turn.
 - **Strict required-tool contracts now use typed tool effects.** MASC passes
   an input-aware required-tool satisfaction predicate into agent_core, so passive
   observation tools such as `masc_status` and `keeper_tasks_list` no longer

@@ -1081,7 +1081,13 @@ let test_a_finding_carries_its_rewrite () =
       ~sandbox:host
       (parse_json_exn
          (`Assoc
-             [ "argv", `List [ `String "sh"; `String "-c"; `String "cat $(echo foo)" ] ]))
+             (* `$( )` used to sit outside the subset and carried this test.
+                It is representable now (RFC shell-ir typed command
+                substitution), so the case moved to a construct the IR still
+                has no node for. *)
+             [ "argv"
+             , `List [ `String "sh"; `String "-c"; `String "cat <(echo foo)" ]
+             ]))
   with
   | [ (_, Costume.Outside_the_subset reason) ] ->
     let advice = Rewrite.to_string (Rewrite.of_reason reason) in
@@ -1090,9 +1096,18 @@ let test_a_finding_carries_its_rewrite () =
       true
       (String.length advice > 0)
   | other ->
+    (* Naming the findings, not counting them: "got 1" was the whole message
+       when `$( )` moved inside the subset, and it does not say which of the
+       four this became. *)
+    let name = function
+      | Costume.Representable -> "representable"
+      | Costume.Refused_by_policy reason -> "refused_by_policy: " ^ reason
+      | Costume.Outside_the_subset _ -> "outside_the_subset"
+      | Costume.Unparsable _ -> "unparsable"
+    in
     Alcotest.failf
-      "expected one outside-the-subset finding, got %d"
-      (List.length other)
+      "expected one outside-the-subset finding, got [%s]"
+      (String.concat "; " (List.map (fun (_, finding) -> name finding) other))
 ;;
 
 let test_a_representable_costume_has_nothing_to_say () =

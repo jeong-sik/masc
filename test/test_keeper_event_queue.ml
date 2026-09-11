@@ -780,8 +780,10 @@ let () =
   in
   assert (
     String.equal (payload_kind_label outcome_stimulus.payload) "task_outcome");
-  assert (
-    String.equal outcome_stimulus.post_id "task-outcome:task-approved:vrf-approved");
+  (* task id alone: an approval is terminal, so [task_outcome_post_id] leaves
+     the verification id out of the identity on purpose. Keeping it here would
+     make a re-verification of the same task a separate post. *)
+  assert (String.equal outcome_stimulus.post_id "task-outcome:task-approved");
   (match stimulus_of_yojson (stimulus_to_yojson outcome_stimulus) with
    | Ok
        { payload =

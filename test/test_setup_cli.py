@@ -54,13 +54,44 @@ class Setup(unittest.TestCase):
                 self.assertFalse((base/'.masc/auth').exists())
                 self.assertFalse((base/'.masc/config/runtime.toml').exists())
 
-    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False):
+    def test_sandbox_selection_is_refused_before_any_work(self):
+        """--sandbox-profile / --microvm-backend pairing, checked as usage.
+
+        setup used to require Docker whatever profile the keeper declared, and
+        offered no way to say otherwise, so a mac without Docker could not
+        finish setup at all (measured on a fresh mac, 2026-09-10). cmdliner
+        cannot express "this flag only means something under that value", so
+        the rule is checked in the command and has to keep reporting as usage
+        rather than silently ignoring the flag.
+        """
+        cases = [
+            (['--sandbox-profile','nope'], '--sandbox-profile takes one of'),
+            (['--microvm-backend','nerdctl_kata'], '--microvm-backend requires --sandbox-profile microvm'),
+            (['--sandbox-profile','docker','--microvm-backend','nerdctl_kata'],
+             '--microvm-backend requires --sandbox-profile microvm'),
+            (['--sandbox-profile','microvm','--microvm-backend','bogus'],
+             '--microvm-backend takes one of'),
+        ]
+        for extra, expected in cases:
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory(prefix='masc-setup-sandbox-') as tmp:
+                base = Path(tmp) / 'ws'
+                base.mkdir()
+                result = subprocess.run(
+                    [BINARY,'setup','--base-path',str(base),'--no-tui'] + extra,
+                    env={'PATH':'/usr/bin:/bin','HOME':tmp},
+                    capture_output=True, text=True, timeout=60)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
+                # Refused as usage: nothing was seeded on the way out.
+                self.assertFalse((base/'.masc').exists(), 'a usage error must not seed a workspace')
+
+    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False):
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)
             commands = base / 'commands'
             commands.mkdir()
             docker = commands / 'docker'
-            docker.write_text('#!/bin/sh\nexit 0\n')
+            docker.write_text("#!/bin/sh\nif [ \"$1\" = info ]; then echo '{\"OSType\":\"linux\",\"SecurityOptions\":[]}'; fi\nexit 0\n")
             docker.chmod(0o755)
             env = {key: value for key, value in os.environ.items()
                    if key in ('PATH', 'HOME', 'LANG', 'TMPDIR')}
@@ -183,16 +214,17 @@ supports_native_streaming = true
                         self.assertEqual(receipt['model'],'setup-fixture-owned-model')
                         self.assertEqual(receipt['observed_model'],'setup-fixture-owned-model')
                         self.assertEqual(receipt['checks'],{'response':True,'tool_called':True,'tool_roundtrip':True})
-                    result = run('setup', '--no-tui', '--port', str(server.server_port))
+                    sandbox_args = ['--sandbox-profile','microvm','--microvm-backend','microsandbox'] if unsupported_sandbox else []
+                    result = run('setup', '--no-tui', '--port', str(server.server_port), *sandbox_args)
                 finally:
                     server.shutdown()
                     thread.join()
             self.assertEqual(manifest.read_bytes(), original)
-            if foreign or missing_key:
+            if foreign or missing_key or unsupported_sandbox:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(posted, [])
                 self.assertFalse((base / '.masc/auth/local-admin.token').exists())
-                self.assertIn('MASC_SETUP_TEST_KEY' if missing_key else 'Port belongs to workspace', result.stderr)
+                self.assertIn('MASC_SETUP_TEST_KEY' if missing_key else 'microsandbox cannot express' if unsupported_sandbox else 'Port belongs to workspace', result.stderr)
             else:
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertEqual(posted, [('/api/v1/keepers/imp/boot', {'name': 'imp'})])
@@ -201,6 +233,9 @@ supports_native_streaming = true
                 self.assertTrue(all(request['model']=='setup-fixture-owned-model' for request in model_requests))
                 self.assertTrue(any(message['role']=='tool' for message in model_requests[-1]['messages']))
                 self.assertNotIn((base / '.masc/auth/local-admin.token').read_text().strip(), result.stdout)
+
+    def test_failed_new_sandbox_preserves_existing_manifest(self):
+        self.scenario(unsupported_sandbox=True)
 
     def test_supported_linked_deployment_root(self):
         self.scenario(linked_root=True)

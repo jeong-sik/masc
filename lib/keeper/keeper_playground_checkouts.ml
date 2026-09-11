@@ -30,6 +30,10 @@ type scan_error =
       { root : string
       ; detail : string
       }
+  | Root_probe_unreachable of
+      { root : string
+      ; reason : string
+      }
 
 type discovery =
   | Complete of checkout list
@@ -302,6 +306,8 @@ let scan_error_to_string = function
     Printf.sprintf "workspace root is a %s, not a directory: %s" kind root
   | Root_unreadable { root; detail } ->
     Printf.sprintf "workspace root unreadable: %s: %s" root detail
+  | Root_probe_unreachable { root; reason } ->
+    Printf.sprintf "workspace root probe did not reach %s: %s" root reason
 ;;
 
 let limit_code = function

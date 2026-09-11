@@ -333,7 +333,7 @@ let test_model_catalog_overlay_installs_config_root_overlay () =
         ~config_root
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Ok Llm_provider.Model_catalog.empty)
+          Ok (Llm_provider.Model_catalog.empty, []))
         ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
         ()
     in
@@ -355,7 +355,7 @@ let test_model_catalog_overlay_absent_is_noop () =
         ~config_root
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Ok Llm_provider.Model_catalog.empty)
+          Ok (Llm_provider.Model_catalog.empty, []))
         ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
         ()
     in
@@ -379,6 +379,87 @@ let test_model_catalog_overlay_invalid_fails_loud () =
     with
     | (_ : string option) ->
       Alcotest.fail "expected Config_error for invalid overlay"
+    | exception Env_config_core.Config_error message ->
+      Alcotest.(check bool)
+        "error names overlay path"
+        true
+        (String_util.contains_substring message "agent-core-models-overlay.toml");
+      Alcotest.(check int) "no install" 0 !set_overlay_calls)
+
+let test_config_load_failure_diagnostic_attributes_to_config () =
+  let output =
+    Server_runtime_bootstrap.config_load_failure_diagnostic
+      ~detail:
+        "catalog overlay /ws/.masc/config/agent-core-models-overlay.toml: model entry \
+         \"m\" contains unknown field(s): supports_extended_thinking"
+  in
+  Alcotest.(check bool)
+    "names the configuration class, not a connection problem"
+    true
+    (String_util.contains_substring output "not a model connection problem");
+  Alcotest.(check bool)
+    "carries the config file path verbatim"
+    true
+    (String_util.contains_substring output "agent-core-models-overlay.toml");
+  Alcotest.(check bool)
+    "names the next action"
+    true
+    (String_util.contains_substring output "masc runtime-verify <RUNTIME_ID>");
+  Alcotest.(check bool)
+    "never claims a model connection failure"
+    false
+    (String_util.contains_substring output "Model connection failed")
+let test_model_catalog_overlay_skips_poisoned_entries () =
+  with_temp_dir "model-catalog-overlay-lenient" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file
+      overlay
+      "[[models]]\n\
+       id_prefix = \"lenient-good-model\"\n\
+       supports_tools = true\n\
+       [[models]]\n\
+       id_prefix = \"lenient-stale-model\"\n\
+       supports_extended_thinking = true\n";
+    let installed = ref None in
+    let result =
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root
+        ~set_overlay:(fun catalog -> installed := Some catalog)
+        ()
+    in
+    (match result with
+     | None -> Alcotest.fail "expected config-root overlay resolution"
+     | Some path ->
+       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
+    match !installed with
+    | None -> Alcotest.fail "expected the surviving overlay rows to install"
+    | Some catalog ->
+      Alcotest.(check bool)
+        "valid row survives"
+        true
+        (Option.is_some (Llm_provider.Model_catalog.lookup catalog "lenient-good-model"));
+      Alcotest.(check bool)
+        "poisoned row skipped"
+        true
+        (Option.is_none (Llm_provider.Model_catalog.lookup catalog "lenient-stale-model")))
+
+let test_model_catalog_overlay_broken_toml_still_fails_loud () =
+  with_temp_dir "model-catalog-overlay-broken-toml" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "agent-core-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file overlay "not toml";
+    let set_overlay_calls = ref 0 in
+    match
+      Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+        ~config_root
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
+        ()
+    with
+    | (_ : string option) ->
+      Alcotest.fail "expected Config_error for broken-TOML overlay"
     | exception Env_config_core.Config_error message ->
       Alcotest.(check bool)
         "error names overlay path"
@@ -423,7 +504,7 @@ let test_explicit_model_catalog_replacement_precedes_overlay () =
         ignore
           (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
              ~config_root
-             ~load_catalog:(fun _ -> Ok overlay)
+             ~load_catalog:(fun _ -> Ok (overlay, []))
              ());
         match Llm_provider.Model_catalog.global () with
         | None -> Alcotest.fail "expected explicit global catalog"
@@ -569,10 +650,25 @@ let merge_env_overrides overrides =
 let main_eio_test_admin_token = "main-eio-test-admin-token"
 let main_eio_auth_header = "Authorization: Bearer " ^ main_eio_test_admin_token
 
+(* A spawned main_eio does not know it is inside a test, so the library-side
+   refusal (which keys on the executable being a test binary) does not reach
+   it. Without a config home of its own, `masc init` records the sandbox
+   workspace as the operator's default in ~/.config/masc/default-base-path,
+   and the next process resolves its base path there until that directory
+   vanishes -- two Server_runtime_bootstrap cases went red exactly that way on
+   2026-09-10. One temp dir for the whole run: nothing here reads it back. *)
+let spawned_config_home =
+  lazy
+    (let dir = Filename.temp_file "masc-test-config-home" "" in
+     Sys.remove dir;
+     Unix.mkdir dir 0o700;
+     dir)
+
 let main_eio_env_overrides overrides =
   merge_env_overrides
     (("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
      :: ("MASC_INTERNAL_MCP_TOKEN", "")
+     :: ("XDG_CONFIG_HOME", Lazy.force spawned_config_home)
      :: overrides)
 
 let curl_health_status ~port =
@@ -3508,7 +3604,7 @@ let test_startup_state_json () =
     (List.sort String.compare
        [ "phase"; "state_ready"; "pending_lazy_tasks"; "last_error";
          "path_diagnostics"; "config_resolution"; "elapsed_sec";
-         "watchdog_timeout_sec"; "product" ])
+         "watchdog_timeout_sec"; "product"; "model_runtime" ])
     (json |> json_assoc |> List.map fst |> List.sort String.compare);
   let product = List.assoc "product" (json_assoc json) in
   Alcotest.(check (list string))
@@ -3795,39 +3891,45 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      (* Select this fixture explicitly: installer evidence may have a saved
+         workspace, which correctly takes precedence over the current cwd. *)
+      with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
       let resolved =
         Fun.protect
           ~finally:(fun () -> Config_dir_resolver.reset ())
           (fun () ->
-             Prompt_defaults.resolve_prompt_markdown_dir
-               ~workspace_path:dir ~base_path:dir)
+             Prompt_defaults.resolve_prompt_markdown_dir ~base_path:dir)
       in
       Alcotest.(check string) "repo seed prompts are not active config"
         (canonical_path expected) (canonical_path resolved))
 
-let test_prompt_markdown_dir_does_not_use_repo_seed () =
+(* The twin of the case above, before masc#35146: same body, same fixture,
+   different name. Both asserted about whatever workspace the process was
+   sitting in, so neither measured the directory it had just built. This one
+   now measures what its name promises -- no repo seed at all -- and runs from
+   an unrelated cwd, which is the part the old body could not distinguish. *)
+let test_prompt_markdown_dir_without_repo_seed_answers_for_the_given_base () =
   with_temp_dir "startup-prompts-no-opt-in" (fun dir ->
-      let config_root = Filename.concat dir "config" in
-      let repo_prompts = Filename.concat config_root "prompts" in
       let expected = Filename.concat dir ".masc/config/prompts" in
-      Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "runtime.toml") "";
-      with_env "MASC_CONFIG_DIR" None @@ fun () ->
-      with_cwd dir @@ fun () ->
-      Config_dir_resolver.reset ();
-      let resolved =
-        Fun.protect
-          ~finally:(fun () -> Config_dir_resolver.reset ())
-          (fun () ->
-             Prompt_defaults.resolve_prompt_markdown_dir
-               ~workspace_path:dir ~base_path:dir)
-      in
-      Alcotest.(check string)
-        "temp workspace keeps resolved default prompt dir without repo seed"
-        (canonical_path expected) (canonical_path resolved))
+      with_temp_dir "startup-prompts-elsewhere" (fun elsewhere ->
+          with_env "MASC_CONFIG_DIR" None @@ fun () ->
+          (* Select this fixture explicitly: installer evidence may have a saved
+             workspace, which correctly takes precedence over the current cwd. *)
+          with_env "MASC_BASE_PATH" (Some dir) @@ fun () ->
+          with_cwd elsewhere @@ fun () ->
+          Config_dir_resolver.reset ();
+          let resolved =
+            Fun.protect
+              ~finally:(fun () -> Config_dir_resolver.reset ())
+              (fun () ->
+                 Prompt_defaults.resolve_prompt_markdown_dir ~base_path:dir)
+          in
+          Alcotest.(check string)
+            "the given base path answers, not the cwd"
+            (canonical_path expected) (canonical_path resolved)))
 
 let test_prompt_markdown_dir_honors_masc_config_dir_override () =
   with_temp_dir "startup-prompts-override" (fun dir ->
@@ -3842,8 +3944,7 @@ let test_prompt_markdown_dir_honors_masc_config_dir_override () =
         Fun.protect
           ~finally:(fun () -> Config_dir_resolver.reset ())
           (fun () ->
-             Prompt_defaults.resolve_prompt_markdown_dir
-               ~workspace_path:dir ~base_path:dir)
+             Prompt_defaults.resolve_prompt_markdown_dir ~base_path:dir)
       in
       Alcotest.(check string) "resolved config root wins over workspace prompts"
         override_prompts resolved)
@@ -3863,7 +3964,6 @@ let test_prompt_markdown_dir_prefers_resolved_config_dir_over_cwd () =
         (fun () ->
           let resolved =
             Prompt_defaults.resolve_prompt_markdown_dir
-              ~workspace_path:(Filename.concat dir "workspace")
               ~base_path:(Filename.concat dir "workspace")
           in
           Alcotest.(check string)
@@ -4810,6 +4910,15 @@ let () =
             "model catalog overlay invalid fails loud"
             `Quick test_model_catalog_overlay_invalid_fails_loud;
           Alcotest.test_case
+            "config load failure diagnostic attributes to config"
+            `Quick test_config_load_failure_diagnostic_attributes_to_config;
+          Alcotest.test_case
+            "model catalog overlay skips poisoned entries"
+            `Quick test_model_catalog_overlay_skips_poisoned_entries;
+          Alcotest.test_case
+            "model catalog overlay broken TOML still fails loud"
+            `Quick test_model_catalog_overlay_broken_toml_still_fails_loud;
+          Alcotest.test_case
             "explicit model catalog replacement precedes overlay"
             `Quick test_explicit_model_catalog_replacement_precedes_overlay;
           Alcotest.test_case
@@ -5012,8 +5121,8 @@ let () =
             "prompt markdown dir ignores repo seed prompts"
             `Quick test_prompt_markdown_dir_ignores_repo_seed_prompts;
           Alcotest.test_case
-            "prompt markdown dir does not use repo seed"
-            `Quick test_prompt_markdown_dir_does_not_use_repo_seed;
+            "prompt markdown dir without a repo seed answers for the given base"
+            `Quick test_prompt_markdown_dir_without_repo_seed_answers_for_the_given_base;
           Alcotest.test_case "prompt markdown dir honors MASC_CONFIG_DIR override"
             `Quick test_prompt_markdown_dir_honors_masc_config_dir_override;
           Alcotest.test_case

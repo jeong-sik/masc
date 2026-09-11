@@ -10,13 +10,16 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding)
  (public_name masc)
  (package masc)
  (libraries
   masc
   masc.masc_goal
   masc.keeper_toml
+  ; setup writes imp's sandbox_profile into its keeper TOML, and the line
+  ; editor is what keeps the seed's comments above that key.
+  masc.toml_line_editor
   masc_front_door
   masc_tui_server_lifecycle
   masc.keeper_sandbox_image

@@ -87,6 +87,27 @@ jobs:
               return;
             }
 
+            // The other direction. `managed` claims every `<axis>/…` name for this
+            // workflow, so a label in that namespace and not in the SSOT is one this
+            // run would strip off any issue carrying it while leaving it in the repo's
+            // label set -- present in every picker, absent from the vocabulary. The
+            // forward check above has always failed on the mirror of this; six such
+            // names had been sitting in the repo since the v2 vocabulary landed
+            // (#35013), so they are named in `retired_labels` with what replaced them.
+            // Anything else in the namespace fails here.
+            const retired = new Set(Object.keys(SSOT.retired_labels || {}));
+            const strays = [...repoLabels]
+              .filter((l) => managed(l) && !knownLabels.has(l) && !retired.has(l))
+              .sort();
+            if (strays.length) {
+              core.setFailed(
+                `Labels in the taxonomy namespace are not in the SSOT: ${strays.join(', ')}. ` +
+                `Add the value to .github/issue-taxonomy.json, or delete the label, or ` +
+                `record it in retired_labels with what replaced it.`,
+              );
+              return;
+            }
+
             // severity_order is the priority order the docs quote. Keep it honest against the
             // value set it orders, or the two drift inside one file.
             const severityErrors = severityOrderErrors();

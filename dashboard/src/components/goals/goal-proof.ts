@@ -25,3 +25,18 @@ export function GoalProofStatus({ proof }: { proof: GoalProof | undefined }) {
     : `${current.state === 'refuted' ? current.reason + '\n' : ''}${current.evidence}\n실행 ${current.runId} · 기준 ${current.criterion.revision}`
   return html`<span data-goal-proof=${current.state} title=${detail}>검증 · ${completionLabel(current)}</span>`
 }
+
+
+export function GoalProofDetail({ proof }: { proof: GoalProof | undefined }) {
+  const refuted = proof?.state === 'current' && proof.completion.state === 'refuted'
+    ? proof.completion : null
+  return html`
+    <section aria-label="Goal 검증 결과" class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-surface)] p-4 text-sm text-text-body">
+      <${GoalProofStatus} proof=${proof} />
+      ${refuted ? html`
+        <p class="mt-2 whitespace-pre-wrap break-words">${refuted.reason}</p>
+        <p class="mt-2 break-all text-xs text-text-muted">검증 실행 ${refuted.runId} · 기준 ${refuted.criterion.revision}</p>
+      ` : null}
+    </section>
+  `
+}

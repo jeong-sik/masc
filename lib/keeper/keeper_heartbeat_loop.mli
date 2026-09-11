@@ -314,9 +314,6 @@ module For_testing : sig
   val failure_route_rate_limited_backoff_hint :
     Keeper_unified_turn.turn_failure -> provider_backoff option
 
-  val rate_limited_backoff_sec :
-    cap_sec:float -> retry_after_hint:float option -> cadence_sec:float -> float
-
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and
       its live caller both remain, so the export stays too. *)

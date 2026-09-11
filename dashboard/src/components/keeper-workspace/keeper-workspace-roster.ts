@@ -301,7 +301,12 @@ function RosterRow({
   const handleTitle = basepath || scope || ''
   const activity = keeperActivityDisplay(keeper, undefined, { includeCreated: false })
   const activityText = rosterActivityText(activity)
-  const phaseLabel = keeperPhaseLabel(keeper)
+  const phaseLabel = keeper.declaration_only ? '아직 시작하지 않음' : keeperPhaseLabel(keeper)
+  const preparation = (keeper.preparation_requirements ?? []).map(requirement => ({
+    runtime_check_required: '모델 연결 확인 필요',
+    sandbox_check_required: '샌드박스 확인 필요',
+    declaration_invalid: 'Keeper 선언 수정 필요',
+  })[requirement]).join(' · ')
   const configErrorTitle = keeper.config_error
     ? `${keeper.config_error.reported_kind ?? keeper.config_error.kind} · ${keeper.config_error.failing_path} · ${keeper.config_error.detail}`
     : null
@@ -334,6 +339,7 @@ function RosterRow({
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
       </div>
+      ${preparation ? html`<div class="kw-kp-sub" role="status">${preparation}</div>` : null}
       <div class="kw-kp-right">
         ${activityText ? html`<span class="kw-kp-time" title=${rosterActivityTitle(activity)}>${activityText}</span>` : null}
         ${keeper.config_error

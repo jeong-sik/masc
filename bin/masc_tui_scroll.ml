@@ -8,6 +8,19 @@ let down ~count ~height scroll =
 
 let up ~count ~height scroll = max 0 (normalize ~count ~height scroll - 1)
 
+(* A page keeps one row from the window it leaves. Moving a full [height]
+   would put the row the reader stopped on just past the edge, so a long list
+   read page by page loses one row per press with nothing saying so. *)
+let page_step ~height = max 1 (height - 1)
+
+let page_down ~count ~height scroll =
+  min
+    (maximum ~count ~height)
+    (normalize ~count ~height scroll + page_step ~height)
+
+let page_up ~count ~height scroll =
+  max 0 (normalize ~count ~height scroll - page_step ~height)
+
 (* Not in the interface: [cursor_down] and [cursor_up] are the only callers,
    and an exported clamp with no caller is a surface the ratchet counts. *)
 let cursor_normalized ~count cursor = max 0 (min cursor (count - 1))

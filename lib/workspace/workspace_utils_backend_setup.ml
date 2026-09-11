@@ -162,8 +162,11 @@ let resolve_masc_base_path path =
   | Some cached -> cached
   | None ->
     let requested = resolve_requested_base_path path in
-    match (Host_config.from_env ()).base_path with
-    | Some explicit
+    (* Read the source alongside the value: the log line used to call every
+       answer "explicit MASC_BASE_PATH", including a workspace that came from
+       the recorded default rather than the environment. *)
+    match Env_config_core.base_path_source_opt () with
+    | Some (_source, explicit)
       when running_under_test_executable ()
            && not (String.equal explicit requested) ->
         (* Test executable and the inherited [MASC_BASE_PATH] diverges from
@@ -182,14 +185,16 @@ let resolve_masc_base_path path =
           "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
           explicit path;
         requested
-    | Some explicit ->
-        log_once_info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
+    | Some (source, explicit) ->
+        (match source with
+         | Env_config_core.From_env key ->
+           log_once_info "MASC base: %s (%s)" explicit key
+         | Env_config_core.From_persisted_default record ->
+           log_once_info "MASC base: %s (default recorded in %s)" explicit record);
         explicit
     | None when running_under_test_executable () -> requested
     | None ->
-        Log.Backend.error
-          "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
-           containing the .masc/ directory.";
+        Log.Backend.error "%s" (Env_config_core.base_path_not_set_message ());
         exit 1
 
 let resolve_server_default_base_path path = resolve_masc_base_path path

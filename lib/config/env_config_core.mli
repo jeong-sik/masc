@@ -171,7 +171,54 @@ val host_fd_pressure_poll_interval_sec : unit -> float
 
 val base_path_env_key : string
 val base_path_input_env_key : string
-val base_path_source_opt : unit -> (string * string) option
+
+type base_path_source =
+  | From_env of string
+  | From_persisted_default of string
+      (** Path of the record file the installer wrote, not an env var. *)
+
+val base_path_source_opt : unit -> (base_path_source * string) option
+(** Resolution order: [MASC_BASE_PATH_INPUT] > [MASC_BASE_PATH] > the workspace
+    a past [masc setup] recorded. Explicit input always wins over the record.
+    A record that no longer holds a [.masc] directory is not used. *)
+
+type persisted_default =
+  | No_record
+  | Usable of { record : string; base_path : string }
+  | Stale of { record : string; recorded_path : string }
+  | Unread_under_test of { record : string }
+
+val persisted_default_base_path : unit -> persisted_default
+(** [Stale] is kept apart from [No_record] so the "not set" error can say that
+    a recorded default was found and ignored, and why.
+
+    [Unread_under_test] is the read counterpart of {!record_default_base_path}'s
+    [Refused_under_test]: a test binary neither writes nor reads the record
+    under the operator's HOME, so a suite cannot resolve a base path from
+    whatever workspace the machine last named. A suite that means to exercise
+    the record points [XDG_CONFIG_HOME] at a temp dir, which is not the
+    operator's location and is both written and read. *)
+
+type record_outcome =
+  | Recorded of string
+  | No_record_location
+  | Refused_under_test
+      (** A test executable asked. It never writes the operator's default:
+          a suite that seeds a workspace in a temp dir would otherwise leave
+          that path as the machine's default until the directory vanished. *)
+  | Record_failed of { record : string; reason : string }
+
+val record_default_base_path : string -> record_outcome
+(** Record [path] as the default for later commands. Callers do this after the
+    workspace has actually served a command, so a path that failed to boot is
+    not remembered. Failure is returned, never raised: not recording a default
+    must not fail the command that succeeded. *)
+
+val base_path_not_set_message : unit -> string
+(** The sentence both base-path reporters use when nothing resolved: this
+    module and the workspace resolver in [lib/workspace]. Names the flag, the
+    env var, and how to record a default; adds why a recorded default was
+    ignored when one was found and is stale. *)
 
 (* RFC-0085 PR-9 — [base_path_raw_opt] and [base_path_opt] are no
    longer part of the public surface.  External callers read the

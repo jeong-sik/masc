@@ -99,9 +99,15 @@ let resolve_agent_core_model_catalog_overlay_path ?config_root () =
     else
       existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
 
+(* Per-row degradation: a poisoned overlay row (e.g. a stale field left by
+   another release) is excluded with one WARN per row instead of failing the
+   whole boot — install must not be blocked by config residue. Whole-file
+   failures (unreadable, broken TOML, duplicate surviving rows) still raise
+   [Config_error], as does the [AGENT_CORE_MODEL_CATALOG] full-replacement
+   path, which keeps the strict loader. *)
 let configure_agent_core_model_catalog_overlay
       ?config_root
-      ?(load_catalog = Llm_provider.Model_catalog.load_file)
+      ?(load_catalog = Llm_provider.Model_catalog.load_file_lenient)
       ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
       ()
   =
@@ -109,7 +115,15 @@ let configure_agent_core_model_catalog_overlay
   | None -> None
   | Some path ->
     (match load_catalog path with
-     | Ok overlay ->
+     | Ok (overlay, skipped) ->
+       List.iter
+         (fun (skip : Llm_provider.Model_catalog.skipped_entry) ->
+            Log.Misc.warn
+              "model_catalog: overlay %s skipping entry %s: %s"
+              path
+              skip.entry_label
+              skip.skip_reason)
+         skipped;
        set_overlay overlay;
        Log.Misc.info
          "model_catalog: deployment overlay %s installed onto embedded catalog"
@@ -119,6 +133,17 @@ let configure_agent_core_model_catalog_overlay
        raise
          (Env_config_core.Config_error
             (Printf.sprintf "catalog overlay %s: %s" path detail)))
+
+(* A config-load failure (catalog overlay, runtime.toml) must not be reported
+   as a model connection problem: the model was never reached. The diagnostic
+   names the class, carries the underlying file-path-bearing detail verbatim,
+   and states the next action. *)
+let config_load_failure_diagnostic ~detail =
+  Printf.sprintf
+    "Model configuration could not be loaded (this is not a model connection problem):\n\
+     %s\n\
+     Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
+    detail
 
 let exact_output_catalog_source_to_string = function
   | Exact_output.Embedded_catalog -> "embedded"
@@ -1042,34 +1067,32 @@ let initialize_owner_state_blocking
       ~env
       ()
   in
-  let runtime_config_path =
-    match Runtime.config_path () with
-    | None ->
-      raise (Owner_initialization_failed Runtime_config_path_unavailable)
-    | Some config_path -> config_path
-  in
+  let runtime_config_path = Runtime.config_path () in
   let runtime_config_observation =
-    match Runtime.load_config_observation ~runtime_config_path () with
-    | Ok observation -> observation
-    | Error detail ->
-      raise (Owner_initialization_failed (Runtime_config_read_failed detail))
+    match runtime_config_path with
+    | None -> Error Runtime_startup_state.Config_missing
+    | Some runtime_config_path ->
+      Runtime.load_config_observation ~runtime_config_path ()
+      |> Result.map_error (fun _ -> Runtime_startup_state.Config_unreadable)
   in
-  (match Runtime.init_default_degraded_observation runtime_config_observation with
-   | Ok Runtime.Initialized ->
-     Log.Server.info
-       "Runtime default initialized: %s"
-       (Runtime.get_default_runtime_id ())
+  let runtime_initialization = match runtime_config_observation with
+    | Error reason -> Error reason
+    | Ok observation ->
+      Runtime.init_default_degraded_observation observation
+      |> Result.map_error (fun _ -> Runtime_startup_state.Config_invalid)
+  in
+  (match runtime_initialization with
+   | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
    | Ok (Runtime.Initialized_degraded degradation) ->
-     Log.Server.warn
-       "Runtime default initialized in degraded catalog mode: %s"
-       (Runtime.startup_degradation_to_string degradation);
-     Log.Server.warn
-       "Runtime degraded effective default: %s"
-       (Runtime.get_default_runtime_id ())
-   | Error error ->
-     raise
-       (Owner_initialization_failed
-          (Runtime_default_initialization_failed error)));
+     Log.Server.warn "Runtime initialized in degraded catalog mode: %s"
+       (Runtime.startup_degradation_to_string degradation)
+   | Error reason ->
+     Runtime.enter_setup_required ~reason ();
+     Log.Server.warn "%s Owner-authenticated settings remain available."
+       (Runtime_startup_state.message reason));
+  (match runtime_config_observation with
+   | Error _ -> ()
+   | Ok runtime_config_observation ->
   (match
      Server_skill_snapshot_runtime.refresh_from_observation
        ~base_path
@@ -1102,7 +1125,7 @@ let initialize_owner_state_blocking
         Log.Server.error
           "Skill snapshot config unreadable at boot: snapshot_revision=%s"
           (Skill_catalog_snapshot.snapshot_revision skill_snapshot
-           |> Skill_catalog_snapshot.snapshot_revision_to_string)));
+           |> Skill_catalog_snapshot.snapshot_revision_to_string))));
   (* masc#28404. Boot refuses only over runtimes something actually routes to,
      which is right — an unassigned runtime is not a reason to stay down. But
      the blocked ones then started silently, and the answer to "why can I not
@@ -1115,9 +1138,14 @@ let initialize_owner_state_blocking
         runtime.id
         reason)
     (Runtime.keeper_dispatch_blocked (Runtime.get_runtimes ()));
-  configure_exact_output_registry
-    ~config_root:(Filename.dirname runtime_config_path)
-    ();
+  (match runtime_initialization, runtime_config_path with
+   | Ok _, Some path ->
+     (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
+      | Env_config_core.Config_error _ ->
+        Runtime.enter_setup_required ~reason:Runtime_startup_state.Exact_output_unavailable ();
+        Log.Server.warn "%s Owner-authenticated settings remain available."
+          (Runtime_startup_state.message Exact_output_unavailable))
+   | Error _, _ | Ok _, None -> ());
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;
@@ -1469,8 +1497,10 @@ let start_post_ready_owner_lanes
   (* Keep the transport-neutral post-readiness order in one place. Both HTTP
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
-  start_completion_authority ~sw ~clock state;
-  start_goal_verifier ~sw state;
+  if not (Runtime_startup_state.requires_setup ()) then (
+    start_completion_authority ~sw ~clock state;
+    start_goal_verifier ~sw state);
+
   start_microvm_guest_maintenance ~sw
     ~sweep:(fun () -> startup_sweep_microvm_guests state);
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state

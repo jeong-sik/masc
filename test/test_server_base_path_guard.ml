@@ -2,6 +2,11 @@ open Alcotest
 
 let getenv_none _ = None
 
+(* The existing cases are about the cli/env/implicit axis. Left to the real
+   reader they would answer differently on a machine where `masc setup` has
+   recorded a workspace, so they say here that there is no record. *)
+let no_record () = None
+
 let getenv_base value name =
   if String.equal name "MASC_BASE_PATH" then Some value else None
 
@@ -27,6 +32,7 @@ let test_implicit_default_ignores_spoofed_resolution_env () =
   with_env "MASC_BASE_PATH_RESOLUTION_SOURCE" (Some "explicit_cli") @@ fun () ->
   let resolved =
     Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
+      ~persisted_default:no_record
       ~cli_base_path:None ~default_base_path ()
   in
   check_source "source" "implicit_base_path" resolved.resolution_source;
@@ -36,7 +42,7 @@ let test_implicit_default_ignores_spoofed_resolution_env () =
 
 let test_cli_source_wins_over_env () =
   let resolved =
-    Server_base_path_guard.resolve_startup_base_path
+    Server_base_path_guard.resolve_startup_base_path ~persisted_default:no_record
       ~getenv:(getenv_base "/tmp/from-env")
       ~cli_base_path:(Some "/tmp/from-cli")
       ~default_base_path ()
@@ -46,7 +52,7 @@ let test_cli_source_wins_over_env () =
 
 let test_env_source_without_cli () =
   let resolved =
-    Server_base_path_guard.resolve_startup_base_path
+    Server_base_path_guard.resolve_startup_base_path ~persisted_default:no_record
       ~getenv:(getenv_base "/tmp/from-env")
       ~cli_base_path:None ~default_base_path ()
   in
@@ -73,6 +79,7 @@ let test_explicit_source_checkout_is_allowed () =
   Unix.mkdir (Filename.concat dir ".git") 0o755;
   let resolved =
     Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
+      ~persisted_default:no_record
       ~cli_base_path:(Some dir) ~default_base_path ()
   in
   match Server_base_path_guard.enforce resolved with
@@ -84,6 +91,7 @@ let test_plain_workspace_allowed () =
   with_temp_dir "masc-workspace-" @@ fun dir ->
   let resolved =
     Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
+      ~persisted_default:no_record
       ~cli_base_path:(Some dir) ~default_base_path ()
   in
   match Server_base_path_guard.enforce resolved with
@@ -116,6 +124,52 @@ let test_canonicalize_existing_retains_failure () =
   | Ok canonical ->
     failf "missing BasePath unexpectedly resolved to %s" canonical
 
+(* The recorded workspace. #35040's first attempt made the reader answer with
+   it and stopped there, and `masc start` with no flag and no env still exited
+   1: the guard refuses whatever the implicit default returns, wherever the
+   value came from. So the source has to be its own case, and it has to be one
+   `enforce` accepts. *)
+let recorded () = Some "/tmp/masc-recorded"
+
+let test_a_recorded_default_is_accepted () =
+  let resolved =
+    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
+      ~persisted_default:recorded ~cli_base_path:None ~default_base_path ()
+  in
+  check string "the recorded path is used" "/tmp/masc-recorded" resolved.raw_base_path;
+  check_source "source" "persisted_default" resolved.resolution_source;
+  match Server_base_path_guard.enforce resolved with
+  | Ok () -> ()
+  | Error (Server_base_path_guard.Implicit_base_path _) ->
+    fail "a recorded workspace was named on an earlier command line, not guessed"
+
+let test_env_and_cli_win_over_a_recorded_default () =
+  let from_env =
+    Server_base_path_guard.resolve_startup_base_path
+      ~getenv:(getenv_base "/tmp/masc-env") ~persisted_default:recorded
+      ~cli_base_path:None ~default_base_path ()
+  in
+  check string "env value" "/tmp/masc-env" from_env.raw_base_path;
+  check_source "env source" "explicit_env" from_env.resolution_source;
+  let from_cli =
+    Server_base_path_guard.resolve_startup_base_path
+      ~getenv:(getenv_base "/tmp/masc-env") ~persisted_default:recorded
+      ~cli_base_path:(Some "/tmp/masc-cli") ~default_base_path ()
+  in
+  check string "cli value" "/tmp/masc-cli" from_cli.raw_base_path;
+  check_source "cli source" "explicit_cli" from_cli.resolution_source
+
+let test_a_blank_record_falls_through_to_implicit () =
+  let resolved =
+    Server_base_path_guard.resolve_startup_base_path ~getenv:getenv_none
+      ~persisted_default:(fun () -> Some "   ") ~cli_base_path:None
+      ~default_base_path ()
+  in
+  check_source "source" "implicit_base_path" resolved.resolution_source;
+  match Server_base_path_guard.enforce resolved with
+  | Error (Server_base_path_guard.Implicit_base_path _) -> ()
+  | Ok () -> fail "a blank record names no workspace"
+
 let () =
   Alcotest.run "Server_base_path_guard"
     [ ( "resolution"
@@ -128,6 +182,12 @@ let () =
       , [ test_case "explicit source checkout is allowed" `Quick
             test_explicit_source_checkout_is_allowed
         ; test_case "plain workspace allowed" `Quick test_plain_workspace_allowed
+        ; test_case "a recorded default is accepted" `Quick
+            test_a_recorded_default_is_accepted
+        ; test_case "env and cli win over a recorded default" `Quick
+            test_env_and_cli_win_over_a_recorded_default
+        ; test_case "a blank record falls through to implicit" `Quick
+            test_a_blank_record_falls_through_to_implicit
         ] )
     ; ( "canonicalization"
       , [ test_case "existing symlink target is frozen" `Quick

@@ -35,7 +35,7 @@ Three things it does:
 > **Status.** Pre-1.0, for local, trusted environments. Not a production
 > service and not a security boundary: the Gate and the sandboxes constrain
 > specific operations, but they do not protect an unattended agent from every
-> unsafe action. The installation contract targets 0.35.3; check
+> unsafe action. The installation contract targets 0.35.5; check
 > [GitHub Releases](https://github.com/jeong-sik/masc/releases) for available binaries.
 
 ![MASC terminal UI](docs/screenshots/tui/2026-09-04/surfaces/01-overview.png)
@@ -50,7 +50,7 @@ and the capture metadata are in the same directory.
 |---|---|---|
 | **TUI** | Watch and steer Keepers, answer the Gate, read tool calls, browse code, diffs, blame, and memory | `masc` on a terminal, or `masc-tui` by name |
 | **MCP** | Your own agent joins the workspace: claims a task, posts to the board, records evidence | Any MCP client at `http://127.0.0.1:8935/mcp` with a bearer |
-| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.35.3 installer includes a binary-matched bundle |
+| **Dashboard** | The same state in a browser | `/dashboard/` on the same server; the 0.35.5 installer includes a binary-matched bundle |
 
 All three read and write the same `.masc/`. New operator work lands in the
 TUI. The dashboard is kept building and truthful, but it is not where the
@@ -58,7 +58,7 @@ product grows (see [Dashboard](#dashboard)).
 
 ## Start here
 
-### First conversation: 0.35.3
+### First conversation: 0.35.5
 
 First sign in to your model CLI or export its API credential, and start Docker.
 In the installer, use **↑/↓, Space and Enter** to select one or more models, then
@@ -78,13 +78,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.3).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.5).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.35.3 (check tag availability on GitHub Releases).
+> Installation target: v0.35.8 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.3
+TAG=v0.35.8
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"
@@ -95,7 +95,7 @@ Optional inspection: run `less /tmp/masc-install.sh` before installation. Press 
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
 The installer requires and verifies `SHA256SUMS`, installs the release executables,
-and runs a one-time wizard (`--no-wizard` skips it). The 0.35.3 wizard
+and runs a one-time wizard (`--no-wizard` skips it). The 0.35.5 wizard
 offers multiple model connections with arrow keys and checkboxes. It verifies each
 selected model with a real response and harmless tool call, then binds imp to the
 selected primary and fallback order while preserving other connections.
@@ -104,7 +104,7 @@ reads those variables from its startup environment. `--provider <id>` selects
 an existing provider without prompting. For the default `imp`, `masc setup`
 prepares the Docker image after you install and start Docker.
 
-Release **0.35.3** includes Intel macOS, `masc-browser-host`, and the matched
+Release **0.35.5** includes Intel macOS, `masc-browser-host`, and the matched
 dashboard, and preserves configuration during `--force` reinstalls.
 The macOS installer includes its Python and shared libraries, so MASC does not require Homebrew. Apple Silicon requires macOS 14 or later; Intel requires macOS 15 or later.
 
@@ -157,7 +157,7 @@ and then needs `OLLAMA_CLOUD_API_KEY` in the shell.
 | `masc` | On an interactive terminal: opens the TUI, starting the server first when nothing answers the port. Anywhere else (a pipe, a unit file, a container, CI): runs the server |
 | `masc start --base-path <dir>` | Runs the server regardless of the terminal |
 | `masc-tui --base-path <dir>` | Opens the TUI by name |
-| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.3) |
+| `masc setup --base-path <dir>` | Prepares Docker, starts the existing `imp`, and opens the TUI (0.35.5) |
 | `masc init --base-path <dir>` | Seeds `.masc/config/` from the assets embedded in the binary, including one Keeper, `imp`, with `activation_mode = "manual"` |
 
 `--base-path` is the directory that holds `.masc`, not `.masc` itself. It
@@ -436,7 +436,7 @@ says which prompt file each reader gets.
 
 ## Dashboard
 
-The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.35.3 release
+The server serves a TypeScript/Preact SPA at `/dashboard/`. The 0.35.5 release
 installer installs the matching dashboard beneath the binary prefix and verifies
 its source commit and file checksums. No Node.js, source checkout or frontend build
 is needed to use it. An already running server keeps its original bundle until

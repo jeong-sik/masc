@@ -218,7 +218,8 @@ let prepare_server ~base_path ~port ~owned =
         | Ok () -> ()
         | Error `Timeout -> fail "Server is not ready yet; inspect its logs and rerun setup.")))
 
-let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~start_keeper ~open_tui =
+let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login
+    ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend =
   let owned = ref None in
   Fun.protect
     ~finally:(fun () ->
@@ -233,13 +234,37 @@ let run ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~st
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in
         Printf.printf "Preparing imp in %s\n%!" base_path;
-        require_ok "Model connection" validate_runtime;
-        (* A reused port is checked before credentials or Keeper state change. *)
-        require_ok "Docker (install and start Docker Desktop on macOS, or Docker Engine on Linux)"
-          (fun () -> run_process ["docker"; "info"; "--format"; "{{.OSType}}"]);
-        require_ok "Sandbox image preparation" prepare_image;
+        require_ok "Model validation" validate_runtime;
+        let module Sandbox = Masc.Sandbox_readiness in
+        let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
+        let original = In_channel.with_open_text path In_channel.input_all in
+        let host = Sandbox.detect_host ~run:Sandbox.system_runner in
+        let selection = match Sandbox.selection_of_contents ~host ~path ~contents:original
+          ~profile:sandbox_profile ~microvm_backend ~network_mode with
+          | Ok selection -> selection | Error reason -> fail reason in
+        let staged = match sandbox_profile, microvm_backend, network_mode with
+          | None, None, None -> original
+          | _ -> (match Sandbox.stage_contents ~path ~contents:original selection with
+            | Ok staged -> staged | Error reason -> fail reason) in
+        let readiness = Sandbox.probe ~host ~run:Sandbox.system_runner
+          ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+          ~require_userns:(Env_config_sandbox.Hardening.require_userns ()) selection.backend in
+        (match readiness.state with
+         | Sandbox.Service_ready ->
+           Printf.printf "Sandbox: %s — %s\n%!" (Sandbox.backend_id selection.backend)
+             (Sandbox.state_message readiness.state)
+         | Sandbox.Needs_configuration _ when selection.backend = Sandbox.Remote_ssh
+             && String.equal original staged ->
+           print_endline "Remote SSH endpoint execution is verified by the server; no local guest readiness is claimed."
+         | state -> fail (Sandbox.state_message state));
+        (match selection.backend with
+         | Sandbox.Remote_ssh -> ()
+         | _ -> require_ok "Sandbox image preparation" (fun () -> prepare_image ~selection));
         prepare_server ~base_path ~port ~owned;
         require_ok "Local operator sign-in" login;
+        require_ok "Sandbox selection commit"
+          (fun () -> match Sandbox.commit_staged ~path ~original ~staged with
+            | Ok () -> 0 | Error reason -> prerr_endline reason; 1);
         require_ok "Starting imp" start_keeper;
         Printf.printf "\nimp is started. Send your first message to begin the conversation.\n\
           Keepers: select imp, open its chat, and say hello. Then ask it to create a Board post\n\

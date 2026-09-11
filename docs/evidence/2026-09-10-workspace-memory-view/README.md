@@ -13,10 +13,12 @@ active curator lane.
 
 Focused component validation: 11 tests across the workspace context and Lab
 suites pass, including stale response isolation, failed read retry and selected
-Keeper disappearance. No local build. CI-built browser verification is recorded below. Run `scripts/verify-workspace-memory-preview.mjs` with a downloaded CI
-preview, its PR head, a read-only backend URL and an evidence output directory.
-The browser scenario uses synthetic workspace-memory HTTP data while rendering
-the real Lab page, and blocks HTTP writes and WebSockets.
+Keeper disappearance. No local build. CI-built browser verification is recorded
+below. Run `scripts/verify-workspace-memory-preview.mjs` with a downloaded CI
+preview, its PR head and an evidence output directory. The browser scenario uses
+an isolated synthetic workspace-memory HTTP fixture while rendering the real Lab
+page. Browser-context interception blocks every request outside the preview
+assets and fixture, as well as HTTP writes and WebSockets; popups are closed.
 
 ## Browser evidence
 

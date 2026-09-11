@@ -205,7 +205,11 @@ let checkpoint_tool_result_to_json
             [ "error_class", Types.tool_error_class_to_yojson error_class ]
           | None -> [])
     in
-    `Assoc (fields @ provenance)
+    `Assoc
+      (fields @ provenance
+       @ match content_override with
+         | None -> []
+         | Some _ -> [ "text_content", `String content ])
   | non_object ->
     invalid_arg
       (Printf.sprintf
@@ -348,6 +352,17 @@ let rec content_block_of_json_strict json =
            ; content_blocks = _
            }) ->
       let* fields = tool_result_fields json in
+      let* text_content = unique_optional_field ~field:"text_content" fields in
+      let* content =
+        match text_content with
+        | None -> Ok content
+        | Some (`String text) -> Ok text
+        | Some _ ->
+          Error
+            (Error.Serialization
+               (JsonParseError
+                  { detail = "Checkpoint ToolResult text_content must be a string" }))
+      in
       let* content_blocks =
         match List.assoc_opt "content" fields with
         | Some (`String _) -> Ok None

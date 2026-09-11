@@ -179,7 +179,7 @@ type turn_params_resolution_error =
       }
 
 let tool_result_of_projection (proj : Llm_provider.Canonical_tool.provider_tool_result) =
-  Types.tool_result_of_outcome ~content:proj.content proj.outcome
+  Types.tool_result_of_outcome ?content_blocks:proj.content_blocks ~content:proj.content proj.outcome
 ;;
 
 let last_tool_results_from messages =
@@ -244,7 +244,7 @@ let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
     | [], [] -> Ok (List.rev updates_rev, List.rev messages_rev)
     | ( ToolUse { name; input; _ } :: tool_uses
       , (result : Agent_tools.tool_execution_result) :: results ) ->
-      let output = Types.tool_result_of_outcome ~content:result.content result.outcome in
+      let output = Types.tool_result_of_outcome ?content_blocks:result.content_blocks ~content:result.content result.outcome in
       let injection =
         try Ok (injector ~tool_name:name ~input ~output) with
         | exn ->
@@ -298,7 +298,7 @@ let make_tool_results results =
          ; content = result.content
          ; outcome = result.outcome
          ; json = None
-         ; content_blocks = None
+         ; content_blocks = result.content_blocks
          })
     results
 ;;
@@ -323,6 +323,7 @@ let[@warning "-32"] mock_result ?(is_error = false) ~id content : Agent_tools.to
   ; tool_name = "test"
   ; input = `Null
   ; content
+  ; content_blocks = None
   ; outcome =
       (if is_error
        then

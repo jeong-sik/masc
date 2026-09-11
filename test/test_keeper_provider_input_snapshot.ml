@@ -60,7 +60,7 @@ let tool =
     ~name:"masc_status"
     ~description:"read current status"
     ~parameters:[]
-    (fun _ -> Ok { Agent_core.Types.content = "ok"; _meta = None })
+    (fun _ -> Ok { Agent_core.Types.content = "ok"; content_blocks = None; _meta = None })
 ;;
 
 let write config absolute_turn =

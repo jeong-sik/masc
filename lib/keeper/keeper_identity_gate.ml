@@ -170,7 +170,7 @@ let agent_tool
          Ok
            { Agent_core.Types.content =
                Yojson.Safe.to_string (Keeper_gate_deferred_payload.data payload)
-           ; _meta = None
+           ; content_blocks = None; _meta = None
            }
        | Keeper_gate.Unavailable reason ->
          Error

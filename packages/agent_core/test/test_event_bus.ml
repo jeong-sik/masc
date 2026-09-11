@@ -277,7 +277,7 @@ let test_filter_tools_only () =
           { invocation = invocation ()
           ; agent_name = "a"
           ; tool_name = "calc"
-          ; output = Ok { Types.content = "42"; _meta = None }
+          ; output = Ok { Types.content = "42"; content_blocks = None; _meta = None }
           }));
   Event_bus.publish bus (ev (TurnCompleted { agent_name = "a"; turn = 0 }));
   let events = Event_bus.drain sub in
@@ -422,7 +422,7 @@ let test_multiple_event_types () =
           { invocation = invocation ()
           ; agent_name = "a"
           ; tool_name = "f"
-          ; output = Ok { Types.content = "ok"; _meta = None }
+          ; output = Ok { Types.content = "ok"; content_blocks = None; _meta = None }
           }));
   Event_bus.publish bus (ev (TurnCompleted { agent_name = "a"; turn = 0 }));
   Event_bus.publish
@@ -620,7 +620,7 @@ let test_on_tool_error_hook_silent_on_success () =
   let bus = Event_bus.create () in
   let tool =
     Tool.create ~name:"ok" ~description:"" ~parameters:[] (fun _ ->
-      Ok { Types.content = "done"; _meta = None })
+      Ok { Types.content = "done"; content_blocks = None; _meta = None })
   in
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -738,7 +738,7 @@ let test_unknown_tool_reports_available_tools_and_retries () =
   let bus = Event_bus.create () in
   let read_file =
     Tool.create ~name:"ReadFile" ~description:"Read a file" ~parameters:[] (fun _ ->
-      Ok { Types.content = "unused"; _meta = None })
+      Ok { Types.content = "unused"; content_blocks = None; _meta = None })
   in
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -844,7 +844,7 @@ let test_execution_rejects_invalid_input_unchanged () =
         ]
       (fun input ->
          handler_input := input;
-         Ok { Types.content = "ok"; _meta = None })
+         Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -889,7 +889,7 @@ let test_on_error_silent_on_successful_dispatch () =
   let bus = Event_bus.create () in
   let tool =
     Tool.create ~name:"ok" ~description:"" ~parameters:[] (fun _ ->
-      Ok { Types.content = "done"; _meta = None })
+      Ok { Types.content = "done"; content_blocks = None; _meta = None })
   in
   let schedule : Tool_contract.schedule =
     { planned_index = 0

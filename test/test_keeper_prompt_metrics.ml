@@ -271,7 +271,7 @@ let test_ctx_composition_splits_final_provider_input_bytes () =
       ~name:"probe_tool"
       ~description:"probe tool"
       ~parameters:[]
-      (fun _input -> Ok { content = "ok"; _meta = None })
+      (fun _input -> Ok { content = "ok"; content_blocks = None; _meta = None })
   in
   let segments =
     KAPM.build_ctx_segments
@@ -490,7 +490,7 @@ let test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it () =
       ~name
       ~description:("probe " ^ name)
       ~parameters:[]
-      (fun _input -> Ok { content = "ok"; _meta = None })
+      (fun _input -> Ok { content = "ok"; content_blocks = None; _meta = None })
   in
   let segments =
     KAPM.build_ctx_segments
@@ -516,7 +516,7 @@ let test_tool_schema_fingerprint_follows_the_order_sent () =
       ~name
       ~description:("probe " ^ name)
       ~parameters:[]
-      (fun _input -> Ok { content = "ok"; _meta = None })
+      (fun _input -> Ok { content = "ok"; content_blocks = None; _meta = None })
   in
   let fingerprint_of tools =
     KAPM.build_ctx_segments ~prompt_blocks:[] ~tools ~input_messages:[]

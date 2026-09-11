@@ -81,7 +81,7 @@ let test_execute_with_prompt () =
     Agent_tool.create_simple ~name:"echo" ~description:"Echo agent" echo_runner
   in
   match Tool.execute tool (`Assoc [ "prompt", `String "test input" ]) with
-  | Ok { content; _meta = _ } -> Alcotest.(check string) "echo" "echo: test input" content
+  | Ok { content; _ } -> Alcotest.(check string) "echo" "echo: test input" content
   | Error { message; _ } -> Alcotest.failf "error: %s" message
 ;;
 
@@ -115,7 +115,7 @@ let test_execute_untyped_malformed_input_errors () =
        "missing prompt surfaced"
        "Agent_tool input requires a prompt field"
        message
-   | Ok { content; _meta = _ } ->
+   | Ok { content; _ } ->
      Alcotest.failf "expected error (missing prompt), got: %s" content);
   match Tool.execute tool (`Assoc [ "prompt", `Int 5 ]) with
   | Error { message; _ } ->
@@ -123,7 +123,7 @@ let test_execute_untyped_malformed_input_errors () =
       "non-string prompt surfaced"
       "Agent_tool prompt must be a string"
       message
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     Alcotest.failf "expected error (non-string prompt), got: %s" content
 ;;
 
@@ -140,7 +140,7 @@ let test_output_summarizer () =
       }
   in
   match Tool.execute tool (`Assoc [ "prompt", `String "q" ]) with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     Alcotest.(check string) "truncated" "this is a ..." content
   | Error { message; _ } -> Alcotest.failf "error: %s" message
 ;;
@@ -175,7 +175,7 @@ let test_multi_content () =
   in
   let tool = Agent_tool.create_simple ~name:"multi" ~description:"d" runner in
   match Tool.execute tool (`Assoc [ "prompt", `String "test" ]) with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     Alcotest.(check string) "joined" "line 1\nline 2\nline 3" content
   | Error { message; _ } -> Alcotest.failf "error: %s" message
 ;;
@@ -205,7 +205,7 @@ let test_typed_child_output_json () =
   let tool = Agent_tool.create_typed (typed_config structured_runner) in
   match Tool.execute tool (`Assoc [ "prompt", `String "hello" ]) with
   | Error { message; _ } -> Alcotest.failf "error: %s" message
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     Alcotest.(check string)
       "type"
@@ -232,7 +232,7 @@ let test_typed_constructor_returns_canonical_tool () =
   let tool = Agent_tool.create_typed (typed_config structured_runner) in
   match Tool.execute tool (`Assoc [ "prompt", `String "bridge" ]) with
   | Error { message; _ } -> Alcotest.failf "error: %s" message
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     let json = Yojson.Safe.from_string content in
     Alcotest.(check string) "text" "child: bridge" (json |> member "text" |> to_string)
 ;;

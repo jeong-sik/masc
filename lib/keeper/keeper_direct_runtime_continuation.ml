@@ -47,10 +47,42 @@ let consume ~base_path ~keeper_name ~operation_id admission =
   Owner.resume_direct_runtime_retry ~base_path ~keeper_name ~operation_id
     ~observed:admission.observed |> owner_result
 
+(* A deferred lane whose failure was the provider throttling must not be
+   re-claimed the instant the child exits — that re-issues the same rejected
+   call in a tight loop (the chat-lane retry storm of the 2026-09-10 drain
+   investigation). The chat lane sleeps its retry by the same capped backoff
+   rule the heartbeat lane applies to its cycle, with one difference: the
+   chat lane has no cycle cadence, so it passes 0 as the floor and the
+   provider's Retry-After hint is authoritative (the shared 60s default still
+   guards a missing or garbage hint). Other failure routes stay immediately
+   eligible because re-running them is how they recover. *)
+let retry_not_before ~now (failure : Agent_core.Error.t) =
+  match
+    Keeper_runtime_failure_route.route_of_error
+      ~boundary:Keeper_runtime_failure_route.Agent_core_execution failure
+  with
+  | Keeper_runtime_failure_route.Retry_after_observed
+      { retry_class =
+          ( Keeper_runtime_failure_route.Rate_limited
+          | Keeper_runtime_failure_route.Hard_quota
+          | Keeper_runtime_failure_route.Capacity_backpressure )
+      ; retry_after
+      } ->
+    Some
+      (now
+       +. Keeper_runtime_failure_route.retry_backoff_sec
+            ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+            ~retry_after_hint:retry_after
+            ~cadence_sec:0.0)
+  | Keeper_runtime_failure_route.Retry_after_observed _
+  | Keeper_runtime_failure_route.Rotate_now _
+  | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> None
+
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
     (lane : Keeper_turn_driver.deferred_runtime_lane) =
   let* _, checkpoint = load_owned ~operation_id ~session_dir ~session_id in
-  let* continuation = Semantic.runtime_retry ~checkpoint ~assignment_id:lane.assignment_id
+  let not_before = retry_not_before ~now:(Time_compat.now ()) lane.failure in
+  let* continuation = Semantic.runtime_retry ~not_before ~checkpoint ~assignment_id:lane.assignment_id
     ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id
     ~later_runtime_ids:lane.later_runtime_ids in
   let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner_result in

@@ -173,6 +173,11 @@ let run (ctx : ctx)
        None
    in
    let deferred_runtime_lane_ref = ref None in
+   (* Last candidate to error, as the runtime walk names it. Written on every
+      failed attempt so the final value is the candidate the turn ends on.
+      Mirrors [deferred_runtime_lane_ref]: the walk runs below this scope and
+      only the callback crosses back. *)
+   let last_dispatched_runtime_id_ref = ref None in
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -230,6 +235,7 @@ let run (ctx : ctx)
                  ~task_skill_selection
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
+                 ~answered_ask_inputs:(Keeper_unified_prompt.answered_ask_inputs observation)
                  ~history_user_source:"world_state_prompt"
                  (* This is an ordinary durable conversation turn. The current
                     observation remains ephemeral dynamic context, while the
@@ -255,6 +261,9 @@ let run (ctx : ctx)
                    (if is_retry then None else deferred_runtime_lane)
                  ~on_runtime_retry_deferred:
                    (fun hint -> deferred_runtime_lane_ref := Some hint)
+                 ~on_runtime_attempt_failed:
+                   (fun ~runtime_id ->
+                      last_dispatched_runtime_id_ref := Some runtime_id)
                  ?on_deferred_runtime_consumed:
                    (if is_retry then None else on_deferred_runtime_consumed)
                  ~temperature:execution.temperature
@@ -360,6 +369,11 @@ let run (ctx : ctx)
         | Some hint ->
           { turn_state with deferred_runtime_lane = Some hint }
         | None -> turn_state
+      in
+      let turn_state =
+        { turn_state with
+          last_dispatched_runtime_id = !last_dispatched_runtime_id_ref
+        }
       in
       let checkpoint_observed =
         not

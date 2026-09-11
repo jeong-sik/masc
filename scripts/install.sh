@@ -4,7 +4,6 @@
 # Usage:
 #   TAG=vX.Y.Z
 #   curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
-#   less /tmp/masc-install.sh
 #   bash /tmp/masc-install.sh --version "$TAG"
 #
 # Flags:
@@ -21,7 +20,9 @@
 #                      an explicit --base-path. External runtime installations remain.
 #   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #   --wizard           Always run the first-time provider setup wizard
-#   --no-wizard        Skip the provider setup wizard
+#   --no-wizard        Skip interactive setup and shell PATH prompts
+#   --shell-path SHELL Enable PATH in zsh or bash startup files (or none);
+#                      default: ask in an interactive wizard
 #   --no-guest-shim    Do not place the guest exec shim (masc-exec-shim) and its
 #                      sha256 sidecar under <base-path>/.masc/microvm/shim; a
 #                      host that boots no microvm keeper needs neither
@@ -75,10 +76,10 @@ GUEST_SHIM=1
 ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 WIZARD="${MASC_WIZARD:-auto}"
 WIZARD_PROVIDER=""
+SHELL_PATH_MODE=auto
 # Whether the config root was already here before this run. This is what makes
 # the setup wizard a first-time step rather than one that runs on every install.
 CONFIG_PREEXISTING=0
-RUN_SETUP_JOURNEY=0
 TEAM="${MASC_TEAM_PRESET:-}"
 WIZARD_SANDBOX="${MASC_SANDBOX_PROFILE:-}"
 
@@ -518,7 +519,7 @@ prompt_provider() {
     done
     printf >&2 '> '
     local choice
-    if ! read -r choice; then
+    if ! read_terminal_line choice; then
       warn "input closed; provider selection cancelled"
       return 1
     fi
@@ -665,23 +666,34 @@ ping_provider() {
   return 0
 }
 
-finish_setup_journey() {
-  [ "$RUN_SETUP_JOURNEY" -eq 1 ] || return 0
+run_selection_wizard() {
+  local base_path="$1" helper receipt
   if [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would open the installed workspace, model and sandbox setup journey"
+    log "[dry-run] would offer multiple connections and verify selected models before saving"
     return 0
   fi
-  if ! "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2; then
-    warn "MASC is installed; imp preparation is incomplete. Run masc setup to resume."
-    return 1
-  fi
+  helper=$(mktemp)
+  receipt=$(mktemp)
+  PARTIAL_FILES+=("$helper" "$receipt")
+  fetch_bundle_asset install-runtime-setup.py "$helper"
+  with_terminal_input python3 "$helper" --binary "$DEST" --base-path "$base_path" --wizard \
+    --discovery-timeout "$MASC_INSTALL_AUTH_PING_TIMEOUT_S" > "$receipt" \
+    || die "model setup stopped; existing connections were preserved"
+  python3 - "$receipt" <<'PYRECEIPT'
+import json, sys
+result = json.load(open(sys.argv[1]))
+if result.get('readiness') == 'verified':
+    print('Selected model connections passed response and tool checks. Run masc setup to prepare imp and its sandbox.')
+else:
+    print('Model setup deferred. Run the installer with --wizard when your connection is ready.')
+PYRECEIPT
 }
 
 run_wizard() {
   local base_path="$1"
   local provider_idx key source
   if [ -z "$WIZARD_PROVIDER" ] && is_tty; then
-    RUN_SETUP_JOURNEY=1
+    run_selection_wizard "$base_path"
     return
   fi
   load_provider_catalog "$base_path"
@@ -779,7 +791,7 @@ run_wizard() {
   echo >&2
   printf '? Test connectivity to provider? [Y/n] ' >&2
   local answer
-  read -r answer || true
+  read_terminal_line answer || true
   case "$answer" in
     [Nn]*) ;;
     *)
@@ -792,7 +804,7 @@ run_wizard() {
           echo >&2
           printf '? Connectivity check failed. [retry/skip/abort] ' >&2
           local action
-          read -r action || true
+          read_terminal_line action || true
           case "$action" in
             retry|Retry|r) run_wizard "$base_path" ;;
             skip|Skip|s) ;;
@@ -838,7 +850,15 @@ maybe_run_wizard() {
 }
 
 # Prompts use stderr; stdout is captured by $(prompt_provider).
-is_tty() { [ -t 0 ] && [ -t 2 ]; }
+is_tty() { [ -t 2 ] && { [ -t 0 ] || ( : </dev/tty ) 2>/dev/null; }; }
+
+read_terminal_line() {
+  if [ -t 0 ]; then IFS= read -r "$1"; else IFS= read -r "$1" </dev/tty; fi
+}
+
+with_terminal_input() {
+  if [ -t 0 ] || ! is_tty; then "$@"; else "$@" </dev/tty; fi
+}
 
 choose_install_base_path() {
   [ -z "$BASE_PATH" ] || return 0
@@ -847,7 +867,7 @@ choose_install_base_path() {
     [ -d "$PWD/.masc/config" ] || suggested="$HOME"
     printf '\nMASC stores configuration, Keepers and workspace data in <workspace>/.masc.\n' >&2
     printf '? Workspace directory [%s]: ' "$suggested" >&2
-    IFS= read -r answer || die "workspace selection cancelled"
+    read_terminal_line answer || die "workspace selection cancelled"
     BASE_PATH="${answer:-$suggested}"
   else
     BASE_PATH="$suggested"
@@ -869,6 +889,132 @@ require_flag_value() {
   [ -n "$value" ] || die "$flag requires a value"
 }
 
+configure_shell_path() {
+  local mode="$SHELL_PATH_MODE" answer suggested
+  if [ "$mode" = auto ]; then
+    if [ "$WIZARD" = 0 ] || ! is_tty; then
+      log "For new terminals, enable PATH with --shell-path zsh or --shell-path bash."
+      return 0
+    fi
+    suggested=3
+    case "${SHELL:-}" in */zsh|zsh) suggested=1 ;; */bash|bash) suggested=2 ;; esac
+    printf '\nMake masc available in new terminals?\n  1) zsh\n  2) bash\n  3) Leave shell files unchanged\nChoice [%s]: ' "$suggested" >&2
+    read_terminal_line answer || { warn "shell PATH setup deferred"; return 0; }
+    case "${answer:-$suggested}" in 1) mode=zsh ;; 2) mode=bash ;; 3) mode=none ;; *) warn "shell PATH setup deferred: select zsh or bash with --shell-path"; return 0 ;; esac
+  fi
+  [ "$mode" != none ] || return 0
+  [ "$DRY_RUN" -eq 0 ] || { log "[dry-run] would enable masc in $mode startup files"; return 0; }
+  if python3 - "$HOME" "${ZDOTDIR:-}" "$PREFIX" "$mode" <<'PYSHELLPATH'
+import fcntl, os, shlex, stat, sys, tempfile
+from pathlib import Path
+home, zdotdir, prefix, shell = sys.argv[1:]
+start, end = b'# >>> MASC PATH >>>\n', b'# <<< MASC PATH <<<\n'
+
+def owned_read(path):
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return None, b''
+    if not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid() or before.st_nlink != 1:
+        raise ValueError('startup file must be an owned regular file, not a link')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        observed = os.fstat(fd)
+        if (observed.st_dev, observed.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError('startup file changed')
+        with os.fdopen(fd, 'rb', closefd=False) as handle:
+            content = handle.read()
+        after = os.fstat(fd)
+        if (after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (observed.st_size, observed.st_mtime_ns, observed.st_ctime_ns):
+            raise ValueError('startup file changed')
+        return after, content
+    finally:
+        os.close(fd)
+
+def sync_parent(path):
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+def temporary(path, content, mode, suffix):
+    fd, name = tempfile.mkstemp(prefix='.' + path.name + suffix, dir=path.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        os.unlink(name)
+        raise
+    return Path(name)
+
+try:
+    if any(c in prefix for c in ('\n', '\r', ':')) or not os.path.isabs(prefix):
+        raise ValueError('installation directory cannot be represented as one PATH entry')
+    root = Path(zdotdir or home) if shell == 'zsh' else Path(home)
+    if not root.is_absolute() or not root.is_dir():
+        raise ValueError('shell configuration directory must already exist')
+    root = root.resolve(strict=True)
+    parent_stat = root.stat()
+    if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o022:
+        raise ValueError('shell configuration directory must be privately writable')
+    if shell == 'zsh':
+        targets = [root/'.zshrc']
+    else:
+        login = next((root/name for name in ('.bash_profile', '.bash_login', '.profile')
+                      if os.path.lexists(root/name)), root/'.bash_profile')
+        targets = [root/'.bashrc', login]
+    # Quote the entire literal PATH entry; never expand $(), backticks or quotes
+    # from an operator-selected installation directory when the shell starts.
+    literal = shlex.quote(prefix)
+    block = start + ('case ":$PATH:" in\n  *:' + literal + ':*) ;;\n  *) export PATH=' + literal + ':"$PATH" ;;\nesac\n').encode() + end
+    for path in targets:
+        lock_path = str(path) + '.masc-path.lock'
+        lock = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            lock_stat = os.fstat(lock)
+            if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_uid != os.geteuid() or lock_stat.st_nlink != 1:
+                raise ValueError('untrusted shell configuration lock')
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            before, old = owned_read(path)
+            if start in old or end in old:
+                if old.count(start) != 1 or old.count(end) != 1 or old.index(end) < old.index(start):
+                    raise ValueError('ambiguous existing MASC PATH block; existing file preserved')
+                first, last = old.index(start), old.index(end) + len(end)
+                new = old[:first] + block + old[last:]
+            else:
+                new = old + (b'\n' if old and not old.endswith(b'\n') else b'') + block
+            if new == old:
+                continue
+            backup = temporary(path, old, 0o600, '.masc-path-backup-') if before else None
+            if backup:
+                sync_parent(backup)
+            staged = temporary(path, new, stat.S_IMODE(before.st_mode) if before else 0o600, '.masc-path-stage-')
+            try:
+                after, observed = owned_read(path)
+                identity = lambda s: None if s is None else (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_mode, s.st_uid, s.st_nlink)
+                if identity(after) != identity(before) or observed != old:
+                    raise ValueError('startup file changed; backup retained')
+                os.replace(staged, path)
+                sync_parent(path)
+            finally:
+                if staged.exists():
+                    staged.unlink()
+            print('Enabled masc PATH in ' + str(path))
+            if backup:
+                print('Original shell file backup: ' + str(backup))
+        finally:
+            os.close(lock)
+except (OSError, ValueError):
+    print('Shell PATH setup did not finish. Existing backups were retained; inspect shell files before retrying.', file=sys.stderr)
+    sys.exit(1)
+PYSHELLPATH
+  then log "Open a new terminal to use masc."; else warn "MASC is installed; shell PATH setup needs attention."; fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --uninstall|--purge-data|--prefix|--base-path|--dry-run|-h|--help) ;;
@@ -887,6 +1033,10 @@ while [ $# -gt 0 ]; do
     --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     --wizard)      WIZARD=1; shift ;;
     --no-wizard)   WIZARD=0; shift ;;
+    --shell-path)
+      require_flag_value "$1" "${2-}"
+      case "$2" in zsh|bash|none) SHELL_PATH_MODE="$2" ;; *) die "--shell-path must be zsh, bash, or none" ;; esac
+      shift 2 ;;
     --no-guest-shim) GUEST_SHIM=0; shift ;;
     --provider)    require_flag_value "$1" "${2-}"; WIZARD_PROVIDER="$2"; shift 2 ;;
     --team)        require_flag_value "$1" "${2-}"; TEAM="$2"; shift 2 ;;
@@ -977,7 +1127,7 @@ fi
 
 choose_install_base_path
 
-# macOS uses a checksummed private runtime, before invoking any Python (the
+# Releases use a checksummed private runtime before invoking Python (the
 # system python3 may be a Command Line Tools installer stub).
 installer_python_ready() {
   "$1" -c 'import json, tarfile, sys; sys.exit(0 if sys.version_info >= (3, 8) else "Python 3.8 or newer is required")'
@@ -1023,6 +1173,14 @@ if [ "$(uname -s)" = Darwin ]; then
     else
       DRY_RUN_WITHOUT_PYTHON=1
     fi
+  fi
+fi
+
+if [ "$(uname -s)" = Linux ] && [ "$DRY_RUN" -eq 1 ]; then
+  log "[dry-run] would verify and install bundled Linux Python; no package-manager installation required"
+  candidate=$(command -v python3 || true)
+  if [ -z "$candidate" ] || ! installer_python_ready "$candidate" >/dev/null 2>&1; then
+    DRY_RUN_WITHOUT_PYTHON=1
   fi
 fi
 
@@ -1164,7 +1322,7 @@ fetch_release_checksums() {
 
 # Bootstrap only release-checksummed regular files into a fresh private tree.
 # Even --allow-unverified never authorizes executing an unchecked interpreter.
-if [ "$(uname -s)" = Darwin ] && [ "$DRY_RUN" -eq 0 ]; then
+if [ "$DRY_RUN" -eq 0 ]; then
   require tar
   fetch_release_checksums
   [ "$CHECKSUMS_AVAILABLE" -eq 1 ] || die "bundled Python requires release checksums"
@@ -1174,7 +1332,7 @@ if [ "$(uname -s)" = Darwin ] && [ "$DRY_RUN" -eq 0 ]; then
   RUNTIME_STAGE=$(mktemp -d)
   RUNTIME_ARCHIVE="$RUNTIME_STAGE/runtime.tar.gz"
   curl -fL --max-time "$MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S" --retry "$MASC_INSTALL_CURL_RETRIES" \
-    -o "$RUNTIME_ARCHIVE" "$RELEASE_BASE_URL/$VERSION/$runtime_asset" || die "could not download bundled macOS runtime"
+    -o "$RUNTIME_ARCHIVE" "$RELEASE_BASE_URL/$VERSION/$runtime_asset" || die "could not download bundled runtime"
   [ "$(sha256_file "$RUNTIME_ARCHIVE")" = "$runtime_expected" ] || die "bundled Python checksum differs"
   tar -tzf "$RUNTIME_ARCHIVE" > "$RUNTIME_STAGE/members" || die "invalid runtime archive"
   tar -tvzf "$RUNTIME_ARCHIVE" > "$RUNTIME_STAGE/types" || die "invalid runtime archive types"
@@ -1456,7 +1614,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$SEED_CONFIG" -eq 1 ]; then
   workspace_receipt=$(mktemp)
   PARTIAL_FILES+=("$workspace_helper" "$workspace_receipt")
   fetch_bundle_asset install-runtime-setup.py "$workspace_helper"
-  python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
+  with_terminal_input python3 "$workspace_helper" --binary "$DEST" --base-path "$BASE_PATH" --workspace-check > "$workspace_receipt" \
     || die "workspace check stopped installation; existing workspace data was preserved"
   BASE_PATH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_path"])' "$workspace_receipt")
 fi
@@ -1494,7 +1652,10 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     # `init` writes what is missing and leaves the rest; --force overwrites.
     log "seeding configs and model catalog overlay to $CONFIG_DIR from the binary"
     mkdir -p "$CONFIG_DIR"
-    init_args=(init --base-path "$BASE_PATH")
+    # --record-default: this is the operator's workspace, so later commands
+    # should find it without being told again. `masc init` does not record by
+    # default, because a throwaway workspace must not become the machine's.
+    init_args=(init --base-path "$BASE_PATH" --record-default)
     [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
     if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
       die "config seed failed ($DEST ${init_args[*]}): $init_summary"
@@ -1503,6 +1664,8 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     [ -e "$RUNTIME_FILE" ] || die "config seed produced no $RUNTIME_FILE"
   fi
 fi
+
+case ":$PATH:" in *":$PREFIX:"*) ;; *) PATH="$PREFIX:$PATH"; export PATH; hash -r ;; esac
 
 # --- 4b. first-run wizard ------------------------------------------------------
 if [ "$DRY_RUN_WITHOUT_PYTHON" -eq 1 ]; then
@@ -1631,22 +1794,28 @@ if [ "$DRY_RUN" -eq 0 ]; then
   fi
 fi
 
-# --- 6. PATH guidance ---------------------------------------------------------
-case ":$PATH:" in
-  *":$PREFIX:"*) ;;
-  *) warn "$PREFIX is not in PATH. Add this to your shell rc:
-      export PATH=\"$PREFIX:\$PATH\"" ;;
-esac
-
+# --- 6. New-terminal PATH integration ----------------------------------------
 if [ "$DRY_RUN" -eq 1 ]; then
+  case "$SHELL_PATH_MODE" in zsh|bash) configure_shell_path ;; esac
   printf '\n%s[dry-run] no files written.%s\n\n' "$c_yel" "$c_off"
   exit 0
 fi
 
 python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
 BUNDLE_TRANSACTION_ACTIVE=0
+configure_shell_path
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
+# do not default-disable Runtime_events. If the operator supplied an override,
+# preserve it; otherwise let the binary's default-on contract apply.
+runtime_events_start_env=""
+if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
+  runtime_events_start_env="MASC_RUNTIME_EVENTS=\"$MASC_RUNTIME_EVENTS\" "
+fi
+start_env="MASC_ASSETS_DIR=\"$DASHBOARD_ASSETS_DIR\" ${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
+if [ -n "$catalog_hint" ]; then
+  start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
+fi
 
 cat <<EOF
 
@@ -1655,21 +1824,47 @@ ${c_grn}masc ${VERSION} installed.${c_off}
 Installed:
   server + TUI + dashboard + browser host + deployment preflight tools
   workspace: $BASE_PATH
-  next: check your model account and prepare imp’s sandbox
+  provider credentials, Keeper creation and execution backend setup are separate
   browser registration: https://github.com/$REPO/blob/$VERSION/connectors/browser/host/README.md
 
-Start or resume your workspace:
-  "$DEST"
+Next: start your first conversation with imp:
+  ${c_dim}# export your provider key in this shell -- the server reads it from its${c_off}
+  ${c_dim}# own environment, and the server the TUI starts inherits the TUI's${c_off}
+  ${c_dim}# export <PROVIDER>_API_KEY=...   (runtime.toml names the variable)${c_off}
 
-Choose model connections and prepare imp's sandbox:
-  "$DEST" setup
+  ${c_dim}# install/start Docker Desktop (macOS) or Docker Engine (Linux), then:${c_off}
+  ${c_dim}# prepare the sandbox, start imp, and open the conversation workspace${c_off}
+  $start_env "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT"
 
-Inspect what still needs attention:
-  "$DEST" doctor
+  ${c_dim}# optional: mint a worker bearer for a separate MCP client${c_off}
+  eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 
-Advanced setup and separate MCP clients:
-  https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
+  ${c_dim}# open the workspace: on a terminal this is the fleet TUI, and it starts${c_off}
+  ${c_dim}# the server here when nothing is answering the port${c_off}
+  $start_env "$DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# the server on its own, with no terminal (loopback only)${c_off}
+  $start_env "$DEST" start --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# to change provider or model later, edit:${c_off}
+  #   $BASE_PATH/.masc/config/runtime.toml
+
+  ${c_dim}# sanity check in a second terminal while the server is running${c_off}
+  curl http://127.0.0.1:${MASC_PORT}/health
+
+  ${c_dim}# the TUI under its own name, when the port is not the default${c_off}
+  ${c_dim}# a fresh root seeds one Keeper, imp, with autoboot off: start it from the Keepers view once a model and a sandbox exist (or reinstall with --team)${c_off}
+  "$TUI_DEST" --base-path "$BASE_PATH" --port "$MASC_PORT"
+
+  ${c_dim}# or create one non-interactively once the server is up:${c_off}
+  ${c_dim}# $DEST keeper-create --help${c_off}
+
+  ${c_dim}# for Docker Keepers, build the general file/Git tools image:${c_off}
+  "$DEST" sandbox-image
+  ${c_dim}# microVM uses a separate runtime/image store; see the platform guide:${c_off}
+  # https://github.com/$REPO/blob/$VERSION/docs/INSTALL.md
+
+  ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
+  See: https://github.com/$REPO#mcp-client-setup
 
 EOF
-
-finish_setup_journey

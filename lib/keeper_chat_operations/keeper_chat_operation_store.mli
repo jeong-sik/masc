@@ -161,8 +161,15 @@ val semantic_apply :
     to Recovering without clearing frames, allowing unrelated work to proceed. *)
 
 (** Gate waiting remains the original queued operation, but cannot be claimed
-    until a bound durable resolution is supplied. No clock controls readiness. *)
-val has_claimable_queued : t -> (bool, error) result
+    until a bound durable resolution is supplied. A deferred runtime retry
+    whose provider-throttle [not_before] lies after [now] is likewise not
+    claimable; the scheduled wake re-offers it once the backoff passes. *)
+val has_claimable_queued : t -> now:float -> (bool, error) result
+
+val next_runtime_retry_wake : t -> now:float -> (float option, error) result
+(** Earliest future [not_before] among cooling deferred runtime retries, so the
+    owner can re-arm the drain wake after a restart (the defer-time sleeper
+    dies with the process). [None] when nothing is cooling past [now]. *)
 val direct_gate_state : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_wait_state option, error) result
 val direct_gate_obligations : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_obligation list, error) result
 val defer_direct_gate : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->

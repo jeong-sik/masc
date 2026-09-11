@@ -163,7 +163,7 @@ let make_handler config : Tool.tool_handler =
          | Some summarize -> summarize text
          | None -> text
        in
-       Ok { content = output; _meta = None }
+       Ok { content = output; content_blocks = None; _meta = None }
      | Error e ->
        Error { message = Error.to_string e; recoverable = false; error_class = None })
 ;;
@@ -237,7 +237,7 @@ let%test "tool has prompt parameter" =
 let%test "handler returns agent text" =
   let tool = create_simple ~name:"t" ~description:"d" (mock_runner "agent says hello") in
   match Tool.execute tool (`Assoc [ "prompt", `String "hi" ]) with
-  | Ok { content; _meta = _ } -> content = "agent says hello"
+  | Ok { content; _ } -> content = "agent says hello"
   | Error _ -> false
 ;;
 
@@ -265,7 +265,7 @@ let%test "output_summarizer applied" =
       }
   in
   match Tool.execute tool (`Assoc [ "prompt", `String "q" ]) with
-  | Ok { content; _meta = _ } -> content = "long"
+  | Ok { content; _ } -> content = "long"
   | Error _ -> false
 ;;
 

@@ -347,6 +347,29 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
             SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
         self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
 
+    def test_unavailable_receipt_carries_the_configuration_detail(self):
+        # A workspace config the server cannot parse reports the class alone
+        # unless the detail travels with it, and the class reads as a model
+        # connection problem. The recurring cause is an overlay entry holding
+        # a capability field a later release removed (masc#34872).
+        detail = ('catalog overlay /w/.masc/config/agent-core-models-overlay.toml: '
+                  'model entry "GLM-5-Turbo" contains unknown field(s): '
+                  'supports_extended_thinking')
+        self.validator("""if sys.argv[1] == 'runtime-verify':
+ print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':sys.argv[4],
+                   'status':'unavailable',
+                   'checks':{'response':False,'tool_called':False,'tool_roundtrip':False},
+                   'failure':{'code':'invalid_configuration',
+                              'message':'The workspace runtime configuration could not be loaded.',
+                              'detail':""" + repr(detail) + """}}))
+ sys.exit(2)
+""")
+        with self.assertRaises(SETUP.VerificationError) as raised:
+            SETUP.configure_many(self.binary, self.base, [spec()], verify=True)
+        self.assertEqual(raised.exception.failure['code'], 'invalid_configuration')
+        self.assertEqual(raised.exception.failure['detail'], detail)
+        self.assertEqual((self.runtime.read_bytes(), self.overlay.read_bytes()), self.originals)
+
     def test_real_verification_receipt_must_join_selected_identity(self):
         self.validator('''if sys.argv[1] == 'runtime-verify':
  print(json.dumps({'schema':'masc.runtime_verification.v1','runtime_id':'another.runtime',

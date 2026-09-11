@@ -147,13 +147,58 @@ let docker_sandbox_image_available =
          Keeper_sandbox_image.default_tag;
      available)
 
+(* The image being present is half the premise. Every case here writes the
+   file it wants to read into a temp workspace and reads it back through a
+   container that bind-mounts that workspace, so the host's docker has to
+   share the directory [temp_dir] creates in.
+
+   Measured on this repo's macOS host (2026-09-10): the docker context is
+   colima, whose default mount list is [$HOME] alone. A bind mount whose
+   source is under [$TMPDIR] (/var/folders/...) or /tmp arrives in the
+   container as an empty directory -- the run succeeds, the file is not there,
+   and the read answers "docker_cat_failed: exit=1 output=cat: ...: No such
+   file or directory". That is the machine, not the projection, and it cost a
+   round of looking at mount and path-projection code (#35075).
+
+   The probe mounts a temp directory of its own and reads a sentinel back, so
+   it fails for the same reason the cases would. Same image, so it pulls
+   nothing extra. *)
+let docker_shares_a_temp_workspace =
+  lazy
+    (let dir = temp_dir () in
+     let sentinel = Filename.concat dir "mount-premise" in
+     let out = open_out sentinel in
+     output_string out "visible";
+     close_out out;
+     let shared =
+       Sys.command
+         (Printf.sprintf
+            "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
+             /masc-mount-premise/mount-premise >/dev/null 2>&1"
+            (Filename.quote dir)
+            (Filename.quote Keeper_sandbox_image.default_tag))
+       = 0
+     in
+     (try Sys.remove sentinel with Sys_error _ -> ());
+     (try Unix.rmdir dir with Unix.Unix_error _ -> ());
+     if not shared
+     then
+       Printf.eprintf
+         "SKIPPING every case in this suite: this host's docker does not share \
+          %s into a container, so a case's temp workspace arrives empty and \
+          every read answers \"No such file or directory\". A colima context \
+          mounts $HOME only; add this path to its mount list, or run the suite \
+          from a workspace under a shared path.\n%!"
+         (Filename.dirname dir);
+     shared)
+
 let setup ?sandbox ?always_allow f =
   (* No [?sandbox] means [make_meta]'s default, which is Docker. *)
   (match sandbox with
    | None | Some Keeper_types_profile_sandbox.Docker ->
-     if not (Lazy.force docker_sandbox_image_available)
-     then
-       Alcotest.skip ()
+     if (not (Lazy.force docker_sandbox_image_available))
+        || not (Lazy.force docker_shares_a_temp_workspace)
+     then Alcotest.skip ()
    | Some _ -> ());
   with_eio_fs
   @@ fun ~fs ~sw () ->

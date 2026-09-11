@@ -66,8 +66,7 @@ val initial_runtime_id
     or claim an empty lane has a usable target. Pass materialized lanes. *)
 
 val verify
-  :  ?secure_random:Eio.Flow.source_ty Eio.Resource.t
-  -> sw:Eio.Switch.t
+  :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock

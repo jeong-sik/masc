@@ -1608,7 +1608,6 @@ let verify_runtime_execution runtime timeout_s =
     Eio_context.set_env env;
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Runtime_verification.verify ~sw ~net:(Eio.Stdenv.net env)
-      ~secure_random:(Eio.Stdenv.secure_random env)
       ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 

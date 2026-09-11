@@ -7,6 +7,7 @@ type action = Standard of Prerequisites.action | Verified_apple_install
 let dependency = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
+  | "antigravity" -> Some Prerequisites.Antigravity_cli
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 let rec wait pid =
   match Unix.waitpid [] pid with

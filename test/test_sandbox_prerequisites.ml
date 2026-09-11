@@ -50,8 +50,27 @@ let test_completion_never_means_ready () =
   check bool "command success needs recheck" true (outcome=P.Commands_completed_recheck_required);
   check bool "no guest proof claimed" true
     (Yojson.Safe.Util.member "readiness" (P.outcome_to_json outcome)=`String "not_checked")
+let test_official_clients_are_explicit_and_not_ready () =
+  List.iter (fun (dependency, id) ->
+    List.iter (fun host ->
+      let action = find id (P.catalog ~host ~distribution:P.Other dependency) in
+      check bool "native client installer needs no sudo" false action.requires_admin;
+      (match action.action_effect with P.Install_official_cli _ -> () | _ -> fail "missing native installer action");
+      let calls = ref [] in
+      let outcome = P.execute ~run:(fun argv -> calls := argv :: !calls; Error "PRIVATE_FAILURE") action in
+      check int "failed download never executes script" 1 (List.length !calls);
+      let argv = List.hd !calls in
+      check string "only HTTPS downloader starts" "curl" (List.hd argv);
+      check bool "redirect protocol bounded to HTTPS" true (List.mem "--proto-redir" argv && List.mem "=https" argv);
+      let json = Yojson.Safe.to_string (P.outcome_to_json outcome) in
+      check bool "failed action stays failed" true (match outcome with P.Failed _ -> true | _ -> false);
+      check bool "private error not echoed" false (String_util.contains_substring json "PRIVATE_FAILURE"))
+      [mac S.Arm64 26; S.Linux S.X64])
+    [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install"]
+
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
   test_case "explicit distro plan and failure boundary" `Quick test_linux_install_is_explicit;
+  test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready]]

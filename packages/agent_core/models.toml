@@ -2888,14 +2888,6 @@ max_output_tokens = 128000
 accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
 
 [[models]]
-id_prefix = "o3-mini"
-base = "openai_chat"
-max_context_tokens = 200000
-max_output_tokens = 100000
-input_per_million = 1.1
-output_per_million = 4.4
-
-[[models]]
 id_prefix = "glm-coding-plan:glm-5-turbo"
 base = "glm"
 max_context_tokens = 200000

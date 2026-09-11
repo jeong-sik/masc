@@ -367,7 +367,7 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
            | Delta_field "reasoning_content" -> ()
            | No_streaming_reasoning
            | Delta_field _
-           | Delta_reasoning_details
+           | Delta_field_and_details _
            | Template_parser ->
              failf "%s resolves to a dialect that drops reasoning deltas" label))
     glm_rows
@@ -563,6 +563,86 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
     ~provider_name:"ollama_cloud"
     ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
+
+(* runtime id -> the OpenRouter wire id it dispatches. Twelve ids probed live
+   on 2026-09-10 (evidence/task-openrouter-support/PROBE-SUMMARY.md). The
+   generic binding test below already requires every seed runtime to resolve a
+   catalog row; what this pins is the OpenRouter-specific half the generic
+   check cannot see. *)
+let openrouter_seed_runtimes =
+  [ "openrouter.openrouter-claude-opus-5", "anthropic/claude-opus-5"
+  ; "openrouter.openrouter-claude-sonnet-5", "anthropic/claude-sonnet-5"
+  ; "openrouter.openrouter-gpt-5-5", "openai/gpt-5.5"
+  ; "openrouter.openrouter-gpt-5-6-sol", "openai/gpt-5.6-sol"
+  ; "openrouter.openrouter-gemini-3-8-flash", "google/gemini-3.8-flash"
+  ; "openrouter.openrouter-grok-4-6", "x-ai/grok-4.6"
+  ; "openrouter.openrouter-kimi-k3", "moonshotai/kimi-k3"
+  ; "openrouter.openrouter-glm-5-3-flash", "z-ai/glm-5.3-flash"
+  ; "openrouter.openrouter-glm-5-3", "z-ai/glm-5.3"
+  ; "openrouter.openrouter-deepseek-v4-flash", "deepseek/deepseek-v4-flash"
+  ; "openrouter.openrouter-deepseek-v4-pro", "deepseek/deepseek-v4-pro"
+  ; "openrouter.openrouter-qwen3-8-max", "qwen/qwen3.8-max-0902"
+  ]
+
+let test_openrouter_seed_runtimes_are_dispatchable () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    List.iter
+      (fun (runtime_id, api_name) ->
+         match find_runtime runtimes runtime_id with
+         | None -> failf "expected OpenRouter runtime in seed: %s" runtime_id
+         | Some runtime ->
+           check string (runtime_id ^ " api name") api_name runtime.model.api_name;
+           (* These rows resolve to the reasoning_effort thinking dialect,
+              whose only wire control is the effort value itself. With no
+              effort declared an enable_thinking turn has nothing to encode
+              and is refused as Enable_not_encodable, so a silently absent
+              key here disables thinking for the whole runtime. Asserting the
+              key is present would not catch a break between runtime.toml and
+              the materialized Provider_config, so this builds the request the
+              dispatcher would send and reads the value off the wire. *)
+           let provider_config = agent_core_provider_config runtime in
+           let request =
+             Llm_provider.Backend_openai.build_request_assoc
+               ~config:
+                 { provider_config with
+                   Llm_provider.Provider_config.enable_thinking = Some true
+                 }
+               ~messages:[ Llm_provider.Types.user_msg "Explain the evidence." ]
+               ()
+           in
+           check
+             (option string)
+             (runtime_id ^ " sends its declared effort on the wire")
+             (Some "high")
+             Yojson.Safe.Util.(request |> member "reasoning_effort" |> to_string_option);
+           (* The provider-scoped row must answer, not the bare
+              openai_chat_extended base: the base streams reasoning as plain
+              text and would drop gpt-5.5's encrypted item. *)
+           (match
+              Llm_provider.Provider_config.capabilities_for_config_model
+                (agent_core_provider_config runtime)
+            with
+            | None -> failf "%s resolves no AGENT_CORE capabilities" runtime_id
+            | Some caps ->
+              check
+                bool
+                (runtime_id ^ " reads reasoning text and details together")
+                true
+                (match
+                   (Llm_provider.Reasoning_dialect.of_capabilities caps)
+                     .Llm_provider.Reasoning_dialect.streaming
+                 with
+                 | Delta_field_and_details "reasoning" -> true
+                 | Delta_field_and_details _
+                 | Delta_field _
+                 | No_streaming_reasoning
+                 | Template_parser -> false)))
+      openrouter_seed_runtimes
+;;
 
 let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
@@ -5069,6 +5149,8 @@ let () =
           test_case
             "repo runtime bindings resolve through AGENT_CORE provider configs"
             `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
+          test_case "OpenRouter seed runtimes are dispatchable"
+            `Quick test_openrouter_seed_runtimes_are_dispatchable;
           test_case "repo DeepSeek seed encodes thinking without an effort override"
             `Quick test_repo_deepseek_thinking_request;
           test_case "unset thinking preserves provider defaults and explicit disable"

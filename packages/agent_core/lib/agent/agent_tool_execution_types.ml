@@ -3,6 +3,7 @@ type tool_execution_result =
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; outcome : Types.tool_result_outcome
   }
 

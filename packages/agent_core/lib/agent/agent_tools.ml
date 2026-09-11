@@ -567,6 +567,7 @@ let find_and_execute_tool_with_index
         ; tool_name = name
         ; input
         ; content = message
+        ; content_blocks = None
         ; outcome =
             Tool_failed
               { failure_kind = Validation_error; error_class = Some Types.Deterministic }
@@ -625,7 +626,7 @@ let find_and_execute_tool_with_index
          let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
          let result_bytes =
            match result with
-           | Ok { content; _meta = _ } -> String.length content
+           | Ok { content; _ } -> String.length content
            | Error { message; _ } -> String.length message
          in
          defer_observer (fun () ->
@@ -680,17 +681,17 @@ let find_and_execute_tool_with_index
                 hooks.on_tool_error
                 (Hooks.OnToolError { invocation; tool_name = name; error = message })
               |> Option.iter record_deferred_failure));
-         let content, outcome =
+         let content, content_blocks, outcome =
            match result with
-           | Ok { content; _meta = _ } -> content, Tool_succeeded
+           | Ok { content; content_blocks; _ } -> content, content_blocks, Tool_succeeded
            | Error { message; recoverable; error_class } ->
              let failure_kind =
                if recoverable then Recoverable_tool_error else Non_retryable_tool_error
              in
-             message, Tool_failed { failure_kind; error_class }
+             message, None, Tool_failed { failure_kind; error_class }
          in
          { result =
-             { invocation; tool_name = name; input = exact_input; content; outcome }
+             { invocation; tool_name = name; input = exact_input; content; content_blocks; outcome }
          ; deferred_failure = None
          })
     | None ->
@@ -730,6 +731,7 @@ let find_and_execute_tool_with_index
           ; tool_name = requested_name
           ; input
           ; content = message
+        ; content_blocks = None
           ; outcome = Tool_failed { failure_kind; error_class = Some Types.Deterministic }
           }
       ; deferred_failure = None
@@ -742,7 +744,7 @@ let find_and_execute_tool_with_index
     | true, Some bus ->
       let output_content = dispatch.result.content in
       let output =
-        Types.tool_result_of_outcome ~content:output_content dispatch.result.outcome
+        Types.tool_result_of_outcome ?content_blocks:dispatch.result.content_blocks ~content:output_content dispatch.result.outcome
       in
       (try
          Event_bus.publish
@@ -941,7 +943,7 @@ let execute_scheduled_tool
           observe_before_completion (fun () -> observe_started ~tool_name ~input);
           Execution_context.with_child_scope_factory start_child (fun () ->
             let pending, _duration_ms = begin_effect ~tool_name ~input in
-            ( (pending.result.content, pending.result.outcome)
+            ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
             , fun () ->
                 let (_ : tool_dispatch) = finish_effect pending ~tool_name in
                 () )))
@@ -965,6 +967,7 @@ let execute_scheduled_tool
               ; tool_name = result.tool_name
               ; input = result.input
               ; content = result.content
+              ; content_blocks = result.content_blocks
               ; outcome = result.outcome
               }
           ; deferred_failure = None

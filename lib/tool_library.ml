@@ -248,6 +248,7 @@ tags: %s
 
       (* Write file *)
       try
+        Fs_compat.mkdir_p (Filename.dirname filepath);
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
         text_ok ~tool_name ~start_time
           (sprintf "Document added to library: %s" filepath)

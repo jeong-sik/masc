@@ -190,6 +190,7 @@ let project
     ~official_client_kind:"codex"
     ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
     ~native_posture:(Some native_posture)
+    ~tool_deny:[]
     ~skill_names
     ~current_task_id:(Some "task-001")
     ~skills_left_out
@@ -433,7 +434,8 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~runtime_id:"fixture.runtime"
       ~official_client_kind:"codex"
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
-      ~native_posture:None
+            ~tool_deny:[]
+~native_posture:None
       ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]
@@ -699,7 +701,8 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                ~runtime_id:"fixture.runtime"
                ~official_client_kind:"agent_core"
                ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
-               ~native_posture:None
+                              ~tool_deny:[]
+~native_posture:None
                ~skill_names:None
                ~current_task_id:(Some task_a)
                ~skills_left_out:[]
@@ -804,7 +807,8 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       ~official_client_kind:"agent_core"
       ~tool_delivery:
         Keeper_effective_tool_surface.Tools_suppressed_runtime_unsupported
-      ~native_posture:None
+            ~tool_deny:[]
+~native_posture:None
       ~skill_names:None
       ~current_task_id:(Some "task-001")
       ~skills_left_out:[]
@@ -928,7 +932,8 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
       ~runtime_id:"fixture.runtime"
       ~official_client_kind:"agent_core"
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
-      ~native_posture:None
+            ~tool_deny:[]
+~native_posture:None
       ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]

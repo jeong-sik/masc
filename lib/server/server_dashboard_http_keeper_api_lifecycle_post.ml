@@ -130,6 +130,7 @@ type boot_preflight =
   | Boot_allowed
   | Boot_operator_paused
   | Boot_meta_read_failed of string
+  | Boot_model_setup_required of Runtime_startup_state.reason
 
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
@@ -279,6 +280,10 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         let boot_preflight =
           if not (String.equal action "boot")
           then Boot_allowed
+          else if Runtime_startup_state.requires_setup () then
+            (match Runtime_startup_state.get () with
+             | Setup_required reason -> Boot_model_setup_required reason
+             | Not_initialized | Available -> Boot_allowed)
           else
             match Keeper_meta_store.read_meta config name with
             | Error error -> Boot_meta_read_failed error
@@ -293,6 +298,10 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                | Keeper_lifecycle_admission.Active -> Boot_allowed)
         in
         (match boot_preflight with
+         | Boot_model_setup_required reason ->
+           let why = Runtime_startup_state.message reason in
+           log_lifecycle_result (Rejected why);
+           respond_error ~status:`Service_unavailable ~request:req ~ok:false reqd why
          | Boot_meta_read_failed error ->
            let why =
              Printf.sprintf "keeper boot preflight read failed: %s" error

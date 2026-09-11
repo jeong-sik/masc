@@ -77,7 +77,8 @@ type image_projection =
   }
 
 val fallback_projector
-  : keeper_name:string
+  : ?exclude_runtime_ids:string list
+  -> keeper_name:string
   -> unit
   -> mode:mode
   -> Agent_core.Types.content_block list
@@ -88,7 +89,13 @@ val fallback_projector
     URL and file-id carriers become explicit unread reference text; this does
     not fetch them or claim that the artifact-only analyze_image tool can.
     Project the current goal with [Eager] before historical [Store_only] input.
-    The original blocks remain available to later image-capable candidates. *)
+    The original blocks remain available to later image-capable candidates.
+
+    [exclude_runtime_ids] reaches {!Keeper_vision_tool.run_vision} unchanged.
+    One projector serves one lane walk, so the set is the walk's own candidates
+    and is fixed when the projector is built: every one of them has either
+    already been dispatched to or is about to be by this same walk, and a
+    delegation to either is work the walk is doing anyway (#34829). *)
 
 val error_reasons : string list
 (** Every reason an image eviction can fail with. Closed by construction —
@@ -98,7 +105,10 @@ val error_reasons : string list
 
 module For_testing : sig
   val fallback_projector :
-    read:(media_type:string -> bytes:string -> (string, string) result option) ->
+    ?exclude_runtime_ids:string list ->
+    read:
+      (exclude_runtime_ids:string list ->
+       media_type:string -> bytes:string -> (string, string) result option) ->
     keeper_name:string -> unit -> mode:mode ->
     Agent_core.Types.content_block list -> image_projection
   (** Replace only the vision provider boundary; artifact storage and cache

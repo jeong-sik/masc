@@ -1,0 +1,60 @@
+qwen/qwen3.8-max-0902
+  ctx 1000000 max_out 131072
+  in$ 2.0 out$ 6.0
+  modalities ['text', 'image', 'video'] -> ['text']
+  params ['frequency_penalty', 'include_reasoning', 'logprobs', 'max_tokens', 'presence_penalty', 'reasoning', 'reasoning_effort', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_k', 'top_logprobs', 'top_p']
+google/gemini-3.8-flash
+  ctx 1048576 max_out 65536
+  in$ 0.75 out$ 3.75
+  modalities ['text', 'image', 'video', 'file', 'audio'] -> ['text']
+  params ['include_reasoning', 'max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_p']
+z-ai/glm-5.3-flash
+  ctx 1310720 max_out 131072
+  in$ 0.075 out$ 0.25
+  modalities ['text', 'image', 'video'] -> ['text']
+  params ['frequency_penalty', 'include_reasoning', 'logit_bias', 'logprobs', 'max_tokens', 'min_p', 'presence_penalty', 'reasoning', 'reasoning_effort', 'repetition_penalty', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_k', 'top_logprobs', 'top_p']
+z-ai/glm-5.3
+  ctx 1310720 max_out 943718
+  in$ 1.4 out$ 4.4
+  modalities ['text'] -> ['text']
+  params ['frequency_penalty', 'include_reasoning', 'logit_bias', 'logprobs', 'max_tokens', 'min_p', 'parallel_tool_calls', 'presence_penalty', 'reasoning', 'reasoning_effort', 'repetition_penalty', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_k', 'top_logprobs', 'top_p']
+x-ai/grok-4.6
+  ctx 500000 max_out 450000
+  in$ 2.0 out$ 6.0
+  modalities ['text', 'image', 'file'] -> ['text']
+  params ['include_reasoning', 'logprobs', 'max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_k', 'top_logprobs', 'top_p']
+anthropic/claude-opus-5
+  ctx 1000000 max_out 128000
+  in$ 5.0 out$ 25.0
+  modalities ['text', 'image', 'file'] -> ['text']
+  params ['include_reasoning', 'max_completion_tokens', 'max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'verbosity']
+moonshotai/kimi-k3
+  ctx 1048576 max_out 943718
+  in$ 3.0 out$ 15.0
+  modalities ['text', 'image', 'video'] -> ['text']
+  params ['frequency_penalty', 'include_reasoning', 'logit_bias', 'logprobs', 'max_tokens', 'min_p', 'presence_penalty', 'reasoning', 'reasoning_effort', 'repetition_penalty', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_k', 'top_logprobs', 'top_p']
+openai/gpt-5.6-sol
+  ctx 1050000 max_out 128000
+  in$ 2.0 out$ 10.0
+  modalities ['file', 'image', 'text'] -> ['text']
+  params ['include_reasoning', 'max_completion_tokens', 'max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'seed', 'structured_outputs', 'tool_choice', 'tools']
+anthropic/claude-sonnet-5
+  ctx 1000000 max_out 128000
+  in$ 2.0 out$ 10.0
+  modalities ['text', 'image', 'file'] -> ['text']
+  params ['include_reasoning', 'max_completion_tokens', 'max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'stop', 'structured_outputs', 'tool_choice', 'tools', 'verbosity']
+openai/gpt-5.5
+  ctx 1050000 max_out 128000
+  in$ 5.0 out$ 30.0
+  modalities ['file', 'image', 'text'] -> ['text']
+  params ['include_reasoning', 'max_completion_tokens', 'max_tokens', 'reasoning', 'reasoning_effort', 'response_format', 'seed', 'structured_outputs', 'tool_choice', 'tools']
+deepseek/deepseek-v4-pro
+  ctx 1048576 max_out 384000
+  in$ 0.9552599999999999 out$ 1.9105199999999998
+  modalities ['text'] -> ['text']
+  params ['frequency_penalty', 'include_reasoning', 'logit_bias', 'logprobs', 'max_completion_tokens', 'max_tokens', 'min_p', 'presence_penalty', 'reasoning', 'reasoning_effort', 'repetition_penalty', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_k', 'top_logprobs', 'top_p']
+deepseek/deepseek-v4-flash
+  ctx 1048576 max_out 384000
+  in$ 0.088606 out$ 0.177212
+  modalities ['text'] -> ['text']
+  params ['frequency_penalty', 'include_reasoning', 'logit_bias', 'logprobs', 'max_completion_tokens', 'max_tokens', 'min_p', 'presence_penalty', 'reasoning', 'reasoning_effort', 'repetition_penalty', 'response_format', 'seed', 'stop', 'structured_outputs', 'temperature', 'tool_choice', 'tools', 'top_a', 'top_k', 'top_logprobs', 'top_p']

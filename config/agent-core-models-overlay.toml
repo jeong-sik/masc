@@ -453,6 +453,19 @@ provider_ref = "ollama_cloud"
 model_id = "deepseek-v4-flash"
 enable_thinking = false
 
+# The install wizard's OpenRouter choice. A wizard-pickable HTTP runtime owes
+# a row here, and thinking is off for the same reason as the ollama_cloud row
+# above: this id reasons by default, and with reasoning on the answer arrives
+# in the reasoning field with content empty. This id accepts the disable --
+# reasoning_effort "none" answered 200 with 0 reasoning tokens billed, while
+# five of the twelve OpenRouter ids refuse it with HTTP 400 (probe7,
+# evidence/task-openrouter-support/).
+[[targets]]
+id = "openrouter.openrouter-deepseek-v4-flash"
+provider_ref = "openrouter"
+model_id = "deepseek/deepseek-v4-flash"
+enable_thinking = false
+
 # verifier_exact admits its slots through the exact-output registry but
 # dispatches them by configured runtime id (Runtime.resolve_assignment), so a
 # slot there must exist under the same string in both registries. This row

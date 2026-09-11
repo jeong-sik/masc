@@ -664,6 +664,8 @@ let test_agent_scope_owns_effect_topology () =
     make_dir dir;
     let scope_locator_json = ref None in
     let invocation_locator_json = ref None in
+    let image_blocks = [ Types.image_block ~media_type:"image/png"
+      ~data:"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a14sAAAAASUVORK5CYII=" () ] in
     let calls = ref 0 in
     let settled_before_observer = ref false in
     with_fresh codec dir (fun _sw writer ->
@@ -757,7 +759,7 @@ let test_agent_scope_owns_effect_topology () =
              incr calls;
              let child = require_agent_scope (start_child ~agent_name:"child-agent") in
              require_agent_scope (Agent_scope.finish child Event.Succeeded);
-             ( ("done", Types.Tool_succeeded)
+             ( ("done", Some image_blocks, Types.Tool_succeeded)
              , fun () ->
                  let observed =
                    Writer.current_cursor writer |> Result.get_ok |> Journal.cursor_seq
@@ -876,6 +878,8 @@ let test_agent_scope_owns_effect_topology () =
        with
        | Ok (Agent_scope.Replayed replayed) ->
          check string "reopened result content" "done" replayed.content;
+         check bool "reopened original image blocks" true
+           (replayed.content_blocks = Some image_blocks);
          check
            bool
            "reopened result outcome"

@@ -14,7 +14,7 @@ let check_string_array =
 
 let make_test_tool name =
   Tool.create ~name ~description:("Tool " ^ name) ~parameters:[] (fun _input ->
-    Ok { Types.content = "result from " ^ name; _meta = None })
+    Ok { Types.content = "result from " ^ name; content_blocks = None; _meta = None })
 ;;
 
 (** Dummy Eio network for Agent.create (not used in these tests). *)

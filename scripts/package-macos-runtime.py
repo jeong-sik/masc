@@ -259,6 +259,6 @@ if __name__ == '__main__':
     parser.add_argument('--stage', type=Path, required=True)
     parser.add_argument('--platform', choices=['macos-arm64', 'macos-x64'], required=True)
     parser.add_argument('--source-commit', required=True)
-    parser.add_argument('--python-lock', type=Path, default=Path(__file__).with_name('macos-python-runtime.lock.json'))
+    parser.add_argument('--python-lock', type=Path, default=Path(__file__).with_name('portable-python-runtime.lock.json'))
     args = parser.parse_args()
     package(args.dist, args.stage, args.platform, args.source_commit, args.python_lock)

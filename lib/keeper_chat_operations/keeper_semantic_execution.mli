@@ -27,8 +27,15 @@ type runtime_retry = private
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
+  ; not_before : float option
+      (** Earliest wall-clock time at which the retry becomes claimable again.
+          [Some] is set when the deferring failure was the provider throttling
+          (rate limit, hard quota, capacity backpressure); [None] keeps the
+          retry immediately claimable. Scheduling metadata only: it is not
+          part of the continuation identity compared by
+          {!equal_runtime_retry}. *)
   }
-val runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> assignment_id:string ->
+val runtime_retry : not_before:float option -> checkpoint:Keeper_checkpoint_ref.t -> assignment_id:string ->
   failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list ->
   (runtime_retry, string) result
 val equal_runtime_retry : runtime_retry -> runtime_retry -> bool

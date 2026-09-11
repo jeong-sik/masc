@@ -43,7 +43,9 @@ let normalize raw =
 let recorded_default () =
   match Env_config.persisted_default_base_path () with
   | Env_config.Usable { base_path; _ } -> Some base_path
-  | Env_config.No_record | Env_config.Stale _ -> None
+  | Env_config.No_record | Env_config.Stale _
+  | Env_config.Unread_under_test _ ->
+    None
 
 let resolve_startup_base_path ?(getenv = Sys.getenv_opt)
     ?(persisted_default = recorded_default) ~cli_base_path ~default_base_path () =

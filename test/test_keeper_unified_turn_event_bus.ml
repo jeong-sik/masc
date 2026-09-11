@@ -48,7 +48,7 @@ let tool_completed name =
        { invocation = invocation name
        ; agent_name = "a"
        ; tool_name = name
-       ; output = Ok { Agent_core.Types.content = "done"; _meta = None }
+       ; output = Ok { Agent_core.Types.content = "done"; content_blocks = None; _meta = None }
        })
 ;;
 

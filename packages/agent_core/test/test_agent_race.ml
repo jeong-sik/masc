@@ -10,7 +10,7 @@ open Agent_core
 let make_agent env =
   let tools =
     [ Tool.create ~name:"echo" ~description:"echo" ~parameters:[] (fun input ->
-        Ok { Types.content = Yojson.Safe.to_string input; _meta = None })
+        Ok { Types.content = Yojson.Safe.to_string input; content_blocks = None; _meta = None })
     ]
   in
   Agent.create

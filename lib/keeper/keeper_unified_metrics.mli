@@ -161,6 +161,7 @@ val append_decision_record :
   ?usage_resolution:Keeper_usage_resolution.t option ->
   ?error:string ->
   ?terminal_reason:Keeper_turn_terminal.t ->
+  ?executed_runtime_id:string ->
   unit ->
   unit
 

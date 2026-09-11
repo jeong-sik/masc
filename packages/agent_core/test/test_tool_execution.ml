@@ -29,7 +29,7 @@ let make_echo_tool ?descriptor name =
         ; required = false
         }
       ]
-    (fun input -> Ok { Types.content = Yojson.Safe.to_string input; _meta = None })
+    (fun input -> Ok { Types.content = Yojson.Safe.to_string input; content_blocks = None; _meta = None })
 ;;
 
 let execute_result_with_tools_in_env
@@ -99,7 +99,7 @@ let test_pre_tool_approval_callback_settles_gate () =
     let tool =
       Tool.create ~name:"gated" ~description:"gated tool" ~parameters:[] (fun _ ->
         incr executed;
-        Ok { Types.content = "executed"; _meta = None })
+        Ok { Types.content = "executed"; content_blocks = None; _meta = None })
     in
     let result =
       execute_result_with_tools_in_env
@@ -174,7 +174,7 @@ let test_pre_tool_approval_callback_settles_gate () =
   let missing_callback_tool =
     Tool.create ~name:"gated" ~description:"gated tool" ~parameters:[] (fun _ ->
       incr missing_callback_count;
-      Ok { Types.content = "must-not-run"; _meta = None })
+      Ok { Types.content = "must-not-run"; content_blocks = None; _meta = None })
   in
   (match
      execute_result_with_tools_in_env
@@ -211,7 +211,7 @@ let test_pre_tool_approval_callback_settles_gate () =
        let generic_input_tool =
          Tool.create ~name:"gated" ~description:"gated tool" ~parameters:[] (fun _ ->
            incr generic_effect_count;
-           Ok { Types.content = "must-not-run"; _meta = None })
+           Ok { Types.content = "must-not-run"; content_blocks = None; _meta = None })
        in
        (match
           execute_result_with_tools_in_env
@@ -244,7 +244,7 @@ let approval_failure_fixture env callback =
   let tool =
     Tool.create ~name:"gated" ~description:"gated tool" ~parameters:[] (fun _ ->
       incr executed;
-      Ok { Types.content = "must-not-run"; _meta = None })
+      Ok { Types.content = "must-not-run"; content_blocks = None; _meta = None })
   in
   let hooks =
     { Hooks.empty with
@@ -442,7 +442,7 @@ let test_post_hook_observer_exception_propagates_after_completion () =
   let tool =
     Tool.create ~name:"safe" ~description:"" ~parameters:[] (fun _ ->
       incr executed;
-      Ok { Types.content = "done"; _meta = None })
+      Ok { Types.content = "done"; content_blocks = None; _meta = None })
   in
   let observer ~invocation:_ ~hook_name ~decision:_ ~detail:_ =
     if String.equal hook_name "post_tool_use" then failwith "post observer boom"
@@ -477,7 +477,7 @@ let test_post_hook_failure_is_typed_agent_error () =
   let tool =
     Tool.create ~name:"safe" ~description:"" ~parameters:[] (fun _ ->
       incr executed;
-      Ok { Types.content = "done"; _meta = None })
+      Ok { Types.content = "done"; content_blocks = None; _meta = None })
   in
   let hooks =
     { Hooks.empty with post_tool_use = Some (fun _ -> failwith "post hook boom") }
@@ -611,7 +611,7 @@ let test_concurrent_journal_failure_retains_sibling_results () =
          Eio.Promise.resolve resolve_self ();
          Eio.Time.with_timeout_exn clock 0.05 (fun () -> Eio.Promise.await await_other);
          Eio.Time.sleep clock 0.005;
-         Ok { Types.content = name; _meta = None })
+         Ok { Types.content = name; content_blocks = None; _meta = None })
   in
   let later_serial =
     Tool.create
@@ -621,7 +621,7 @@ let test_concurrent_journal_failure_retains_sibling_results () =
       ~parameters:[]
       (fun _ ->
          incr later_serial_runs;
-         Ok { Types.content = "must not run"; _meta = None })
+         Ok { Types.content = "must not run"; content_blocks = None; _meta = None })
   in
   let result =
     execute_result_with_tools_in_env
@@ -685,7 +685,7 @@ let test_block_emits_no_execution_lifecycle () =
   let tool =
     Tool.create ~name:"safe" ~description:"" ~parameters:[] (fun _ ->
       incr executed;
-      Ok { Types.content = "must not run"; _meta = None })
+      Ok { Types.content = "must not run"; content_blocks = None; _meta = None })
   in
   let hooks =
     { Hooks.empty with pre_tool_use = Some (fun _ -> Hooks.Block "caller denied") }
@@ -900,7 +900,7 @@ let test_concurrent_tools_share_batch () =
         (fun _execution_env input ->
           Eio.Promise.resolve resolve_self ();
           Eio.Time.with_timeout_exn clock 0.05 (fun () -> Eio.Promise.await await_other);
-          Ok { Types.content = Yojson.Safe.to_string input; _meta = None })
+          Ok { Types.content = Yojson.Safe.to_string input; content_blocks = None; _meta = None })
     }
   in
   let tools =
@@ -939,7 +939,7 @@ let test_serial_tools_run_sequentially () =
           running := true;
           Eio.Time.sleep clock 0.01;
           running := false;
-          Ok { Types.content = name; _meta = None })
+          Ok { Types.content = name; content_blocks = None; _meta = None })
     }
   in
   let results =
@@ -975,7 +975,7 @@ let test_undeclared_tools_default_to_sequential () =
           running := true;
           Eio.Time.sleep clock 0.01;
           running := false;
-          Ok { Types.content = name; _meta = None })
+          Ok { Types.content = name; content_blocks = None; _meta = None })
     }
   in
   let results =
@@ -1012,7 +1012,7 @@ let test_serial_barrier_splits_concurrent_batches () =
           incr concurrent_running;
           Eio.Time.sleep clock 0.02;
           decr concurrent_running;
-          Ok { Types.content = name; _meta = None })
+          Ok { Types.content = name; content_blocks = None; _meta = None })
     }
   in
   let make_serial_tool name =
@@ -1026,7 +1026,7 @@ let test_serial_barrier_splits_concurrent_batches () =
           serial_running := true;
           Eio.Time.sleep clock 0.02;
           serial_running := false;
-          Ok { Types.content = name; _meta = None })
+          Ok { Types.content = name; content_blocks = None; _meta = None })
     }
   in
   let tools =
@@ -1076,7 +1076,7 @@ let test_dispatch_passes_exact_tool_invocation () =
                    (Tool_contract.Invocation.tool_use_id invocation)
                    (Tool_contract.Invocation.turn invocation)
                    (Tool_contract.Invocation.planned_index invocation)
-             ; _meta = None
+             ; content_blocks = None; _meta = None
              }
          | None ->
            Error
@@ -1178,7 +1178,7 @@ let test_lifecycle_surfaces_share_exact_tool_invocation () =
            (Tool.Execution_env.invocation execution_env);
          result)
   in
-  let success = Ok { Types.content = "done"; _meta = None } in
+  let success = Ok { Types.content = "done"; content_blocks = None; _meta = None } in
   let failure =
     Error
       { Types.message = "expected failure"
@@ -1315,7 +1315,7 @@ let terminal_tool ~name on_execute =
     ~parameters:[]
     (fun _ ->
        on_execute ();
-       Ok { Types.content = "terminal-complete"; _meta = None })
+       Ok { Types.content = "terminal-complete"; content_blocks = None; _meta = None })
 ;;
 
 let test_terminal_admission_rejects_entire_malformed_batch () =
@@ -1345,7 +1345,7 @@ let test_terminal_admission_rejects_entire_malformed_batch () =
       ~parameters:[]
       (fun _ ->
          incr handler_count;
-         Ok { Types.content = "ordinary-complete"; _meta = None })
+         Ok { Types.content = "ordinary-complete"; content_blocks = None; _meta = None })
   in
   let run tools tool_uses =
     execute_result_with_tools_in_env
@@ -1499,7 +1499,7 @@ let test_invalid_terminal_input_remains_correction_capable () =
         ]
       (fun _ ->
          incr handler_count;
-         Ok { Types.content = "must-not-run"; _meta = None })
+         Ok { Types.content = "must-not-run"; content_blocks = None; _meta = None })
   in
   match
     execute_result_with_tools_in_env

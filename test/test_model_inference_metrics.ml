@@ -827,6 +827,22 @@ let test_success_without_model_uses_runtime_attribution () =
       (Some "missing_usage_and_inference")
       s.primary_coverage_reason)
 
+(* Same row, plus the candidate that actually answered on that lane. *)
+let executed_runtime_entry ~outcome ~runtime_id ~executed_runtime_id ~ts () =
+  match sparse_provider_context_entry ~outcome ~runtime_id ~ts () with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            match key, value with
+            | "provider_context", `Assoc nested ->
+              ( key
+              , `Assoc
+                  (("executed_runtime_id", `String executed_runtime_id) :: nested) )
+            | _ -> key, value)
+         fields)
+  | other -> other
+
 let test_provider_context_attribution_survives_sparse_telemetry () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -850,6 +866,36 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "error count" 1 s.error_count)
+
+(* #35043: one lane, two candidates. The lane id is what the turn was
+   budgeted under; the error belongs to whoever answered. Attributing by lane
+   filed 162 payment-required errors against a provider that was serving
+   normally, and made the fleet's second-worst runtime out of a healthy one. *)
+let test_error_attribution_names_the_candidate_not_the_lane () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "executed_runtime" in
+    let ts = now_unix () in
+    write_decisions path [
+      executed_runtime_entry ~outcome:"error"
+        ~runtime_id:"glm-coding.glm-5.3"
+        ~executed_runtime_id:"claude_code.claude-sonnet-5"
+        ~ts:(ts -. 5.0) ();
+      executed_runtime_entry ~outcome:"error"
+        ~runtime_id:"glm-coding.glm-5.3"
+        ~executed_runtime_id:"deepseek.deepseek-v4-flash"
+        ~ts:(ts -. 10.0) ();
+    ];
+    let agg = M.compute ~base_path:base ~window_minutes:60 in
+    check int "both rows retained" 2 agg.total_entries;
+    let named =
+      List.sort compare (List.map (fun (s : M.model_stats) -> s.model_id) agg.models)
+    in
+    check (list string) "attributed to the answering candidates"
+      [ "claude_code.claude-sonnet-5 (runtime)"
+      ; "deepseek.deepseek-v4-flash (runtime)"
+      ]
+      named)
 
 let test_cost_ledger_backfills_wall_tok_per_sec () =
   let base = test_dir () in
@@ -1192,6 +1238,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
       (match json |> member "p95" with `Null -> true | _ -> false))
 
 (* ── thinking_fraction tests ─────────────────────── *)
+
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
   let trace_id, keeper_turn_id, agent_core_turn_ordinal =
@@ -1603,6 +1650,8 @@ let () =
         test_success_without_model_uses_runtime_attribution;
       test_case "provider_context attribution survives sparse telemetry" `Quick
         test_provider_context_attribution_survives_sparse_telemetry;
+      test_case "error attribution names the candidate not the lane" `Quick
+        test_error_attribution_names_the_candidate_not_the_lane;
       test_case "decision parser reads current hw-decode field" `Quick
         test_hw_decode_parser_reads_current_field;
       test_case "cost parser reads current hw-decode field" `Quick

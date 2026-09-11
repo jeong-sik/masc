@@ -131,6 +131,7 @@ val outcome_of_response :
 val run_vision
   :  ?complete:complete_fn
   -> ?runtime_id:string
+  -> ?exclude_runtime_ids:string list
   -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -141,6 +142,14 @@ val run_vision
   -> vision_outcome
 (** The one-shot vision sub-call core (runtime resolution + Provider-boundary
     call + §2.2 classification). Used by {!handle} and by eager ingestion.
+
+    [exclude_runtime_ids] drops candidates the caller's own walk already spent
+    this turn. The quota window moves a candidate that answered a hard
+    rejection behind the live ones but keeps it in the list, so a delegation
+    from a lane walk that just collected 402s would ask those accounts once
+    more before the text fallback starts (#34829). Excluding every capable
+    candidate answers [Vo_no_runtime] with a reason that says so, rather than
+    the "none configured" one, which would be false.
     When [runtime_id] is supplied, only that configured image candidate is used;
     unavailable candidates are invalid requests, and no other runtime is tried.
     Omitting it preserves automatic candidate selection and failover.

@@ -4,6 +4,7 @@
  (name masc_runtime)
  (public_name masc.runtime)
  (wrapped false)
+ (private_modules embedded_antigravity_context)
  (libraries
   masc.apple_keychain
   masc.egress_host
@@ -61,3 +62,10 @@
   tls-eio)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+
+(rule
+ (target embedded_antigravity_context.ml)
+ (deps ../../scripts/embed-setup.py ../../scripts/antigravity-context-pty.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:../../scripts/embed-setup.py} %{dep:../../scripts/antigravity-context-pty.py}))))

@@ -64,6 +64,11 @@ val oauth_path : t -> string
 
 val home_dir : t -> string
 
+val write_context_observation_settings : t -> command:string -> (unit, error) result
+(** Metadata-only setup for a fresh disposable HOME: no MCP allowance and no
+    native file/command access; only the official status-line callback runs. *)
+
+
 val keychain_state : t -> keychain_state
 (** Outcome of ensuring [<home>/Library/Keychains/login.keychain-db], the only
     path macOS resolves a HOME's login keychain from. Without it the CLI's

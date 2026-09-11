@@ -1609,18 +1609,12 @@ let verify_runtime_execution runtime timeout_s =
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_path) ~cwd_path:private_path ~timeout_s runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
-  (* Second producer of masc.runtime_verification.v1. Runtime_verification.to_json
-     always emits failure.detail, so omitting the key here made a consumer's
-     read of it depend on which producer answered. [detail] is what the caller
-     was told and would otherwise drop. *)
   let unavailable ?detail code message =
-    print_endline (Yojson.Safe.to_string (`Assoc [
-      "schema", `String "masc.runtime_verification.v1"; "runtime_id", `String runtime_id;
-      "model", `Null; "observed_model", `Null; "status", `String "unavailable";
-      "checks", `Assoc ["response", `Bool false; "tool_called", `Bool false; "tool_roundtrip", `Bool false];
-      "failure", `Assoc [
-        "code", `String code; "message", `String message;
-        "detail", (match detail with None -> `Null | Some detail -> `String detail)]])); 2 in
+    print_endline
+      (Yojson.Safe.to_string
+         (Runtime_verification.unavailable_to_json ?detail ~runtime_id ~code ~message ()));
+    2
+  in
   if not (Float.is_finite timeout_s) || timeout_s <= 0. then
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else

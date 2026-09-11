@@ -46,6 +46,13 @@ type result =
   }
 
 val to_json : result -> Yojson.Safe.t
+val unavailable_to_json
+  :  ?detail:string
+  -> runtime_id:string
+  -> code:string
+  -> message:string
+  -> unit
+  -> Yojson.Safe.t
 val exit_code : result -> int
 
 val initial_runtime_id

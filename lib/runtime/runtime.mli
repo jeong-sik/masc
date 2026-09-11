@@ -824,3 +824,7 @@ val default_max_context : unit -> int
 val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 (** Clear model dispatch state after startup configuration failure. Owner and
     workspace readiness are managed independently by server bootstrap. *)
+
+val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) result) -> ('a, string) result
+(** Serialize an owner configuration activation with the existing file writers.
+    The action must not recursively invoke a config writer. *)

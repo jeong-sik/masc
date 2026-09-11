@@ -272,32 +272,13 @@ let initial_runtime_id ~default_runtime_id ~assignments ~lanes ~keeper_name =
      | candidate :: _ -> Some candidate)
 ;;
 
-let verify ?secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) =
+let verify ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime.t) =
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
     if not runtime.model.tools_support
     then Error (Unavailable Tools_not_declared)
     else (
       match runtime.execution with
-      | Runtime_execution.Antigravity_cli execution ->
-        (match secure_random with
-         | None -> Error (Unavailable (Invalid_configuration "Antigravity readiness requires a secure random source"))
-         | Some secure_random ->
-           let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
-             cli_path = execution.cli_path;
-             effort = execution.effort;
-             admission_timeout_s = Float.min timeout_s execution.timeout_s;
-             timeout_s = Some timeout_s; wall_clock_ceiling_s = Some timeout_s } in
-           (match Runtime_verification_antigravity.run ~secure_random ~net ~mgr ~clock ~cwd
-              ~directory:cwd_path ~oauth_source:execution.oauth_source ~config ~tool ~prompt with
-            | Ok result -> Ok {model=result.model; text=result.text}
-            | Error Runtime_verification_antigravity.Private_home_unavailable ->
-              Error (Unavailable (Client_not_authenticated "Antigravity private authentication could not be prepared"))
-            | Error (Client_error (Runtime_antigravity.Spawn_failed _)) ->
-              Error (Unavailable (Client_not_started "The Antigravity executable could not be started"))
-            | Error (Client_error (Runtime_antigravity.Invalid_config _)) ->
-              Error (Unavailable (Invalid_configuration "Antigravity readiness configuration is invalid"))
-            | Error (Client_error (Runtime_antigravity.Timeout _)) -> Error Timed_out
-            | Error (Client_error _) -> Error Provider_rejected))
+      | Runtime_execution.Antigravity_cli _ -> Error (Unavailable Unsupported_runtime)
       | Runtime_execution.Agent_core provider_cfg ->
         (match
            Runtime.validate_dispatch_credential ~provider_config:provider_cfg runtime

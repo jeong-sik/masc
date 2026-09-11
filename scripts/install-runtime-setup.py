@@ -7,6 +7,7 @@ The wizard requires real response/tool verification; --spec stays offline unless
 """
 import argparse
 import fcntl
+import getpass
 import hashlib
 import json
 import math
@@ -30,6 +31,7 @@ CHOICES = {
     'llama_cpp': ('openai-compatible-http', None),
     'vllm': ('openai-compatible-http', None),
     'openai_compatible': ('openai-compatible-http', None),
+    'messages': ('messages-http', None),
     'claude_code': ('claude-code', 'claude'),
     'codex': ('codex-app-server', 'codex'),
     'antigravity': ('antigravity-cli', 'agy'),
@@ -82,8 +84,15 @@ def render(spec):
     if choice not in CHOICES:
         raise SetupError('unsupported runtime choice')
     protocol, default_command = CHOICES[choice]
+
     allowed = {'choice', 'model', 'max_context', 'tools', 'streaming'}
-    allowed |= {'endpoint', 'api_key_env'} if default_command is None else {'command'}
+    allowed |= {'endpoint', 'api_key_env', 'credential_file', 'provider_kind', 'request_path'} if default_command is None else {'command'}
+    named = 'provider_id' in spec
+    if named:
+        if default_command is not None:
+            raise SetupError('a named catalog provider is an HTTP connection')
+        allowed |= {'provider_id', 'provider_display_name', 'model_key', 'provider_declared',
+                    'reasoning_effort', 'thinking_disable_encodable', 'wizard_default'}
     if choice == 'antigravity':
         allowed |= {'credential_file', 'timeout_s'}
     if set(spec) - allowed:
@@ -95,6 +104,51 @@ def render(spec):
     for key in ('tools', 'streaming'):
         if type(spec.get(key)) is not bool:
             raise SetupError(key + ' must be an explicitly declared boolean')
+    if named:
+        # A named catalog provider writes the provider's own section name, so
+        # the runtime resolves against the catalog instead of an anonymous
+        # setup_* identity. provider_declared skips the section when the
+        # workspace runtime.toml already declares the provider.
+        endpoint = text(spec, 'endpoint')
+        try:
+            url = urlsplit(endpoint)
+            valid = url.scheme in ('http', 'https') and url.hostname and not (url.username or url.password or url.query or url.fragment)
+            _ = url.port
+        except ValueError:
+            valid = False
+        if not valid:
+            raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
+        key = text(spec, 'api_key_env')
+        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+            raise SetupError('api_key_env must name an environment variable, not a credential value')
+        provider = text(spec, 'provider_id')
+        model_key = provider + '-' + text(spec, 'model_key')
+        runtime = ''
+        if spec.get('provider_declared') is not True:
+            runtime += table(('providers', provider), {'display-name': text(spec, 'provider_display_name'),
+                                                       'protocol': protocol, 'endpoint': endpoint})
+            runtime += table(('providers', provider, 'healthcheck'),
+                             {'path': '/api/tags' if choice == 'ollama' else '/models'})
+            runtime += table(('providers', provider, 'credentials'), {'type': 'env', 'key': key})
+        model_fields = {'api-name': model, 'tools-support': spec['tools'], 'streaming': spec['streaming']}
+        # No max-context here: the catalog row owns the window, exactly like
+        # the seed's OpenRouter entries.
+        if spec.get('reasoning_effort'):
+            model_fields.update(**{'thinking-support': True, 'reasoning-effort': text(spec, 'reasoning_effort')})
+        runtime += table(('models', model_key), model_fields)
+        binding = {'wizard-default': True} if spec.get('wizard_default') is True else {}
+        runtime += table((provider, model_key), binding)
+        # Overlay targets only. The catalog already declares the provider and
+        # its curated rows, and an overlay [[models]] row would shadow the
+        # curated one because overlay rows win the merge. enable_thinking is
+        # only written where the row accepts the "none" effort, so the
+        # disable is always encodable on the wire.
+        target = {'id': provider + '.' + model_key, 'provider_ref': provider, 'model_id': model}
+        if spec.get('thinking_disable_encodable') is True:
+            target['enable_thinking'] = False
+        overlay = table(('targets',), target, array=True)
+        return provider + '.' + model_key, runtime.encode(), overlay.encode()
+
     # A connection/model is an identity, not a singleton slot per CLI kind.
     # Include explicit capabilities and limits so changed operator settings do
     # not silently mutate a runtime another Keeper may already use.
@@ -125,6 +179,13 @@ def render(spec):
     runtime = table(('providers', provider), fields)
     if default_command is None:
         runtime += table(('providers', provider, 'healthcheck'), {'path': '/api/tags' if choice == 'ollama' else '/models'})
+        if spec.get('credential_file') and spec.get('api_key_env'):
+            raise SetupError('choose one credential reference for the connection')
+        if 'credential_file' in spec:
+            credential = Path(text(spec, 'credential_file'))
+            if not credential.is_absolute():
+                raise SetupError('credential_file must be an absolute private file reference')
+            runtime += table(('providers', provider, 'credentials'), {'type': 'file', 'path': str(credential)})
         if 'api_key_env' in spec and spec['api_key_env'] != '':
             key = text(spec, 'api_key_env')
             if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
@@ -145,7 +206,15 @@ def render(spec):
     runtime += table((provider, model_key), binding)
     overlay = ''
     if default_command is None:
-        base_capabilities = 'ollama' if choice == 'ollama' else 'openai_chat'
+        kind = spec.get('provider_kind') or ('ollama' if choice == 'ollama' else 'openai_compat')
+        accepted = ('anthropic', 'kimi') if choice == 'messages' else ('ollama',) if choice == 'ollama' else ('openai_compat', 'glm')
+        if kind not in accepted:
+            raise SetupError('the provider kind does not match the selected HTTP protocol')
+        base_capabilities = {'anthropic':'anthropic', 'kimi':'kimi', 'ollama':'ollama', 'glm':'glm', 'openai_compat':'openai_chat'}[kind]
+        request_path = spec.get('request_path') or ('/api/chat' if choice == 'ollama' else '/v1/messages' if choice == 'messages' else '/chat/completions')
+        parsed_path = urlsplit(request_path)
+        if not request_path.startswith('/') or parsed_path.scheme or parsed_path.netloc or parsed_path.query or parsed_path.fragment or not model_text(request_path):
+            raise SetupError('request_path must be an API path without credentials or a server address')
         caps = {'id_prefix': model, 'provider_name': provider, 'base': base_capabilities,
                 'max_context_tokens': context, 'supports_tools': spec['tools'],
                 'supports_native_streaming': spec['streaming']}
@@ -155,8 +224,8 @@ def render(spec):
         # Exact-output lanes resolve through this same provider/model pair.
         # A runtime binding alone is not an Agent Core target declaration.
         overlay += table(('providers',), {
-            'id': provider, 'kind': 'ollama' if choice == 'ollama' else 'openai_compat', 'base_url': endpoint,
-            'request_path': '/api/chat' if choice == 'ollama' else '/chat/completions', 'api_key_env': spec.get('api_key_env', ''),
+            'id': provider, 'kind': kind, 'base_url': endpoint,
+            'request_path': request_path, 'api_key_env': spec.get('api_key_env', ''),
             'capabilities_base': base_capabilities}, array=True)
         overlay += table(('targets',), {
             'id': provider + '.' + model_key, 'provider_ref': provider,
@@ -189,7 +258,7 @@ def atomic_write(path, content, mode):
 
 
 def configured_inventory(binary, base_path):
-    result = subprocess.run([str(binary), 'runtime-wizard-catalog', '--base-path', str(base_path), '--json'],
+    result = subprocess.run([str(binary), 'runtime-wizard-catalog', '--base-path', str(base_path), '--json', '--private-credentials'],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode:
         raise SetupError('cannot read the workspace runtime inventory; configuration was not changed')
@@ -213,6 +282,8 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         raise SetupError('runtime_ids must be a list of runtime identifiers')
     if default_id is not None and not model_text(default_id):
         raise SetupError('default_runtime_id must be a runtime identifier')
+    # Ids only: named ids are provider+slug and do not depend on the
+    # wizard-default flag applied inside the transaction below.
     rendered = [render(spec) for spec in specs]
     selected = list(dict.fromkeys(selected_ids if selected_ids is not None else [row[0] for row in rendered]))
     if not selected:
@@ -235,6 +306,44 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
             raise SetupError('runtime.toml is missing; initialize the workspace first')
         inventory = configured_inventory(binary, base)
         existing_ids = {row['id'] for row in inventory['runtimes']}
+        # A provider the workspace has never configured gets exactly one
+        # wizard-default binding among the new additions, or the wizard later
+        # refuses it for having several enabled bindings and no default. The
+        # first addition of that provider claims the flag; providers that
+        # already run keep whatever their own config declares. Doing this at
+        # the transactional boundary also covers the verification-retry path,
+        # where an earlier spec can drop out of the active set.
+        configured_providers = {row.get('provider_id') for row in inventory['runtimes']}
+        defaulted_providers = set()
+        claimed_named_keys = set()
+        normalized = []
+        for spec in specs:
+            provider_id = spec.get('provider_id') if isinstance(spec, dict) else None
+            if provider_id:
+                # Two model ids that differ only in punctuation would slug to
+                # the same runtime entry; the second would silently overwrite
+                # the first in the additions below. Refuse the pair instead.
+                key = (provider_id, spec.get('model_key'))
+                if key in claimed_named_keys:
+                    raise SetupError('two of the selected models render the same runtime entry name '
+                                     + repr(str(spec.get('model_key'))) + '; choose one of them')
+                claimed_named_keys.add(key)
+            if provider_id and provider_id in configured_providers:
+                # The provider section already exists in the workspace config;
+                # writing it again would declare the same table twice and fail
+                # validation that cannot say why.
+                spec = dict(spec, provider_declared=True, wizard_default=False)
+            elif provider_id:
+                first = provider_id not in defaulted_providers
+                defaulted_providers.add(provider_id)
+                # The first addition of a fresh provider writes the provider
+                # section and claims wizard-default; later additions of the
+                # same provider must not write the section a second time, or
+                # the appended config would define one table twice.
+                spec = dict(spec, wizard_default=first,
+                            provider_declared=spec.get('provider_declared') is True or not first)
+            normalized.append(spec)
+        rendered = [render(spec) for spec in normalized]
         additions = {}
         for runtime_id, runtime_text, overlay_text in rendered:
             if runtime_id not in existing_ids:
@@ -300,154 +409,6 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
             'models': [spec['model'] for spec in specs]}
 
 
-def positive_integer(value):
-    return type(value) is int and value > 0
-
-
-def model_text(value):
-    return isinstance(value, str) and bool(value) and value == value.strip() and all(ord(c) >= 32 and ord(c) != 127 for c in value)
-
-
-def http_json(endpoint, path, api_key_env='', timeout=10, body=None):
-    url = urlsplit(endpoint)
-    if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
-        raise SetupError('Use an HTTP(S) API URL without embedded credentials, query or fragment')
-    headers = {'Accept': 'application/json'}
-    if api_key_env:
-        if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', api_key_env):
-            raise SetupError('Choose an API key environment variable, not a credential value')
-        if os.environ.get(api_key_env):
-            headers['Authorization'] = 'Bearer ' + os.environ[api_key_env]
-    data = None if body is None else json.dumps(body).encode()
-    if data is not None:
-        headers['Content-Type'] = 'application/json'
-    class NoRedirect(HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-    with build_opener(NoRedirect()).open(Request(endpoint.rstrip('/') + path, data=data, headers=headers), timeout=timeout) as response:
-        return json.load(response)
-
-
-def ollama_model_details(endpoint, model, api_key_env='', timeout=10, load=False):
-    details = http_json(endpoint, '/api/show', api_key_env, timeout, {'model': model})
-    if not isinstance(details, dict):
-        raise SetupError('Ollama returned invalid model details')
-    capabilities = details.get('capabilities')
-    tools = 'tools' in capabilities if isinstance(capabilities, list) else None
-    configured = []
-    parameters = details.get('parameters', '')
-    if not isinstance(parameters, str):
-        raise SetupError('Ollama returned invalid model parameters')
-    for line in parameters.splitlines():
-        parts = line.split()
-        if parts and parts[0] == 'num_ctx':
-            if len(parts) != 2 or not parts[1].isascii() or not parts[1].isdigit() or int(parts[1]) <= 0:
-                raise SetupError('Ollama returned an invalid num_ctx parameter')
-            configured.append(int(parts[1]))
-    if len(set(configured)) > 1:
-        raise SetupError('Ollama returned conflicting num_ctx parameters')
-    if configured:
-        return dict(context=configured[0], context_source='Ollama configured num_ctx', tools=tools)
-    if load:
-        # Official preload API; only the models the operator selected are
-        # loaded. Let the server choose its window instead of allocating the
-        # model's potentially enormous architectural maximum.
-        http_json(endpoint, '/api/generate', api_key_env, timeout, {'model': model, 'stream': False})
-    running_payload = http_json(endpoint, '/api/ps', api_key_env, timeout)
-    if not isinstance(running_payload, dict) or not isinstance(running_payload.get('models'), list):
-        raise SetupError('Ollama returned an invalid running model list')
-    running = running_payload['models']
-    matches = [row['context_length'] for row in running if isinstance(row, dict)
-               and row.get('name', row.get('model')) == model and positive_integer(row.get('context_length'))]
-    if len(set(matches)) > 1:
-        raise SetupError('Ollama returned conflicting running context windows')
-    return dict(context=matches[0] if matches else None, context_source='Ollama running context window' if matches else None, tools=tools)
-
-
-def codex_model_rows(command, timeout):
-    path = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))) / 'models_cache.json'
-    try:
-        rows = json.loads(path.read_text())['models']
-        if isinstance(rows, list) and rows:
-            return rows, 'Codex local model list (cached; availability is checked after selection)'
-    except (OSError, ValueError, KeyError, TypeError):
-        pass
-    # A fresh user has no cache. Ask the installed client for its own bundled
-    # catalog, without logging in, starting a turn, or inheriting credentials.
-    # Its context_window is distinct from an API model's maximum capacity.
-    with tempfile.TemporaryDirectory(prefix='masc-codex-models-') as home:
-        env = {key: value for key, value in os.environ.items() if key in ('PATH', 'LANG', 'LC_ALL')}
-        env.update(HOME=home, CODEX_HOME=str(Path(home) / '.codex'))
-        try:
-            result = subprocess.run([command, 'debug', 'models', '--bundled'],
-                                    cwd=home, env=env, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, timeout=timeout)
-            rows = json.loads(result.stdout)['models'] if result.returncode == 0 else None
-            if isinstance(rows, list):
-                return rows, 'Installed Codex CLI bundled model catalog (availability is checked after selection)'
-        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
-            pass
-    return [], 'Codex model details unavailable. Refresh after updating/signing in to your CLI, or choose another connection.'
-
-
-def discover_models(choice, endpoint='', api_key_env='', timeout=10, command='codex'):
-    """Return observed IDs, not guessed names or inferred context capacities."""
-    if choice == 'ollama':
-        try:
-            rows = http_json(endpoint, '/api/tags', api_key_env, timeout)['models']
-            if not isinstance(rows, list):
-                raise ValueError('invalid model list')
-            models = [dict(id=row['name'], label=row['name'], context=None)
-                      for row in rows if isinstance(row, dict) and model_text(row.get('name'))]
-            origin = 'Installed Ollama models'
-        except (OSError, ValueError, KeyError, TypeError, URLError):
-            return [], 'Ollama model list unavailable. Start Ollama, then choose Refresh.'
-    elif choice == 'codex':
-        rows, origin = codex_model_rows(command, timeout)
-        models = []
-        for row in rows:
-            if not isinstance(row, dict) or row.get('visibility') != 'list' or not model_text(row.get('slug')):
-                continue
-            models.append(dict(id=row['slug'], label=row.get('display_name'), context=row.get('context_window')))
-    elif choice in ('llama_cpp', 'vllm', 'openai_compatible'):
-        url = urlsplit(endpoint)
-        if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
-            raise SetupError('Use the server HTTP(S) API base URL without embedded credentials, query or fragment')
-        headers = {'Accept': 'application/json'}
-        if api_key_env:
-            if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', api_key_env):
-                raise SetupError('Enter the API key environment variable name, not the key itself')
-            credential = os.environ.get(api_key_env)
-            if credential:
-                headers['Authorization'] = 'Bearer ' + credential
-        class NoRedirect(HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                return None
-        try:
-            with build_opener(NoRedirect()).open(Request(endpoint.rstrip('/') + '/models', headers=headers), timeout=timeout) as response:
-                rows = json.load(response)['data']
-            if not isinstance(rows, list):
-                raise ValueError('invalid model list')
-        except (OSError, ValueError, KeyError, TypeError, URLError) as error:
-            detail = 'HTTP ' + str(error.code) if isinstance(error, HTTPError) else 'unavailable or invalid response'
-            return [], 'Server /models: ' + detail + '. Start the server/check authentication, or copy its exact served model ID.'
-        origin = 'Your server /models response'
-        models = [dict(id=row['id'], label=row.get('name'), context=row.get('max_model_len'))
-                  for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
-    else:
-        return [], ('Open Claude Code and use /model to find your model ID.' if choice == 'claude_code'
-                    else 'Copy the exact model ID shown by your runtime.')
-    seen, result = set(), []
-    for model in models:
-        if model['id'] in seen:
-            continue
-        seen.add(model['id'])
-        model['label'] = model['label'] if model_text(model['label']) else model['id']
-        model['context'] = model['context'] if positive_integer(model['context']) else None
-        result.append(model)
-    return result, origin
-
-
 def catalog_models(binary, choice):
     client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(choice)
     if client is None:
@@ -459,14 +420,44 @@ def catalog_models(binary, choice):
         rows = json.loads(result.stdout)['models']
         if not isinstance(rows, list):
             return []
-        # API catalog capacities do not establish a Codex client window. Keep
-        # names as suggestions, but require client metadata or advanced input.
-        return [dict(id=row['id'], label=row.get('label', row['id']),
-                     context=None if choice == 'codex' else row['max_context'])
+        # The binary's client catalog owns the window: its rows are verified
+        # client metadata, so the wizard trusts the stated context as-is.
+        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'])
                 for row in rows if isinstance(row, dict) and model_text(row.get('id'))
                 and positive_integer(row.get('max_context'))]
     except (ValueError, KeyError, TypeError):
         return []
+
+
+def model_slug(model_id):
+    return re.sub(r'[^A-Za-z0-9-]+', '-', model_id).strip('-').lower()
+
+
+def provider_catalog_models(binary, provider_id):
+    """Curated rows for a named catalog provider, from the installed binary."""
+    result = subprocess.run([binary, 'runtime-model-list', '--provider', provider_id],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        # A failed catalog read must not masquerade as "no curated models":
+        # every later pick would be refused with a message about the catalog
+        # instead of the actual failure.
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' failed: '
+                         + (result.stderr.strip() or 'no diagnostics'))
+    try:
+        rows = json.loads(result.stdout)['models']
+    except (ValueError, KeyError, TypeError):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    if not isinstance(rows, list):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    return [row for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
+
+
+def positive_integer(value):
+    return type(value) is int and value > 0
+
+
+def model_text(value):
+    return isinstance(value, str) and bool(value) and value == value.strip() and all(ord(c) >= 32 and ord(c) != 127 for c in value)
 
 
 def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
@@ -476,11 +467,20 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
         if not answer or answer.strip().lower() == 'q':
             raise SetupError('model setup cancelled; run the installer again when you have the model settings')
         return answer.strip()
-    models, origin = discover_models(choice, endpoint, api_key_env, timeout)
-    if not models and choice in ('codex', 'claude_code'):
+    # CLI clients answer only through the binary's client catalog; an empty
+    # catalog offers nothing to guess from. HTTP connections use the native
+    # discovery command, which owns the wire formats.
+    if choice in ('codex', 'claude_code'):
         models = catalog_models(binary, choice)
-        if models:
-            origin = 'Installed MASC model catalog (suggestions; model response is not yet verified)'
+        origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if models
+                  else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
+    else:
+        source = dict(choice=choice)
+        if endpoint:
+            source['endpoint'] = endpoint
+        if api_key_env:
+            source['api_key_env'] = api_key_env
+        models, origin = native_discover_models(binary, source, timeout)
     print('\n' + origin, file=sys.stderr)
     for index, item in enumerate(models, 1):
         print('  {}) {} — ID: {}'.format(index, item['label'] if model_text(item['label']) else item['id'], item['id']), file=sys.stderr)
@@ -541,7 +541,7 @@ def ask_text(label):
 
 
 def pick(title, labels, multiple=False, defaults=()):
-    """TTY arrows/Space picker; numbered input for accessible/scripted terminals."""
+    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals."""
     if not labels:
         raise SetupError('there are no options to select')
     selected = set(defaults)
@@ -568,26 +568,53 @@ def pick(title, labels, multiple=False, defaults=()):
     fd = sys.stdin.fileno()
     original = termios.tcgetattr(fd)
     drawn = 0
+    # The filter changes what is displayed, never the index space: selected
+    # and current keep real indexes into labels, so a choice made under a
+    # filter still names the same row after the filter is cleared.
+    query = bytearray()
     try:
         tty.setcbreak(fd)
         while True:
             width, height = shutil.get_terminal_size()
-            count = max(1, height - 5)
-            start = min(max(0, current - count + 1), max(0, len(labels) - count))
+            text_query = bytes(query).decode('utf-8', 'ignore')
+            needle = text_query.strip().casefold()
+            visible = [index for index, label in enumerate(labels)
+                       if not needle or needle in terminal_text(label).casefold()]
+            if visible and current not in visible:
+                current = visible[0]
+            position = visible.index(current) if current in visible else 0
+            count = max(1, height - 6)
+            start = min(max(0, position - count + 1), max(0, len(visible) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            lines = [terminal_text(title), '↑/↓ move · Space select · Enter continue · q cancel' if multiple else '↑/↓ move · Enter select · q cancel']
-            for index in range(start, min(len(labels), start + count)):
+            hint = ('↑/↓ move · Space select · Enter continue · type to filter · Esc clears · Ctrl-C cancels' if multiple
+                    else '↑/↓ move · Enter select · type to filter · Esc clears · Ctrl-C cancels')
+            lines = [terminal_text(title), hint, 'Filter: ' + text_query]
+            for slot in range(start, min(len(visible), start + count)):
+                index = visible[slot]
                 marker = '[x]' if index in selected else '[ ]'
                 lines.append(('› ' if index == current else '  ') + (marker + ' ' if multiple else '') + terminal_text(labels[index]))
-            lines.append('{} selected'.format(len(selected)) if multiple else '{}/{}'.format(current + 1, len(labels)))
-            for line in lines:
+            if not visible:
+                footer = 'no matches'
+            elif multiple:
+                footer = '{} selected · {}/{} shown'.format(len(selected), len(visible), len(labels))
+            else:
+                footer = '{}/{} shown'.format(len(visible), len(labels))
+            lines.append(footer)
+            # A narrower frame has fewer lines than the one before it. Pad
+            # with cleared empties so exactly the previous frame's line count
+            # is rewritten, or the rows that vanished stay on screen as ghost
+            # rows (old markers, old footer and all).
+            emitted = lines + [''] * max(0, drawn - len(lines))
+            for line in emitted:
                 print('\r\x1b[2K' + line[:max(1, width - 1)], file=sys.stderr)
             sys.stderr.flush()
-            drawn = len(lines)
+            drawn = len(emitted)
             key = os.read(fd, 1)
             if not key:
                 raise SetupError('terminal closed; existing connections were preserved')
+            move = 0
+            cancel = False
             if key == b'\x1b':
                 # Escape sequences arrive separately on some terminals. Bound
                 # only key decoding, never model execution or Keeper behavior.
@@ -595,22 +622,50 @@ def pick(title, labels, multiple=False, defaults=()):
                     prefix = os.read(fd, 1)
                     if prefix == b'[' and select.select([fd], [], [], 0.1)[0]:
                         direction = os.read(fd, 1)
-                        key = b'k' if direction == b'A' else b'j' if direction == b'B' else b''
+                        move = -1 if direction == b'A' else 1 if direction == b'B' else 0
+                        key = b''
+                    elif prefix:
+                        # A byte arriving right after Esc is a keystroke of
+                        # its own, not half of a sequence: clear the filter
+                        # and process it instead of eating it.
+                        del query[:]
+                        key = prefix
+                    else:
+                        key = b''
+                elif query:
+                    del query[:]
+                    key = b''
                 else:
-                    key = b'q'
-            if key in (b'q', b'\x03', b'\x04'):
+                    cancel = True
+            # Every printable byte types into the query, q/j/k included: a
+            # filter is ordinary text, and a model id can start with any
+            # letter (qwen, kimi, janus). Movement is arrows only and cancel
+            # is Ctrl-C/Ctrl-D, or Esc when nothing is typed.
+            if cancel or key in (b'\x03', b'\x04'):
                 raise SetupError('setup cancelled; existing connections were preserved')
-            elif key == b'k':
-                current = (current - 1) % len(labels)
-            elif key == b'j':
-                current = (current + 1) % len(labels)
+            elif move:
+                if len(visible) > 1:
+                    current = visible[(position + move) % len(visible)]
             elif multiple and key == b' ':
-                selected.symmetric_difference_update([current])
+                if current in visible:
+                    selected.symmetric_difference_update([current])
             elif key in (b'\r', b'\n'):
+                # An empty filter must not hand back a row the operator cannot
+                # see; Enter waits for a match instead.
+                if not visible:
+                    continue
                 if not multiple:
                     return [current]
                 if selected:
                     return sorted(selected)
+            elif key == b'\x7f':
+                if query:
+                    query.pop()
+            elif len(key) == 1 and key >= b' ':
+                # Space toggles in multiple mode, so a filter cannot contain a
+                # space there; single mode types it. Bytes at 0x80 and above
+                # are UTF-8 continuation bytes on their way into the query.
+                query.extend(key)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, original)
 
@@ -628,9 +683,34 @@ def connection_sources(inventory):
             source = dict(provider_id=row['provider_id'], label=row['display_name'],
                           choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
                           command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
-                          credential_kind=row.get('credential_kind', 'unknown'), rows=[])
+                          credential_kind=row.get('credential_kind', 'unknown'),
+                          credential_file=row.get('credential_file'), provider_kind=row.get('provider_kind'),
+                          request_path=row.get('request_path'), rows=[])
             sources.append(source)
         source['rows'].append(row)
+    for integration in inventory.get('integrations', []):
+        existing = next((source for source in sources if source['provider_id'] == integration['id']), None)
+        if existing:
+            existing['origin'] = integration['origin']
+            continue
+        source = dict(provider_id=integration['id'], label=integration['display_name'],
+                      choice=PROTOCOL_CHOICES.get(integration.get('protocol')),
+                      endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
+                      api_key_env=integration.get('api_key_env') or '',
+                      credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
+                      credential_file=integration.get('credential_file'),
+                      provider_kind=integration.get('provider_kind'), request_path=integration.get('request_path'),
+                      origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
+        # A catalog-advertised new connection carries the provider's own name,
+        # so the wizard renders a named provider instead of an anonymous one.
+        # verification_support absent means an older binary that predates the
+        # field; those rows were always response-tool verified.
+        if (integration.get('setup_support') == 'new_connection'
+                and integration.get('protocol') in PROTOCOL_CHOICES
+                and integration.get('api_key_env') and integration.get('endpoint')
+                and integration.get('verification_support', 'response_tool') == 'response_tool'):
+            source['catalog_provider'] = dict(declared=integration.get('origin') == 'runtime_config')
+        sources.append(source)
     # These are local server connection suggestions, never guessed model IDs.
     for choice, label, endpoint in [('ollama', 'Ollama on this computer', 'http://localhost:11434'),
                                      ('llama_cpp', 'llama.cpp on this computer', 'http://localhost:8080/v1')]:
@@ -646,7 +726,11 @@ def connection_sources(inventory):
 
 def source_label(source):
     command, endpoint, key = source['command'], source['endpoint'], source['api_key_env']
-    if command:
+    if source.get('setup_support') == 'unsupported':
+        status = 'connection support not available yet'
+    elif source.get('credential_file'):
+        status = 'saved private API key; access will be checked'
+    elif command:
         status = 'CLI found' if shutil.which(command) else 'CLI not found'
     elif key:
         status = key + (' is set' if os.environ.get(key) else ' is not set')
@@ -655,64 +739,287 @@ def source_label(source):
     return source['label'] + ' — ' + status
 
 
+class PendingCredentials:
+    """Own only files created by this wizard, until a config commit retains them."""
+    def __init__(self, binary):
+        self.binary = binary
+        self.pending = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        for path, identity in self.pending.items():
+            try:
+                info = os.lstat(path)
+                if (info.st_dev, info.st_ino) == identity and stat.S_ISREG(info.st_mode):
+                    os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+    def retain(self, specs):
+        for spec in specs:
+            self.pending.pop(spec.get('credential_file'), None)
+
+    def save(self):
+        if not sys.stdin.isatty():
+            raise SetupError('API keys require the hidden input in an interactive terminal')
+        secret = getpass.getpass('API key (hidden; saved privately): ', stream=sys.stderr)
+        result = subprocess.run([str(self.binary), 'runtime-store-credential'], input=secret,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        del secret
+        if result.returncode != 0:
+            raise SetupError('The API key could not be stored. Enter one raw key and check your user configuration permissions.')
+        try:
+            receipt = json.loads(result.stdout)
+            path = receipt['credential_file']
+            if receipt.get('schema') != 'masc.private_credential_reference.v1' or not os.path.isabs(path):
+                raise ValueError('invalid reference')
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise ValueError('invalid private file')
+        except (KeyError, TypeError, ValueError, OSError):
+            raise SetupError('MASC did not return a valid private credential reference')
+        self.pending[path] = (info.st_dev, info.st_ino)
+        return path
+
+
+def prerequisite_menu(binary, dependency):
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if result.returncode or catalog.get('schema') != 'masc.prerequisite_actions.v1' or not isinstance(catalog.get('actions'), list):
+            raise ValueError('invalid actions')
+    except (TypeError, ValueError):
+        raise SetupError('MASC could not inspect installation actions for this computer')
+    actions = catalog['actions']
+    labels = [row['label'] + (' · administrator permission' if row['requires_admin'] else '') for row in actions]
+    choice = pick('Install or start the selected prerequisite', labels + ['Refresh detection', 'Back to setup choices'])[0]
+    if choice == len(actions) + 1:
+        return False
+    if choice == len(actions):
+        return True
+    selected = actions[choice]
+    print(terminal_text(selected['detail']), file=sys.stderr)
+    print('Source: ' + terminal_text(selected['source_url']), file=sys.stderr)
+    # The selected native action owns commands and privilege boundaries. Child
+    # password prompts and vendor output keep the terminal, not a hidden pipe.
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', selected['id']],
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+        if receipt.get('schema') != 'masc.prerequisite_action_result.v1' or receipt.get('readiness') != 'not_checked':
+            raise ValueError('invalid result')
+        state = receipt['status']
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
+    if state == 'failed' or result.returncode:
+        reason = receipt.get('reason')
+        if isinstance(reason, str) and reason.strip():
+            print(terminal_text(reason), file=sys.stderr)
+        else:
+            print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+    elif state == 'external_step_pending':
+        print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
+    elif state == 'commands_completed_recheck_required':
+        print('The installation step finished. Checking the service and account access next.', file=sys.stderr)
+    else:
+        raise SetupError('MASC returned an unknown installation state')
+    return True
+
+
+def prepare_connection(source, credentials):
+    source = dict(source)
+    if source.get('setup_support') == 'unsupported' or source['choice'] is None:
+        raise SetupError(source['label'] + ' is listed for visibility but its setup integration is not available yet')
+    if CHOICES[source['choice']][1] is not None:
+        command = source.get('command') or CHOICES[source['choice']][1]
+        while not shutil.which(command):
+            client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(source['choice'])
+            if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
+                raise SetupError('Install the selected client, then return to connection setup')
+        return source
+    if not source['endpoint']:
+        urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
+        selected = pick('Choose the running local server address', urls + ['Another API URL'])[0]
+        source['endpoint'] = urls[selected] if selected < len(urls) else ask_text('API base URL')
+    has_credential = bool(source.get('credential_file') or (source['api_key_env'] and os.environ.get(source['api_key_env'])))
+    if source['api_key_env'] and not has_credential and credentials is not None:
+        action = pick(source['label'] + ': account access', [
+            'Enter an API key now (hidden, saved for future terminals)',
+            'Return to connection selection'])[0]
+        if action:
+            raise SetupError('returned to connection selection')
+        source.update(credential_file=credentials.save(), credential_kind='file', api_key_env='', credential_replaced=True)
+    return source
+
+
+def native_connection_command(binary, command, source, timeout, arguments=()):
+    spec = {key: source[key] for key in ('choice', 'provider_kind', 'endpoint', 'provider_id', 'api_key_env', 'credential_file')
+            if source.get(key)}
+    with tempfile.TemporaryDirectory(prefix='masc-model-discovery-') as directory:
+        path = Path(directory) / 'connection.json'
+        atomic_write(path, json.dumps(spec).encode(), 0o600)
+        return subprocess.run([str(binary), command, '--spec', str(path)] + list(arguments),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+
+
+def native_discover_models(binary, source, timeout):
+    try:
+        result = native_connection_command(binary, 'runtime-discover-models', source, timeout)
+    except subprocess.TimeoutExpired:
+        return [], 'Model list did not answer in time; check the connection and refresh.'
+    if result.returncode:
+        # Native errors are fixed diagnostics; never forward provider bodies.
+        return [], 'Model list unavailable. Check account access, API credit or the running server, then refresh.'
+    try:
+        result = json.loads(result.stdout)
+        if result.get('source') != 'account_or_server_model_list' or result.get('account_availability_verified') is not False:
+            raise ValueError('unsupported observation')
+        models = result['models']
+        if not isinstance(models, list) or not all(isinstance(row, dict) and model_text(row.get('id')) for row in models):
+            raise ValueError('invalid models')
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('MASC returned an invalid model-list observation')
+    return models, 'Current account/server model list; invocation is checked after selection'
+
+
+def native_serving_context(binary, source, model, timeout, load=False):
+    arguments = ['--model', model] + (['--load'] if load else [])
+    if load:
+        print('Loading the selected model and reading its running context… Ctrl-C cancels setup.', file=sys.stderr)
+    try:
+        # A cold model load may legitimately outlast an inventory request.
+        # The operator can cancel it; the discovery timeout must not keep
+        # aborting and restarting a large model before it becomes available.
+        result = native_connection_command(binary, 'runtime-serving-context', source, None if load else timeout, arguments)
+    except subprocess.TimeoutExpired:
+        raise SetupError('The selected model is not ready yet. Wait for its server to load it, then refresh.')
+    if result.returncode:
+        raise SetupError('The selected server did not return its serving context. Check its account or server configuration.')
+    try:
+        observation = json.loads(result.stdout)
+        if (observation.get('model') != model
+                or observation.get('context_source') not in ('running_model', 'configured_model', 'serving_endpoint', 'not_reported')
+                or (observation.get('context') is not None and not positive_integer(observation['context']))
+                or (observation.get('tools') is not None and type(observation['tools']) is not bool)):
+            raise ValueError('invalid observation')
+    except (TypeError, ValueError):
+        raise SetupError('The native serving-context observation was invalid')
+    return observation
+
+
 def source_models(binary, source, timeout):
-    choice = source['choice']
-    can_discover = choice and source.get('credential_kind', 'none') in ('none', 'env')
-    observed, origin = discover_models(choice, source['endpoint'], source['api_key_env'], timeout,
-                                      command=source.get('command') or 'codex') if can_discover else ([], 'Configured models')
+    """One source's model list: discovery belongs to the native runtime;
+    curated catalog rows lead, workspace bindings are matched onto the rest."""
+    choice = source.get('choice')
+    if choice in ('codex', 'claude_code'):
+        # CLI clients answer through the binary's client catalog; the wizard
+        # never drives the vendor CLI directly.
+        observed = catalog_models(binary, choice)
+        origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if observed
+                  else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
+    else:
+        can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
+        observed, origin = native_discover_models(binary, source, timeout) if can_discover else ([], 'Configured models')
     rows = []
+    curated = provider_catalog_models(binary, source['provider_id']) if source.get('catalog_provider') and source.get('provider_id') else []
+    curated_ids = set()
+    if curated:
+        # A named catalog source leads with its curated rows: they carry the
+        # context, efforts and capabilities the runtime entry needs. Served
+        # ids the catalog does not curate still list below, uncurated.
+        curated_ids = {row['id'] for row in curated}
+        for row in curated:
+            discovered = next((item for item in observed if item['id'] == row['id']), None)
+            context = (discovered['context'] if discovered and positive_integer(discovered.get('context'))
+                       else row.get('max_context'))
+            rows.append(dict(id=row['id'], label=row.get('label') or row['id'],
+                             context=context, existing=None, catalog=row))
     for model in observed:
+        if model['id'] in curated_ids:
+            continue
         existing_rows = [row for row in source['rows'] if row['model'] == model['id']]
         # A workspace declaration is relevant only in this exact connection.
         if existing_rows:
             for existing in existing_rows:
                 context = model['context'] or existing['max_context']
                 label = model['label'] + (' — ' + existing['id'] if len(existing_rows) > 1 else '')
-                rows.append(dict(model, label=label, context=context, existing=existing))
+                rows.append(dict(model, label=label, context=context,
+                                 existing=None if source.get('credential_replaced') else existing))
         else:
             rows.append(dict(model, existing=None))
     for row in source['rows']:
+        if source.get('credential_replaced') and any(item['id'] == row['model'] for item in rows):
+            continue
         if not any(item.get('existing', {}).get('id') == row['id'] for item in rows if item.get('existing')):
             duplicates = sum(other['model'] == row['model'] for other in source['rows']) > 1
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
-            rows.append(dict(id=row['model'], label=label, context=row['max_context'], existing=row))
-    if choice in ('codex', 'claude_code'):
-        for model in catalog_models(binary, choice):
-            if not any(item['id'] == model['id'] for item in rows):
-                rows.append(dict(model, existing=None))
+            rows.append(dict(id=row['model'], label=label, context=row['max_context'],
+                             existing=None if source.get('credential_replaced') else row))
     return rows, origin
 
 
-def resolve_model_spec(source, model, timeout):
+def resolve_model_spec(source, model, timeout, binary=None):
     existing = model.get('existing')
     choice = source['choice']
     # Preserve every setting on an operator's existing connection. Its actual
     # model/tool capability is verified before it can become imp's default.
     if existing and existing.get('tools') is True and choice != 'ollama':
         return existing['id'], None
-    if source.get('credential_kind', 'none') not in ('none', 'env'):
+    if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
     if choice is None or choice == 'antigravity':
         raise SetupError('this connection needs runtime-specific configuration; choose an existing tool-enabled runtime')
+    if source.get('catalog_provider'):
+        # A named catalog source writes named provider sections that resolve
+        # against the installed catalog. A served id the catalog does not
+        # curate cannot resolve an exact-output target, so it is refused here
+        # rather than written as a binding that quietly cannot dispatch.
+        catalog = model.get('catalog')
+        if not catalog:
+            raise SetupError(model['id'] + ' is not in the installed catalog for this provider; '
+                             'choose a curated model or use "Add another server URL" for arbitrary endpoints')
+        if not positive_integer(catalog.get('max_context')):
+            raise SetupError(model['id'] + ' declares no context in the installed catalog')
+        if catalog.get('supports_tools') is not True:
+            # Refuse early with the real reason: a toolless row would pass
+            # configuration and only fail live verification later.
+            raise SetupError(model['id'] + ' declares no tool support in the installed catalog; '
+                             'select a tool-capable model')
+        spec = dict(choice=choice, model=model['id'], max_context=catalog['max_context'],
+                    tools=catalog.get('supports_tools') is True,
+                    streaming=catalog.get('supports_streaming') is True,
+                    endpoint=source['endpoint'], api_key_env=source['api_key_env'],
+                    provider_id=source['provider_id'], provider_display_name=source['label'],
+                    model_key=model_slug(model['id']),
+                    provider_declared=source['catalog_provider'].get('declared') is True,
+                    thinking_disable_encodable='none' in (catalog.get('accepted_reasoning_efforts') or []))
+        if catalog.get('default_reasoning_effort'):
+            spec['reasoning_effort'] = catalog['default_reasoning_effort']
+        return render(spec)[0], spec
     context = model.get('context')
+    if not positive_integer(context) and binary and source.get('provider_id') and choice != 'ollama':
+        result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            try:
+                catalog_model = json.loads(result.stdout)
+                if catalog_model.get('model') == model['id'] and positive_integer(catalog_model.get('max_context')):
+                    context = catalog_model['max_context']
+            except ValueError:
+                pass
     if choice == 'ollama':
-        details = ollama_model_details(source['endpoint'], model['id'], source['api_key_env'], timeout, load=True)
+        details = native_serving_context(binary, source, model['id'], timeout, load=True)
         if details['tools'] is False:
             raise SetupError('this Ollama model reports no tool support; select a tool-capable model for imp')
         context = details['context']
     elif choice in ('llama_cpp', 'openai_compatible') and context is None:
-        endpoint = source['endpoint'].rstrip('/')
-        root = endpoint[:-3] if endpoint.endswith('/v1') else endpoint
         try:
-            props = http_json(root, '/props', source['api_key_env'], timeout)
-        except (OSError, ValueError, URLError):
-            props = None
-        served, _ = discover_models(choice, endpoint, source['api_key_env'], timeout)
-        # Router metadata must not become another model's context declaration.
-        if len(served) == 1 and served[0]['id'] == model['id'] and isinstance(props, dict):
-            settings = props.get('default_generation_settings')
-            if isinstance(settings, dict) and positive_integer(settings.get('n_ctx')):
-                context = settings['n_ctx']
+            context = native_serving_context(binary, source, model['id'], timeout)['context']
+        except SetupError:
+            context = None
     if not positive_integer(context):
         action = pick('The server did not report its configured context window.',
                       ['Return to model selection', 'Advanced: enter the documented server limit'])[0]
@@ -724,13 +1031,14 @@ def resolve_model_spec(source, model, timeout):
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
                 streaming=choice in ('claude_code', 'codex'))
     if CHOICES[choice][1] is None:
-        spec.update(endpoint=source['endpoint'], api_key_env=source['api_key_env'])
+        spec.update(endpoint=source['endpoint'])
+        spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
     return render(spec)[0], spec
 
 
-def select_connections(binary, inventory, timeout):
+def select_connections(binary, inventory, timeout, credentials=None):
     sources = connection_sources(inventory)
     labels = [source_label(source) for source in sources] + ['Add another server URL', 'Configure later']
     chosen = pick('Select model connections (you can choose several)', labels, multiple=True)
@@ -750,16 +1058,24 @@ def select_connections(binary, inventory, timeout):
                 raise SetupError('use an HTTP(S) API URL without embedded credentials')
             keys = sorted({source['api_key_env'] for source in sources if source['api_key_env']}
                           | {key for key in os.environ if key.endswith('_API_KEY')})
-            key_index = pick('Server authentication', ['No API key'] + keys + ['Another environment variable name'])[0]
-            key = '' if key_index == 0 else keys[key_index - 1] if key_index <= len(keys) else ask_text('API key environment variable name (not its value)')
+            key_index = pick('Server authentication', ['No API key', 'Enter an API key now (hidden)'] + keys + ['Advanced: environment variable name'])[0]
+            key = keys[key_index - 2] if 2 <= key_index < len(keys) + 2 else ask_text('API key environment variable name (not its value)') if key_index == len(keys) + 2 else ''
             source = dict(choice=choice, endpoint=endpoint, api_key_env=key, command='', rows=[], label=endpoint)
+            if key_index == 1:
+                if credentials is None:
+                    raise SetupError('Open masc setup to save an API key privately')
+                source.update(credential_file=credentials.save(), credential_kind='file')
         else:
             source = sources[index]
+        source = prepare_connection(source, credentials)
         while True:
             models, origin = source_models(binary, source, timeout)
             print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
             options = [item['label'] + (' — existing connection' if item.get('existing') else '') for item in models]
             actions = ['Refresh model list', 'Back to connection selection', 'Advanced: enter an exact model ID']
+            can_replace_key = credentials is not None and CHOICES[source['choice']][1] is None
+            if can_replace_key:
+                actions.append('Save or replace API key (hidden)')
             indexes = pick(source['label'] + ': select models', options + actions, multiple=True)
             commands = [value for value in indexes if value >= len(models)]
             if commands:
@@ -771,6 +1087,9 @@ def select_connections(binary, inventory, timeout):
                     continue
                 if action == 1:
                     raise SetupError('returned to connection selection')
+                if action == 3 and can_replace_key:
+                    source.update(credential_file=credentials.save(), credential_kind='file', api_key_env='', credential_replaced=True)
+                    continue
                 model_id = ask_text('Exact model ID from your runtime')
                 if not model_text(model_id):
                     raise SetupError('model ID must be a nonempty single line')
@@ -778,7 +1097,7 @@ def select_connections(binary, inventory, timeout):
                 indexes = [len(models) - 1]
             for model_index in indexes:
                 model = models[model_index]
-                runtime_id, spec = resolve_model_spec(source, model, timeout)
+                runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary)
                 if runtime_id not in selected:
                     selected.append(runtime_id)
                     names[runtime_id] = source['label'] + ' / ' + model['id']
@@ -802,10 +1121,15 @@ def login_command(runtime_id, specs, inventory):
 
 
 def wizard(binary, base_path, timeout):
+    with PendingCredentials(binary) as credentials:
+        return wizard_with_credentials(binary, base_path, timeout, credentials)
+
+
+def wizard_with_credentials(binary, base_path, timeout, credentials):
     while True:
         try:
             inventory = configured_inventory(binary, base_path)
-            selected, specs, names = select_connections(binary, inventory, timeout)
+            selected, specs, names = select_connections(binary, inventory, timeout, credentials)
             if not selected:
                 return dict(configured=False, readiness='deferred', base_path=str(base_path))
             primary = pick('Which connection should imp use first?', [names[value] for value in selected])[0]
@@ -826,6 +1150,7 @@ def wizard(binary, base_path, timeout):
                     # declaration from the transaction, not just from the lane.
                     active_specs = [spec for spec in specs if render(spec)[0] in ordered]
                     result = configure_many(binary, base_path, active_specs, ordered, verify=True)
+                    credentials.retain(active_specs)
                     result['base_path'] = str(base_path)
                     return result
                 except VerificationError as error:
@@ -923,6 +1248,72 @@ def open_workspace(binary, base_path, port):
     return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)]).returncode
 
 
+def select_sandbox(binary, base_path):
+    advanced = False
+    names = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
+             'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
+    while True:
+        response = subprocess.run([str(binary), 'sandbox-catalog', '--base-path', str(base_path)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            catalog = json.loads(response.stdout)
+        except ValueError:
+            raise SetupError('Sandbox inspection failed. Run masc sandbox-catalog for details.')
+        if response.returncode != 0 or catalog.get('schema') != 'masc.sandbox_readiness.v1':
+            raise SetupError('MASC could not inspect sandbox prerequisites.')
+        if catalog.get('configuration_error'):
+            print(terminal_text(catalog['configuration_error']), file=sys.stderr)
+        rows = [row for row in catalog['candidates'] if advanced or not row['advanced']]
+        rows.sort(key=lambda row: not row['recommended'])
+        labels = [names.get(row['id'], row['id']) + (' · recommended' if row['recommended'] else '')
+                  + ' — ' + ('service found; guest still needs preparation' if row['state'] == 'service_ready' else row['reason'])
+                  for row in rows]
+        action = pick('3 · Choose imp’s sandbox', labels + [
+            'Refresh after installing or starting a service',
+            'Show common choices' if advanced else 'Advanced sandbox choices', 'Finish later'])[0]
+        if action == len(rows):
+            continue
+        if action == len(rows) + 1:
+            advanced = not advanced
+            continue
+        if action == len(rows) + 2:
+            return None
+        row = rows[action]
+        if row['state'] != 'service_ready':
+            print(terminal_text(row['reason']), file=sys.stderr)
+            prerequisite_menu(binary, row['id'])
+            continue
+        arguments = list(row['setup_args'])
+        configured = catalog.get('configured_selection')
+        same_backend = isinstance(configured, dict) and configured.get('backend') == row['id']
+        modes = row['capabilities']['network_modes']
+        if same_backend and not advanced:
+            print('Keeping the configured guest network policy. MASC model connections and WebFetch have separate server-side controls.', file=sys.stderr)
+            return arguments
+        if advanced:
+            # A declared policy can be kept; creating a new one also needs its
+            # destination configuration, so it is not synthesized here.
+            modes = [mode for mode in modes if mode in ('inherit', 'none')]
+            modes.sort(key=lambda mode: mode != 'inherit')
+            labels = [('Allow internet access for guest commands' if mode == 'inherit'
+                       else 'Disable networking for guest commands') for mode in modes]
+            if same_backend:
+                labels.insert(0, 'Keep configured guest network policy (' + terminal_text(configured['network_mode']) + ')')
+            print('Guest networking controls sandbox commands. MASC model connections and WebFetch run through separate server-side controls.', file=sys.stderr)
+            choice = pick('Sandbox guest network access', labels)[0]
+            if same_backend:
+                if choice == 0:
+                    return arguments
+                choice -= 1
+            mode = modes[choice]
+        else:
+            if 'inherit' not in modes:
+                raise SetupError('This sandbox needs advanced network configuration for the first conversation.')
+            mode = 'inherit'
+            print('The new sandbox allows internet access for guest commands. MASC model connections and WebFetch have separate server-side controls; Advanced choices can disable guest networking.', file=sys.stderr)
+        return arguments + ['--network-mode', mode]
+
+
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     conditions = {check['id']: check['condition'] for check in state['checks']}
@@ -947,12 +1338,16 @@ def journey(binary, base_path, port, timeout, resume=False):
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0
-    print('\n3 · Prepare imp’s sandbox\n4 · Open your first conversation', file=sys.stderr)
+    sandbox_args = select_sandbox(binary, base)
+    if sandbox_args is None:
+        print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
+        return 0
+    print('\n4 · Open your first conversation', file=sys.stderr)
     while True:
         # Native setup owns staging, image preparation, server/operator login,
         # and imp boot. --no-tui avoids re-entering this interactive journey.
         code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
-                               '--no-tui'], stdout=sys.stderr).returncode
+                               '--no-tui'] + sandbox_args, stdout=sys.stderr).returncode
         if code == 0:
             return open_workspace(binary, base, port)
         action = pick('imp is not running yet. Keep your workspace and continue when ready.',

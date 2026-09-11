@@ -20,6 +20,9 @@ val detect_host : run:runner -> host
 val probe : host:host -> run:runner -> require_rootless:bool -> require_userns:bool -> backend -> entry
 val recommend : host:host -> configured:backend option -> entry list -> backend option
 val catalog_json : host:host -> configured:backend option -> entry list -> Yojson.Safe.t
+val inspect : base_path:string option -> Yojson.Safe.t
+(** Observe the declared sandbox and host services without changing either.
+    An unreadable declaration is returned as an explicit configuration error. *)
 val state_message : state -> string
 val system_runner : runner
 val selection_of_contents : host:host -> path:string -> contents:string ->

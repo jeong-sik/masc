@@ -5519,6 +5519,20 @@
  (name test_fusion_decision)
  (modules test_fusion_decision)
  (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+(include stanzas/test_onboarding_status.inc)
+(include stanzas/test_onboarding_journey.inc)
+(include stanzas/test_sandbox_readiness.inc)
+(include stanzas/test_runtime_model_discovery.inc)
+
+(test
+ (name test_runtime_setup_credentials)
+ (modules test_runtime_setup_credentials)
+ (libraries masc_test_deps))
+
+(include stanzas/test_sandbox_prerequisites.inc)
+
+(include stanzas/test_apple_container_install.inc)
+
 (rule
  (alias runtest-test_model_independent_owner)
  (deps test_model_independent_owner.py ../bin/main_eio.exe)
@@ -5539,8 +5553,6 @@
  (name test_keeper_declared_roster)
  (modules test_keeper_declared_roster)
  (libraries masc_test_deps))
-(include stanzas/test_onboarding_status.inc)
-(include stanzas/test_sandbox_readiness.inc)
 
 (test
  (name test_owner_process_identity)
@@ -5551,21 +5563,15 @@
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
  (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
-(include stanzas/test_sandbox_prerequisites.inc)
-(include stanzas/test_onboarding_journey.inc)
 
 (include stanzas/test_docker_desktop_install.inc)
 
 (include stanzas/test_docker_account_access.inc)
 
-(include stanzas/test_apple_container_install.inc)
-
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
  (libraries masc alcotest eio eio_main yojson unix))
+(include stanzas/test_runtime_model_discovery.inc)
 
-(test
- (name test_runtime_setup_credentials)
- (modules test_runtime_setup_credentials)
- (libraries masc_test_deps))
+(include stanzas/test_bedrock_sdk.inc)

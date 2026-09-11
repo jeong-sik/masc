@@ -5575,3 +5575,7 @@
 (include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)
+(test
+ (name test_model_release_evidence)
+ (modules test_model_release_evidence)
+ (libraries masc.runtime alcotest yojson))

@@ -1,0 +1,78 @@
+{
+  "schema": "masc.model_release_evidence.v1",
+  "models": [
+    {
+      "publisher": "anthropic",
+      "model_id": "claude-sonnet-5",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-06-30",
+        "kind": "general_availability",
+        "source_url": "https://www.anthropic.com/news/claude-sonnet-5",
+        "checked_on": "2026-09-10"
+      }
+    },
+    {
+      "publisher": "anthropic",
+      "model_id": "claude-opus-5",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-07-24",
+        "kind": "general_availability",
+        "source_url": "https://www.anthropic.com/news/claude-opus-5",
+        "checked_on": "2026-09-10"
+      }
+    },
+    {
+      "publisher": "openai",
+      "model_id": "gpt-5.6-sol",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-07-09",
+        "kind": "general_availability",
+        "source_url": "https://openai.com/index/gpt-5-6/",
+        "checked_on": "2026-09-10"
+      }
+    },
+    {
+      "publisher": "openai",
+      "model_id": "gpt-5.6-terra",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-07-09",
+        "kind": "general_availability",
+        "source_url": "https://openai.com/index/gpt-5-6/",
+        "checked_on": "2026-09-10"
+      }
+    },
+    {
+      "publisher": "openai",
+      "model_id": "gpt-5.6-luna",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-07-09",
+        "kind": "general_availability",
+        "source_url": "https://openai.com/index/gpt-5-6/",
+        "checked_on": "2026-09-10"
+      }
+    },
+    {
+      "publisher": "openai",
+      "model_id": "gpt-6-astra",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-09-03",
+        "kind": "limited_release",
+        "source_url": "https://openai.com/products/release-notes/",
+        "checked_on": "2026-09-10"
+      }
+    },
+    {
+      "publisher": "zai",
+      "model_id": "glm-5.3",
+      "release": {
+        "status": "unknown"
+      }
+    }
+  ]
+}

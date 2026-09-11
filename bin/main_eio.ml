@@ -423,6 +423,14 @@ let accept_store_quarantine =
   in
   Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
 
+let record_default_arg =
+  let doc =
+    "Record this workspace as the default for later commands (in \
+     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     a temporary server workspace must not overwrite the machine's default."
+  in
+  Arg.(value & flag & info [ "record-default" ] ~doc)
+
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
   Arg.(value & opt (some string) None & info ["build-provenance-path"] ~docv:"PATH" ~doc)
@@ -548,7 +556,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd host port cli_base_path accept_store_quarantine =
+let run_cmd ?(record_default = false) host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   let resolved_base_path =
     Server_base_path_guard.resolve_startup_base_path ~cli_base_path
@@ -584,18 +592,20 @@ let run_cmd host port cli_base_path accept_store_quarantine =
   (* An explicit start is the operator naming this workspace, so it becomes the
      default for later commands the same way `masc init` does. Only explicit
      sources: re-recording what the record itself supplied is a no-op, and the
-     implicit default never reaches here. *)
-  (match resolved_base_path.resolution_source with
-   | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
-     (match Env_config.record_default_base_path canonical_base_path with
-      | Env_config.Recorded _ -> ()
-      | Env_config.No_record_location
-      | Env_config.Refused_under_test
-      | Env_config.Record_failed _ ->
-        (* Not fatal, and not worth a line on every boot: the server is
-           starting on a path the operator just supplied. *)
-        ())
-   | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
+     implicit default never reaches here. Off by default: a temporary server
+     workspace must not overwrite the machine's default (#35147). *)
+  if record_default then
+    (match resolved_base_path.resolution_source with
+     | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
+       (match Env_config.record_default_base_path canonical_base_path with
+        | Env_config.Recorded _ -> ()
+        | Env_config.No_record_location
+        | Env_config.Refused_under_test
+        | Env_config.Record_failed _ ->
+          (* Not fatal, and not worth a line on every boot: the server is
+             starting on a path the operator just supplied. *)
+          ())
+     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let _base_path_lease =
@@ -902,18 +912,18 @@ let run_cmd host port cli_base_path accept_store_quarantine =
             Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode =
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default =
   let identity = Build_identity.current () in
   Installed_dashboard.initialize ~executable_path:identity.executable_path
     ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd host port base_path accept_store_quarantine;
+    run_cmd ~record_default host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd host port base_path accept_store_quarantine;
+       run_cmd ~record_default host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;
@@ -1195,7 +1205,8 @@ let path_is_executable candidate =
 
 let front_door_cmd_exit
       host requested_port base_path accept_store_quarantine
-      provenance_path provenance_sha256 provenance_device provenance_inode =
+      provenance_path provenance_sha256 provenance_device provenance_inode
+      record_default =
   let serve () =
     match resolve_connection_port base_path requested_port with
     | Error error ->
@@ -1203,7 +1214,7 @@ let front_door_cmd_exit
       1
     | Ok port ->
       run_cmd_exit host (Workspace_connection.to_int port) base_path accept_store_quarantine provenance_path
-        provenance_sha256 provenance_device provenance_inode
+        provenance_sha256 provenance_device provenance_inode record_default
   in
   let deployment_flags_present =
     accept_store_quarantine
@@ -1242,7 +1253,7 @@ let start_cmd =
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
-    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
@@ -3004,7 +3015,7 @@ let cmd =
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group
     ~default:
-      Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+      Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
     info
     [ init_cmd
     ; start_cmd

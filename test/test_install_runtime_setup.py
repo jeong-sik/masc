@@ -403,7 +403,7 @@ class MultipleSelection(unittest.TestCase):
             (('0 selected · 3/3 shown').encode(), b'alph', 1),
             (b'2/3 shown', b' ', 1),
             (('1 selected · 2/3 shown').encode(), b'\x1b', 1),
-            (('1 selected · 3/3 shown').encode(), b'jj', 1),
+            (('1 selected · 3/3 shown').encode(), b'\x1b[B\x1b[B', 1),
             ('› [ ] Beta one'.encode(), b' ', 1),
             ('› [x] Beta one'.encode(), b'\r', 1),
         ])
@@ -425,6 +425,37 @@ class MultipleSelection(unittest.TestCase):
             (b'2/2 shown', b'\x1b', 1),
         ])
         self.assertEqual(result, {'error': 'SetupError'})
+
+    def test_q_and_k_type_into_the_filter_instead_of_commanding(self):
+        # Model ids start with any letter (qwen, kimi): every printable byte
+        # is filter text, movement is arrows only and q no longer cancels.
+        result, terminal = self._drive_picker(self._picker_program(['qwen big', 'kimi-k3', 'beta one']), [
+            (b'3/3 shown', b'qwen', 1),
+            (b'Filter: qwen', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+        result, terminal = self._drive_picker(self._picker_program(['kimi-k3', 'beta one']), [
+            (b'2/2 shown', b'kimi', 1),
+            (b'Filter: kimi', b'\r', 1),
+        ])
+        self.assertEqual(result, [0])
+
+    def test_a_byte_right_after_esc_clears_the_filter_and_is_kept(self):
+        result, _ = self._drive_picker(self._picker_program(['alpha one', 'golf two']), [
+            (b'2/2 shown', b'al', 1),
+            (b'Filter: al', b'\x1bg', 1),
+            (b'Filter: g', b'\r', 1),
+        ])
+        self.assertEqual(result, [1])
+
+    def test_narrowing_then_clearing_keeps_the_cursor_on_its_row(self):
+        labels = ['opt-{}'.format(index) for index in range(10)] + ['needle row']
+        result, _ = self._drive_picker(self._picker_program(labels), [
+            (b'11/11 shown', b'needle', 1),
+            (b'1/11 shown', b'\x1b', 1),
+            (b'11/11 shown', b'\r', 1),
+        ])
+        self.assertEqual(result, [10])
 
     def test_accessible_number_input_selects_several_without_model_typing(self):
         with patch('sys.stdin', io.StringIO('1,3\n')), contextlib.redirect_stderr(io.StringIO()):

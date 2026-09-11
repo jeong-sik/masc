@@ -587,8 +587,8 @@ def pick(title, labels, multiple=False, defaults=()):
             start = min(max(0, position - count + 1), max(0, len(visible) - count))
             if drawn:
                 print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
-            hint = ('↑/↓ move · Space select · Enter continue · type to filter · Esc clears · q cancel' if multiple
-                    else '↑/↓ move · Enter select · type to filter · Esc clears · q cancel')
+            hint = ('↑/↓ move · Space select · Enter continue · type to filter · Esc clears · Ctrl-C cancels' if multiple
+                    else '↑/↓ move · Enter select · type to filter · Esc clears · Ctrl-C cancels')
             lines = [terminal_text(title), hint, 'Filter: ' + text_query]
             for slot in range(start, min(len(visible), start + count)):
                 index = visible[slot]
@@ -601,13 +601,20 @@ def pick(title, labels, multiple=False, defaults=()):
             else:
                 footer = '{}/{} shown'.format(len(visible), len(labels))
             lines.append(footer)
-            for line in lines:
+            # A narrower frame has fewer lines than the one before it. Pad
+            # with cleared empties so exactly the previous frame's line count
+            # is rewritten, or the rows that vanished stay on screen as ghost
+            # rows (old markers, old footer and all).
+            emitted = lines + [''] * max(0, drawn - len(lines))
+            for line in emitted:
                 print('\r\x1b[2K' + line[:max(1, width - 1)], file=sys.stderr)
             sys.stderr.flush()
-            drawn = len(lines)
+            drawn = len(emitted)
             key = os.read(fd, 1)
             if not key:
                 raise SetupError('terminal closed; existing connections were preserved')
+            move = 0
+            cancel = False
             if key == b'\x1b':
                 # Escape sequences arrive separately on some terminals. Bound
                 # only key decoding, never model execution or Keeper behavior.
@@ -615,20 +622,30 @@ def pick(title, labels, multiple=False, defaults=()):
                     prefix = os.read(fd, 1)
                     if prefix == b'[' and select.select([fd], [], [], 0.1)[0]:
                         direction = os.read(fd, 1)
-                        key = b'k' if direction == b'A' else b'j' if direction == b'B' else b''
+                        move = -1 if direction == b'A' else 1 if direction == b'B' else 0
+                        key = b''
+                    elif prefix:
+                        # A byte arriving right after Esc is a keystroke of
+                        # its own, not half of a sequence: clear the filter
+                        # and process it instead of eating it.
+                        del query[:]
+                        key = prefix
+                    else:
+                        key = b''
                 elif query:
                     del query[:]
                     key = b''
                 else:
-                    key = b'q'
-            if key in (b'q', b'\x03', b'\x04'):
+                    cancel = True
+            # Every printable byte types into the query, q/j/k included: a
+            # filter is ordinary text, and a model id can start with any
+            # letter (qwen, kimi, janus). Movement is arrows only and cancel
+            # is Ctrl-C/Ctrl-D, or Esc when nothing is typed.
+            if cancel or key in (b'\x03', b'\x04'):
                 raise SetupError('setup cancelled; existing connections were preserved')
-            elif key == b'k':
+            elif move:
                 if len(visible) > 1:
-                    current = visible[(position - 1) % len(visible)]
-            elif key == b'j':
-                if len(visible) > 1:
-                    current = visible[(position + 1) % len(visible)]
+                    current = visible[(position + move) % len(visible)]
             elif multiple and key == b' ':
                 if current in visible:
                     selected.symmetric_difference_update([current])
@@ -644,7 +661,7 @@ def pick(title, labels, multiple=False, defaults=()):
             elif key == b'\x7f':
                 if query:
                     query.pop()
-            elif key >= b' ':
+            elif len(key) == 1 and key >= b' ':
                 # Space toggles in multiple mode, so a filter cannot contain a
                 # space there; single mode types it. Bytes at 0x80 and above
                 # are UTF-8 continuation bytes on their way into the query.

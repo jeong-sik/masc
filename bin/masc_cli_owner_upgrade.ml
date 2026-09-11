@@ -23,6 +23,7 @@ let port_free port =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
     Fun.protect ~finally:(fun () -> Unix.close socket) (fun () ->
+      Unix.setsockopt socket Unix.SO_REUSEADDR true;
       Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,port)); true)
   with Unix.Unix_error _ -> false
 let inspect ~base_path ~port =
@@ -63,13 +64,15 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
         if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed else
         let* () = Upgrade.request_termination owner in
         prerr_endline "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.";
-        let rec wait () =
+        let rec wait attempts =
           let* state = Upgrade.replacement_readiness ~run_dir ~base_path ~port in
           match state with
-          | Owner_draining -> Eio.Time.sleep clock 0.2; wait ()
+          | Owner_draining -> Eio.Time.sleep clock 0.2; wait attempts
+          | Port_busy when attempts > 0 ->
+            Eio.Time.sleep clock 0.2; wait (attempts - 1)
           | Port_busy -> Ok false
           | Replacement_can_start -> Ok true in
-        wait ()))
+        wait 25))
     with Unix.Unix_error _ | Sys_error _ -> Error Upgrade.Owner_unavailable in
   match result with
   | Error error -> emit (`Assoc ["schema", `String "masc.setup_server_error.v1";

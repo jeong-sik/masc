@@ -4,6 +4,10 @@ type error = Invalid_port | Invalid_configuration | Configuration_unavailable | 
 val error_message : error -> string
 val port : int -> (port, error) result
 val to_int : port -> int
+val is_ephemeral : port -> bool
+(** True if the port falls in the IANA dynamic/ephemeral range [49152..65535].
+    Ephemeral ports assigned by the OS or chosen during fallback takeovers
+    must not overwrite a workspace's durable connection contract (#35270). *)
 val read : base_path:string -> (port option, error) result
 val resolve : base_path:string option -> cli:int option -> environment:string option -> (port, error) result
 (** Explicit CLI, then nonempty existing environment, then workspace, then default. *)

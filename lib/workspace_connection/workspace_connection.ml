@@ -8,6 +8,7 @@ let error_message = function
   | Write_failed -> "The selected HTTP port could not be saved durably. Supply --port on the next connection."
 let port n = if n > 0 && n <= 65535 then Ok n else Error Invalid_port
 let to_int n = n
+let is_ephemeral n = n >= 49152 && n <= 65535
 let path base_path =
   Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") "connection.toml"
 let parse text =

@@ -1,7 +1,8 @@
 type distribution = Debian | Ubuntu | Other
-type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli
+type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
+  | Install_official_cli of Runtime_official_cli_install.client
 type action = { id : string; label : string; detail : string;
   source_url : string; requires_admin : bool; action_effect : action_effect }
 type outcome = External_step_pending | Commands_completed_recheck_required
@@ -33,16 +34,27 @@ let open_action ~host ~id ~label ~detail ~source_url url =
    action_effect=Open_official_installer {url; argv}}
 let commands ~id ~label ~detail ~source_url ~requires_admin argv =
   {id; label; detail; source_url; requires_admin; action_effect=Run_commands argv}
+let install_cli client =
+  let name = Runtime_official_cli_install.name client in
+  {id=name ^ "_native_install"; label="Install " ^ name ^ " using its official installer";
+   detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
+   source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
+   action_effect=Install_official_cli client}
 let catalog ~host ~distribution dependency =
   let open_ = open_action ~host in
   match dependency, host with
   | _, Sandbox_readiness.Unsupported -> []
-  | Codex_cli, _ -> [open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
+  | Codex_cli, _ -> [install_cli Codex; open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."
       ~source_url:codex_source codex_source]
-  | Claude_cli, _ -> [open_ ~id:"claude_official_install" ~label:"Open official Claude Code installation"
+  | Claude_cli, _ -> [install_cli Claude; open_ ~id:"claude_official_install" ~label:"Open official Claude Code installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."
       ~source_url:claude_source claude_source]
+  | Antigravity_cli, _ -> [install_cli Antigravity;
+      open_ ~id:"agy_official_install" ~label:"Open official Antigravity installation"
+        ~detail:"Follow the vendor instructions, then return to sign in and verify the selected model."
+        ~source_url:(Runtime_official_cli_install.source_url Antigravity)
+        (Runtime_official_cli_install.source_url Antigravity)]
   | Sandbox Sandbox_readiness.Apple_container, Macos {architecture=Arm64; major} when major >= 26 ->
     [open_ ~id:"apple_container_official_install" ~label:"Open Apple Container signed installer"
        ~detail:"Choose the signed installer package on Apple's release page and complete the macOS installer. Opening this page does not install or verify the package."
@@ -86,6 +98,8 @@ let catalog ~host ~distribution dependency =
   | Sandbox (Apple_container | Nerdctl_kata | Microsandbox | Remote_ssh), _ -> []
 
 let effect_json = function
+  | Install_official_cli client -> `Assoc ["kind", `String "official_cli_install";
+      "client", `String (Runtime_official_cli_install.name client)]
   | Open_official_installer {url; argv} -> `Assoc ["kind",`String "open_official_installer";
       "url",`String url; "argv",`List (List.map (fun s -> `String s) argv)]
   | Run_commands steps -> `Assoc ["kind",`String "run_commands";
@@ -96,16 +110,19 @@ let to_json actions = `Assoc ["schema",`String "masc.prerequisite_actions.v1";
     "source_url",`String action.source_url; "requires_admin",`Bool action.requires_admin;
     "effect",effect_json action.action_effect; "completion",`String "recheck_required"]) actions)]
 let execute ~run action =
-  let steps, completed = match action.action_effect with
-    | Open_official_installer {argv; _} -> [argv], External_step_pending
-    | Run_commands steps -> steps, Commands_completed_recheck_required in
-  let rec loop index = function
+  let rec commands completed index = function
     | [] -> completed
     | [] :: _ -> Failed {step=index; reason="This host cannot launch the installation page; open its source URL manually"}
     | argv :: rest -> (match run argv with
-      | Ok () -> loop (index+1) rest
+      | Ok () -> commands completed (index+1) rest
       | Error _ -> Failed {step=index; reason="The selected prerequisite action did not finish. Check its terminal output, correct the prerequisite, and retry or choose another backend."}) in
-  loop 1 steps
+  match action.action_effect with
+  | Install_official_cli client ->
+    (match Runtime_official_cli_install.install ~run client with
+     | Ok () -> Commands_completed_recheck_required
+     | Error reason -> Failed {step=1; reason})
+  | Open_official_installer {argv; _} -> commands External_step_pending 1 [argv]
+  | Run_commands steps -> commands Commands_completed_recheck_required 1 steps
 let outcome_to_json outcome =
   let status, fields = match outcome with
     | External_step_pending -> "external_step_pending", []

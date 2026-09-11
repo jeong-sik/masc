@@ -4336,43 +4336,53 @@ let launch_runtime_surface_load state ~mailbox ~force =
                 (generation, Error "Eio switch is unavailable")))
 
 let launch_repositories_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_repositories ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.repositories_inflight then ()
+  else begin
+    state.repositories_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_repositories ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Repositories_loaded result)
     in
-    enqueue_async mailbox (Repositories_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Repositories_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.repositories_inflight <- false;
+        enqueue_async mailbox
+          (Repositories_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_memory_health_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_memory_health ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.memory_health_inflight then ()
+  else begin
+    state.memory_health_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_memory_health ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Memory_loaded result)
     in
-    enqueue_async mailbox (Memory_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.memory_health_inflight <- false;
+        enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -5182,22 +5192,28 @@ let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
   launch_lane_run_detail_load state ~mailbox ~run_id
 
 let launch_verification_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_verification ~host ~port ~limit:200 with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.verification_inflight then ()
+  else begin
+    state.verification_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_verification ~host ~port ~limit:200 with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Verification_loaded result)
     in
-    enqueue_async mailbox (Verification_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.verification_inflight <- false;
+        enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+  end
 
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
@@ -12579,14 +12595,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Workspace_activity_loaded (request, result) ->
       apply_workspace_activity_read state request result
-  | Repositories_loaded result -> (
-      match result with
+  | Repositories_loaded result ->
+      state.repositories_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
-  | Memory_loaded result -> (
-      match result with
+  | Memory_loaded result ->
+      state.memory_health_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
@@ -12861,8 +12879,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.fusion_historical_inflight <- None
        | Some _ | None -> ());
       apply_fusion_historical_detail_load state generation reference result
-  | Verification_loaded result -> (
-      match result with
+  | Verification_loaded result ->
+      state.verification_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
           state.verification_error <- None;

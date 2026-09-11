@@ -33,6 +33,10 @@ module Mock_backend = struct
     Calls.push ("container_path:" ^ host_path);
     Ok ("/container" ^ host_path)
 
+  let read_complete_file ~config:_ ~meta:_ ~host_path ~timeout_sec:_ () =
+    Calls.push ("read_complete_file:" ^ host_path);
+    Ok "mock complete file body"
+
   let read_file
       ?turn_sandbox_factory:_
       ~config:_

@@ -392,9 +392,9 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_qu
     raise exn
 
 (** CLI options *)
-let port =
-  let doc = "Port to listen on" in
-  Arg.(value & opt int (Env_config_core.masc_http_port_int ()) & info ["p"; "port"] ~docv:"PORT" ~doc)
+let port_argument =
+  Arg.(value & opt (some int) None & info ["p"; "port"] ~docv:"PORT"
+    ~doc:"HTTP port resolution order (explicit flag, MASC_HTTP_PORT, saved workspace port, then default).")
 
 let host =
   let default = Env_config.masc_host () in
@@ -403,34 +403,33 @@ let host =
   in
   Arg.(value & opt string default & info ["host"] ~docv:"HOST" ~doc)
 
-let base_path =
-  let doc =
-    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
-  in
-  (* [Arg.opt] takes a value, not a thunk, so its default is computed while the
-     term is built — before Cmdliner has looked at argv. Calling
-     [default_base_path ()] there ran the environment-backed resolver on every
-     invocation: it logged a base path no command had selected, and it exited 1
-     when MASC_BASE_PATH was unset even though --base-path carried one. Parse
-     the flag as optional and consult the environment only when it is absent,
-     matching [run_base_path]. *)
-  let resolve = function Some raw -> raw | None -> default_base_path () in
-  Term.(
-    const resolve
-    $ Arg.(
-        value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc))
-
 let run_base_path =
-  let doc =
-    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
-  in
-  Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
+  Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH"
+    ~doc:"Workspace root; runtime state lives under its .masc directory.")
+let base_path = Term.(const (function Some raw -> raw | None -> default_base_path ()) $ run_base_path)
+let selected_base_path requested =
+  let selected = match requested with Some _ -> requested | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
+  Option.map Env_config.normalize_masc_base_path_input selected
+let resolve_connection_port requested cli =
+  Workspace_connection.resolve ~base_path:(selected_base_path requested) ~cli
+    ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key)
+let port = Term.(ret (const (fun requested cli -> match resolve_connection_port requested cli with
+  | Ok value -> `Ok (Workspace_connection.to_int value)
+  | Error error -> `Error (false, Workspace_connection.error_message error)) $ run_base_path $ port_argument))
 
 let accept_store_quarantine =
   let doc =
     "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deploy script never passes it: its preflight refuses the same files before the executable starts."
   in
   Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
+
+let record_default_arg =
+  let doc =
+    "Record this workspace as the default for later commands (in \
+     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     a temporary server workspace must not overwrite the machine's default."
+  in
+  Arg.(value & flag & info [ "record-default" ] ~doc)
 
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
@@ -557,7 +556,7 @@ let acquire_base_path_lock ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd host port cli_base_path accept_store_quarantine =
+let run_cmd ?(record_default = false) host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   let resolved_base_path =
     Server_base_path_guard.resolve_startup_base_path ~cli_base_path
@@ -593,18 +592,20 @@ let run_cmd host port cli_base_path accept_store_quarantine =
   (* An explicit start is the operator naming this workspace, so it becomes the
      default for later commands the same way `masc init` does. Only explicit
      sources: re-recording what the record itself supplied is a no-op, and the
-     implicit default never reaches here. *)
-  (match resolved_base_path.resolution_source with
-   | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
-     (match Env_config.record_default_base_path canonical_base_path with
-      | Env_config.Recorded _ -> ()
-      | Env_config.No_record_location
-      | Env_config.Refused_under_test
-      | Env_config.Record_failed _ ->
-        (* Not fatal, and not worth a line on every boot: the server is
-           starting on a path the operator just supplied. *)
-        ())
-   | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
+     implicit default never reaches here. Off by default: a temporary server
+     workspace must not overwrite the machine's default (#35147). *)
+  if record_default then
+    (match resolved_base_path.resolution_source with
+     | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
+       (match Env_config.record_default_base_path canonical_base_path with
+        | Env_config.Recorded _ -> ()
+        | Env_config.No_record_location
+        | Env_config.Refused_under_test
+        | Env_config.Record_failed _ ->
+          (* Not fatal, and not worth a line on every boot: the server is
+             starting on a path the operator just supplied. *)
+          ())
+     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let _base_path_lease =
@@ -911,18 +912,18 @@ let run_cmd host port cli_base_path accept_store_quarantine =
             Masc.Shutdown.await_deadline_watchdog watchdog));
   Log.Server.info "MASC MCP: Shutdown complete."
 
-let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode =
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default =
   let identity = Build_identity.current () in
   Installed_dashboard.initialize ~executable_path:identity.executable_path
     ~binary_commit:identity.binary_commit;
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
   | None, None, None, None ->
-    run_cmd host port base_path accept_store_quarantine;
+    run_cmd ~record_default host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   | Some path, Some sha256, Some device, Some inode ->
     (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
      | Ok () ->
-       run_cmd host port base_path accept_store_quarantine;
+       run_cmd ~record_default host port base_path accept_store_quarantine;
        Cmd.Exit.ok
      | Error message ->
        Printf.eprintf "invalid build provenance: %s\n" message;
@@ -1203,26 +1204,39 @@ let path_is_executable candidate =
   | exception Unix.Unix_error _ -> false
 
 let front_door_cmd_exit
-      host port base_path accept_store_quarantine
-      provenance_path provenance_sha256 provenance_device provenance_inode =
+      host requested_port base_path accept_store_quarantine
+      provenance_path provenance_sha256 provenance_device provenance_inode
+      record_default =
   let serve () =
-    run_cmd_exit host port base_path accept_store_quarantine provenance_path
-      provenance_sha256 provenance_device provenance_inode
+    match resolve_connection_port base_path requested_port with
+    | Error error ->
+      prerr_endline (Workspace_connection.error_message error);
+      1
+    | Ok port ->
+      run_cmd_exit host (Workspace_connection.to_int port) base_path accept_store_quarantine provenance_path
+        provenance_sha256 provenance_device provenance_inode record_default
   in
   let deployment_flags_present =
-    accept_store_quarantine
+    record_default
+    || accept_store_quarantine
     || Option.is_some provenance_path
     || Option.is_some provenance_sha256
     || Option.is_some provenance_device
     || Option.is_some provenance_inode
   in
+  (* Routing only constructs an unused TUI argv. Resolve the workspace's saved
+     endpoint only after the interactive journey has chosen its workspace. *)
+  match Workspace_connection.resolve ~base_path:None ~cli:requested_port
+          ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key) with
+  | Error error -> prerr_endline (Workspace_connection.error_message error); 1
+  | Ok routing_port ->
   match
     Masc_front_door.decide
       ~interactive:(stdio_is_a_terminal ())
       ~host
       ~default_host:(Env_config.masc_host ())
       ~deployment_flags_present
-      ~port
+      ~port:(Workspace_connection.to_int routing_port)
       ~base_path
       ~executable_name:Sys.executable_name
       ~path_env:(Sys.getenv_opt "PATH")
@@ -1230,7 +1244,7 @@ let front_door_cmd_exit
   with
   | Masc_front_door.Serve -> serve ()
   | Masc_front_door.Open_tui _ ->
-    Masc_cli_onboarding.run ~base_path ~port ~resume:true ~sandbox_step:false
+    Masc_cli_onboarding.run ~base_path ~port:requested_port ~resume:true ~sandbox_step:false
 
 let start_cmd =
   let doc =
@@ -1240,7 +1254,7 @@ let start_cmd =
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info
-    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+    Term.(const run_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
 
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
@@ -2876,7 +2890,7 @@ let setup_cmd =
   in
   let network_mode = Arg.(value & opt (some string) None & info ["network-mode"]
     ~doc:"Sandbox network mode: inherit, none, or policy where supported.") in
-  let run base_path port no_tui sandbox_profile microvm_backend network_mode =
+  let run base_path requested_port no_tui sandbox_profile microvm_backend network_mode =
     let network = match network_mode with
       | None -> Ok None
       | Some value -> (match Keeper_types_profile_sandbox.network_mode_of_string value with
@@ -2889,19 +2903,22 @@ let setup_cmd =
     | `Error _ as error -> error
     | `Ok (profile, backend) ->
       if not no_tui && profile = None && backend = None && network_mode = None && stdio_is_a_terminal () then
-        `Ok (Masc_cli_onboarding.run ~base_path ~port ~resume:false ~sandbox_step:false)
+        `Ok (Masc_cli_onboarding.run ~base_path ~port:requested_port ~resume:false ~sandbox_step:false)
       else
         let resolved = match base_path with
           | Some path -> Some path
           | None -> Option.map snd (Env_config_core.base_path_source_opt ()) in
         match resolved with
-        | Some path -> `Ok (setup_cmd_exit path port no_tui profile backend network_mode)
+        | Some path ->
+          (match resolve_connection_port (Some path) requested_port with
+           | Ok port -> `Ok (setup_cmd_exit path (Workspace_connection.to_int port) no_tui profile backend network_mode)
+           | Error error -> `Error (false, Workspace_connection.error_message error))
         | None -> `Error (false, "Choose a workspace with --base-path, or run masc setup in a terminal.")
   in
   Cmd.v
     (Cmd.info "setup"
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
-    Term.(ret (const run $ run_base_path $ port $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
+    Term.(ret (const run $ run_base_path $ port_argument $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
 
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
@@ -2961,10 +2978,29 @@ let docker_account_access_cmd =
     Term.(const (fun action base_path port -> Masc_cli_docker_session.run ~action ~base_path ~port) $ action $ run_base_path $ port)
 
 let docker_session_resume_cmd =
-  let base = Arg.(required & opt (some string) None & info ["base-path"] ~docv:"PATH") in
+  let base = base_path in
   let expected_uid = Arg.(required & opt (some int) None & info ["expected-uid"] ~docv:"UID") in
   Cmd.v (Cmd.info "docker-session-resume" ~doc:"Internal same-account continuation after Docker group selection.")
     Term.(const (fun base_path port expected_uid -> Masc_cli_docker_session.resume ~base_path ~port ~expected_uid) $ base $ port $ expected_uid)
+
+let workspace_connection_cmd =
+  let save = Arg.(value & flag & info ["save"] ~doc:"Save the explicitly selected desired port; this is not a readiness check.") in
+  let run requested cli save =
+    match resolve_connection_port requested cli with
+    | Error error -> prerr_endline (Workspace_connection.error_message error); 1
+    | Ok selected ->
+      let base = selected_base_path requested in
+      let saved = if not save then Ok () else match base,cli with
+        | Some base_path,Some _ -> Workspace_connection.save ~base_path ~port:selected
+        | _ -> Error Workspace_connection.Invalid_port in
+      match saved with
+      | Error error -> prerr_endline (Workspace_connection.error_message error); 1
+      | Ok () -> print_endline (Yojson.Safe.to_string (`Assoc [
+          "schema",`String "masc.workspace_connection.v1";
+          "base_path",(match base with None -> `Null | Some path -> `String path);
+          "port",`Int (Workspace_connection.to_int selected);"readiness",`String "not_checked"])); 0 in
+  Cmd.v (Cmd.info "workspace-connection" ~doc:"Resolve or save this workspace's desired HTTP port.")
+    Term.(const run $ run_base_path $ port_argument $ save)
 
 let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
@@ -2980,7 +3016,7 @@ let cmd =
   let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group
     ~default:
-      Term.(const front_door_cmd_exit $ host $ port $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode)
+      Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
     info
     [ init_cmd
     ; start_cmd
@@ -3008,6 +3044,7 @@ let cmd =
     ; sandbox_install_docker_verified_cmd
     ; docker_account_access_cmd
     ; docker_session_resume_cmd
+    ; workspace_connection_cmd
     ; prerequisite_actions_cmd
     ; setup_cmd
     ; setup_preflight_cmd

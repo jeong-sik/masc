@@ -36,7 +36,7 @@
 
 ## PR D — 설치가 workspace를 기억하게 (bare `masc` 동작)
 
-- **persisted default base path**: `masc setup`/`masc init` 성공 시, 그리고 `masc start --base-path X`가 성공적으로 부팅할 때마다, 해소된 절대경로를 사용자 전역 위치에 기록한다. 후보 위치: `$XDG_CONFIG_HOME/masc/default-base-path`(기본 `~/.config/masc/default-base-path`). 기록 파일을 base path 안에 두면 base path 자체와 헷갈리므로 바깥에 둔다.
+- **persisted default base path**: `masc setup` 및 `masc init --record-default` 성공 시, 그리고 `masc start --record-default` (또는 bare `masc --record-default`)로 지정하여 부팅할 때, 해소된 절대경로를 사용자 전역 위치에 기록한다 (`--record-default`는 opt-in으로 임시 workspace 오염 방지, #35101/#35147). 후보 위치: `$XDG_CONFIG_HOME/masc/default-base-path`(기본 `~/.config/masc/default-base-path`). 기록 파일을 base path 안에 두면 base path 자체와 헷갈리므로 바깥에 둔다.
 - **해소 순서 확장** (`env_config_core.base_path_source_opt`): `--base-path` 플래그 > `MASC_BASE_PATH_INPUT`/`MASC_BASE_PATH` env > persisted default > 기존 에러. env/flag는 항상 이긴다(명시가 기록을 덮는다).
 - **stale 방어**: 기록된 경로가 더 이상 `.masc`를 품고 있지 않으면 무시하고 기존 에러 메시지에 "기록된 기본값 X가 유효하지 않아 무시했다"를 덧붙인다. uninstall은 자기가 지우는 workspace를 가리키는 기록을 함께 제거한다.
 - 비목표: cwd walk-up 자동 감지(별도 논의; blast radius가 커서 이번엔 뺀다).

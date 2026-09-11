@@ -86,6 +86,9 @@ val unit_disposition_of_string
     {!disposition}, never recover semantics by inspecting it. *)
 type output_payload =
   { data : Yojson.Safe.t
+  ; content_blocks : Llm_provider.Types.content_block list option
+    (** Model-visible media, separate from the UTF-8 observation data.
+        [to_json] emits observations only; Tool_bridge preserves these blocks. *)
   ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
@@ -176,6 +179,7 @@ val make_ok
   -> start_time:float
   -> ?data:Yojson.Safe.t
   -> ?metadata:Yojson.Safe.t
+  -> ?content_blocks:Llm_provider.Types.content_block list
   -> unit
   -> result
 

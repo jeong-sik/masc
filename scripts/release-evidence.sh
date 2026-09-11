@@ -295,6 +295,8 @@ MCP_URL="${BASE_URL}/mcp"
 copy_install_smoke
 installed_version="$(capture_installed_version)"
 
+# Note: --record-default is intentionally omitted so temporary release workspaces
+# never pollute the developer's default base path (~/.config/masc/default-base-path).
 (cd "$base_path" && exec env \
   MASC_BASE_PATH="$base_path" \
   MASC_ADMIN_TOKEN= \

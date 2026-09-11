@@ -6,6 +6,15 @@ module Descriptor = Masc.Keeper_tool_descriptor
 module VAT = Masc.Verification_authority_tools
 module AR = Masc.Task.Anti_rationalization
 
+(* Existing text assertions inspect the typed disposition explicitly. *)
+let dispatch_text surface ~name ~args =
+  let result = VAT.dispatch surface ~name ~args in
+  match result with
+  | Tool_result.Completed _ -> Ok (Tool_result.message result)
+  | Tool_result.Failed _ -> Error (Tool_result.message result)
+  | Tool_result.Deferred _ -> Alcotest.fail "read-only lookup unexpectedly deferred"
+;;
+
 (* Prompts moved from code into config/prompts; load them so verification.lookup
    templates render instead of reporting missing. Matches the other
    prompt-rendering tests. *)
@@ -118,11 +127,11 @@ let write_runtime_toml ~base_path =
            }))
 ;;
 
-let with_fake_ssh f =
+let with_fake_ssh ?(script = fake_ssh_script) f =
   let dir = temp_dir () in
   let ssh_path = Filename.concat dir "ssh" in
   Out_channel.with_open_text ssh_path (fun channel ->
-    output_string channel fake_ssh_script);
+    output_string channel script);
   Unix.chmod ssh_path 0o755;
   Masc.Keeper_sandbox_ssh.For_testing.set_ssh_bin_override (Some ssh_path);
   Fun.protect
@@ -141,7 +150,7 @@ let with_fake_ssh f =
    so a read routed through it fails there for a reason that is not about the
    verifier. Micro_vm needs Apple's container CLI, so it cannot run on Linux
    at all. Tests that are about the Docker route ask for it by name. *)
-let with_surface ?(sandbox_profile = "remote_ssh") f =
+let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -188,7 +197,7 @@ let with_surface ?(sandbox_profile = "remote_ssh") f =
     (* The bootstrap preflight ends in [gh auth status], which a fixture
        endpoint cannot answer; the read path under test never needed it. *)
     with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" (fun () ->
-      with_fake_ssh run))
+      with_fake_ssh ?script:ssh_script run))
   else run ()
 ;;
 
@@ -245,9 +254,19 @@ let test_schemas_are_the_descriptor_schemas () =
       (fun (schema : Masc_domain.tool_schema) ->
          match Descriptor.descriptors_for_internal schema.name with
          | [ descriptor ] ->
+           (* The lookup surface alone reads images as visual input, so its
+              read_file description carries the descriptor's text plus that
+              one sanctioned sentence. *)
+           let expected =
+             match schema.name with
+             | "tool_read_file" ->
+                 descriptor.Descriptor.description
+                 ^ " " ^ VAT.image_delivery_note
+             | _ -> descriptor.Descriptor.description
+           in
            Alcotest.(check string)
              (schema.name ^ " description is the descriptor's")
-             descriptor.Descriptor.description
+             expected
              schema.description;
            Alcotest.(check bool)
              (schema.name ^ " input schema is the descriptor's")
@@ -274,7 +293,7 @@ let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () 
      with
      | Sys_error err -> Alcotest.failf "probe file could not be written: %s" err);
     let read key =
-      VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc [ key, `String name ])
+      dispatch_text surface ~name:"tool_read_file" ~args:(`Assoc [ key, `String name ])
     in
     let required =
       match
@@ -305,7 +324,7 @@ let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () 
          (Printf.sprintf "%S returns what the endpoint served" required)
          true
          (Astring.String.is_infix ~affix:ssh_fixture_body output));
-    match VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc []) with
+    match dispatch_text surface ~name:"tool_read_file" ~args:(`Assoc []) with
     | Ok output ->
       Alcotest.failf
         "a read with no %S resolved instead of being refused, so an unopened \
@@ -345,7 +364,7 @@ let test_search_refuses_a_call_without_its_required_pattern () =
   with_surface (fun config surface ->
     ignore (producer_playground config producer);
     (match
-       VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc [])
+       dispatch_text surface ~name:"tool_search_files" ~args:(`Assoc [])
      with
      | Ok output ->
        Alcotest.failf
@@ -357,7 +376,7 @@ let test_search_refuses_a_call_without_its_required_pattern () =
          true
          (Astring.String.is_infix ~affix:"pattern" detail));
     match
-      VAT.dispatch
+      dispatch_text
         surface
         ~name:"tool_search_files"
         ~args:(`Assoc [ "pattern", `String "advertised" ])
@@ -371,7 +390,7 @@ let test_search_refuses_a_call_without_its_required_pattern () =
    dropped call would read to the model as a tool that returned nothing. *)
 let test_unknown_tool_name_is_an_error () =
   with_surface (fun _config surface ->
-    match VAT.dispatch surface ~name:"tool_write_file" ~args:(`Assoc []) with
+    match dispatch_text surface ~name:"tool_write_file" ~args:(`Assoc []) with
     | Ok output -> Alcotest.failf "unknown tool should not succeed; got %s" output
     | Error detail ->
       Alcotest.(check bool)
@@ -407,7 +426,7 @@ let test_workspace_producer_gets_owned_read_surface () =
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match
-       VAT.dispatch
+       dispatch_text
          surface
          ~name:"tool_read_file"
          ~args:
@@ -424,7 +443,7 @@ let test_workspace_producer_gets_owned_read_surface () =
          "reads the requested line"
          "second line\n"
          Yojson.Safe.Util.(json |> member "content" |> to_string));
-    (match VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc []) with
+    (match dispatch_text surface ~name:"tool_search_files" ~args:(`Assoc []) with
      | Ok output -> Alcotest.failf "workspace search unexpectedly ran: %s" output
      | Error detail ->
        Alcotest.(check bool)
@@ -497,15 +516,14 @@ let test_binary_lookup_failures_survive_observation_replay () =
     ~authority_actor:"verifier_exact" ~started_at:1.0;
   let fixtures =
     [ "booklet.pdf", "%PDF-1.3\n%\147\140\139\158\n1 0 obj\n<<>>\nendobj\n"
-    ; "page.png", Base64.decode_exn
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+    ; "unsupported.bin", "\000\255\147\140"
     ]
   in
   let tools = List.map (fun (name, bytes) ->
     Out_channel.with_open_bin (Filename.concat playground name)
       (fun channel -> output_string channel bytes);
     let input = `Assoc [ "file_path", `String name; "limit", `Int 5 ] in
-    let detail = match VAT.dispatch surface ~name:"tool_read_file" ~args:input with
+    let detail = match dispatch_text surface ~name:"tool_read_file" ~args:input with
       | Ok _ -> Alcotest.fail "binary text lookup must not succeed"
       | Error detail -> detail
     in
@@ -759,7 +777,7 @@ let test_web_fetch_is_offered_and_dispatches () =
           })
       (fun () ->
         match
-          VAT.dispatch
+          dispatch_text
             surface
             ~name:"masc_web_fetch"
             ~args:
@@ -778,7 +796,7 @@ let test_web_fetch_is_offered_and_dispatches () =
 let test_web_fetch_refuses_a_private_target () =
   with_surface (fun _config surface ->
     match
-      VAT.dispatch
+      dispatch_text
         surface
         ~name:"masc_web_fetch"
         ~args:(`Assoc [ "url", `String "http://127.0.0.1:8935/health" ])
@@ -786,6 +804,112 @@ let test_web_fetch_refuses_a_private_target () =
     | Ok output ->
       Alcotest.failf "private-network fetch must be refused, got: %s" output
     | Error _ -> ())
+;;
+
+let test_keeper_endpoint_read_preserves_png_bytes () =
+  let fixture = Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ())
+      "test/fixtures/verifier-image-lookup.png" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let trailer = Exec_ssh_protocol.render_trailer
+      { v=Exec_ssh_protocol.newest; exit=Some 0; signal=None; timed_out=false; shim_error=None } in
+  let ssh_script = Printf.sprintf
+      "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat %s\nprintf '%%s' %s >&2\nexit 0\n"
+      (Filename.quote fixture) (Filename.quote trailer) in
+  with_surface ~ssh_script (fun config surface ->
+    ignore (producer_playground config producer);
+    let result = VAT.dispatch surface ~name:"tool_read_file"
+        ~args:(`Assoc [ "file_path", `String "endpoint-only.png" ]) in
+    match result with
+    | Tool_result.Completed { content_blocks=Some blocks; data; _ } ->
+      Alcotest.(check bool) "remote complete byte count" true
+        (Yojson.Safe.Util.member "bytes" data = `Int (String.length bytes));
+      Alcotest.(check bool) "remote raw PNG reaches model unchanged" true
+        (List.exists (function
+          | Llm_provider.Types.Image { data; _ } -> Base64.decode_exn data = bytes
+          | _ -> false) blocks)
+    | _ -> Alcotest.fail (Tool_result.message result))
+;;
+
+let test_goal_and_task_read_deliver_full_png () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "visual-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat
+      (match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ())
+      "test/fixtures/verifier-image-lookup.png" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  Alcotest.(check bool) "fixture exceeds text Read default" true (String.length bytes > 200000);
+  let image_path = Filename.concat root "proof.png" in
+  Out_channel.with_open_bin image_path (fun out -> output_string out bytes);
+  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let encoded = Base64.encode_exn bytes in
+  let task_surface = VAT.create ~config ~producer:producer_name |> Result.get_ok in
+  let goal_surface = VAT.create_goal_proof ~config |> Result.get_ok in
+  List.iter (fun (surface, path) ->
+    let args = `Assoc [ "file_path", `String path ] in
+    let result = VAT.dispatch surface ~name:"tool_read_file" ~args in
+    (match result with
+     | Tool_result.Completed output ->
+       Alcotest.(check bool) "SHA receipt" true
+         (Yojson.Safe.Util.member "sha256" output.data = `String sha);
+       Alcotest.(check bool) "full byte receipt" true
+         (Yojson.Safe.Util.member "bytes" output.data = `Int (String.length bytes))
+     | Tool_result.Failed _ | Tool_result.Deferred _ -> Alcotest.fail (Tool_result.message result));
+    let observation = Tool_result.to_json result |> Yojson.Safe.to_string in
+    Alcotest.(check bool) "observation valid UTF-8" true (String_util.is_valid_utf8 observation);
+    Alcotest.(check bool) "observation excludes image body" false
+      (Astring.String.is_infix ~affix:encoded observation);
+    let output = Masc.Tool_bridge.to_agent_core_typed_result result |> Result.get_ok in
+    let actual_blocks = match output.content_blocks with
+      | Some blocks -> blocks | None -> Alcotest.fail "bridge erased image blocks" in
+    Alcotest.(check bool) "bridge preserves complete PNG" true
+      (List.exists (function
+         | Agent_core.Types.Image { media_type="image/png"; data; source_type=Base64 } -> data = encoded
+         | _ -> false) actual_blocks);
+    let message role content : Agent_core.Types.message =
+      { role; content; name=None; tool_call_id=None; metadata=[] } in
+    let messages =
+      [ message User [ Text "Inspect the artifact visually" ]
+      ; message Assistant [ ToolUse { id="read-visual"; name="Read"; input=args } ]
+      ; message Tool [ ToolResult { tool_use_id="read-visual"; content=output.content
+                                 ; content_blocks=output.content_blocks; json=None; outcome=Tool_succeeded } ] ] in
+    let provider = Llm_provider.Provider_config.make ~kind:Anthropic
+      ~model_id:"visual-fixture" ~base_url:"https://api.anthropic.com" ~max_tokens:1024 () in
+    let request = Llm_provider.Backend_anthropic.build_request ~config:provider ~messages ()
+      |> Yojson.Safe.from_string in
+    let rec has_image = function
+      | `Assoc fields ->
+        (match List.assoc_opt "type" fields, List.assoc_opt "source" fields with
+         | Some (`String "image"), Some (`Assoc source) -> List.assoc_opt "data" source = Some (`String encoded)
+         | _ -> List.exists (fun (_, value) -> has_image value) fields)
+      | `List items -> List.exists has_image items
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> false in
+    Alcotest.(check bool) "next request receives image bytes" true (has_image request))
+    [ task_surface, "proof.png"; goal_surface, producer_name ^ "/proof.png" ];
+  let outside = Filename.concat dir "outside.png" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.png");
+  let rejected path =
+    let result = VAT.dispatch goal_surface ~name:"tool_read_file"
+      ~args:(`Assoc [ "file_path", `String path ]) in
+    Alcotest.(check bool) "out-of-root read rejected" true (Tool_result.is_failed result)
+  in
+  rejected outside;
+  rejected (producer_name ^ "/escape.png");
+  with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "1024" (fun () ->
+    let result = VAT.dispatch goal_surface ~name:"tool_read_file"
+      ~args:(`Assoc [ "file_path", `String (producer_name ^ "/proof.png") ]) in
+    Alcotest.(check bool) "existing image cap enforced" true
+      (Tool_result.failure_class result = Some Tool_result.Policy_rejection));
+  Alcotest.(check string) "read left exact file unchanged" bytes
+    (In_channel.with_open_bin image_path In_channel.input_all)
 ;;
 
 let () =
@@ -809,7 +933,11 @@ let () =
             test_keeper_surface_uses_the_effective_sandbox_root
         ] )
     ; ( "dispatch"
-      , [ Alcotest.test_case "unknown tool name is an error" `Quick
+      , [ Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
+            test_goal_and_task_read_deliver_full_png
+        ; Alcotest.test_case "Keeper endpoint read keeps exact PNG bytes" `Quick
+            test_keeper_endpoint_read_preserves_png_bytes
+        ; Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
         ; Alcotest.test_case "web fetch is offered and dispatches" `Quick
             test_web_fetch_is_offered_and_dispatches

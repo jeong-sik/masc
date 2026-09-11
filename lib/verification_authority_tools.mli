@@ -43,7 +43,12 @@ val goal_proof_root_layout : t -> (string list, string) result
 
 val schemas : t -> Types_core.tool_schema list
 
-val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
-(** Lookup results are UTF-8 text. A backend returning non-text bytes is a
-    stated lookup failure, never a successful text observation. Binary image
-    evidence is delivered by the snapshot image-block path. *)
+val image_delivery_note : string
+(** The sentence [schemas] appends to the read_file descriptor: this surface
+    reads images as visual input. Exposed so the schema-parity test asserts
+    against the same spelling the surface publishes. *)
+
+val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
+(** Observations are UTF-8 text. Read delivers admitted image bytes as canonical
+    model content, with path, media type, size and SHA-256 in the text receipt.
+    Other binary output is a stated lookup failure, never text or visual proof. *)

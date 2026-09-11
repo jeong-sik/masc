@@ -3686,6 +3686,7 @@ type state = {
      for the operator to open the keeper list. *)
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
+  mutable keeper_turns_inflight: bool;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -3836,14 +3837,17 @@ type state = {
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  mutable keeper_lanes_inflight: bool;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
+  mutable standalone_lanes_inflight: bool;
   mutable standalone_lanes_generation: int;
   (* The clients roster, off the ring under Runtime the way Lanes is. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
      cursor is where it lands. *)
   mutable clients_surface: Tui_decode.clients_snapshot option;
   mutable clients_surface_error: string option;
+  mutable clients_surface_inflight: bool;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
   mutable clients_surface_generation: int;
@@ -3891,6 +3895,7 @@ type state = {
   mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
+  mutable connectors_inflight: bool;
   mutable connectors_scroll: int;
   mutable connectors_cursor: int;
   mutable connectors_binding_cursor: int;
@@ -3914,6 +3919,7 @@ type state = {
   mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
+  mutable repositories_inflight: bool;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
   mutable workspace_activity_repo: string option;
@@ -3921,6 +3927,7 @@ type state = {
   mutable workspace_activity_cursor: int;
   mutable memory_health: Tui_decode.memory_health_snapshot option;
   mutable memory_health_error: string option;
+  mutable memory_health_inflight: bool;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
@@ -3968,6 +3975,7 @@ type state = {
   mutable code_dir: string;
   mutable code_entries: Tui_decode.workspace_tree_node list;
   mutable code_entries_error: string option;
+  mutable code_entries_inflight: bool;
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -4072,6 +4080,7 @@ type state = {
   mutable changes_tree_diff_path: string option;
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
+  mutable harness_inflight: bool;
   mutable harness_scroll: int;
   mutable harness_cursor: int;
   (* The verdict opened from the list. Task id alone is not an identity: the
@@ -4121,6 +4130,7 @@ type state = {
   mutable acting_detail_scroll: int;
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
+  mutable verification_inflight: bool;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* The request being read, not merely the current cursor position. A refresh
@@ -4210,6 +4220,7 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
+  mutable msg_history_inflight: (int * string) option;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows
@@ -5117,6 +5128,7 @@ let create_state
   keeper_tool_approvals_read = Snapshot_read.idle;
   keeper_turns = [];
   keeper_turns_error = None;
+  keeper_turns_inflight = false;
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -5187,11 +5199,14 @@ let create_state
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
+  keeper_lanes_inflight = false;
   standalone_lanes = None;
   standalone_lanes_error = None;
+  standalone_lanes_inflight = false;
   standalone_lanes_generation = 0;
   clients_surface = None;
   clients_surface_error = None;
+  clients_surface_inflight = false;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;
   clients_surface_generation = 0;
@@ -5232,6 +5247,7 @@ let create_state
   browser_lane_generation = 0;
   connectors = None;
   connectors_error = None;
+  connectors_inflight = false;
   connectors_scroll = 0;
   connectors_cursor = 0;
   connectors_binding_cursor = 0;
@@ -5250,6 +5266,7 @@ let create_state
   runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
+  repositories_inflight = false;
   repositories_scroll = 0;
   repositories_cursor = 0;
   workspace_activity_repo = None;
@@ -5257,6 +5274,7 @@ let create_state
   workspace_activity_cursor = 0;
   memory_health = None;
   memory_health_error = None;
+  memory_health_inflight = false;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   memory_facts_keeper = None;
@@ -5293,6 +5311,7 @@ let create_state
   code_dir = "";
   code_entries = [];
   code_entries_error = None;
+  code_entries_inflight = false;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
   code_file_scroll = 0;
@@ -5327,6 +5346,7 @@ let create_state
   changes_tree_diff_path = None;
   harness = None;
   harness_error = None;
+  harness_inflight = false;
   harness_scroll = 0;
   harness_cursor = 0;
   harness_detail = None;
@@ -5360,6 +5380,7 @@ let create_state
   acting_detail_scroll = 0;
   verification = None;
   verification_error = None;
+  verification_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
   verification_detail_request_id = None;
@@ -5399,6 +5420,7 @@ let create_state
   msg_memory_error = None;
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
+  msg_history_inflight = None;
   msg_scroll = 0;
   msg_scroll_pin = None;
   msg_older_cursor = None;

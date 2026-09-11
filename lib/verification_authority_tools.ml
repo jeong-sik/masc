@@ -250,9 +250,19 @@ let goal_proof_root_layout t = entry_lines_of t.ownership_root ~cap:goal_root_en
 (* Schemas                                                          *)
 (* ================================================================ *)
 
+(* The lookup surface reads images as visual input for the judge -- a fact of
+   this surface, not of the keeper descriptor it starts from. Named so the
+   schema-parity test reuses the same spelling instead of restating it. *)
+let image_delivery_note =
+  "Image files are delivered as visual input with byte count and SHA-256; \
+   read them without line offset/limit."
+
 let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.tool_schema =
   { Types_core.name = tool_name tool
-  ; description = descriptor.description
+  ; description =
+      (match tool with
+       | Read_file -> descriptor.description ^ " " ^ image_delivery_note
+       | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
 ;;
@@ -359,7 +369,68 @@ let run t tool ~args =
     |> result_of_execution
 ;;
 
+let image_result t tool ~name ~args ~start_time =
+  match tool, args with
+  | Read_file, `Assoc fields ->
+    (match List.assoc_opt "path" fields with
+     | Some (`String path) when String_util.is_valid_utf8 path ->
+       let cwd =
+         match List.assoc_opt "cwd" fields with Some (`String cwd) -> Some cwd | _ -> None
+       in
+       let limit = Env_config_keeper.KeeperVision.max_image_bytes () in
+       let bytes =
+         match t.producer_scope with
+         | Keeper_producer meta ->
+           (* The bounded probe identifies the format only. Its potentially
+              text-projected body never becomes image input or hash evidence. *)
+           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
+                    ~config:t.config ~meta ~path ?cwd
+                    ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
+            | Error _ as error -> error
+            | Ok probe ->
+              (match Keeper_vision_tool.sniff_image_media_type probe with
+               | Error _ -> Ok probe
+               | Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
+                   ~config:t.config ~meta ~path ?cwd ()))
+         | Workspace_producer ->
+           Keeper_tool_filesystem_runtime.read_owned_bytes
+             ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) ()
+       in
+       (match bytes with
+        | Error _ -> None (* The ordinary Read preserves its own error contract. *)
+        | Ok bytes ->
+          (match Keeper_vision_tool.sniff_image_media_type bytes with
+           | Error _ -> None
+           | Ok media_type ->
+             let size = String.length bytes in
+             if size > limit then
+               Some (Tool_result.error ~failure_class:Tool_result.Policy_rejection
+                 ~tool_name:name ~start_time "Image exceeds the configured image byte limit")
+             else if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+               Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+                 ~tool_name:name ~start_time "Images are read whole; omit line offset and limit")
+             else
+               let data = `Assoc
+                 [ "path", `String path; "media_type", `String media_type
+                 ; "bytes", `Int size
+                 ; "sha256", `String Digestif.SHA256.(digest_string bytes |> to_hex)
+                 ; "visual_input", `Bool true ] in
+               Some (Tool_result.make_ok ~tool_name:name ~start_time ~data
+                 ~content_blocks:
+                   [ Llm_provider.Types.Text (Yojson.Safe.to_string data)
+                   ; Llm_provider.Types.image_block ~media_type
+                       ~data:(Base64.encode_exn bytes) () ] ()) ))
+     | _ -> None)
+  | (Read_file | Search_files | Web_fetch), _ -> None
+;;
+
 let dispatch t ~name ~args =
+  let start_time = Time_compat.now () in
+  let text_result = function
+    | Ok text -> Tool_result.ok ~tool_name:name ~start_time text
+    | Error detail -> Tool_result.error ~failure_class:Tool_result.Runtime_failure
+        ~tool_name:name ~start_time detail
+  in
   match List.find_opt (fun (tool, _) -> String.equal (tool_name tool) name) t.tools with
   | None ->
     let detail =
@@ -369,7 +440,8 @@ let dispatch t ~name ~args =
         (String.concat ", " (List.map (fun (tool, _) -> tool_name tool) t.tools))
     in
     log_call t ~name ~argument:"" ~outcome:Unknown_tool;
-    Error detail
+    Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name:name ~start_time detail
   | Some (tool, descriptor) ->
     let argument = Yojson.Safe.to_string args in
     (match
@@ -381,12 +453,15 @@ let dispatch t ~name ~args =
      | Error rejection ->
        let detail = Tool_result.message rejection in
        log_call t ~name ~argument ~outcome:Invalid_input;
-       Error detail
+       Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+         ~tool_name:name ~start_time detail
      | Ok prepared_args ->
-       (* The lookup contract is text, unlike the snapshot's typed binary
-          payload. Raw PDF/PNG slices from Read must not become invalid JSON
-          strings in either the reviewer request or its durable observation. *)
+       (* Image bodies travel as typed model content. Every observation and
+          non-image result must still be UTF-8 text; PDF bytes are not visuals. *)
        let result =
+         match image_result t tool ~name ~args:prepared_args ~start_time with
+         | Some result -> result
+         | None -> text_result (
          match run t tool ~args:prepared_args with
          | (Ok text | Error text) as result when String_util.is_valid_utf8 text ->
            result
@@ -400,13 +475,14 @@ let dispatch t ~name ~args =
                    ; "output_sha256",
                      `String Digestif.SHA256.(digest_string bytes |> to_hex)
                    ; "error",
-                     `String "The lookup returned non-UTF-8 bytes, not readable text. No text content was delivered. Image inspection requires the submitted image evidence; binary file bytes are not a visual inspection."
-                   ]))
+                     `String "The lookup returned non-UTF-8 bytes, not readable text. No text content was delivered. Binary file bytes are not a visual inspection."
+                   ])))
        in
        log_call
          t
          ~name
          ~argument
-         ~outcome:(match result with Ok _ -> Resolved | Error _ -> Rejected);
+         ~outcome:(match result with Tool_result.Completed _ -> Resolved
+           | Tool_result.Failed _ | Tool_result.Deferred _ -> Rejected);
        result)
 ;;

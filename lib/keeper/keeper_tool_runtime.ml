@@ -86,6 +86,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
+  | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_workspace_memory_read
   | Tool_memory_search
@@ -164,6 +165,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_tools_list
   | Tool_capability_search
   | Tool_context_status
+  | Tool_peer_artifact
   | Tool_artifact_read
   | Tool_workspace_memory_read
   | Tool_memory_search
@@ -252,6 +254,14 @@ let handle_in_process ctx descriptor args =
             ~meta:ctx.meta
             ~ctx_work:ctx.ctx_work
             ~args))
+  | Tool_peer_artifact ->
+    Some (Keeper_peer_artifact.handle ~config:ctx.config ~meta:ctx.meta
+      ~turn_sandbox_factory:ctx.turn_sandbox_factory ~args
+      ~write:(fun args -> Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+        ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta
+        ~publication_recovery:ctx.publication_recovery
+        ?continuation_channel:ctx.continuation_channel ?gate_context:ctx.gate_context
+        ?gate_grant:ctx.gate_grant ~args ()))
   | Tool_artifact_read ->
     Some
       (Keeper_artifact_read.handle

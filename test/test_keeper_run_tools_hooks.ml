@@ -472,7 +472,7 @@ let test_gate_history_drops_orphan_tool_result () =
 let huge_tool_result index =
   (* Mirrors the live 623,999 B [result] that refused the prompt. *)
   Tool_result.Completed
-    { Tool_result.data =
+    { content_blocks = None; Tool_result.data =
         `Assoc
           [ "index", `Int index
           ; "body", `String (String.make 620_000 'y')

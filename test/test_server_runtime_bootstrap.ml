@@ -665,11 +665,17 @@ let spawned_config_home =
      dir)
 
 let main_eio_env_overrides overrides =
-  merge_env_overrides
-    (("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
-     :: ("MASC_INTERNAL_MCP_TOKEN", "")
-     :: ("XDG_CONFIG_HOME", Lazy.force spawned_config_home)
-     :: overrides)
+  let defaults =
+    [ ("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
+    ; ("MASC_INTERNAL_MCP_TOKEN", "")
+    ; ("XDG_CONFIG_HOME", Lazy.force spawned_config_home)
+    ]
+  in
+  let override_keys = List.map fst overrides in
+  let filtered_defaults =
+    List.filter (fun (k, _) -> not (List.mem k override_keys)) defaults
+  in
+  merge_env_overrides (filtered_defaults @ overrides)
 
 let curl_health_status ~port =
   let url = Printf.sprintf "http://127.0.0.1:%d/health" port in
@@ -4809,6 +4815,129 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
                   String_util.contains_substring error "required default profile")
                rejection_errors)))
 
+let test_main_eio_start_does_not_record_default_without_flag () =
+  with_temp_dir "start-no-record-default" (fun dir ->
+      with_temp_dir "start-no-record-config-home" (fun config_home ->
+          let exe = Masc_test_runtime.find_main_eio_exe () in
+          let port = find_free_port () in
+          let log_file = Filename.concat dir "server.log" in
+          let log_fd =
+            Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+          in
+          let env =
+            main_eio_env_overrides
+              [
+                ("XDG_CONFIG_HOME", config_home);
+                ("MASC_BASE_PATH", dir);
+                ("GRAPHQL_API_KEY", "");
+                ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+                ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
+                ("MASC_ORCHESTRATOR_ENABLED", "0");
+                ("MASC_USE_H2", "0");
+                ("DUNE_SOURCEROOT", project_root ());
+              ]
+          in
+          let pid =
+            Unix.create_process_env exe
+              [|
+                exe;
+                "start";
+                "--host";
+                "127.0.0.1";
+                "--port";
+                string_of_int port;
+                "--base-path";
+                dir;
+              |]
+              env Unix.stdin log_fd log_fd
+          in
+          Unix.close log_fd;
+          Fun.protect
+            ~finally:(fun () -> stop_process pid)
+            (fun () ->
+              if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
+                prerr_endline
+                  (Printf.sprintf
+                     "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
+                     (read_file log_file));
+                Alcotest.skip ()
+              end else begin
+                let record_file =
+                  Filename.concat (Filename.concat config_home "masc") "default-base-path"
+                in
+                Alcotest.(check bool)
+                  "default-base-path record does not exist without --record-default"
+                  false
+                  (Sys.file_exists record_file)
+              end)))
+
+let test_main_eio_start_records_default_with_flag () =
+  with_temp_dir "start-with-record-default" (fun dir ->
+      with_temp_dir "start-with-record-config-home" (fun config_home ->
+          let exe = Masc_test_runtime.find_main_eio_exe () in
+          let port = find_free_port () in
+          let log_file = Filename.concat dir "server.log" in
+          let log_fd =
+            Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+          in
+          let env =
+            main_eio_env_overrides
+              [
+                ("XDG_CONFIG_HOME", config_home);
+                ("MASC_BASE_PATH", dir);
+                ("GRAPHQL_API_KEY", "");
+                ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+                ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
+                ("MASC_ORCHESTRATOR_ENABLED", "0");
+                ("MASC_USE_H2", "0");
+                ("DUNE_SOURCEROOT", project_root ());
+              ]
+          in
+          let pid =
+            Unix.create_process_env exe
+              [|
+                exe;
+                "start";
+                "--host";
+                "127.0.0.1";
+                "--port";
+                string_of_int port;
+                "--base-path";
+                dir;
+                "--record-default";
+              |]
+              env Unix.stdin log_fd log_fd
+          in
+          Unix.close log_fd;
+          Fun.protect
+            ~finally:(fun () -> stop_process pid)
+            (fun () ->
+              if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
+                prerr_endline
+                  (Printf.sprintf
+                     "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
+                     (read_file log_file));
+                Alcotest.skip ()
+              end else begin
+                let record_file =
+                  Filename.concat (Filename.concat config_home "masc") "default-base-path"
+                in
+                Alcotest.(check bool)
+                  "default-base-path record exists with --record-default"
+                  true
+                  (Sys.file_exists record_file);
+                let recorded = String.trim (read_file record_file) in
+                let expected =
+                  match Unix.realpath dir with
+                  | canonical -> canonical
+                  | exception _ -> dir
+                in
+                Alcotest.(check string)
+                  "recorded path matches workspace base path"
+                  expected
+                  recorded
+              end)))
+
 (* A wedged case in this suite has burned 57 CI minutes in silence: a hang
    never fails, so dune kept the Alcotest stream buffered and the log showed
    nothing (#32181 — load-only, unreproduced in three 6-way local rounds).
@@ -5166,5 +5295,13 @@ let () =
             "main_eio invalid runtime stays degraded but serves dashboard"
             `Slow
             test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard;
+          Alcotest.test_case
+            "main_eio start does not record default without flag"
+            `Slow
+            test_main_eio_start_does_not_record_default_without_flag;
+          Alcotest.test_case
+            "main_eio start records default with flag"
+            `Slow
+            test_main_eio_start_records_default_with_flag;
         ] );
     ]

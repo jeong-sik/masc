@@ -97,6 +97,19 @@ type wake_record =
   ; error : string option
   }
 
+type schedule_note =
+  { note_id : string
+  ; schedule_id : string
+  ; author_id : string
+  ; author_kind : actor_kind
+  ; created_at : float
+  ; body : string
+  }
+
+val schedule_note_to_yojson : schedule_note -> Yojson.Safe.t
+
+val schedule_note_of_yojson : Yojson.Safe.t -> (schedule_note, string) result
+
 val create_request :
   schedule_id:string ->
   requested_by:actor ->

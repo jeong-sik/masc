@@ -1,0 +1,32 @@
+name = "masc_schedule_note_add"
+description = """Append a durable note to one scheduled request. Notes record why a
+schedule exists, what changed and when, and the context a Keeper needs when
+it wakes. They are keyed by the stable schedule_id, so a definition
+replacement (masc_schedule_update) does not orphan them. Notes are
+append-only: there is no edit and no removal, and notes survive terminal
+schedule states. Read history with masc_schedule_notes_list."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Stable id of the schedule the note belongs to."
+
+[[params]]
+name = "body"
+type = "string"
+required = true
+description = "Note text. Empty or whitespace-only bodies are rejected."
+
+[[params]]
+name = "author_id"
+type = "string"
+description = "Author actor id. Defaults to the calling agent name."
+
+[[params]]
+name = "author_kind"
+type = "string"
+description = "Author actor kind. Defaults to automated_actor."
+enum = ["human_operator", "automated_actor", "system"]

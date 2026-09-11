@@ -1248,7 +1248,14 @@ let test_rate_limit_backoff_sec_clamps_and_escalates () =
   check (float 0.001) "negative hint degrades to the bounded default" 60.0
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some (-5.0)) ~cadence_sec:30.0);
   check (float 0.5) "NaN hint degrades to the bounded default" 60.0
-    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some nan) ~cadence_sec:30.0)
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some nan) ~cadence_sec:30.0);
+  (* Fractional Retry-After hint when cadence is zero floors at 1.0s (#35246) *)
+  check (float 0.001) "fractional hint with zero cadence floors at 1.0s" 1.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.001) ~cadence_sec:0.0);
+  check (float 0.001) "sub-second hint with zero cadence floors at 1.0s" 1.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 0.5) ~cadence_sec:0.0);
+  check (float 0.001) "usable hint above 1s with zero cadence is preserved" 5.0
+    (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 5.0) ~cadence_sec:0.0)
 ;;
 
 let test_sleep_distinguishes_rate_limited_route_from_cadence () =

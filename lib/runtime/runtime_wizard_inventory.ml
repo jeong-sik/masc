@@ -294,7 +294,9 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                    Some
                      (`Assoc
                         [ ("id", `String entry.id_prefix)
-                        ; ("label", `String (Option.value entry.base_label ~default:entry.id_prefix))
+                        ; ("label", `String (match entry.base_label with
+                                               Some label -> label
+                                             | None -> entry.id_prefix))
                         ; ("max_context", `Int context)
                         ; ( "accepted_reasoning_efforts"
                           , (match entry.accepted_reasoning_efforts with

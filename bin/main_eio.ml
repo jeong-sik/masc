@@ -2539,7 +2539,7 @@ let runtime_model_list_cmd =
       print_endline (Yojson.Safe.to_string (`Assoc [
         "source", `String "installed MASC model catalog";
         "account_availability_verified", `Bool false;
-        "models", `List models ]));
+        "models", models ]));
       0
   in
   Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client or, with --provider, a named catalog provider; account availability is not verified.")

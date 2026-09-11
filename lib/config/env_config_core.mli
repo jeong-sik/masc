@@ -191,9 +191,6 @@ type persisted_default =
 (** Shared user configuration location, derived from XDG_CONFIG_HOME or HOME. *)
 val default_base_path_record_path_opt : unit -> string option
 
-(** Shared user configuration location, derived from XDG_CONFIG_HOME or HOME. *)
-val default_base_path_record_path_opt : unit -> string option
-
 val persisted_default_base_path : unit -> persisted_default
 (** [Stale] is kept apart from [No_record] so the "not set" error can say that
     a recorded default was found and ignored, and why.

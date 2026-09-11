@@ -5548,7 +5548,6 @@
  (name test_released_workspace_upgrade)
  (modules test_released_workspace_upgrade)
  (libraries masc masc.server fs_compat alcotest unix yojson))
-
 (test
  (name test_keeper_declared_roster)
  (modules test_keeper_declared_roster)
@@ -5580,7 +5579,6 @@
  (name test_model_release_evidence)
  (modules test_model_release_evidence)
  (libraries masc.runtime alcotest yojson))
-
 (test
  (name test_lane_addon)
  (modules test_lane_addon)
@@ -5602,3 +5600,8 @@
  (modules test_lane_addon_store_query)
  (libraries alcotest yojson unix masc masc.masc_tool_blob_store))
 
+(test
+ (name test_runtime_setup_spec)
+ (modules test_runtime_setup_spec)
+ (libraries alcotest yojson masc.runtime)
+ (deps fixtures/runtime-setup-spec-parity.json))

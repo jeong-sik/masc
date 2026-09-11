@@ -321,6 +321,16 @@ let build_request_assoc_artifact
       ~supports_image_input:caps.Capabilities.supports_image_input
       messages
   in
+  (* Same boundary for audio: [media_parts] projects tool-result audio
+     alongside images, so [supports_audio_input = false] would carry an
+     [input_audio] part the endpoint rejects. Degrading here — before
+     serialization — keeps every later turn of a history that already holds
+     the audio live, mirroring the document and image rules above. *)
+  let messages, _audio_degraded =
+    Api_common.degrade_audio_messages
+      ~supports_audio_input:caps.Capabilities.supports_audio_input
+      messages
+  in
   let provider_messages =
     let history =
       match

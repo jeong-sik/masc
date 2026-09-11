@@ -278,10 +278,10 @@ type usage_totals =
 
 let aggregate_run_usages (observations : run_observation list) : usage_totals =
   let per_request_obs =
-    List.filter (fun o -> o.usage_scope = Some Per_request) observations
+    List.filter (fun (o : run_observation) -> o.usage_scope = Some Per_request) observations
   in
   let cumulative_obs =
-    List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) observations
+    List.filter (fun (o : run_observation) -> o.usage_scope = Some Cumulative_request_snapshot) observations
   in
   let distinct_per_request =
     List.fold_left
@@ -299,7 +299,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
   let request_ids =
     List.sort_uniq String.compare
       (List.map
-         (fun o ->
+         (fun (o : run_observation) ->
             match o.request_or_task_identity with
             | Some r -> r
             | None -> o.run_id)
@@ -310,7 +310,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
       (fun req_id ->
          let matching =
            List.filter
-             (fun o ->
+             (fun (o : run_observation) ->
                 let r =
                   match o.request_or_task_identity with
                   | Some r -> r
@@ -321,7 +321,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
          in
          let sorted =
            List.sort
-             (fun a b ->
+             (fun (a : run_observation) (b : run_observation) ->
                 match Int.compare a.attempt_sequence b.attempt_sequence with
                 | 0 ->
                   let a_cost =
@@ -436,8 +436,8 @@ let check_observations
   let matrix_expected = 18 in
   let live_expected = 3 in
 
-  let matrix_obs = List.filter (fun o -> o.execution_mode = "matrix") observations in
-  let live_obs = List.filter (fun o -> o.execution_mode = "live") observations in
+  let matrix_obs = List.filter (fun (o : run_observation) -> o.execution_mode = "matrix") observations in
+  let live_obs = List.filter (fun (o : run_observation) -> o.execution_mode = "live") observations in
 
   (* Group observations by run key: (case_id, repeat_index) *)
   let run_keys_matrix =
@@ -446,7 +446,7 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun o -> o.case_id, o.repeat_index) matrix_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index) matrix_obs)
   in
   let matrix_observed = List.length run_keys_matrix in
 
@@ -456,7 +456,7 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun o -> o.case_id, o.repeat_index) live_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index) live_obs)
   in
   let live_observed = List.length run_keys_live in
 
@@ -481,11 +481,11 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) -> o.case_id = case_id && o.repeat_index = repeat_index)
            matrix_obs
        in
        let sorted_attempts =
-         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+         List.sort (fun (a : run_observation) (b : run_observation) -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
        in
        let final_attempt = List.hd (List.rev sorted_attempts) in
        let first_attempt = List.hd sorted_attempts in
@@ -493,10 +493,10 @@ let check_observations
 
        (* Check for duplicated usage within run *)
        let per_req_attempts =
-         List.filter (fun o -> o.usage_scope = Some Per_request) run_obs
+         List.filter (fun (o : run_observation) -> o.usage_scope = Some Per_request) run_obs
        in
        let per_req_ids =
-         List.filter_map (fun o -> o.run_turn_attempt_identity) per_req_attempts
+         List.filter_map (fun (o : run_observation) -> o.run_turn_attempt_identity) per_req_attempts
        in
        let unique_per_req_ids = List.sort_uniq String.compare per_req_ids in
        if List.length per_req_ids <> List.length unique_per_req_ids then (
@@ -508,11 +508,11 @@ let check_observations
            (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
        );
        let cumulative_attempts =
-         List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) run_obs
+         List.filter (fun (o : run_observation) -> o.usage_scope = Some Cumulative_request_snapshot) run_obs
        in
        let cumulative_keys =
          List.map
-           (fun o ->
+           (fun (o : run_observation) ->
               ( (match o.request_or_task_identity with Some r -> r | None -> o.run_id)
               , o.attempt_sequence ))
            cumulative_attempts
@@ -594,7 +594,7 @@ let check_observations
 
        (* Check phase timestamps monotonicity *)
        List.iter
-         (fun o ->
+         (fun (o : run_observation) ->
             if not (check_phase_boundary_order o.phase_timestamps) then (
               run_valid := false;
               add_finding "phase_boundary_order"
@@ -718,11 +718,11 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun o -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) -> o.case_id = case_id && o.repeat_index = repeat_index)
            live_obs
        in
        let sorted_attempts =
-         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+         List.sort (fun (a : run_observation) (b : run_observation) -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
        in
        let final_attempt = List.hd (List.rev sorted_attempts) in
        let first_attempt = List.hd sorted_attempts in

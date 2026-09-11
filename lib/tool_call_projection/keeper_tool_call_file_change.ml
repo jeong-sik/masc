@@ -384,6 +384,7 @@ type tally = {
   changes : t list;
   unreadable_rows : unreadable_row list;
   not_file_changes : int;
+  not_file_changes_ts : float list;
   over_budget : int;
   malformed : int;
 }
@@ -391,15 +392,23 @@ type tally = {
 and unreadable_row = {
   ur_location : location option;
   ur_reason : unreadable_reason;
+  ur_at : float;
 }
 
 let empty_tally =
   { changes = []
   ; unreadable_rows = []
   ; not_file_changes = 0
+  ; not_file_changes_ts = []
   ; over_budget = 0
   ; malformed = 0
   }
+;;
+
+let row_ts_or_zero row =
+  match Json_field.to_option (Json_field.float row "ts") with
+  | Some ts -> ts
+  | None -> 0.0
 ;;
 
 (* [classify_all] is this fold; a caller that reads rows incrementally holds
@@ -409,15 +418,21 @@ let empty_tally =
 let fold_row tally row =
   match classify row with
   | File_change change -> { tally with changes = change :: tally.changes }
-  | Not_a_file_change -> { tally with not_file_changes = tally.not_file_changes + 1 }
+  | Not_a_file_change ->
+    let ts = row_ts_or_zero row in
+    { tally with
+      not_file_changes = tally.not_file_changes + 1
+    ; not_file_changes_ts = ts :: tally.not_file_changes_ts
+    }
   | Unreadable reason ->
     let ur_location =
       match target_path_of_row row with
       | Ok target_path -> Some (location_of_target ~target_path)
       | Error _ -> None
     in
+    let ur_at = row_ts_or_zero row in
     { tally with
-      unreadable_rows = { ur_location; ur_reason = reason } :: tally.unreadable_rows
+      unreadable_rows = { ur_location; ur_reason = reason; ur_at } :: tally.unreadable_rows
     ; over_budget =
         (match reason with
          | Input_exceeded_log_budget -> tally.over_budget + 1
@@ -427,6 +442,55 @@ let fold_row tally row =
          | Input_exceeded_log_budget -> tally.malformed
          | Malformed _ -> tally.malformed + 1)
     }
+;;
+
+let prune_before ~since_ts tally =
+  let changes = List.filter (fun c -> c.at >= since_ts) tally.changes in
+  let unreadable_rows = List.filter (fun u -> u.ur_at >= since_ts) tally.unreadable_rows in
+  let not_file_changes_ts = List.filter (fun ts -> ts >= since_ts) tally.not_file_changes_ts in
+  let over_budget =
+    List.fold_left
+      (fun n u ->
+         match u.ur_reason with
+         | Input_exceeded_log_budget -> n + 1
+         | Malformed _ -> n)
+      0
+      unreadable_rows
+  in
+  let malformed = List.length unreadable_rows - over_budget in
+  { changes
+  ; unreadable_rows
+  ; not_file_changes = List.length not_file_changes_ts
+  ; not_file_changes_ts
+  ; over_budget
+  ; malformed
+  }
+;;
+
+let min_opt a b =
+  match a, b with
+  | None, None -> None
+  | Some x, None | None, Some x -> Some x
+  | Some x, Some y -> Some (Float.min x y)
+;;
+
+let oldest_row_ts tally =
+  let oldest_change =
+    List.fold_left
+      (fun acc (c : t) -> min_opt acc (Some c.at))
+      None
+      tally.changes
+  in
+  let oldest_unreadable =
+    List.fold_left
+      (fun acc u -> min_opt acc (Some u.ur_at))
+      oldest_change
+      tally.unreadable_rows
+  in
+  List.fold_left
+    (fun acc ts -> min_opt acc (Some ts))
+    oldest_unreadable
+    tally.not_file_changes_ts
 ;;
 
 (* Every classified row lands in exactly one of the three: [fold_row] matches

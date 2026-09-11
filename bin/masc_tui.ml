@@ -4700,10 +4700,28 @@ let launch_workspace_activity state ~mailbox ~repo_id =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
       state.workspace_activity <- next;
-      let keepers = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
-        |> List.sort_uniq String.compare in
+      let assigned_keepers =
+        match state.repositories with
+        | None -> []
+        | Some snap ->
+            match List.find_opt (fun (r : Tui_decode.repository) -> String.equal r.rp_id repo_id) snap.rs_repositories with
+            | None -> []
+            | Some r -> r.rp_keepers
+      in
+      let fleet_keepers =
+        List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
+        |> List.sort_uniq String.compare
+      in
+      let keepers =
+        match assigned_keepers with
+        | [] -> fleet_keepers
+        | ks ->
+            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
+            if active = [] then fleet_keepers
+            else List.sort_uniq String.compare active
+      in
       let run () =
-        let reads = List.map (fun keeper_name ->
+        let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->
           let result = try Masc_tui_loader.load_keeper_file_changes
               ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
             with Eio.Cancel.Cancelled _ as exn -> raise exn

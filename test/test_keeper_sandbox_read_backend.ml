@@ -2582,8 +2582,8 @@ let test_complete_binary_failure_has_safe_diagnostic () =
       | Error detail ->
         Alcotest.(check bool) "diagnostic contains no binary byte" false (String.contains detail '\255');
         Alcotest.(check bool) "metadata records complete failed output size" true
-          (Masc.String_util.contains_substring detail "binary_bytes=4");
-        Alcotest.(check bool) "exit preserved" true (Masc.String_util.contains_substring detail "exit=1")))
+          (String_util.contains_substring detail "binary_bytes=4");
+        Alcotest.(check bool) "exit preserved" true (String_util.contains_substring detail "exit=1")))
 
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"

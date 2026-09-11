@@ -59,8 +59,12 @@ let model protocol = function
     (match id with
      | None -> Error Invalid_response
      | Some id ->
-       let label = Option.value ~default:id (match string fields "display_name" with
-         | Some _ as label -> label | None -> string fields "name") in
+       (* sound-partial: only a well-formed display_name/name overrides the id *)
+       let label = match string fields "display_name" with
+         | Some _ as label -> label
+         | None -> (match string fields "name" with
+             | Some _ as label -> label
+             | None -> Some id) in
        (* Only explicit window fields count. Creation/listing timestamps do not
           become release dates, and parameter counts do not become windows. *)
        let contexts = ["context_length"; "max_model_len"] |> List.filter_map (fun key ->

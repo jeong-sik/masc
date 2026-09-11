@@ -2506,7 +2506,7 @@ let wizard_model_context model entries =
 
 let runtime_model_list_cmd =
   let client =
-    Arg.(value & opt (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
+    Arg.(value & pos 0 (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
   in
   let provider =
     Arg.(value & opt (some string) None & info [ "provider" ] ~docv:"PROVIDER"

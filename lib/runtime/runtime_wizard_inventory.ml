@@ -230,3 +230,80 @@ let binding_for_provider (cfg : Runtime_schema.config)
                 (List.length defaults)
                 provider.id))
 ;;
+
+(* Rows the setup wizard can offer for one named catalog provider. The entries
+   come from the embedded catalog scoped to [provider_name]; capabilities are
+   resolved against the provider's own wire kind, so a row that only inherits
+   from the provider base still reports the capabilities it will actually run
+   with. A row without a positive declared context is not wizard-offerable —
+   the wizard writes a runtime entry that needs a context — and stays out of
+   the list. [global ()] and [load_default ()] read the same embedded catalog
+   in this command's process; no override or overlay is installed. *)
+let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result =
+  match Llm_provider.Model_catalog.load_default () with
+  | Error message -> Error message
+  | Ok catalog ->
+    let providers = Catalog_binding.all () in
+    let provider =
+      providers
+      |> List.find_opt (fun (entry : Catalog_binding.t) -> String.equal entry.id provider_id)
+    in
+    (match provider with
+     | None ->
+       let available =
+         providers
+         |> List.map (fun (entry : Catalog_binding.t) -> entry.id)
+         |> List.sort_uniq String.compare
+       in
+       Error
+         (Printf.sprintf "unknown provider %S; installed catalog providers: %s"
+            provider_id (String.concat ", " available))
+     | Some provider ->
+       let rows =
+         Llm_provider.Model_catalog.model_entries catalog
+         |> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+              match entry.provider_name with
+              | Some name -> String.equal name provider_id
+              | None -> false)
+         |> List.filter_map (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+              match entry.max_context_tokens with
+              | Some context when context > 0 ->
+                (match
+                   Llm_provider.Capabilities.for_provider_model_id_row
+                     ~wire:(Some provider.kind)
+                     ~provider_label:provider.id
+                     ~model_id:entry.id_prefix
+                 with
+                 | None -> None
+                 | Some capabilities ->
+                   (* "high" is the effort the seed rows pin; when a row's
+                      accepted ladder does not carry it, the ladder runs weak
+                      to strong and its top is the honest default. *)
+                   let default_effort =
+                     match entry.accepted_reasoning_efforts with
+                     | None | Some [] -> `Null
+                     | Some rungs ->
+                       let chosen =
+                         if List.exists (String.equal "high") rungs
+                         then "high"
+                         else (match List.rev rungs with top :: _ -> top | [] -> "high")
+                       in
+                       `String chosen
+                   in
+                   Some
+                     (`Assoc
+                        [ ("id", `String entry.id_prefix)
+                        ; ("label", `String (Option.value entry.base_label ~default:entry.id_prefix))
+                        ; ("max_context", `Int context)
+                        ; ( "accepted_reasoning_efforts"
+                          , (match entry.accepted_reasoning_efforts with
+                             | None -> `Null
+                             | Some rungs -> `List (List.map (fun rung -> `String rung) rungs)) )
+                        ; ("default_reasoning_effort", default_effort)
+                        ; ("supports_tools", `Bool capabilities.supports_tools)
+                        ; ("supports_streaming", `Bool capabilities.supports_native_streaming)
+                        ]))
+              | _ -> None)
+       in
+       Ok (`List rows))
+;;

@@ -406,7 +406,9 @@ let empty_tally =
 ;;
 
 let row_ts_or_zero row =
-  Option.value ~default:0.0 (Json_field.to_option (Json_field.float row "ts"))
+  match Json_field.to_option (Json_field.float row "ts") with
+  | Some ts -> ts
+  | None -> 0.0
 ;;
 
 (* [classify_all] is this fold; a caller that reads rows incrementally holds

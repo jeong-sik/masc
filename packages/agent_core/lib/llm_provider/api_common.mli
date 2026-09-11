@@ -109,10 +109,12 @@ val admit_document_blocks
 val document_omitted_placeholder : media_type:string -> Types.content_block
 
 (** [degrade_document_messages ~wire_form ~supports_document_input messages]
-    rewrites every [Document] that cannot be placed on a wire whose native form
-    is [wire_form] into {!document_omitted_placeholder}, leaving representable
-    documents and every other block untouched. Returns the rewritten history and
-    the number of documents degraded.
+    rewrites every [Document] — including documents nested in ToolResult
+    [content_blocks], where [Tool_result_projection.media_parts] reads them
+    from — that cannot be placed on a wire whose native form is [wire_form]
+    into {!document_omitted_placeholder}, leaving representable documents and
+    every other block untouched. Returns the rewritten history and the number
+    of documents degraded.
 
     This is the request/serialize-path remedy for agent-core boundary: a document is never
     relabelled as another modality (the original defect) and never rejects the
@@ -143,6 +145,27 @@ val image_omitted_placeholder : media_type:string -> Types.content_block
     retroactively, and the omission is named in the conversation. *)
 val degrade_image_messages
   :  supports_image_input:bool
+  -> Types.message list
+  -> Types.message list * int
+
+(** The visible text block an audio block is replaced with when the model does
+    not declare [supports_audio_input]. Names the media type so the omission is
+    legible to the model and, through it, the user — the degrade is not
+    silent. *)
+val audio_omitted_placeholder : media_type:string -> Types.content_block
+
+(** [degrade_audio_messages ~supports_audio_input messages] rewrites every
+    [Audio] — including audio nested in ToolResult [content_blocks], where
+    [Tool_result_projection.media_parts] reads them from — into
+    {!audio_omitted_placeholder} when [supports_audio_input] is false, and
+    leaves the history untouched when it is true. Returns the rewritten
+    history and the number of audio blocks degraded.
+
+    Same agent-core boundary as {!degrade_image_messages}: the audio never
+    rides the wire of a model that cannot read it, the turn is never rejected
+    retroactively, and the omission is named in the conversation. *)
+val degrade_audio_messages
+  :  supports_audio_input:bool
   -> Types.message list
   -> Types.message list * int
 

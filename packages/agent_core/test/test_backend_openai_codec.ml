@@ -2663,6 +2663,195 @@ let test_tool_image_degrades_without_declared_capability () =
      | _ -> false)
 ;;
 
+let test_tool_document_audio_degrade_without_declared_capability () =
+  let open Yojson.Safe.Util in
+  let substring_present haystack needle =
+    let needle_length = String.length needle in
+    let rec from index =
+      if index + needle_length > String.length haystack then false
+      else if String.sub haystack index needle_length = needle then true
+      else from (index + 1)
+    in
+    from 0
+  in
+  let document = document_block ~media_type:"application/pdf" ~data:"UERG" () in
+  let audio = audio_block ~media_type:"wav" ~data:"QVVE" () in
+  (* The B-1 residual scenario: an Image and a Document/Audio share one tool
+     result, so [with_image_followups] projects all of them onto the media
+     follow-up turn — unless the unrepresentable ones are degraded first. *)
+  let image = image_block ~media_type:"image/png" ~data:"cG5n" () in
+  let result blocks =
+    ToolResult { tool_use_id = "a"; content = "read a"; outcome = Tool_succeeded
+               ; json = None; content_blocks = blocks }
+  in
+  let messages =
+    [ msg User [ Text "Inspect the artifact" ]
+    ; msg Assistant [ ToolUse { id = "a"; name = "Read"; input = `Assoc [] } ]
+    ; msg Tool [ result (Some [ Text "the artifact"; image; document; audio ]) ] ]
+  in
+  let doc_omission =
+    "[document omitted: this model does not accept document input (media_type application/pdf)]"
+  in
+  let audio_omission =
+    "[audio omitted: this model does not accept audio input (media_type wav)]"
+  in
+  let has_part_field field item =
+    match item |> member "content" with
+    | `List parts -> List.exists (fun part -> part |> member field <> `Null) parts
+    | _ -> false
+  in
+  let wire_roles body =
+    List.map (fun item -> item |> member "role" |> to_string)
+      (body |> member "messages" |> to_list)
+  in
+  (* The degrader itself: nested tool-result audio is rewritten, counted, and
+     named on the canonical tool content; a capable model's history passes
+     through untouched. *)
+  let degraded_messages, degraded_count =
+    Api_common.degrade_audio_messages ~supports_audio_input:false messages
+  in
+  check_int "one audio degraded" 1 degraded_count;
+  check_bool "placeholder replaces the nested audio" true
+    (match (List.nth degraded_messages 2).content with
+     | [ ToolResult { content_blocks = Some [ Text _; _; _; Text text ]; _ } ] ->
+       text = audio_omission
+     | _ -> false);
+  check_bool "canonical tool content names the audio omission" true
+    (match (List.nth degraded_messages 2).content with
+     | [ ToolResult { content; _ } ] -> content = "read a\n" ^ audio_omission
+     | _ -> false);
+  let capable_messages, capable_count =
+    Api_common.degrade_audio_messages ~supports_audio_input:true messages
+  in
+  check_int "capable model degrades nothing" 0 capable_count;
+  check_bool "capable audio history is untouched" true (capable_messages = messages);
+  (* The document degrader gates on the DECLARED capability, not on the wire
+     form alone: an unrepresentable wire degrades regardless, and every
+     representable wire form still degrades unless the model declares
+     [supports_document_input] — the B-1 contract this repair preserves. *)
+  let doc_messages, doc_count =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_unrepresentable
+      ~supports_document_input:false messages
+  in
+  check_int "one document degraded" 1 doc_count;
+  check_bool "placeholder replaces the nested document" true
+    (match (List.nth doc_messages 2).content with
+     | [ ToolResult { content_blocks = Some [ Text _; _; Text text; _ ]; _ } ] ->
+       text = doc_omission
+     | _ -> false);
+  let file_part_messages, file_part_count =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_input_file_part
+      ~supports_document_input:false messages
+  in
+  check_int "file-part wire degrades without declared capability" 1
+    file_part_count;
+  check_bool "file-part wire names the document omission" true
+    (match (List.nth file_part_messages 2).content with
+     | [ ToolResult { content_blocks = Some [ Text _; _; Text text; _ ]; _ } ] ->
+       text = doc_omission
+     | _ -> false);
+  let inline_messages, inline_count =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_inline_data
+      ~supports_document_input:false messages
+  in
+  check_int "inline-data wire degrades without declared capability" 1
+    inline_count;
+  let declared_messages, declared_count =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_input_file_part
+      ~supports_document_input:true messages
+  in
+  check_int "declared capability degrades nothing" 0 declared_count;
+  check_bool "declared-capability history untouched" true
+    (declared_messages = messages);
+  (* OpenAI production boundary: a row that declares image but neither
+     document nor audio must not receive the tool result's file/input_audio
+     parts; both omissions are named instead. *)
+  let text_only_caps =
+    { Capabilities.openai_compat_chat_capabilities with
+      supports_document_input = false; supports_audio_input = false }
+  in
+  let openai_config =
+    Provider_config.make
+      ~kind:OpenAI_compat ~model_id:"tool-doc-audio-text-only"
+      ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+      ~max_tokens:128
+      ~model_capabilities_override:text_only_caps
+      ()
+  in
+  let body =
+    Backend_openai_request.build_request ~config:openai_config ~messages ()
+    |> Yojson.Safe.from_string
+  in
+  check_bool "text-only wire carries no file part" true
+    (not (List.exists (has_part_field "file") (body |> member "messages" |> to_list)));
+  check_bool "text-only wire carries no input_audio" true
+    (not (List.exists (has_part_field "input_audio")
+            (body |> member "messages" |> to_list)));
+  check_bool "document omission is named on the OpenAI wire" true
+    (substring_present (Yojson.Safe.to_string body) doc_omission);
+  check_bool "audio omission is named on the OpenAI wire" true
+    (substring_present (Yojson.Safe.to_string body) audio_omission);
+  check_bool "media turn projects the image only, omissions named in tool content" true
+    (wire_roles body = [ "user"; "assistant"; "tool"; "user" ]);
+  (* Declared capability keeps both native parts on the same boundary. *)
+  let media_caps =
+    { Capabilities.openai_compat_chat_capabilities with
+      supports_document_input = true; supports_audio_input = true }
+  in
+  let openai_media_config =
+    Provider_config.make
+      ~kind:OpenAI_compat ~model_id:"tool-doc-audio-capable"
+      ~base_url:"https://codec.test" ~request_path:"/v1/chat/completions"
+      ~max_tokens:128
+      ~model_capabilities_override:media_caps
+      ()
+  in
+  let media_body =
+    Backend_openai_request.build_request ~config:openai_media_config
+      ~messages ()
+    |> Yojson.Safe.from_string
+  in
+  check_bool "capable wire still carries the document" true
+    (match wire_roles media_body with
+     | [ _; _; _; "user" ] -> true
+     | _ -> false);
+  check_bool "capable wire's media turn still carries the file part" true
+    (List.exists (has_part_field "file") (media_body |> member "messages" |> to_list));
+  check_bool "capable wire's media turn still carries input_audio" true
+    (List.exists (has_part_field "input_audio")
+       (media_body |> member "messages" |> to_list));
+  (* Gemini production boundary: documents have no native form there, audio
+     needs the declared capability — both must degrade with named omissions. *)
+  let gemini_config =
+    Provider_config.make
+      ~kind:Gemini ~model_id:"tool-doc-audio-text-only-gemini"
+      ~base_url:"https://generativelanguage.googleapis.com/v1beta"
+      ~max_tokens:128
+      ~model_capabilities_override:
+        { Capabilities.gemini_capabilities with
+          supports_image_input = false; supports_audio_input = false }
+      ()
+  in
+  let gemini_body =
+    Backend_gemini.build_request ~config:gemini_config ~messages ()
+  in
+  check_bool "Gemini wire carries no inlineData for document/audio" true
+    (not (substring_present gemini_body "inlineData"));
+  check_bool "document omission is named on the Gemini wire" true
+    (substring_present gemini_body doc_omission);
+  check_bool "audio omission is named on the Gemini wire" true
+    (substring_present gemini_body audio_omission);
+  check_bool "canonical document+audio history unchanged" true
+    (match (List.nth messages 2).content with
+     | [ ToolResult { content_blocks = Some [ _; Image _; Document _; Audio _ ]; _ } ] ->
+       true
+     | _ -> false)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
@@ -2671,6 +2860,10 @@ let () =
             test_tool_image_followups_preserve_batch_order
         ; Alcotest.test_case "tool images degrade without declared capability" `Quick
             test_tool_image_degrades_without_declared_capability
+        ; Alcotest.test_case
+            "tool document+audio degrade without declared capability"
+            `Quick
+            test_tool_document_audio_degrade_without_declared_capability
         ; Alcotest.test_case
             "content parts cover modalities"
             `Quick

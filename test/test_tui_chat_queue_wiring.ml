@@ -715,7 +715,7 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
     | Keeper_selection.Switch_to _ -> true
   in
   let roster_row name : Tui_types.keeper =
-    { k_name = name
+    { k_origin = Masc.Tui_decode.Persisted_keeper; k_name = name
     ; k_trace_id = "trace-" ^ name
     ; k_paused = false
     ; k_current_task_id = None

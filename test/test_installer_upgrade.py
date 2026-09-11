@@ -49,6 +49,10 @@ while [ "$#" -gt 0 ]; do
     --base-path) seed_base="$2"; shift 2 ;;
     --skills-only) skills_only=1; shift ;;
     --force) force_seed=1; shift ;;
+    # The installer's seed asks for this; `masc init` does not record a
+    # default workspace without it. Accepted and ignored: what this fake
+    # stands in for is the config seed, not the record.
+    --record-default) shift ;;
     *) echo "unexpected init argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -102,8 +106,8 @@ curl() {
             script += 'maybe_run_wizard() {' + section('maybe_run_wizard() {', '\nis_tty()')
             script += section('# --- 4. seed minimum config', '# --- 4c. keeper team preset').split('\n', 1)[1]
             script += 'seed_team() {' + section('seed_team() {', '\nif [ -n "$TEAM" ]; then')
-            script += '\nseed_team classic\n'
-            env = dict(os.environ, BASE_PATH=str(base), DEST=str(binary), TEST_RESET=str(int(reset)))
+            script += '\nseed_team classic\ntest "$(command -v masc)" = "$DEST"\n'
+            env = dict(os.environ, BASE_PATH=str(base), PREFIX=str(base), DEST=str(binary), TEST_RESET=str(int(reset)))
             result = subprocess.run(['bash', '-c', script], env=env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(runtime.read_text(), 'seeded\n' if reset else '[runtime]\ndefault = "operator-choice"\n')

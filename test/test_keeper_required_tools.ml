@@ -72,7 +72,7 @@ candidates = ["native.no_tools", "binding.sample"]
   let tool = Agent_core.Tool.create
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~name:"fixture_tool" ~description:"Offered callable tool." ~parameters:[]
-    (fun _ -> Ok {Agent_core.Types.content="fixture result";_meta=None}) in
+    (fun _ -> Ok {Agent_core.Types.content="fixture result"; content_blocks = None; _meta = None}) in
   let errors = ref [] in
   let run ?provider_config_transform ~tool_requirement ~tools runtime_id =
     Keeper_turn_driver.run_named ~runtime_id ~keeper_name:"required-tools-proof"

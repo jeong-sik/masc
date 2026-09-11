@@ -216,13 +216,17 @@ let auto_label_for_binding (binding : Runtime_binding.t) =
       None)
 ;;
 
+(* A gateway or multi-vendor provider declares no house model, so there is no
+   label for auto-detection to pick and [default_model_label_for_binding]
+   answers Error. This used to exclude the single provider then in that shape
+   by naming it here, which both put a provider identity into generic code and
+   went stale for its peers -- five other registry bindings are the same shape
+   and were each logging a WARN per call on the path below. Ask the binding
+   instead: whether a default exists is data the catalog already carries. *)
 let participates_in_auto_detection (binding : Runtime_binding.t) =
   let profile = profile_of_binding binding in
-  (* OpenRouter has no provider-wide default model; it needs an explicit
-     runtime_model despite being a normal AGENT_CORE binding. Once AGENT_CORE exposes that
-     as catalog data, this compatibility exception can disappear. *)
   profile.runtime_kind = Direct_api
-  && not (String.equal (normalize_label profile.id) "openrouter")
+  && Option.is_some (default_model_candidate_of_binding binding)
 ;;
 
 let preferred_execution_model_labels () =

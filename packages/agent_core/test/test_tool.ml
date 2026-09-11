@@ -17,11 +17,11 @@ let test_simple_handler_ok () =
         ]
       (fun input ->
          let open Yojson.Safe.Util in
-         Ok { Types.content = input |> member "msg" |> to_string; _meta = None })
+         Ok { Types.content = input |> member "msg" |> to_string; content_blocks = None; _meta = None })
   in
   let actual = Tool.execute tool (`Assoc [ "msg", `String "hello" ]) in
   match actual with
-  | Ok { content; _meta = _ } -> check string "returns Ok" "hello" content
+  | Ok { content; _ } -> check string "returns Ok" "hello" content
   | Error _ -> fail "expected Ok"
 ;;
 
@@ -47,7 +47,7 @@ let test_context_handler_receives_context () =
          ())
       (Tool.requiring_context (fun ctx _input ->
          match Context.get ctx "key" with
-         | Some (`String v) -> Ok { Types.content = v; _meta = None }
+         | Some (`String v) -> Ok { Types.content = v; content_blocks = None; _meta = None }
          | _ ->
            Error
              { Types.message = "key not found"; recoverable = true; error_class = None }))
@@ -56,7 +56,7 @@ let test_context_handler_receives_context () =
   Context.set ctx "key" (`String "ctx_value");
   let actual = Tool.execute ~context:ctx tool `Null in
   match actual with
-  | Ok { content; _meta = _ } -> check string "reads context" "ctx_value" content
+  | Ok { content; _ } -> check string "reads context" "ctx_value" content
   | Error _ -> fail "expected Ok"
 ;;
 
@@ -70,7 +70,7 @@ let test_context_handler_writes_context () =
          ())
       (Tool.requiring_context (fun ctx _input ->
          Context.set ctx "written" (`Int 42);
-         Ok { Types.content = "done"; _meta = None }))
+         Ok { Types.content = "done"; content_blocks = None; _meta = None }))
   in
   let ctx = Context.create_sync () in
   let _result = Tool.execute ~context:ctx tool `Null in
@@ -86,7 +86,7 @@ let test_context_handler_requires_context () =
          ~parameters:[]
          ())
       (Tool.requiring_context (fun _ctx _input ->
-         Ok { Types.content = "works"; _meta = None }))
+         Ok { Types.content = "works"; content_blocks = None; _meta = None }))
   in
   let actual = Tool.execute tool `Null in
   match actual with
@@ -138,7 +138,7 @@ let test_execution_env_handler_receives_context_and_invocation () =
                    (Tool_contract.Invocation.tool_use_id invocation)
                    (Tool_contract.Invocation.turn invocation)
                    (Tool_contract.Invocation.planned_index invocation)
-             ; _meta = None
+             ; content_blocks = None; _meta = None
              }
          | _, None -> missing_invocation_error ()
          | None, Some _ ->
@@ -163,7 +163,7 @@ let test_execution_env_handler_receives_context_and_invocation () =
       ~completion:Tool_contract.Continue_after_success
   in
   match Tool.execute ~context ~invocation tool `Null with
-  | Ok { content; _meta = _ } ->
+  | Ok { content; _ } ->
     check string "orthogonal execution resources" "ctx:provider-call-17:4:2" content
   | Error _ -> fail "expected execution-environment tool to run"
 ;;
@@ -178,7 +178,7 @@ let test_execution_env_handler_observes_missing_invocation () =
          ())
       (fun execution_env _input ->
          match Tool.Execution_env.invocation execution_env with
-         | Some _ -> Ok { Types.content = "unexpected"; _meta = None }
+         | Some _ -> Ok { Types.content = "unexpected"; content_blocks = None; _meta = None }
          | None -> missing_invocation_error ())
   in
   match Tool.execute tool `Null with
@@ -213,7 +213,7 @@ let test_schema_to_json_structure () =
           ; required = false
           }
         ]
-      (fun _input -> Ok { Types.content = ""; _meta = None })
+      (fun _input -> Ok { Types.content = ""; content_blocks = None; _meta = None })
   in
   let json = Tool.schema_to_json tool in
   let open Yojson.Safe.Util in
@@ -243,7 +243,7 @@ let test_schema_param_types () =
   in
   let tool =
     Tool.create ~name:"types" ~description:"" ~parameters:params (fun _input ->
-      Ok { Types.content = ""; _meta = None })
+      Ok { Types.content = ""; content_blocks = None; _meta = None })
   in
   let json = Tool.schema_to_json tool in
   let open Yojson.Safe.Util in
@@ -269,7 +269,7 @@ let test_descriptor_preserved_and_not_in_schema () =
           ; required = true
           }
         ]
-      (fun _ -> Ok { Types.content = "ok"; _meta = None })
+      (fun _ -> Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let descriptor = Tool.descriptor tool in
   check bool "descriptor present" true (Option.is_some descriptor);
@@ -314,7 +314,7 @@ let test_execution_mode_yojson_roundtrip () =
 let test_missing_descriptor_defaults_to_serial () =
   let tool =
     Tool.create ~name:"plain" ~description:"" ~parameters:[] (fun _ ->
-      Ok { Types.content = "ok"; _meta = None })
+      Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   check
     string
@@ -344,7 +344,7 @@ let test_concurrent_when_admits_only_proven_read_only () =
       ~name:"scoped"
       ~description:""
       ~parameters:[]
-      (fun _ -> Ok { Types.content = "ok"; _meta = None })
+      (fun _ -> Ok { Types.content = "ok"; content_blocks = None; _meta = None })
   in
   let mode input = Tool_contract.show_execution_mode (Tool.execution_mode tool ~input) in
   check
@@ -392,7 +392,7 @@ let test_terminal_descriptor_is_serial_and_terminal () =
       ~name:"finish"
       ~description:""
       ~parameters:[]
-      (fun _ -> Ok { Types.content = "done"; _meta = None })
+      (fun _ -> Ok { Types.content = "done"; content_blocks = None; _meta = None })
   in
   check
     string
@@ -505,22 +505,22 @@ let () =
                 (fun input ->
                    let open Yojson.Safe.Util in
                    Ok
-                     { Types.content = input |> member "name" |> to_string; _meta = None })
+                     { Types.content = input |> member "name" |> to_string; content_blocks = None; _meta = None })
             in
             let wrapped = Tool.with_defaults [ "name", `String "default_user" ] tool in
             match Tool.execute wrapped (`Assoc []) with
-            | Ok { content; _meta = _ } ->
+            | Ok { content; _ } ->
               check string "default injected" "default_user" content
             | Error _ -> fail "expected Ok")
         ; test_case "preserves explicit args" `Quick (fun () ->
             let tool =
               Tool.create ~name:"greet" ~description:"Greet" ~parameters:[] (fun input ->
                 let open Yojson.Safe.Util in
-                Ok { Types.content = input |> member "name" |> to_string; _meta = None })
+                Ok { Types.content = input |> member "name" |> to_string; content_blocks = None; _meta = None })
             in
             let wrapped = Tool.with_defaults [ "name", `String "default_user" ] tool in
             match Tool.execute wrapped (`Assoc [ "name", `String "alice" ]) with
-            | Ok { content; _meta = _ } ->
+            | Ok { content; _ } ->
               check string "explicit preserved" "alice" content
             | Error _ -> fail "expected Ok")
         ; test_case "works with context handler" `Quick (fun () ->
@@ -535,13 +535,13 @@ let () =
                    let open Yojson.Safe.Util in
                    Ok
                      { Types.content = input |> member "agent" |> to_string
-                     ; _meta = None
+                     ; content_blocks = None; _meta = None
                      }))
             in
             let wrapped = Tool.with_defaults [ "agent", `String "worker-1" ] tool in
             let ctx = Context.create_sync () in
             match Tool.execute ~context:ctx wrapped (`Assoc []) with
-            | Ok { content; _meta = _ } ->
+            | Ok { content; _ } ->
               check string "default in ctx handler" "worker-1" content
             | Error _ -> fail "expected Ok")
         ; test_case "works with execution environment handler" `Quick (fun () ->
@@ -561,7 +561,7 @@ let () =
                            Tool_contract.Invocation.tool_use_id invocation
                            ^ ":"
                            ^ (input |> member "name" |> to_string)
-                       ; _meta = None
+                       ; content_blocks = None; _meta = None
                        }
                    | None -> missing_invocation_error ())
             in
@@ -579,7 +579,7 @@ let () =
                 ~completion:Tool_contract.Continue_after_success
             in
             match Tool.execute ~invocation wrapped (`Assoc []) with
-            | Ok { content; _meta = _ } ->
+            | Ok { content; _ } ->
               check string "invocation and default preserved" "call-1:default" content
             | Error _ -> fail "expected Ok")
         ] )

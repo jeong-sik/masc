@@ -1236,7 +1236,7 @@ let test_warmup_boundary_and_steady_cadence () =
    never park the lane; and a negative or NaN hint degrades to the
    cadence instead of an immediate retry. *)
 let test_rate_limit_backoff_sec_clamps_and_escalates () =
-  let backoff = Keeper_heartbeat_loop.For_testing.rate_limited_backoff_sec in
+  let backoff = Keeper_runtime_failure_route.retry_backoff_sec in
   check (float 0.001) "provider retry-after hint wins when above cadence" 120.0
     (backoff ~cap_sec:900.0 ~retry_after_hint:(Some 120.0) ~cadence_sec:30.0);
   check (float 0.001) "hint below cadence defers to the cadence" 30.0

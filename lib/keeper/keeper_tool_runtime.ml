@@ -532,6 +532,8 @@ let handle_in_process ctx descriptor args =
        the turn-scoped dispatch context. *)
     Some
       (Keeper_tool_in_process_runtime.handle_analyze_image_with_outcome
+         ~config:ctx.config
+         ?turn_sandbox_factory:ctx.turn_sandbox_factory
          ?sw:ctx.sw
          ?clock:ctx.clock
          ?net:ctx.net

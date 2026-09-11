@@ -53,15 +53,7 @@ let param_type_to_string = function
   | Object -> "object"
 ;;
 
-(** Tool execution result types.
-    Defined before content_block/message/api_response to avoid
-    field-name shadowing on the [content] record field. *)
-type tool_output =
-  { content : string
-  ; _meta : Yojson.Safe.t option
-    (** Optional structured metadata forwarded to the MCP [tool_result._meta]
-        field. [None] omits the field on the wire. *)
-  }
+(** Tool execution outcome types. *)
 
 type tool_error_class =
   | Transient
@@ -104,17 +96,6 @@ type tool_error =
   ; error_class : tool_error_class option
   }
 
-type tool_result = (tool_output, tool_error) result
-
-let tool_result_of_outcome ~content = function
-  | Tool_succeeded -> Ok { content; _meta = None }
-  | Tool_failed { failure_kind; error_class } ->
-    Error
-      { message = content
-      ; recoverable = tool_failure_kind_is_recoverable failure_kind
-      ; error_class
-      }
-;;
 
 type tool_param =
   { name : string
@@ -988,6 +969,28 @@ type content_block =
       ; source_type : media_source_kind
       }
 [@@deriving show]
+
+type tool_output =
+  { content : string
+  ; content_blocks : content_block list option
+    (** Model-visible structured content. [None] denotes text-only output. *)
+  ; _meta : Yojson.Safe.t option
+    (** Optional structured metadata forwarded to the MCP [tool_result._meta]
+        field. [None] omits the field on the wire. *)
+  }
+
+type tool_result = (tool_output, tool_error) result
+
+let tool_result_of_outcome ?content_blocks ~content = function
+  | Tool_succeeded -> Ok { content; content_blocks; _meta = None }
+  | Tool_failed { failure_kind; error_class } ->
+    Error
+      { message = content
+      ; recoverable = tool_failure_kind_is_recoverable failure_kind
+      ; error_class
+      }
+;;
+
 
 let reasoning_details_text
       ~(reasoning_content : string option)

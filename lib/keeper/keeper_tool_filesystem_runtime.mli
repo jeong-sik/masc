@@ -37,12 +37,25 @@ val handle_read_file_with_outcome :
 
 val read_sandbox_bytes :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?cwd:string ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   path:string -> max_bytes:int -> unit ->
   (string, string) result
 (** Resolve like Read, enforce this Keeper's containment, and read binary bytes
     through the existing sandbox runner. Never falls back to a host read. *)
+
+val read_complete_sandbox_bytes :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  path:string -> ?cwd:string -> unit -> (string, string) result
+(** Complete raw read for a verifier without a turn runtime. Uses the existing
+    resolver/containment and exact endpoint or Docker capture, never host fallback. *)
+
+val read_owned_bytes :
+  ownership_root:string -> path:string -> ?cwd:string -> max_bytes:int -> unit ->
+  (string, string) result
+(** Binary prefix through the same owned Read resolver and regular-file
+    containment. The caller supplies a bounded byte limit. *)
 
 val handle_owned_read_file_with_outcome :
   ownership_root:string ->

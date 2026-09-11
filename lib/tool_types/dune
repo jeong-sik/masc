@@ -11,7 +11,8 @@
 ; namespace bulk promotion (PR-2E) and the Tool_misc_web_fetch
 ; cluster RFC.
 ;
-; Deps: yojson only (Tool_args.mli's Tool_local_runtime_core reference
+; Typed model content uses the leaf llm_provider types; no Agent Core runtime
+; dependency is introduced. (Tool_args.mli's Tool_local_runtime_core reference
 ; is a single OCamldoc cross-reference comment, not a code dep).
 ; (wrapped false) keeps bare `Tool_args` / `Tool_result` so all
 ; 1156 external refs (Tool_args 161 bare + 4 wrapped, Tool_result
@@ -23,6 +24,6 @@
  (name masc_tool_types)
  (public_name masc.tool_types)
  (wrapped false)
- (libraries yojson unix masc_log masc_core eio time_compat)
+ (libraries yojson unix masc_log masc_core eio time_compat llm_provider)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show)))

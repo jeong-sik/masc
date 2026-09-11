@@ -12,6 +12,10 @@ module type Backend = sig
     host_path:string ->
     (string, string) result
 
+  val read_complete_file :
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string -> timeout_sec:float -> unit -> (string, string) result
+
   val read_file :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     config:Workspace.config ->
@@ -55,6 +59,10 @@ module type S = sig
     meta:Keeper_meta_contract.keeper_meta ->
     host_path:string ->
     (string, string) result
+
+  val read_complete_file :
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string -> timeout_sec:float -> unit -> (string, string) result
 
   val read_file :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->

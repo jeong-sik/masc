@@ -329,15 +329,7 @@ let install () =
              "unknown tool %s; this review offers only %s"
              name
              report_tool_schema.Masc_domain.name)
-      | Some dispatch ->
-        (match dispatch ~name ~args with
-         | Ok output -> Tool_result.ok ~tool_name:name ~start_time output
-         | Error detail ->
-           Tool_result.error
-             ~failure_class:Tool_result.Runtime_failure
-             ~tool_name:name
-             ~start_time
-             detail)
+      | Some dispatch -> dispatch ~name ~args
     in
     let dispatch_verdict ~name ~args =
       let start_time = Time_compat.now () in

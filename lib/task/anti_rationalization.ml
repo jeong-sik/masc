@@ -41,7 +41,7 @@ type lookup_surface =
   | No_lookup_surface
   | Lookup_tools of
       { schemas : Types_core.tool_schema list
-      ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
+      ; dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result
       ; root_layout : string list
       }
 

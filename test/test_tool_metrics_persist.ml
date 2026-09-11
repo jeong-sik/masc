@@ -5,7 +5,7 @@ module R = Tool_result
 
 let make_result ~name ~success ~duration_ms : R.result =
   if success
-  then R.Completed { R.tool_name = name; data = `Null; metadata = None; duration_ms }
+  then R.Completed { content_blocks = None; R.tool_name = name; data = `Null; metadata = None; duration_ms }
   else
     R.Failed
       { R.class_ = Runtime_failure
@@ -58,6 +58,7 @@ let test_enqueue_writes_directly_to_sqlite () =
          { R.tool_name = "alpha"
          ; data = `Null
          ; metadata = None
+         ; content_blocks = None
          ; duration_ms = 3.0
          });
     P.enqueue
@@ -104,6 +105,7 @@ let test_restart_hydrates_without_duplicates () =
          { R.tool_name = "alpha"
          ; data = `Null
          ; metadata = None
+         ; content_blocks = None
          ; duration_ms = 20.0
          });
     P.enqueue

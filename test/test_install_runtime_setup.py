@@ -797,6 +797,7 @@ class NamedCatalogSources(unittest.TestCase):
                 dict(path=str(old),detail='unsupported schema')]))),
                 subprocess.CompletedProcess([],0,json.dumps(dict(status='ready',read_only=True,scope='keeper_goal_state_schema')))]
             with patch('subprocess.run',side_effect=replies), patch.object(SETUP,'pick',return_value=[0]), \
+                 patch.object(SETUP,'workspace_upgrade_catalog',return_value=dict(keepers=[],backups=[])), \
                  patch('sys.stdin.isatty',return_value=True), contextlib.redirect_stderr(io.StringIO()):
                 result = SETUP.workspace_check('/fixture',base)
             self.assertEqual(result['base_path'], str(base.resolve()) + '-new')

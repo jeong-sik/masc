@@ -5529,6 +5529,11 @@
  (modules test_runtime_setup_credentials)
  (libraries masc_test_deps))
 
+(test
+ (name test_runtime_setup_accounts)
+ (modules test_runtime_setup_accounts)
+ (libraries masc_test_deps))
+
 (include stanzas/test_sandbox_prerequisites.inc)
 
 (include stanzas/test_apple_container_install.inc)
@@ -5612,7 +5617,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries alcotest yojson unix eio eio_main masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries alcotest yojson unix eio eio_main masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)

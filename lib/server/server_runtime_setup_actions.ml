@@ -38,8 +38,8 @@ let private_key ~sw pending secret =
     pending := key :: !pending;
     Eio.Switch.on_release sw (fun () -> Runtime_setup_credentials.remove_uncommitted key);
     Ok ["credential_file",`String (Runtime_setup_credentials.reference_path key)]
-let source_template ~sw ~pending config request =
-  let* request = fields ["integration_id";"endpoint";"api_key"] ["integration_id"] request in
+let source_template ~sw ~pending ~workspace config request =
+  let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
   let* id = text (value "integration_id" request) in
   let inventory = Runtime_wizard_inventory.to_json ~include_credential_references:true config in
   let rows = match inventory with `Assoc fields -> (match value "integrations" fields with `List rows -> rows | _ -> []) | _ -> [] in
@@ -60,10 +60,21 @@ let source_template ~sw ~pending config request =
   let transport = if http then ["endpoint", endpoint_val]
     else ["command",value "command" selected] in
   let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
-  let* credentials = match List.assoc_opt "api_key" request with
-    | Some (`String secret) when http -> private_key ~sw pending secret
-    | Some _ -> Error Invalid_request
-    | None ->
+  let* account = match List.assoc_opt "account_ref" request with
+    | None -> Ok None
+    | Some (`String reference) when choice="antigravity" && not (List.mem_assoc "api_key" request) ->
+      let* reference=Runtime_setup_accounts.reference_of_string reference |> Result.map_error (fun _ -> Credential_unavailable) in
+      let* command=text (value "command" selected) in
+      Runtime_setup_accounts.resolve ~workspace ~integration_id:id ~cli_path:command reference
+        |> Result.map Option.some |> Result.map_error (fun _ -> Credential_unavailable)
+    | Some _ -> Error Invalid_request in
+  let* credentials = match account,List.assoc_opt "api_key" request with
+    | Some account,None -> Ok ["credential_file",`String account.Runtime_setup_accounts.credential_file]
+    | Some _,Some _ -> Error Invalid_request
+
+    | None,Some (`String secret) when http -> private_key ~sw pending secret
+    | None,Some _ -> Error Invalid_request
+    | None,None ->
       (match value "credential_kind" selected with
        | `String "inline" ->
          (match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.Runtime_schema.providers with
@@ -74,8 +85,9 @@ let source_template ~sw ~pending config request =
           | `String path -> Ok ["credential_file",`String path] | _ -> Error Credential_unavailable)
        | _ -> (match value "api_key_env" selected with
           | `String name when name<>"" -> Ok ["api_key_env",`String name] | _ -> Ok [])) in
-  let* timeout = if choice<>"antigravity" then Ok [] else
-    match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers with
+  let* timeout = if choice<>"antigravity" then Ok [] else match account with
+    | Some account -> Ok ["timeout_s",`Float account.Runtime_setup_accounts.timeout_s]
+    | None -> match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers with
     | Some provider -> (match provider.antigravity_cli with
       | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
     | None -> Error Unsupported_connection in
@@ -102,11 +114,38 @@ let project_client_models ~source ~catalog json =
     | _ -> Error Unsupported_connection in
   let* rows=project [] models in
   Ok (`Assoc ["source",`String source;"account_availability_verified",`Bool false;"models",`List rows])
+let import_account ~binary ~base_path request =
+  let* request=fields ["integration_id"] ["integration_id"] request in
+  let* integration_id=text (value "integration_id" request) in
+  let* config=config ~base_path in
+  let catalog=Runtime_wizard_inventory.to_json config in
+  let integrations=match catalog with `Assoc fields -> value "integrations" fields | _ -> `Null in
+  let* rows=list integrations in
+  let selected=List.filter_map (function `Assoc row when value "id" row=`String integration_id -> Some row | _ -> None) rows in
+  let* selected=match selected with [row] when value "protocol" row=`String "antigravity-cli" -> Ok row | _ -> Error Unsupported_connection in
+  let* cli_path=text (value "command" selected) in
+  let import ~base_path =
+    let result =
+      let* json=native_json ~binary ["runtime-antigravity-account";"--base-path";base_path;"--cli-path";cli_path] in
+      let* row=match json with `Assoc row when value "schema" row=`String "masc.antigravity_account.v1"
+        && value "invocation_verified" row=`Bool false -> Ok row | _ -> Error Unsupported_connection in
+      let* credential_file=text (value "credential_file" row) in
+      let* timeout_s=match value "provider_timeout_s" row with
+        | `Float seconds when Float.is_finite seconds && seconds>0. -> Ok seconds
+        | _ -> Error Unsupported_connection in
+      let* catalog=project_client_models ~source:"antigravity_imported_account_models" ~catalog:false (value "catalog" row) in
+      Ok {Runtime_setup_accounts.credential_file;timeout_s;catalog} in
+    Result.map_error (fun _ -> Runtime_setup_accounts.Import_failed) result in
+  let* reference,catalog=Runtime_setup_accounts.create ~workspace:base_path ~integration_id ~cli_path ~import
+    |> Result.map_error (fun _ -> Credential_unavailable) in
+  Ok (`Assoc ["schema",`String "masc.web_setup_account.v1";
+    "account_ref",`String (Runtime_setup_accounts.reference_to_string reference);
+    "account_imported",`Bool true;"invocation_verified",`Bool false;"catalog",catalog])
 let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id=source_template ~sw ~pending config request in
+    let* template,id=source_template ~sw ~pending ~workspace:base_path config request in
     match value "choice" template with
     | `String "codex" ->
       let* command=text (value "command" template) in
@@ -131,7 +170,7 @@ let context ~binary ~net ~base_path request =
     let* load=match value "load" request with `Bool value -> Ok value | _ -> Error Invalid_request in
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id=source_template ~sw ~pending config (value "source" request) in
+    let* template,id=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
     let observed = match value "choice" template with
       | `String "antigravity" ->
         let* command=text (value "command" template) in
@@ -182,7 +221,7 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_=source_template ~sw ~pending config (value "source" row) in
+        let* template,_=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let rec specs = function [] -> Ok [] | model::tail ->

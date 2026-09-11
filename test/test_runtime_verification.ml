@@ -252,7 +252,7 @@ wizard-default = true
     let antigravity = integration prototypes "antigravity" in
     check string "official Antigravity executable" "agy"
       (antigravity |> member "command" |> to_string);
-    check string "unsupported verification is not ready" "unsupported"
+    check string "native response and tool verification is available" "response_tool"
       (antigravity |> member "verification_support" |> to_string);
     List.iter (fun id ->
       check string "media endpoints are not chat setup connections" "unsupported"

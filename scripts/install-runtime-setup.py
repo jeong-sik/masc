@@ -741,8 +741,9 @@ def source_label(source):
 
 class PendingCredentials:
     """Own only files created by this wizard, until a config commit retains them."""
-    def __init__(self, binary):
+    def __init__(self, binary, base_path=None):
         self.binary = binary
+        self.base_path = base_path
         self.pending = {}
 
     def __enter__(self):
@@ -782,6 +783,78 @@ class PendingCredentials:
             raise SetupError('MASC did not return a valid private credential reference')
         self.pending[path] = (info.st_dev, info.st_ino)
         return path
+
+    def register_account_reference(self, path):
+        info = os.lstat(path)
+        if not os.path.isabs(path) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise SetupError('Antigravity did not return a private account reference')
+        self.pending[path] = (info.st_dev, info.st_ino)
+
+
+def antigravity_catalog_rows(catalog):
+    if (catalog.get('source') != 'antigravity_cli_models'
+            or catalog.get('account_availability_verified') is not False
+            or not isinstance(catalog.get('models'), list)):
+        raise SetupError('Antigravity returned an unsupported model list')
+    result = []
+    for row in catalog['models']:
+        if not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label')):
+            raise SetupError('Antigravity returned an invalid model entry')
+        result.append(dict(id=row['id'], label=row['label'], context=None))
+    return result
+
+
+def prepare_antigravity_account(source, credentials):
+    if credentials is None or credentials.base_path is None:
+        raise SetupError('Open masc setup to select an Antigravity account')
+    actions = [('current', 'Use the account signed in to Antigravity on this computer'),
+               ('signin', 'Sign in with the official Antigravity client'), ('back', 'Back to connections')]
+    if source.get('credential_file'):
+        actions.insert(0, ('saved', 'Use this workspace’s saved Antigravity account'))
+    selected = actions[pick('Antigravity account', [label for _, label in actions])[0]][0]
+    if selected == 'back':
+        raise SetupError('returned to connection selection')
+    arguments = [str(credentials.binary), 'runtime-antigravity-account', '--base-path', str(credentials.base_path),
+                 '--cli-path', source['command']]
+    if selected == 'signin':
+        arguments.append('--sign-in')
+    elif selected == 'saved':
+        arguments += ['--credential-file', source['credential_file']]
+    response = subprocess.run(arguments, stdout=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(response.stdout)
+        if response.returncode:
+            if receipt.get('schema') == 'masc.antigravity_setup_error.v1':
+                raise SetupError(terminal_text(receipt['error']))
+            raise ValueError('invalid failure')
+        if (receipt.get('schema') != 'masc.antigravity_account.v1' or receipt.get('invocation_verified') is not False
+                or not isinstance(receipt.get('provider_timeout_s'), (int, float))
+                or not math.isfinite(receipt['provider_timeout_s']) or receipt['provider_timeout_s'] <= 0):
+            raise ValueError('invalid account receipt')
+        credential = receipt['credential_file']
+        models = antigravity_catalog_rows(receipt['catalog'])
+        credentials.register_account_reference(credential)
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity account selection did not return a readable result')
+    source.update(credential_file=credential, credential_kind='file', credential_replaced=True,
+                  account_catalog=models, provider_timeout_s=receipt['provider_timeout_s'])
+    if receipt.get('catalog_error'):
+        print(terminal_text(receipt['catalog_error']) + ' Choose Refresh model list to try again.', file=sys.stderr)
+    return source
+
+
+def antigravity_models(binary, source):
+    if 'account_catalog' in source:
+        return source.pop('account_catalog')
+    response = subprocess.run([str(binary), 'runtime-antigravity-models', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file']],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if response.returncode:
+        raise SetupError('Antigravity could not refresh models. Check sign-in and retry account selection.')
+    try:
+        return antigravity_catalog_rows(json.loads(response.stdout))
+    except (TypeError, ValueError):
+        raise SetupError('Antigravity did not return a readable model list')
 
 
 def prerequisite_menu(binary, dependency):
@@ -839,6 +912,9 @@ def prepare_connection(source, credentials):
             client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(source['choice'])
             if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
                 raise SetupError('Install the selected client, then return to connection setup')
+        if source['choice'] == 'antigravity':
+            source['command'] = shutil.which(command)
+            return prepare_antigravity_account(source, credentials)
         return source
     if not source['endpoint']:
         urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
@@ -914,7 +990,9 @@ def source_models(binary, source, timeout):
     """One source's model list: discovery belongs to the native runtime;
     curated catalog rows lead, workspace bindings are matched onto the rest."""
     choice = source.get('choice')
-    if choice in ('codex', 'claude_code'):
+    if choice == 'antigravity' and source.get('credential_file'):
+        observed, origin = antigravity_models(binary, source), 'Models from the selected Antigravity account'
+    elif choice in ('codex', 'claude_code'):
         # CLI clients answer through the binary's client catalog; the wizard
         # never drives the vendor CLI directly.
         observed = catalog_models(binary, choice)
@@ -923,6 +1001,7 @@ def source_models(binary, source, timeout):
     else:
         can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
         observed, origin = native_discover_models(binary, source, timeout) if can_discover else ([], 'Configured models')
+
     rows = []
     curated = provider_catalog_models(binary, source['provider_id']) if source.get('catalog_provider') and source.get('provider_id') else []
     curated_ids = set()
@@ -937,10 +1016,12 @@ def source_models(binary, source, timeout):
                        else row.get('max_context'))
             rows.append(dict(id=row['id'], label=row.get('label') or row['id'],
                              context=context, existing=None, catalog=row))
+    # An account switch invalidates both membership and effective CLI context.
+    declared_rows = [] if choice == 'antigravity' and source.get('credential_replaced') else source['rows']
     for model in observed:
         if model['id'] in curated_ids:
             continue
-        existing_rows = [row for row in source['rows'] if row['model'] == model['id']]
+        existing_rows = [row for row in declared_rows if row['model'] == model['id']]
         # A workspace declaration is relevant only in this exact connection.
         if existing_rows:
             for existing in existing_rows:
@@ -950,11 +1031,11 @@ def source_models(binary, source, timeout):
                                  existing=None if source.get('credential_replaced') else existing))
         else:
             rows.append(dict(model, existing=None))
-    for row in source['rows']:
+    for row in declared_rows:
         if source.get('credential_replaced') and any(item['id'] == row['model'] for item in rows):
             continue
         if not any(item.get('existing', {}).get('id') == row['id'] for item in rows if item.get('existing')):
-            duplicates = sum(other['model'] == row['model'] for other in source['rows']) > 1
+            duplicates = sum(other['model'] == row['model'] for other in declared_rows) > 1
             label = row['model'] + (' — ' + row['id'] if duplicates else '')
             rows.append(dict(id=row['model'], label=label, context=row['max_context'],
                              existing=None if source.get('credential_replaced') else row))
@@ -970,7 +1051,7 @@ def resolve_model_spec(source, model, timeout, binary=None):
         return existing['id'], None
     if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
         raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
-    if choice is None or choice == 'antigravity':
+    if choice is None:
         raise SetupError('this connection needs runtime-specific configuration; choose an existing tool-enabled runtime')
     if source.get('catalog_provider'):
         # A named catalog source writes named provider sections that resolve
@@ -1035,6 +1116,8 @@ def resolve_model_spec(source, model, timeout, binary=None):
         spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
     elif source['command']:
         spec['command'] = source['command']
+    if choice == 'antigravity':
+        spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
     return render(spec)[0], spec
 
 
@@ -1121,7 +1204,7 @@ def login_command(runtime_id, specs, inventory):
 
 
 def wizard(binary, base_path, timeout):
-    with PendingCredentials(binary) as credentials:
+    with PendingCredentials(binary, base_path) as credentials:
         return wizard_with_credentials(binary, base_path, timeout, credentials)
 
 

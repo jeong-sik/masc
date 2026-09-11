@@ -1,0 +1,156 @@
+{
+  "scope": "keeper",
+  "keeper": "exhibit-editor",
+  "open_count": 2,
+  "returned": 4,
+  "asks": [
+    {
+      "keeper": "exhibit-editor",
+      "ask_id": "askfe933ed25be8fdce",
+      "asked_at": 1789042675.051341,
+      "context": null,
+      "questions": [
+        {
+          "question_id": "event-format",
+          "header": "행사 형태 확인",
+          "prompt": "《기억의 정원》이 온라인 가상 전시만 진행되는지, 아니면 추후 오프라인 공간·일정이 추가될 예정인지 알려주세요. 안내 책자와 포스터에 확정되지 않은 정보를 사실처럼 쓰지 않아야 해서 필요합니다.",
+          "mode": "single",
+          "free_text": {
+            "allowed": true
+          },
+          "choices": [
+            {
+              "choice_id": "virtual-only",
+              "label": "온라인 가상 전시만",
+              "description": "온라인 가상 전시만 진행, 실물 공간·일정 없음"
+            },
+            {
+              "choice_id": "hybrid-schedule-tbd",
+              "label": "하이브리드 확장 예정(일정 미확정)",
+              "description": "추후 하이브리드로 확장 예정이나 일정 미확정"
+            },
+            {
+              "choice_id": "answer-late",
+              "label": "답변은 조금 뒤에",
+              "description": "현재 확인이 어려워 답변이 늦어질 수 있음"
+            }
+          ]
+        },
+        {
+          "question_id": "confirmed-info",
+          "header": "기타 확정 정보",
+          "prompt": "현재 확정된 행사 정보(전시 기간, 주최, 관련 링크, 협업 작가 등)가 있나요? 없다면 '없음'이라고 답해 주시면, 책자·포스터에는 '일정·세부 정보는 추후 공지' 형태로만 표기하겠습니다.",
+          "mode": "single",
+          "free_text": {
+            "allowed": true,
+            "hint": "예: 작가 이름, 전시 기간, 사이트 주소 등 (없으면 '없음')"
+          },
+          "choices": []
+        }
+      ],
+      "resolution": {
+        "state": "answered",
+        "answered_at": 1789042768.499207,
+        "answered_question_ids": [
+          "event-format",
+          "confirmed-info"
+        ]
+      }
+    },
+    {
+      "keeper": "exhibit-editor",
+      "ask_id": "ask6c21df417c09d474",
+      "asked_at": 1789042702.369586,
+      "context": null,
+      "questions": [
+        {
+          "question_id": "proceed-now",
+          "header": "이어서 진행할까요",
+          "prompt": "방금 전 확인 질문(행사 형태, 확정 정보)에 답을 기다리는 동안 제 작업공간의 셸 실행이 승인 대기 중입니다. 지금 바로 답할 수 있다면 이어서 진행하고, 답이 늦어질 것 같으면 '온라인 가상 전시만 진행'으로 가정하고 먼저 제작을 시작하겠습니다.",
+          "mode": "single",
+          "free_text": {
+            "allowed": true
+          },
+          "choices": [
+            {
+              "choice_id": "keep-waiting",
+              "label": "답변을 기다린다",
+              "description": "답변을 계속 기다린다"
+            },
+            {
+              "choice_id": "virtual-assume",
+              "label": "온라인 가상 전시라 가정하고 진행",
+              "description": "온라인 가상 전시만 진행한다고 가정하고 진행한다"
+            }
+          ]
+        }
+      ],
+      "resolution": {
+        "state": "answered",
+        "answered_at": 1789042848.335179,
+        "answered_question_ids": [
+          "proceed-now"
+        ]
+      }
+    },
+    {
+      "keeper": "exhibit-editor",
+      "ask_id": "askd0d27a5b6924b32f",
+      "asked_at": 1789043553.080176,
+      "context": null,
+      "questions": [
+        {
+          "question_id": "confirmed-schedule-venue",
+          "header": "확정된 전시 일정과 장소",
+          "prompt": "《기억의 정원》에 실제 전시 공간과 일정이 추가된다고 하셨는데, 확정된 일정(시작~종료)과 장소(걸명·주소)를 알려주세요. 아직 미정이면 '미정'이라고 답해 주시면 '하이브리드 전시 예정, 일정·장소는 추후 공지'로만 표기하겠습니다.",
+          "mode": "single",
+          "free_text": {
+            "allowed": true,
+            "hint": "예: 2026.10.1~10.31 / 서울 성수동 OO갤러리"
+          },
+          "choices": []
+        }
+      ],
+      "resolution": {
+        "state": "open"
+      }
+    },
+    {
+      "keeper": "exhibit-editor",
+      "ask_id": "ask953959b82773c773",
+      "asked_at": 1789043585.694653,
+      "context": null,
+      "questions": [
+        {
+          "question_id": "confirm-schedule-status",
+          "header": "확정 정보 확인",
+          "prompt": "《기억의 정원》 안내 책자·포스터에 넣을 '실제 전시 공간·일정' 정보의 상태를 알려주세요. 이미 답해 주신 내용이 있지만 제 쪽 메모리에 정확한 문구가 남지 않아 재확인합니다.",
+          "mode": "single",
+          "free_text": {
+            "allowed": true
+          },
+          "choices": [
+            {
+              "choice_id": "schedule-now",
+              "label": "확정 일정·장소 알려주기",
+              "description": "확정된 일정·장소를 바로 알려준다"
+            },
+            {
+              "choice_id": "tbd-hybrid",
+              "label": "하이브리드 예정, 일정·장소 미정",
+              "description": "하이브리드 전시 예정이나 일정·장소는 아직 미정"
+            },
+            {
+              "choice_id": "keep-online-only",
+              "label": "온라인만 표기, 실제 공간은 추후 공지",
+              "description": "현재 공개용으론 온라인 가상 전시만 표기하고 실제 공간 정보는 추후 공지"
+            }
+          ]
+        }
+      ],
+      "resolution": {
+        "state": "open"
+      }
+    }
+  ]
+}

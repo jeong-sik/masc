@@ -181,6 +181,61 @@ let messages projection = projection
 let original_message resolved = resolved.original
 let content resolved = resolved.content
 
+
+let rec contains_image = function
+  | Image _ -> true
+  | ToolResult { content_blocks = Some blocks; _ } -> List.exists contains_image blocks
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+  | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false
+;;
+
+let result_label tool_use_id outcome =
+  Text
+    ("Media from tool result "
+     ^ Yojson.Safe.to_string
+         (`Assoc [ "tool_use_id", `String tool_use_id
+                 ; "is_error", `Bool (tool_result_outcome_is_error outcome) ]))
+;;
+
+let rec media_parts = function
+  | (Text _ | Image _ | Document _ | Audio _) as block -> [ block ]
+  | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->
+    result_label tool_use_id outcome :: List.concat_map media_parts blocks
+  | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+    | ToolResult { content_blocks = None; _ }) as block ->
+    [ Text (Yojson.Safe.to_string (Api_common.content_block_to_json block)) ]
+;;
+
+let with_image_followups messages =
+  let flush pending reversed =
+    match pending with
+    | [] -> reversed
+    | _ ->
+      { role = User; content = List.rev pending; name = None
+      ; tool_call_id = None; metadata = [] } :: reversed
+  in
+  let rec loop reversed pending = function
+    | [] -> List.rev (flush pending reversed)
+    | ({ role = Tool; _ } as message) :: rest ->
+      let content, pending =
+        List.fold_left
+          (fun (content, pending) block ->
+             match block with
+             | ToolResult { tool_use_id; content = summary; outcome; json
+                          ; content_blocks = Some blocks }
+               when List.exists contains_image blocks ->
+               let followup = result_label tool_use_id outcome :: List.concat_map media_parts blocks in
+               (ToolResult { tool_use_id; content = summary; outcome; json; content_blocks = None } :: content,
+                List.rev_append followup pending)
+             | _ -> block :: content, pending)
+          ([], pending) message.content
+      in
+      loop ({ message with content = List.rev content } :: reversed) pending rest
+    | message :: rest -> loop (message :: flush pending reversed) [] rest
+  in
+  loop [] [] messages
+;;
+
 [@@@coverage off]
 
 let[@warning "-32"] message role content : Types.message =

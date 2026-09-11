@@ -261,6 +261,7 @@ let execute_with_observers_with_authority
       let observed_result : Tool_result.result =
         Tool_result.Completed
           { Tool_result.tool_name = name
+          ; content_blocks = None
           ; data = producer_payload ~raw:raw_result producer_data
           ; metadata = producer_metadata
           ; duration_ms = Float.of_int duration_ms
@@ -322,6 +323,7 @@ let execute_with_observers_with_authority
       let observed_result : Tool_result.result =
         Tool_result.Deferred
           { Tool_result.tool_name = name
+          ; content_blocks = None
           ; data = producer_payload ~raw:raw_result producer_data
           ; metadata = producer_metadata
           ; duration_ms = Float.of_int duration_ms

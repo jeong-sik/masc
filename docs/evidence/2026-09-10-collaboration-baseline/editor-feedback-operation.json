@@ -1,0 +1,32 @@
+{
+  "schema": "masc.keeper_chat_operation.v1",
+  "operation_id": "kmsg-26f2f1c5868f802ade02062ba5cd39d3",
+  "sequence": "1",
+  "created_at": 1789044992.778211,
+  "execution_digest": "cb447f0d1963c133d8fb5b012eb4c63dfca42d74677bcc7c4b5b37b38307d664",
+  "source": {
+    "channel": "agent",
+    "channel_user_id": "",
+    "channel_user_name": "",
+    "channel_workspace_id": "",
+    "continuation_channel": {
+      "kind": "dashboard",
+      "thread_id": "keeper:exhibit-editor"
+    },
+    "conversation_id": null,
+    "external_message_id": null,
+    "extra_mentions": [],
+    "schema": "masc.keeper_chat_operation.source.v1",
+    "submitted_by": "admin",
+    "surface": {
+      "kind": "agent"
+    },
+    "thread_id": "keeper:exhibit-editor",
+    "user_row_origin": "needs_append",
+    "workspace_id": null
+  },
+  "input": null,
+  "state": "Succeeded",
+  "completed_at": 1789045084.285804,
+  "outcome_ref": "trace-1789042595401-00001#9"
+}

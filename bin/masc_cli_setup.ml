@@ -215,7 +215,11 @@ let prepare_server ~base_path ~port ~owned =
               fail (Printf.sprintf "Server readiness returned HTTP %d." status)
             | _ -> Eio.Time.sleep clock 0.2; wait ()
           in wait ()) with
-        | Ok () -> ()
+        | Ok () ->
+          (match Workspace_connection.port port with
+           | Error error -> fail (Workspace_connection.error_message error)
+           | Ok port -> (match Workspace_connection.save ~base_path ~port with
+             | Ok () -> () | Error error -> prerr_endline (Workspace_connection.error_message error)))
         | Error `Timeout -> fail "Server is not ready yet; inspect its logs and rerun setup.")))
 
 let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~resume_models

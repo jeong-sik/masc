@@ -119,6 +119,7 @@ type unreadable_row = {
       (** The resolved action-radius target when that independent field was
           readable. [None] means this row could belong to any file. *)
   ur_reason : unreadable_reason;
+  ur_at : float;  (** Unix time the call was logged. *)
 }
 
 type tally = {
@@ -128,6 +129,7 @@ type tally = {
           order. Kept beside the legacy counts so a file-centric reader can
           distinguish an exact incomplete row from a fleet-wide unknown. *)
   not_file_changes : int;
+  not_file_changes_ts : float list;
   over_budget : int;
       (** File changes whose text the log did not keep. A caller that draws
           changes owes its reader this number: without it a turn that wrote
@@ -138,6 +140,12 @@ type tally = {
 
 val empty_tally : tally
 (** The tally of no rows. *)
+
+val prune_before : since_ts:float -> tally -> tally
+(** Drop events with timestamps older than [since_ts]. *)
+
+val oldest_row_ts : tally -> float option
+(** Return the oldest event timestamp across changes, unreadable rows, and non-file-changes. *)
 
 val rows_counted : tally -> int
 (** How many rows a tally was folded from: changes, unreadable rows and

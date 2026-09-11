@@ -23,6 +23,16 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def observe_process_rows(command):
+    result = subprocess.run(command, capture_output=True, text=True)
+    rows = result.stdout.splitlines()
+    if result.returncode == 0 and rows and not result.stderr.strip():
+        return rows
+    if result.returncode == 1 and not rows and not result.stderr.strip():
+        return []  # Both lsof and ps report a successful no-match with exit 1.
+    raise RuntimeError(f'{command[0]} process observation failed (exit {result.returncode}); no restart authorized')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base', type=Path, required=True)
@@ -37,7 +47,11 @@ def main():
     call.add_argument('--arguments-file', type=Path, required=True)
     get = sub.add_parser('get')
     get.add_argument('path')
+    post = sub.add_parser('post')
+    post.add_argument('path')
+    post.add_argument('--arguments-file', type=Path, required=True)
     args = p.parse_args()
+    is_effect = args.command in ['call', 'post']
     base = args.base.resolve()
     operator_lock = (base / 'operator.lock').open('a')
     fcntl.flock(operator_lock, fcntl.LOCK_EX)
@@ -62,13 +76,14 @@ def main():
         persist_state()
         return response
 
-    def request(path, body=None):
+    def request(path, body=None, *, method=None):
         if not path.startswith('/') or path.startswith('//'):
             raise ValueError('Expected same-origin absolute path')
         headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/json, text/event-stream', 'Content-Type': 'application/json'}
         if state.get('session'):
             headers['Mcp-Session-Id'] = state['session']
-        req = Request(url + path, headers=headers, data=None if body is None else json.dumps(body).encode())
+        req = Request(url + path, headers=headers, method=method,
+                      data=None if body is None and method != 'POST' else json.dumps(body).encode())
         try:
             with http.open(req, timeout=30) as response:
                 raw = response.read().decode()
@@ -84,10 +99,12 @@ def main():
         lines = [line[6:] for line in raw.splitlines() if line.startswith('data: ')]
         return json.loads(next((line for line in lines if '"id"' in line), raw))
 
-    def check_health():
+    def check_health(*, expected_commit=None, expected_binary_sha256=None):
         health = request('/health?full=1')
-        if health['build']['binary_commit'] != args.expected_commit or Path(health['paths']['effective_base_path']).resolve() != base:
+        if health['build']['binary_commit'] != (expected_commit or args.expected_commit) or Path(health['paths']['effective_base_path']).resolve() != base:
             raise ValueError('Running binary/base identity mismatch')
+        if expected_binary_sha256 is not None and health['build']['executable_sha256'] != expected_binary_sha256:
+            raise ValueError('Running binary hash differs from the owned process receipt')
         return health
 
     if args.command in ['start', 'restart-owned']:
@@ -102,6 +119,8 @@ def main():
         env = {key: value for key, value in os.environ.items() if not any(part in key for part in ['TOKEN', 'SECRET', 'API_KEY']) and not key.startswith('MASC_')}
         runtime_config = tomllib.loads((base / '.masc/config/runtime.toml').read_text())
         for provider in runtime_config['providers'].values():
+            if provider.get('protocol') == 'codex-app-server' and 'credentials' not in provider:
+                continue  # The configured CLI owns its existing subscription authentication.
             credential = provider.get('credentials', {})
             if credential.get('type') != 'env':
                 raise ValueError('This scenario expects explicit environment credential references')
@@ -109,27 +128,32 @@ def main():
             if not os.environ.get(key):
                 raise ValueError('Selected provider credential environment is absent')
             env[key] = os.environ[key]
-        env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_WS_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='true', MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED='false')
+        env.update(MASC_ADMIN_TOKEN=token, MASC_BASE_PATH=str(base), MASC_GRPC_ENABLED='0', MASC_KEEPER_AUTONOMOUS_ENABLED='true', MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED='false')
         if args.command == 'restart-owned':
             if state.get('pending'):
                 raise ValueError('Unconfirmed effect requires reconciliation before restart')
-            listeners = subprocess.run(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'], capture_output=True).stdout.decode().split()
+            listeners = observe_process_rows(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'])
             if set(listeners) == {str(state['pid'])}:
-                check_health()
+                # Validate the process being replaced against its own receipt,
+                # not against the new candidate's commit. A source change is
+                # the reason for this restart, not an ownership mismatch.
+                check_health(expected_commit=state['expected_commit'],
+                             expected_binary_sha256=state['binary_sha256'])
                 state.setdefault('restarts', []).append({'previous_pid': state['pid'], 'at': time.time()})
                 persist_state()
                 os.kill(state['pid'], signal.SIGTERM)
             elif (listeners or not state.get('restarts')
                   or state['restarts'][-1]['previous_pid'] != state['pid']
-                  or subprocess.run(['ps', '-p', str(state['pid']), '-o', 'comm='], capture_output=True).stdout.strip()):
+                  or observe_process_rows(['ps', '-p', str(state['pid']), '-o', 'comm='])):
                 raise ValueError('Neither a verified owned listener nor a recorded stopped restart')
             for _ in range(100):
-                listeners = subprocess.run(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'], capture_output=True).stdout.split()
-                if not listeners:
+                listeners = observe_process_rows(['lsof', '-t', f"-iTCP:{scenario['port']}", '-sTCP:LISTEN'])
+                process_alive = observe_process_rows(['ps', '-p', str(state['pid']), '-o', 'comm='])
+                if not listeners and not process_alive:
                     break
                 time.sleep(0.2)
             else:
-                raise TimeoutError('Owned listener did not stop; no forced kill or new process')
+                raise TimeoutError('Owned process has not finished stopping; no forced kill or new process')
             state.pop('session', None)
             state['counter'] += 1
         with socket.socket() as sock:
@@ -155,7 +179,7 @@ def main():
         result = initialize()
     else:
         check_health()
-        if args.command == 'call' and state.get('pending'):
+        if is_effect and state.get('pending'):
             raise RuntimeError('Previous effect response is unconfirmed. Reconcile the actual operation/target before any further tool call; do not resubmit.')
         if args.command == 'call':
             # The server may have expired an idle session while models ran.
@@ -163,13 +187,15 @@ def main():
             state.pop('session', None)
             initialize()
         state['counter'] += 1
-        if args.command == 'call':
+        if is_effect:
             arguments = json.loads(args.arguments_file.read_text())
-            state['pending'] = {'counter': state['counter'], 'tool': args.tool,
+            target = {'tool': args.tool} if args.command == 'call' else {'path': args.path}
+            state['pending'] = {'counter': state['counter'], **target,
                                 'arguments_sha256': hashlib.sha256(json.dumps(arguments, sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
                                 'submitted_at': time.time(), 'remote_effect': 'unconfirmed'}
             persist_state()
-            result = request('/mcp', {'jsonrpc': '2.0', 'id': state['counter'], 'method': 'tools/call', 'params': {'name': args.tool, 'arguments': arguments}})
+            result = (request('/mcp', {'jsonrpc': '2.0', 'id': state['counter'], 'method': 'tools/call', 'params': {'name': args.tool, 'arguments': arguments}})
+                      if args.command == 'call' else request(args.path, arguments, method='POST'))
         else:
             result = request(args.path)
     destination = base / f"operator-response-{state['counter']:03}.private.json"
@@ -178,7 +204,7 @@ def main():
         handle.write(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
         handle.flush()
         os.fsync(handle.fileno())
-    if args.command == 'call':
+    if is_effect:
         state.pop('pending', None)
     persist_state()
     print(json.dumps({'response_file': str(destination), 'server_pid': state['pid'], 'counter': state['counter']}))

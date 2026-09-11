@@ -125,6 +125,27 @@ val degrade_document_messages
   -> Types.message list
   -> Types.message list * int
 
+(** The visible text block an image is replaced with when the model does not
+    declare [supports_image_input]. Names the media type so the omission is
+    legible to the model and, through it, the user — the degrade is not
+    silent. *)
+val image_omitted_placeholder : media_type:string -> Types.content_block
+
+(** [degrade_image_messages ~supports_image_input messages] rewrites every
+    [Image] — including images nested in ToolResult [content_blocks], where
+    [Tool_result_projection] reads them from — into
+    {!image_omitted_placeholder} when [supports_image_input] is false, and
+    leaves the history untouched when it is true. Returns the rewritten
+    history and the number of images degraded.
+
+    Same agent-core boundary as {!degrade_document_messages}: the image never
+    rides the wire of a model that cannot read it, the turn is never rejected
+    retroactively, and the omission is named in the conversation. *)
+val degrade_image_messages
+  :  supports_image_input:bool
+  -> Types.message list
+  -> Types.message list * int
+
 (** {2 Content block JSON conversion} *)
 
 val content_block_to_json : Types.content_block -> Yojson.Safe.t

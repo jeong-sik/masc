@@ -1,0 +1,36 @@
+[
+  {
+    "source": {
+      "post_id": "keeper-ask:askfe933ed25be8fdce",
+      "urgency": "normal",
+      "arrived_at_unix": 1789042768.500017,
+      "payload": {
+        "kind": "ask_answered",
+        "ask_id": "askfe933ed25be8fdce",
+        "channel": {
+          "kind": "keeper",
+          "keeper_name": "exhibit-editor"
+        }
+      }
+    },
+    "admitted_revision": 2,
+    "checkpoint_retentions": 0
+  },
+  {
+    "source": {
+      "post_id": "keeper-ask:ask6c21df417c09d474",
+      "urgency": "normal",
+      "arrived_at_unix": 1789042848.336127,
+      "payload": {
+        "kind": "ask_answered",
+        "ask_id": "ask6c21df417c09d474",
+        "channel": {
+          "kind": "keeper",
+          "keeper_name": "exhibit-editor"
+        }
+      }
+    },
+    "admitted_revision": 7,
+    "checkpoint_retentions": 0
+  }
+]

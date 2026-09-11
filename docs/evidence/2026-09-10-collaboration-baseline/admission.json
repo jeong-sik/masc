@@ -1,0 +1,13 @@
+{
+  "status": "running",
+  "operation_id": "kmsg-b3763215fa65dc2048749b3bd15b502a",
+  "task_id": "task-001",
+  "goal_id": "exhibition-publication-baseline",
+  "criterion_revision": "c36f5a9061458b3efbeb8cbb2cacfc6b",
+  "keeper": "exhibit-editor",
+  "server_pid": 71727,
+  "port": 18951,
+  "base_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668",
+  "last_observed_state": "Running",
+  "source_commit": "68c7668a976a2ac7db36a80f10deaea3516ec469"
+}

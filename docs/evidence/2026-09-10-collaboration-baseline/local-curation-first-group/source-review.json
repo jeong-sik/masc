@@ -1,0 +1,35 @@
+{
+  "observed_at": "2026-09-10T15:07:30.745837+00:00",
+  "result_file_sha256": "49a8b7cf7a5e14c3b9aa08ade33c3cdc765da93035b10c57d8e4e061381bcfd3",
+  "result_canonical_sha256": "250ce9865a910471f034e0536a81c09454ae42575260c42e97a9e0129a4f3222",
+  "receipt_hash_matches": true,
+  "claim_count": 7,
+  "conflict_count": 1,
+  "cited_source_count": 11,
+  "source_scope": "exhibit-designer ordinary memory revision11; not whole live workspace truth",
+  "review_findings": [
+    {
+      "sources": [
+        "s10",
+        "s11"
+      ],
+      "finding": "Malformed admission-price wording is present in source memory; local model copied it rather than introducing it. Do not promote this wording as verified fact."
+    },
+    {
+      "sources": [
+        "s11"
+      ],
+      "finding": "Removal of the old collaboration claim matches change.removed. Absence is only within this designer snapshot, not proof that the real collaboration ended."
+    },
+    {
+      "sources": [
+        "s3",
+        "s6"
+      ],
+      "finding": "Valid requirement tension between allowing pixel-analysis substitution and requiring actual vision review; reading script source and executing pixel analysis are distinct."
+    }
+  ],
+  "semantic_acceptance": "partial source-faithfulness established; factual promotion not accepted",
+  "published": false,
+  "workspace_pass_complete": false
+}

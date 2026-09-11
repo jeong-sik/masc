@@ -148,11 +148,16 @@ open Alcotest
 (* 2026-09-11: 103,716 across 119 tools. PR adds 6 lane tools: masc_lane_attach,
    masc_lane_detach, masc_lane_evidence, masc_lane_inspect, masc_lane_observe,
    masc_lane_slice (+3,260 bytes). What it bought: Codex lane-addon runtime operations. *)
-(* 2026-09-11: 104,675 across 120 tools. PR adds keeper_artifact_transfer
-   (+959 bytes). What it bought: a Keeper hands a generated binary to a peer
+(* 2026-09-11: 105,415 across 121 tools (task-381). Adds masc_schedule_note_add and
+   masc_schedule_notes_list (+1,931 rendered bytes). What it bought: durable schedule
+   notes -- why a schedule exists, what changed across masc_schedule_update
+   replacements, and what a Keeper needs when it wakes; append-only, keyed by the
+   stable schedule_id, surviving terminal states. *)
+(* 2026-09-11: 106,394 across 122 tools. PR adds keeper_artifact_transfer
+   (+979 bytes). What it bought: a Keeper hands a generated binary to a peer
    through the workspace blob store, without either side touching the other's
    host paths. *)
-let ceiling_bytes = 104_675
+let ceiling_bytes = 106_394
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -331,6 +336,8 @@ let all_surface_golden_names =
   ; "masc_run_list"
   ; "masc_run_plan"
   ; "masc_schedule_cancel"
+  ; "masc_schedule_note_add"
+  ; "masc_schedule_notes_list"
   ; "masc_schedule_create"
   ; "masc_schedule_get"
   ; "masc_schedule_list"

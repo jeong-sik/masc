@@ -1,0 +1,8 @@
+{
+  "url": "http://127.0.0.1:18961/dashboard/#keepers?keeper=exhibit-editor",
+  "page_errors": [],
+  "ready": false,
+  "source_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "backend_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "scope": "Vite source preview against unchanged isolated backend; not installed dashboard proof"
+}

@@ -112,6 +112,7 @@ let unit_disposition_of_string = function
 
 type output_payload =
   { data : Yojson.Safe.t
+  ; content_blocks : Llm_provider.Types.content_block list option
   ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
@@ -154,7 +155,7 @@ let failure_class : result -> tool_failure_class option = function
 let to_json (result : result) : Yojson.Safe.t =
   let disposition = string_of_disposition result in
   match result with
-  | Completed { data; metadata; tool_name; duration_ms } ->
+  | Completed { data; metadata; tool_name; duration_ms; _ } ->
     `Assoc
       ([ "disposition", `String disposition
       ; "data", data
@@ -162,7 +163,7 @@ let to_json (result : result) : Yojson.Safe.t =
       ; "duration_ms", `Float duration_ms
       ]
        @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
-  | Deferred { data; metadata; tool_name; duration_ms } ->
+  | Deferred { data; metadata; tool_name; duration_ms; _ } ->
     `Assoc
       ([ "disposition", `String disposition
        ; "data", data
@@ -235,7 +236,7 @@ let is_failed : result -> bool = function
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  Completed { data = `String message_str; metadata = None; tool_name; duration_ms }
+  Completed { data = `String message_str; content_blocks = None; metadata = None; tool_name; duration_ms }
 ;;
 
 let error ~failure_class ~tool_name ~start_time message_str : result =
@@ -283,14 +284,14 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
     enforced positionally for new code that wants to commit to a
     classification at the catch boundary. *)
 
-let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
+let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata ?content_blocks () : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Completed { data; metadata; tool_name; duration_ms }
+  Completed { data; content_blocks; metadata; tool_name; duration_ms }
 ;;
 
 let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Deferred { data; metadata; tool_name; duration_ms }
+  Deferred { data; content_blocks = None; metadata; tool_name; duration_ms }
 ;;
 
 let make_err

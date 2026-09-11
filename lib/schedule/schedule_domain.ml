@@ -77,6 +77,7 @@ type wake_record =
 
 let ( let* ) = Result.bind
 
+
 let nonempty field value =
   if String.trim value = "" then Error (field ^ " must be non-empty") else Ok value
 ;;
@@ -87,6 +88,57 @@ let actor_kind_to_string = Schedule_contract_values.actor_kind_to_string
 let actor_kind_of_string value =
   Schedule_contract_values.actor_kind_of_string value
   |> Result.map_error decode_error_to_string
+;;
+
+(* Notes (task-381) live at schedule_id granularity, not instance granularity:
+   an update issues a fresh schedule_instance_id and drops the old definition,
+   so instance-scoped prose would not survive the replacement it explains.
+   Appended only -- there is no edit or removal, because a note is evidence
+   about intent and history, not state. *)
+type schedule_note =
+  { note_id : string
+  ; schedule_id : string
+  ; author_id : string
+  ; author_kind : actor_kind
+  ; created_at : float
+  ; body : string
+  }
+
+let schedule_note_to_yojson (note : schedule_note) : Yojson.Safe.t =
+  `Assoc
+    [ "note_id", `String note.note_id
+    ; "schedule_id", `String note.schedule_id
+    ; "author_id", `String note.author_id
+    ; "author_kind", `String (actor_kind_to_string note.author_kind)
+    ; "created_at", `Float note.created_at
+    ; "body", `String note.body
+    ]
+
+let schedule_note_of_yojson (json : Yojson.Safe.t) : (schedule_note, string) result =
+  (* Local option binder: the module-level [let*] is the Result one, and the
+     field lookups here are [option]s until the shape match. *)
+  let ( let* ) = Option.bind in
+  match json with
+  | `Assoc fields ->
+    let field name = List.assoc_opt name fields in
+    let shape =
+      let* note_id = field "note_id" in
+      let* schedule_id = field "schedule_id" in
+      let* author_id = field "author_id" in
+      let* author_kind = field "author_kind" in
+      let* created_at = field "created_at" in
+      let* body = field "body" in
+      Some (note_id, schedule_id, author_id, author_kind, created_at, body)
+    in
+    (match shape with
+     | Some (`String note_id, `String schedule_id, `String author_id, `String kind, `Float created_at, `String body) ->
+       (match actor_kind_of_string kind with
+        | Ok author_kind ->
+          Ok { note_id; schedule_id; author_id; author_kind; created_at; body }
+        | Error msg -> Error msg)
+     | _ ->
+       Error "schedule_note: field type mismatch")
+  | _ -> Error "schedule_note: expected an object"
 ;;
 
 let schedule_status_to_string = Schedule_contract_values.schedule_status_to_string

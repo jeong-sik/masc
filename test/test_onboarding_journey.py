@@ -29,8 +29,105 @@ def observation(base=None, checks=()):
     return dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
                 base_path=base, checks=[dict(id=name, condition=value) for name, value in checks])
 
-
 class Journey(unittest.TestCase):
+    def setUp(self):
+        renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
+        renderer.start()
+        self.addCleanup(renderer.stop)
+
+    def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
+        def receipt(schema, **values):
+            return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
+        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        replies = [receipt('masc.setup_server.v1', **same),
+                   receipt('masc.setup_server_stopped.v1', owner_stopped=True),
+                   receipt('masc.setup_server.v1', status='free', read_only=True)]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as pick, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True), 9123)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+        self.assertEqual(run.call_args_list[1].args[0][-2:], ['--expected-version', '0.35.5'])
+        self.assertEqual(len(pick.call_args.args[1]), 2)
+        self.assertTrue(pick.call_args.args[1][0].startswith('Restart'))
+
+    def test_group_session_owner_pause_never_prepares_or_reselects_models(self):
+        with patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \
+                patch.object(SETUP, 'select_sandbox') as sandbox, patch.object(SETUP, 'wizard') as models:
+            self.assertEqual(SETUP.sandbox_journey('/owned/masc', '/saved', 9123, refresh_owner=True), 1)
+        owner.assert_called_once_with('/owned/masc', '/saved', 9123, require_new_owner=True)
+        sandbox.assert_not_called()
+        models.assert_not_called()
+
+    def test_saved_sandbox_step_never_reselects_models_or_workspace(self):
+        with patch.object(SETUP, 'wizard') as models, \
+                patch.object(SETUP, 'workspace_check') as workspace, \
+                patch.object(SETUP, 'select_sandbox', return_value=['--sandbox-profile', 'docker']) as sandbox, \
+                patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
+                patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)) as run, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.sandbox_journey('/owned/masc', '/saved workspace', 9123), 0)
+        models.assert_not_called()
+        workspace.assert_not_called()
+        sandbox.assert_called_once_with('/owned/masc', '/saved workspace', port=9123)
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'setup', '--base-path', '/saved workspace',
+                                               '--port', '9123', '--no-tui', '--sandbox-profile', 'docker'])
+        opened.assert_called_once_with('/owned/masc', '/saved workspace', 9123)
+
+    def test_finished_group_session_exits_old_parent_without_repreparation(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.docker_account_action_result.v1', status='session_finished', readiness='not_checked')))
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run:
+            with self.assertRaises(SETUP.SetupSessionFinished):
+                SETUP.docker_account_action('/owned/masc', '/saved workspace', 9123, 'handoff')
+        self.assertEqual(run.call_args.args[0][-4:], ['--base-path', '/saved workspace', '--port', '9123'])
+        self.assertNotIn('stderr', run.call_args.kwargs)
+        with patch.object(sys, 'argv', ['setup', '--binary', '/owned/masc', '--base-path', '/saved workspace', '--sandbox-step']), \
+                patch.object(SETUP, 'sandbox_journey', side_effect=SETUP.SetupSessionFinished), \
+                patch.object(SETUP, 'journey') as initial:
+            with self.assertRaises(SystemExit) as exited:
+                SETUP.main()
+        self.assertEqual(exited.exception.code, 0)
+        initial.assert_not_called()
+
+    def test_failed_group_session_preserves_saved_tail_and_never_claims_ready(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.docker_account_action_result.v1', status='reauthentication_required',
+            reason='Retry this session', readiness='not_checked')))
+        with patch.object(SETUP.subprocess, 'run', return_value=result), \
+                contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertTrue(SETUP.docker_account_action('/owned/masc', '/saved', 9123, 'handoff'))
+        self.assertIn('Retry this session', output.getvalue())
+
+    def test_docker_privilege_detail_precedes_selection_and_only_selected_action_runs(self):
+        replies = [subprocess.CompletedProcess([], 0, json.dumps(dict(
+            schema='masc.prerequisite_actions.v1', actions=[]))),
+            subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.docker_account_actions.v1',
+                actions=[dict(id='grant', label='Allow Docker', detail='Grants root-level control through Docker.',
+                              source_url='https://docs.docker.com/engine/install/linux-postinstall/', requires_admin=True)])))]
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            def choose(*_):
+                self.assertIn('root-level control', output.getvalue())
+                return [0]
+            with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                    patch.object(SETUP, 'pick', side_effect=choose), \
+                    patch.object(SETUP, 'docker_account_action', return_value=True) as execute:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'docker', base_path='/saved', port=9123))
+        self.assertTrue(all('--execute' not in call.args[0] for call in run.call_args_list))
+        execute.assert_called_once_with('/owned/masc', '/saved', 9123, 'grant')
+
+    @unittest.skipUnless(BINARY, 'native binary supplied only by CI')
+    def test_native_group_resume_rejects_root_identity_before_helper_or_docker(self):
+        with tempfile.TemporaryDirectory() as home:
+            env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=home, PATH='')
+            result = subprocess.run([BINARY, 'docker-session-resume', '--base-path', home,
+                                     '--port', '9123', '--expected-uid', '0'],
+                                    env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn('Welcome', result.stdout + result.stderr)
+            self.assertFalse(Path(home, '.masc').exists())
+
+
     def test_antigravity_context_observation_avoids_numeric_input(self):
         source = dict(choice='antigravity', command='/owned/agy', endpoint='', api_key_env='',
                       credential_kind='file', credential_file='/private/account', provider_timeout_s=300.)
@@ -140,6 +237,37 @@ class Journey(unittest.TestCase):
             self.assertEqual(path.read_text(), original)
             self.assertEqual(backup.read_text(), original)
 
+    def test_final_workspace_owns_port_resolution_before_server_contact(self):
+        events = []
+        def check(*_):
+            events.append('workspace'); return dict(base_path='/chosen-new')
+        def port(binary, base, requested, save=False):
+            self.assertEqual(base, '/chosen-new')
+            events.append('save' if save else 'port'); return 19300
+        def server(binary, base, selected):
+            self.assertEqual((base, selected), ('/chosen-new', 19300))
+            events.append('server'); return 19301
+        with patch.object(SETUP, 'onboarding_status', return_value=observation('/old')), \
+                patch.object(SETUP, 'pick', return_value=[0]), \
+                patch.object(SETUP, 'workspace_check', side_effect=check), \
+                patch.object(SETUP, 'workspace_port', side_effect=port) as connection, \
+                patch.object(SETUP, 'select_setup_server', side_effect=server), \
+                patch.object(SETUP, 'wizard', return_value=dict(readiness='deferred')), \
+                patch.object(SETUP.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.journey('/owned/masc', None, None, 10), 0)
+        self.assertEqual(events, ['workspace', 'port', 'server', 'save'])
+        self.assertEqual(connection.call_args.args, ('/owned/masc', '/chosen-new', 19301))
+        self.assertTrue(connection.call_args.kwargs['save'])
+
+    def test_current_owner_history_quick_open_still_observes_identity(self):
+        result = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
+            read_only=True, status='same_workspace', installed_version='0.35.5', server_version='0.35.5')))
+        with patch.object(SETUP.subprocess, 'run', return_value=result) as run, patch.object(SETUP, 'pick') as pick:
+            self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 19301, resume_existing=True), 19301)
+        self.assertEqual(run.call_args.args[0], ['/owned/masc', 'setup-server', '--base-path', '/saved', '--port', '19301'])
+        pick.assert_not_called()
+
     def test_sandbox_selection_uses_native_backend_arguments(self):
         catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
             id='apple_container', state='service_ready', reason='service only', advanced=False,
@@ -178,7 +306,56 @@ class Journey(unittest.TestCase):
                 patch.object(SETUP, 'prerequisite_menu', return_value=False) as prerequisites, \
                 patch.object(SETUP, 'pick', side_effect=[[0], [3]]), contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
-        prerequisites.assert_called_once_with('/bin/masc', 'docker')
+        prerequisites.assert_called_once_with('/bin/masc', 'docker', base_path='/workspace', port=8945)
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_official_client_install_rechecks_without_auth_or_model(self):
+        import shlex
+        import sys
+        for dependency, client in [('codex', 'codex'), ('claude-code', 'claude'), ('antigravity', 'agy')]:
+            with self.subTest(client=client), tempfile.TemporaryDirectory() as home:
+                root = Path(home)
+                tools = root / 'tools'
+                tools.mkdir()
+                downloaded = root / 'downloaded-path'
+                target = root / '.local/bin' / client
+                payload = '#!/bin/sh\n[ "$1" = --version ] || exit 77\necho fixture-client-version\n'
+                script = '#!/bin/sh\nmkdir -p ' + shlex.quote(str(target.parent)) + '\nprintf %s ' + shlex.quote(payload) + ' > ' + shlex.quote(str(target)) + '\nchmod 700 ' + shlex.quote(str(target)) + '\n'
+                curl = tools / 'curl'
+                curl.write_text('#!' + sys.executable + '\nimport pathlib,sys\n'
+                    'args=sys.argv[1:]\nassert args[args.index("--proto")+1]=="=https"\n'
+                    'assert args[args.index("--proto-redir")+1]=="=https"\n'
+                    'assert args[-1] in ["https://chatgpt.com/codex/install.sh","https://claude.ai/install.sh","https://antigravity.google/cli/install.sh"]\n'
+                    'path=pathlib.Path(args[args.index("--output")+1])\npath.write_text(' + repr(script) + ')\n'
+                    'pathlib.Path(' + repr(str(downloaded)) + ').write_text(str(path))\n')
+                curl.chmod(0o700)
+                env = dict(os.environ, HOME=home, CODEX_INSTALL_DIR=str(target.parent), PATH=str(tools)+':/usr/bin:/bin')
+                result = subprocess.run([BINARY, 'prerequisite-actions', dependency, '--execute', client+'_native_install'],
+                    env=env, cwd=home, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                receipt = json.loads(result.stdout)
+                self.assertEqual(receipt['status'], 'commands_completed_recheck_required')
+                self.assertEqual(receipt['readiness'], 'not_checked')
+                self.assertTrue(target.is_file())
+                self.assertFalse(Path(downloaded.read_text()).exists())
+                self.assertNotIn('fixture-client-version', result.stdout)
+
+    def test_missing_antigravity_uses_installer_then_detects_user_binary_without_path(self):
+        with tempfile.TemporaryDirectory() as home:
+            source = dict(choice='antigravity', command='agy', label='Antigravity')
+            target = Path(home, '.local/bin/agy')
+            def install(*args):
+                target.parent.mkdir(parents=True)
+                target.write_text('#!/bin/sh\necho fixture\n')
+                target.chmod(0o700)
+                return True
+            credentials = type('Credentials', (), {'binary':'/owned/masc'})()
+            with patch.dict(os.environ, HOME=home), patch.object(SETUP.shutil, 'which', return_value=None), \
+                    patch.object(SETUP, 'prerequisite_menu', side_effect=install) as action, \
+                    patch.object(SETUP, 'prepare_antigravity_account', side_effect=lambda row, _: row):
+                result = SETUP.prepare_connection(source, credentials)
+            action.assert_called_once_with('/owned/masc', 'antigravity')
+            self.assertEqual(result['command'], str(target.resolve()))
 
     def test_prerequisite_runs_only_selected_action_with_terminal_prompts(self):
         catalog = dict(schema='masc.prerequisite_actions.v1', actions=[
@@ -302,6 +479,85 @@ class Journey(unittest.TestCase):
         preflight.assert_not_called()
         models.assert_not_called()
 
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_setup_can_leave_remembered_workspace_with_invalid_port(self):
+        with tempfile.TemporaryDirectory() as home:
+            old = Path(home, 'old')
+            config = old / '.masc/config/connection.toml'
+            config.parent.mkdir(parents=True)
+            invalid = '[server]\nhttp_port = "invalid"\n'
+            config.write_text(invalid)
+            record = Path(home, 'config/masc/default-base-path')
+            record.parent.mkdir(parents=True)
+            record.write_text(str(old) + '\n')
+            chosen = Path(home, 'chosen')
+            pid, fd = pty.fork()
+            if pid == 0:
+                environment = {key: value for key, value in os.environ.items()
+                               if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+                environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb')
+                os.chdir(home)
+                os.execve(BINARY, [BINARY, 'setup'], environment)
+            captured = b''
+            exited = False
+
+            def until(expected):
+                nonlocal captured
+                deadline = time.monotonic() + 30
+                while expected not in captured and time.monotonic() < deadline:
+                    if select.select([fd], [], [], 0.2)[0]:
+                        try:
+                            chunk = os.read(fd, 65536)
+                        except OSError:
+                            break
+                        if not chunk:
+                            break
+                        captured += chunk
+                self.assertIn(expected, captured, captured.decode(errors='replace'))
+
+            try:
+                until(b'Your workspace')
+                os.write(fd, b'2\n')
+                until(b'Workspace directory')
+                os.write(fd, str(chosen).encode() + b'\n')
+                until(b'Connect a model')
+                os.write(fd, b'q\n')
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    waited, status = os.waitpid(pid, os.WNOHANG)
+                    if waited == pid:
+                        exited = True
+                        self.assertTrue(os.WIFEXITED(status))
+                        self.assertEqual(os.WEXITSTATUS(status), 1, captured.decode(errors='replace'))
+                        break
+                    if select.select([fd], [], [], 0.1)[0]:
+                        try:
+                            captured += os.read(fd, 65536)
+                        except OSError:
+                            pass
+                self.assertTrue(exited, captured.decode(errors='replace'))
+                self.assertTrue((chosen / '.masc/config/connection.toml').is_file())
+                self.assertEqual(config.read_text(), invalid)
+            finally:
+                os.close(fd)
+                if not exited:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    os.waitpid(pid, 0)
+
+    def test_resume_invalid_saved_port_returns_to_workspace_selection(self):
+        state = observation('/old', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')])
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', side_effect=SETUP.SetupError('Invalid saved port')), \
+                patch.object(SETUP, 'pick', return_value=[2]) as picker, \
+                patch.object(SETUP, 'select_setup_server') as owner, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.journey('/bin/masc', None, None, 10, resume=True), 0)
+        picker.assert_called_once()
+        owner.assert_not_called()
+
     def test_default_workspace_is_selected_without_path_typing_and_native_owns_preparation(self):
         with tempfile.TemporaryDirectory() as home:
             base = str(Path(home) / 'MASC')
@@ -309,6 +565,8 @@ class Journey(unittest.TestCase):
                     patch.object(SETUP.Path, 'home', return_value=Path(home)), \
                     patch.object(SETUP, 'pick', return_value=[0]) as picker, \
                     patch.object(SETUP, 'workspace_check', return_value=dict(base_path=base)) as preflight, \
+                    patch.object(SETUP, 'select_setup_server', return_value=9876), \
+                    patch.object(SETUP, 'workspace_port', return_value=9876), \
                     patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')), \
                     patch.object(SETUP, 'select_sandbox', return_value=[]), \
                     patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
@@ -326,16 +584,20 @@ class Journey(unittest.TestCase):
     def test_persisted_history_resumes_without_model_reselection(self):
         state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_persistence', 'satisfied')])
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=8945) as owner, \
                 patch.object(SETUP, 'open_workspace', return_value=0) as opened, \
                 patch.object(SETUP, 'pick') as picker:
             self.assertEqual(SETUP.journey('/bin/masc', None, 8945, 10, resume=True), 0)
-        opened.assert_called_once_with('/bin/masc', '/workspace', 8945)
+        opened.assert_once_with('/bin/masc', '/workspace', 8945) if hasattr(opened, 'assert_once_with') else opened.assert_called_once_with('/bin/masc', '/workspace', 8945)
+        owner.assert_called_once_with('/bin/masc', '/workspace', 8945, resume_existing=True)
         picker.assert_not_called()
 
     def test_declaration_alone_never_skips_first_preparation(self):
         state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_declaration', 'satisfied')])
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
                 patch.object(SETUP, 'pick', return_value=[2]), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
                 patch.object(SETUP, 'open_workspace') as opened, contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(SETUP.journey('/bin/masc', None, 8945, 10, resume=True), 0)
         opened.assert_not_called()
@@ -344,6 +606,8 @@ class Journey(unittest.TestCase):
         with patch.object(SETUP, 'onboarding_status', return_value=observation('/workspace')), \
                 patch.object(SETUP, 'pick', side_effect=[[0], [1]]), \
                 patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=8945), \
                 patch.object(SETUP, 'wizard', return_value=dict(readiness='verified')) as models, \
                 patch.object(SETUP, 'select_sandbox', return_value=[]), \
                 patch.object(SETUP, 'open_workspace') as opened, \
@@ -357,7 +621,7 @@ class Journey(unittest.TestCase):
         spec = dict(choice='claude_code', command='/owned/claude', model='account-model',
                     max_context=100000, tools=True, streaming=False)
         runtime = SETUP.render(spec)[0]
-        with patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[])), \
+        with patch.object(SETUP, 'configured_inventory', return_value=dict(runtimes=[], setup_revision="a" * 64)), \
                 patch.object(SETUP, 'select_connections', return_value=([runtime], [spec], {runtime: 'Claude'})) as select, \
                 patch.object(SETUP, 'pick', side_effect=[[0], [4]]), \
                 patch.object(SETUP, 'configure_many', side_effect=[SETUP.VerificationError(runtime), dict(readiness='verified')]) as verify, \

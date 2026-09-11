@@ -800,7 +800,10 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
 
 (** Parse command line arguments *)
 let parse_args () =
-  let port = ref (Env_config_core.masc_http_port_int ()) in
+  let port = ref None in
+  (* Named so the R13 footer-fact scan does not read the setter's [ := ] as a
+     quoted [Port:] label split across the flag tuple's strings. *)
+  let set_selected_port value = port := Some value in
   let workspace = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
@@ -815,7 +818,8 @@ let parse_args () =
         | Some commit -> print_endline commit; exit 0
         | None -> prerr_endline "build commit is not embedded"; exit 1),
       "Print the Git commit embedded at build time and exit");
-    ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
+    ( "--port", Arg.Int set_selected_port
+    , "MASC server port (environment or saved workspace value when omitted)" );
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
     ( "--base-path",
@@ -843,6 +847,11 @@ let parse_args () =
     else Config_dir_resolver.base_path_or_cwd ()
   in
 
+  let resolved_port = match Workspace_connection.resolve ~base_path:(Some base) ~cli:!port
+    ~environment:(Env_config_core.raw_value_opt Env_config_core.http_port_env_key) with
+    | Ok value -> Workspace_connection.to_int value
+    | Error error -> prerr_endline (Workspace_connection.error_message error); exit 1 in
+
   (* Resolve workspace *)
   let r = if !workspace <> "" then !workspace
     else match Env_config_core.cluster_name_opt () with
@@ -869,7 +878,7 @@ let parse_args () =
   ( base_path_input
   , base
   , r
-  , !port
+  , resolved_port
   , !refresh
   , reasoning_visibility
   , tool_visibility )
@@ -4327,43 +4336,53 @@ let launch_runtime_surface_load state ~mailbox ~force =
                 (generation, Error "Eio switch is unavailable")))
 
 let launch_repositories_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_repositories ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.repositories_inflight then ()
+  else begin
+    state.repositories_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_repositories ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Repositories_loaded result)
     in
-    enqueue_async mailbox (Repositories_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Repositories_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.repositories_inflight <- false;
+        enqueue_async mailbox
+          (Repositories_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_memory_health_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_memory_health ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.memory_health_inflight then ()
+  else begin
+    state.memory_health_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_memory_health ~host ~port with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Memory_loaded result)
     in
-    enqueue_async mailbox (Memory_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.memory_health_inflight <- false;
+        enqueue_async mailbox (Memory_loaded (Error "Eio switch is unavailable"))
+  end
 
 let launch_memory_facts_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -4691,10 +4710,28 @@ let launch_workspace_activity state ~mailbox ~repo_id =
   | Masc_tui_fetched.Already_loading -> ()
   | Masc_tui_fetched.Started (next, request) ->
       state.workspace_activity <- next;
-      let keepers = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
-        |> List.sort_uniq String.compare in
+      let assigned_keepers =
+        match state.repositories with
+        | None -> []
+        | Some snap ->
+            match List.find_opt (fun (r : Tui_decode.repository) -> String.equal r.rp_id repo_id) snap.rs_repositories with
+            | None -> []
+            | Some r -> r.rp_keepers
+      in
+      let fleet_keepers =
+        List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers
+        |> List.sort_uniq String.compare
+      in
+      let keepers =
+        match assigned_keepers with
+        | [] -> fleet_keepers
+        | ks ->
+            let active = List.filter (fun name -> List.mem name fleet_keepers) ks in
+            if active = [] then fleet_keepers
+            else List.sort_uniq String.compare active
+      in
       let run () =
-        let reads = List.map (fun keeper_name ->
+        let reads = Eio.Fiber.List.map ~max_fibers:4 (fun keeper_name ->
           let result = try Masc_tui_loader.load_keeper_file_changes
               ~host:server_peer_host ~port:state.port ~keeper_name ~window_hours:changes_window_hours
             with Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -5155,22 +5192,28 @@ let open_lane_run_detail state ~mailbox ~lane_id ~run_id =
   launch_lane_run_detail_load state ~mailbox ~run_id
 
 let launch_verification_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_verification ~host ~port ~limit:200 with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+  if state.verification_inflight then ()
+  else begin
+    state.verification_inflight <- true;
+    let host = server_peer_host in
+    let port = state.port in
+    let run () =
+      let result =
+        try Masc_tui_loader.load_verification ~host ~port ~limit:200 with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Verification_loaded result)
     in
-    enqueue_async mailbox (Verification_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw ->
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+            run ();
+            `Stop_daemon)
+    | None ->
+        state.verification_inflight <- false;
+        enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
+  end
 
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
@@ -12552,14 +12595,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Workspace_activity_loaded (request, result) ->
       apply_workspace_activity_read state request result
-  | Repositories_loaded result -> (
-      match result with
+  | Repositories_loaded result ->
+      state.repositories_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
-  | Memory_loaded result -> (
-      match result with
+  | Memory_loaded result ->
+      state.memory_health_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.memory_health <- Some snapshot;
           state.memory_health_error <- None
@@ -12834,8 +12879,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.fusion_historical_inflight <- None
        | Some _ | None -> ());
       apply_fusion_historical_detail_load state generation reference result
-  | Verification_loaded result -> (
-      match result with
+  | Verification_loaded result ->
+      state.verification_inflight <- false;
+      (match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
           state.verification_error <- None;

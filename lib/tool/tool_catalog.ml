@@ -401,6 +401,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_schedule_list", read_state_tool);
     ("masc_schedule_get", read_state_tool);
     ("masc_schedule_cancel", broadcast_tool);
+    (* Notes (task-381): appends are mutations like the other schedule writes;
+       listing notes is a read. *)
+    ("masc_schedule_note_add", broadcast_tool);
+    ("masc_schedule_notes_list", read_state_tool);
     (* Keeper-only: a spawned process belongs to the turn's switch, and the
        MCP boundary has no turn to end it, so these are callable from a keeper
        and absent from the public schema surface. *)

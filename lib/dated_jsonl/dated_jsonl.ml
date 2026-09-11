@@ -1690,20 +1690,24 @@ let range_day_file_paths t ~since ~until =
    restarts it from zero, which double-counts rather than under-counts, so a
    caller that cannot tolerate that must compare the returned cursor against
    the one it passed. *)
-let fold_range_appended t ~since ~until ~cursors ~init ~f =
+let fold_range_appended_raw t ~since ~until ~cursors ~init ~f =
   let paths = range_day_file_paths t ~since ~until in
   List.fold_left
     (fun (acc, next_cursors) path ->
        let from = match List.assoc_opt path cursors with Some n -> n | None -> 0 in
        let acc, boundary =
-         Fs_compat.fold_appended_lines ~path ~from ~init:acc ~f:(fun acc line ->
-           match Yojson.Safe.from_string line with
-           | json -> f acc json
-           | exception Yojson.Json_error _ -> acc)
+         Fs_compat.fold_appended_lines ~path ~from ~init:acc ~f
        in
        acc, (path, boundary) :: next_cursors)
     (init, [])
     paths
+;;
+
+let fold_range_appended t ~since ~until ~cursors ~init ~f =
+  fold_range_appended_raw t ~since ~until ~cursors ~init ~f:(fun acc line ->
+    match Yojson.Safe.from_string line with
+    | json -> f acc json
+    | exception Yojson.Json_error _ -> acc)
 ;;
 
 type append_cursor = (string * Unix.stats * int) list

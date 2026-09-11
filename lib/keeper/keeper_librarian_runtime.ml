@@ -119,9 +119,11 @@ type exact_setup_error =
     (** Even the librarian's fixed material (template, keeper instructions,
         current facts) with zero conversation messages exceeds this admitted
         slot's request-body limit — nothing left to shrink. *)
-  | Exact_request_projection_failed of { slot_id : string }
+  | Exact_request_projection_failed of { slot_id : string; reason : string }
     (** The pre-flight request-body projection itself failed for this slot;
-        distinct from over-budget, which is a measured size verdict. *)
+        distinct from over-budget, which is a measured size verdict. The
+        reason names the admission refusal (capability, serialization) so
+        the failure is diagnosable from the line alone. *)
 
 type outward_effect =
   | No_outward_effect
@@ -183,10 +185,10 @@ let exact_setup_error_to_string = function
       "librarian prompt exceeds slot request-body limit even with zero \
        conversation messages slot=%s"
       slot_id
-  | Exact_request_projection_failed { slot_id } ->
+  | Exact_request_projection_failed { slot_id; reason } ->
     Printf.sprintf
-      "librarian request-body projection failed for slot=%s"
-      slot_id
+      "librarian request-body projection failed for slot=%s reason=%s"
+      slot_id reason
 ;;
 
 let extraction_error_to_string = function
@@ -305,60 +307,127 @@ let librarian_output_requirement =
    nowhere to advance (lane audit W1/W2, live p50 132s). Message count is the
    shrink axis: dropping older messages only removes prompt bytes, so the
    serialized size is monotone in the count and binary search applies. *)
-let prompt_fits_all_slots ~selected_slots messages =
-  let rec loop = function
-    | [] -> Ok true
-    | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
-      (match
-         Exact_output.project_request_body
-           ~target:slot.admitted_target
-           ~messages
-           librarian_output_requirement
-       with
-       | Error _ ->
-         Error
-           (Exact_setup_failed
-              (Exact_request_projection_failed { slot_id = slot.slot_id }))
-       | Ok projection ->
-         if projection.Exact_output.within_limit then loop rest else Ok false)
-  in
-  loop selected_slots
+type slot_projection =
+  | Slot_fits
+  | Slot_too_large
+  | Slot_unusable of string
+        (** The projection refused the request outright -- a capability or
+            serialization refusal, not a measured size. *)
+
+type lane_fit =
+  { usable : string list
+        (** Slot ids whose projected body still imposes the request-body
+            bound this pre-flight exists to enforce. *)
+  ; unusable : (string * string) list
+        (** Slot id and refusal reason for each structurally unusable slot. *)
+  ; fits : bool
+        (** Every usable slot's projected body is within its own limit. *)
+  }
+
+(* The size decision, pure over one projection per slot in ladder order. A
+   slot whose request cannot be projected at all is structurally unusable and
+   leaves the size decision: it imposes no bound because it cannot run, and
+   the flow's own advance already handles a slot failing at dispatch. Until
+   2026-09-11 one such slot failed the whole pre-flight and took down every
+   slot the run would actually have used -- the appended
+   openrouter.openrouter-deepseek-v4-flash refused projection on every
+   librarian run of the evening while the first two slots were healthy. A
+   ladder with no projectable slot left is a misconfiguration; naming that
+   is the caller's job, not a size verdict. *)
+let fit_decision (projections : (string * slot_projection) list) : lane_fit =
+  List.fold_left
+    (fun (fit : lane_fit) (slot_id, projection) ->
+      match projection with
+      | Slot_fits -> { fit with usable = slot_id :: fit.usable }
+      | Slot_too_large ->
+        { fit with usable = slot_id :: fit.usable; fits = false }
+      | Slot_unusable reason ->
+        { fit with unusable = (slot_id, reason) :: fit.unusable })
+    { usable = []; unusable = []; fits = true }
+    projections
+  |> fun fit -> { fit with usable = List.rev fit.usable; unusable = List.rev fit.unusable }
+;;
+
+let slot_reason_pairs ?(sep = "; ") (unusable : (string * string) list) : string =
+  String.concat sep
+    (List.map (fun (slot_id, reason) -> slot_id ^ ": " ^ reason) unusable)
+;;
+
+let project_slot ~(slot : Runtime_exact_output_registry.selected_slot) ~messages :
+  slot_projection =
+  match
+    Exact_output.project_request_body
+      ~target:slot.admitted_target
+      ~messages
+      librarian_output_requirement
+  with
+  | Error error -> Slot_unusable (Exact_output.admission_error_reason error)
+  | Ok projection ->
+    if projection.Exact_output.within_limit then Slot_fits else Slot_too_large
+;;
+
+let project_lane ~selected_slots ~messages : lane_fit =
+  fit_decision
+    (List.map
+       (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+         (slot.slot_id, project_slot ~slot ~messages))
+       selected_slots)
 ;;
 
 (* [render_at k] renders the prompt with both message lists trimmed to the
    newest [k] entries and returns it as the flow's message list. Returns the
-   fitted messages plus [Some k] when the full prompt had to shrink, so the
+   fitted messages, [Some k] when the full prompt had to shrink (so the
    caller can record that the observed registration input and the dispatched
-   prompt differ. *)
+   prompt differ), and the unusable-slot report of the dispatched window, so
+   the caller can say in one line which slots the lane is running without. *)
 let fitted_messages ~selected_slots ~full_messages ~render_at =
   let open Result.Syntax in
-  let* full_fits = prompt_fits_all_slots ~selected_slots full_messages in
-  if full_fits
-  then Ok (full_messages, None)
-  else (
-    let full = prompt_max_messages () in
-    let rec search best low high =
-      if low > high
-      then
-        match best with
-        | Some (messages, count) -> Ok (messages, Some count)
-        | None ->
-          let slot_id =
-            match selected_slots with
-            | (slot : Runtime_exact_output_registry.selected_slot) :: _ ->
-              slot.slot_id
-            | [] -> exact_lane_id
-          in
-          Error (Exact_setup_failed (Exact_input_over_budget { slot_id }))
-      else (
-        let midpoint = low + ((high - low) / 2) in
-        let* messages = render_at midpoint in
-        let* fits = prompt_fits_all_slots ~selected_slots messages in
-        if fits
-        then search (Some (messages, midpoint)) (midpoint + 1) high
-        else search best low (midpoint - 1))
-    in
-    search None 0 (max 0 (full - 1)))
+  (* An empty ladder fits and reports nothing, as the old pre-flight said:
+     the production caller routes an empty slot list to the cli lane before
+     it gets here, so the exported shape keeps that verdict rather than
+     failing with no slot to name and no reason to give. *)
+  match selected_slots with
+  | [] -> Ok ((full_messages, None), [])
+  | _ :: _ ->
+  let full_lane = project_lane ~selected_slots ~messages:full_messages in
+  let over_budget_slot =
+    match full_lane.usable with
+    | slot_id :: _ -> slot_id
+    | [] -> exact_lane_id
+  in
+  match full_lane.usable with
+  | [] ->
+    Error
+      (Exact_setup_failed
+         (Exact_request_projection_failed
+            { slot_id =
+                (match selected_slots with
+                 | (slot : Runtime_exact_output_registry.selected_slot) :: _ ->
+                   slot.slot_id
+                 | [] -> exact_lane_id)
+            ; reason = slot_reason_pairs full_lane.unusable }))
+  | _ :: _ ->
+    if full_lane.fits
+    then Ok ((full_messages, None), full_lane.unusable)
+    else (
+      let full = prompt_max_messages () in
+      let rec search best low high =
+        if low > high
+        then
+          match best with
+          | Some (messages, count, unusable) -> Ok ((messages, Some count), unusable)
+          | None ->
+            Error
+              (Exact_setup_failed (Exact_input_over_budget { slot_id = over_budget_slot }))
+        else (
+          let midpoint = low + ((high - low) / 2) in
+          let* messages = render_at midpoint in
+          let lane = project_lane ~selected_slots ~messages in
+          if lane.usable <> [] && lane.fits
+          then search (Some (messages, midpoint, lane.unusable)) (midpoint + 1) high
+          else search best low (midpoint - 1))
+      in
+      search None 0 (max 0 (full - 1)))
 ;;
 
 let resolve_librarian_slots ~base_path ~keeper_id =
@@ -524,9 +593,14 @@ let execute_exact_output_classified
      | Some (runtime_id, selection, output) -> Ok ((selection, output), runtime_id, None)
      | None -> Error Cli_slots_exhausted)
   | _ :: _ ->
-  let* messages, fitted_message_count =
+  let* (messages, fitted_message_count), lane_unusable =
     fitted_messages ~selected_slots ~full_messages:messages ~render_at
   in
+  (if lane_unusable <> [] then
+     Log.Keeper.warn ~keeper_name:keeper_id
+       "librarian lane=%s pre-flight excluded slot(s) from this run: %s"
+       exact_lane_id
+       (slot_reason_pairs ~sep:", " lane_unusable));
   let* attempt = prepare_attempt ~selected_slots messages in
   let validate flow_success =
     let output = Exact_output.flow_success_output flow_success in

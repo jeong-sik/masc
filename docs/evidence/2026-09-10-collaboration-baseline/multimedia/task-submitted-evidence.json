@@ -1,0 +1,119 @@
+{
+  "schema": "memory-garden.multimedia-evidence.v1",
+  "files": {
+    "garden.gif": {
+      "bytes": 588811,
+      "sha256": "da21aa4e6c7f80e88481f49c0c77e864b64e5f7f0ebe7536256b699b35396307"
+    },
+    "garden.wav": {
+      "bytes": 2116844,
+      "sha256": "2471dc1e9805570267b668e05e05b7138a1e1cac489cebd6f4a2252dad8e96e0"
+    },
+    "garden.mp3": {
+      "bytes": 289689,
+      "sha256": "1c2eaa4f20e51fdba0534a6fe71c1558c94d6a6dafc50194ab5bc88e397c6f7d"
+    },
+    "creative-note.md": {
+      "bytes": 2140,
+      "sha256": "a0e91419cdcf453cc39d3a8febb01566fbcd2797fce3c11488b466a2345b02de"
+    }
+  },
+  "gif": {
+    "format": "GIF",
+    "size": [
+      640,
+      900
+    ],
+    "frame_count": 24,
+    "distinct_frame_count": 24,
+    "frame_duration_ms": [
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160,
+      160
+    ],
+    "playback_duration_ms": 3840,
+    "loop": 0,
+    "decode_passed": true
+  },
+  "audio": {
+    "garden.wav": {
+      "codec": "pcm_s16le",
+      "sample_rate": 44100,
+      "channels": 2,
+      "sample_width_bytes": 2,
+      "frame_count": 529200,
+      "duration_seconds": 12.0,
+      "signal": {
+        "peak": 0.679962,
+        "peak_dbfs": -3.35,
+        "rms": 0.155933,
+        "rms_dbfs": -16.141,
+        "clipped_samples": 0,
+        "silent": false
+      },
+      "decode": {
+        "command": "ffmpeg -v error -i multimedia/garden.wav -f null -",
+        "exit_code": 0,
+        "stderr": "",
+        "passed": true
+      }
+    },
+    "garden.mp3": {
+      "codec": "mp3",
+      "sample_rate": 44100,
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration_seconds": 12.042449,
+      "format_name": "mp3",
+      "signal_after_decode": {
+        "peak": 0.662842,
+        "peak_dbfs": -3.572,
+        "rms": 0.151254,
+        "rms_dbfs": -16.406,
+        "clipped_samples": 0,
+        "silent": false
+      },
+      "decode": {
+        "command": "ffmpeg -v error -i multimedia/garden.mp3 -f null -",
+        "exit_code": 0,
+        "stderr": "",
+        "passed": true
+      }
+    }
+  },
+  "checks": {
+    "gif_at_least_8_frames": true,
+    "gif_at_least_8_distinct_frames": true,
+    "wav_at_least_8_seconds": true,
+    "mp3_at_least_8_seconds": true,
+    "wav_not_silent": true,
+    "mp3_not_silent_after_decode": true,
+    "wav_no_clipping": true,
+    "mp3_no_clipping_after_decode": true,
+    "wav_ffmpeg_decode": true,
+    "mp3_ffmpeg_decode": true
+  },
+  "all_checks_passed": true,
+  "verification_note": "Pillow로 GIF 전 프레임을 RGB 디코딩했고, wave/ffprobe로 메타데이터를 읽은 뒤 ffmpeg로 WAV와 MP3 전체를 null 및 PCM으로 실제 디코딩했다."
+}

@@ -10,10 +10,11 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
  (public_name masc)
  (package masc)
  (libraries
+  masc.workspace_connection
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -1186,6 +1187,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.workspace_connection
   masc_tui_lane_addons
   masc.browser_lane
   ;; The CLI reports the build rule's stamp, without a runtime repository probe.

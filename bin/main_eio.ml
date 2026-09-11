@@ -2506,30 +2506,44 @@ let wizard_model_context model entries =
 
 let runtime_model_list_cmd =
   let client =
-    Arg.(required & pos 0 (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
+    Arg.(value & pos 0 (some wizard_model_client_arg) None & info [] ~docv:"CLIENT")
   in
-  let run client =
-    match Llm_provider.Model_catalog.load_default () with
+  let provider =
+    Arg.(value & opt (some string) None & info [ "provider" ] ~docv:"PROVIDER"
+      ~doc:"List the catalog's curated rows for one named provider instead of a client's.")
+  in
+  let usage = "runtime-model-list: pass a CLIENT (claude-code, codex) or --provider PROVIDER, not both" in
+  let run client provider =
+    let models_result = match client, provider with
+      | Some _, Some _ | None, None -> Error usage
+      | Some client, None ->
+        (match Llm_provider.Model_catalog.load_default () with
+         | Error message -> Error message
+         | Ok catalog ->
+           let entries = wizard_model_entries client catalog in
+           Ok
+             (`List
+               (entries
+                |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
+                |> List.sort_uniq String.compare
+                |> List.filter_map (fun model ->
+                     Option.map (fun context -> `Assoc [ "id", `String model
+                                                       ; "label", `String model
+                                                       ; "max_context", `Int context ])
+                       (wizard_model_context model entries)))))
+      | None, Some provider_id -> Runtime_wizard_inventory.provider_model_rows provider_id
+    in
+    match models_result with
     | Error message -> prerr_endline message; 1
-    | Ok catalog ->
-      let entries = wizard_model_entries client catalog in
-      let models = entries
-        |> List.map (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
-        |> List.sort_uniq String.compare
-        |> List.filter_map (fun model ->
-          Option.map (fun context -> `Assoc [ "id", `String model
-                                            ; "label", `String model
-                                            ; "max_context", `Int context ])
-            (wizard_model_context model entries))
-      in
+    | Ok models ->
       print_endline (Yojson.Safe.to_string (`Assoc [
         "source", `String "installed MASC model catalog";
         "account_availability_verified", `Bool false;
-        "models", `List models ]));
+        "models", models ]));
       0
   in
-  Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client; account availability is not verified.")
-    Term.(const run $ client)
+  Cmd.v (Cmd.info "runtime-model-list" ~doc:"List catalog model IDs and context limits for an official client or, with --provider, a named catalog provider; account availability is not verified.")
+    Term.(const run $ client $ provider)
 
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]
@@ -2546,32 +2560,10 @@ let runtime_discover_models_cmd =
   Cmd.v (Cmd.info "runtime-discover-models" ~doc:"Read account or server model metadata without creating a runtime.")
     Term.(const run $ spec)
 
-let runtime_store_credential_cmd =
-  let run () =
-    if Unix.isatty Unix.stdin then (
-      prerr_endline "Use the hidden API-key field in masc setup. This command accepts a private stdin pipe.";
-      1)
-    else
-      match Runtime_setup_credentials.save ~secret:(In_channel.input_all stdin) () with
-      | Error error -> prerr_endline (Runtime_setup_credentials.error_message error); 1
-      | Ok pending ->
-        let path = Runtime_setup_credentials.reference_path pending in
-        (* The local setup caller owns the returned pending reference and
-           removes it if no configuration transaction commits it. *)
-        Runtime_setup_credentials.retain pending;
-        print_endline (Yojson.Safe.to_string (`Assoc [
-          "schema", `String "masc.private_credential_reference.v1";
-          "credential_file", `String path]));
-        0 in
-  Cmd.v (Cmd.info "runtime-store-credential" ~doc:"Save an API key from a private stdin pipe for local setup.")
-    Term.(const run $ const ())
-
 let runtime_model_info_cmd =
   let model = Arg.(required & pos 0 (some string) None & info [] ~docv:"MODEL") in
   let client = Arg.(value & opt (some wizard_model_client_arg) None & info [ "client" ] ~docv:"CLIENT") in
-  let provider = Arg.(value & opt (some string) None & info ["provider"]
-    ~doc:"Limit exact catalog metadata to this provider identity; no endpoint or model-name inference.") in
-  let run model client provider =
+  let run model client =
     match Llm_provider.Model_catalog.load_default () with
     | Error message -> prerr_endline message; 1
     | Ok catalog ->
@@ -2579,14 +2571,6 @@ let runtime_model_info_cmd =
         | None -> Llm_provider.Model_catalog.model_entries catalog
         | Some client -> wizard_model_entries client catalog
       in
-      let entries = match provider with
-        | None -> entries
-        | Some provider -> (match Agent_core.Provider_runtime_binding.find provider with
-          | None -> []
-          | Some binding -> List.filter (fun (entry : Llm_provider.Model_catalog.model_entry) ->
-              match entry.provider_name with
-              | None -> true
-              | Some name -> name = binding.id || List.mem name binding.aliases) entries) in
       (* A generic family prefix is not evidence for the context of a model
          the installer does not know. Include provider-scoped exact rows, and
          reject conflicting declarations rather than pick a convenient one. *)
@@ -2596,7 +2580,7 @@ let runtime_model_info_cmd =
       | None -> 1
   in
   Cmd.v (Cmd.info "runtime-model-info" ~doc:"Read an exact model's declared context size from the installed catalog.")
-    Term.(const run $ model $ client $ provider)
+    Term.(const run $ model $ client)
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
@@ -2817,7 +2801,6 @@ let cmd =
     ; runtime_verify_cmd
     ; runtime_model_list_cmd
     ; runtime_discover_models_cmd
-    ; runtime_store_credential_cmd
     ; runtime_model_info_cmd
     ; schedule_prune_cmd
     ; keeper_create_cmd

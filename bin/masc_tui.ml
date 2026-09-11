@@ -5573,12 +5573,11 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     ~keeper_name =
   let already_inflight =
     match state.msg_history_inflight with
-    | Some inflight_keeper when String.equal inflight_keeper keeper_name -> true
+    | Some (_, inflight_keeper) when String.equal inflight_keeper keeper_name -> true
     | Some _ | None -> false
   in
   if already_inflight && not force then ()
   else begin
-    state.msg_history_inflight <- Some keeper_name;
     let host = server_peer_host in
     let port = state.port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -5586,6 +5585,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     state.msg_memory_error <- None;
     state.msg_memory_dropped <- 0;
     let generation = state.msg_history_load_generation in
+    state.msg_history_inflight <- Some (generation, keeper_name);
     let run () =
       let history_result =
         try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
@@ -5607,8 +5607,10 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
              run ();
              `Stop_daemon)
      | None ->
-         if Option.exists (String.equal keeper_name) state.msg_history_inflight then
-           state.msg_history_inflight <- None;
+         (match state.msg_history_inflight with
+          | Some (g, k) when g = generation && String.equal k keeper_name ->
+              state.msg_history_inflight <- None
+          | _ -> ());
          enqueue_async mailbox
            (Keeper_chat_history_loaded
               ( generation
@@ -12283,8 +12285,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       end
   | Keeper_chat_history_loaded
       (generation, keeper_name, history_result, memory_result) ->
-      if Option.exists (String.equal keeper_name) state.msg_history_inflight then
-        state.msg_history_inflight <- None;
+      (match state.msg_history_inflight with
+       | Some (g, k) when g = generation && String.equal k keeper_name ->
+           state.msg_history_inflight <- None
+       | _ -> ());
       (* The operator can switch while a previous GET is still in flight. The
          pane owns one loaded-history cache, so a late response for the old
          target or an older request for a target revisited since must not

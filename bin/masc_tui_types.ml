@@ -4220,7 +4220,7 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
-  mutable msg_history_inflight: string option;
+  mutable msg_history_inflight: (int * string) option;
   (* The newest row [msg_scroll] counts back from, by causal row identity, while the
      operator is reading back. Counting from whatever is newest right now made
      the count mean something different every time a reply landed: the new rows

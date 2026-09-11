@@ -294,11 +294,14 @@ let retry_backoff_sec ~cap_sec ~retry_after_hint ~cadence_sec =
   let retry_after_hint = Option.value ~default:0.0 retry_after_hint in
   (* A garbage [Retry-After] (negative, NaN, infinite) is still a signal the
      provider rate-limited this lane, but carries no usable duration: both
-     degrade to the same bounded default rather than diverging. *)
+     degrade to the same bounded default rather than diverging.
+     A positive fractional hint (e.g. 0.001s) must not cause an immediate
+     re-fire loop when cadence_sec is 0.0 (chat lane); clamp positive hints to
+     at least 1.0s (#35246). *)
   let base =
     if Float.is_nan retry_after_hint || retry_after_hint <= 0.0
     then Float.max cadence_sec 60.0
-    else Float.max retry_after_hint cadence_sec
+    else Float.max (Float.max retry_after_hint 1.0) cadence_sec
   in
   Float.min cap_sec base
 ;;

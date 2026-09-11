@@ -296,10 +296,25 @@ def configure_many(binary, base_path, specs, selected_ids=None, verify=False, de
         # where an earlier spec can drop out of the active set.
         configured_providers = {row.get('provider_id') for row in inventory['runtimes']}
         defaulted_providers = set()
+        claimed_named_keys = set()
         normalized = []
         for spec in specs:
             provider_id = spec.get('provider_id') if isinstance(spec, dict) else None
-            if provider_id and provider_id not in configured_providers:
+            if provider_id:
+                # Two model ids that differ only in punctuation would slug to
+                # the same runtime entry; the second would silently overwrite
+                # the first in the additions below. Refuse the pair instead.
+                key = (provider_id, spec.get('model_key'))
+                if key in claimed_named_keys:
+                    raise SetupError('two of the selected models render the same runtime entry name '
+                                     + repr(str(spec.get('model_key'))) + '; choose one of them')
+                claimed_named_keys.add(key)
+            if provider_id and provider_id in configured_providers:
+                # The provider section already exists in the workspace config;
+                # writing it again would declare the same table twice and fail
+                # validation that cannot say why.
+                spec = dict(spec, provider_declared=True, wizard_default=False)
+            elif provider_id:
                 first = provider_id not in defaulted_providers
                 defaulted_providers.add(provider_id)
                 # The first addition of a fresh provider writes the provider
@@ -552,14 +567,18 @@ def provider_catalog_models(binary, provider_id):
     result = subprocess.run([binary, 'runtime-model-list', '--provider', provider_id],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if result.returncode:
-        return []
+        # A failed catalog read must not masquerade as "no curated models":
+        # every later pick would be refused with a message about the catalog
+        # instead of the actual failure.
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' failed: '
+                         + (result.stderr.strip() or 'no diagnostics'))
     try:
         rows = json.loads(result.stdout)['models']
-        if not isinstance(rows, list):
-            return []
-        return [row for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
     except (ValueError, KeyError, TypeError):
-        return []
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    if not isinstance(rows, list):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    return [row for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
 
 
 def model_slug(model_id):
@@ -887,6 +906,11 @@ def resolve_model_spec(source, model, timeout):
                              'choose a curated model or use "Add another server URL" for arbitrary endpoints')
         if not positive_integer(catalog.get('max_context')):
             raise SetupError(model['id'] + ' declares no context in the installed catalog')
+        if catalog.get('supports_tools') is not True:
+            # Refuse early with the real reason: a toolless row would pass
+            # configuration and only fail live verification later.
+            raise SetupError(model['id'] + ' declares no tool support in the installed catalog; '
+                             'select a tool-capable model')
         spec = dict(choice=choice, model=model['id'], max_context=catalog['max_context'],
                     tools=catalog.get('supports_tools') is True,
                     streaming=catalog.get('supports_streaming') is True,

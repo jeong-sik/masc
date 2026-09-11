@@ -330,6 +330,29 @@ runtime.write_text(runtime.read_text().replace('default = "original.model"', 'de
         written = self.runtime.read_text()
         self.assertIn(b'setup_vllm_'.decode(), written)
 
+    def test_a_configured_provider_never_rewrites_its_section(self):
+        # The workspace already declares the provider; a named addition that
+        # re-declared it would fail TOML validation that cannot say why.
+        self.binary.write_text('#!' + sys.executable + '\nimport sys,json\n'
+                               "if sys.argv[1] == 'runtime-wizard-catalog':\n"
+                               " print(json.dumps({'runtimes':[{'id':'openrouter.openrouter-x','provider_id':'openrouter'}]})); sys.exit(0)\n")
+        self.binary.chmod(0o755)
+        result = SETUP.configure_many(self.binary, self.base, [named_spec('anthropic/claude-opus-5')])
+        self.assertTrue(result['configured'])
+        written = self.runtime.read_text()
+        self.assertNotIn('["providers"."openrouter"]', written)
+        self.assertIn('["openrouter"."openrouter-anthropic-claude-opus-5"]', written)
+        self.assertNotIn('wizard-default', written)
+
+    def test_two_models_slugging_to_one_entry_are_refused(self):
+        # "anthropic/claude.opus-5" and "anthropic/claude-opus-5" differ only
+        # in punctuation and slug to the same runtime entry.
+        self.validator('')
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.configure_many(self.binary, self.base,
+                                 [named_spec('anthropic/claude-opus-5'), named_spec('anthropic/claude.opus-5')])
+        self.assertIn('same runtime entry name', str(raised.exception))
+
 
 class NamedCatalogSources(unittest.TestCase):
     INVENTORY = {'runtimes': [], 'integrations': [
@@ -397,6 +420,22 @@ class NamedCatalogSources(unittest.TestCase):
         source = self.catalog_sources(self.INVENTORY)[0]
         with self.assertRaises(SETUP.SetupError):
             SETUP.resolve_model_spec(source, dict(id='vendor/uncurated', label='x', context=None, existing=None), 1)
+
+    def test_resolve_rejects_a_catalog_row_without_tool_support(self):
+        source = self.catalog_sources(self.INVENTORY)[0]
+        catalog = {'id': 'google/gemma3-4b', 'label': 'google/gemma3-4b', 'max_context': 1000000,
+                   'accepted_reasoning_efforts': None, 'supports_tools': False, 'supports_streaming': True}
+        with self.assertRaises(SETUP.SetupError) as raised:
+            SETUP.resolve_model_spec(source, dict(id=catalog['id'], label='x', context=None,
+                                                  existing=None, catalog=catalog), 1)
+        self.assertIn('tool support', str(raised.exception))
+
+    def test_a_failed_catalog_read_is_an_error_not_an_empty_list(self):
+        failure = subprocess.CompletedProcess([], 1, '', 'provider listing exploded')
+        with patch('subprocess.run', return_value=failure):
+            with self.assertRaises(SETUP.SetupError) as raised:
+                SETUP.provider_catalog_models('binary', 'openrouter')
+        self.assertIn('provider listing exploded', str(raised.exception))
 
     def test_resolve_builds_a_named_spec_from_the_catalog_row(self):
         source = self.catalog_sources(self.INVENTORY)[0]
@@ -710,6 +749,12 @@ class InstalledModelCatalog(unittest.TestCase):
         self.assertEqual(sonnet['max_context'],1000000)
         self.assertTrue(all(row['id'].startswith('claude-') and row['max_context']>0 for row in models))
         self.assertNotIn('claude_code',{row['id'] for row in models})
+        index=models.index(sonnet)+1
+        with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
+            selected=SETUP.select_model(BINARY,'claude_code')
+        self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
+        self.assertIn('No number to enter',terminal.getvalue())
+        self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 
     def test_provider_mode_lists_curated_rows_for_a_named_catalog_provider(self):
         result=subprocess.run([BINARY,'runtime-model-list','--provider','openrouter'],check=True,capture_output=True,text=True)
@@ -730,12 +775,6 @@ class InstalledModelCatalog(unittest.TestCase):
         neither=subprocess.run([BINARY,'runtime-model-list'],capture_output=True,text=True)
         self.assertNotEqual(neither.returncode,0)
         self.assertEqual(neither.stdout,'')
-        index=models.index(sonnet)+1
-        with patch('sys.stdin',io.StringIO(str(index)+'\n')), contextlib.redirect_stderr(io.StringIO()) as terminal:
-            selected=SETUP.select_model(BINARY,'claude_code')
-        self.assertEqual(selected,dict(model='claude-sonnet-5',max_context=1000000))
-        self.assertIn('No number to enter',terminal.getvalue())
-        self.assertNotIn('Documented/configured context limit',terminal.getvalue())
 
 
 @unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')

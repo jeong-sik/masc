@@ -237,12 +237,14 @@ let binding_for_provider (cfg : Runtime_schema.config)
    from the provider base still reports the capabilities it will actually run
    with. A row without a positive declared context is not wizard-offerable —
    the wizard writes a runtime entry that needs a context — and stays out of
-   the list. [global ()] and [load_default ()] read the same embedded catalog
-   in this command's process; no override or overlay is installed. *)
+   the list. The loaded catalog is installed as the global before resolving
+   capabilities, so entries and capabilities provably read one catalog
+   whatever a caller left in the global before this call. *)
 let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result =
   match Llm_provider.Model_catalog.load_default () with
   | Error message -> Error message
   | Ok catalog ->
+    Llm_provider.Model_catalog.set_global catalog;
     let providers = Catalog_binding.all () in
     let provider =
       providers
@@ -277,9 +279,11 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                  with
                  | None -> None
                  | Some capabilities ->
-                   (* "high" is the effort the seed rows pin; when a row's
-                      accepted ladder does not carry it, the ladder runs weak
-                      to strong and its top is the honest default. *)
+                   (* "high" is the effort the seed rows pin. When a row's
+                      accepted ladder does not carry it, take the strongest
+                      rung that still reasons -- "none" is the disable, not a
+                      default -- and a ladder of only "none" takes "none",
+                      because that is all the row can encode. *)
                    let default_effort =
                      match entry.accepted_reasoning_efforts with
                      | None | Some [] -> `Null
@@ -287,7 +291,12 @@ let provider_model_rows (provider_id : string) : (Yojson.Safe.t, string) result 
                        let chosen =
                          if List.exists (String.equal "high") rungs
                          then "high"
-                         else (match List.rev rungs with top :: _ -> top | [] -> "high")
+                         else
+                           (match
+                              List.rev (List.filter (fun rung -> not (String.equal "none" rung)) rungs)
+                            with
+                            | top :: _ -> top
+                            | [] -> "none")
                        in
                        `String chosen
                    in

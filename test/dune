@@ -5580,3 +5580,25 @@
  (name test_model_release_evidence)
  (modules test_model_release_evidence)
  (libraries masc.runtime alcotest yojson))
+
+(test
+ (name test_lane_addon)
+ (modules test_lane_addon)
+ (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
+ (name test_lane_addon_sources)
+ (modules test_lane_addon_sources)
+ (libraries masc_test_deps masc.browser_lane eio eio_main yojson unix))
+
+(test
+ (name test_lane_addon_surface)
+ (modules test_lane_addon_surface)
+ (libraries alcotest yojson masc masc.server masc.masc_tool_dispatch
+   masc.tool_schemas masc.masc_types))
+
+(test
+ (name test_lane_addon_store_query)
+ (modules test_lane_addon_store_query)
+ (libraries alcotest yojson unix masc masc.masc_tool_blob_store))
+

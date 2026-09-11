@@ -685,10 +685,10 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
       let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
         Ok (text_response "not-json")
       in
-      let raw =
+      let outcome =
         Eio_main.run (fun env ->
           Eio.Switch.run (fun sw ->
-            Vt.handle
+            Vt.handle_with_outcome
               ~complete
               ~sw
               ~clock:(Eio.Stdenv.clock env)
@@ -697,6 +697,8 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
               ~args:(artifact_args handle)
               ()))
       in
+      assert (outcome.failure_effect_disposition = Tool_result.Proven_pre_effect);
+      let raw = outcome.raw_output in
       let json = json_of_output raw in
       assert
         (String.equal

@@ -18,7 +18,11 @@ type tool_occurrence =
 
 type delta =
   | Run_started
-  | Runtime_attempt_started
+  | Runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
+  | Stream_model_started of { model : string }
   | Text of string
   | Thinking of string
   | Tool_started of
@@ -181,9 +185,23 @@ let custom_deltas_unvalidated fields =
               ]))
   | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
     (match List.assoc_opt "value" fields with
-     | Some `Null -> [ Runtime_attempt_started ]
+     | Some `Null -> [ Runtime_attempt_started { runtime_id = None; attempt_index = None } ]
+     | Some (`Assoc v) ->
+       let runtime_id = string_field v "runtime_id" in
+       let attempt_index = nonnegative_int_field v "attempt_index" in
+       [ Runtime_attempt_started { runtime_id; attempt_index } ]
      | Some _ | None ->
-       [ Undecodable "KEEPER_RUNTIME_ATTEMPT_STARTED value must be null" ])
+       [ Undecodable
+           "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null or an object"
+       ])
+  | Some "KEEPER_STREAM_MESSAGE_START" ->
+    (match object_field fields "value" with
+     | Some value ->
+       (match string_field value "model" with
+        | Some model when String.trim model <> "" ->
+          [ Stream_model_started { model = String.trim model } ]
+        | _ -> [])
+     | None -> [])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_TOOL_RESULT_READY value is not an object" ]

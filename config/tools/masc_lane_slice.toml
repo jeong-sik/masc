@@ -1,0 +1,27 @@
+name = "masc_lane_slice"
+description = """
+Query retained events and relationships across Lane Add-ons.
+
+Filters by run, lane and wall-clock window. Source coverage and missing intervals are returned. A slice is a read view, not a new world-state authority."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "run_id"
+type = "string"
+description = "Optional exact recorded run scope."
+
+[[params]]
+name = "lane_id"
+type = "string"
+description = "Optional exact lane identity."
+
+[[params]]
+name = "since"
+type = "number"
+description = "Inclusive observed-at lower bound, Unix seconds."
+
+[[params]]
+name = "until"
+type = "number"
+description = "Inclusive observed-at upper bound, Unix seconds."

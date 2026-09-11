@@ -366,6 +366,7 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
           ; tool_call_name = "Read"
           }
       ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+          { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 1 }
       ; Masc.Keeper_chat_events.Text_delta "fresh"
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-retry" }
       ]

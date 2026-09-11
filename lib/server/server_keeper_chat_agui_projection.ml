@@ -117,8 +117,18 @@ let project ~timestamp ~redact_text ~redact_json state event =
       state, Some (custom ~timestamp ~redact_json state External_effect_completed value)
   | Agent_core_stream_connected ->
       state, Some (custom ~timestamp ~redact_json state Connected `Null)
-  | Agent_core_runtime_attempt_started ->
-      state, Some (custom ~timestamp ~redact_json state Runtime_attempt_started `Null)
+  | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
+      let value =
+        match runtime_id with
+        | None -> `Null
+        | Some rid when String.trim rid = "" -> `Null
+        | Some rid ->
+            `Assoc
+              ([ "runtime_id", `String rid ]
+               @ json_opt "attempt_index"
+                   (Option.map (fun i -> `Int i) attempt_index))
+      in
+      state, Some (custom ~timestamp ~redact_json state Runtime_attempt_started value)
   | Agent_core_stream_message_start { provider_message_id; model; usage } ->
       let value =
         `Assoc

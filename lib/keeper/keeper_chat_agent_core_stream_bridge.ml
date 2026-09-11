@@ -353,7 +353,7 @@ let poison_scope_with state ~kind ~reason ~diagnostic extra_events =
   }
 ;;
 
-let start_runtime_attempt ~previous_scope state =
+let start_runtime_attempt ?runtime_id ?attempt_index ~previous_scope state =
   let reason = "tool occurrence superseded by a new runtime attempt" in
   let terminalized =
     match previous_scope with
@@ -369,7 +369,9 @@ let start_runtime_attempt ~previous_scope state =
   { bridge_state = reset_runtime_attempt_state terminalized.bridge_state
   ; chat_events =
       terminalized.chat_events
-      @ [ Keeper_chat_events.Agent_core_runtime_attempt_started ]
+      @ [ Keeper_chat_events.Agent_core_runtime_attempt_started
+            { runtime_id; attempt_index }
+        ]
   }
 ;;
 

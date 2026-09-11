@@ -54,9 +54,9 @@ let add t ~seq (delta : Live.delta) =
   then false
   else begin
     (match delta with
-     | Live.Runtime_attempt_started -> t.attempt <- t.attempt + 1
-     | Live.Run_started | Live.Text _ | Live.Thinking _ | Live.Tool_started _
-     | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
+     | Live.Runtime_attempt_started _ -> t.attempt <- t.attempt + 1
+     | Live.Run_started | Live.Text _ | Live.Thinking _ | Live.Stream_model_started _
+     | Live.Tool_started _ | Live.Tool_args _ | Live.Tool_ended _ | Live.Tool_result _
      | Live.Stream_protocol_error _ | Live.Approval_requested _
      | Live.Approval_settled _ | Live.Accepted _ | Live.Checkpoint
      | Live.External_effect_completed | Live.Reply_details _ | Live.Run_failed _
@@ -113,8 +113,10 @@ let delta_of_journaled (event : E.keeper_chat_event) : Live.delta option =
          { reply; turn_outcome; turn_ref = Ids.Turn_ref.to_string turn_ref })
   | E.Continuation_checkpoint _ -> Some Live.Checkpoint
   | E.Agent_core_stream_connected -> None
-  | E.Agent_core_runtime_attempt_started -> Some Live.Runtime_attempt_started
-  | E.Agent_core_stream_message_start _
+  | E.Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
+    Some (Live.Runtime_attempt_started { runtime_id; attempt_index })
+  | E.Agent_core_stream_message_start { model; _ } ->
+    Some (Live.Stream_model_started { model })
   | E.Agent_core_stream_message_delta _
   | E.Agent_core_stream_message_stop
   | E.Agent_core_stream_ping

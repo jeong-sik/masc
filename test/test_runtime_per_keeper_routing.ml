@@ -1102,6 +1102,51 @@ let test_lane_candidates_replace_rather_than_append () =
         (Runtime_lane.ordered_candidates lane))
 ;;
 
+(* The routing API's exact/ prefix names [runtime.exact_output_lanes.<name>]
+   walk orders; the writer is the same SSOT path the conversation-lane picker
+   uses, so the Runtime screen can edit both lane kinds the same way. *)
+let test_exact_lane_slots_writer () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_exact_output_lane_slots
+         ~runtime_config_path:path
+         ~lane_name:"verifier_exact"
+         ~slots:[ "openai.gpt"; "runpod_mtp.qwen" ]
+         ()
+     with
+     | Ok _receipt -> ()
+     | Error msg -> Alcotest.failf "set_exact_output_lane_slots failed: %s" msg);
+    let written = Fs_compat.load_file path in
+    Alcotest.(check bool)
+      "the exact-output lane table header is written"
+      true
+      (string_contains written {|[runtime.exact_output_lanes.verifier_exact]|});
+    Alcotest.(check bool)
+      "both slots are written in order"
+      true
+      (string_contains written {|"openai.gpt"|}
+       && string_contains written {|"runpod_mtp.qwen"|});
+    let headers =
+      String.split_on_char '\n' written
+      |> List.filter (fun l ->
+        String.equal (String.trim l) {|[runtime.exact_output_lanes.verifier_exact]|})
+    in
+    Alcotest.(check int) "one exact lane table, not two" 1 (List.length headers);
+    match
+      Runtime.set_exact_output_lane_slots
+        ~runtime_config_path:path
+        ~lane_name:"verifier_exact"
+        ~slots:[]
+        ()
+    with
+    | Ok _ -> Alcotest.fail "empty slots must not be written"
+    | Error msg ->
+      Alcotest.(check bool)
+        "the refusal names the empty-slot rule"
+        true
+        (string_contains msg "at least one slot"))
+;;
+
 let test_lane_candidates_reject_an_empty_ladder () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
@@ -2486,6 +2531,10 @@ let () =
             "a second write replaces the ladder"
             `Quick
             test_lane_candidates_replace_rather_than_append
+        ; Alcotest.test_case
+            "an exact-output lane writes its walk order"
+            `Quick
+            test_exact_lane_slots_writer
         ; Alcotest.test_case
             "an empty ladder is refused"
             `Quick

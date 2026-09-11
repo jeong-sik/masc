@@ -1,0 +1,79 @@
+module Sandbox = Masc.Sandbox_readiness
+module Prerequisites = Masc.Sandbox_prerequisites
+module Apple = Masc.Apple_container_install
+type action = Standard of Prerequisites.action | Verified_apple_install
+let dependency = function
+  | "codex" -> Some Prerequisites.Codex_cli
+  | "claude-code" -> Some Prerequisites.Claude_cli
+  | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
+let rec wait pid =
+  match Unix.waitpid [] pid with
+  | _, Unix.WEXITED 0 -> Ok ()
+  | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> Error ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait pid
+let run_terminal = function
+  | [] -> Error ()
+  | executable :: _ as argv ->
+    try Unix.create_process executable (Array.of_list argv) Unix.stdin Unix.stderr Unix.stderr |> wait
+    with Unix.Unix_error _ -> Error ()
+let capture argv =
+  match Process_eio.run_argv_with_status_split_or_refusal argv with
+  | Ok (Unix.WEXITED 0, stdout, _) -> Ok stdout
+  | Ok _ | Error _ -> Error ()
+let id = function Standard action -> action.Prerequisites.id | Verified_apple_install -> "apple_container_verified_install"
+let actions host dependency =
+  let distribution = try
+    In_channel.with_open_text "/etc/os-release" In_channel.input_all
+    |> Prerequisites.distribution_of_os_release
+    with Sys_error _ -> Prerequisites.Other in
+  let standard = Prerequisites.catalog ~host ~distribution dependency |> List.map (fun action -> Standard action) in
+  match host, dependency with
+  | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
+    Verified_apple_install :: standard
+  | _ -> standard
+let to_json actions =
+  let standard = List.filter_map (function Standard action -> Some action | Verified_apple_install -> None) actions in
+  let json = Prerequisites.to_json standard in
+  match json with
+  | `Assoc fields when List.mem Verified_apple_install actions ->
+    let row = `Assoc ["id", `String (id Verified_apple_install);
+      "label", `String "Install Apple Container (verify the signed package)";
+      "detail", `String "Download Apple's signed package, check its digest and publisher, then open the administrator installation step. Service and guest checks follow separately.";
+      "source_url", `String "https://github.com/apple/container/releases/latest";
+      "requires_admin", `Bool true;
+      "effect", `Assoc ["kind", `String "verified_package_install"];
+      "completion", `String "recheck_required"] in
+    (match List.assoc_opt "actions" fields with
+     | Some (`List rows) -> `Assoc (("actions", `List (row :: rows)) :: List.remove_assoc "actions" fields)
+     | _ -> json)
+  | json -> json
+let execute host = function
+  | Standard action ->
+    Prerequisites.execute ~run:(fun argv -> run_terminal argv |> Result.map_error (fun () -> "Action failed")) action
+  | Verified_apple_install ->
+    prerr_endline "Downloading and verifying the official Apple Container package…";
+    (match Apple.acquire ~host ~run:capture with
+     | Error error -> Prerequisites.Failed {step=1; reason=Apple.error_message error}
+     | Ok artifact ->
+       Fun.protect ~finally:(fun () -> Apple.remove artifact) (fun () ->
+         prerr_endline "Package verified. The administrator installer may request your password.";
+         match Apple.install ~executable_path:Sys.executable_name
+                 ~run:capture ~elevate:run_terminal artifact with
+         | Ok () -> Prerequisites.Commands_completed_recheck_required
+         | Error error -> Prerequisites.Failed {step=2; reason=Apple.error_message error}))
+let run ~dependency:name ~action =
+  match dependency name with
+  | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1
+  | Some dependency ->
+    let host = Sandbox.detect_host ~run:Sandbox.system_runner in
+    let actions = actions host dependency in
+    match action with
+    | None -> print_endline (Yojson.Safe.to_string (to_json actions)); 0
+    | Some requested ->
+      (match List.find_opt (fun action -> id action = requested) actions with
+       | None -> prerr_endline "This prerequisite action is not offered on the current host."; 1
+       | Some action ->
+         let outcome = execute host action in
+         print_endline (Yojson.Safe.to_string (Prerequisites.outcome_to_json outcome));
+         match outcome with Prerequisites.Failed _ -> 1
+           | External_step_pending | Commands_completed_recheck_required -> 0)

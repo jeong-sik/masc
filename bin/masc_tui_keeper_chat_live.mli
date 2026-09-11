@@ -51,9 +51,13 @@ type tool_occurrence =
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
-  | Runtime_attempt_started
+  | Runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
       (** New resolved-runtime attempt: discard unfinished text/thinking from
           the prior attempt while retaining tool evidence. *)
+  | Stream_model_started of { model : string }
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Tool_started of

@@ -101,13 +101,16 @@ let freeze_exact_completion_artifact
         (match count_tokens_body_of_generation_artifact generation_artifact with
          | Error _ as error -> error
          | Ok body ->
+           let ( let* ) = Result.bind in
+           let* auth_headers = Provider_config.resolve_auth_headers config
+             |> Result.map_error (fun reason -> Invalid_completion_request reason) in
            let measurement_request =
              { protocol
              ; model_id = config.model_id
              ; url = Count_tokens_sync.count_tokens_url config
              ; headers =
                  config.headers
-                 @ Provider_config.auth_headers_for_config config
+                 @ auth_headers
                  @ [ "Content-Type", "application/json"
                    ; "Content-Length", string_of_int (String.length body)
                    ]

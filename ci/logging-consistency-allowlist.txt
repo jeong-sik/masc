@@ -43,6 +43,12 @@ bin/masc_cost.ml
 # startup failures to the operator's terminal before any runtime exists;
 # user-facing CLI output, not server logging.
 bin/masc_cli_onboarding.ml
+# masc_cli_antigravity prompts the user on stderr before launching the
+# interactive sign-in flow; user-facing CLI output, not server logging.
+bin/masc_cli_antigravity.ml
+# masc_cli_codex_models reports online refresh failure on stderr before
+# returning an exit code to the setup wizard; user-facing CLI output.
+bin/masc_cli_codex_models.ml
 # gen_board_tool_registry is a Dune-time generator; its eprintf reports a
 # malformed or incomplete Board TOML declaration to the build operator.
 bin/gen_board_tool_registry.ml
@@ -133,3 +139,16 @@ lib/keeper/keeper_github_identity.ml
 # terminal before any server or log sink starts. Routing this command output
 # through server logging would hide the read-only preflight result.
 bin/masc_cli_setup.ml
+
+# prerequisite-actions prints human guidance (download progress, elevation
+# prompts, catalog errors) straight to the operator's terminal; it runs before
+# any server or log sink exists, like the setup CLI above.
+bin/masc_cli_prerequisites.ml
+
+# runtime-resume prints operator error messages directly to the calling
+# terminal during setup resume, like the setup CLI above.
+bin/masc_cli_model_resume.ml
+# owner-upgrade prints upgrade outcomes straight to the operator's
+# terminal; it runs before any server or log sink exists, like the
+# other setup CLIs above.
+bin/masc_cli_owner_upgrade.ml

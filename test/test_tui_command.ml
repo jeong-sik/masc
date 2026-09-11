@@ -24,6 +24,7 @@ let describe = function
   | Command.Show_acting_pane_tab `Fleet -> "acting-pane-tab:fleet"
   | Command.Show_acting_pane_tab `Changes -> "acting-pane-tab:changes"
   | Command.Acting_pane_tab_unknown word -> "acting-pane-tab-unknown:" ^ word
+  | Command.Lane_addons input -> "lane-addons:" ^ input
   | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"

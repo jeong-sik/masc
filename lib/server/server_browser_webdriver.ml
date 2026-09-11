@@ -52,8 +52,10 @@ let start ~sw ~env =
       ~start_downloads:(Browser_bidi_downloads.start ~sw ~env ~root
         ~publish:(Browser_download_artifact.publish ~base_path:(Config_dir_resolver.base_path_or_cwd ()))) ~request:(request ~pool ~clock ~endpoint) () in
     Browser_lane.install_automation_executor (Some (Browser_webdriver.execute driver));
+    Browser_lane.install_automation_document_observer (Some (Browser_webdriver.observe_document_if_idle driver));
     Eio.Switch.on_release sw (fun () ->
       Browser_lane.install_automation_executor None;
+      Browser_lane.install_automation_document_observer None;
       match close_with_fresh_pool ~env ~endpoint driver with
       | Ok () -> ()
       | Error error -> Log.Server.warn "browser-lane: close failed: %s"

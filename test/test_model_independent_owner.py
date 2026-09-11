@@ -17,21 +17,21 @@ BINARY = None
 
 class OwnerWithoutModel(unittest.TestCase):
     def test_owner_auth_and_settings_survive_missing_or_invalid_runtime(self):
-        for contents, reason in [(None, 'config_missing'), ('[runtime]\ndefault = "missing.model"\n', 'config_invalid'), ('seed_without_lanes', 'exact_output_unavailable')]:
+        for contents, reason in [(None, 'config_missing'), ('[runtime]\ndefault = "missing.model"\n', 'config_invalid'), ('seed_without_lanes', None)]:
             with self.subTest(reason=reason), tempfile.TemporaryDirectory(prefix='masc-owner-no-model-') as tmp:
                 base = Path(tmp)
                 env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': tmp,
-                       'MASC_CONFIG_BOOTSTRAP': 'skip'}
+                       'MASC_CONFIG_BOOTSTRAP': 'skip', 'MASC_KEEPER_AUTONOMOUS_ENABLED': 'false'}
                 subprocess.run([BINARY, 'init', '--base-path', tmp], env=env, check=True,
                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
                 runtime = base/'.masc/config/runtime.toml'
-                if contents == 'seed_without_lanes':
-                    kept, skip = [], False
-                    for line in runtime.read_text().splitlines(keepends=True):
-                        if line.lstrip().startswith('['):
-                            skip = line.lstrip().startswith('[runtime.exact_output_lanes.')
-                        if not skip: kept.append(line)
-                    contents = ''.join(kept)
+                kept, skip = [], False
+                for line in runtime.read_text().splitlines(keepends=True):
+                    if line.lstrip().startswith('['):
+                        skip = line.lstrip().startswith('[runtime.exact_output_lanes.')
+                    if not skip: kept.append(line)
+                seed_without_lanes = ''.join(kept)
+                if contents == 'seed_without_lanes': contents = seed_without_lanes
                 if contents is None: runtime.unlink()
                 else: runtime.write_text(contents)
                 with socket.socket() as sock:
@@ -59,7 +59,7 @@ class OwnerWithoutModel(unittest.TestCase):
                             self.assertLess(time.monotonic(), deadline, 'owner readiness deadline exceeded')
                             time.sleep(.1)
                         observation = health['startup']['model_runtime']
-                        self.assertEqual(observation['status'], 'setup_required')
+                        self.assertEqual(observation['status'], 'setup_required' if reason else 'available')
                         self.assertEqual(observation['reason'], reason)
                         self.assertIn(get('/api/v1/runtime/config/raw')[0], (401, 403))
                         subprocess.run([BINARY, 'login', '--base-path', tmp, '--port', str(port),
@@ -70,15 +70,40 @@ class OwnerWithoutModel(unittest.TestCase):
                         status, _ = get('/api/v1/runtime/config/raw', {'Authorization': 'Bearer '+token,
                                                                     'X-MASC-Agent': 'local-admin'})
                         self.assertEqual(status, 404 if contents is None else 200)
-                        request = Request(url+'/api/v1/keepers/imp/boot', data=b'{}',
-                                          headers={'Authorization': 'Bearer '+token, 'X-MASC-Agent': 'local-admin',
-                                                   'Content-Type': 'application/json'})
-                        with self.assertRaises(HTTPError) as rejected:
-                            urlopen(request, timeout=5)
-                        self.assertEqual(rejected.exception.code, 503)
-                        self.assertIn('setup required', rejected.exception.read().decode())
+                        if reason:
+                            request = Request(url+'/api/v1/keepers/imp/boot', data=b'{}',
+                                              headers={'Authorization': 'Bearer '+token, 'X-MASC-Agent': 'local-admin',
+                                                       'Content-Type': 'application/json'})
+                            with self.assertRaises(HTTPError) as rejected:
+                                urlopen(request, timeout=5)
+                            self.assertEqual(rejected.exception.code, 503)
+                            self.assertIn('setup required', rejected.exception.read().decode())
                         self.assertFalse((base/'.masc/keepers/imp.json').exists())
                         self.assertEqual(runtime.read_text() if runtime.exists() else None, contents)
+                        with self.assertRaises(HTTPError) as rejected:
+                            urlopen(Request(url+'/api/v1/runtime/setup/resume', data=b'{}'), timeout=5)
+                        self.assertIn(rejected.exception.code, (401, 403))
+                        # Model settings are saved by another process, exactly as the CLI
+                        # wizard does. Resume must affect this same existing owner.
+                        runtime.write_text(seed_without_lanes)
+                        for attempt in range(2):
+                            if attempt == 0:
+                                # Same native command invoked by setup after local login.
+                                result = subprocess.run([BINARY, 'runtime-resume', '--base-path', tmp,
+                                                         '--port', str(port)], env=env,
+                                                        capture_output=True, text=True, timeout=30)
+                                self.assertEqual(result.returncode, 0, result.stderr)
+                                self.assertNotIn(token, result.stdout + result.stderr)
+                            request = Request(url+'/api/v1/runtime/setup/resume', data=b'{}',
+                                              headers={'Authorization': 'Bearer '+token, 'X-MASC-Agent': 'local-admin',
+                                                       'Content-Type': 'application/json'})
+                            with urlopen(request, timeout=10) as response: resumed = json.load(response)
+                            self.assertTrue(resumed['runtime_ready'])
+                            self.assertFalse(resumed['exact_output_authority_available'])
+                            self.assertEqual(resumed['model_setup']['status'], 'available')
+                        self.assertIsNone(process.poll(), 'resume must preserve the running workspace owner')
+                        self.assertEqual((base/'.masc/auth/local-admin.token').read_text().strip(), token)
+                        self.assertEqual(get('/health?full=1')[1]['startup']['model_runtime']['status'], 'available')
                     finally:
                         if process.poll() is None:
                             os.killpg(process.pid, signal.SIGTERM)

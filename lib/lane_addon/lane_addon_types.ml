@@ -94,6 +94,10 @@ let row_of_json json =
   let* related_ids = list (text "related_ids") (field f "related_ids") in
   Ok { id; lane_id; kind; title; observed_at; subject_id; clock; actor;
        fields; evidence; related_ids }
+let coverage_to_json (c : coverage) =
+  `Assoc ["source_id", string c.source_id; "incarnation", string c.incarnation;
+    "cursor", optional string c.cursor; "complete", `Bool c.complete;
+    "detail", optional string c.detail]
 let coverage_of_json json =
   let* f = object_fields ["source_id"; "incarnation"; "cursor"; "complete"; "detail"] json in
   let* source_id = text "source_id" (field f "source_id") in
@@ -102,6 +106,9 @@ let coverage_of_json json =
   let* complete = match field f "complete" with `Bool b -> Ok b | _ -> Error "complete: expected bool" in
   let* detail = nullable (text "detail") (field f "detail") in
   Ok { source_id; incarnation; cursor; complete; detail }
+let output_to_json (o : output) =
+  `Assoc ["rows", `List (List.map row_to_json o.rows);
+          "coverage", `List (List.map coverage_to_json o.coverage)]
 let output_of_json json =
   let* f = object_fields ["rows"; "coverage"] json in
   let* rows = list row_of_json (field f "rows") in
@@ -127,3 +134,10 @@ let phase_of_json = function
        | `String "failed", `String message -> Ok (Failed message)
        | _ -> Error "invalid Lane phase")
   | _ -> Error "invalid Lane phase"
+let package_to_json (p : package) =
+  `Assoc ["id", string p.id; "revision", string p.revision; "title", string p.title;
+    "contributions", strings (List.map (function Observe -> "observe" | Derive -> "derive") p.contributions);
+    "image", string p.image; "command", strings p.command; "directory", string p.directory;
+    "resources", `Assoc ["cpus", `Float p.resources.cpus;
+      "memory_bytes", `Intlit (Int64.to_string p.resources.memory_bytes);
+      "pids", `Int p.resources.pids; "max_reply_bytes", `Int p.resources.max_reply_bytes]]

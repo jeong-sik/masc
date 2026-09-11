@@ -751,7 +751,8 @@ let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_u
   match api_format with
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Antigravity_cli_runtime -> None
+  | Runtime_schema.Antigravity_cli_runtime
+  | Runtime_schema.Vertex_gemini_api -> None
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
     Some
@@ -760,6 +761,7 @@ let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_u
        else if String.ends_with ~suffix:"/api" base
        then base ^ "/tags"
        else base ^ "/api/tags")
+  | Runtime_schema.Gemini_api
   | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
     Some (dashboard_runtime_append_probe_path base_url ~suffix:"/models")
 ;;
@@ -863,8 +865,9 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
     match api_format with
     | Runtime_schema.Codex_app_server_runtime
     | Runtime_schema.Claude_code_runtime
-    | Runtime_schema.Antigravity_cli_runtime -> None
-    | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
+    | Runtime_schema.Antigravity_cli_runtime
+    | Runtime_schema.Vertex_gemini_api -> None
+    | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
       (match dashboard_runtime_list_member_len "data" json with
        | Some _ as value -> value
@@ -1659,6 +1662,8 @@ let runtime_api_format_wire : Runtime_schema.api_format -> string = function
   | Runtime_schema.Messages_api -> "messages"
   | Runtime_schema.Chat_completions_api -> "chat-completions"
   | Runtime_schema.Ollama_api -> "ollama"
+  | Runtime_schema.Gemini_api -> "gemini"
+  | Runtime_schema.Vertex_gemini_api -> "vertex-gemini"
   | Runtime_schema.Codex_app_server_runtime -> "codex-app-server"
   | Runtime_schema.Antigravity_cli_runtime -> "antigravity-cli"
   | Runtime_schema.Claude_code_runtime -> "claude-code"

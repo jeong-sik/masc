@@ -1,0 +1,23 @@
+name: Antigravity context transport
+on:
+  pull_request:
+    paths:
+      - 'scripts/antigravity-context-pty.py'
+      - 'test/test_antigravity_context_transport.py'
+      - '.github/workflows/antigravity-context.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  zero-prompt-pty:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 test/test_antigravity_context_transport.py

@@ -420,7 +420,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         tool_trail := Keeper_chat_tool_trail.create ();
         loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
           ~last_edited_text:"" ~post_attempts_left:2
-    | Agent_core_runtime_attempt_started ->
+    | Agent_core_runtime_attempt_started _ ->
         continue ~acc_text:"" ()
     | Text_message_start _ -> continue ()
     | Reply_details _

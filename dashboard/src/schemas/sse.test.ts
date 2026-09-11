@@ -415,6 +415,16 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts the runtime-attempt boundary event with runtime_id and attempt_index', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_RUNTIME_ATTEMPT_STARTED', {
+        runtime_id: 'claude-3-7-sonnet',
+        attempt_index: 1,
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
   it('accepts an exact quarantined occurrence on a stream protocol error', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {

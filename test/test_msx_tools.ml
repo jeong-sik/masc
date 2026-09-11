@@ -98,16 +98,28 @@ let test_rendered_pixel_snapshot () =
   let observation, captured = require (Msx_lane.capture ()) in
   check bool "capture shares observed pixels" true (first.rgb == captured.rgb);
   check int "capture agrees with clock" first.number observation.frame;
+  let identity = require (Msx_lane.capture_with_identity ()) in
+  check bool "identified capture shares pixels" true (first.rgb == identity.frame.rgb);
+  check int "identified capture has same frame" first.number identity.observation.frame;
+  let again = require (Msx_lane.capture_with_identity ()) in
+  check string "observation preserves incarnation" identity.incarnation again.incarnation;
+  check int "observation preserves input cursor" identity.input_count again.input_count;
   let save_path = Filename.concat base_path "before.json" in
   ignore (require (Msx_lane.save ~path:save_path));
   ignore (require (Msx_lane.step ~frames:1));
   let advanced = read () in
+  let progressed = require (Msx_lane.capture_with_identity ()) in
+  check string "normal progress preserves incarnation" identity.incarnation progressed.incarnation;
   check int "step advances snapshot" (first.number + 1) advanced.number;
   check bool "step invalidates rendered buffer" false (first.rgb == advanced.rgb);
   check bool "guest VBlank changes actual RGB" false (String.equal bytes advanced.rgb);
   check string "old snapshot remains immutable" bytes first.rgb;
   ignore (require (Msx_lane.restore ~path:save_path ~ledger_dir));
   let restored = read () in
+  let restored_identity = require (Msx_lane.capture_with_identity ()) in
+  check bool "restore installs a new explicit history" false
+    (String.equal identity.incarnation restored_identity.incarnation);
+  check int "restored identity agrees with restored frame" restored.number restored_identity.frame.number;
   check int "restore rewinds snapshot" first.number restored.number;
   check string "restore reproduces pixels" bytes restored.rgb;
   check bool "restore reverses the visible guest change" false

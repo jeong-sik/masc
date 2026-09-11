@@ -169,6 +169,21 @@ val step_frame : frames:int -> (frame * entry list, error) result
     input ledger under one machine lock. Encoding happens outside that lock. *)
 
 val capture : unit -> (observation * frame, error) result
+(** Copy observation and pixels under the same machine lock. Does not advance
+    the machine. Consumers encode/persist the immutable copy outside the lock. *)
+
+type identified_capture = {
+  incarnation : string;
+      (** Fresh identity on successful load/restore. Reads and time progression
+          preserve it, including frame counters restored to an earlier value. *)
+  observation : observation;
+  frame : frame;
+  input_count : int;
+}
+
+val capture_with_identity : unit -> (identified_capture, error) result
+(** Atomically reads the same machine as {!capture}, with its explicit history
+    identity and input cursor. Never steps, peeks, or changes a RAM baseline. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core
@@ -201,9 +216,6 @@ val ram_diff : unit -> (ram_diff, error) result
     before/after hex. [Error Invalid_request] before any peek. The snapshot
     survives machine swaps — a reload after a peek reads as wholesale change,
     which it is. *)
-(** Copy observation and pixels under the same machine lock. Does not advance
-    the machine. Consumers encode/persist the immutable copy outside the lock. *)
-
 val save : path:string -> (observation, error) result
 (** Atomically replace a named checkpoint with the complete machine and ledger.
     Does not advance or eject the machine. *)

@@ -206,6 +206,8 @@ let protocol_declarations =
       "openai-compatible-http"
       Runtime_schema.Chat_completions_api
   ; http_protocol "ollama-http" Runtime_schema.Ollama_api
+  ; http_protocol "gemini-http" Runtime_schema.Gemini_api
+  ; http_protocol "vertex-gemini" Runtime_schema.Vertex_gemini_api
   ; official_client_protocol
       "codex-app-server"
       Runtime_schema.Codex_app_server_runtime
@@ -562,6 +564,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Messages_api
   | Chat_completions_api
   | Ollama_api
+  | Gemini_api
+  | Vertex_gemini_api
   | Codex_app_server_runtime
   | Claude_code_runtime ->
     (match
@@ -2312,6 +2316,8 @@ let validate_ollama_only_binding_fields
        | Some
            (( Runtime_schema.Messages_api
             | Runtime_schema.Chat_completions_api
+            | Runtime_schema.Gemini_api
+            | Runtime_schema.Vertex_gemini_api
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Antigravity_cli_runtime
             | Runtime_schema.Claude_code_runtime ) as api_format) ->

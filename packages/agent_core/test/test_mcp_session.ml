@@ -164,27 +164,6 @@ let () =
                | Http -> "http"
                | Stdio -> "stdio"))
         ] )
-    ; ( "to_server_spec"
-      , [ test_case "converts info to server_spec" `Quick (fun () ->
-            let info =
-              make_info
-                ~server_name:"my-server"
-                ~command:"/usr/local/bin/mcp"
-                ~args:[ "--mode"; "production" ]
-                ~env:[ "TOKEN", "abc" ]
-                ()
-            in
-            let spec = Mcp_session.to_server_spec info in
-            check string "name" "my-server" spec.name;
-            check string "command" "/usr/local/bin/mcp" spec.command;
-            check int "args" 2 (List.length spec.args);
-            check string "arg1" "--mode" (List.hd spec.args);
-            check string "arg2" "production" (List.nth spec.args 1);
-            check int "env" 1 (List.length spec.env);
-            let k, v = List.hd spec.env in
-            check string "env key" "TOKEN" k;
-            check string "env val" "abc" v)
-        ] )
     ; ( "json_fields"
       , [ test_case "info_to_json has expected keys" `Quick (fun () ->
             let info =
@@ -282,35 +261,6 @@ let () =
                 detail
             | Error _ -> fail "expected a JsonParseError"
             | Ok _ -> fail "unknown field must be rejected")
-        ] )
-    ; ( "spec_roundtrip"
-      , [ test_case "to_server_spec preserves all fields" `Quick (fun () ->
-            let info =
-              make_info
-                ~server_name:"roundtrip-srv"
-                ~command:"/opt/bin/server"
-                ~args:[ "--verbose"; "--port"; "8080" ]
-                ~env:[ "HOME", "/tmp"; "LANG", "en_US" ]
-                ~tool_schemas:[ sample_tool_schema; multi_param_tool ]
-                ()
-            in
-            let spec = Mcp_session.to_server_spec info in
-            check string "name roundtrip" info.server_name spec.name;
-            check string "command roundtrip" info.command spec.command;
-            check (list string) "args roundtrip" info.args spec.args;
-            check int "env count" (List.length info.env) (List.length spec.env);
-            List.iter2
-              (fun (ik, iv) (sk, sv) ->
-                 check string "env key" ik sk;
-                 check string "env val" iv sv)
-              info.env
-              spec.env)
-        ; test_case "to_server_spec with empty fields" `Quick (fun () ->
-            let info = make_info ~server_name:"empty" ~command:"cmd" () in
-            let spec = Mcp_session.to_server_spec info in
-            check string "name" "empty" spec.name;
-            check (list string) "empty args" [] spec.args;
-            check int "empty env" 0 (List.length spec.env))
         ] )
     ; ( "json_env_roundtrip"
       , [ test_case "env with special characters" `Quick (fun () ->

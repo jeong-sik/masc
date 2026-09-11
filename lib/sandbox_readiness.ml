@@ -123,6 +123,10 @@ let catalog_json ~host ~configured entries =
         "network_modes", `List (List.map (fun mode -> `String (Keeper_types_profile_sandbox.network_mode_to_string mode)) (network_modes row.backend));
         "workspace_storage", `String (match row.backend with Docker -> "host_mount" | Apple_container | Nerdctl_kata | Microsandbox -> "guest_volume" | Remote_ssh -> "remote_directory")];
       "configured", `Bool (configured = Some row.backend);
+      "setup_args", `List (List.map (fun value -> `String value)
+        (["--sandbox-profile"; Keeper_sandbox_config.sandbox_profile_to_string (profile row.backend)]
+         @ match microvm_backend row.backend with None -> []
+           | Some backend -> ["--microvm-backend"; Keeper_microvm_backend.to_string backend]));
       "recommended", `Bool (recommended = Some row.backend);
       "advanced", `Bool (List.mem row.backend [Nerdctl_kata; Microsandbox; Remote_ssh])]) entries)]
 let selection_of_contents ~host ~path ~contents ~profile:requested ~microvm_backend:requested_backend ~network_mode:requested_network =
@@ -153,6 +157,32 @@ let selection_of_contents ~host ~path ~contents ~profile:requested ~microvm_back
   let remote_endpoint = if backend = Remote_ssh then defaults.remote_endpoint else None in
   let* () = if backend = Remote_ssh && remote_endpoint = None then Error "Choose a configured SSH endpoint first" else Ok () in
   Ok {backend; network_mode; remote_endpoint}
+let inspect ~base_path =
+  let host = detect_host ~run:system_runner in
+  let configured_selection, configuration_error = match base_path with
+    | None -> None, None
+    | Some base_path ->
+      let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
+      (try
+        let contents = In_channel.with_open_text path In_channel.input_all in
+        match selection_of_contents ~host ~path ~contents ~profile:None
+                ~microvm_backend:None ~network_mode:None with
+        | Ok selection -> Some selection, None
+        | Error _ -> None, Some "imp's sandbox declaration needs repair before it can be prepared."
+       with Sys_error _ -> None, Some "imp's sandbox declaration could not be read. Initialize or repair the workspace.") in
+  let entries = List.map (probe ~host ~run:system_runner
+    ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+    ~require_userns:(Env_config_sandbox.Hardening.require_userns ())) all in
+  let configured = Option.map (fun (selection : selection) -> selection.backend) configured_selection in
+  match catalog_json ~host ~configured entries with
+  | `Assoc fields -> `Assoc (("configured_selection", (match configured_selection with
+      | None -> `Null
+      | Some selection -> `Assoc ["backend", `String (backend_id selection.backend);
+          "network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string selection.network_mode)]))
+      :: ("configuration_error",
+      (match configuration_error with None -> `Null | Some message -> `String message)) :: fields)
+  | json -> json
+
 let stage_contents ~path ~contents selection =
   let edit contents key value = Toml_line_editor.edit_table_scalar contents ~path:"keeper" ~key ~value in
   let next = edit contents "sandbox_profile" (Some (Keeper_sandbox_config.sandbox_profile_to_string (profile selection.backend))) in

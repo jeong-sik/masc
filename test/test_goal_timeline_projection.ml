@@ -349,6 +349,110 @@ let test_tree_field_is_empty_without_events () =
   check int "no events" 0 (List.length (timeline_events_of json))
 ;;
 
+(* [goals.json] holds only the current set, so what the log says about a goal
+   that left it is the only record it existed (#35359). *)
+let history_row ?(ts = "2026-09-10T00:00:00Z") ~goal_id ~event_type payload =
+  `Assoc
+    [ "ts", `String ts
+    ; "goal_id", `String goal_id
+    ; "event_type", `String event_type
+    ; "payload", payload
+    ]
+;;
+
+let unlisted json =
+  Yojson.Safe.Util.member "unlisted" json |> Yojson.Safe.Util.to_list
+;;
+
+let coverage json name =
+  Yojson.Safe.Util.member "coverage" json |> Yojson.Safe.Util.member name
+;;
+
+let test_unlisted_history_reconstructs_a_departed_goal () =
+  let rows =
+    [ history_row ~ts:"2026-09-10T00:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_created"
+        (`Assoc [ "title", `String "Shipped and gone" ])
+    ; history_row ~ts:"2026-09-10T06:00:00Z" ~goal_id:"goal-gone"
+        ~event_type:"goal_phase"
+        (live_phase_payload ~phase:"completed" ~actor:"alpha")
+      (* A goal the store still lists is already on every goal surface. *)
+    ; history_row ~goal_id:"goal-listed" ~event_type:"goal_created"
+        (`Assoc [ "title", `String "Still here" ])
+    ]
+  in
+  let json =
+    DG.unlisted_goal_history_of_rows ~listed:[ "goal-listed" ] ~rows ~malformed_lines:0
+  in
+  let rows_out = unlisted json in
+  check int "a goal the store still lists is not history" 1 (List.length rows_out);
+  let row = List.hd rows_out in
+  check (option string) "the goal is named" (Some "goal-gone") (field "goal_id" row);
+  check (option string) "the title outlived the store" (Some "Shipped and gone")
+    (field "title" row);
+  check (option string) "opening comes from the creation row"
+    (Some "2026-09-10T00:00:00Z") (field "opened_at" row);
+  check (option string) "a terminal phase closes the goal"
+    (Some "2026-09-10T06:00:00Z") (field "closed_at" row);
+  check (option string) "the final phase is reported" (Some "completed")
+    (field "final_phase" row);
+  check (float 0.001) "lifetime spans the two rows" 6.0
+    (Yojson.Safe.Util.member "lifetime_hours" row |> Yojson.Safe.Util.to_float)
+;;
+
+let test_unlisted_history_does_not_invent_an_outcome () =
+  let rows =
+    [ history_row ~ts:"2026-09-01T00:00:00Z" ~goal_id:"goal-open"
+        ~event_type:"goal_phase"
+        (live_phase_payload ~phase:"verifying" ~actor:"alpha")
+      (* No creation row: this goal predates goal_created. *)
+    ; history_row ~ts:"2026-09-02T00:00:00Z" ~goal_id:"goal-old"
+        ~event_type:"goal_phase"
+        (live_phase_payload ~phase:"dropped" ~actor:"alpha")
+    ]
+  in
+  let json = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:0 in
+  let row id =
+    List.find (fun r -> field "goal_id" r = Some id) (unlisted json)
+  in
+  let still_open = row "goal-open" in
+  check (option string) "a non-terminal phase is still reported" (Some "verifying")
+    (field "final_phase" still_open);
+  check (option string) "but it closes nothing" None (field "closed_at" still_open);
+  check bool "and spans nothing" true
+    (Yojson.Safe.Util.member "lifetime_hours" still_open = `Null);
+  let old_goal = row "goal-old" in
+  check (option string) "a goal with no creation row has no opening" None
+    (field "opened_at" old_goal);
+  check (option string) "nor a title" None (field "title" old_goal);
+  check (option string) "its ending is still known" (Some "2026-09-02T00:00:00Z")
+    (field "closed_at" old_goal);
+  check bool "an ending alone spans nothing" true
+    (Yojson.Safe.Util.member "lifetime_hours" old_goal = `Null)
+;;
+
+let test_unlisted_history_reports_what_it_could_not_read () =
+  let rows =
+    [ `Assoc [ "ts", `String "2026-09-01T00:00:00Z"; "event_type", `String "goal_phase" ]
+    ; history_row ~goal_id:"goal-x" ~event_type:"goal_retired_somehow" (`Assoc [])
+    ; history_row ~goal_id:"goal-x" ~event_type:"goal_created"
+        (`Assoc [ "title", `String "X" ])
+    ]
+  in
+  let json = DG.unlisted_goal_history_of_rows ~listed:[] ~rows ~malformed_lines:3 in
+  check int "malformed lines are carried through" 3
+    (coverage json "malformed_event_lines" |> Yojson.Safe.Util.to_int);
+  check int "a row naming no goal is counted" 1
+    (coverage json "rows_without_goal_id" |> Yojson.Safe.Util.to_int);
+  check (list string) "an unknown event type is named, not dropped"
+    [ "goal_retired_somehow" ]
+    (coverage json "unrecognised_event_types"
+     |> Yojson.Safe.Util.to_list
+     |> List.map Yojson.Safe.Util.to_string);
+  check int "the goal still appears from the rows that were understood" 1
+    (List.length (unlisted json))
+;;
+
 let () =
   run
     "goal timeline projection"
@@ -372,6 +476,14 @@ let () =
     ; ( "tree field"
       , [ test_case "timeline_events is normalized" `Quick test_tree_field_is_normalized
         ; test_case "empty without events" `Quick test_tree_field_is_empty_without_events
+        ] )
+    ; ( "unlisted history"
+      , [ test_case "a departed goal is reconstructed" `Quick
+            test_unlisted_history_reconstructs_a_departed_goal
+        ; test_case "no outcome is invented" `Quick
+            test_unlisted_history_does_not_invent_an_outcome
+        ; test_case "what it could not read is reported" `Quick
+            test_unlisted_history_reports_what_it_could_not_read
         ] )
     ]
 ;;

@@ -101,6 +101,7 @@ type DashboardScheduledAutomationDeferredActivation =
         | 'lifecycle_denied'
         | 'shutdown_fenced'
         | 'owner_unknown'
+        | 'owner_not_current'
         | 'not_running'
       activation_detail: string
     }
@@ -109,9 +110,6 @@ type DashboardScheduledAutomationDeferredActivation =
       activation_reason:
         | 'autoboot_disabled'
         | 'proactive_disabled'
-        // The Keeper store answered and holds no Keeper under this name.
-        // Distinct from owner_unknown, which is a read that did not answer.
-        | 'owner_absent'
         | 'unregistered'
       activation_detail: null
     }

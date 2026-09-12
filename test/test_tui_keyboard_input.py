@@ -8415,7 +8415,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             beta_frame,
             health=b"idle",
-            runtime=b"paused anthropic.claude-sonnet-4",
+            runtime=b"paused \xc2\xb7 configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
         )
         for expected in (
@@ -8460,7 +8460,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             alpha_frame,
             health=b"healthy",
-            runtime=b"running anthropic.claude-opus-5",
+            runtime=b"running \xc2\xb7 configured: anthropic.claude-opus-5",
             description="restored alpha chat",
         )
         for expected in (

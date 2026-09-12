@@ -73,18 +73,9 @@ type base_path_lock_rejection =
       ; reason : string
       }
 
-(* Who holds the base path, as far as the contender could establish it.
-
-   The lease file's number is written after the kernel lock is taken and the
-   lease file's identity is verified, so a contender that reads it in that
-   window reads the previous owner's number -- and that owner may be gone. The
-   refusal used to carry the number alone, so the operator was told to kill a
-   process that did not exist and had nothing to go on when the kill failed
-   (observed 2026-09-13: seven refusals naming PID 14427, which `kill` reported
-   as "no such process", while PID 83338 held the path).
-
-   The liveness check is what separates the two, and it belongs here rather
-   than at each caller: the number alone cannot say which case it is. *)
+(* Only the process-local table establishes ownership identity. The recorded
+   number is written after locking and may describe a previous owner or a
+   different PID namespace; local process liveness cannot verify it. *)
 type base_path_owner =
   | Owner_this_process of int
       (** This process already holds the lease. A second acquisition in the

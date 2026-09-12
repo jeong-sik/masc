@@ -26,6 +26,13 @@ type http_request =
   ; body_json : Yojson.Safe.t
   }
 
+(** What to send an endpoint to ask which voices it has. Separate from
+    {!http_request} because this one carries no body: it is a read. *)
+type voice_listing_request =
+  { listing_url : string
+  ; listing_headers : (string * string) list
+  }
+
 type stt_request =
   { url : string
   ; headers : (string * string) list
@@ -59,3 +66,14 @@ val stt_request_for_endpoint
   -> audio_file:string
   -> model:string
   -> (stt_request, string) result
+
+(** The request that asks an endpoint which voices it has, or why there is
+    nothing to ask. Only ElevenLabs publishes a catalogue; an OpenAI-compatible
+    server takes a voice name and offers no listing beside it, and an endpoint
+    reached through a tool is asked to speak rather than asked what it can
+    speak with. Both of those are [Error] with that said in words, because the
+    caller shows the reason to a reader who is about to type the name instead. *)
+val voice_listing_request_for_endpoint
+  :  Voice_config.endpoint
+  -> api_key:string
+  -> (voice_listing_request, string) result

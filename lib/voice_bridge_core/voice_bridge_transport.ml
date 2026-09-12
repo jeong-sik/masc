@@ -198,6 +198,49 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
     Error (Printf.sprintf "STT curl stopped by signal %d" sig_num)
 ;;
 
+(* Asking an endpoint what it can speak with. A read, so GET and no body, and
+   a short deadline: this runs while somebody is waiting on a wizard step, and
+   a slow answer is worth less than the typing it saves. *)
+let run_voice_listing_request (req : Voice_runtime_overlay.voice_listing_request) =
+  let header_args =
+    List.concat_map
+      (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
+      req.listing_headers
+  in
+  let argv =
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; "15"; req.listing_url ]
+    @ header_args
+  in
+  let status, body =
+    run_voice_status ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec argv
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    (match Yojson.Safe.from_string body with
+     | json -> Ok json
+     | exception Yojson.Json_error msg ->
+       Error (Printf.sprintf "voice listing parse error: %s" msg))
+  | Unix.WEXITED 22 ->
+    Error
+      (Printf.sprintf
+         "voice listing HTTP error: %s"
+         (if String.length body > 200 then String.sub body 0 200 else body))
+  | Unix.WEXITED 28 -> Error "voice listing request timed out"
+  | Unix.WEXITED code -> Error (Printf.sprintf "voice listing curl exit %d" code)
+  (* Named for the same reason the two dispatches above are: a wildcard here
+     discards which signal ended it. *)
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "voice listing curl killed by signal %d" sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "voice listing curl stopped by signal %d" sig_num)
+;;
+
+let list_voices_via_http endpoint =
+  let* api_key = resolve_api_key endpoint in
+  let* request = Voice_runtime_overlay.voice_listing_request_for_endpoint endpoint ~api_key in
+  run_voice_listing_request request
+;;
+
 let transcribe_via_http_stt endpoint ~audio_file ~model =
   let* api_key = resolve_api_key endpoint in
   let* request =

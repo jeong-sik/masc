@@ -210,6 +210,80 @@ let probe_attempt_json attempt =
 
 let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
 
+(* One voice as an endpoint names it. The id is what goes in the config; the
+   name and the language are what make the id pickable by a person, because
+   an ElevenLabs id is twenty opaque characters and a Korean voice in that
+   account is only distinguishable by its label. *)
+type catalogue_voice =
+  { voice_id : string
+  ; voice_name : string option
+  ; voice_language : string option
+  }
+
+(* The name stays optional rather than falling back to the id here. An endpoint
+   that sends no name has said something, and flattening that into the id makes
+   a nameless voice indistinguishable from one named after its id. Which of the
+   two a reader sees is the screen's decision, taken where the screen is. *)
+let catalogue_voice_json voice =
+  `Assoc
+    ([ "id", `String voice.voice_id ]
+     @ (match voice.voice_name with
+        | Some name -> [ "name", `String name ]
+        | None -> [])
+     @
+     match voice.voice_language with
+     | Some language -> [ "language", `String language ]
+     | None -> [])
+;;
+
+let string_member key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+(* The shape ElevenLabs answers with, measured 2026-09-12 against
+   /v2/voices: an object carrying [voices], each with [voice_id], [name] and a
+   [labels] object whose [language] is the only field worth showing beside the
+   name. A row without an id is dropped rather than shown: it cannot be chosen,
+   and a list that offers unchoosable rows is worse than a shorter one. *)
+let catalogue_voices_of_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "voices" fields with
+     | Some (`List items) ->
+       Ok
+         (List.filter_map
+            (fun item ->
+              match string_member "voice_id" item with
+              | None -> None
+              | Some id ->
+                let language =
+                  match item with
+                  | `Assoc entry ->
+                    (match List.assoc_opt "labels" entry with
+                     | Some labels -> string_member "language" labels
+                     | None -> None)
+                  | _ -> None
+                in
+                Some
+                  { voice_id = id
+                  ; voice_name = string_member "name" item
+                  ; voice_language = language
+                  })
+            items)
+     | Some _ | None -> Error "the endpoint answered without a voices list")
+  | _ -> Error "the endpoint answered with something other than an object"
+;;
+
+let list_voices endpoint =
+  match Voice_bridge_transport.list_voices_via_http endpoint with
+  | Error message -> Error message
+  | Ok json -> catalogue_voices_of_json json
+;;
+
 let probe_tts ?(agent_id = "probe") ~message () =
   match Voice_config.load_detailed () with
   | Error error -> Error (Voice_config.load_error_to_string error)

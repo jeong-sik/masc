@@ -2605,6 +2605,25 @@ let fetch_browser_scene ?(scene_view=Browser_lane.Content) ?scope ~host ~port ~v
     ~path:"/api/v1/dashboard/browser-lane/scene" ~body in
   decode_scene json
 
+let refresh_browser_scene ~host ~port ~view ~tab_id ~scene_view ~scope =
+  let open Masc_tui_types.Browser_lane_view in
+  match scope with
+  | None -> fetch_browser_scene ~scene_view ~host ~port ~view ~tab_id ()
+  | Some target ->
+    let* regions = fetch_browser_scene ~scene_view:Browser_lane.Regions
+        ~host ~port ~view ~tab_id () in
+    (* Region references belong to a document, not a URL or a channel name.
+       A navigation or detached region returns the current map for selection;
+       never retry an old node reference against the replacement document. *)
+    if regions.source <> view.source
+       || regions.client_id <> client_id view
+       || regions.tab_id <> tab_id || regions.content.view <> Browser_lane.Regions
+       || Option.is_some regions.content.scope then
+      Error "region refresh source, client, tab or scope mismatch"
+    else if region_observed target regions then
+      fetch_browser_scene ~scene_view ~scope:target ~host ~port ~view ~tab_id ()
+    else Ok regions
+
 let click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url =
   let open Masc_tui_types.Browser_lane_view in
   let fields = match request_body {view with selected_tab = Some tab_id} with
@@ -2627,7 +2646,7 @@ let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

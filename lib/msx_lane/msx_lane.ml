@@ -319,8 +319,38 @@ let media_json media =
      "bytes", `String (Base64.encode_string bytes)]) media)
 ;;
 
+type medium =
+  | Cartridge of string
+  | Disk of string
+
+type transition = {
+  before : medium option;
+  after : medium option;
+}
+
+type loaded = {
+  observation : observation;
+  transition : transition;
+}
+
+(* [load] empties the slot when a disk is in the drive, so the drive is asked
+   first and the two never both answer. *)
+let medium_of (st : machine option) =
+  match st with
+  | None -> None
+  | Some st ->
+    (match st.disk, st.cart with
+     | Some name, _ -> Some (Disk name)
+     | None, Some name -> Some (Cartridge name)
+     | None, None -> None)
+;;
+
 let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
   locked (fun () ->
+    (* Read under the lock the load commits under: two loads that serialise
+       here see the machine each one replaced, not the one both started
+       from. *)
+    let before = medium_of !state in
     match load_roms roms_dir, load_cart cart_path, load_disk disk_path with
     | Error e, _, _ | _, Error e, _ | _, _, Error e -> Error e
     | Ok roms, Ok cart, Ok disk ->
@@ -365,7 +395,8 @@ let load ~ledger_dir ~roms_dir ~cart_path ~disk_path =
           }
         in
         state := Some st;
-        Ok (observe st))
+        Ok { observation = observe st
+           ; transition = { before; after = medium_of (Some st) } })
 ;;
 
 let eject () =

@@ -10,15 +10,16 @@ type row_error =
       physical_index : int;
       detail : string;
     }
-  (* A row the file holds for someone else. It is not damage -- the metrics file
-     is shared and this screen shows one keeper -- but it does consume the
-     physical window, which is why it is counted at all: without it "200 rows
-     read, 125 shown" has no explanation. Its own variant so the count of rows
-     that could not be read stays separate from it; folded together, a single
-     unreadable row hid inside seventy-five normal ones. *)
-  | Other_keeper_row of {
+  (* A row in this Keeper's own store that names a different Keeper. The store is
+     not shared -- Keeper_types_support.keeper_metrics_store opens
+     <base-path>/.masc/keepers/<name>/metrics -- so this is not a row meant for
+     somebody else that arrived here by design: a writer put it in the wrong
+     Keeper's directory. Damage, like an unreadable row, and counted apart from
+     one because it says who misfiled it and because it still consumes the
+     physical window, which is what explains "200 rows read, 125 shown". *)
+  | Misfiled_row of {
       physical_index : int;
-      actual_keeper : string;
+      names_keeper : string;
     }
 
 type load_error =
@@ -46,37 +47,39 @@ let row_error_to_string = function
   | Invalid_metrics_row { physical_index; detail } ->
       Printf.sprintf "physical row %d is not current Keeper metrics: %s"
         physical_index detail
-  | Other_keeper_row { physical_index; actual_keeper } ->
-      Printf.sprintf "physical row %d belongs to Keeper %S" physical_index
-        actual_keeper
+  | Misfiled_row { physical_index; names_keeper } ->
+      Printf.sprintf "physical row %d is in this Keeper's store but names %S"
+        physical_index names_keeper
 
 let error_to_string = function
   | Storage_error error ->
       "metrics storage read failed: " ^ Dated_jsonl.read_error_to_string error
   | Row_errors { physical_rows; errors } ->
-      (* Two counts, because they ask for different things. Rows held for
-         another keeper explain why a window of [physical_rows] showed fewer
-         entries; rows that could not be read are damage. One number for both
-         let a single unreadable row hide inside seventy-five normal ones. *)
-      let others =
+      (* Two counts, because they name two different faults. A misfiled row is
+         readable and in the wrong Keeper's store; an unreadable row is damage
+         this screen cannot name an owner for. Both consume the window of
+         [physical_rows], which is what explains a short list. One number for
+         both let a single unreadable row hide inside seventy-five misfiled
+         ones. *)
+      let misfiled =
         List.length
           (List.filter
              (function
-               | Other_keeper_row _ -> true
+               | Misfiled_row _ -> true
                | Malformed_json _ | Invalid_metrics_row _ -> false)
              errors)
       in
-      let unreadable = List.length errors - others in
+      let unreadable = List.length errors - misfiled in
       let first_unreadable =
         List.find_opt
           (function
             | Malformed_json _ | Invalid_metrics_row _ -> true
-            | Other_keeper_row _ -> false)
+            | Misfiled_row _ -> false)
           errors
       in
       let parts =
-        (if others = 0 then []
-         else [ Printf.sprintf "%d for another Keeper" others ])
+        (if misfiled = 0 then []
+         else [ Printf.sprintf "%d misfiled into this store" misfiled ])
         @ (match first_unreadable, unreadable with
            | _, 0 -> []
            | None, _ -> [ Printf.sprintf "%d unreadable" unreadable ]
@@ -93,13 +96,14 @@ let error_to_string = function
          | [] -> "all of them this Keeper's"
          | parts -> String.concat " \xc2\xb7 " parts)
 
-(* What one physical row turned out to be. A row for another keeper is an
-   outcome, not a failure: the [Error] channel is for rows that could not be
-   read at all, and keeping the two apart here is what lets the notice count
-   them apart. *)
+(* What one physical row turned out to be. A row that names another Keeper is
+   read successfully and is still wrong -- the store belongs to one Keeper -- so
+   it travels on the [Ok] channel and becomes a [Misfiled_row] above. The
+   [Error] channel is for rows that could not be read at all. Keeping the two
+   apart here is what lets the notice count them apart. *)
 type decoded_row =
   | Mine of Decode.log_entry
-  | Another_keeper of string
+  | Names_another_keeper of string
 
 let decode_for_keeper ~expected_keeper json : (decoded_row, string) result =
   match Decode.decode_log_entry json with
@@ -115,7 +119,7 @@ let decode_for_keeper ~expected_keeper json : (decoded_row, string) result =
       in
       (match actual_keeper with
        | Some actual when String.equal actual expected_keeper -> Ok (Mine entry)
-       | Some actual -> Ok (Another_keeper actual)
+       | Some actual -> Ok (Names_another_keeper actual)
        | None -> Error "current Keeper metrics row lost its required name")
 
 let resolve_with ~expected_keeper ~read_recent ~limit =
@@ -130,9 +134,9 @@ let resolve_with ~expected_keeper ~read_recent ~limit =
             | Dated_jsonl.Parsed json -> (
                 match decode_for_keeper ~expected_keeper json with
                 | Ok (Mine entry) -> entry :: entries, errors
-                | Ok (Another_keeper actual_keeper) ->
+                | Ok (Names_another_keeper names_keeper) ->
                     ( entries,
-                      Other_keeper_row { physical_index; actual_keeper }
+                      Misfiled_row { physical_index; names_keeper }
                       :: errors )
                 | Error detail ->
                     ( entries,

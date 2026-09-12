@@ -12,10 +12,9 @@ type row_error =
       physical_index : int;
       detail : string;
     }
-  | Other_keeper_row of {
-      (** Same one-based position as above. *)
+  | Misfiled_row of {
       physical_index : int;
-      actual_keeper : string;
+      names_keeper : string;
     }
       (** A row the shared metrics file holds for someone else. Counted because
           it consumes the physical window, kept apart from the rows that could

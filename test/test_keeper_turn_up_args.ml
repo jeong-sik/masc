@@ -1237,6 +1237,75 @@ let test_rollback_after_rename_failure_requires_reconciliation () =
     (current_revision_exn ctx.config name = initial)
 ;;
 
+(* Regression for the review finding on #35366: a successful
+   compensating rollback used to leave the crash journal in place, so
+   the next boot's recovery could re-apply this request's stale
+   before-images over LATER successful writes. Pins the Ok branch of
+   rollback clearing the journal, and the production startup recovery
+   entry point answering No_journal afterwards. *)
+let test_compensated_rollback_clears_crash_journal () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let journal_path =
+    Keeper_config_journal.journal_path_for_base_path ~base_path
+  in
+  let name = "manifest-rollback-journal-clear-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _runtime_transaction _ -> Rollback ())
+       ()
+   with
+   | Ok _ ->
+     check bool "successful compensation cleared the crash journal" false
+       (Sys.file_exists journal_path);
+     let report =
+       Server_bootstrap_maintenance
+       .recover_keeper_config_journal_on_startup ~base_path
+     in
+     (match report.Keeper_config_journal.outcome with
+      | Keeper_config_journal.No_journal -> ()
+      | _ -> fail "startup recovery found a journal after compensated rollback")
+   | Error error ->
+     fail
+       ("unexpected rollback error: "
+       ^ Keeper_turn_up_config_persistence.error_to_string error));
+  check bool "compensated rollback kept the pre-request state" true
+    (current_revision_exn ctx.config name = initial)
+;;
+
 let test_publication_exception_restores_missing_manifest () =
   with_persisting_context @@ fun ctx ->
   let name = "manifest-publication-exception-fixture" in
@@ -2255,6 +2324,10 @@ let () =
             "post-write revision failure restores missing manifest"
             `Quick
             test_post_write_revision_failure_restores_missing_manifest
+        ; test_case
+            "compensated rollback clears the crash journal"
+            `Quick
+            test_compensated_rollback_clears_crash_journal
         ; test_case
             "journal recovery recovers interrupted dual-write"
             `Quick

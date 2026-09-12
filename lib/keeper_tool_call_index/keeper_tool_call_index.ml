@@ -445,11 +445,26 @@ let select_locations store ~keeper_name ~n =
     loop [])
 ;;
 
+(* ORDER BY ts made SQLite prefer rows_keeper_ts and visit every record for
+   the Keeper once per execution ID. The exact predicate uses both columns of
+   rows_keeper_execution; sort only the selected matches below. This preserves
+   duplicate evidence and its previous chronological order without rebuilding
+   the index or growing a cache. *)
+let select_execution_sql =
+  "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts, execution_id \
+   FROM rows WHERE keeper_name = ? AND execution_id = ?"
+
+let compare_execution_location
+    (path_a, offset_a, _, _, ts_a, _) (path_b, offset_b, _, _, ts_b, _) =
+  match Float.compare ts_a ts_b with
+  | 0 -> (match String.compare path_a path_b with
+      | 0 -> Int.compare offset_a offset_b
+      | order -> order)
+  | order -> order
+;;
+
 let select_execution_locations store ~keeper_name ~execution_ids =
-  with_stmt store.db ~operation:"select execution rows"
-    "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts, execution_id \
-     FROM rows WHERE keeper_name = ? AND execution_id = ? \
-     ORDER BY ts DESC, ledger_path DESC, ledger_offset DESC"
+  with_stmt store.db ~operation:"select execution rows" select_execution_sql
     (fun stmt ->
       let rec collect acc =
         match Sqlite3.step stmt with
@@ -473,7 +488,7 @@ let select_execution_locations store ~keeper_name ~execution_ids =
             let* () = bind_all store.db ~operation:"bind execution identity" stmt
                 [ Sqlite3.Data.TEXT keeper_name; Sqlite3.Data.TEXT execution_id ] in
             let* locations = collect [] in
-            Ok (locations :: batches))
+            Ok (List.sort compare_execution_location locations :: batches))
           (Ok []) (List.sort_uniq String.compare execution_ids)
       in
       Ok (List.concat (List.rev batches)))
@@ -549,5 +564,6 @@ let by_execution_ids ~store ~keeper_name ~execution_ids =
 ;;
 
 module For_testing = struct
+  let select_execution_sql = select_execution_sql
   let recent_rows = recent_rows_with
 end

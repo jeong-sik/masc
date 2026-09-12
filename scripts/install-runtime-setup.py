@@ -740,6 +740,36 @@ def docker_account_action(binary, base_path, port, action):
     return True
 
 
+def decode_pdf_tools_readiness(value):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.pdf_tools_readiness.v1'
+            or value.get('status') not in ('tools_available', 'unavailable')
+            or value.get('pdf_inspection') != 'not_run'
+            or value.get('scope') != 'current_process_environment'):
+        raise SetupError('MASC returned unreadable PDF tool readiness')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 2
+            or any(not isinstance(row, dict) or row.get('status') not in ('missing', 'started', 'failed')
+                   or row.get('command') not in ('pdftotext', 'pdftoppm') for row in checks)
+            or {row.get('command') for row in checks} != {'pdftotext', 'pdftoppm'}):
+        raise SetupError('MASC did not check both PDF inspection tools')
+    started = all(row['status'] == 'started' for row in checks)
+    if started != (value['status'] == 'tools_available'):
+        raise SetupError('MASC returned inconsistent PDF tool readiness')
+    return value
+
+
+def pdf_tools_status(binary):
+    result = subprocess.run([str(binary), 'prerequisite-actions', 'pdf-tools'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if result.returncode or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.prerequisite_actions.v1':
+            raise ValueError('invalid catalog')
+        return decode_pdf_tools_readiness(catalog.get('dependency_readiness'))
+    except (ValueError, TypeError):
+        raise SetupError('MASC could not inspect PDF tool availability')
+
+
 def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     result = subprocess.run([str(binary), 'prerequisite-actions', dependency],
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -750,6 +780,18 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     except (TypeError, ValueError):
         raise SetupError('MASC could not inspect installation actions for this computer')
     actions = catalog['actions']
+    if dependency == 'pdf-tools':
+        pdf = decode_pdf_tools_readiness(catalog.get('dependency_readiness'))
+        if pdf['status'] == 'tools_available':
+            print('PDF inspection tools are available. Original PDF inspection runs when a document is read.', file=sys.stderr)
+        else:
+            print('PDF inspection is unavailable. Install the tools below, then refresh detection.', file=sys.stderr)
+        for row in pdf['checks']:
+            print(terminal_text(row['command']) + ': ' + terminal_text(row['status']), file=sys.stderr)
+        if pdf['status'] == 'tools_available':
+            return True
+        if not actions:
+            print('No automatic installation action is available on this host. Install Poppler through your operating system, then refresh detection.', file=sys.stderr)
     if dependency == 'docker' and base_path is not None:
         account_actions = docker_account_actions(binary)
         for row in account_actions:
@@ -772,9 +814,19 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
                             stdout=subprocess.PIPE, text=True)
     try:
         receipt = json.loads(result.stdout)
-        if receipt.get('schema') != 'masc.prerequisite_action_result.v1' or receipt.get('readiness') != 'not_checked':
+        if receipt.get('schema') != 'masc.prerequisite_action_result.v1':
             raise ValueError('invalid result')
         state = receipt['status']
+        if dependency == 'pdf-tools' and receipt.get('readiness') in ('tools_available', 'unavailable'):
+            pdf = decode_pdf_tools_readiness(receipt.get('dependency_readiness'))
+            if receipt['readiness'] != pdf['status']:
+                raise ValueError('inconsistent PDF recheck')
+            if state == 'commands_completed' and pdf['status'] != 'tools_available':
+                raise ValueError('PDF tools were not available after installation')
+        elif receipt.get('readiness') != 'not_checked':
+            raise ValueError('invalid readiness')
+        if dependency == 'pdf-tools' and state == 'commands_completed' and receipt.get('readiness') != 'tools_available':
+            raise ValueError('PDF installation was not rechecked')
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
     if state == 'failed' or result.returncode:
@@ -783,6 +835,8 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
             print(terminal_text(reason), file=sys.stderr)
         else:
             print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+    elif dependency == 'pdf-tools' and state == 'commands_completed':
+        print('PDF tools installed and both commands started successfully. Original PDF inspection runs when a document is read.', file=sys.stderr)
     elif state == 'external_step_pending':
         print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
     elif state == 'commands_completed_recheck_required':
@@ -1507,15 +1561,24 @@ def select_sandbox(binary, base_path, port=8945):
         labels = [names.get(row['id'], row['id']) + (' · recommended' if row['recommended'] else '')
                   + ' — ' + ('service found; guest still needs preparation' if row['state'] == 'service_ready' else row['reason'])
                   for row in rows]
-        action = pick('4 · Choose imp’s sandbox', labels + [
+        try:
+            pdf = pdf_tools_status(binary)
+            pdf_label = ('PDF document inspection · tools available' if pdf['status'] == 'tools_available'
+                         else 'PDF document inspection · install missing tools')
+        except SetupError:
+            pdf_label = 'PDF document inspection · could not check tools'
+        action = pick('4 · Prepare imp’s workspace', labels + [
             'Refresh after installing or starting a service',
-            'Show common choices' if advanced else 'Advanced sandbox choices', 'Finish later'])[0]
+            'Show common choices' if advanced else 'Advanced sandbox choices', pdf_label, 'Finish later'])[0]
         if action == len(rows):
             continue
         if action == len(rows) + 1:
             advanced = not advanced
             continue
         if action == len(rows) + 2:
+            prerequisite_menu(binary, 'pdf-tools', base_path=base_path, port=port)
+            continue
+        if action == len(rows) + 3:
             return None
         row = rows[action]
         if row['state'] != 'service_ready':

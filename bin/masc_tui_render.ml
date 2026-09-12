@@ -4875,9 +4875,10 @@ let render_keeper_list (state : state) =
     done;
 
   box_line buf cols (keeper_operations_preview state);
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" (Theme.recede ()) Ansi.box_bl (draw_hline (cols - 2))
-       Ansi.box_br Ansi.reset);
+  (* A section rule, drawn by the helper the rest of this surface uses, so it
+     reads as the two rules above it do. No corners: the Keepers frame holds
+     no box_tl, box_tr or edge bar for a corner to point at. *)
+  box_divider buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:(keeper_action_hints ~offers_back:false state selected_reading));

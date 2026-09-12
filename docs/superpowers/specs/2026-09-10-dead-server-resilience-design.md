@@ -29,9 +29,9 @@
 
 ## PR C — 죽은 서버 fd 누수 제거
 
-- **probe-first connect**: connect 가능성을 단명 child switch에서 먼저 확인(`Eio.Net.connect`), 성공할 때만 pool switch에서 `Piaf.Client.create`. child switch teardown이 실패 소켓을 즉시 회수 → 누수 0. probe 성공 ↔ create 실패 race는 창이 좁고 그 경우에 한정.
-- **호스트별 connect-failure 백오프**: cooldown 동안 소켓 생성 없이 fast-fail. 죽은 서버를 2초마다 두드리는 낭비 제거 + 혹시 남은 누수 경로의 속도도 사실상 0. cooldown 값은 pool config 명시 필드 + 근거 주석(매직 넘버 금지).
-- 회귀 테스트: 도달 불가 포트에 `Pool.request` × 50 후 프로세스 fd 수 평탄 단언(`/dev/fd`, `/proc/self/fd`). 선례: `test/test_keeper_fd_pressure_fleet.ml`.
+- **클라이언트별 소켓 소유권**: TCP probe는 단명 child switch에서 수행한다. 실제 `Piaf.Client.create`도 별도 child switch에서 수행하고, 생성 실패·취소 때 그 switch를 닫는다. 성공한 클라이언트는 같은 switch를 유지하며 pool에서 재사용하고, eviction·shutdown 때 취소와 정리를 끝까지 기다린다. TLS 실패나 취소의 소켓 정리를 probe 성공 여부에 맡기지 않는다.
+- **호스트별 connect-failure 백오프**: 보고된 실패 이후 cooldown 동안 후속 요청이 소켓 생성 없이 fast-fail한다. 동시에 시작한 요청까지 직렬화하지 않으며, 백오프는 소켓 회수를 보장하는 수단이 아니다. cooldown 값은 기존 pool config 필드를 사용한다.
+- 회귀 테스트: cooldown을 끄고 도달 불가 포트·잘못된 TLS 응답·TLS handshake 중 취소를 각각 반복한 뒤 프로세스 fd 수를 확인한다. 정상 HTTP 연결 재사용과 shutdown도 확인한다. 테스트 코드 추가와 실제 실행 결과는 구분하며, TLS 누수 여부의 실측 판정은 해당 커밋의 CI 결과가 필요하다. 선례: `test/test_keeper_fd_pressure_fleet.ml`.
 - Piaf는 upstream 고정(`piaf (= 0.2.0)`)이라 masc 쪽에서 감내. upstream 기여는 별건.
 
 ## PR D — 설치가 workspace를 기억하게 (bare `masc` 동작)

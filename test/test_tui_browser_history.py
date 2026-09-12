@@ -55,8 +55,10 @@ def run(binary):
         "data": {"clients": [{"clientId": client, "browser": "firefox"}]}})
 
     def read(body):
-        requests.append(("read", json.loads(body)))
-        return 200, {"ok": True, "data": {"source": "live", "clientId": client, "elapsed_ms": 1.,
+        request = json.loads(body)
+        requests.append(("read", request))
+        lane = request["lane"]
+        return 200, {"ok": True, "data": {"source": lane, "clientId": client if lane == "live" else None, "elapsed_ms": 1.,
             "tabs": [{"id": 2, "title": "Current page", "url": current, "active": True}],
             "page": {"tabId": 2, "title": "Current page", "url": current,
                      "text": "CURRENT PAGE CONTENT", "chars": 20, "truncated": False}}}
@@ -89,6 +91,9 @@ def run(binary):
             assert len(requests) == count, "history dispatched a current browser request"
             assert not any(kind == "unexpected effect" for kind, _ in requests)
             h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"a", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"ghttps://example.org/history", b"https://example.org/history")
+            h.send_and_wait(process, fd, output, b"\x1b", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             # Global navigation must release the hidden history's key ownership.
             h.send_and_wait(process, fd, output, b"\x1b[<0;5;1M\x1b[<0;5;1m", b"MASC Overview")

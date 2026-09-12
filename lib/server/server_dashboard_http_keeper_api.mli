@@ -9,9 +9,9 @@
 module Http = Http_server_eio
 (** Alias used internally for the Eio HTTP server module. *)
 
-val tool_calls_fleet_cache_key : masc_root:string -> string
-(** Return the bounded fleet-row cache key after invalidating its cached value
-    when the durable tool-call revision has advanced. *)
+val tool_call_entries : keeper_name:string -> limit:int -> Yojson.Safe.t list
+(** Exact per-Keeper indexed tail, in chronological order, with the same tool
+    definition annotations emitted by [/tool-calls]. *)
 
 val file_changes_default_window_hours : float
 val file_changes_max_window_hours : float

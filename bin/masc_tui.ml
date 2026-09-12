@@ -15789,35 +15789,6 @@ and is loaded on demand through keeper_skill.
        | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some key when key <> "q" && Option.is_some (browser_history_on_screen state) ->
-           (match state.browser_history with
-            | None -> ()
-            | Some history ->
-                (match key with
-                 | "esc" | "h" ->
-                     close_browser_history state
-                 | "[" | "]" ->
-                     Option.iter (fun next ->
-                       state.browser_history <- Some next;
-                       launch_browser_history state ~mailbox:async_messages ~reload:false)
-                       (Browser_history.move (if key="[" then -1 else 1) history)
-                 | "r" ->
-                     state.browser_history <- Some (Browser_history.create history.keeper_name);
-                     launch_browser_history state ~mailbox:async_messages ~reload:true
-                 | "y" -> Option.iter (copy_reference_to_terminal render_schedule) (Browser_history.context history)
-                 | "j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" ->
-                     let terminal_rows, cols = get_terminal_size () in
-                     let limit = Masc_tui_render.browser_history_scroll_limit state ~terminal_rows ~cols history in
-                     let delta = match key with "j" | "down" -> 1 | "k" | "up" -> -1
-                       | "pagedown" -> max 1 (terminal_rows-10) | "pageup" -> -(max 1 (terminal_rows-10)) | _ -> -history.scroll in
-                     state.browser_history <- Some {history with scroll=max 0 (min limit (history.scroll+delta))}
-                 | _ -> ()))
-       | Some "h" when Option.is_some (browser_lane_on_screen state) ->
-           (match selected_keeper state with
-            | None -> add_event state "system" "Choose a Keeper to read its retained observations"
-            | Some keeper ->
-                state.browser_history <- Some (Browser_history.create keeper.k_name);
-                launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some key when Option.is_some state.lane_addons ->
            let module Addons = Masc_tui_lane_addons in
            (match state.lane_addons with
@@ -17082,6 +17053,7 @@ and is loaded on demand through keeper_skill.
                           launch_browser_lane state ~mailbox:async_messages Read)
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
+                       && Option.is_none (browser_history_on_screen state)
                        && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -17125,6 +17097,36 @@ and is loaded on demand through keeper_skill.
                              && (String.length text = 1 || Char.code text.[0] >= 128) ->
                      edit (Some (draft ^ text))
                  | _ -> ()))
+       | Some key when Browser_history.owns_key key && Option.is_some (browser_history_on_screen state) ->
+           (match state.browser_history with
+            | None -> ()
+            | Some history ->
+                (match key with
+                 | "esc" | "left" | "h" ->
+                     close_browser_history state
+                 | "[" | "]" ->
+                     Option.iter (fun next ->
+                       state.browser_history <- Some next;
+                       launch_browser_history state ~mailbox:async_messages ~reload:false)
+                       (Browser_history.move (if key="[" then -1 else 1) history)
+                 | "r" ->
+                     state.browser_history <- Some (Browser_history.create history.keeper_name);
+                     launch_browser_history state ~mailbox:async_messages ~reload:true
+                 | "y" -> Option.iter (copy_reference_to_terminal render_schedule) (Browser_history.context history)
+                 | "j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" ->
+                     let terminal_rows, cols = get_terminal_size () in
+                     let limit = Masc_tui_render.browser_history_scroll_limit state ~terminal_rows ~cols history in
+                     let delta = match key with "j" | "down" -> 1 | "k" | "up" -> -1
+                       | "pagedown" -> max 1 (terminal_rows-10) | "pageup" -> -(max 1 (terminal_rows-10)) | _ -> -history.scroll in
+                     state.browser_history <- Some {history with scroll=max 0 (min limit (history.scroll+delta))}
+                 | _ -> ()))
+       | Some "h" when (match browser_lane_on_screen state with
+           | Some {url_draft=None;client_picker=None;_} -> true | _ -> false) ->
+           (match selected_keeper state with
+            | None -> add_event state "system" "Choose a Keeper to read its retained observations"
+            | Some keeper ->
+                state.browser_history <- Some (Browser_history.create keeper.k_name);
+                launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"

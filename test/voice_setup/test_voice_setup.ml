@@ -266,7 +266,7 @@ let test_an_agent_voice_is_set_and_cleared () =
 let test_send_on_stop_is_written_as_a_boolean () =
   with_config fixture (fun path ->
     (match apply path [ Voice_setup.Set_send_on_stop true ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     let reads contents =
       match Voice_config.parse_runtime_toml_text contents with
@@ -280,7 +280,7 @@ let test_send_on_stop_is_written_as_a_boolean () =
     Alcotest.(check bool) "written unquoted" true
       (Astring.String.is_infix ~affix:"send_on_stop = true" (read path));
     (match apply path [ Voice_setup.Set_send_on_stop false ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     Alcotest.(check (option bool)) "and off again" (Some false) (reads (read path)))
 

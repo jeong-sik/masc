@@ -12,6 +12,7 @@ type Draft = {
   fileName: string; text: string; document: LaneDeclarationDocument | null;
   current: LaneDeclarationDocument | null; phase: 'loading' | 'idle' | 'reading' | 'saving';
   error: string | null; notice: string | null;
+  retainedCreateDrafts: { text: string; sourceRevision: string }[];
 }
 const template = 'id = ""\nrun_id = ""\nmanifest_path = ""\n\n[binding]\nsources = []\n'
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -53,12 +54,13 @@ export function LaneDeclarationEditor({ target, onClose, onSaved }: {
     setDrafts(all => ({ ...all, [target.key]: {
       fileName: '', text: target.sourcePath === null ? template : '', document: null, current: null,
       phase: target.sourcePath === null ? 'idle' : 'loading', error: null, notice: null,
+      retainedCreateDrafts: [],
     } }))
     if (target.sourcePath !== null) void read(target.key, target.sourcePath, true)
   }, [target, read])
-  const dirty = Object.values(drafts).some(draft => draft.document === null
+  const dirty = Object.values(drafts).some(draft => draft.retainedCreateDrafts.length > 0 || (draft.document === null
     ? draft.fileName !== '' || draft.text !== template && draft.text !== ''
-    : draft.text !== draft.document.source_text)
+    : draft.text !== draft.document.source_text))
   useEffect(() => {
     if (!dirty) return undefined
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
@@ -99,7 +101,13 @@ export function LaneDeclarationEditor({ target, onClose, onSaved }: {
         // The file can be discovered and opened before its create response
         // reaches this session. That destination owns its newer draft, read
         // revision, comparison, and any in-flight save.
-        if (savedKey !== key && all[savedKey] !== undefined) return remaining
+        const destination = all[savedKey]
+        if (savedKey !== key && destination !== undefined) {
+          const retainedCreateDrafts = [...destination.retainedCreateDrafts, ...value.retainedCreateDrafts,
+            ...(value.text !== request.source_text && value.text !== destination.text
+              ? [{ text: value.text, sourceRevision: receipt.document.source_revision }] : [])]
+          return { ...remaining, [savedKey]: { ...destination, retainedCreateDrafts } }
+        }
         return { ...remaining, [savedKey]: next }
       })
       onSaved(key, receipt.document)
@@ -152,6 +160,16 @@ export function LaneDeclarationEditor({ target, onClose, onSaved }: {
     </div>
     ${draft.error !== null && html`<p role="alert">${draft.error}</p>`}
     ${draft.notice !== null && html`<p role="status">${draft.notice}</p>`}
+    ${draft.retainedCreateDrafts.map((retained, index) => html`<section key=${index} class="space-y-2" aria-label=${`Retained create draft ${index + 1} comparison`}>
+      <p>These unsaved edits were made while the create response was pending. Your separately opened draft is unchanged. Copy any edits you need into the current draft before saving.</p>
+      <p>Created file source revision: <code>${retained.sourceRevision}</code></p>
+      <label class="block">Retained create draft ${index + 1}
+        <${TextArea} value=${retained.text} readOnly rows=${6} class="block w-full font-mono" />
+      </label>
+      <${ActionButton} onClick=${() => update(key, value => ({ ...value,
+        retainedCreateDrafts: value.retainedCreateDrafts.filter((_, retainedIndex) => retainedIndex !== index),
+      }))}>Discard retained create draft ${index + 1}</${ActionButton}>
+    </section>`)}
     ${draft.current !== null && html`<section class="space-y-2" aria-label="Current file comparison">
       <p>Current file source revision: <code>${draft.current.source_revision}</code></p>
       <pre class="overflow-auto whitespace-pre-wrap break-all" aria-label="Current file source">${draft.current.source_text}</pre>

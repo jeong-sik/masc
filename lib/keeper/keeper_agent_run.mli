@@ -267,10 +267,20 @@ val run_turn
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
   -> ?on_runtime_retry_deferred:
        (Keeper_turn_driver.deferred_runtime_lane -> unit)
-  -> ?on_runtime_attempt_failed:(runtime_id:string -> unit)
-       (* Called once per candidate that dispatched and errored, with that
-          candidate's own id. A failure returns no [run_result], so this is
-          the only place the caller learns who answered. *)
+  -> ?on_runtime_attempt_failed:
+       (runtime_id:string
+        -> dispatch:Keeper_attempt_dispatch.t
+        -> error:Agent_core.Error.t
+        -> unit)
+       (* Called once per candidate the runtime walk attempted and that ended
+          in an error, with that candidate's own id, whether the walk invoked
+          its provider or client, and the error. A failure returns no
+          [run_result], so this is the only place the caller learns which
+          candidates the walk reached and with what. *)
+  -> ?on_runtime_lane_terminal_error:
+       (Keeper_turn_driver.lane_terminal_error -> unit)
+       (* Called once per runtime walk that returns a candidate's error as
+          the lane's error, with the candidate that produced it. *)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
   -> ?shared_context:Agent_core.Context.t

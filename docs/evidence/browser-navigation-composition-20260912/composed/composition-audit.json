@@ -1,0 +1,230 @@
+{
+  "source": "typed turn execution_ids joined to durable tool_call rows; composition actions joined by execution_id and tool_use_id",
+  "operation_id": "kmsg-98ba877dbad3262d9e4126b8abee44ef",
+  "state": "Succeeded",
+  "trace_id": "trace-1789222468127-00000",
+  "runtime_id": "codex_subscription.gpt-5.6-luna",
+  "server": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "cd7f637eca4ce164552fafc47051fb70579c91dd",
+    "commit_source": "embedded",
+    "binary_commit": "cd7f637eca4ce164552fafc47051fb70579c91dd",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "08f3ce42a9ebbf2c5dc2f14e50dd390e45c8c0cdf0c59f4218168ef591525e7d",
+    "binary_commit_unix_ts": 1789221166.0,
+    "binary_commit_age_seconds": 1289,
+    "executable_path": "/private/tmp/browser-composition-native-cd7/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-composition-native-cd7/runtime",
+    "runtime_instance_id": "01a095f8-0187-7000-8b45-c1e8c5c95002",
+    "started_at": "2026-09-12T14:14:13Z",
+    "uptime_seconds": 2
+  },
+  "tui_sha256": "821a88fe8299a0e367496adff2e65ddaafd3af6f6de9be4c0c5712e9a5a6d781",
+  "outer_call_count": 10,
+  "outer_errors": 1,
+  "composition_invocations": 3,
+  "outer_result_bytes": 21904,
+  "outer_calls": [
+    {
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "source_id": "project-masc",
+          "package_id": "team-channels-fixture",
+          "name": "team-channels-fixture"
+        }
+      },
+      "execution_id": "exec-1789222483524-0001",
+      "tool_use_id": "exec-a9788879-c10c-4a69-8c05-1ac88b63e119",
+      "success": true,
+      "output": "# Team Channels\n\nUse this instruction with browser-lanes for the Team Channels fixture only.\nThe Channels navigation contains ordinary same-tab links. Observe its link targets\nand reuse those targets within this site; do not infer paths from channel names.\nA channel's main landmark is labelled with its channel name. Its article is the\nvisible message list. The sidebar is a navigation summary, not message evidence.\n\nCollect the requested channels' visible messages, sender, time, decision, open\nrequest, and message permalink. Check the channel heading and message content after\nnavigation. Preserve a small per-channel result before leaving it. Reuse observed\nsame-site links instead of reopening the channel index for every channel.\n\nA mention must occur in a message and name the requested person. Distinguish older\nsuperseded decisions from current decisions. Derive shared work from the messages\nacross channels, with the per-channel sources. Do not invent a site API, token,\nconnector, or hidden history. Report the visible coverage and any missing channel.\n\nFor a known observed link URL on an automation tab, prefer the available keeper_compose_browser-navigate-regions tool. It performs navigation and the next region read in one ordered call. Reuse its returned region references for the scoped message read instead of reading the regions again. If the navigation node completed but the read failed, retry only BrowserRead on the same tab; do not replay the composition."
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "mode": "elements",
+        "expectedUrl": "http://127.0.0.1:56380/index.html"
+      },
+      "execution_id": "exec-1789222487264-0002",
+      "tool_use_id": "exec-8f8dce96-a59e-4981-839f-8ed74ca88b69",
+      "success": false,
+      "output": "expectedUrl supports top-document scene or regions only\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "mode": "regions"
+      },
+      "execution_id": "exec-1789222489600-0003",
+      "tool_use_id": "exec-5c8e1803-3e37-4292-b8cb-99db3963b26d",
+      "success": true,
+      "output": "{\"tabId\":1,\"chars\":34,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"2591bde12a0b50e7215db7a2141ee5cc\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n1\",\"rects\":[{\"height\":269.83331298828125,\"width\":190,\"x\":20,\"y\":20}],\"role\":\"nav\",\"sourceContext\":null,\"tag\":\"nav\",\"text\":\"Channels\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n2\",\"rects\":[{\"height\":269.83331298828125,\"width\":848,\"x\":234,\"y\":20}],\"role\":\"main\",\"sourceContext\":null,\"tag\":\"main\",\"text\":\"Overview\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n3\",\"rects\":[{\"height\":269.83331298828125,\"width\":240,\"x\":1106,\"y\":20}],\"role\":\"aside\",\"sourceContext\":null,\"tag\":\"aside\",\"text\":\"Navigation summary\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":null,\"title\":\"Overview · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/index.html\",\"view\":\"regions\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":9.246124999999999}"
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "mode": "scene",
+        "scope": {
+          "documentId": "2591bde12a0b50e7215db7a2141ee5cc",
+          "nodeId": "n1"
+        }
+      },
+      "execution_id": "exec-1789222492864-0004",
+      "tool_use_id": "exec-c2fc23b2-aabc-4dce-aff8-4afcf901ed2c",
+      "success": true,
+      "output": "{\"tabId\":1,\"chars\":22,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"2591bde12a0b50e7215db7a2141ee5cc\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":27,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n4\",\"rects\":[{\"height\":28,\"width\":121.5500030517578,\"x\":39,\"y\":61.41667175292969}],\"sourceContext\":null,\"tag\":\"h2\",\"text\":\"Channels\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/alpha.html\",\"kind\":\"control\",\"nodeId\":\"n5\",\"rects\":[{\"height\":19,\"width\":46.05000305175781,\"x\":39,\"y\":111.83332824707033}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Alpha\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/beta.html\",\"kind\":\"control\",\"nodeId\":\"n6\",\"rects\":[{\"height\":19,\"width\":37.03334045410156,\"x\":39,\"y\":130.8333282470703}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Beta\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/gamma.html\",\"kind\":\"control\",\"nodeId\":\"n7\",\"rects\":[{\"height\":19,\"width\":64.03334045410156,\"x\":39,\"y\":149.8333282470703}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Gamma\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"2591bde12a0b50e7215db7a2141ee5cc\",\"nodeId\":\"n1\"},\"title\":\"Overview · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/index.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":31.19025}"
+    },
+    {
+      "tool": "keeper_compose_browser-navigate-regions",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:56380/alpha.html"
+      },
+      "execution_id": "exec-1789222495729-0007",
+      "tool_use_id": "exec-a5203d7c-35f9-475e-9b98-ae9e623581a1",
+      "success": true,
+      "output": "{\"composition_tool\":\"keeper_compose_browser-navigate-regions\",\"tool_kind\":\"composition\",\"actions\":[{\"node_id\":\"navigate\",\"execution_id\":\"exec-1789222495582-0005\",\"tool_name\":\"BrowserGoto\",\"input\":{\"tabId\":1,\"url\":\"http://127.0.0.1:56380/alpha.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"disposition\":\"completed\",\"data\":{\"title\":\"Alpha · Team Channels\",\"url\":\"http://127.0.0.1:56380/alpha.html\"},\"tool_name\":\"masc_browser_goto\",\"duration_ms\":108.0},\"tool_use_id\":\"composition:36:01a095f8-a55e-7000-9c65-44100d92e809:41:exec-a5203d7c-35f9-475e-9b98-ae9e623581a1:8:navigate\",\"failure_effect_disposition\":null,\"deferred_kind\":null,\"result_bytes\":76,\"truncated_to\":null},{\"node_id\":\"regions\",\"execution_id\":\"exec-1789222495695-0006\",\"tool_name\":\"BrowserRead\",\"input\":{\"lane\":\"automation\",\"tabId\":1,\"mode\":\"regions\",\"expectedUrl\":\"http://127.0.0.1:56380/alpha.html\"},\"schedule\":{\"planned_index\":1,\"batch_index\":1,\"batch_size\":1,\"execution_mode\":\"concurrent\"},\"result\":{\"disposition\":\"completed\",\"data\":{\"tabId\":1,\"chars\":87,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"3f0aaaa9e4f45642d375afd344b904bd\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n1\",\"rects\":[{\"height\":421.23333740234375,\"width\":190,\"x\":20,\"y\":20}],\"role\":\"nav\",\"sourceContext\":null,\"tag\":\"nav\",\"text\":\"Channels\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n2\",\"rects\":[{\"height\":421.23333740234375,\"width\":848,\"x\":234,\"y\":20}],\"role\":\"main\",\"sourceContext\":null,\"tag\":\"main\",\"text\":\"Alpha channel\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n3\",\"rects\":[{\"height\":243,\"width\":810,\"x\":253,\"y\":124.23333740234376}],\"role\":\"article\",\"sourceContext\":null,\"tag\":\"article\",\"text\":\"Visible messages\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n4\",\"rects\":[{\"height\":106,\"width\":810,\"x\":253,\"y\":124.23333740234376}],\"role\":\"section\",\"sourceContext\":null,\"tag\":\"section\",\"text\":\"Message a1\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n5\",\"rects\":[{\"height\":19,\"width\":810,\"x\":253,\"y\":137.23333740234375}],\"role\":\"header\",\"sourceContext\":null,\"tag\":\"header\",\"text\":\"header\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n6\",\"rects\":[{\"height\":125,\"width\":810,\"x\":253,\"y\":242.23333740234375}],\"role\":\"section\",\"sourceContext\":null,\"tag\":\"section\",\"text\":\"Message a2\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n7\",\"rects\":[{\"height\":19,\"width\":810,\"x\":253,\"y\":255.23333740234375}],\"role\":\"header\",\"sourceContext\":null,\"tag\":\"header\",\"text\":\"header\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n8\",\"rects\":[{\"height\":421.23333740234375,\"width\":240,\"x\":1106,\"y\":20}],\"role\":\"aside\",\"sourceContext\":null,\"tag\":\"aside\",\"text\":\"Navigation summary\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":null,\"title\":\"Alpha · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/alpha.html\",\"view\":\"regions\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":22.216},\"tool_name\":\"masc_browser_read\",\"duration_ms\":22.0},\"tool_use_id\":\"composition:36:01a095f8-a55e-7000-9c65-44100d92e809:41:exec-a5203d7c-35f9-475e-9b98-ae9e623581a1:7:regions\",\"failure_effect_disposition\":null,\"deferred_kind\":null,\"result_bytes\":2487,\"truncated_to\":null}]}"
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "mode": "scene",
+        "scope": {
+          "documentId": "3f0aaaa9e4f45642d375afd344b904bd",
+          "nodeId": "n3"
+        }
+      },
+      "execution_id": "exec-1789222498533-0008",
+      "tool_use_id": "exec-c4cbdf90-d610-47d9-9916-4ac5570b5b2a",
+      "success": true,
+      "output": "{\"tabId\":1,\"chars\":255,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"3f0aaaa9e4f45642d375afd344b904bd\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n14\",\"rects\":[{\"height\":19,\"width\":41.01666259765625,\"x\":253,\"y\":137.23333740234375}],\"sourceContext\":null,\"tag\":\"strong\",\"text\":\"Mina\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n15\",\"rects\":[{\"height\":15,\"width\":110.5,\"x\":299.01666259765625,\"y\":140.23333740234375}],\"sourceContext\":null,\"tag\":\"time\",\"text\":\"2026-09-12 09:00\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n16\",\"rects\":[{\"height\":19,\"width\":316.98333740234375,\"x\":253,\"y\":174.23333740234375}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Superseded plan: ship Cedar on Friday.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/alpha.html#a1\",\"kind\":\"control\",\"nodeId\":\"n17\",\"rects\":[{\"height\":19,\"width\":105.08332824707033,\"x\":253,\"y\":211.23333740234375}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Message link\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n18\",\"rects\":[{\"height\":19,\"width\":44.03334045410156,\"x\":253,\"y\":255.23333740234375}],\"sourceContext\":null,\"tag\":\"strong\",\"text\":\"Hana\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n19\",\"rects\":[{\"height\":15,\"width\":110.5,\"x\":302.0333251953125,\"y\":258.23333740234375}],\"sourceContext\":null,\"tag\":\"time\",\"text\":\"2026-09-12 10:00\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n20\",\"rects\":[{\"height\":19,\"width\":743.25,\"x\":253,\"y\":292.23333740234375},{\"height\":19,\"width\":511.0833129882813,\"x\":253,\"y\":311.23333740234375}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Current decision: ship Cedar Tuesday after accessibility approval. @Mina please approve the accessibility checklist Monday. Shared dependency: schema v4.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/alpha.html#a2\",\"kind\":\"control\",\"nodeId\":\"n21\",\"rects\":[{\"height\":19,\"width\":105.08332824707033,\"x\":253,\"y\":348.23333740234375}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Message link\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"3f0aaaa9e4f45642d375afd344b904bd\",\"nodeId\":\"n3\"},\"title\":\"Alpha · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/alpha.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":39.147875}"
+    },
+    {
+      "tool": "keeper_compose_browser-navigate-regions",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:56380/beta.html"
+      },
+      "execution_id": "exec-1789222501710-000b",
+      "tool_use_id": "exec-a4ccae40-0dc2-48c6-9086-533d0ddff1aa",
+      "success": true,
+      "output": "{\"composition_tool\":\"keeper_compose_browser-navigate-regions\",\"tool_kind\":\"composition\",\"actions\":[{\"node_id\":\"navigate\",\"execution_id\":\"exec-1789222501611-0009\",\"tool_name\":\"BrowserGoto\",\"input\":{\"tabId\":1,\"url\":\"http://127.0.0.1:56380/beta.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"disposition\":\"completed\",\"data\":{\"title\":\"Beta · Team Channels\",\"url\":\"http://127.0.0.1:56380/beta.html\"},\"tool_name\":\"masc_browser_goto\",\"duration_ms\":68.0},\"tool_use_id\":\"composition:36:01a095f8-bceb-7000-ba18-d0830355c46c:41:exec-a4ccae40-0dc2-48c6-9086-533d0ddff1aa:8:navigate\",\"failure_effect_disposition\":null,\"deferred_kind\":null,\"result_bytes\":74,\"truncated_to\":null},{\"node_id\":\"regions\",\"execution_id\":\"exec-1789222501681-000a\",\"tool_name\":\"BrowserRead\",\"input\":{\"lane\":\"automation\",\"tabId\":1,\"mode\":\"regions\",\"expectedUrl\":\"http://127.0.0.1:56380/beta.html\"},\"schedule\":{\"planned_index\":1,\"batch_index\":1,\"batch_size\":1,\"execution_mode\":\"concurrent\"},\"result\":{\"disposition\":\"completed\",\"data\":{\"tabId\":1,\"chars\":70,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"3df487627d07b4e05766834ce6138a7a\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n1\",\"rects\":[{\"height\":303.23333740234375,\"width\":190,\"x\":20,\"y\":20}],\"role\":\"nav\",\"sourceContext\":null,\"tag\":\"nav\",\"text\":\"Channels\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n2\",\"rects\":[{\"height\":303.23333740234375,\"width\":848,\"x\":234,\"y\":20}],\"role\":\"main\",\"sourceContext\":null,\"tag\":\"main\",\"text\":\"Beta channel\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n3\",\"rects\":[{\"height\":125,\"width\":810,\"x\":253,\"y\":124.23333740234376}],\"role\":\"article\",\"sourceContext\":null,\"tag\":\"article\",\"text\":\"Visible messages\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n4\",\"rects\":[{\"height\":125,\"width\":810,\"x\":253,\"y\":124.23333740234376}],\"role\":\"section\",\"sourceContext\":null,\"tag\":\"section\",\"text\":\"Message b1\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n5\",\"rects\":[{\"height\":19,\"width\":810,\"x\":253,\"y\":137.23333740234375}],\"role\":\"header\",\"sourceContext\":null,\"tag\":\"header\",\"text\":\"header\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n6\",\"rects\":[{\"height\":303.23333740234375,\"width\":240,\"x\":1106,\"y\":20}],\"role\":\"aside\",\"sourceContext\":null,\"tag\":\"aside\",\"text\":\"Navigation summary\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":null,\"title\":\"Beta · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/beta.html\",\"view\":\"regions\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":23.309625},\"tool_name\":\"masc_browser_read\",\"duration_ms\":23.0},\"tool_use_id\":\"composition:36:01a095f8-bceb-7000-ba18-d0830355c46c:41:exec-a4ccae40-0dc2-48c6-9086-533d0ddff1aa:7:regions\",\"failure_effect_disposition\":null,\"deferred_kind\":null,\"result_bytes\":1984,\"truncated_to\":null}]}"
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "mode": "scene",
+        "scope": {
+          "documentId": "3df487627d07b4e05766834ce6138a7a",
+          "nodeId": "n3"
+        }
+      },
+      "execution_id": "exec-1789222504314-000c",
+      "tool_use_id": "exec-63289b6e-20c3-4cd0-94c0-6ea36b32f6d2",
+      "success": true,
+      "output": "{\"tabId\":1,\"chars\":172,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"3df487627d07b4e05766834ce6138a7a\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n12\",\"rects\":[{\"height\":19,\"width\":43.01666259765625,\"x\":253,\"y\":137.23333740234375}],\"sourceContext\":null,\"tag\":\"strong\",\"text\":\"Joon\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n13\",\"rects\":[{\"height\":15,\"width\":110.5,\"x\":301.01666259765625,\"y\":140.23333740234375}],\"sourceContext\":null,\"tag\":\"time\",\"text\":\"2026-09-12 09:30\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n14\",\"rects\":[{\"height\":19,\"width\":803.9166870117188,\"x\":253,\"y\":174.23333740234375},{\"height\":19,\"width\":329.29998779296875,\"x\":253,\"y\":193.23333740234375}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Current decision: finish schema v4 migration Monday for Cedar. Owner: Joon. @Mina please confirm the client payload before migration starts.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/beta.html#b1\",\"kind\":\"control\",\"nodeId\":\"n15\",\"rects\":[{\"height\":19,\"width\":105.08332824707033,\"x\":253,\"y\":230.23333740234375}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Message link\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"3df487627d07b4e05766834ce6138a7a\",\"nodeId\":\"n3\"},\"title\":\"Beta · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/beta.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":19.645583}"
+    },
+    {
+      "tool": "keeper_compose_browser-navigate-regions",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:56380/gamma.html"
+      },
+      "execution_id": "exec-1789222507008-000f",
+      "tool_use_id": "exec-80aa1f04-e9c0-4869-865c-10d548776a46",
+      "success": true,
+      "output": "{\"composition_tool\":\"keeper_compose_browser-navigate-regions\",\"tool_kind\":\"composition\",\"actions\":[{\"node_id\":\"navigate\",\"execution_id\":\"exec-1789222506804-000d\",\"tool_name\":\"BrowserGoto\",\"input\":{\"tabId\":1,\"url\":\"http://127.0.0.1:56380/gamma.html\"},\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\"execution_mode\":\"serial\"},\"result\":{\"disposition\":\"completed\",\"data\":{\"title\":\"Gamma · Team Channels\",\"url\":\"http://127.0.0.1:56380/gamma.html\"},\"tool_name\":\"masc_browser_goto\",\"duration_ms\":89.0},\"tool_use_id\":\"composition:36:01a095f8-d134-7000-b392-996ae239b28e:41:exec-80aa1f04-e9c0-4869-865c-10d548776a46:8:navigate\",\"failure_effect_disposition\":null,\"deferred_kind\":null,\"result_bytes\":76,\"truncated_to\":null},{\"node_id\":\"regions\",\"execution_id\":\"exec-1789222506895-000e\",\"tool_name\":\"BrowserRead\",\"input\":{\"lane\":\"automation\",\"tabId\":1,\"mode\":\"regions\",\"expectedUrl\":\"http://127.0.0.1:56380/gamma.html\"},\"schedule\":{\"planned_index\":1,\"batch_index\":1,\"batch_size\":1,\"execution_mode\":\"concurrent\"},\"result\":{\"disposition\":\"completed\",\"data\":{\"tabId\":1,\"chars\":71,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"13800fe09f69a76691ecfa271af4c1d1\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n1\",\"rects\":[{\"height\":303.23333740234375,\"width\":190,\"x\":20,\"y\":20}],\"role\":\"nav\",\"sourceContext\":null,\"tag\":\"nav\",\"text\":\"Channels\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n2\",\"rects\":[{\"height\":303.23333740234375,\"width\":848,\"x\":234,\"y\":20}],\"role\":\"main\",\"sourceContext\":null,\"tag\":\"main\",\"text\":\"Gamma channel\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n3\",\"rects\":[{\"height\":125,\"width\":810,\"x\":253,\"y\":124.23333740234376}],\"role\":\"article\",\"sourceContext\":null,\"tag\":\"article\",\"text\":\"Visible messages\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n4\",\"rects\":[{\"height\":125,\"width\":810,\"x\":253,\"y\":124.23333740234376}],\"role\":\"section\",\"sourceContext\":null,\"tag\":\"section\",\"text\":\"Message g1\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n5\",\"rects\":[{\"height\":19,\"width\":810,\"x\":253,\"y\":137.23333740234375}],\"role\":\"header\",\"sourceContext\":null,\"tag\":\"header\",\"text\":\"header\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"region\",\"nodeId\":\"n6\",\"rects\":[{\"height\":303.23333740234375,\"width\":240,\"x\":1106,\"y\":20}],\"role\":\"aside\",\"sourceContext\":null,\"tag\":\"aside\",\"text\":\"Navigation summary\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":null,\"title\":\"Gamma · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/gamma.html\",\"view\":\"regions\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":92.69395900000001},\"tool_name\":\"masc_browser_read\",\"duration_ms\":92.0},\"tool_use_id\":\"composition:36:01a095f8-d134-7000-b392-996ae239b28e:41:exec-80aa1f04-e9c0-4869-865c-10d548776a46:7:regions\",\"failure_effect_disposition\":null,\"deferred_kind\":null,\"result_bytes\":1995,\"truncated_to\":null}]}"
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "tabId": 1,
+        "mode": "scene",
+        "scope": {
+          "documentId": "13800fe09f69a76691ecfa271af4c1d1",
+          "nodeId": "n3"
+        }
+      },
+      "execution_id": "exec-1789222510501-0010",
+      "tool_use_id": "exec-93dd0e9f-61ce-41e8-93f2-1b58e18055c9",
+      "success": true,
+      "output": "{\"tabId\":1,\"chars\":163,\"coverage\":\"top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness\",\"documentId\":\"13800fe09f69a76691ecfa271af4c1d1\",\"nodes\":[{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"700\",\"kind\":\"text\",\"nodeId\":\"n12\",\"rects\":[{\"height\":19,\"width\":40.01666259765625,\"x\":253,\"y\":137.23333740234375}],\"sourceContext\":null,\"tag\":\"strong\",\"text\":\"Sora\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(82, 96, 109)\",\"fontSize\":14,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n13\",\"rects\":[{\"height\":15,\"width\":110.5,\"x\":298.01666259765625,\"y\":140.23333740234375}],\"sourceContext\":null,\"tag\":\"time\",\"text\":\"2026-09-12 10:15\",\"whiteSpace\":\"normal\"},{\"color\":\"rgb(21, 32, 43)\",\"fontSize\":18,\"fontWeight\":\"400\",\"kind\":\"text\",\"nodeId\":\"n14\",\"rects\":[{\"height\":19,\"width\":743.2999877929688,\"x\":253,\"y\":174.23333740234375},{\"height\":19,\"width\":337.33331298828125,\"x\":253,\"y\":193.23333740234375}],\"sourceContext\":null,\"tag\":\"p\",\"text\":\"Current decision: run Cedar end-to-end QA Wednesday against schema v4. Owner: Sora. No additional request for Mina in this channel.\",\"whiteSpace\":\"normal\"},{\"clickable\":true,\"color\":\"rgb(22, 82, 166)\",\"controlType\":\"a\",\"disabled\":false,\"editable\":false,\"fontSize\":18,\"fontWeight\":\"400\",\"href\":\"http://127.0.0.1:56380/gamma.html#g1\",\"kind\":\"control\",\"nodeId\":\"n15\",\"rects\":[{\"height\":19,\"width\":105.08332824707033,\"x\":253,\"y\":230.23333740234375}],\"sourceContext\":null,\"tag\":\"a\",\"text\":\"Message link\",\"whiteSpace\":\"normal\"}],\"schema\":\"masc.browser.scene.v1\",\"scope\":{\"documentId\":\"13800fe09f69a76691ecfa271af4c1d1\",\"nodeId\":\"n3\"},\"title\":\"Gamma · Team Channels\",\"truncated\":false,\"url\":\"http://127.0.0.1:56380/gamma.html\",\"view\":\"content\",\"viewport\":{\"height\":683,\"scrollX\":0,\"scrollY\":0,\"width\":1366},\"source\":\"automation\",\"clientId\":null,\"elapsed_ms\":10.391708}"
+    }
+  ],
+  "composition_routes": [
+    {
+      "outer_execution_id": "exec-1789222495729-0007",
+      "node_execution_ids": [
+        "exec-1789222495582-0005",
+        "exec-1789222495695-0006"
+      ],
+      "url": "http://127.0.0.1:56380/alpha.html",
+      "document_id": "3f0aaaa9e4f45642d375afd344b904bd",
+      "body_execution_id": "exec-1789222498533-0008",
+      "scope": {
+        "documentId": "3f0aaaa9e4f45642d375afd344b904bd",
+        "nodeId": "n3"
+      },
+      "navigation_then_observation_ms": [
+        108.0,
+        22.0
+      ]
+    },
+    {
+      "outer_execution_id": "exec-1789222501710-000b",
+      "node_execution_ids": [
+        "exec-1789222501611-0009",
+        "exec-1789222501681-000a"
+      ],
+      "url": "http://127.0.0.1:56380/beta.html",
+      "document_id": "3df487627d07b4e05766834ce6138a7a",
+      "body_execution_id": "exec-1789222504314-000c",
+      "scope": {
+        "documentId": "3df487627d07b4e05766834ce6138a7a",
+        "nodeId": "n3"
+      },
+      "navigation_then_observation_ms": [
+        68.0,
+        23.0
+      ]
+    },
+    {
+      "outer_execution_id": "exec-1789222507008-000f",
+      "node_execution_ids": [
+        "exec-1789222506804-000d",
+        "exec-1789222506895-000e"
+      ],
+      "url": "http://127.0.0.1:56380/gamma.html",
+      "document_id": "13800fe09f69a76691ecfa271af4c1d1",
+      "body_execution_id": "exec-1789222510501-0010",
+      "scope": {
+        "documentId": "13800fe09f69a76691ecfa271af4c1d1",
+        "nodeId": "n3"
+      },
+      "navigation_then_observation_ms": [
+        89.0,
+        92.0
+      ]
+    }
+  ],
+  "answer": "세 채널의 현재 결정은 모두 Cedar와 schema v4를 연결해 진행하는 것입니다.\n\n- **Alpha**\n  - 현재 결정: 화요일 Cedar 출시, 접근성 승인 후 진행.\n  - 담당자: Hana\n  - Mina 요청: 월요일 접근성 체크리스트 승인.\n  - 참고: 금요일 출시안은 superseded(폐기됨).\n  - [현재 결정 메시지](http://127.0.0.1:56380/alpha.html#a2) · [이전 결정](http://127.0.0.1:56380/alpha.html#a1)\n\n- **Beta**\n  - 현재 결정: 월요일 Cedar의 schema v4 마이그레이션 완료.\n  - 담당자: Joon\n  - Mina 요청: 마이그레이션 전 클라이언트 payload 확인.\n  - [메시지 링크](http://127.0.0.1:56380/beta.html#b1)\n\n- **Gamma**\n  - 현재 결정: 수요일 schema v4 기준 Cedar E2E QA 실행.\n  - 담당자: Sora\n  - Mina 요청: 별도 요청 없음.\n  - [메시지 링크](http://127.0.0.1:56380/gamma.html#g1)\n\n공통 작업은 **schema v4를 기반으로 Cedar를 진행하는 것**이며, 순서는 대략 Beta의 마이그레이션 → Alpha의 접근성 승인 후 출시 → Gamma의 E2E QA입니다. Mina에게는 Alpha와 Beta에서 각각 승인·확인 요청이 왔습니다.\n\n읽은 범위: Team Channels 인덱스에서 관측된 Alpha/Beta/Gamma 링크를 따라 각 채널의 `Visible messages` 영역만 읽었습니다. Alpha 2개 메시지, Beta 1개, Gamma 1개가 현재 화면에 표시되어 있었고, 사이드바 요약이나 숨겨진 기록은 근거로 사용하지 않았습니다.",
+  "observed_elapsed_seconds": 55.832,
+  "measurement_limits": [
+    "Original report model_tool_calls only observes standard message envelopes; native app-server calls require this durable join.",
+    "Timing includes status polling and request latency; no causal speed claim from a single run.",
+    "Current answer treats Alpha speaker Hana as owner, which is not explicitly stated in the fixture."
+  ]
+}

@@ -39,6 +39,7 @@ type package = {
   image : string;
   command : string list;
   directory : string;
+  skills_directory : Skill_resource_path.t option;
   resources : resources;
 }
 type phase = Attached | Observing | Failed of string | Detaching | Detached
@@ -46,6 +47,7 @@ val row_to_json : row -> Yojson.Safe.t
 val row_of_json : Yojson.Safe.t -> (row, string) result
 val output_to_json : output -> Yojson.Safe.t
 val output_of_json : Yojson.Safe.t -> (output, string) result
+val coverage_to_json : coverage -> Yojson.Safe.t
 val phase_to_json : phase -> Yojson.Safe.t
 val phase_of_json : Yojson.Safe.t -> (phase, string) result
 val package_to_json : package -> Yojson.Safe.t

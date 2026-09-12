@@ -1,42 +1,55 @@
-import * as v from 'valibot'
+import { Schema } from 'effect'
 import { get, post } from './core'
 
-const text = v.pipe(v.string(), v.nonEmpty())
-const count = v.pipe(v.number(), v.integer(), v.minValue(0))
-const nullableText = v.nullable(text)
-export const laneAddonRowSchema = v.object({
-  id: text, lane_id: text, kind: v.picklist(['event', 'value', 'relation']),
-  title: text, observed_at: v.pipe(v.number(), v.finite()), subject_id: text,
-  clock: v.nullable(v.object({ domain: text, value: text })),
-  actor: nullableText, fields: v.record(v.string(), v.unknown()),
-  evidence: v.array(v.object({ uri: text, sha256: nullableText })),
-  related_ids: v.array(text),
+const text = Schema.NonEmptyString
+const count = Schema.Int.pipe(Schema.nonNegative())
+const nullableText = Schema.NullOr(text)
+export const laneAddonRowSchema = Schema.Struct({
+  id: text, lane_id: text, kind: Schema.Literal('event', 'value', 'relation'),
+  title: text, observed_at: Schema.Number.pipe(Schema.finite()), subject_id: text,
+  clock: Schema.NullOr(Schema.Struct({ domain: text, value: text })),
+  actor: nullableText, fields: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  evidence: Schema.Array(Schema.Struct({ uri: text, sha256: nullableText })),
+  related_ids: Schema.Array(text),
 })
-const coverageSchema = v.object({
+const coverageSchema = Schema.Struct({
   source_id: text, incarnation: text, cursor: nullableText,
-  complete: v.boolean(), detail: nullableText,
+  complete: Schema.Boolean, detail: nullableText,
 })
-const instanceSchema = v.object({
+const instanceConfigurationSchema = Schema.Struct({
+  id: text, source_path: text, revision: text,
+})
+const configurationSchema = Schema.Struct({
+  directory: text, complete: Schema.Boolean,
+  issues: Schema.Array(Schema.Struct({ source_path: text, id: nullableText, message: text })),
+  declarations: Schema.Array(Schema.Struct({
+    id: text, source_path: text, desired_revision: text,
+    applied_revision: nullableText, instance_id: nullableText,
+  })),
+})
+const instanceSchema = Schema.Struct({
   instance_id: text, run_id: text, addon_id: text, title: text, revision: text,
-  phase: v.object({
-    kind: v.picklist(['attached', 'observing', 'failed', 'detaching', 'detached']),
-    message: v.optional(v.string()),
+  configuration: Schema.NullOr(instanceConfigurationSchema),
+  phase: Schema.Struct({
+    kind: Schema.Literal('attached', 'observing', 'failed', 'detaching', 'detached'),
+    message: Schema.optional(Schema.String),
   }),
-  observation_seq: count, rows_count: count, error: v.optional(v.nullable(v.string())),
+  observation_seq: count, rows_count: count, error: Schema.optional(Schema.NullOr(Schema.String)),
 })
-const snapshotSchema = v.object({
-  instances: v.array(instanceSchema), rows: v.array(laneAddonRowSchema),
-  coverage: v.array(coverageSchema),
+const snapshotSchema = Schema.Struct({
+  configuration: Schema.NullOr(configurationSchema),
+  instances: Schema.Array(instanceSchema), rows: Schema.Array(laneAddonRowSchema),
+  coverage: Schema.Array(coverageSchema),
 })
-const sliceSchema = v.object({
-  rows: v.array(laneAddonRowSchema), coverage: v.array(coverageSchema), complete: v.boolean(),
+const sliceSchema = Schema.Struct({
+  rows: Schema.Array(laneAddonRowSchema), coverage: Schema.Array(coverageSchema), complete: Schema.Boolean,
 })
-export type LaneAddonRow = v.InferOutput<typeof laneAddonRowSchema>
-export type LaneAddonSnapshot = v.InferOutput<typeof snapshotSchema>
-export type LaneAddonSlice = v.InferOutput<typeof sliceSchema>
+export type LaneAddonRow = Schema.Schema.Type<typeof laneAddonRowSchema>
+export type LaneAddonSnapshot = Schema.Schema.Type<typeof snapshotSchema>
+export type LaneAddonSlice = Schema.Schema.Type<typeof sliceSchema>
 export type LaneAddonQuery = { run_id?: string; lane_id?: string; since?: number; until?: number }
-export const parseLaneAddonSnapshot = (value: unknown) => v.parse(snapshotSchema, value)
-export const parseLaneAddonSlice = (value: unknown) => v.parse(sliceSchema, value)
+export const parseLaneAddonSnapshot = Schema.decodeUnknownSync(snapshotSchema)
+export const parseLaneAddonSlice = Schema.decodeUnknownSync(sliceSchema)
 
 export async function fetchLaneAddons(signal?: AbortSignal): Promise<LaneAddonSnapshot> {
   return parseLaneAddonSnapshot(await get<unknown>('/api/v1/lane-addons', { signal }))

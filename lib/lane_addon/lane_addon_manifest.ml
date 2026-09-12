@@ -15,6 +15,17 @@ let load ~path =
       let* value = read key Otoml.get_string in
       if String.trim value = "" then Error (String.concat "." key ^ " is blank") else Ok value
     in
+    let* skills_directory =
+      match Otoml.find_opt document Fun.id ["world"] with
+      | None -> Ok None
+      | Some (Otoml.TomlTable ["skills", (Otoml.TomlTable ["directory", Otoml.TomlString value]
+          | Otoml.TomlInlineTable ["directory", Otoml.TomlString value])]
+        | Otoml.TomlInlineTable ["skills", (Otoml.TomlTable ["directory", Otoml.TomlString value]
+          | Otoml.TomlInlineTable ["directory", Otoml.TomlString value])]) ->
+          Skill_resource_path.of_string value |> Result.map Option.some
+          |> Result.map_error (fun error -> "world.skills.directory: " ^ Skill_resource_path.error_to_string error)
+      | Some _ -> Error "world requires only a skills table with a relative directory string"
+    in
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in
@@ -39,7 +50,7 @@ let load ~path =
          || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
     then Error "resources require finite positive CPU, memory, pids and reply bytes"
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
-      directory = Filename.dirname path;
+      directory = Filename.dirname path; skills_directory;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
   with
   | Sys_error message -> Error message

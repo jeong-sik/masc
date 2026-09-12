@@ -48,6 +48,7 @@ module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
+module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
@@ -151,7 +152,7 @@ let surface_body_height ~rows
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
-  | None -> current + delta
+  | None -> Masc_tui_scroll.step_uncounted ~delta current
   | Some scrolled ->
       let height = surface_body_height ~rows scrolled in
       if delta >= 0 then
@@ -286,7 +287,7 @@ let surface_body_height_at (state : state) ~cursor scrolled =
 
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
-  | None -> (cursor, scroll + delta)
+  | None -> (cursor, Masc_tui_scroll.step_uncounted ~delta scroll)
   | Some ({ sc_count; _ } as scrolled) ->
       (* [delta], not its sign. The two steppers move one row, and reading
          only the direction meant a page key that routed through here moved
@@ -1932,11 +1933,16 @@ type async_msg =
   | Image_render_ready of {
       title : string;
       caption : string list;
+      page_url : string;
+      image_url : string;
       result : (string, string) result;
     }
       (** A [v]-requested web image, downloaded and converted to PNG off the
           render loop. [result] is the PNG bytes ready to draw, or why they
-          could not be produced. *)
+          could not be produced. [title] is indented for the screen and is
+          never a location. [image_url] is what was fetched; [page_url] is the
+          link the operator chose, and the one a browser gets when drawing
+          fails (see [Masc_tui_browser.browser_url]). *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -4283,19 +4289,23 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
-      (* Scene geometry belongs to its observation. Browser effects and fresh
+      (* Scene geometry belongs to its observation. Browser effects and explicit
          reads withdraw it before dispatch; a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
          Scene_click retains its exact reference in [operation], and the
-         matching completion can install the newly observed scene. *)
+         matching completion can install the newly observed scene. A cadence
+         refresh keeps its frame visible so periodic observations do not erase
+         the operator's reading position. Operator input supersedes a cadence
+         result; effects still use the observed document/URL checks. Failed
+         refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
@@ -4304,6 +4314,8 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation);
+        read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4317,13 +4329,16 @@ let launch_browser_lane state ~mailbox operation =
         match operation with
         | Discover _ -> Browser_lane_clients_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
-        | Read -> Browser_lane_loaded
+        | Read | Read_refresh -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Scene_read tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ()))
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
+              ~host ~port ~view ~tab_id ~scene_view ~scope))
         | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scope:target ~host ~port ~view ~tab_id ()))
@@ -7276,24 +7291,60 @@ let ensure_img_cache_dir () =
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   dir
 
+(* Removes a cached body the cache will not stand behind. A file already gone
+   is the wanted state; the caller's error names why the body was refused. *)
+let discard_cached_image path = try Sys.remove path with Sys_error _ -> ()
+
+(* The cached file for a remote image URL, or why there is none. A hit is
+   decided by the bytes (Masc_tui_image_cache.verdict_of_bytes), never by the
+   file being non-empty: an empty body is removed on sight, a known signature
+   is a hit, and a signature the table does not name is handed to the decoder,
+   which reads formats the table does not (BMP, AVIF, SVG). curl runs with
+   --fail so an HTTP error status writes no body in the first place, and its
+   exit status is kept as the typed reason. *)
 let download_remote_image url =
   let cache_dir = ensure_img_cache_dir () in
   let hash = Digest.to_hex (Digest.string url) in
   let target_file = Filename.concat cache_dir ("img_" ^ hash) in
-  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
-    Ok target_file
-  else
+  let verdict_of_cached () =
+    match read_file_bytes target_file with
+    | Error detail ->
+        discard_cached_image target_file;
+        Error (Masc_tui_image_cache.Cache_unreadable { detail })
+    | Ok bytes -> (
+        match Masc_tui_image_cache.verdict_of_bytes bytes with
+        | Masc_tui_image_cache.Known_image _ | Masc_tui_image_cache.Unknown_signature ->
+            Ok target_file
+        | Masc_tui_image_cache.Empty ->
+            discard_cached_image target_file;
+            Error Masc_tui_image_cache.Empty_body)
+  in
+  let fetch () =
     let cmd =
-      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+      Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
         (Filename.quote target_file)
         (Filename.quote url)
     in
-    match Unix.system cmd with
-    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
-        Ok target_file
-    | _ ->
-        (try Sys.remove target_file with _ -> ())  (* @observe-allowed: removing a partial download on the failure path; the caller's error is the download failure, not this *);
-        Error "could not download remote image"
+    let status = Unix.system cmd in
+    match
+      Masc_tui_image_cache.fetch_failure_of_status status
+        ~body_present:(Sys.file_exists target_file)
+    with
+    | None -> verdict_of_cached ()
+    | Some failure ->
+        discard_cached_image target_file;
+        Error (Masc_tui_image_cache.Fetch_failed failure)
+  in
+  if Sys.file_exists target_file then
+    match verdict_of_cached () with
+    | Ok path -> Ok path
+    | Error
+        ( Masc_tui_image_cache.Fetch_failed _ | Masc_tui_image_cache.Empty_body
+        | Masc_tui_image_cache.Cache_unreadable _ ) ->
+        (* A body cached before this check existed: it is gone now, so ask the
+           URL again rather than report the stale answer. *)
+        fetch ()
+  else fetch ()
 
 let convert_to_png input_path =
   let cache_dir = ensure_img_cache_dir () in
@@ -7333,12 +7384,21 @@ let convert_to_png input_path =
    a narrow terminal skips it rather than wrapping. Decode/draw stay a few ms. *)
 let mosaic_cols = 120
 
-(* Download a preview image and decode it into half-block mosaic lines, or None.
-   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
-   render loop inside run_in_systhread. *)
-let image_url_to_mosaic ~cols url =
+(* Download a preview image and decode it into half-block mosaic lines, or say
+   why not. Every answer is durable for the session: the caller records it so
+   the URL is not fetched or decoded again on every preview parse. A body the
+   decoder rejected is removed from the cache, so a later session downloads
+   afresh instead of decoding the same bytes. Blocking (curl + ffmpeg through
+   Unix.system): the caller runs it off the render loop inside
+   run_in_systhread. *)
+let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
   match download_remote_image url with
-  | Error _ -> None
+  | Error (Masc_tui_image_cache.Fetch_failed failure) ->
+      Masc_tui_link_preview.(
+        Refused (Fetch_failed { detail = Masc_tui_image_cache.fetch_failure_text failure }))
+  | Error Masc_tui_image_cache.Empty_body -> Masc_tui_link_preview.(Refused Empty_body)
+  | Error (Masc_tui_image_cache.Cache_unreadable { detail }) ->
+      Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
   | Ok local_path -> (
       let raw =
         Filename.concat
@@ -7356,28 +7416,39 @@ let image_url_to_mosaic ~cols url =
            rgb24 %s"
           (Filename.quote local_path) cols (Filename.quote raw)
       in
-      match Unix.system cmd with
-      | Unix.WEXITED 0 when Sys.file_exists raw -> (
-          try
-            let ic = open_in_bin raw in
-            let data = really_input_string ic (in_channel_length ic) in
-            close_in ic;
-            let rows = String.length data / (cols * 3) in
-            match Masc_tui_image_mosaic.render ~cols ~rows data with
-            | [] -> None
-            | lines -> Some lines
-          with _ -> None)
-      | _ -> None)
+      let status = Unix.system cmd in
+      let refuse failure =
+        if Masc_tui_image_cache.decode_failure_discards_body failure then
+          discard_cached_image local_path;
+        Masc_tui_link_preview.(
+          Refused (Decode_failed { detail = Masc_tui_image_cache.decode_failure_text failure }))
+      in
+      match
+        Masc_tui_image_cache.decode_failure_of_status status
+          ~output_present:(Sys.file_exists raw)
+      with
+      | Some failure -> refuse failure
+      | None -> (
+          match read_file_bytes raw with
+          | Error detail -> refuse (Masc_tui_image_cache.Frame_unreadable { detail })
+          | Ok data -> (
+              let rows = String.length data / (cols * 3) in
+              match Masc_tui_image_mosaic.render ~cols ~rows data with
+              | [] -> refuse Masc_tui_image_cache.No_frame_written
+              | lines -> Masc_tui_link_preview.Mosaic lines)))
 
 let () =
   compute_and_store_mosaic :=
     fun img ->
-      match
-        Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
-            image_url_to_mosaic ~cols:mosaic_cols img)
-      with
-      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
-      | None -> ()
+      match Masc_tui_link_preview.mosaic_lookup img with
+      | Some (Masc_tui_link_preview.Mosaic _ | Masc_tui_link_preview.Refused _) ->
+          (* Already decided this session; neither a mosaic nor a refusal is
+             fetched again. *)
+          ()
+      | None ->
+          Masc_tui_link_preview.mosaic_store img
+            (Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
+                 image_url_to_mosaic ~cols:mosaic_cols img))
 
 let open_image state ~notice path =
   let refuse reason =
@@ -7405,7 +7476,7 @@ let open_image state ~notice path =
              notice ~role:Message_local
                (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
          | Error _ ->
-             refuse dl_err)
+             refuse (Masc_tui_image_cache.download_error_text dl_err))
     | Ok local_path -> (
         match !terminal_draws_images with
         | Some false -> refuse terminal_draws_no_images
@@ -7445,7 +7516,7 @@ let open_image state ~notice path =
    so it is safe to run on a systhread. *)
 let prepare_remote_image_bytes url =
   match download_remote_image url with
-  | Error e -> Error e
+  | Error e -> Error (Masc_tui_image_cache.download_error_text e)
   | Ok local_path -> (
       match read_file_bytes local_path with
       | Error detail -> Error detail
@@ -7458,6 +7529,9 @@ let prepare_remote_image_bytes url =
               match convert_to_png local_path with
               | Ok png_path -> read_file_bytes png_path
               | Error _ ->
+                  (* No converter read the body, so the cache does not keep
+                     it; the next [v] downloads afresh. *)
+                  discard_cached_image local_path;
                   Error "could not convert the image to a format the terminal draws")))
 
 (* [v] on a link preview: download and convert the image OFF the render loop,
@@ -7465,9 +7539,12 @@ let prepare_remote_image_bytes url =
    render fiber, not here. The blocking curl/sips live inside run_in_systhread
    so the domain keeps rendering; the loading line is shown at once so the
    keypress is not silent. terminal_draws_images = false skips the download and
-   opens a browser instead. *)
-let launch_image_render ~mailbox ~notice ~title ~caption url =
+   opens the page in a browser instead. *)
+let launch_image_render ~mailbox ~notice ~title ~caption ~page_url image_url =
   if !terminal_draws_images = Some false then
+    let url =
+      Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
+    in
     match Masc_tui_browser.open_url url with
     | Ok opener ->
         notice ~role:Message_local
@@ -7475,19 +7552,22 @@ let launch_image_render ~mailbox ~notice ~title ~caption url =
     | Error err ->
         notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
   else begin
-    notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
+    notice ~role:Message_local (Printf.sprintf "Loading image: %s" image_url);
     let run () =
       let result =
-        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () -> prepare_remote_image_bytes url)
+        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
+            prepare_remote_image_bytes image_url)
       in
-      enqueue_async mailbox (Image_render_ready { title; caption; result })
+      enqueue_async mailbox
+        (Image_render_ready { title; caption; page_url; image_url; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         enqueue_async mailbox
           (Image_render_ready
-             { title; caption; result = Error "Eio switch unavailable" })
+             { title; caption; page_url; image_url;
+               result = Error "Eio switch unavailable" })
   end
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
@@ -12168,7 +12248,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error reason -> refuse reason
         | Ok data -> draw_image state ~refuse ~title:name data
       end
-  | Image_render_ready { title; caption; result } ->
+  | Image_render_ready { title; caption; page_url; image_url; result } ->
       if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
@@ -12178,13 +12258,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            draw_image state ~caption ~refuse ~title data
        | Error e -> (
-           match Masc_tui_browser.open_url title with
+           let url =
+             Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
+           in
+           match Masc_tui_browser.open_url url with
            | Ok opener ->
                notice ~role:Message_local
                  (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
-                    e opener title)
-           | Error _ ->
-               notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
+                    e opener url)
+           | Error opener_err ->
+               notice ~role:Message_error
+                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with
@@ -13391,11 +13475,10 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  (* [at_exit] runs its callbacks in the reverse of this order and stops at
-     the first one that raises, so the terminal restore is registered last
-     and runs first. The frame summary appends to a file and can raise on a
-     write -- registered the other way round it would take the restore with
-     it and leave the terminal in raw mode. *)
+  (* [at_exit] runs its callbacks in the reverse of this order. Restore first
+     so an error writing the frame summary cannot prevent the first restore
+     attempt. An exception interrupts that cleanup pass; OCaml may retry
+     remaining callbacks while reporting an uncaught exception. *)
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -13545,7 +13628,7 @@ let main
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
-  let restore_terminal () =
+  let restore_terminal_outcome () =
     (* No tracking-off here: suspend runs this too, and a terminal that
        re-enters raw mode after Ctrl-Z would silently lose the wheel. The
        off byte is written once, in [cleanup], at real process exit. *)
@@ -13554,7 +13637,12 @@ let main
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
+    (* Keep the known-loss result so exit cleanup does not write a farewell
+       or tracking controls to a terminal that already rejected restoration. *)
+    let outcome =
+      Terminal_restore.put_back ~set:(fun () ->
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
+    in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
        terminal back, and this character is the part it cannot reach.
        [-1] means the descriptor was never a terminal, so there is nothing to
@@ -13565,7 +13653,12 @@ let main
       ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
     if old_discard_output >= 0 then
       (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
-      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool);
+    outcome
+  in
+  let restore_terminal () =
+    match restore_terminal_outcome () with
+    | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ()
   in
 
   (* Cleanup on exit *)
@@ -13573,19 +13666,25 @@ let main
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
-      restore_terminal ();
-      print_endline "Goodbye!";
-      (* Tracking off after Goodbye: a terminal left in report mode keeps
-         swallowing the wheel after this process is gone, and the farewell
-         line is the last thing a reader matches on -- a byte after it cannot
-         disturb that read. *)
-      output_string stdout mouse_tracking_disable;
-      output_string stdout bracketed_paste_disable;
-      (* The mode belongs to this program's screen. A shell that inherited it
-         would see its own keys reported in a form it does not read. *)
-      if Terminal_profile.kitty_keyboard terminal_profile then
-        output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-      flush stdout
+      (* Bound by name: the AST guard pins this call by listing every
+         labelled argument as an identifier, so the exit writer is a named
+         function rather than an inline closure. *)
+      let finish () =
+        print_endline "Goodbye!";
+        (* Tracking off after Goodbye: a terminal left in report mode keeps
+           swallowing the wheel after this process is gone, and the farewell
+           line is the last thing a reader matches on -- a byte after it cannot
+           disturb that read. *)
+        output_string stdout mouse_tracking_disable;
+        output_string stdout bracketed_paste_disable;
+        (* The mode belongs to this program's screen. A shell that inherited it
+           would see its own keys reported in a form it does not read. *)
+        if Terminal_profile.kitty_keyboard terminal_profile then
+          output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+        flush stdout
+      in
+      Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
+        ~finish
     end
   in
 
@@ -15639,6 +15738,10 @@ and is loaded on demand through keeper_skill.
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (match key, browser_lane_on_screen state with
+       | Some _, Some view ->
+           state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
+       | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
        | Some key when Option.is_some state.lane_addons ->
@@ -16251,7 +16354,7 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "@" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
                 (match targets with
                  | [] -> ()
@@ -16283,7 +16386,7 @@ and is loaded on demand through keeper_skill.
                      else if cursor >= state.answering_scroll + height then
                        state.answering_scroll <- cursor - height + 1)
             | "\r" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 (match List.nth_opt lines state.answering_cursor with
                  | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
                      close ();
@@ -16366,7 +16469,7 @@ and is loaded on demand through keeper_skill.
                        @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
                      in
                      launch_image_render ~mailbox:async_messages ~notice ~title
-                       ~caption img_url
+                       ~caption ~page_url:url img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->
@@ -16999,7 +17102,7 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
-                      | Some _, _ -> state.browser_lane <- Some {view with scene = None; scroll = 0}
+                      | Some _, _ -> read {view with scene = None; scroll = 0}
                       | None, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
                       | None, None -> ())
                  | "r" ->
@@ -17887,7 +17990,7 @@ and is loaded on demand through keeper_skill.
            state.answering_cursor <-
              (match
                 Masc_tui_answering.target_indexes
-                  (Masc_tui_render.answering_lines state)
+                  (Masc_tui_render_prim.answering_lines state)
               with
               | index :: _ -> index
               | [] -> 0)
@@ -20204,12 +20307,12 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Planning;
             state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render.ctx_goal_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
@@ -20351,11 +20454,11 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Overview;
-            (match change_ctx.Masc_tui_render.ctx_task_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_task_id with
              | Some tid ->
                  state.task_detail_id <- Some tid;
                  state.task_detail_scroll <- 0;
@@ -20746,7 +20849,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
            in
            let change_ctx =
-             Masc_tui_render.resolve_change_context state ~path_opt
+             Masc_tui_render_prim.resolve_change_context state ~path_opt
            in
            (* Only the scope's own repository names a remote. A project-wide
               scope spans every registered repository, and picking the first
@@ -20766,7 +20869,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
              | Some Tui_decode.Repository_change_project | None -> None
            in
-           (match change_ctx.Masc_tui_render.ctx_pr with
+           (match change_ctx.Masc_tui_render_prim.ctx_pr with
             | None ->
                 add_event state "git"
                   "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
@@ -21313,6 +21416,9 @@ and is loaded on demand through keeper_skill.
          | Connectors ->
              (match browser_lane_on_screen state with
               | None -> launch_connectors_load state ~mailbox:async_messages
+              | Some view when not state.image_open ->
+                  Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                    (Browser_lane_view.cadence_operation view)
               | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps

@@ -1226,7 +1226,6 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
-  masc_tui_planning_proof_mark
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane

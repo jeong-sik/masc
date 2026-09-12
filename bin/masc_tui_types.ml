@@ -5757,6 +5757,16 @@ type clamped_scroll =
    [resource_scroll] it holds the real last row, not this. *)
 let clamped_scroll_end = max_int
 
+(* Moving down from [clamped_scroll_end]. The sentinel waits for a frame to
+   count the real rows and report them back, and some frames pass without
+   counting: a reading that has not arrived, and -- on a narrow terminal with
+   the list focused -- a frame that draws no reading at all. A key pressed
+   in between would carry the sentinel into [+], so the addition stops here
+   instead of wrapping negative and throwing the reader to the top. Moving up
+   needs no such care: [max 0] already holds that end. *)
+let scroll_down_from scroll ~by =
+  if scroll > max_int - by then max_int else scroll + by
+
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value

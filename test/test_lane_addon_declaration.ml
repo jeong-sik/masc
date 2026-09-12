@@ -207,7 +207,7 @@ let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock confi
   let request = Editor.write_request (request ~revision:(text "source_revision" current) ~mode:"save" ~file_name:"a.toml" next) |> unwrap in
   let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
     ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory)))
-    ~save_file:(fun path bytes -> write path bytes) path source in
+    path source in
   let receipt = Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~directory request) |> unwrap in
   let json = Editor.receipt_to_json receipt in
   check string "post-rename result records visible save" "saved" (member "write" json |> text "state");

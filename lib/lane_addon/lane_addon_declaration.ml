@@ -126,7 +126,7 @@ let create ~replace_file ~directory ~document =
   let staged = Filename.concat directory (".lane-create-" ^ Random_id.uuid_v7 ()) in
   let remove_stage () = try Unix.unlink staged with Unix.Unix_error (Unix.ENOENT,_,_) -> () in
   match replace_file staged document.source_text with
-  | Error failure ->
+  | Error (failure : Fs_compat.atomic_replace_failure) ->
       remove_stage ();
       (match failure.Fs_compat.exception_ with
        | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace

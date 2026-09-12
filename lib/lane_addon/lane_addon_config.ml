@@ -99,11 +99,10 @@ let resolve_snapshot_paths ~directory = function
        | _ -> `Assoc fields)
   | value -> value
 
-let decode ~source_path fields =
+let decode ~source_path ~id fields =
   let allowed = ["id"; "run_id"; "manifest_path"; "binding"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
-  let* id = text fields "id" in
   let* run_id = text fields "run_id" in
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
@@ -135,13 +134,15 @@ let read_declaration ~path =
       (match Otoml.Parser.from_string_result bytes with
        | Error message -> failure ~unreadable:false message
        | Ok (Otoml.TomlTable fields) ->
-           let id = Result.to_option (text fields "id") in
-           (try
-              match decode ~source_path fields with
-              | Ok declaration -> Ok declaration
-              | Error message -> failure ?id ~unreadable:false message
-            with (Sys_error _ | Unix.Unix_error _) as exn ->
-              failure ?id ~unreadable:true (io_message exn))
+           (match text fields "id" with
+            | Error message -> failure ~unreadable:false message
+            | Ok id ->
+                try
+                  match decode ~source_path ~id fields with
+                  | Ok declaration -> Ok declaration
+                  | Error message -> failure ~id ~unreadable:false message
+                with (Sys_error _ | Unix.Unix_error _) as exn ->
+                  failure ~id ~unreadable:true (io_message exn))
        | Ok _ -> failure ~unreadable:false "declaration requires a TOML table")
 
 let load_file ~path =

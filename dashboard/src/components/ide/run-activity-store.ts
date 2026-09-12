@@ -42,6 +42,9 @@ export interface RunActivityContext {
 }
 
 export interface RunActivityEvent {
+  /** Canonical scope of the IDE endpoint that supplied this event.
+   * Workspace-wide activity has no per-event codebase authority. */
+  readonly codebase?: string
   readonly id: string
   readonly run_id: string
   readonly keeper_id: string
@@ -138,6 +141,7 @@ function normalizeMaxEvents(value: number | undefined): number {
 function validEventForRun(event: unknown, runId: string): event is RunActivityEvent {
   if (!isRecord(event)) return false
   if (event.run_id !== runId) return false
+  if (!optionalNonEmptyString(event.codebase)) return false
   if (!hasNonEmptyStringField(event, 'id')) return false
   if (!hasNonEmptyStringField(event, 'keeper_id')) return false
   if (!hasNonEmptyStringField(event, 'target')) return false

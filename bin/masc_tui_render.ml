@@ -10885,8 +10885,8 @@ let render_code (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.code_focus_file = Right_pane then "  [j/k]" else "")
+       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
@@ -11413,9 +11413,10 @@ let render_resources (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim) ^ " Resources"
+      ((if list_focused then Ansi.bold else Ansi.dim)
+       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ "Resources"
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
-       ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
     (* The status line spends one of the budgeted rows, not an extra one:
@@ -11486,8 +11487,8 @@ let render_resources (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.resource_focus = Right_pane then "  [j/k]" else "")
+       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = framed_content_height ~rows in

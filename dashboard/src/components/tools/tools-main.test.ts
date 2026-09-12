@@ -9,6 +9,9 @@ import type {
 
 type MockToolsResponse = {
   generated_at?: string
+  // The warming envelope the server answers a cold read with carries both.
+  status?: string
+  is_warming?: boolean
   tool_inventory: { tools: unknown[] }
   tool_usage: Record<string, unknown> & {
     registered_count: number
@@ -20,6 +23,7 @@ type MockToolsResponse = {
 
 const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
+  subscribeToolsAutoRefresh: vi.fn(() => () => {}),
   fetchDashboardTools: vi.fn(),
   navigate: vi.fn(),
   configResolutionPanel: vi.fn(),
@@ -39,8 +43,13 @@ vi.mock('../schedule/schedule-state', () => ({
   subscribeScheduledAutomationRefresh: () => () => {},
 }))
 
+// An explicit factory, so every export tools-main reaches for has to be
+// listed here: a name added to tool-state and used in the component fails
+// this file with "No <name> export is defined on the mock" rather than
+// anything about the behaviour.
 vi.mock('./tool-state', () => ({
   loadTools: mocks.loadTools,
+  subscribeToolsAutoRefresh: mocks.subscribeToolsAutoRefresh,
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
@@ -61,7 +70,10 @@ vi.mock('../common/card', () => ({
 }))
 
 vi.mock('../tool-metrics', () => ({
-  ToolMetrics: () => html`<div>ToolMetrics</div>`,
+  // Echo whether usage was handed over at all: the warming envelope's
+  // tool_usage is a placeholder of zeroes and must not reach this pane.
+  ToolMetrics: ({ data }: { data: unknown }) =>
+    html`<div>ToolMetrics:${data ? 'usage' : 'none'}</div>`,
 }))
 
 vi.mock('./tool-full-inventory', () => ({
@@ -285,6 +297,7 @@ describe('Tools', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()
+    mocks.subscribeToolsAutoRefresh.mockClear()
     mocks.fetchDashboardTools.mockReset()
     mocks.configResolutionPanel.mockClear()
     mocks.toolsData.value = null
@@ -298,13 +311,57 @@ describe('Tools', () => {
     container.remove()
   })
 
+  it('does not draw the warming envelope placeholder as observed usage', async () => {
+    // A cold read answers with status/is_warming set and a tool_usage of
+    // zeroes (server_dashboard_http_runtime_info.ml). Handing that object to
+    // ToolMetrics drew "0 calls, 0 tools observed" as a measurement, which
+    // reads as "nothing has ever been called" rather than "not built yet".
+    mocks.toolsData.value = {
+      status: 'warming',
+      is_warming: true,
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+    }
+
+    render(html`<${Tools} />`, container)
+    await flush()
+
+    expect(container.textContent).toContain('ToolMetrics:none')
+    expect(container.textContent).not.toContain('ToolMetrics:usage')
+  })
+
+  it('hands real usage to the metrics pane once the projection is built', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 103,
+        distinct_tools_called: 26,
+        never_called_count: 77,
+      },
+    }
+
+    render(html`<${Tools} />`, container)
+    await flush()
+
+    expect(container.textContent).toContain('ToolMetrics:usage')
+  })
+
   it('loads tool data and renders full inventory with prompt registry inside the tools surface', async () => {
     render(html`<${Tools} />`, container)
     await flush()
 
     expect(container.querySelector('.v2-lab-surface')).not.toBeNull()
     expect(container.querySelectorAll('.v2-lab-action')).toHaveLength(2)
-    expect(mocks.loadTools).toHaveBeenCalledTimes(1)
+    // The surface subscribes rather than loading once by hand.
+    // subscribeToolsAutoRefresh performs the first load itself and keeps a
+    // visibility-aware poller, which is what brings the finished projection
+    // in after a cold read answered with the warming envelope.
+    expect(mocks.subscribeToolsAutoRefresh).toHaveBeenCalledTimes(1)
+    expect(mocks.loadTools).not.toHaveBeenCalled()
     expect(container.textContent).toContain('ConfigResolutionPanel')
     expect(container.textContent).toContain('예약 자동화 FSM')
     expect(container.textContent).toContain('시스템 도구 목록')

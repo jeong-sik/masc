@@ -12,7 +12,7 @@ type t = {
   table_frame : bool option;
   hints_visible : bool option;
   coalesce_queued_input : bool option;
-  voice_send_on_stop : bool option;
+  send_on_stop : bool option;
 }
 
 let runtime_toml_path ~base_path =
@@ -22,13 +22,6 @@ let runtime_toml_path ~base_path =
   in
   Filename.concat resolution.Config_dir_resolver.config_root.path
     Config_dir_resolver.runtime_toml_filename
-
-let doc_of_path path =
-  match Fs_compat.load_file path with
-  | exception Sys_error _ -> None
-  | content -> ( match Keeper_toml_loader.parse_toml content with
-                 | Ok doc -> Some doc
-                 | Error _ -> None)
 
 (* The reader's chosen theme name, [tui].theme. Kept pure so a test can hand it
    a parsed doc without a file: every absence -- file gone, table missing, key
@@ -116,16 +109,42 @@ let coalesce_queued_input_of_doc doc =
   Keeper_toml_loader.toml_bool_opt doc "tui.coalesce_queued_input"
 
 (* Whether ^Y ending a capture also sends what was heard,
-   [tui].voice_send_on_stop. Absent reads as off, unlike its siblings here:
+   [voice.stt].send_on_stop. Absent reads as off, unlike its siblings here:
    they choose between two ways of showing the same thing, and this one sends
    a message without the operator confirming it. The draft is also where a
    spoken half-sentence waits for typing, so the default keeps the step that
-   operator uses. *)
-let voice_send_on_stop_of_doc doc =
-  Keeper_toml_loader.toml_bool_opt doc "tui.voice_send_on_stop"
+   operator uses.
+
+   Read through [Voice_config], not as a raw [tui] key. The setting lived in
+   two places at once: [voice.stt].send_on_stop was parsed, published by
+   [GET /api/v1/voice/config] and by the voice setup route, and read by
+   nothing, while this file read a [tui].voice_send_on_stop that no surface
+   published. An operator who set the documented one got silence. One
+   spelling now, and it is the one on the wire -- which is also the one the
+   voice setup routes write, so a surface that configures voice can reach it.
+
+   A [voice] section that does not parse reads as off rather than as an error
+   here: the TUI is not where a broken voice config is reported (the speak and
+   transcribe paths carry that, by name), and off is the direction that does
+   not send a message nobody confirmed. *)
+let send_on_stop_of_text text =
+  match Voice_config.parse_runtime_toml_text text with
+  | Ok (Some config) ->
+    Option.map (fun stt -> stt.Voice_config.send_on_stop) config.Voice_config.stt
+  | Ok None | Error _ -> None
 
 let load ~base_path =
-  let doc = doc_of_path (runtime_toml_path ~base_path) in
+  let path = runtime_toml_path ~base_path in
+  (* One read of the file, two parsers over it: the [tui] keys through the
+     loader this file has always used, and the voice one through the parser
+     that owns that section's schema. Reading the voice field by raw path
+     would be a second definition of it, which is how it came to have two. *)
+  let text = try Some (Fs_compat.load_file path) with Sys_error _ -> None in
+  let doc = Option.bind text (fun text ->
+    match Keeper_toml_loader.parse_toml text with
+    | Ok doc -> Some doc
+    | Error _ -> None)
+  in
   let read extract = Option.bind doc extract in
   { theme = read theme_of_doc;
     board_sort = read (fun doc -> Keeper_toml_loader.toml_string_opt doc "tui.board_sort");
@@ -133,7 +152,7 @@ let load ~base_path =
     table_frame = read table_frame_of_doc;
     hints_visible = read hints_visible_of_doc;
     coalesce_queued_input = read coalesce_queued_input_of_doc;
-    voice_send_on_stop = read voice_send_on_stop_of_doc;
+    send_on_stop = Option.bind text send_on_stop_of_text;
   }
 
 let set_board_sort ~base_path sort =

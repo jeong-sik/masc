@@ -418,8 +418,8 @@ type runtime_reference =
    [None] means nothing declared it, and [runtime_count] is what the message
    counts against. *)
 type resolution_failure =
-  { id : string
-  ; reason : drop_reason option
+  { unresolved_id : string
+  ; declared_drop : drop_reason option
   ; runtime_count : int
   }
 
@@ -466,7 +466,7 @@ let dangling_reference_reason = function
 
 let resolution_of ~(dropped_bindings : (string * drop_reason) list)
     ~(runtime_count : int) (id : string) : resolution_failure =
-  { id; reason = List.assoc_opt id dropped_bindings; runtime_count }
+  { unresolved_id = id; declared_drop = List.assoc_opt id dropped_bindings; runtime_count }
 ;;
 
 (* Rendering lives here now, and only here. Every message below is the one the
@@ -474,7 +474,7 @@ let resolution_of ~(dropped_bindings : (string * drop_reason) list)
    whole account of a refused configuration, and a reworded one would read as a
    different failure. *)
 let resolution_suffix (resolution : resolution_failure) : string =
-  match resolution.reason with
+  match resolution.declared_drop with
   | Some reason ->
     Printf.sprintf
       ": binding is defined but could not be materialized as a runtime — %s"
@@ -519,13 +519,13 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
     Printf.sprintf
       "%s: [runtime].default = %S%s"
       config_path
-      resolution.id
+      resolution.unresolved_id
       (resolution_suffix resolution)
   | Reference_unresolved { site; shape; resolution } ->
     let named =
       match shape with
-      | Scalar -> Printf.sprintf "%s = %S" site resolution.id
-      | List_entry -> Printf.sprintf "%s entry %S" site resolution.id
+      | Scalar -> Printf.sprintf "%s = %S" site resolution.unresolved_id
+      | List_entry -> Printf.sprintf "%s entry %S" site resolution.unresolved_id
     in
     Printf.sprintf "%s: %s%s" config_path named (resolution_suffix resolution)
   | Lane_candidate_unresolved { lane_id; resolution } ->
@@ -533,7 +533,7 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       "%s: [runtime.lanes.%s] candidate %S%s"
       config_path
       lane_id
-      resolution.id
+      resolution.unresolved_id
       (resolution_suffix resolution)
   | Max_context_absent { runtime_id; execution_model; declared_model } ->
     Printf.sprintf
@@ -545,6 +545,28 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       runtime_id
       execution_model
       declared_model
+;;
+
+(* The same account, minus the one part this repository did not write. A parse
+   error's text comes from the TOML parser and can quote the line it choked on,
+   which on an operator surface may be a value rather than a key. Every other
+   case names ids and config keys, so it reads identically to the diagnostic.
+   Listed case by case on purpose: a new failure has to decide where it
+   belongs instead of falling into a default. *)
+let to_operator_text ~(config_path : string) (failure : load_failure) : string =
+  match failure with
+  | Toml_unparsable errors ->
+    Printf.sprintf
+      "%s: %d parse error(s) in the file itself. Run masc runtime-probe for the \
+       parser's own report."
+      config_path
+      (List.length errors)
+  | Undeclared_bindings _
+  | Default_runtime_absent
+  | Default_runtime_unresolved _
+  | Reference_unresolved _
+  | Lane_candidate_unresolved _
+  | Max_context_absent _ -> to_diagnostic_text ~config_path failure
 ;;
 
 (* The list is carried out whole rather than counted here: the caller decides
@@ -1508,7 +1530,6 @@ let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_con
    back through [lsp_servers]. *)
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
-  |> Result.map_error (to_diagnostic_text ~config_path)
   |> Result.map (fun ((runtimes, rt, assignments, media_failover, lanes, _lsp_servers), _) ->
        (runtimes, rt, assignments, media_failover, lanes))
 ;;

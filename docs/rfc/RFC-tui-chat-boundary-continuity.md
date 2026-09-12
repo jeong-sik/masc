@@ -7,7 +7,7 @@ updated: 2026-09-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["RFC-tui-operator-ia"]
+related: ["tui-operator-ia", "chat-turn-rail-and-side-lanes"]
 ---
 
 # RFC: Keeper 채팅의 경계와 연속 (tui-chat-boundary-continuity)
@@ -300,6 +300,31 @@ PR 1 은 나머지와 독립이다. PR 2 와 3 은 같은 행 예산을 건드�
 
 `masc_tui_render.ml` 은 19,665 행이다. PR 2·3 전에 이 파일의 분해가 예정되어
 있다면 그것을 먼저 한다 — 같은 블록을 두 번 헤집지 않기 위해서다.
+
+## 4.5 `chat-turn-rail-and-side-lanes` 와의 관계
+
+같은 화면을 먼저 본 RFC 가 있다(2026-09-06, Draft). 진단의 한 문장이 겹친다 —
+"채팅 화면은 한 턴 안에서 일어난 일과 턴 밖에서 도착한 것을 같은 컬럼에 같은
+무게로 쌓는다."
+
+두 RFC 는 **축이 다르고 보완적이다.**
+
+| | 레일 RFC | 이 RFC |
+|---|---|---|
+| 무엇을 가르나 | 턴 **안**(본선) ↔ 턴 **밖**(측선) | **대화** ↔ **계기판** ↔ **입력** |
+| 수단 | 있는 `turn_rail` 에 층을 더한다 (`╭ │ ├ ┤ ╰`) | 영역의 경계와 행 예산 |
+| 대상 행 | 사고·도구·스킬·승인·journal·남이 보낸 줄 | promoted·NEXT·Progress·Gate·composer |
+
+레일은 transcript **안쪽** 행들의 위계를 그리고, 이 RFC 는 transcript 와 계기판
+**사이**에 없는 경계를 만든다. 한쪽이 다른 쪽을 대신하지 않는다.
+
+**겹치는 자리는 하나다.** §3.2 에서 promoted·NEXT 를 transcript 로 들여보내면
+레일이 그 두 행도 그려야 한다 — 아직 확정되지 않은 턴의 시작을 레일이 어떻게
+여는지는 레일 RFC 가 정할 문제다. 그래서 **PR 3 은 레일 RFC 의 구현 상태를 보고
+순서를 정한다.** 레일이 먼저 들어가면 PR 3 은 레일 어휘를 쓰고, 아니면 PR 3 이
+평범한 행으로 넣은 뒤 레일이 나중에 덮는다. 어느 쪽이든 두 번 그리지는 않는다.
+
+PR 1(이 PR)과 PR 2 는 레일이 그리지 않는 영역만 건드리므로 순서와 무관하다.
 
 ## 5. 외부 근거 (2026-09-12 확인)
 

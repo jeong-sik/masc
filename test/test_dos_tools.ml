@@ -90,7 +90,7 @@ let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `St
 
 (* Setup for the tests that are about what happens after a load. The load's
    own result has its own test. *)
-let boot ~base_path name = ignore (load ~base_path name : Tool_result.t)
+let boot ~base_path name = ignore (load ~base_path name : Tool_result.result)
 
 let test_no_machine () =
   with_workspace (fun base_path ->

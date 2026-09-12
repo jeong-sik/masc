@@ -31,6 +31,11 @@
 - Goals: a goal records when it was opened, and one that goals.json no longer holds is read back rather than treated as gone (#35375, #35388).
 - Skills: builtin packages refresh as complete packages (#35442).
 - TOML line editor: array-of-tables entries are addressed by an identifying key rather than by position (#35365).
+- Voice: setup runs over HTTP and refuses unknown input by name, every endpoint is probed over HTTP rather than only from the CLI, and an endpoint can be asked which voices it has (#35431, #35609, #35629).
+- Lanes: a DOS machine lives on the server behind seven masc_dos_* tools, MSX observations reach frame progress through TOML, and named package outputs connect the same way (#35548, #35562, #35572).
+- Browser: the navigate-content composition ships, and tool receipts retain the scenes a TUI review reads (#35620, #35546).
+- TUI: the Board column's marks carry names, and the help sheet holds the same words (#35528).
+- Benchmarks: arm K also runs on opencode, without Anthropic credentials (#35406).
 
 ## [0.35.14] - 2026-09-12
 

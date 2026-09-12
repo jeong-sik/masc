@@ -201,6 +201,12 @@ let test_result_survives_failed_parent_sync () = with_fixture (fun clock fixture
   let after_rename = Atomic.make false in
   let failed_path = Atomic.make None in
   let publication_error = Atomic.make None in
+  let release_mutex = Stdlib.Mutex.create () in
+  let release_condition = Condition.create () in
+  let released = ref false in
+  let release_writer () = Stdlib.Mutex.protect release_mutex (fun () ->
+    released := true;
+    Condition.broadcast release_condition) in
   let writer ~store ~instance_id ~request_id json =
     let receipt = Action.of_json json |> unwrap in
     if receipt.state = Action.Confirmed && Atomic.compare_and_set inject true false then (
@@ -219,13 +225,31 @@ let test_result_survives_failed_parent_sync () = with_fixture (fun clock fixture
            Atomic.set renamed_result (Some (Yojson.Safe.from_file path));
            let message = Fs_compat.atomic_replace_failure_to_string failure in
            Atomic.set publication_error (Some message);
+           (* Hold the real failed write until a status reader is waiting on
+              its serializer. This forces the original false-confirmed race. *)
+           Stdlib.Mutex.lock release_mutex;
+           while not !released do Condition.wait release_condition release_mutex done;
+           Stdlib.Mutex.unlock release_mutex;
            Error message))
     else Store.save_action store ~instance_id ~request_id json in
   Runtime.For_testing.with_action_writer writer (fun () ->
+    (* This finalizer only signals a synchronous OS condition. It must also run
+       when the test fails before its reader releases the non-cancellable writer. *)
+    Fun.protect ~finally:release_writer (fun () ->
     let id = attach clock fixture ~acting:true in
     let request_id = "result-sync-failure" in
     ignore (act fixture id request_id (`Int 1) |> unwrap);
-    let uncertain = await_state clock fixture id request_id "outcome_unknown" in
+    await clock (fun () -> Atomic.get after_rename);
+    let uncertain = Eio.Switch.run (fun sw ->
+      let started, signal = Eio.Promise.create () in
+      let reader = Eio.Fiber.fork_promise ~sw (fun () ->
+        Eio.Promise.resolve signal ();
+        status fixture id request_id) in
+      Eio.Promise.await started;
+      release_writer ();
+      Eio.Promise.await_exn reader) in
+    check string "first reader after failed publication never sees confirmed" "outcome_unknown"
+      (text "state" uncertain);
     check bool "fault happened after the terminal JSON became visible" true (Atomic.get after_rename);
     let visible = match Atomic.get renamed_result with Some json -> json | None -> fail "missing renamed receipt" in
     check string "package confirmation was visible before fsync failed" "confirmed" (text "state" visible);
@@ -236,16 +260,16 @@ let test_result_survives_failed_parent_sync () = with_fixture (fun clock fixture
     check string "received result bytes survive fallback publication"
       (member "result" visible |> Yojson.Safe.to_string) (member "result" retained |> Yojson.Safe.to_string);
     let error = match Atomic.get publication_error with Some message -> message | None -> fail "missing fsync error" in
-    check string "package interpretation and exact fsync error both remain explicit"
-      (text "detail" visible ^ "; action result persistence failed: " ^ error
-        ^ "; worker lifetime ended before a durable action result; no automatic retry")
-      (text "detail" retained);
+    let failed_detail = text "detail" visible ^ "; action result persistence failed: " ^ error in
+    check bool "package interpretation and exact fsync error both remain explicit" true
+      (List.mem (text "detail" retained)
+        [failed_detail; failed_detail ^ "; worker lifetime ended before a durable action result; no automatic retry"]);
     let rows = dispatch fixture Runtime.Slice ["run_id",str "action-world"] |> unwrap |> values "rows" in
     check bool "committed package evidence survives receipt sync failure" true
       (List.exists (fun row -> member "fields" row |> member "action_request" = str request_id) rows);
     ignore (act fixture id request_id (`Int 1) |> unwrap);
     check int "uncertain durable publication never repeats the action" 1 !(fixture.calls);
-    detach clock fixture id))
+    detach clock fixture id)))
 
 let () = run "Lane action workflow" ["optional world actions",[
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;

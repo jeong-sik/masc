@@ -260,17 +260,27 @@ let perform_action m e c (queued : Lane_addon_action.receipt) =
                  {received with state;
                    detail = Some "outcome reported by the package; interpret its result and retained evidence"}) in
       e.current_action <- Some finished;
-      (match save_action m finished with
-       | Ok () -> e.current_action <- None
-       | Error message ->
-           (* A renamed result may already be visible despite failed fsync.
-              Retain that observation, while refusing to assert durability. *)
-           let detail = match finished.detail with
-             | None -> "action result persistence failed: " ^ message
-             | Some previous -> previous ^ "; action result persistence failed: " ^ message in
-           e.current_action <- Some {finished with state = Lane_addon_action.Outcome_unknown;
-             detail = Some detail};
-           raise (Action_persistence_failed ("action result persistence: " ^ message)))
+      let uncertain message =
+        let detail = match finished.detail with
+          | None -> "action result persistence failed: " ^ message
+          | Some previous -> previous ^ "; action result persistence failed: " ^ message in
+        e.current_action <- Some {finished with state = Lane_addon_action.Outcome_unknown;
+          detail = Some detail} in
+      (* Publish the save outcome to readers before releasing their serializer.
+         A post-rename fsync error must not expose its visible terminal JSON as
+         a confirmed result while failure handling yields to other fibers. *)
+      let saved = Eio.Mutex.use_ro m.action_mutex (fun () ->
+        match save_action_unlocked m finished with
+        | Ok () -> e.current_action <- None; Ok ()
+        | Error message -> uncertain message; Error message
+        | exception exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            uncertain (Printexc.to_string exn);
+            Printexc.raise_with_backtrace exn backtrace) in
+      (match saved with
+       | Ok () -> ()
+       | Error message -> raise (Action_persistence_failed ("action result persistence: " ^ message)))
+
 let run ~sw backend m e =
   fork_isolated ~sw (fun () ->
     let work () = try
@@ -602,6 +612,21 @@ let retained_action_unlocked m ~instance_id ~request_id =
       let* receipt = Lane_addon_action.of_json json in
       let* () = if receipt.instance_id = instance_id && receipt.request_id = request_id then Ok ()
         else Error "retained receipt belongs to a different request" in
+      let* receipt =
+        let failed_publication = match Hashtbl.find_opt m.entries instance_id with
+          | Some e -> (match e.current_action with
+              | Some current when current.request_id = request_id
+                  && current.state = Lane_addon_action.Outcome_unknown
+                  && (receipt.state = Lane_addon_action.Confirmed
+                      || receipt.state = Lane_addon_action.Failed_before_effect) -> Some current
+              | _ -> None)
+          | None -> None in
+        match failed_publication with
+        | None -> Ok receipt
+        | Some current ->
+            (* The terminal file may be visible even though its mandatory fsync
+               failed. Retain the known uncertainty before returning a receipt. *)
+            let* () = save_action_unlocked m current in Ok current in
       let active = match Hashtbl.find_opt m.entries instance_id with
         | Some e when e.running ->
             let owns (queued : Lane_addon_action.receipt) = queued.request_id = request_id in

@@ -230,6 +230,8 @@ val start_post_ready_owner_lanes :
 
 (** {1 Main Entry Point} *)
 
+(** [on_ready] runs once the owner is ready and the HTTP listener is bound.
+    It is not called when initialization fails before either boundary. *)
 val run :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->
@@ -237,6 +239,7 @@ val run :
   port:int ->
   base_path:string ->
   ?input_base_path:string ->
+  ?on_ready:(unit -> unit) ->
   accept_store_quarantine:bool ->
   make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
                clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->

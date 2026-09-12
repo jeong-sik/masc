@@ -28,6 +28,11 @@ let load_ledger ~base_path =
    to pass on. A keeper calling these tools is the one reader in a position to
    act, and saying nothing here is what would make the store's own contract a
    lie. Omitted when there are none, so the ordinary answer stays quiet. *)
+(* Every other keeper tool answers inside an [ok] envelope, and the dispatch
+   suite checks for it: a result without it reads as a failure to the same
+   caller that reads the rest. *)
+let ok_envelope fields = `Assoc (("ok", `Bool true) :: fields)
+
 let with_unreadable (ledger : World_constitution_store.ledger) fields =
   match ledger.World_constitution_store.rejected with
   | [] -> fields
@@ -97,15 +102,15 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
               (World_constitution_store.append_error_to_string error)
           | Ok () ->
             Keeper_tool_execution.success_data
-              (`Assoc
-                (with_unreadable ledger
-                   [ ( "article_id"
-                     , `String
-                         (World_constitution_types.Article_id.to_string
-                            article.id) )
-                   ; "articles_held", `Int (List.length held + 1)
-                   ; "rendered_bytes", `Int (String.length projected)
-                   ])))))
+              (ok_envelope
+                 (with_unreadable ledger
+                    [ ( "article_id"
+                      , `String
+                          (World_constitution_types.Article_id.to_string
+                             article.id) )
+                    ; "articles_held", `Int (List.length held + 1)
+                    ; "rendered_bytes", `Int (String.length projected)
+                    ])))))
 
 let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let base_path = config.Workspace.base_path in
@@ -143,8 +148,8 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
               (World_constitution_store.append_error_to_string error)
           | Ok () ->
             Keeper_tool_execution.success_data
-              (`Assoc
-                (with_unreadable ledger
-                   [ "article_id", `String raw
-                   ; "articles_held", `Int (List.length held - 1)
-                   ])))))
+              (ok_envelope
+                 (with_unreadable ledger
+                    [ "article_id", `String raw
+                    ; "articles_held", `Int (List.length held - 1)
+                    ])))))

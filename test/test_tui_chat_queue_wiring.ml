@@ -1798,11 +1798,30 @@ let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
   | _ -> fail "pending preview shape changed"
 ;;
 
-(* NEXT is a separate causal lane below the transcript. Its row budget counts
-   the selected Keeper only, and the renderer walks that same selected queue;
-   a workspace-global count is what made one Keeper's footer report another
-   Keeper's waiting input. *)
+(* The chat surface is its own file. Naming it once keeps the guards below
+   and the messages they print from drifting apart. *)
+let chat_path = "bin/masc_tui_render_chat.ml"
+
+let layout_binding = "keeper_message_layout_entries"
+let tail_binding = "chat_tail_entries"
+
+(* NEXT is no longer a lane below the transcript: the unsettled lines are
+   entries at the end of the same stream, so the history budgets their rows
+   the way it budgets every other row and nothing is reserved for them.
+
+   What survives is the half that was the actual bug -- the queue read has to
+   be the selected Keeper's. A workspace-global count is what made one
+   Keeper's footer report another Keeper's waiting input. *)
 let test_the_budget_and_the_pane_agree_about_queue_rows () =
+  (* Both zeros below are about a binding that is here; say so, or a rename
+     answers them by making the binding disappear. *)
+  if
+    Ast_grep.count_value_bindings ~module_path:"bin/masc_tui_types.ml"
+      ~name:"keeper_message_status_rows"
+    <> 1
+  then failf "keeper_message_status_rows is not in bin/masc_tui_types.ml";
+  if Ast_grep.count_value_bindings ~module_path:chat_path ~name:tail_binding <> 1
+  then failf "%s is not in %s" tail_binding chat_path;
   let counted =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_types.ml"
@@ -1810,9 +1829,8 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
       ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
   let drawn =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
+    Ast_grep.count_calls_in_value_binding ~module_path:chat_path
+      ~binding_name:tail_binding
       ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
   let counted_preview =
@@ -1822,16 +1840,16 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
       ~callee:"keeper_message_pending_status_rows"
   in
   let drawn_preview =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
+    Ast_grep.count_calls_in_value_binding ~module_path:chat_path
+      ~binding_name:tail_binding
       ~callee:"keeper_message_pending_preview"
   in
   if
-    counted <> 1 || drawn <> 1 || counted_preview <> 1 || drawn_preview <> 1
+    counted <> 0 || drawn <> 1 || counted_preview <> 0 || drawn_preview <> 1
   then
     failf
-      "NEXT must be counted and drawn once for the selected Keeper: \
+      "NEXT is drawn once from the selected Keeper's queue and reserved \
+       nowhere: \
        count=%d draw=%d count-preview=%d draw-preview=%d"
       counted drawn counted_preview drawn_preview
 ;;
@@ -1895,7 +1913,6 @@ let test_page_navigation_uses_the_reserved_scrollback_budget () =
   check int "PgUp and PgDn share the support-reserved row budget" 1 calls
 ;;
 
-let layout_binding = "keeper_message_layout_entries"
 
 (* Drawing and scroll-pin compensation must consume the same physical layout.
    Re-laying out only the suffix forgets the preceding hour bucket and can
@@ -1912,16 +1929,28 @@ let test_the_pane_builds_one_full_message_layout () =
 ;;
 
 let test_pending_input_is_not_mixed_into_the_transcript () =
+  (* A count of zero is the answer this wants, and it is also what a binding
+     that is not in the file returns. Say the binding is there first, or the
+     zero below means nothing. *)
+  if
+    Ast_grep.count_value_bindings ~module_path:chat_path ~name:layout_binding
+    <> 1
+  then failf "%s is not in %s" layout_binding chat_path;
   let transcript_reads =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:chat_path
       ~binding_name:layout_binding
       ~callee:"Masc_tui_keeper_chat_queue.holds"
   in
+  (* The queue is read where the tail entries are built, not where the
+     transcript's own rows are. Both are in the chat file now that the
+     unsettled lines sit at the end of the same stream, so naming the binding
+     is what keeps them apart. *)
+  if Ast_grep.count_value_bindings ~module_path:chat_path ~name:tail_binding <> 1
+  then failf "%s is not in %s" tail_binding chat_path;
   let next_reads =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render_chat.ml"
-      ~binding_name:"render_keeper_message"
+    Ast_grep.count_calls_in_value_binding ~module_path:chat_path
+      ~binding_name:tail_binding
       ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
   if transcript_reads <> 0 || next_reads <> 1 then
@@ -2230,7 +2259,7 @@ let test_cancel_and_edit_take_the_row_with_them () =
    bottom. Nothing failed — the rows were drawn, just into the wrong pane. *)
 let test_the_pane_draws_every_row_into_its_own_buffer () =
   let source =
-    let path = Ast_grep.resolve_module_path "bin/masc_tui_render.ml" in
+    let path = Ast_grep.resolve_module_path chat_path in
     let channel = open_in_bin path in
     let length = in_channel_length channel in
     let text = really_input_string channel length in
@@ -2239,13 +2268,17 @@ let test_the_pane_draws_every_row_into_its_own_buffer () =
   in
   let lines = String.split_on_char '\n' source in
   let in_renderer = ref false in
+  let renderer_seen = ref false in
   let offenders = ref [] in
   List.iteri
     (fun index line ->
        if
          String.length line > 26
          && String.sub line 0 26 = "let render_keeper_message "
-       then in_renderer := true
+       then begin
+         in_renderer := true;
+         renderer_seen := true
+       end
        else if
          String.length line > 4
          && String.sub line 0 4 = "let "
@@ -2268,6 +2301,12 @@ let test_the_pane_draws_every_row_into_its_own_buffer () =
               search 0)
            [ "box_top"; "box_line"; "box_line_styled"; "box_divider"; "box_empty" ])
     lines;
+  (* The scan walks text, so a renderer that is not in this file leaves the
+     flag false and the list empty -- which reads exactly like a clean pass.
+     Say the binding was found, or the guard is answering about nothing. *)
+  if not !renderer_seen then
+    failf "render_keeper_message is not in %s; this guard read the wrong file"
+      chat_path;
   match !offenders with
   | [] -> ()
   | rows ->

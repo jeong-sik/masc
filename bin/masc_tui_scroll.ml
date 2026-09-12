@@ -8,6 +8,8 @@ let down ~count ~height scroll =
 
 let up ~count ~height scroll = max 0 (normalize ~count ~height scroll - 1)
 
+let step_uncounted ~delta scroll = max 0 (scroll + delta)
+
 (* A page keeps one row from the window it leaves. Moving a full [height]
    would put the row the reader stopped on just past the edge, so a long list
    read page by page loses one row per press with nothing saying so. *)

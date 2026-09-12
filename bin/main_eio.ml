@@ -541,12 +541,13 @@ let acquire_pid_lock port =
 let acquire_base_path_lock ~run_dir base_path =
   match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
-  | Server_startup_takeover.Base_path_already_owned { pid } ->
-      let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
+  | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
+      let detail =
+        Server_startup_takeover.base_path_contention_message
+          ~base_path ~lock_path owner
+      in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
-           owner base_path);
+        ("[FATAL] " ^ detail);
       exit 1
   | Server_startup_takeover.Base_path_rejected rejection ->
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"

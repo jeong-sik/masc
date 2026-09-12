@@ -362,3 +362,202 @@ let edit_table_int content ~path ~key ~value =
          | Some current when String.equal current key -> List.rev_append acc (line :: rest)
          | _ -> replace (existing :: acc) rest) in
     replace [] section)
+
+(* ── array-of-tables entries ───────────────────────────────────────────── *)
+
+(* Endpoint lists are array-of-tables: [\[\[voice.tts.endpoints\]\]] repeated,
+   each entry naming itself with an [id]. The scalar editors above address a
+   table by path, which cannot separate one repeated entry from the next, so
+   entries are addressed by the value of an identifying key instead. *)
+
+type value =
+  | String of string
+  | Int of int
+  | Float of float
+  | Bool of bool
+
+(* The shortest spelling that reads back as the same float. [%.17g] round-trips
+   every double but renders 0.1 as 0.10000000000000001, so precision climbs
+   until the rendering parses back equal. [nan] never compares equal to itself
+   and falls through to the 17-digit form, which is spelled [nan] either way. *)
+let float_text v =
+  let rec shortest precision =
+    if precision > 17
+    then Printf.sprintf "%.17g" v
+    else (
+      let rendered = Printf.sprintf "%.*g" precision v in
+      match float_of_string_opt rendered with
+      | Some parsed when Float.equal parsed v -> rendered
+      | Some _ | None -> shortest (precision + 1))
+  in
+  let rendered = shortest 1 in
+  let has character = String.exists (Char.equal character) rendered in
+  (* A float rendered without a point or exponent reads back as an integer, and
+     a field declared float is then refused by type. [nan] and [inf] carry no
+     point and must not gain one. *)
+  if has '.' || has 'e' || has 'E' || has 'n' || has 'i' then rendered else rendered ^ ".0"
+;;
+
+let value_line ~key ~value =
+  match value with
+  | String v -> scalar_line ~key ~value:v
+  | Int v -> Printf.sprintf "%s = %d" key v
+  | Float v -> Printf.sprintf "%s = %s" key (float_text v)
+  | Bool v -> Printf.sprintf "%s = %b" key v
+;;
+
+let is_table_array ~path line =
+  match header_of_line (Printf.sprintf "[[%s]]" path), header_of_line line with
+  | Some expected, Some found -> equal_header expected found
+  | Some _, None | None, Some _ | None, None -> false
+;;
+
+(* The value of a [key = value] line when it is a string, read by the same
+   grammar as the headers so a quoted key, an escape, or a trailing comment is
+   read here the way the loader reads it. *)
+let string_value_of_line line =
+  match Otoml.Parser.from_string_result line with
+  | Ok (Otoml.TomlTable [ (_key, Otoml.TomlString value) ]) -> Some value
+  | Ok _ | Error _ -> None
+;;
+
+(* An entry body runs from just after its header to the next table header of
+   any kind. *)
+let split_entry_body lines =
+  match find_index is_table_header lines with
+  | None -> lines, []
+  | Some next -> split_at next lines
+;;
+
+let entry_id ~id_key body =
+  List.find_map
+    (fun line ->
+      match key_of_line line with
+      | Some key when String.equal key id_key -> string_value_of_line line
+      | Some _ | None -> None)
+    body
+;;
+
+let entry_has_id ~id_key ~id body =
+  match entry_id ~id_key body with
+  | Some found -> String.equal found id
+  | None -> false
+;;
+
+let table_array_entry_ids content ~path ~id_key =
+  let lines, _trailing = split_lines content in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | line :: rest when is_table_array ~path line ->
+      let body, after = split_entry_body rest in
+      let acc =
+        match entry_id ~id_key body with
+        | Some id -> id :: acc
+        | None -> acc
+      in
+      loop acc after
+    | _ :: rest -> loop acc rest
+  in
+  loop [] lines
+;;
+
+let replace_or_append_value section_lines ~key ~value =
+  let line = value_line ~key ~value in
+  let rec loop acc = function
+    | [] -> List.rev_append acc [ line ]
+    | existing :: rest ->
+      (match key_of_line existing with
+       | Some k when String.equal k key -> List.rev_append acc (line :: rest)
+       | Some _ | None -> loop (existing :: acc) rest)
+  in
+  loop [] section_lines
+;;
+
+let trailing_blank_count lines =
+  let rec loop count = function
+    | line :: rest when String.equal (String.trim line) "" -> loop (count + 1) rest
+    | _ :: _ | [] -> count
+  in
+  loop 0 (List.rev lines)
+;;
+
+(* Insert [block] where the next table header begins, after the last
+   [\[\[path\]\]] entry and the blank lines that trail it, then repeat that many
+   blanks below the new entry.
+
+   The separator goes below rather than above so that adding an entry and
+   removing it again restores the file byte-for-byte: {!remove_table_array_entry}
+   takes an entry's trailing blanks with it, so an entry whose blanks sit above
+   it would leave one behind on every add/remove round trip, and a wizard that
+   adds and drops an endpoint a few times would grow the file a blank at a time.
+
+   With no entry present the block goes at the end of the file, separated by one
+   blank line. *)
+let append_table_array_entry lines ~path ~block =
+  let rec last_entry_end index best = function
+    | [] -> best
+    | line :: rest when is_table_array ~path line ->
+      let body, after = split_entry_body rest in
+      let after_index = index + 1 + List.length body in
+      last_entry_end after_index (Some (after_index, trailing_blank_count body)) after
+    | _ :: rest -> last_entry_end (index + 1) best rest
+  in
+  match last_entry_end 0 None lines with
+  | Some (insert_at, blanks) ->
+    let before, after = split_at insert_at lines in
+    before @ block @ List.init blanks (fun _ -> "") @ after
+  | None ->
+    (match List.rev lines with
+     | [] -> block
+     | last :: _ when String.equal (String.trim last) "" -> lines @ block
+     | _ :: _ -> lines @ ("" :: block))
+;;
+
+let upsert_table_array_entry content ~path ~id_key ~id ~fields =
+  let lines, _trailing = split_lines content in
+  (* [id] is the entry's identity; a second spelling of it in [fields] could
+     disagree with the entry this call just addressed. *)
+  let fields = List.filter (fun (key, _) -> not (String.equal key id_key)) fields in
+  let set_fields body =
+    List.fold_left
+      (fun body (key, value) -> replace_or_append_value body ~key ~value)
+      body
+      fields
+  in
+  let rec edit acc found = function
+    | [] -> List.rev acc, found
+    | line :: rest when is_table_array ~path line ->
+      let body, after = split_entry_body rest in
+      let body, found =
+        if entry_has_id ~id_key ~id body then set_fields body, true else body, found
+      in
+      edit (List.rev_append body (line :: acc)) found after
+    | line :: rest -> edit (line :: acc) found rest
+  in
+  let edited, found = edit [] false lines in
+  let updated =
+    if found
+    then edited
+    else (
+      let block =
+        (Printf.sprintf "[[%s]]" path :: value_line ~key:id_key ~value:(String id)
+         :: List.map (fun (key, value) -> value_line ~key ~value) fields)
+      in
+      append_table_array_entry edited ~path ~block)
+  in
+  join_lines updated ~trailing_newline:true
+;;
+
+let remove_table_array_entry content ~path ~id_key ~id =
+  let lines, _trailing = split_lines content in
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | line :: rest when is_table_array ~path line ->
+      let body, after = split_entry_body rest in
+      if entry_has_id ~id_key ~id body
+      then loop acc after
+      else loop (List.rev_append body (line :: acc)) after
+    | line :: rest -> loop (line :: acc) rest
+  in
+  join_lines (loop [] lines) ~trailing_newline:true
+;;

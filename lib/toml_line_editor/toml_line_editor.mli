@@ -56,3 +56,62 @@ val edit_table_multiline_array :
 
 val edit_table_int : string -> path:string -> key:string -> value:int -> string
 (** Set a typed integer while retaining unrelated lines and comments. *)
+
+(** {1 Array-of-tables entries} *)
+
+type value =
+  | String of string
+  | Int of int
+  | Float of float
+  | Bool of bool
+(** A typed entry field. One [\[\[a.b\]\]] entry mixes types — a voice endpoint
+    carries [id] and [kind] strings, an [enabled] bool and a [timeout_seconds]
+    float in the same table — so a writer that rendered every field as a string
+    would quote the bool and the loader would refuse it by type. *)
+
+val value_line : key:string -> value:value -> string
+(** Render [key = value] in TOML's spelling for the type. A [Float] always keeps
+    a point or an exponent, so it does not read back as an integer. *)
+
+val is_table_array : path:string -> string -> bool
+(** Return [true] when [line] opens the array-of-tables [\[\[path\]\]], compared
+    by the key path the grammar reads from each. The array-of-tables counterpart
+    of {!is_table}, which answers [false] for the same path. *)
+
+val table_array_entry_ids : string -> path:string -> id_key:string -> string list
+(** The [id_key] value of every [\[\[path\]\]] entry, in file order. An entry
+    carrying no [id_key] line, or one whose value is not a string, is skipped:
+    {!upsert_table_array_entry} cannot address it either. *)
+
+val upsert_table_array_entry
+  :  string
+  -> path:string
+  -> id_key:string
+  -> id:string
+  -> fields:(string * value) list
+  -> string
+(** Set [fields] on the [\[\[path\]\]] entry whose [id_key] is [id], appending a
+    new entry after the last existing one when no entry carries that id.
+
+    Only the lines named in [fields] are written. Every other line in the entry —
+    comments, blanks, fields not named — passes through unchanged, and a named
+    field the entry does not have yet is appended to the end of its body.
+
+    [id_key] is skipped if it also appears in [fields]: [id] is the one source of
+    the entry's identity, and writing a second spelling of it from the field list
+    would let the two disagree. *)
+
+val remove_table_array_entry
+  :  string
+  -> path:string
+  -> id_key:string
+  -> id:string
+  -> string
+(** Drop the [\[\[path\]\]] entry whose [id_key] is [id], from its header line to
+    the line before the next table header of any kind.
+
+    Comments above the header stay where they are. An operator wrote them about
+    the endpoint, and this editor cannot tell which of the lines above a header
+    belong to it: the whisper endpoint in a live runtime.toml carries twelve
+    lines of measured notes above its header, and a rule that swallowed them
+    would delete the reason the setting exists. *)

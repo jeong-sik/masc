@@ -228,6 +228,230 @@ judge = "duo-judge"
   Alcotest.(check bool) "the next table is untouched" true
     (has_line out {|judge = "duo-judge"|})
 
+(* ── array-of-tables entries ───────────────────────────────────────────── *)
+
+(* Endpoint lists are array-of-tables, and adding or removing one entry is the
+   whole job of a voice setup wizard. This fixture mirrors what a live
+   runtime.toml carries: an operator's measured notes above the first entry
+   header, two entries, and a section after them. *)
+let endpoints_fixture =
+  {|[voice.stt]
+default_model = "scribe_v2"
+
+# 2026-09-03: local whisper goes first. Measured 0.85 s on a real utterance.
+# model=scribe_v2 is ignored by whisper, and leaving api_key_env out is what
+# keeps the Authorization header absent, which is why this answers 200.
+
+[[voice.stt.endpoints]]
+id = "whisper-local"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:2022/v1"
+enabled = true
+timeout_seconds = 60.0
+
+[[voice.stt.endpoints]]
+id = "elevenlabs-stt"
+kind = "elevenlabs_direct"
+api_key_env = "ELEVENLABS_API_KEY"
+enabled = true
+timeout_seconds = 35.0
+
+
+[voice.session]
+endpoints = []
+|}
+
+let lines_of content = fst (Toml_line_editor.split_lines content)
+
+let count_line content target =
+  List.length (List.filter (String.equal target) (lines_of content))
+
+let index_of content target =
+  match Toml_line_editor.find_index (String.equal target) (lines_of content) with
+  | Some index -> index
+  | None -> Alcotest.failf "line not found: %s" target
+
+let upsert = Toml_line_editor.upsert_table_array_entry
+let endpoints = "voice.stt.endpoints"
+
+let test_entry_ids_read_in_file_order () =
+  Alcotest.(check (list string))
+    "both endpoints, in the order the file lists them"
+    [ "whisper-local"; "elevenlabs-stt" ]
+    (Toml_line_editor.table_array_entry_ids endpoints_fixture ~path:endpoints ~id_key:"id")
+
+let test_upsert_edits_only_the_addressed_entry () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "base_url", Toml_line_editor.String "http://127.0.0.1:9000/v1" ]
+  in
+  check_comments_unchanged endpoints_fixture out;
+  Alcotest.(check bool) "the addressed entry took the new value" true
+    (has_line out {|base_url = "http://127.0.0.1:9000/v1"|});
+  Alcotest.(check bool) "the old value is gone" false
+    (has_line out {|base_url = "http://127.0.0.1:2022/v1"|});
+  Alcotest.(check bool) "the sibling entry is untouched" true
+    (has_line out {|api_key_env = "ELEVENLABS_API_KEY"|});
+  Alcotest.(check bool) "and keeps its own timeout" true
+    (has_line out "timeout_seconds = 35.0")
+
+(* A float that renders as [35] loads as an integer, and a field declared float
+   is then refused by type -- which is exactly the shape of the bug that kept
+   voice silent for six days. *)
+let test_a_float_field_keeps_its_point () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "timeout_seconds", Toml_line_editor.Float 35.0 ]
+  in
+  Alcotest.(check bool) "35.0 does not render as a bare 35" true
+    (has_line out "timeout_seconds = 35.0")
+
+let test_a_bool_field_is_not_quoted () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "enabled", Toml_line_editor.Bool false ]
+  in
+  Alcotest.(check bool) "enabled reads as a bool" true (has_line out "enabled = false");
+  Alcotest.(check bool) "not as a string" false (has_line out {|enabled = "false"|})
+
+let test_a_field_the_entry_lacks_is_appended_to_it_alone () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "health_url", Toml_line_editor.String "http://127.0.0.1:2022/health" ]
+  in
+  Alcotest.(check int) "the new field is written exactly once" 1
+    (count_line out {|health_url = "http://127.0.0.1:2022/health"|});
+  Alcotest.(check bool) "it lands inside the addressed entry, before the next header" true
+    (index_of out {|health_url = "http://127.0.0.1:2022/health"|}
+     < index_of out {|id = "elevenlabs-stt"|})
+
+let test_a_new_entry_lands_after_the_last_one () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"mlx-audio"
+      ~fields:
+        [ "kind", Toml_line_editor.String "openai_compat"
+        ; "base_url", Toml_line_editor.String "http://127.0.0.1:8000/v1"
+        ; "enabled", Toml_line_editor.Bool true
+        ; "timeout_seconds", Toml_line_editor.Float 60.0
+        ]
+  in
+  check_comments_unchanged endpoints_fixture out;
+  Alcotest.(check bool) "it sits after the last existing endpoint" true
+    (index_of out {|id = "elevenlabs-stt"|} < index_of out {|id = "mlx-audio"|});
+  Alcotest.(check bool) "and before the section that follows them" true
+    (index_of out {|id = "mlx-audio"|} < index_of out "[voice.session]");
+  Alcotest.(check int) "one header is added, not two" 3
+    (List.length (lines_of out |> List.filter (Toml_line_editor.is_table_array ~path:endpoints)));
+  Alcotest.(check (list string)) "all three are addressable afterwards"
+    [ "whisper-local"; "elevenlabs-stt"; "mlx-audio" ]
+    (Toml_line_editor.table_array_entry_ids out ~path:endpoints ~id_key:"id")
+
+let test_upsert_with_no_entries_yet_appends_one () =
+  let source = {|[voice.tts]
+default_model = "eleven_multilingual_v2"
+|} in
+  let out =
+    upsert source ~path:"voice.tts.endpoints" ~id_key:"id" ~id:"elevenlabs-direct"
+      ~fields:[ "kind", Toml_line_editor.String "elevenlabs_direct" ]
+  in
+  Alcotest.(check (list string)) "the entry is addressable" [ "elevenlabs-direct" ]
+    (Toml_line_editor.table_array_entry_ids out ~path:"voice.tts.endpoints" ~id_key:"id");
+  Alcotest.(check bool) "the existing table survives" true
+    (has_line out {|default_model = "eleven_multilingual_v2"|})
+
+(* [id] is the entry's identity. A second spelling of it in the field list could
+   disagree with the entry the call just addressed. *)
+let test_an_id_inside_fields_is_ignored () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:
+        [ "id", Toml_line_editor.String "renamed"; "enabled", Toml_line_editor.Bool false ]
+  in
+  Alcotest.(check bool) "the id stays as addressed" true
+    (has_line out {|id = "whisper-local"|});
+  Alcotest.(check bool) "the rename never lands" false (has_line out {|id = "renamed"|});
+  Alcotest.(check bool) "the other field still applies" true (has_line out "enabled = false")
+
+let test_remove_drops_the_entry_and_its_fields () =
+  let out =
+    Toml_line_editor.remove_table_array_entry endpoints_fixture ~path:endpoints
+      ~id_key:"id" ~id:"whisper-local"
+  in
+  Alcotest.(check (list string)) "only the sibling remains" [ "elevenlabs-stt" ]
+    (Toml_line_editor.table_array_entry_ids out ~path:endpoints ~id_key:"id");
+  Alcotest.(check bool) "its fields went with it" false
+    (has_line out {|base_url = "http://127.0.0.1:2022/v1"|});
+  Alcotest.(check bool) "the section after the entries survives" true
+    (has_line out "[voice.session]")
+
+(* The notes above a header were written by an operator about the endpoint, and
+   nothing in the text says where that block begins. Swallowing them would
+   delete the measured reason the setting exists. *)
+let test_remove_keeps_the_notes_written_above_the_header () =
+  let out =
+    Toml_line_editor.remove_table_array_entry endpoints_fixture ~path:endpoints
+      ~id_key:"id" ~id:"whisper-local"
+  in
+  check_comments_unchanged endpoints_fixture out
+
+let test_removing_an_absent_id_changes_nothing () =
+  let out =
+    Toml_line_editor.remove_table_array_entry endpoints_fixture ~path:endpoints
+      ~id_key:"id" ~id:"never-configured"
+  in
+  Alcotest.(check (list string)) "both entries stay" [ "whisper-local"; "elevenlabs-stt" ]
+    (Toml_line_editor.table_array_entry_ids out ~path:endpoints ~id_key:"id");
+  check_comments_unchanged endpoints_fixture out
+
+(* [a.b] and [[a.b]] carry the same path and mean different things to a loader,
+   so an editor that confused them would write a field into the wrong shape. *)
+let test_a_table_and_a_table_array_of_one_path_stay_apart () =
+  Alcotest.(check bool) "[[a.b]] is not the standard table [a.b]" false
+    (Toml_line_editor.is_table ~path:endpoints "[[voice.stt.endpoints]]");
+  Alcotest.(check bool) "[[a.b]] is the table array" true
+    (Toml_line_editor.is_table_array ~path:endpoints "[[voice.stt.endpoints]]");
+  Alcotest.(check bool) "[a.b] is not the table array" false
+    (Toml_line_editor.is_table_array ~path:endpoints "[voice.stt.endpoints]")
+
+let test_an_entry_without_the_id_key_is_skipped () =
+  let source = {|[[voice.stt.endpoints]]
+kind = "openai_compat"
+
+[[voice.stt.endpoints]]
+id = "named"
+|} in
+  Alcotest.(check (list string)) "only the entry that names itself is listed" [ "named" ]
+    (Toml_line_editor.table_array_entry_ids source ~path:endpoints ~id_key:"id")
+
+let test_a_value_line_renders_each_type () =
+  let render key value = Toml_line_editor.value_line ~key ~value in
+  Alcotest.(check string) "string" {|id = "a"|} (render "id" (Toml_line_editor.String "a"));
+  Alcotest.(check string) "int" "port = 8000" (render "port" (Toml_line_editor.Int 8000));
+  Alcotest.(check string) "bool" "enabled = true" (render "enabled" (Toml_line_editor.Bool true));
+  Alcotest.(check string) "a whole float keeps a point" "t = 35.0"
+    (render "t" (Toml_line_editor.Float 35.0));
+  Alcotest.(check string) "a fractional float is not padded out" "t = 0.5"
+    (render "t" (Toml_line_editor.Float 0.5))
+
+(* Found by running the editor against a live 2000-line runtime.toml while every
+   fixture case above was passing: adding an entry put its separating blank line
+   above it, and removing an entry takes the blanks below it, so each add/remove
+   round trip left one blank line behind and a wizard that added and dropped an
+   endpoint a few times grew the file. *)
+let test_add_then_remove_restores_the_file () =
+  let added =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"mlx-audio"
+      ~fields:
+        [ "kind", Toml_line_editor.String "openai_compat"
+        ; "base_url", Toml_line_editor.String "http://127.0.0.1:8000/v1"
+        ]
+  in
+  let back =
+    Toml_line_editor.remove_table_array_entry added ~path:endpoints ~id_key:"id"
+      ~id:"mlx-audio"
+  in
+  Alcotest.(check string) "the file comes back byte-for-byte" endpoints_fixture back
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
@@ -254,5 +478,37 @@ let () =
             test_is_table_reads_both_sides_by_path
         ; Alcotest.test_case "an edit finds a hand-spelled header" `Quick
             test_an_edit_finds_a_hand_spelled_header
+        ] )
+    ; ( "array-of-tables entries"
+      , [ Alcotest.test_case "entry ids read in file order" `Quick
+            test_entry_ids_read_in_file_order
+        ; Alcotest.test_case "upsert edits only the addressed entry" `Quick
+            test_upsert_edits_only_the_addressed_entry
+        ; Alcotest.test_case "a float field keeps its point" `Quick
+            test_a_float_field_keeps_its_point
+        ; Alcotest.test_case "a bool field is not quoted" `Quick
+            test_a_bool_field_is_not_quoted
+        ; Alcotest.test_case "a missing field is appended to that entry alone" `Quick
+            test_a_field_the_entry_lacks_is_appended_to_it_alone
+        ; Alcotest.test_case "a new entry lands after the last one" `Quick
+            test_a_new_entry_lands_after_the_last_one
+        ; Alcotest.test_case "upsert with no entries yet appends one" `Quick
+            test_upsert_with_no_entries_yet_appends_one
+        ; Alcotest.test_case "an id inside fields is ignored" `Quick
+            test_an_id_inside_fields_is_ignored
+        ; Alcotest.test_case "remove drops the entry and its fields" `Quick
+            test_remove_drops_the_entry_and_its_fields
+        ; Alcotest.test_case "remove keeps the notes above the header" `Quick
+            test_remove_keeps_the_notes_written_above_the_header
+        ; Alcotest.test_case "removing an absent id changes nothing" `Quick
+            test_removing_an_absent_id_changes_nothing
+        ; Alcotest.test_case "a table and a table array of one path stay apart" `Quick
+            test_a_table_and_a_table_array_of_one_path_stay_apart
+        ; Alcotest.test_case "an entry without the id key is skipped" `Quick
+            test_an_entry_without_the_id_key_is_skipped
+        ; Alcotest.test_case "a value line renders each type" `Quick
+            test_a_value_line_renders_each_type
+        ; Alcotest.test_case "add then remove restores the file" `Quick
+            test_add_then_remove_restores_the_file
         ] )
     ]

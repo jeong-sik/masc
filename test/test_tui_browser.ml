@@ -35,6 +35,19 @@ let test_both_openers_are_tried () =
   check (Alcotest.list str) "macOS first, then freedesktop"
     [ "open"; "xdg-open" ] Masc_tui_browser.openers
 
+let test_the_browser_gets_the_page_not_the_picture_or_the_title () =
+  (* Three distinct strings, so the wrong pick is visible. The title is
+     indented for the screen; handing it to a shell would open nothing. The
+     picture is what just failed. The page is what the operator chose. *)
+  let page_url = "https://e.com/post/1" in
+  let picked =
+    Masc_tui_browser.browser_url
+      { Masc_tui_browser.title = "  A post about nothing";
+        page_url;
+        image_url = "https://cdn.e.com/preview/1.png" }
+  in
+  check str "page url, not image url, not title" page_url picked
+
 let () =
   Alcotest.run "tui_browser"
     [ ( "the command",
@@ -43,5 +56,7 @@ let () =
             `Quick test_a_quote_in_the_url_cannot_close_the_quoting;
           Alcotest.test_case "both openers are tried" `Quick
             test_both_openers_are_tried;
+          Alcotest.test_case "the browser gets the page, not the picture or the title"
+            `Quick test_the_browser_gets_the_page_not_the_picture_or_the_title;
         ] );
     ]

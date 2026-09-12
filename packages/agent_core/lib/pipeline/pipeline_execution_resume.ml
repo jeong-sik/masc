@@ -158,7 +158,7 @@ let classify_settled agent =
    settled results without re-executing effects and without aborting the root as
    Failed. [tools_settled] is the completed-tool-turn outcome; [terminal] wraps
    the reconstructed final assistant response. *)
-let run_settled agent boundary ~all_pre_tool_use_blocked ~tools_settled ~terminal =
+let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~terminal =
   let* replay = classify_settled agent in
   match replay with
   | Replay_tools_settled { tool_uses; tool_results } ->
@@ -168,22 +168,15 @@ let run_settled agent boundary ~all_pre_tool_use_blocked ~tools_settled ~termina
         ~response
         ~tool_uses:(Nonempty.to_list tool_uses)
     in
-    let turn = agent.Agent_types.state.turn_count - 1 in
-    if turn < 0
-    then
-      Error
-        (Error.Internal
-           "durable execution resume settled tool turn has an invalid turn counter")
-    else
-      let* invocations = Pipeline_execution_scope.settled_invocations boundary in
-      let* outcome =
-        match settled_tool_authority invocations with
-        | All_pre_tool_use_blocked -> Ok all_pre_tool_use_blocked
-        | Durable_invocations invocations ->
-          tools_settled ~response ~turn ~invocations ~tool_results tool_uses
-      in
-      let+ () = Pipeline_execution_scope.finalize_settled boundary in
-      outcome
+    let* invocations = Pipeline_execution_scope.settled_invocations boundary in
+    let* outcome =
+      match settled_tool_authority invocations with
+      | All_pre_tool_use_blocked -> Ok all_pre_tool_use_blocked
+      | Durable_invocations invocations ->
+        tools_settled ~response ~turn ~invocations ~tool_results tool_uses
+    in
+    let+ () = Pipeline_execution_scope.finalize_settled boundary in
+    outcome
   | Replay_terminal message ->
     let* response = Pipeline_execution_scope.settled_response boundary in
     let* invocations = Pipeline_execution_scope.settled_invocations boundary in
@@ -208,6 +201,7 @@ let run_settled agent boundary ~all_pre_tool_use_blocked ~tools_settled ~termina
 let run
       agent
       execution
+      ~turn
       ~execute
       ~settled_before_checkpoint
       ~all_pre_tool_use_blocked
@@ -270,7 +264,7 @@ let run
                      in
                      settled_before_checkpoint
                        ~response
-                       ~turn:(Pipeline_execution_scope.turn_ordinal execution)
+                       ~turn
                        ~invocations
                        ~tool_results
                        tool_blocks)))
@@ -286,7 +280,7 @@ let run
               | Durable_invocations invocations ->
                 already_settled
                   ~response
-                  ~turn:(Pipeline_execution_scope.turn_ordinal execution)
+                  ~turn
                   ~invocations
                   ~tool_results
                   tool_blocks)
@@ -311,18 +305,55 @@ let run
     Pipeline_execution_scope.close_success execution |> Result.map (fun () -> outcome)
 ;;
 
-(* Dispatch one pipeline turn against the durable-execution scope. Consume the
-   one-shot resume flag and classify what the restored scope found at the durable
-   turn frontier: [Active] resumes an in-progress turn/provider via {!run};
-   [Settled] surfaces an already-settled boundary via {!run_settled}; [Fresh] (no
-   resume requested, or nothing left to resume) runs a new turn via [fresh]. The
-   resume flag is consumed here — before [fresh] — exactly as the pre-crash run
-   would have, so effects and order match the non-resumed path. The turn identity
-   passed to [execute] is read from the durable turn ([turn_ordinal]), never
-   reconstructed from mutable agent state, so a resumed tool turn is traced under
-   the same ordinal the crashed run used. *)
+(* The identity of the provider turn about to run. [resumed] is what the durable
+   turn frontier held; [turn] is the one zero-based ordinal every producer for
+   that turn reads. *)
+type frontier =
+  { resumed : Pipeline_execution_scope.resumed
+  ; turn : int
+  }
+
+let frontier_ordinal frontier = frontier.turn
+
+(* The one place the provider turn ordinal is produced. [Fresh] reads the turn
+   about to run from agent state; [Active] reads the durable turn the crashed
+   run opened, so the resumed turn is traced under the exact ordinal that run
+   used (#2709); [Settled] names the turn the collect stage already closed,
+   which is the one before the restored counter. Consumes the one-shot resume
+   flag, so the caller resolves exactly once per turn, before any span or
+   record names the turn. Fails closed on inconsistent restored topology. *)
+let resolve agent =
+  let* resumed =
+    if Execution_context.take_resume_once ()
+    then Pipeline_execution_scope.resume_current (Execution_context.agent_scope ())
+    else Ok Pipeline_execution_scope.Fresh
+  in
+  let+ turn =
+    match resumed with
+    | Pipeline_execution_scope.Fresh ->
+      Ok (Agent_turn.provider_turn_ordinal agent.Agent_types.state)
+    | Pipeline_execution_scope.Active execution ->
+      Ok (Pipeline_execution_scope.turn_ordinal execution)
+    | Pipeline_execution_scope.Settled _ ->
+      let turn = agent.Agent_types.state.turn_count - 1 in
+      if turn < 0
+      then
+        Error
+          (Error.Internal
+             "durable execution resume settled turn has an invalid turn counter")
+      else Ok turn
+  in
+  { resumed; turn }
+;;
+
+(* Dispatch one pipeline turn against the durable-execution scope, under the
+   identity {!resolve} produced: [Active] resumes an in-progress turn/provider
+   via {!run}; [Settled] surfaces an already-settled boundary via {!run_settled};
+   [Fresh] runs a new turn via [fresh]. Every continuation receives the same
+   [turn]; none re-derives it from mutable agent state. *)
 let dispatch
       agent
+      { resumed; turn }
       ~execute
       ~tools_settled_before_checkpoint
       ~tools_settled
@@ -330,22 +361,17 @@ let dispatch
       ~terminal
       ~fresh
   =
-  let* resumed =
-    if Execution_context.take_resume_once ()
-    then Pipeline_execution_scope.resume_current (Execution_context.agent_scope ())
-    else Ok Pipeline_execution_scope.Fresh
-  in
   match resumed with
   | Pipeline_execution_scope.Active execution ->
-    let turn = Pipeline_execution_scope.turn_ordinal execution in
     run
       agent
       execution
+      ~turn
       ~execute:(execute ~turn)
       ~settled_before_checkpoint:tools_settled_before_checkpoint
       ~all_pre_tool_use_blocked
       ~already_settled:tools_settled
   | Pipeline_execution_scope.Settled boundary ->
-    run_settled agent boundary ~all_pre_tool_use_blocked ~tools_settled ~terminal
-  | Pipeline_execution_scope.Fresh -> fresh ()
+    run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~terminal
+  | Pipeline_execution_scope.Fresh -> fresh ~turn
 ;;

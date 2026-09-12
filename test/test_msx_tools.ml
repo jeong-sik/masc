@@ -349,6 +349,139 @@ let test_inventory () =
      has "hero.rom" && has "big")
 ;;
 
+(* --- arcade relay -----------------------------------------------------------
+   The relay is judged on the Board it posts to: the JSONL board boots in the
+   test workspace, loads go through the tool handler, and the persisted posts
+   are read back. A load announces a change of medium only. *)
+
+let medium =
+  testable
+    (fun fmt m ->
+      Format.pp_print_string fmt
+        (match m with
+         | Msx_lane.Cartridge n -> "cartridge:" ^ n
+         | Msx_lane.Disk n -> "disk:" ^ n))
+    ( = )
+;;
+
+let announced ~name ~kind =
+  Printf.sprintf
+    "msx-test 님이 %s (%s) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요"
+    name kind
+;;
+
+(* Bodies of this test agent's arcade posts, sorted: the board's own order
+   (Hot) is not what is under test. *)
+let arcade_posts () =
+  Board_dispatch.list_posts ~limit:200 ()
+  |> List.filter_map (fun (post : Board.post) ->
+    if String.equal post.title "MSX 아케이드"
+       && String.equal (Board.Agent_id.to_string post.author) "msx-test"
+    then Some post.body
+    else None)
+  |> List.sort String.compare
+;;
+
+(* The board reads its directory from MASC_BASE_PATH and forces its store
+   once per process, so the store is reset to this workspace and the process
+   is left as found: no backend, and no base path, for the tests after. *)
+let with_board base_path f =
+  Eio_main.run @@ fun _env ->
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Unix.putenv "MASC_BASE_PATH" "")
+    f
+;;
+
+let write_cart carts name content =
+  Out_channel.with_open_bin (Filename.concat carts name) (fun oc ->
+    output_string oc content)
+;;
+
+(* Reloading the cartridge in the slot or the disk in the drive posts nothing;
+   a different cartridge or disk posts once more; a BIOS-only boot, an unknown
+   name and a rejected disk boot leave the count where it was. *)
+let test_arcade_relay_posts_once_per_medium_change () =
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  List.iter (fun d -> if not (Sys.file_exists d) then Sys.mkdir d 0o755)
+    [ Filename.concat base_path ".masc"; Filename.dirname carts; carts ];
+  write_cart carts "hero.rom" (String.make 0x4000 '\000');
+  write_cart carts "big" (String.make 0x4000 '\000');
+  write_cart carts "war.dsk" (String.make (720 * 1024) '\xf9');
+  write_cart carts "short.dsk" "";
+  with_board base_path @@ fun () ->
+  ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+  let load name =
+    dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String name) ]
+  in
+  let posts = list string in
+  check posts "the board holds no arcade post before the first load" [] (arcade_posts ());
+  check bool "the first load completes" true (is_completed (load "hero"));
+  let hero = announced ~name:"hero.rom" ~kind:"카트리지" in
+  check posts "the first load is announced" [ hero ] (arcade_posts ());
+  check bool "reloading the same cartridge completes" true (is_completed (load "hero"));
+  check posts "the same cartridge again is not announced" [ hero ] (arcade_posts ());
+  check bool "loading another cartridge completes" true (is_completed (load "big"));
+  let expected = List.sort String.compare [ hero; announced ~name:"big" ~kind:"카트리지" ] in
+  check posts "a different cartridge is announced" expected (arcade_posts ());
+  check bool "an unknown name is rejected" true (rejected (load "nope"));
+  check posts "an unknown name is not announced" expected (arcade_posts ());
+  check bool "a BIOS-only load completes" true
+    (is_completed (dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ]));
+  check posts "BIOS only is not announced" expected (arcade_posts ());
+  check bool "a disk loads" true (is_completed (load "war"));
+  let expected = List.sort String.compare (announced ~name:"war.dsk" ~kind:"디스크" :: expected) in
+  check posts "the disk is announced" expected (arcade_posts ());
+  check bool "reloading the same disk completes" true (is_completed (load "war.dsk"));
+  check posts "the same disk again is not announced" expected (arcade_posts ());
+  check bool "an unreadable boot sector is rejected" true (rejected (load "short"));
+  check posts "a rejected disk boot is not announced" expected (arcade_posts ())
+;;
+
+(* Two loads of one cartridge at once. The lane serialises them and reads
+   each transition inside that critical section, so whichever load takes the
+   lock first starts from no machine and the other starts from the cartridge:
+   between them the cartridge is announced once. *)
+let test_concurrent_loads_announce_the_medium_once () =
+  with_workspace @@ fun base_path ->
+  let ledger_dir = Filename.concat base_path "ledger" in
+  let cart_path = Filename.concat base_path "hero.rom" in
+  Out_channel.with_open_bin cart_path (fun oc -> output_string oc (String.make 0x4000 '\000'));
+  ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+  let racers = 2 in
+  let arrived = Atomic.make 0 in
+  let load () =
+    Atomic.incr arrived;
+    while Atomic.get arrived < racers do Domain.cpu_relax () done;
+    Msx_lane.load ~ledger_dir ~roms_dir:"" ~cart_path:(Some cart_path) ~disk_path:None
+  in
+  let transitions =
+    List.init racers (fun _ -> Domain.spawn load)
+    |> List.map (fun domain ->
+      match Domain.join domain with
+      | Ok (loaded : Msx_lane.loaded) -> loaded.transition
+      | Error e -> fail (Msx_lane.error_to_string e))
+  in
+  let hero = Some (Msx_lane.Cartridge "hero.rom") in
+  check (list (option medium)) "both loads leave the cartridge in the slot" [ hero; hero ]
+    (List.map (fun (t : Msx_lane.transition) -> t.after) transitions);
+  check (list (option medium)) "one load started from no machine, the other from the cartridge"
+    [ None; hero ]
+    (List.sort compare (List.map (fun (t : Msx_lane.transition) -> t.before) transitions));
+  check (list string) "the cartridge is announced once between them"
+    [ announced ~name:"hero.rom" ~kind:"카트리지" ]
+    (List.filter_map
+       (Tool_misc_msx_lane.arcade_announcement ~agent_name:"msx-test")
+       transitions)
+;;
+
 (* A .dsk image resolves in the same inventory and lands in the drive: the
    observation names it under "disk" with no cartridge (the interface ROM the
    core rides in the slot takes it), and a ROM-less load still completes —
@@ -504,7 +637,7 @@ let disk_swap_fixture base_path =
   let ledger_dir = Filename.concat (Filename.concat base_path ".masc") "msx" in
   let loaded = Msx_lane.load ~ledger_dir ~roms_dir:roms ~cart_path:None ~disk_path:(Some a)
     |> lane_observation "synthetic disk boot" in
-  check (option string) "disk A is mounted" (Some "A.dsk") loaded.disk;
+  check (option string) "disk A is mounted" (Some "A.dsk") loaded.observation.disk;
   ledger_dir, a, b
 ;;
 
@@ -808,6 +941,10 @@ let () =
         ; test_case "press sequence taps keys in turn" `Quick test_press_sequence
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "rendered snapshot reuse and invalidation" `Quick test_rendered_pixel_snapshot
+        ; test_case "arcade relay posts once per medium change" `Quick
+            test_arcade_relay_posts_once_per_medium_change
+        ; test_case "concurrent loads announce the medium once" `Quick
+            test_concurrent_loads_announce_the_medium_once
         ; test_case "disk image loads into the drive" `Quick test_disk_load
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint

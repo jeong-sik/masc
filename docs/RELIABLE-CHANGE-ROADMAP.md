@@ -39,7 +39,7 @@ Scale-out은 검증된 완료 처리량을 높이는 기능으로 개발한다. 
 
 | Goal | 완료했을 때 사용자가 얻는 것 | 의존 관계 | 현재 |
 | --- | --- | --- | --- |
-| G1 결과와 측정 연결 | 무엇이 실제로 끝났고 무엇을 확인하지 못했는지 알 수 있음 | 시작점 | 첫 Task 착수 대상으로 등록 |
+| G1 결과와 측정 연결 | 무엇이 실제로 끝났고 무엇을 확인하지 못했는지 알 수 있음 | 시작점 | revision 2 계약 확정, 병합 뒤 재등록 대기 (revision 1 등록은 소실) |
 | G2 두 단계 변경의 중단 복구 | 적용한 변경을 확인하고 중복 없이 남은 단계 진행 | G1 | 계획 |
 | G3 담당·모델 전환 뒤 연속성 | 에이전트가 바뀌어도 소유권과 증거가 이어짐 | G1·G2, 기존 tool-continuity Goal 재사용 | 계획 |
 | G4 검증된 규모 확장 | 충돌·장애를 포함해 동시 작업 처리량을 확대 | 계측은 G1부터 병렬 가능; 완료 판정은 G2·G3 이후 | 계획 |
@@ -54,9 +54,10 @@ Goal 완료 요청은 원시 증거를 보존한 뒤 verifier에 제출한다. �
 
 ## G1 — 요청부터 검증 결과까지 측정이 끊기지 않는다
 
-Runtime Goal ID: `goal-reliable-change-g1-20260909`. 첫 구현 Task: `task-1478` (등록 시 todo).
-[등록 당시 readback](evidence/reliable-change-roadmap/activation.json)은 실행 결과가 아니다.
-정의 정본: [G1 acceptance contract](roadmaps/reliable-change-g1.json).
+Runtime Goal ID: `goal-reliable-change-g1-20260909`. 첫 구현 Task: `task-1478` (등록 시 todo, 2026-09-12 현재도 todo).
+정의 정본: [G1 acceptance contract](roadmaps/reliable-change-g1.json), 현재 `criterion_revision` 2.
+[등록 당시 readback](evidence/reliable-change-roadmap/activation.json)은 revision 1의 기록이며 실행 결과가 아니다.
+그 등록은 2026-09-09 운영자 초기화로 런타임에서 사라졌다. 자세한 경위와 재등록 절차는 아래 revision 2 항목에 있다.
 
 범위는 기존 coding harness와 run/turn/request/cost ledger의 연결이다. 새로운 실행 엔진을 만들지 않는다.
 다음 여섯 사례를 각각 3회 실행한다. 3회는 잘못된 재사용·누적 집계를 찾는 소규모 반복이며
@@ -98,6 +99,77 @@ verifier request를 제공한다. 합계는 input 40 / output 8 / cache-read 8 t
 첫 Task: 여섯 사례 manifest 및 observation checker를 고정하고 기존 harness의
 run/turn/request/attempt 및 usage 연결을 구현한다. 새 runtime budget gate는 추가하지 않는다.
 다음 Task는 CI 바이너리로 위 18+3 실행을 수행하고 증거를 제출한다.
+경계 suite(아래)는 세 번째 Task이며 `task-1478`의 계약을 고쳐서 끼워 넣지 않는다.
+
+### revision 2 (2026-09-12) — 감사 뒤 경계 사례와 선행 조건
+
+2026-09-11/12 감사는 회계 층 아래가 깨진 사례를 찾았다. 계약 없는 Task 46건 중 23건에 판정이 붙었고
+그중 15건이 APPROVE였다(S2). MCP producer의 playground root가 없어 verifier가 산출물을 못 읽었다(F044, #35262).
+거절 9건은 producer가 Keeper가 아니라 수정 요청이 전달되지 않은 채 남았다(U1).
+포트가 12시간에 네 번 바뀌어 `.mcp.json`, 터널, 스크립트가 측정 대상 런타임을 잃었다(B6).
+이 실패들은 기존 여섯 사례가 세지 않는다. revision 2는 이를 따로 세는 경계 suite로 추가한다.
+
+**바뀌지 않는 것**: 여섯 사례 × 3회 = 18개, 실제 provider 3회, `retry-success` fixture 합계
+input 40 / output 8 / cache-read 8 / USD 0.07. Goal ID도 그대로 둔다.
+
+**경계 suite**: 12개 사례를 각 1회 실행하고 `boundary-manifest.json` / `boundary-runs.jsonl` /
+`boundary-checker.json`에 따로 기록한다. 경계 사례 통과는 18+3을 대신하지 못하고,
+경계 사례 실패는 Goal 완료를 막지만 18+3 숫자를 바꾸지 않는다. `boundary_cases_counted_into_matrix`는 0이어야 한다.
+
+| 사례 ID | 입력 조건 | 기대 결과 |
+| --- | --- | --- |
+| contract-absent-submit-refused | 계약이 없는 Task를 submit_for_verification | 타입 있는 거절; 검증 요청 행·판정 행 없음; judge prompt를 만들지 않음 |
+| contract-revision-bound-at-settlement | 제출과 판정 확정 사이에 계약이 바뀜 | 제출 시점 revision과 비교해 불일치면 판정을 쓰지 않고 불일치를 기록 |
+| producer-root-missing-mcp | MCP producer의 playground 디렉터리가 없음 | 없음을 사실로 기록하고 제출된 증거로 검토; 보류·반복 경고 없음 |
+| producer-root-missing-keeper | Keeper producer의 host root가 없음 | 인프라 사유로 보류; MCP 사례와 다르게 처리; 판정 없음 |
+| producer-root-wrong | 산출물 참조가 다른 producer root 아래로 풀림 | foreign-root로 기록; 검사한 산출물로 세지 않음; 그 산출물로 APPROVE 불가 |
+| producer-artifact-unreadable | root 아래지만 읽을 수 없거나 해시가 다름 | 코드 있는 사유 기록; 제출 해시와 관측 해시(또는 읽기 오류) 둘 다 보존 |
+| rejection-disposition-mcp-producer | Keeper가 아닌 producer의 Task에 REJECT | 판정 행에 종결 disposition과 책임자(Task 생성자 또는 운영자); Keeper wake 없음; pending 로그 반복 없음 |
+| rejection-disposition-keeper-producer | Keeper producer의 Task에 REJECT | 같은 행 모양, 책임자 = 그 Keeper; 거절 이벤트가 큐에 한 번; 전달 상태를 행에서 읽음 |
+| rejected-before-billing-cost-row | 과금 전 4xx 거절 또는 preflight 거부 | 실제 candidate runtime id, attempt_index, 요청 바이트, 타입 있는 상태, cost_usd null과 미보고 사유가 있는 비용 행; cost 0 행 없음 |
+| canonical-identity-replay-dedup | 두 tool round인 cycle 하나를 네 곳이 로그하고, 재시작 뒤 boot 복구가 재생 | canonical tuple당 관측 한 행; 중복 수 기록; cycle 수 = distinct cycle_id 수 |
+| live-runtime-identity-pinned | endpoint·process id·binary·config 해시를 고정한 live 실행 중 선언 없는 재시작 | process_instance_id 변경을 runtime-identity-mismatch로 판정; live_passed로 세지 않음 |
+| goal-store-unavailable-during-run | 실행 중 goals.json이 읽히지 않음 | 모든 consumer가 파일명과 초기화 절차를 담은 unavailable 상태를 봄; 빈 store를 만들지 않음; 원본 바이트 불변 |
+
+각 사례의 정확한 조건·기대 결과·출처 finding은 JSON contract의 `boundary_suite.cases`가 정본이다.
+
+**이미 구현된 것은 다시 요구하지 않는다.** `e763050689` 기준으로
+[bin/masc_reliable_change_g1_check.ml](../bin/masc_reliable_change_g1_check.ml)은 `check_observations`를 호출하고,
+[lib/goal/reliable_change_g1.ml](../lib/goal/reliable_change_g1.ml)은 manifest의 사례별 필수 엔티티와 phase 경계를 소비하며,
+[scripts/harness_coding_eval.sh](../scripts/harness_coding_eval.sh)는 `--execution-mode matrix`와 `--manifest`로 checker를 부른다.
+남은 구현은 경계 manifest, canonical identity 필드, live manifest 필드, 그리고 JSON의
+`checker_status_at_head.rule_ids_required_by_revision_2`에 적은 규칙 7개다. 소스의 helper 테스트 통과는
+배포된 checker가 조작된 증거를 잡는다는 증명이 아니다.
+
+**선행 조건은 단계 하나씩만 막는다.** 선행 조건이 없는 단계는 지금 시작한다.
+
+| 단계 | 선행 조건 | 이유 |
+| --- | --- | --- |
+| checker·manifest 구현 | 없음 | 지금 진행 |
+| Goal 재등록의 영속성 | goal-store-typed-unavailable | `goal_store.ml`의 `read_state`가 아직 `Undecodable`을 빈 store로 접는다. 그대로 등록하면 09-08 손실이 반복된다 |
+| 18+3 정식 실행 | contract-absent-submit-refusal | 계약 없는 제출을 거부하기 전에는 APPROVE가 아무것도 검사하지 않은 APPROVE와 구분되지 않는다 |
+| 재시작 포함 live 자격 | port-bind-or-refuse | 8935 → 56209 → 54984 → 60690으로 네 번 옮겨 다닌 포트로는 같은 런타임을 측정한다고 말할 수 없다 |
+| 최종 종료 | 위 전부 + 사람 확인 | 감사 finding 전부 해결, 런타임 재작성, hard-quota 회전, witness WAL은 선행 조건이 아니다 |
+
+선행 조건 이름은 2026-09-12 감사 종합이 제안한 RFC slug다. 지금 `docs/rfc/`에 그 이름의 파일은 없다.
+단계는 RFC가 병합되고 구현이 배포 바이너리에 들어갔을 때 열린다. 이름을 적었다고 열리지 않는다.
+
+**task-1478 정리.** 2026-09-12 `tasks/backlog.json` 기준 상태는 todo, 생성자 codex-mcp-client, owner 없음,
+`goal_task_links.json`에 G1 항목 없음. 계약 항목 4개는 revision 2에서도 그대로 유효하다.
+재등록 뒤 `masc_task_set_goal`로 이 Task를 다시 잇는다. Goal이 없는 Task이므로 Ok가 기대된다.
+`Already_assigned`가 돌아오면 끊지 않는다. `predecessor_task_id = task-1478`인 후속 Task를 만들고 task-1478은 그대로 둔다.
+재등록 단계는 소유권을 잡지 않는다. 구현자는 평소처럼 `masc_transition(claim)`으로 잡는다.
+
+**revision 1 등록의 대체.** [activation.json](evidence/reliable-change-roadmap/activation.json)은 revision 1의
+readback으로 남긴다. 고치지 않고, 거기서 진행률을 가져오지 않는다. 손실 경위: #34459가 `criterion_revision`을
+필수 필드로 만들었고 `read_state`가 `Undecodable`을 빈 상태로 접어 goals.json이 7시간 29분 동안 비어 보였다.
+#34485가 오류를 드러낸 뒤 운영자가 goals.json을 손으로 초기화했다(97 → 41 → 0). revision 1에서는
+측정이 한 번도 돌지 않았다. JSON contract의 `supersedes` 블록이 이 관계를 기계가 읽는 형태로 담는다.
+
+**재등록 절차.** 이 PR은 런타임에 아무것도 등록하지 않는다. 병합 뒤 `masc_goal_upsert`를 이 파일의 sha256과
+함께 호출하고, readback으로 revision 2 activation snapshot을 새로 쓴다. 런타임이 만드는
+`criterion_revision`(16바이트 hex)은 그 snapshot에 기록하며 이 문서의 revision 번호 2와 다른 값이다.
+계약을 또 바꾸면 revision 3, 새 sha256, revision 2 snapshot의 보존, `not_run`부터 재측정이다.
 
 ## G2 — 고정된 두 단계 변경이 중단 뒤 수습된다
 
@@ -232,8 +304,9 @@ Dashboard는 같은 상태를 사실대로 보여 준다. 각 시나리오에 TU
 판정·전달 의무 저장 후 전달 전 중단, 전달 실패, 재시작 뒤 전달을 각각 원시 증거로 검증한다.
 
 이는 내부 review-repair 루프의 한 경계를 고치는 작업이다. 전달 성공은 수정·재검증 성공이나
-전체 G5 완료를 뜻하지 않는다. G1의 기존 JSON acceptance, 등록된 Goal과 `task-1478`의
+전체 G5 완료를 뜻하지 않는다. G1의 JSON acceptance(revision 2), 재등록할 Goal과 `task-1478`의
 측정 범위는 그대로 유지하며 이 구현 조각의 결과로 G1을 완료 처리하지 않는다.
+G1 경계 suite의 거절 disposition 두 사례는 이 조각과 같은 행 모양을 본다.
 
 ## 기존 Goal과의 관계
 

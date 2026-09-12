@@ -32,6 +32,23 @@ surface. Each explicit read obtains a fresh page observation.
 
 The TUI has one `go Browser Lane` entry (`B` from Connectors). It lists all
 open tabs of the selected source; `[` / `]` select a tab and `r` refreshes.
+While the lane is visible, the existing TUI refresh cadence follows that
+selected client and tab. It does not rediscover clients or switch to another
+active tab. A scene refresh retains the operator's selected node and scroll
+position while its document, URL and region remain the same. Accepted scene
+observations also update the tab title and URL; returning to text reads the
+current page instead of showing an earlier cached body.
+
+A focused region is rechecked against the current region map before its body
+is refreshed. If its document changed or the region is no longer observed,
+the reader shows the new region map so the operator can select a current
+region. It does not apply an old node reference to a replacement document.
+An observation failure withdraws stale scene actions and preserves the typed
+read intent for the next observation. Cadence reads are single-flight and
+pause while a URL draft, client picker or screenshot overlay owns the surface.
+Operator input takes priority over a cadence read. Its late result cannot
+replace the operator's newer choice, and the actual in-flight request remains
+tracked until completion so superseding a result cannot stack periodic reads.
 The operator chooses pages by title and URL. Websites have no dedicated lanes
 or app filters. Keeper tools use the same general browser capabilities.
 

@@ -17,7 +17,20 @@
 
 ### Added
 
+- Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
+- Lanes: observation packages install from TOML, expose their Skills through the existing Keeper catalog, connect package outputs through TOML world inputs, and carry optional world actions with retained artifact bytes. A self-contained DOS world package ships as one of them (#35465, #35482, #35497, #35521, #35522).
+- TUI: the turn dashboard folds to one line, which returns Ctrl-S to the surface (#35458).
+- TUI: chat holds one timeline, with promoted and NEXT rows inside the flow rather than beside it (#35492).
+- TUI: the keeper detail screen shows its tabs and stops saying its hints twice (#35490).
+- TUI: the judge legend names the marks the list actually draws (#35467).
 - TUI: Resources search and navigation to the beginning/end of either pane (#35370).
+- TUI: Planning shows the name of a goal that has left (#35408).
+- TUI: task throughput and lead time are counted per assignee (#35357).
+- TUI: an open Browser Lane follows the current page, and browser text renders without repeating DOM labels (#35470, #35533).
+- Browser: navigation composes with landing-page regions (#35513).
+- Goals: a goal records when it was opened, and one that goals.json no longer holds is read back rather than treated as gone (#35375, #35388).
+- Skills: builtin packages refresh as complete packages (#35442).
+- TOML line editor: array-of-tables entries are addressed by an identifying key rather than by position (#35365).
 
 ## [0.35.14] - 2026-09-12
 

@@ -150,6 +150,16 @@ let test_large_geometry_has_bounded_raster_dimensions () =
         check bool "PNG height bounded before render" true (uint32 20 <= Pdf.max_page_pixels))
         inspection.pages)
 
+let test_source_budget_precedes_dependency_or_process_lookup () =
+  let bytes = String.make (Pdf.max_source_bytes + 1) 'x' in
+  match Pdf.inspect ~base_path:"unused-no-process-should-start"
+    ~max_image_bytes:1 ~bytes () with
+  | Error (Pdf.Payload_budget_exceeded { bytes; limit }) ->
+    check int "source size" (Pdf.max_source_bytes + 1) bytes;
+    check int "source ceiling" Pdf.max_source_bytes limit
+  | Error error -> fail (Pdf.error_to_string error)
+  | Ok _ -> fail "oversized source reached inspection"
+
 let test_each_refusal_says_which_budget () =
   let counted =
     Pdf.error_to_string
@@ -179,6 +189,8 @@ let () =
             test_extracted_xml_is_bounded_before_parsing
         ; test_case "large page geometry has bounded raster dimensions" `Quick
             test_large_geometry_has_bounded_raster_dimensions
+        ; test_case "source cap precedes dependency and subprocess lookup" `Quick
+            test_source_budget_precedes_dependency_or_process_lookup
         ; test_case "each refusal says which budget" `Quick
             test_each_refusal_says_which_budget
         ] )

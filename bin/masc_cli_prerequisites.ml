@@ -10,7 +10,17 @@ let dependency ~base_path = function
   | "antigravity" -> Some Prerequisites.Antigravity_cli
   | "pdf-tools" -> Some Prerequisites.Pdf_tools
   | "presentation-tools" -> Some (Prerequisites.Presentation_tools {base_path})
+  | "whisper" -> Some Prerequisites.Whisper_cli
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
+
+(* Where a downloaded model lands. A cache directory rather than anywhere under
+   masc: the file is whisper's, masc only names its path in the configuration,
+   and nothing here deletes or refreshes it. Absent HOME, the catalog opens the
+   downloads page instead of offering a command with nowhere to write. *)
+let model_dir () =
+  Option.map
+    (fun home -> Filename.concat (Filename.concat home ".cache") "whisper")
+    (Sys.getenv_opt "HOME")
 let rec wait pid =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> Ok ()
@@ -34,7 +44,10 @@ let actions host dependency =
     In_channel.with_open_text "/etc/os-release" In_channel.input_all
     |> Prerequisites.distribution_of_os_release
     with Sys_error _ -> Prerequisites.Other in
-  let standard = Prerequisites.catalog ~host ~distribution dependency |> List.map (fun action -> Standard action) in
+  let standard =
+    Prerequisites.catalog ?model_dir:(model_dir ()) ~host ~distribution dependency
+    |> List.map (fun action -> Standard action)
+  in
   match host, dependency with
   | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
     Verified_apple_install :: standard
@@ -117,7 +130,7 @@ let run ~base_path ~dependency:name ~action =
           `Assoc (("dependency_readiness", Masc.Pdf_runtime_dependencies.(observe () |> to_json)) :: fields)
         | Prerequisites.Presentation_tools {base_path}, `Assoc fields ->
           `Assoc (("dependency_readiness", Masc.Presentation_runtime_dependencies.(observe ~base_path () |> to_json)) :: fields)
-        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli), _ -> catalog
+        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Whisper_cli), _ -> catalog
         | (Pdf_tools | Presentation_tools _), _ -> invalid_arg "prerequisite catalog encoder must return an object" in
       print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->

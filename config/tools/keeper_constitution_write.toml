@@ -1,0 +1,19 @@
+name = "keeper_constitution_write"
+description = """
+Write one norm into this world's constitution. Every keeper here reads it at \
+the top of every turn from then on. This is the world's shared text, not your \
+own notes — those go to keeper_memory_write. Agreement happens on the board \
+before you call this; the tool records what was decided and judges nothing.\
+"""
+additional_properties = false
+
+[[params]]
+name = "text"
+type = "string"
+required = true
+description = "The norm, as one sentence, rendered verbatim into every keeper's prompt."
+
+[[params]]
+name = "evidence_uri"
+type = "string"
+description = "Optional board post or comment id where this norm was agreed."

@@ -244,6 +244,76 @@ let test_the_same_silence_stalls_once_the_wait_settles () =
             ()))
 ;;
 
+let test_yielded_provider_ignores_missing_tool_observation () =
+  let now = attempt_started_at +. 4_000.0 in
+  List.iter (fun observation ->
+    check bool "main provider yielded; missing tool mirror is not a stall" false
+      (Try_provider.provider_lease_stalled
+         ~lease_phase:Try_provider.Provider_yielded ~now ~threshold_sec
+         ~attempt_started_at ~sample:observation))
+    [None; sample ~last_progress_at:attempt_started_at ~active_tool_count:0 ()]
+;;
+
+let test_provider_lease_callbacks_work_without_downstream () =
+  let now = ref attempt_started_at in
+  let phase, yield, resume = Try_provider.For_testing.observe_provider_lease
+    ~now:(fun () -> !now) ~on_yield:None ~on_resume:None in
+  yield ();
+  now := !now +. 4_000.0;
+  check bool "yield is tracked without optional callbacks" true
+    (Atomic.get phase = Try_provider.Provider_yielded);
+  resume ();
+  check bool "resume starts the new inference window" true
+    (Atomic.get phase = Try_provider.Provider_active_since !now)
+;;
+
+let test_provider_lease_callbacks_preserve_order_and_failure () =
+  let now = ref attempt_started_at in
+  let yielded = ref false in
+  let phase, yield, resume = Try_provider.For_testing.observe_provider_lease
+    ~now:(fun () -> !now)
+    ~on_yield:(Some (fun () -> yielded := true))
+    ~on_resume:(Some (fun () -> now := !now +. 4_000.0)) in
+  yield ();
+  check bool "original yield callback ran" true !yielded;
+  resume ();
+  check bool "baseline is stamped after downstream resume work" true
+    (Atomic.get phase = Try_provider.Provider_active_since !now);
+  let failure = Failure "resume rejected" in
+  let phase, yield, resume = Try_provider.For_testing.observe_provider_lease
+    ~now:(fun () -> !now) ~on_yield:None
+    ~on_resume:(Some (fun () -> raise failure)) in
+  yield ();
+  check_raises "downstream failure propagates" failure resume;
+  check bool "failed resume does not claim active inference" true
+    (Atomic.get phase = Try_provider.Provider_yielded)
+;;
+
+let test_resumed_provider_gets_its_own_progress_window () =
+  let resumed_at = attempt_started_at +. 4_000.0 in
+  let lease_phase = Try_provider.Provider_active_since resumed_at in
+  List.iter (fun observation ->
+    check bool "time spent in the tool is excluded after resume" false
+      (Try_provider.provider_lease_stalled ~lease_phase
+         ~now:(resumed_at +. threshold_sec) ~threshold_sec
+         ~attempt_started_at ~sample:observation);
+    check bool "silent main provider still times out after resume" true
+      (Try_provider.provider_lease_stalled ~lease_phase
+         ~now:(resumed_at +. threshold_sec +. 1.0) ~threshold_sec
+         ~attempt_started_at ~sample:observation))
+    [None; sample ~last_progress_at:attempt_started_at ~active_tool_count:0 ()]
+;;
+
+let test_resumed_provider_retains_later_stream_progress () =
+  let resumed_at = attempt_started_at +. 4_000.0 in
+  let now = resumed_at +. threshold_sec +. 100.0 in
+  check bool "fresh stream progress takes precedence over resume time" false
+    (Try_provider.provider_lease_stalled
+       ~lease_phase:(Try_provider.Provider_active_since resumed_at)
+       ~now ~threshold_sec ~attempt_started_at
+       ~sample:(sample ~last_progress_at:(now -. 1.0) ~active_tool_count:0 ()))
+;;
+
 let () =
   run
     "keeper_provider_call_deadline"
@@ -262,6 +332,16 @@ let () =
     ; ( "attempt_stalled"
       , [ test_case "a progressing attempt is not stalled" `Quick
             test_a_progressing_attempt_is_not_stalled
+        ; test_case "yielded lease excludes missing tool observations" `Quick
+            test_yielded_provider_ignores_missing_tool_observation
+        ; test_case "lease callbacks work without downstream observers" `Quick
+            test_provider_lease_callbacks_work_without_downstream
+        ; test_case "lease callbacks preserve ordering and failures" `Quick
+            test_provider_lease_callbacks_preserve_order_and_failure
+        ; test_case "resumed lease has its own progress window" `Quick
+            test_resumed_provider_gets_its_own_progress_window
+        ; test_case "resumed lease keeps later stream progress" `Quick
+            test_resumed_provider_retains_later_stream_progress
         ; test_case "a wedged attempt is stalled" `Quick
             test_a_wedged_attempt_is_stalled
         ; test_case "a tool in flight is not a stall" `Quick

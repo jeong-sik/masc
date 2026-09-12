@@ -14,10 +14,31 @@
 - Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).
 - TUI: preserve critical Attention text, avoid empty source hints, clarify schedule failures, and use consistent footer/help key labels (#35411, #35421, #35430, #35436, #35439).
 - TUI: replace the Keepers screen's orphaned bottom box corners with a section divider (#35414).
+- Agent core: use the same provider-turn ordinal in hooks, tracing and diagnostic logs, including resumed turns; avoid duplicate INFO completion records (#35348).
+- Keeper: treat inventory shutdown as a normal shutdown boundary, and describe scheduled verification retries accurately (#35347, #35352).
+- Keeper: preserve current context and the original official-client session during native resumption and Gate continuation; reject invalid incoming Gate bindings without disabling the Owner (#35419, #35444, #35449, #35459, #35516).
+- TUI: open the original page URL when an inline image cannot be drawn; retain cached input after converter failures and offer an explicit retry for refused previews (#35346, #35349, #35525).
+- TUI: finish known-lost-terminal cleanup without further terminal output, keep Git overlay scrolling within its geometry, and draw dividers using the terminal-aware palette (#35345, #35351, #35463).
+- TUI: show only applicable Config actions, preserve Activity's filter hint, retain Planning modes at narrow widths, wrap complete judge legends, and keep conflict paths and actionable warnings intact alongside exit controls (#35401, #35418, #35445, #35467, #35475).
+- TUI: distinguish Memory loading failures from waiting and name fields rejected by strict response decoding (#35457, #35460).
+- Browser Lane: follow the current page and keep read-failure badges consistent with the surrounding surface (#35446, #35470).
+- Dashboard: keep authenticated read observations outside the per-agent operation quota while retaining the per-IP resource boundary (#35447).
+- Fusion: include the active Task contract and Goal criteria by default, and retrieve the original deliberation by canonical run ID. Missing Board reads preserve their error rather than inventing expiry (#35501, #35511, #35510).
+- Board: relay MSX events on media changes and include verification identity in verification post titles (#35350).
 
 ### Added
 
 - TUI: Resources search and navigation to the beginning/end of either pane (#35370).
+- Verification: support configured official clients and original PDF evidence inspection, with PDF installation prerequisites available through setup (#35372, #35398, #35409).
+- Media: carry image tool results through official clients and support declared official-client vision candidates (#35384, #35405).
+- Lane packages: install observation packages from TOML and expose their Skills through the existing Keeper catalog (#35465, #35482).
+- Browser: compose navigation with landing-page region observations (#35513).
+- TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
+
+### Documentation
+
+- Align the benchmark's arm A description with its actual kimi-cli runner (#35395).
+- Update the G1 revision 2 contract and registration evidence, and document the proposed typed unavailable Goal-store boundary (#35485, #35524, #35479).
 
 ## [0.35.14] - 2026-09-12
 

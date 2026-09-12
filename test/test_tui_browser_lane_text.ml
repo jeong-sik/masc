@@ -10,7 +10,7 @@ let () =
     page = Some page; source = Live; client_id = Some "11111111-1111-4111-8111-111111111111"; elapsed_ms = 1.;
   } in
   let view = { (Lane.create ()) with reading = Some reading } in
-  let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in
+  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view)) in
   if lines <> ["Alice"; "First message"; ""; "Bob"; "두 번째 메시지"; ""] then
     failwith "Page paragraph boundaries, blank lines and trailing newline must survive projection";
   print_endline "PASS page multiline and blank-line projection"
@@ -78,7 +78,7 @@ let () =
     width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false;view=Content;scope=None } in
   let scene : Lane.scene = {source=Automation;client_id=None;tab_id=1;content;elapsed_ms=1.} in
   let view = {(Lane.create ()) with source=Automation;selected_tab=Some 1;scene=Some scene} in
-  let lines = Masc_tui_types.browser_lane_page_lines ~cols:80 view in
+  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
   List.iter (fun line ->
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
       failwith "scene line plus indentation exceeds the framed content width") lines;
@@ -134,7 +134,7 @@ let () =
     scene_cursor = 2 } in
   if List.length (Lane.scene_targets view) <> 3 then
     failwith "repeated node ids must collapse to one target each";
-  let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in
+  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view)) in
   if lines <> ["[1 p] first"; "[2 p] second"; "[1 p] first again"; "[>3 p] third"] then
     failwith "each node must carry the number of its id's first appearance, and the cursor its marker";
   print_endline "PASS repeated scene node ids keep one number each"

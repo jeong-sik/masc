@@ -78,6 +78,12 @@ val peek_file_change_artifact_refs :
   invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
 (** Producer-owned snapshot references, retained with line evidence until row commit. *)
 
+val set_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> Tool_output.artifact_ref list -> unit
+val peek_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
+val clear_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> unit
+(** Observer-owned references cross the model projection without entering its
+    data. The logging hook clears them only after its durable row commits. *)
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
     [run_turn] invocation and threaded to every context reader of the
@@ -263,7 +269,10 @@ val log_call :
     typed plan executor; readers must not reconstruct them from [tool_use_id]
     or tool-name strings. [file_change_evidence] is producer-owned typed data,
     persisted independently of the truncated opaque [output] preview.
-    [on_committed], when supplied, forces this row through the synchronous
+    Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
+    synchronous append even without a callback; an unavailable store or failed
+    append raises rather than losing their receipt in the preview queue.
+    [on_committed], when supplied, also forces the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the
     asynchronous log queue. [turn_kind] names which turn made the call —

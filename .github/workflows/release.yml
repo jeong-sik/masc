@@ -41,9 +41,15 @@ jobs:
             shim-arch: arm64
 
     runs-on: ${{ matrix.os }}
-    # The Linux jobs also build the exec shim in a container (an opam install
-    # on the first run), on top of the server build.
-    timeout-minutes: 60
+    # The Linux jobs build the server in a container at the glibc floor and
+    # the exec shim in another (an opam install in each on the first run).
+    timeout-minutes: 90
+
+    env:
+      # Where the built binaries are, for every step that runs one. macOS
+      # builds in place; Linux builds in a container and exports here, so the
+      # steps below must not name dune's output directory directly.
+      MASC_BIN_DIR: _build/default/bin
 
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +71,10 @@ jobs:
           python3 test/test_package_macos_runtime.py
           python3 test/test_installer_dependencies.py
 
+      # Linux builds inside a container (see the Build step), so only the
+      # macOS jobs need a toolchain on the runner itself.
       - name: Setup OCaml
+        if: runner.os == 'macOS'
         uses: ./.github/actions/setup-ocaml-toolchain
 
       - name: Install native dependencies (macOS)
@@ -73,7 +82,7 @@ jobs:
         run: |
           # ripgrep 은 evidence 번들의 Grep 도구 시나리오가 요구한다.
           # Linux 는 별도 스텝에서 apt 로 넣는다.
-          brew install flock gmp libpq openssl@3 zstd ripgrep
+          brew install flock gmp libpq openssl@3 zstd ripgrep poppler
 
           libpq_prefix="$(brew --prefix libpq)"
           openssl_prefix="$(brew --prefix openssl@3)"
@@ -92,6 +101,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Pin private dependencies
+        if: runner.os == 'macOS'
         run: |
           chmod +x scripts/opam-pin-external-deps.sh
           # --with-bisect 는 --with-test 와 짝이다. bisect_ppx 의 opam 제약이
@@ -108,9 +118,10 @@ jobs:
       # 러너 이미지에 rg 가 없으면 "rg executable not found" 로 번들이 깨진다.
       - name: Install ripgrep
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y -qq ripgrep
+        run: sudo apt-get install -y -qq ripgrep poppler-utils
 
       - name: Install dependencies
+        if: runner.os == 'macOS'
         run: |
           for attempt in 1 2 3; do
             opam install . --deps-only --with-test -y && break
@@ -122,24 +133,36 @@ jobs:
             sleep 15
           done
 
-      # Bake SQLite into the release binaries instead of requiring
-      # libsqlite3.so.0 at runtime. libsqlite3-dev ships the static archive
-      # libsqlite3.a; removing the shared linker symlink makes the linker
-      # resolve -lsqlite3 to that archive. Without this a bare Ubuntu cannot
-      # start v0.27.0 until `apt-get install libsqlite3-0` is run first.
-      - name: Prefer static SQLite (self-contained Linux binary)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y -qq libsqlite3-dev
-          sudo rm -f /usr/lib/*/libsqlite3.so /usr/lib/libsqlite3.so
-
-      - name: Build
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
         run: |
           opam exec -- dune build --release \
             bin/main_eio.exe \
             bin/masc_tui.exe \
             bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe
+
+      # Built in a container whose glibc is the support floor, not on the
+      # runner. A binary records the oldest glibc that provides each symbol it
+      # references, so building on ubuntu-24.04 silently raised the floor to
+      # 2.38 and the result refused to start on Debian 12 and Ubuntu 22.04
+      # (masc#35321). The script also bakes SQLite in and enforces the floor;
+      # scripts/check-glibc-floor.sh re-checks the packaged assets below.
+      - name: Build at the glibc floor (Linux, container)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x scripts/build-linux-release.sh scripts/check-glibc-floor.sh
+          contract_test=""
+          if [ "${{ matrix.arch }}" = "linux-x64" ]; then
+            contract_test="--run-contract-test"
+          fi
+          # Exported where a source checkout keeps its build, so MASC_BIN_DIR
+          # stays one value on both operating systems. The onboarding smoke
+          # below runs quickstart.sh, which starts start-masc.sh, and both name
+          # _build/default/bin/main_eio.exe directly; this runner has no OCaml
+          # toolchain, so anywhere else leaves start-masc.sh trying to build
+          # from source and exiting "dune not found".
+          scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" $contract_test
 
       # Manual branch runs also serve isolated runtime/TUI experiments. Keep
       # their compiled bytes even when a later unrelated release check fails.
@@ -157,7 +180,7 @@ jobs:
           out.mkdir()
           files = {}
           for name in ('main_eio', 'masc_tui', 'masc_browser_host'):
-              source = Path('_build/default/bin') / (name + '.exe')
+              source = Path(os.environ['MASC_BIN_DIR']) / (name + '.exe')
               target = out / (name + '.exe')
               shutil.copy2(source, target)
               files[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
@@ -178,20 +201,16 @@ jobs:
           retention-days: 7
 
       - name: Runtime setup validates each supported connection
-        run: python3 test/test_install_runtime_setup.py --binary _build/default/bin/main_eio.exe
+        run: python3 test/test_install_runtime_setup.py --binary "$MASC_BIN_DIR"/main_eio.exe
 
       - name: First conversation setup CLI
-        run: python3 test/test_setup_cli.py --binary _build/default/bin/main_eio.exe
+        run: python3 test/test_setup_cli.py --binary "$MASC_BIN_DIR"/main_eio.exe
 
       - name: Keeper creation CLI exits after HTTP response
-        run: python3 test/test_keeper_create_cli_exit.py _build/default/bin/main_eio.exe
-
-      - name: Tool contract truth
-        if: matrix.arch == 'linux-x64'
-        run: opam exec -- dune exec --release test/test_tool_contract_truth.exe
+        run: python3 test/test_keeper_create_cli_exit.py "$MASC_BIN_DIR"/main_eio.exe
 
       - name: Sandbox image CLI runtime routing
-        run: python3 test/test_sandbox_image_cli.py _build/default/bin/main_eio.exe
+        run: python3 test/test_sandbox_image_cli.py "$MASC_BIN_DIR"/main_eio.exe
 
       # Exercise the image distributed as a recipe by the actual release CLI.
       # This is guest tool readiness, not an authenticated Keeper/model turn.
@@ -200,7 +219,7 @@ jobs:
         run: |
           mkdir -p dist sandbox-smoke-workspace
           image="masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}"
-          _build/default/bin/main_eio.exe sandbox-image --tag "$image" \
+          "$MASC_BIN_DIR"/main_eio.exe sandbox-image --tag "$image" \
             > "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
           docker run --rm --network none --read-only --cap-drop=ALL \
             --user "$(id -u):$(id -g)" --tmpfs /tmp \
@@ -223,9 +242,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           for exe in main_eio masc_tui; do
-            if ldd "_build/default/bin/$exe.exe" 2>/dev/null | grep -qi sqlite; then
+            if ldd "$MASC_BIN_DIR/$exe.exe" 2>/dev/null | grep -qi sqlite; then
               echo "$exe.exe still dynamically links sqlite3:"
-              ldd "_build/default/bin/$exe.exe" | grep -i sqlite
+              ldd "$MASC_BIN_DIR/$exe.exe" | grep -i sqlite
               exit 1
             fi
           done
@@ -254,7 +273,7 @@ jobs:
       - name: Release binary smoke (boot + README drift)
         run: |
           chmod +x scripts/release-binary-smoke.sh
-          scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
+          scripts/release-binary-smoke.sh "$MASC_BIN_DIR"/main_eio.exe
 
       # masc-tui refuses to start without an interactive TTY, so a runner
       # cannot boot it the way the server binary is booted above. --help
@@ -264,16 +283,16 @@ jobs:
       # by test/test_tui_keyboard_input.py in CI, over a real PTY.
       - name: Terminal UI binary smoke (dynamic link)
         run: |
-          _build/default/bin/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
+          "$MASC_BIN_DIR"/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
           grep -q -- '--base-path' /tmp/masc-tui-help.txt
 
       - name: Package binary
         run: |
           mkdir -p dist
-          cp _build/default/bin/main_eio.exe dist/masc-${{ matrix.arch }}
-          cp _build/default/bin/masc_tui.exe dist/masc-tui-${{ matrix.arch }}
-          cp _build/default/bin/masc_browser_host.exe dist/masc-browser-host-${{ matrix.arch }}
-          cp _build/default/bin/deployment_preflight_helper.exe \
+          cp "$MASC_BIN_DIR"/main_eio.exe dist/masc-${{ matrix.arch }}
+          cp "$MASC_BIN_DIR"/masc_tui.exe dist/masc-tui-${{ matrix.arch }}
+          cp "$MASC_BIN_DIR"/masc_browser_host.exe dist/masc-browser-host-${{ matrix.arch }}
+          cp "$MASC_BIN_DIR"/deployment_preflight_helper.exe \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }}
           cp scripts/check-runtime-deployment-preflight.sh \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
@@ -283,6 +302,26 @@ jobs:
           chmod +x \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
+
+      # The build step enforces the floor on what it produced; this enforces it
+      # on what actually ships. The two differ if a copy goes wrong, if a step
+      # between them replaces a file, or if MASC_BIN_DIR ever points somewhere
+      # other than the container's output — the ways a floor regression could
+      # reach users without the build itself failing.
+      - name: Assert shipped Linux binaries meet the glibc floor
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x scripts/check-glibc-floor.sh
+          # Asked of the build script rather than repeated here. Two literals
+          # drift one at a time, and raising only this one checks the shipped
+          # assets against a floor nothing was built at, while raising only the
+          # other ships below the floor this asserts -- both pass quietly.
+          floor="$(bash scripts/build-linux-release.sh --print-floor)"
+          scripts/check-glibc-floor.sh "$floor" \
+            dist/masc-${{ matrix.arch }} \
+            dist/masc-tui-${{ matrix.arch }} \
+            dist/masc-browser-host-${{ matrix.arch }} \
+            dist/masc-deployment-preflight-helper-${{ matrix.arch }}
 
       - name: Bundle relocatable macOS libraries and Python
         if: runner.os == 'macOS'
@@ -378,7 +417,7 @@ jobs:
           chmod +x scripts/release-evidence.sh
           mkdir -p dist
           scripts/release-evidence.sh \
-            _build/default/bin/main_eio.exe \
+            "$MASC_BIN_DIR"/main_eio.exe \
             dist/release-evidence-${{ matrix.arch }}.md
 
       # Exercise scripts/install.sh end to end against the just-packaged

@@ -25,7 +25,7 @@ type voice_tuning = {
 }
 
 type tts_config = {
-  default_model : string;
+  default_model : string option;
   default_voice : string;
   default_voice_settings : voice_tuning;
   agent_voices : (string * string) list;
@@ -61,9 +61,13 @@ type gate_config = {
 
 (* [tts] and [stt] are [None] when their section is absent: a typed absence
    here and a refusal at the speak and transcribe paths, not a model with no
-   name. A record with [default_model = ""] in its place would reach
-   providers as [model_id ""] and the public config as
-   [available_models [""]]. *)
+   name.
+
+   Within a section [default_model] may be blank, but only where nothing is
+   asked for it: a speaking section whose endpoints all run a command that
+   takes no model. Where an endpoint would be asked, the load refuses a blank
+   rather than sending [model_id ""] after the audio. The public config
+   publishes no model in the blank case rather than one named "". *)
 type t = {
   tts : tts_config option;
   stt : stt_config option;
@@ -211,6 +215,18 @@ let endpoint_kind_of_string = function
         (Printf.sprintf
            "endpoint.kind must be one of             openai_compat|elevenlabs_direct|voice_mcp|macos_say|whisper_cli (got %s)"
            value)
+
+(* Whether an endpoint of this kind is ever asked for the section's model by
+   name. The three that reach an address are, and so is whisper-cli, for which
+   the model is the file it loads. say takes no model at all: it is asked for a
+   voice, which is a different setting.
+
+   Exhaustive on purpose. A new kind has to answer this, because the section's
+   requirement is computed from it and a wrong default would either demand a
+   setting that means nothing or let one be skipped that does. *)
+let kind_needs_default_model = function
+  | Openai_compat | Elevenlabs_direct | Voice_mcp | Whisper_cli -> true
+  | Macos_say -> false
 
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
@@ -367,12 +383,6 @@ let parse_tts json =
       let* default_voice =
         require_string ~ctx:"tts" ~field:"default_voice" tts_json
       in
-      (* Required once the section exists: every endpoint in it is asked for
-         this model by name, and a blank name is a request the provider
-         answers with an error after the audio has been sent. *)
-      let* default_model =
-        require_string ~ctx:"tts" ~field:"default_model" tts_json
-      in
       let* default_voice_settings =
         parse_voice_tuning ~ctx:"tts.default_voice_settings"
           (Option.value ~default:`Null
@@ -384,6 +394,21 @@ let parse_tts json =
       in
       let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
       let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
+      (* Required when any endpoint in the section will be asked for it by
+         name: a blank name is then a request the provider answers with an
+         error after the audio has been sent. A section whose endpoints all
+         take no model -- say, on a fresh mac -- is not made to invent one. *)
+      let* default_model =
+        if List.exists
+             (fun (endpoint : endpoint) -> kind_needs_default_model endpoint.kind)
+             endpoints
+        then Result.map Option.some (require_string ~ctx:"tts" ~field:"default_model" tts_json)
+        else
+          (* Absent stays absent rather than becoming a blank standing for it:
+             a section whose endpoints take no model has none, and every reader
+             below has to say what it does about that. *)
+          Ok (Json_util.get_string_nonempty tts_json "default_model")
+      in
       Ok
         (Some
            {
@@ -404,7 +429,10 @@ let parse_stt json =
   | None | Some `Null -> Ok None
   | Some (`Assoc _ as stt_json) ->
       let open Result in
-      (* Required for the same reason as [tts.default_model]. *)
+      (* Always required here, unlike the speaking section. Every kind that
+         transcribes needs it: the three that reach an address are asked for it
+         by name, and whisper-cli is asked for it as the file it loads. There is
+         no transcriber that takes none. *)
       let* default_model =
         require_string ~ctx:"stt" ~field:"default_model" stt_json
       in
@@ -803,10 +831,20 @@ let public_json config =
         | Some tts ->
             `Assoc
               [
-                ("default_model", `String tts.default_model);
+                (* Null and empty rather than a blank name and a list holding
+                   one: a section whose endpoints take no model has none, and
+                   [""] here would read as a model named "". *)
+                ( "default_model"
+                , match tts.default_model with
+                  | Some model -> `String model
+                  | None -> `Null );
                 ("default_voice", `String tts.default_voice);
                 ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices tts)));
-                ("available_models", `List [ `String tts.default_model ]);
+                ( "available_models"
+                , `List
+                    (match tts.default_model with
+                     | Some model -> [ `String model ]
+                     | None -> []) );
                 ("active_endpoint", active_endpoint_json tts.endpoints);
               ] );
       ( "stt",

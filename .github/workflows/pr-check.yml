@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
+          sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml gcc libc6-dev binutils
 
       # Runs before the lints because it answers whether this run is about the
       # current head at all. The payload carries the sha the run was created
@@ -97,6 +97,12 @@ jobs:
 
       - name: Verify release evidence receipt with private captures
         run: python3 test/test_release_evidence_report.py -v
+
+      # The glibc floor decides which distros a release can start on, and
+      # release.yml does not run on pull requests, so this is where the check
+      # itself gets exercised before it is trusted at tag time.
+      - name: Verify the glibc floor check
+        run: python3 test/test_glibc_floor_check.py -v
 
       - name: Installer onboarding and removal behavior
         run: |
@@ -185,7 +191,7 @@ jobs:
         uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-test
-          os-packages: jq ripgrep
+          os-packages: jq ripgrep poppler-utils
 
       - name: Verify standalone namespace fixtures
         run: python3 test/test_run_standalone_suites.py --compile-fixtures -v

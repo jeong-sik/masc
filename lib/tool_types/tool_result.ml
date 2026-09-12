@@ -111,7 +111,8 @@ let unit_disposition_of_string = function
 ;;
 
 type output_payload =
-  { data : Yojson.Safe.t
+  { retained_artifacts : Tool_output.artifact_ref list
+  ; data : Yojson.Safe.t
   ; content_blocks : Llm_provider.Types.content_block list option
   ; metadata : Yojson.Safe.t option
   ; tool_name : string
@@ -200,6 +201,17 @@ let data : result -> Yojson.Safe.t = function
   | Completed { data; _ } | Deferred { data; _ } | Failed { data; _ } -> data
 ;;
 
+let retained_artifacts : result -> Tool_output.artifact_ref list = function
+  | Completed payload | Deferred payload -> payload.retained_artifacts
+  | Failed _ -> []
+;;
+
+let with_retained_artifacts references : result -> result = function
+  | Completed payload -> Completed { payload with retained_artifacts = references }
+  | Deferred payload -> Deferred { payload with retained_artifacts = references }
+  | Failed _ as failure -> failure
+;;
+
 let metadata : result -> Yojson.Safe.t option = function
   | Completed { metadata; _ }
   | Deferred { metadata; _ }
@@ -236,7 +248,7 @@ let is_failed : result -> bool = function
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  Completed { data = `String message_str; content_blocks = None; metadata = None; tool_name; duration_ms }
+  Completed { retained_artifacts = []; data = `String message_str; content_blocks = None; metadata = None; tool_name; duration_ms }
 ;;
 
 let error ~failure_class ~tool_name ~start_time message_str : result =
@@ -286,12 +298,12 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
 
 let make_ok ~tool_name ~start_time ?(data = `Null) ?metadata ?content_blocks () : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Completed { data; content_blocks; metadata; tool_name; duration_ms }
+  Completed { retained_artifacts = []; data; content_blocks; metadata; tool_name; duration_ms }
 ;;
 
 let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Deferred { data; content_blocks = None; metadata; tool_name; duration_ms }
+  Deferred { retained_artifacts = []; data; content_blocks = None; metadata; tool_name; duration_ms }
 ;;
 
 let make_err

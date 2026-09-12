@@ -1,10 +1,10 @@
 (** A derived read index over the keeper tool-call ledger (RFC-0437).
 
     The ledger is the authority. This holds only where each row lives and the
-    two fields the reads filter on, and it can be deleted at any time: the
+    fields the reads filter on, and it can be deleted at any time: the
     next read rebuilds it from the ledger.
 
-    There is no gate. {!recent_rows} advances the index to the ledger's
+    There is no gate. Each read advances the index to the ledger's
     current end before it queries, so "is the index current" is not a
     question the caller can ask. An index that cannot be opened, or whose
     schema version differs, is deleted and rebuilt rather than fallen back
@@ -33,6 +33,21 @@ val recent_rows :
 
     Blocking index transactions run in a system thread for Eio callers.
     A read failure returns [Error] and leaves no index behind. *)
+
+val by_execution_ids :
+  store:Dated_jsonl.t ->
+  keeper_name:string ->
+  execution_ids:string list ->
+  (Yojson.Safe.t list, string) result
+(** Read every authoritative row matching the keeper and requested execution
+    identities across the complete ledger, independent of the recent-row tail.
+    Missing identities return no row. Repeated request IDs do not duplicate
+    results, but multiple ledger rows with one execution ID are all returned;
+    callers must reject ambiguous execution evidence rather than pick a row.
+
+    Advances the index once for the batch, then validates each selected row's
+    keeper, timestamp, and execution ID against its indexed identity. Uses the
+    same rebuild and read-failure handling as {!recent_rows}. *)
 
 val forget_for_ledger : ledger_dir:string -> unit
 (** Drop the open handle for this ledger. The file stays; the next read

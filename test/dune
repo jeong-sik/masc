@@ -2160,6 +2160,11 @@
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
+
+(test
+ (name test_verification_presentation)
+ (modules test_verification_presentation)
+ (libraries masc_test_deps))
 (include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
 (include stanzas/test_keeper_registry_admission_no_suspend.inc)

@@ -140,7 +140,11 @@ val run
         -> content:string
         -> unit)
   -> ?on_runtime_attempt_error:
-       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit)
+       (runtime_id:string
+        -> attempt:int
+        -> dispatch:Keeper_attempt_dispatch.t
+        -> Agent_core.Error.t
+        -> unit)
   -> sw:Eio.Switch.t
   -> net:Eio_context.eio_net
   -> unit

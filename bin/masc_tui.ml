@@ -16266,7 +16266,7 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "@" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
                 (match targets with
                  | [] -> ()
@@ -16298,7 +16298,7 @@ and is loaded on demand through keeper_skill.
                      else if cursor >= state.answering_scroll + height then
                        state.answering_scroll <- cursor - height + 1)
             | "\r" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 (match List.nth_opt lines state.answering_cursor with
                  | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
                      close ();
@@ -17908,7 +17908,7 @@ and is loaded on demand through keeper_skill.
            state.answering_cursor <-
              (match
                 Masc_tui_answering.target_indexes
-                  (Masc_tui_render.answering_lines state)
+                  (Masc_tui_render_prim.answering_lines state)
               with
               | index :: _ -> index
               | [] -> 0)
@@ -20225,12 +20225,12 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Planning;
             state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render.ctx_goal_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
@@ -20372,11 +20372,11 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Overview;
-            (match change_ctx.Masc_tui_render.ctx_task_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_task_id with
              | Some tid ->
                  state.task_detail_id <- Some tid;
                  state.task_detail_scroll <- 0;
@@ -20767,7 +20767,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
            in
            let change_ctx =
-             Masc_tui_render.resolve_change_context state ~path_opt
+             Masc_tui_render_prim.resolve_change_context state ~path_opt
            in
            (* Only the scope's own repository names a remote. A project-wide
               scope spans every registered repository, and picking the first
@@ -20787,7 +20787,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
              | Some Tui_decode.Repository_change_project | None -> None
            in
-           (match change_ctx.Masc_tui_render.ctx_pr with
+           (match change_ctx.Masc_tui_render_prim.ctx_pr with
             | None ->
                 add_event state "git"
                   "no PR to open: this change names no github.com/…/pull/N link or PR-N token"

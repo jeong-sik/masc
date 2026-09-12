@@ -3337,15 +3337,25 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Browser_lane_view.scene_targets view);
     let reversed, _, selected = List.fold_left
       (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
-      let label = match node.kind with
-        | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
-        | Control {disabled=true;_} -> "disabled"
-        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
       let index = Hashtbl.find_opt target_index node.node_id in
-      let prefix = match index with
-        | None -> ""
-        | Some i -> Printf.sprintf "[%s%d %s] "
-            (if i = view.scene_cursor then ">" else "") (i + 1) label in
+      (* Text is the reading surface. DOM tags do not help read a paragraph,
+         author or timestamp; the selected text still has its observed index
+         for n/p and context copying. Controls and regions retain their action
+         labels and the same indices as the interaction model. *)
+      let label = match node.kind with
+        | Text -> None
+        | Raster -> Some "image · Ctrl-O"
+        | Region role -> Some ("region · " ^ role)
+        | Control {disabled=true;_} -> Some "disabled"
+        | Control {editable=true;_} -> Some "input"
+        | Control _ -> Some "button/link" in
+      let prefix = match label, index with
+        | _, None -> ""
+        | None, Some i ->
+            if i = view.scene_cursor then Printf.sprintf "[>%d] " (i + 1) else ""
+        | Some label, Some i ->
+            Printf.sprintf "[%s%d %s] "
+              (if i = view.scene_cursor then ">" else "") (i + 1) label in
       let lines = wrap (prefix ^ node.text) in
       let selected = match selected, index with
         | None, Some i when i = view.scene_cursor -> Some offset

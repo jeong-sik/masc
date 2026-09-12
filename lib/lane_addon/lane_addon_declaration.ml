@@ -122,7 +122,7 @@ let replacement_result ~document ~state = function
 (* A fully written, synced sibling is linked into an absent target. link(2)
    cannot replace a concurrently created declaration. The staging filename is
    outside the *.toml inventory; the final path retains relative-path meaning. *)
-let create ~replace_file ~directory ~document =
+let create ~replace_file ~directory ~(document : document) =
   let staged = Filename.concat directory (".lane-create-" ^ Random_id.uuid_v7 ()) in
   let remove_stage () = try Unix.unlink staged with Unix.Unix_error (Unix.ENOENT,_,_) -> () in
   match replace_file staged document.source_text with

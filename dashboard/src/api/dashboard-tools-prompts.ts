@@ -88,6 +88,7 @@ type DashboardScheduledAutomationDeferredActivation =
         | 'lifecycle_denied'
         | 'shutdown_fenced'
         | 'owner_unknown'
+        | 'owner_not_current'
         | 'not_running'
       activation_detail: string
     }

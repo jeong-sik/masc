@@ -25,6 +25,11 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_owner_unknown of string
       (** The owner could not be read: the metadata store or the owner
           registry did not answer. The string is that failure. *)
+  | Keeper_wake_activation_owner_not_current of string
+      (** The metadata store holds a file under this name that this binary
+          does not decode as current. Boot re-materialises the Keeper from
+          its declaration and it consumes the retained stimulus then. Wire
+          reason [owner_not_current]; the string is the decode detail. *)
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 

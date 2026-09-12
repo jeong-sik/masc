@@ -543,17 +543,20 @@ let test_board_post_schedule_is_rejected_without_mutation () =
 ;;
 
 (* A due occurrence for a name the Keeper store does not hold can never be
-   consumed: no owner exists to take the stimulus, and the drain that used
-   to cancel such rows is gone (#34633). Live 2026-09-10..12: taskmaster,
-   with neither TOML nor meta, gained one durable queue row per day while
-   its schedule stayed [scheduled]. The consumer now rejects the occurrence
-   terminally before it touches the queue. *)
+   consumed: no owner exists to take the stimulus. The consumer rejects the
+   occurrence terminally before it touches the queue, and a recurring
+   schedule does not come due again once it has failed. *)
 let test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
-  let request = create_keeper_wake_schedule config in
+  let interval_sec = 60 in
+  let request =
+    create_keeper_wake_schedule
+      ~recurrence:(Schedule_domain.Interval { interval_sec })
+      config
+  in
   let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   let dispatch = List.hd result.dispatches in
@@ -590,8 +593,74 @@ let test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing () =
   check int "nothing was enqueued for the absent owner" 0
     (Keeper_event_queue.length
        (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
-  check int "the failed schedule is not dispatched again" 0
-    (List.length (tick_ok config ~now:202.0).dispatches)
+  (* Past the occurrence that would have followed the failed one. *)
+  let past_next_due = request.due_at +. float_of_int (interval_sec + interval_sec) in
+  check int "the failed recurrence is not dispatched at its next due time" 0
+    (List.length (tick_ok config ~now:past_next_due).dispatches);
+  check int "and still enqueues nothing" 0
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot ~base_path keeper_name))
+;;
+
+(* A file the store holds under the name but cannot decode as current is
+   not absence: boot re-materialises the Keeper from its declaration, so the
+   stimulus is enqueued and activation defers with the decode detail. *)
+let test_keeper_wake_for_not_current_owner_meta_is_retained () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "schedule-keeper" in
+  let base_path = config.Workspace_utils.base_path in
+  declare_keeper_profile config keeper_name;
+  let meta_path = Keeper_types_profile.keeper_meta_path config keeper_name in
+  mkdir_p (Filename.dirname meta_path);
+  (match Masc_test_deps.current_meta_json_fixture ~name:keeper_name () with
+   | `Assoc fields ->
+     write_file
+       meta_path
+       (Yojson.Safe.pretty_to_string (`Assoc (("generation", `Int 0) :: fields)))
+   | _ -> fail "keeper meta fixture must be a JSON object");
+  (match Keeper_meta_store.read_meta_file_path_presence meta_path with
+   | Ok (Keeper_meta_store.Meta_not_current _) -> ()
+   | Ok Keeper_meta_store.Meta_absent -> fail "fixture meta file is missing"
+   | Ok (Keeper_meta_store.Meta_present _) -> fail "fixture meta decoded as current"
+   | Error detail -> fail ("fixture meta was refused: " ^ detail));
+  let request = create_keeper_wake_schedule config in
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "the stimulus is enqueued durably" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  check int "one stimulus waits for the re-materialised owner" 1
+    (Keeper_event_queue.length
+       (Keeper_registry_event_queue.snapshot ~base_path keeper_name));
+  match
+    Schedule_store.last_wake_for_schedule_instance
+      (Schedule_store.read_state config)
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+  with
+  | None -> fail "missing wake record"
+  | Some wake ->
+    (match wake.detail with
+     | None -> fail "wake detail missing"
+     | Some detail ->
+       let open Yojson.Safe.Util in
+       check string "activation deferred" "deferred"
+         (detail |> member "activation_status" |> to_string);
+       check string "a not-current file is its own reason" "owner_not_current"
+         (detail |> member "activation_reason" |> to_string);
+       check bool "and carries the decode detail" true
+         (String.length (detail |> member "activation_detail" |> to_string) > 0);
+       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+        | Ok
+            (Server_schedule_consumers.Keeper_wake_enqueued
+              { activation_outcome =
+                  Server_schedule_consumers.Keeper_wake_activation_deferred
+                    (Server_schedule_consumers.Keeper_wake_activation_owner_not_current _)
+              ; _
+              }) ->
+          ()
+        | Ok _ -> fail "receipt decoded to a different activation outcome"
+        | Error reason -> fail ("receipt did not decode: " ^ reason)))
 ;;
 
 let test_keeper_wake_consumer_records_wake_receipt () =
@@ -1743,6 +1812,12 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
    | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
      fail ("changed compact source became terminal: " ^ detail)
    | Ok _ -> fail "changed compact source reused the durable occurrence");
+  (* Terminal reconciliation does not consult the Keeper store: the retry
+     repairs evidence and commits acceptance with the owner's metadata
+     gone. *)
+  (match Keeper_meta_store.remove_snapshot config ~name:keeper_name with
+   | Ok () -> ()
+   | Error detail -> fail ("keeper meta removal failed: " ^ detail));
   let retried = tick_ok config ~now:202.0 in
   (match List.hd retried.dispatches with
    | { status = Schedule_runner.Dispatch_succeeded
@@ -1835,6 +1910,9 @@ let test_terminal_retry_requires_acceptance_commit () =
           { detail; _ }) ->
      fail detail
    | Error detail -> fail detail);
+  (match Keeper_meta_store.remove_snapshot config ~name:keeper_name with
+   | Ok () -> ()
+   | Error detail -> fail ("keeper meta removal failed: " ^ detail));
   let running =
     match
       Schedule_store.start_due_candidate
@@ -2717,6 +2795,8 @@ let () =
         ; test_case "keeper wake for an absent owner is terminal and enqueues nothing"
             `Quick
             test_keeper_wake_for_absent_owner_is_terminal_and_enqueues_nothing
+        ; test_case "keeper wake for a not-current owner meta is retained" `Quick
+            test_keeper_wake_for_not_current_owner_meta_is_retained
         ; test_case "keeper wake records wake receipt" `Quick
             test_keeper_wake_consumer_records_wake_receipt
         ; test_case "routed schedule carries occurrence destination to Keeper" `Quick

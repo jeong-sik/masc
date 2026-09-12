@@ -5679,3 +5679,13 @@
  (deps
   (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps yojson unix fs_compat))
+
+(test
+ (name test_lane_addon_config)
+ (modules test_lane_addon_config)
+ (libraries alcotest masc yojson unix))
+
+(test
+ (name test_lane_addon_reconcile)
+ (modules test_lane_addon_reconcile)
+ (libraries alcotest masc yojson unix eio_main eio.mock fs_compat))

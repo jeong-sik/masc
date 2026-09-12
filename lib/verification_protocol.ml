@@ -438,7 +438,7 @@ let retry_delay_of_json : Yojson.Safe.t -> retry_delay option = function
     Some (Full_interval { seconds })
   | `Assoc [ ("kind", `String "shared_timer") ] -> Some Shared_timer
   | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
-  | `List _ | `Tuple _ | `Variant _ -> None
+  | `List _ -> None
 
 let stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option = function
   | `Assoc [ ("kind", `String "retry_scheduled"); ("retry_delay", delay) ] ->
@@ -447,7 +447,7 @@ let stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option = func
      | None -> None)
   | `Assoc [ ("kind", `String "no_retry_armed") ] -> Some No_retry_armed
   | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
-  | `List _ | `Tuple _ | `Variant _ -> None
+  | `List _ -> None
 
 (* Two dispositions are the same news when they agree on whether a retry is
    armed. The delay is how soon, not whether. *)

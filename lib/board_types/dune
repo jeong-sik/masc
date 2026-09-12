@@ -15,7 +15,6 @@
  (libraries
   yojson
   re
-  re.str
   re.pcre
   eio
   masc_random_id

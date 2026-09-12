@@ -499,14 +499,28 @@ let test_rendered_image_reaches_verifier_http_request () =
           check string "producer file changed independently" "changed after submission"
             (Fs_compat.load_file source);
           let module Store = Workspace_verification_store in
+          (* #35170: artifact reads are complete — a known binary format is
+             adopted whole regardless of size, and the delivery ceiling (not
+             the reader) bounds what the judge later receives. The
+             pre-#35170 contract classified an over-ceiling image as
+             unreadable; the unreadable classification is now reserved for
+             artifacts the reader genuinely cannot read, which the
+             missing-file case below still proves. *)
           Fs_compat.save_file source
             (png ^ String.make Store.verification_evidence_max_bytes 'x');
           let oversized = Store.snapshot_submitted_evidence_json
               ~request_id:"vrf-oversized-image" ~base_path:config.base_path
               ~worker:meta.name ["artifact:render.PNG"] in
           let oversized_item = oversized |> to_list |> List.hd in
-          check string "partial host image is explicitly unreadable"
-            "artifact_unreadable" (oversized_item |> member "kind" |> to_string)))
+          check string "oversized known binary is adopted whole"
+            "artifact_binary" (oversized_item |> member "kind" |> to_string);
+          Unix.unlink source;
+          let missing = Store.snapshot_submitted_evidence_json
+              ~request_id:"vrf-missing-image" ~base_path:config.base_path
+              ~worker:meta.name ["artifact:render.PNG"] in
+          check string "unreadable artifact is explicitly typed"
+            "artifact_unreadable"
+            (missing |> to_list |> List.hd |> member "kind" |> to_string)))
 
 
 let test_completion_with_evidence_refs_succeeds () =

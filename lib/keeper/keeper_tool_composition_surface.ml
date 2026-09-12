@@ -819,6 +819,7 @@ let async_worker_result
       (Option.map
          (fun turn_context ->
             observe_node_result
+              ?on_receipt_committed:None
               ~composition_tool:tool_name
               ~composition_execution
               ~composition_tool_kind:tool_kind

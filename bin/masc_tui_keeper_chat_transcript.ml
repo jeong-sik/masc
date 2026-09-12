@@ -255,6 +255,16 @@ let revision t = t.revision
 let bump t = t.revision <- t.revision + 1
 let current_runtime_id t = t.current_runtime_id
 
+let runtime_identity_text ~keeper_name ~configured_runtime transcript =
+  let configured = "configured: " ^ safe_line configured_runtime in
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
+    (match t.current_runtime_id with
+     | Some runtime when String.trim runtime <> "" ->
+       "turn: " ^ safe_line runtime ^ " · " ^ configured
+     | Some _ | None -> configured)
+  | Some _ | None -> configured
+
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
    bounded by the turn's shape (rounds), not by its chunking on the wire. *)

@@ -1291,6 +1291,27 @@ let test_runtime_failover_visibility_and_error_attribution () =
     (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
     (Transcript.phase t)
 
+let test_runtime_identity_separates_configured_and_observed () =
+  let identity ?(keeper_name = "keeper.one") transcript =
+    Transcript.runtime_identity_text ~keeper_name
+      ~configured_runtime:"configured-claude" transcript
+  in
+  check string "without a current transcript only configuration is known"
+    "configured: configured-claude" (identity None);
+  let t = fresh () in
+  check string "a transcript with no runtime observation uses configuration"
+    "configured: configured-claude" (identity (Some t));
+  feed t [ Live.Run_started; Live.Runtime_attempt_started
+    { runtime_id = Some "observed-glm"; attempt_index = Some 1 } ];
+  check string "failover runtime and configured runtime are labelled separately"
+    "turn: observed-glm · configured: configured-claude" (identity (Some t));
+  check string "another keeper's transcript cannot change this header"
+    "configured: configured-claude"
+    (identity ~keeper_name:"keeper.other" (Some t));
+  feed t [ Live.Run_failed { message = "provider timeout" } ];
+  check string "an error keeps the failing turn's runtime visible"
+    "turn: observed-glm · configured: configured-claude" (identity (Some t))
+
 let test_drawn_items_carry_superseded_runtime_id () =
   let t = fresh () in
   feed t
@@ -2409,6 +2430,8 @@ let () =
             test_unreadable_lines_are_counted_with_their_last_reason
         ; test_case "runtime failover visibility and error attribution" `Quick
             test_runtime_failover_visibility_and_error_attribution
+        ; test_case "header separates configured and observed runtimes" `Quick
+            test_runtime_identity_separates_configured_and_observed
         ; test_case "drawn items carry superseded runtime id" `Quick
             test_drawn_items_carry_superseded_runtime_id
         ] )

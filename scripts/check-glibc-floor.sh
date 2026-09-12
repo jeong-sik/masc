@@ -87,6 +87,15 @@ for binary in "$@"; do
     continue
   fi
 
+  # objdump also recognizes PE/COFF and other non-Linux formats. Their lack
+  # of GLIBC references must not turn them into an accepted static ELF.
+  if ! magic="$(od -An -tx1 -N4 "$binary" | tr -d '[:space:]')" \
+    || [ "$magic" != 7f454c46 ]; then
+    echo "check-glibc-floor: not an ELF file: $binary" >&2
+    status=1
+    continue
+  fi
+
   # Private headers include the version requirements, including ABI tags
   # without an imported symbol. Unlike -T, -p also succeeds on a real static
   # ELF. A nonzero status still means no valid measurement was obtained.

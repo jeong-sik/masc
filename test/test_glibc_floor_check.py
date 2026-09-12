@@ -119,6 +119,17 @@ class GlibcFloorCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('no dynamic glibc references', result.stdout)
 
+    def test_a_recognized_non_elf_format_is_not_a_static_pass(self):
+        self.binary.write_bytes(b'MZ\x00\x00PE fixture')
+        env = self.stub_objdump('masc: file format pei-x86-64\n')
+        inspection = subprocess.run(['objdump', '-p', str(self.binary)],
+                                    env=env, capture_output=True, text=True)
+        self.assertEqual(inspection.returncode, 0)
+        result = self.run_check('2.35', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('not an ELF file', result.stderr)
+        self.assertNotIn('no dynamic glibc references', result.stdout)
+
     def test_a_named_abi_requirement_is_not_ignored(self):
         env = self.stub_objdump('Version References:\n  GLIBC_ABI_DT_RELR\n')
         result = self.run_check('2.35', env=env)
@@ -257,6 +268,15 @@ class GlibcFloorRealElfTest(unittest.TestCase):
         self.assertIn('no dynamic glibc references', result.stdout)
 
     def test_real_relr_requirement_obeys_its_glibc_236_floor(self) -> None:
+        target = subprocess.run([str(self.compiler), '-dumpmachine'],
+                                check=True, capture_output=True, text=True).stdout.strip()
+        architecture = target.split('-', 1)[0]
+        # GNU ld 2.42 ignores pack-relative-relocs on AArch64. The PR lint
+        # job uses ubuntu-latest x86_64, where this fixture must never skip.
+        if os.uname().machine == 'x86_64':
+            self.assertEqual(architecture, 'x86_64', 'CI requires its native RELR fixture')
+        if architecture != 'x86_64':
+            self.skipTest(f'DT_RELR fixture requires x86_64 GNU ld; compiler targets {target}')
         binary = self.link('relr', '-fPIE', '-pie', '-Wl,-z,pack-relative-relocs')
         versions = subprocess.run(['objdump', '-p', str(binary)],
                                   check=True, capture_output=True, text=True)
@@ -270,7 +290,7 @@ class GlibcFloorRealElfTest(unittest.TestCase):
     def test_real_non_elf_file_is_refused(self) -> None:
         result = self.check_binary('2.35', self.source)
         self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn('could not read', result.stderr)
+        self.assertIn('not an ELF file', result.stderr)
 
 
 if __name__ == '__main__':

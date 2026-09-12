@@ -1387,6 +1387,47 @@ let test_code_search_count_tracks_fetched_source () =
   load "empty.ml" [||];
   Alcotest.(check (option int)) "loaded empty file has zero matches" (Some 0) (count "needle")
 
+let test_detail_search_counts_follow_the_active_pane () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.search_last <- "needle";
+  state.harness <- Some
+    { Tui_decode.hs_verdicts =
+        [{ Tui_decode.hv_at = 1.; hv_task_id = "task-1";
+           hv_task_title = "needle"; hv_agent = "agent"; hv_gate = "gate";
+           hv_verdict = "approve"; hv_evaluator = "evaluator";
+           hv_fallback_reason = None; hv_notes_hash = "hash" }];
+      hs_calibration = None; hs_overview = None };
+  state.system_logs <- Some
+    { Tui_decode.sys_entries =
+        [{ Tui_decode.sl_seq = 1; sl_ts = "2026-09-13T00:00:00Z";
+           sl_level = Tui_decode.System_info;
+           sl_source = Tui_decode.System_structured;
+           sl_module = "test"; sl_keeper = None; sl_turn = None;
+           sl_message = "needle"; sl_details = `Null; sl_category = None }];
+      sys_total = 1; sys_latest_seq = 1 };
+  let check_pane label surface set_detail =
+    state.view <- surface;
+    let count () = surface_search_count state surface ~query:state.search_last in
+    Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
+    Alcotest.(check bool) (label ^ " list has a cursor") true
+      (Option.is_some (scrolled_surface_rows state surface));
+    set_detail true;
+    Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
+    Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
+      None (surface_row_texts state surface);
+    Alcotest.(check bool) (label ^ " detail has no cursor") false
+      (Option.is_some (scrolled_surface_rows state surface));
+    set_detail false;
+    Alcotest.(check (option int)) (label ^ " return restores count") (Some 1) (count ());
+    Alcotest.(check bool) (label ^ " return restores cursor") true
+      (Option.is_some (scrolled_surface_rows state surface));
+    Alcotest.(check string) (label ^ " keeps settled query") "needle" state.search_last
+  in
+  check_pane "Harness" Harness
+    (fun detail -> state.harness_detail <- if detail then Some ("task-1", 1.) else None);
+  check_pane "System logs" System_logs
+    (fun detail -> state.system_logs_detail_seq <- if detail then Some 1 else None)
+
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
      that does nothing, pointing the other way. Eight of these ten answered
@@ -1572,6 +1613,8 @@ let () =
             `Quick test_every_searchable_surface_names_its_search
         ; test_case "Code search counts follow immutable fetched rows"
             `Quick test_code_search_count_tracks_fetched_source
+        ; test_case "detail search counts follow the active pane"
+            `Quick test_detail_search_counts_follow_the_active_pane
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
         ] )

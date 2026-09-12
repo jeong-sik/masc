@@ -6842,7 +6842,8 @@ let surface_row_texts (state : state) : surface -> string list option = function
               s.Tui_decode.vs_requests)
           state.verification
   | Harness ->
-      Option.map
+      if Option.is_some state.harness_detail then None
+      else Option.map
         (fun s ->
           List.map
             (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
@@ -6924,7 +6925,8 @@ let surface_row_texts (state : state) : surface -> string list option = function
                 s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
-      Option.map
+      if Option.is_some state.system_logs_detail_seq then None
+      else Option.map
         (fun _ ->
           visible_system_log_entries state
           |> List.map

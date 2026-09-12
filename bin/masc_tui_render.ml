@@ -6194,12 +6194,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 
     (* Title, with the tab walk on the same row so the chrome height the
        scroll math counts does not move. *)
+    (* The tab you are on carries the mark the surface strip puts on the
+       surface you are on. Bold and underline said it alone before, so the
+       answer was gone from a monochrome terminal, from one that drops
+       underline, and from every text capture -- a frame dump, a screenshot
+       pasted into an issue, the keyboard-input fixtures. Info's own body
+       opens with a section called "Identity", which is also the name of
+       another tab, so a reader with no mark had a wrong guess waiting. *)
     let tabs =
       Masc_tui_types.keeper_detail_tabs
       |> List.map (fun tab ->
              let label = Masc_tui_types.keeper_detail_tab_label tab in
              if tab = state.detail_tab then
-               Ansi.bold ^ Ansi.underline ^ label ^ Ansi.reset
+               Ansi.bold ^ Ansi.underline
+               ^ Masc_tui_theme.Glyph.current_entry
+               ^ label ^ Ansi.reset
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
@@ -10492,10 +10501,17 @@ let render_metrics (state : state) =
       (screen_title " MASC Metrics & Performance Telemetry")
       sec_label timestamp (connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"metrics"
+  (* The section's lines are formatted by the drawing, so the row it could
+     start at is known only once it has. The body writes it here and the
+     contract reads it back out. *)
+  let drawn_metrics_scroll = ref state.metrics_scroll in
+  surface_chrome
+    ~clamped:(fun () -> Some (Metrics_scroll !drawn_metrics_scroll))
+    state ~terminal_rows ~cols ~surface_key:"metrics"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
       Render_metrics.render_metrics_body ~cols ~budget state
+        ~report_scroll:(fun scroll -> drawn_metrics_scroll := scroll)
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 

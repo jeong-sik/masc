@@ -136,9 +136,9 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
   ; default_voice = None
-  (* The wizard does not ask for a command: each command kind knows the name it
-     is installed under, and an override is for a path the wizard has no way to
-     check. Someone who needs one edits the file. *)
+  (* The wizard offers the three kinds that have an address. Naming the
+     executable belongs to the two command kinds, which it does not offer yet,
+     and each of those knows the name it is normally installed under. *)
   ; command = None
   }
 ;;

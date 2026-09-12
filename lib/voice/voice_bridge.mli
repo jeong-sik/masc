@@ -27,12 +27,9 @@ val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
     can be replayed on a machine that has no say. *)
 val say_catalogue_of_output : string -> catalogue_voice list
 
-(** Ask one endpoint which voices it has. Two kinds publish a catalogue and
-    publish it differently -- ElevenLabs answers a URL, [say] answers a command
-    -- so the endpoint's kind decides which is asked rather than one being
-    tried and the other used when it fails. [Error] carries why there is
-    nothing to show, in words meant for a reader who will type the name
-    instead. *)
+(** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
+    [say] answers a command; the resolved endpoint adapter selects its transport.
+    [Error] explains why an endpoint has no catalogue or could not answer. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
 type mcp_call_error =

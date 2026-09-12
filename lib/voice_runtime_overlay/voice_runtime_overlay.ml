@@ -437,6 +437,11 @@ let elevenlabs_catalogue_url base_url =
 let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
   let adapter = adapter_for_endpoint endpoint in
   match endpoint_base_url endpoint, adapter.transport with
+  | _, (Macos_say | Whisper_cli) ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s runs a command and has no HTTP voice catalogue"
+         endpoint.id)
   | None, _ ->
     Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
   | Some _, Openai_compat ->
@@ -456,14 +461,6 @@ let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_k
       { listing_url = elevenlabs_catalogue_url base_url
       ; listing_headers = [ "xi-api-key", api_key ]
       }
-  (* These publish a catalogue too, but by running a command rather than by
-     answering a URL. Named here rather than folded into the refusals above so
-     a caller is told where to ask instead of being told there is nothing. *)
-  | Some _, (Macos_say | Whisper_cli) ->
-    Error
-      (Printf.sprintf
-         "voice config endpoint %s lists its voices by running a command, not over HTTP"
-         endpoint.id)
 ;;
 
 (* The two kinds that are a command rather than an address.

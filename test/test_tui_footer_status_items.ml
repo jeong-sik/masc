@@ -705,6 +705,34 @@ let test_actionable_conflicts_outrank_worktree_provenance () =
 let keeper_control_hints =
   "j/k:move  p:pause  w:wake  s:shutdown  d:delete  r:refresh  q:quit"
 
+let test_the_notice_that_blocks_the_row_is_the_one_given_up () =
+  (* The four cells of the omitted-key marker are a gap the drawability probe
+     cannot see: a row that drops nothing carries no marker, so counting one
+     there would reject a notice that fits a row exactly. This path lands in that
+     gap -- 70 cells, which passes the probe beside q:quit at 80 and fails the
+     real cut row by four -- while the 57-cell build mismatch fits both. Giving up
+     the lowest-ranked notice first threw the mismatch away and then the path too,
+     and the row drew no notice at all. *)
+  let path = "/w/" ^ String.make 42 'a' in
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch path
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:"q:quit" ()
+  in
+  Alcotest.(check int) "the path notice is the width this case is about" 70
+    (Masc_tui_message_layout.display_width
+       ("MISMATCH local " ^ path ^ " (r:retry)"));
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice that says what to do is drawn" true
+    (contains ~needle:"redeploy)" row);
+  check_bool "the one that could not be drawn is given up" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
 let test_an_armed_action_outlives_every_notice () =
   (* A conflict stays true on the next frame. An armed action is a question
      waiting for one keypress and gone after any other, and [?] cannot recover
@@ -898,6 +926,8 @@ let tests =
           test_actionable_conflicts_outrank_worktree_provenance
       ; Alcotest.test_case "ANSI Keeper controls drop individually and keep q" `Quick
           test_ansi_keeper_keys_remain_individually_droppable
+      ; Alcotest.test_case "the notice that blocks the row is given up" `Quick
+          test_the_notice_that_blocks_the_row_is_the_one_given_up
       ; Alcotest.test_case "an armed action outlives every notice" `Quick
           test_an_armed_action_outlives_every_notice
       ; Alcotest.test_case "a running action reads as one item" `Quick

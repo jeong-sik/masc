@@ -343,6 +343,42 @@ let rec without_lowest_priority = function
   | [] | [ _ ] -> []
   | conflict :: rest -> conflict :: without_lowest_priority rest
 
+(* The undroppable keys of a hint row: what the narrowest row this fitter can
+   draw still has to carry. *)
+let undroppable_keys hints =
+  split_on_double_space hints
+  |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+  |> List.filter item_is_pinned
+
+(* Which notice to give up when the set will not fit. The one that cannot be
+   drawn in the narrowest row that could carry it -- itself, the keys that cannot
+   be dropped, and the marker that says the row was cut -- is the one blocking,
+   whatever it ranks. Giving up the lowest-ranked one instead threw away a short,
+   actionable build mismatch to keep a long workspace path that then could not be
+   drawn either, and the row ended with no notice at all.
+
+   The probe in {!line} cannot reject that long notice up front: a row that drops
+   nothing carries no marker, and counting one there rejects a notice that fits a
+   row exactly. So the marker's cells are counted here, where a drop is already
+   known to be needed. *)
+let without_a_blocking_conflict ~max_cells ~hints conflicts =
+  let undroppable = undroppable_keys hints in
+  let narrowest conflict =
+    "  "
+    ^ String.concat "  " (conflict.text :: undroppable)
+    ^ "  " ^ cut_marker
+  in
+  let blocking =
+    List.filteri
+      (fun _ conflict ->
+        Masc_tui_message_layout.display_width (narrowest conflict) > max_cells)
+      conflicts
+  in
+  match blocking with
+  | [] -> without_lowest_priority conflicts
+  | first :: _ ->
+    List.filter (fun conflict -> conflict != first) conflicts
+
 (* Keys give way before a notice does, and a notice gives way before the keys
    it crowded out stay gone: every attempt starts from the whole key row again,
    so the cells a dropped notice hands back are offered to the keys.
@@ -383,11 +419,7 @@ let drop_hint_items ~max_cells ~conflicts hints =
    Otherwise one long path would starve a short, actionable build mismatch that
    ranks below it and fits on its own. *)
 let drawable_conflicts ~max_cells ~hints conflicts =
-  let undroppable =
-    split_on_double_space hints
-    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
-    |> List.filter item_is_pinned
-  in
+  let undroppable = undroppable_keys hints in
   (* No cut marker in the probe. A row that gives nothing up carries none, and
      counting it here rejected a notice that fits a row exactly. Where a key
      does have to go the marker's cells are counted by the fit itself, which
@@ -428,8 +460,9 @@ let rec fit_body ~max_cells ~conflicts ~hints ~omissions statuses =
   | None ->
     (match conflicts with
      | _ :: _ ->
-       fit_body ~max_cells ~conflicts:(without_lowest_priority conflicts) ~hints
-         ~omissions statuses
+       fit_body ~max_cells
+         ~conflicts:(without_a_blocking_conflict ~max_cells ~hints conflicts)
+         ~hints ~omissions statuses
      | [] ->
        (* Never cell-cut a conflict into a different path or diagnosis. Only
           surface hints can use the last-resort text truncation. *)

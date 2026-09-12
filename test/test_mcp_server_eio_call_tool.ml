@@ -896,11 +896,77 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
       check bool "native retained receipt requires successful log commit" true failed)
 
+let test_canonical_keeper_retention ~bearer ~fail_audit () =
+  with_call_tool_state (fun env sw state ->
+    let config = (Masc.Mcp_server.workspace_scope state).config in
+    let base_path = config.base_path in
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    let alias = "retention" in
+    ignore (Masc.Workspace.bind_session config ~agent_name:alias ~capabilities:[] ());
+    let keeper_name = Masc.Workspace.resolve_agent_name config alias in
+    check bool "fixture resolves a bound workspace alias" true (keeper_name <> alias);
+    let meta = make_keeper_meta keeper_name in
+    ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    Fun.protect ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Time_compat.clear_clock ()) (fun () ->
+      let auth_token = if bearer then
+        match Masc.Auth.create_token base_path ~agent_name:keeper_name ~role:Masc_domain.Worker with
+        | Ok (token, _) -> Some token
+        | Error _ -> fail "credential fixture creation failed"
+        else None in
+      let arguments = `Assoc (["lane",`String "automation"; "tabId",`Int 7;
+        "mode",`String "scene"] @ if bearer then [] else ["_agent_name",`String alias]) in
+      let data = `Assoc [
+        "schema",`String "masc.browser.scene.v1"; "tabId",`Int 7;
+        "source",`String "automation"; "clientId",`Null;
+        "documentId",`String "canonical-owner-document";
+        "url",`String "https://example.org/page"; "title",`String "Observed";
+        "view",`String "content"; "scope",`Null;
+        "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+        "chars",`Int 0; "truncated",`Bool false; "nodes",`List []] in
+      if fail_audit then (
+        let path = Filename.concat (Masc.Workspace.masc_dir config) Masc.Audit_log.store_dirname in
+        if Sys.file_exists path then Fs_compat.remove_tree path;
+        let channel = open_out path in close_out channel);
+      let dispatch_count = ref 0 in
+      let failed = try
+        ignore (Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
+            ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+            _ ~name ~arguments:_ ->
+            incr dispatch_count;
+            Tool_result.make_ok ~tool_name:name ~start_time:0. ~data ())
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw ~clock:(Eio.Stdenv.clock env) ?auth_token state (`Int 19)
+          (admit_call (`Assoc ["name",`String "BrowserRead"; "arguments",arguments])));
+        false
+      with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
+      check int "one physical browser dispatch" 1 !dispatch_count;
+      check bool "audit failure remains visible after root commit" fail_audit failed;
+      let rows = Masc.Keeper_tool_call_log.read_recent ~keeper_name () in
+      let row = match rows with [row] -> row | _ -> fail "canonical Keeper needs exactly one receipt" in
+      let roots = Tool_output.normalized_artifact_refs_in_json (row |> U.member "artifact_refs") in
+      check int "canonical caller owns the retained scene" 1 (List.length roots);
+      let gc = match Tool_blob_maintenance.run ~base_path ~mode:Observe_only with
+        | Ok gc -> gc | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
+      check int "receipt is a durable GC root even after audit failure" 1 gc.live_references))
+
 let () =
   run "mcp_server_eio_call_tool"
     [
       ( "typed projection",
         [
+          test_case "bearer-resolved Keeper owns retained reads" `Quick
+            (test_canonical_keeper_retention ~bearer:true ~fail_audit:false);
+          test_case "bound alias Keeper owns retained reads" `Quick
+            (test_canonical_keeper_retention ~bearer:false ~fail_audit:false);
+          test_case "audit failure follows retained root commit" `Quick
+            (test_canonical_keeper_retention ~bearer:false ~fail_audit:true);
           test_case "free-form text does not control response" `Quick
             test_free_form_failure_text_does_not_control_response;
           test_case "call request decodes current shape once" `Quick

@@ -529,19 +529,32 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             raise (Managed_agent_translation_failed msg))
     | Full | Operator_remote -> requested_name, admitted_arguments
   in
-  (* Resolve caller identity for telemetry.  HTTP auth injects [_agent_name];
-     tool-domain [agent_name] is not a caller identity. *)
-  let agent_name =
-    let from_transport =
-      Safe_ops.json_string ~default:"" "_agent_name" arguments
-    in
-    if from_transport <> "" then from_transport
-    else
-      let identity =
-        Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
-      in
-      let resolved = identity.Client_identity.agent_name in
-      if resolved <> "" then resolved else "unknown"
+  (* Attribute retention using the same canonical caller resolution as the
+     executor: bearer fallback, resolved session binding and workspace alias
+     are authorization inputs, not raw telemetry names. *)
+  let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
+  let cached_resolved_agent =
+    Option.bind mcp_session_id Client_registry_eio.get_resolved_name
+  in
+  let direct_call_authority =
+    match profile with
+    | Full -> Mcp_server_eio_caller_identity.Catalog_policy
+    | Managed_agent | Operator_remote ->
+      if Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile name
+      then Mcp_server_eio_caller_identity.Restricted_profile
+      else Mcp_server_eio_caller_identity.Catalog_policy
+  in
+  let caller_identity =
+    try Ok (Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
+      ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
+      ~direct_call_authority
+      ~workspace_initialized:(fun () -> Workspace.is_initialized config)
+      ~log_mcp_exn)
+    with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Error exn
+  in
+  let agent_name = match caller_identity with
+    | Ok caller -> caller.agent_name
+    | Error _ -> identity.Client_identity.agent_name
   in
   (* Classify call source: Keeper_internal only when the resolved agent_name
      matches a keeper in the admission workspace.  A process-global lookup
@@ -550,8 +563,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      observation generation.  Missing identity falls through to External_mcp.
      Issue #8915. *)
   let keeper_entry =
-    if String.length agent_name = 0 then None
-    else
+    match caller_identity with
+    | Error _ -> None
+    | Ok _ ->
       Keeper_registry.all ~base_path:config.base_path ()
       |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
         String.equal entry.name agent_name)
@@ -560,6 +574,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let start_time = Eio.Time.now clock in
   let execute () =
     try
+      (* Identity failures retain the dispatcher's typed error handling and
+         cannot acquire observation ownership from an unverified name. *)
+      (match caller_identity with Error exn -> raise exn | Ok _ -> ());
       execute_tool_eio
         ~sw
         ~clock
@@ -640,6 +657,32 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     Option.map (fun (_failure_class, detail) -> detail) failure_observation
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
+  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
+     tool_calls row, the trajectory row and the [Tool_called] telemetry event
+     all carry this value, so a reader of two streams can tell one physical
+     call reported twice from two calls. Minted only when a keeper owns the
+     call, because that is when a tool_calls row is written. *)
+  let execution_id =
+    Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
+  in
+  (* Commit retained roots before audit or any other fallible observer. *)
+  (match keeper_entry, execution_id with
+   | Some entry, Some execution_id ->
+       (try
+          record_runtime_mcp_keeper_tool_trace
+            ~typed_result:result
+            ?mcp_session_id
+            entry
+            ~tool_name:name
+            ~arguments
+            ~message
+            ~disposition:result
+            ~execution_id
+            ~duration_ms
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn;
+          if Tool_result.retained_artifacts result <> [] then raise exn)
+   | Some _, None | None, _ -> ());
   Audit_log.log_tool_call config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
@@ -666,14 +709,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       (Printf.sprintf "tool call failed: %s — %s" name
          error_detail));
 
-  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
-     tool_calls row, the trajectory row and the [Tool_called] telemetry event
-     all carry this value, so a reader of two streams can tell one physical
-     call reported twice from two calls. Minted only when a keeper owns the
-     call, because that is when a tool_calls row is written. *)
-  let execution_id =
-    Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
-  in
   let source : Tool_registry.call_source =
     match keeper_entry with
     | Some _ -> Agent_internal
@@ -799,23 +834,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Some tid -> tid
     | None -> request_id_trace_fallback
   in
-  (match keeper_entry, execution_id with
-   | Some entry, Some execution_id ->
-       (try
-          record_runtime_mcp_keeper_tool_trace
-            ~typed_result:result
-            ?mcp_session_id
-            entry
-            ~tool_name:name
-            ~arguments
-            ~message
-            ~disposition:result
-            ~execution_id
-            ~duration_ms
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn;
-          if Tool_result.retained_artifacts result <> [] then raise exn)
-   | Some _, None | None, _ -> ());
   let status = status_of_result result in
   let envelope =
     `Assoc [

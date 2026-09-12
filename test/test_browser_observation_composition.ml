@@ -23,7 +23,7 @@ let scene = `Assoc [
   "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
   "chars",`Int 0; "truncated",`Bool false; "nodes",`List []]
 
-let test_composition_retains_observation ~reject_schema () =
+let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema () =
   let base = Filename.temp_dir "browser-composition-observation-" "" in
   Fun.protect ~finally:(fun () ->
     Browser_lane.install_automation_executor None;
@@ -70,12 +70,18 @@ let test_composition_retains_observation ~reject_schema () =
         check bool "producer read succeeds before schema validation" true
           (execution.disposition=Tool_result.Completed ());
         produced := Some result;
+        if fail_receipt then Log.reset_for_testing ();
         Executor.dispatch_result result in
       let outcome = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () in
-      check bool "executor actually applies declared output schema" (not reject_schema) (Result.is_ok outcome);
+      check bool "executor actually applies declared output schema" (not reject_schema && not fail_receipt) (Result.is_ok outcome);
       let result = match !produced with Some result -> result | None -> fail "read never dispatched" in
       let reference = match Tool_result.retained_artifacts result with
         | [reference] -> reference | _ -> fail "one retained scene required" in
+      if fail_receipt then (
+        match outcome with
+        | Error { cause = Executor.Node_observation_failed _; _ } -> ()
+        | _ -> fail "missing retained receipt must fail the composition observer")
+      else (
       let rows = Log.read_recent ~keeper_name:meta.name () in
       let row = match rows with [row] -> row | _ -> fail "production observer must commit exactly one node row" in
       let open Yojson.Safe.Util in
@@ -96,8 +102,10 @@ let test_composition_retains_observation ~reject_schema () =
       let gc = Tool_blob_maintenance.run ~base_path:base ~mode:Observe_only
         |> Result.map_error Tool_blob_maintenance.error_to_string |> expect in
       check int "committed node roots retain the observation" 1 gc.live_references;
-      check int "retained observation is not a GC candidate" 0 gc.candidates_recorded))
+      check int "retained observation is not a GC candidate" 0 gc.candidates_recorded)))
 
 let () = run "browser observation composition" ["production observer",[
+  test_case "receipt failure prevents composition success" `Quick (test_composition_retains_observation ~fail_receipt:true ~reject_schema:false);
+  test_case "schema rejection still requires original receipt" `Quick (test_composition_retains_observation ~fail_receipt:true ~reject_schema:true);
   test_case "success preserves inline payload and root" `Quick (test_composition_retains_observation ~reject_schema:false);
   test_case "schema rejection preserves original observation root" `Quick (test_composition_retains_observation ~reject_schema:true)]]

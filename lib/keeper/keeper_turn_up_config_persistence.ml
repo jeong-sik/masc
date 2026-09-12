@@ -790,7 +790,8 @@ let commit_configuration ~expected_revision ~config
             | Runtime.Assignment_committed { revision; _ } -> revision in
           Commit_then_publish
             (warnings_of_runtime_assignment_write write,
-             fun () -> Ok (publish outcome { manifest = outcome.revision; runtime_assignment }))) () with
+             fun () -> Ok (publish outcome
+               ({ manifest = outcome.revision; runtime_assignment } : config_revision)))) () with
   | Error _ as error -> error
   | Ok { value = Error detail; _ } -> Error (Io_error detail)
   | Ok { value = Ok value; warnings } -> Ok { value; warnings }

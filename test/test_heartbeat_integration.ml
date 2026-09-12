@@ -2182,7 +2182,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       check bool "committed configuration is not reported as rolled back" true
         (Option.is_none
            (Turn_up_update.config_publication_rollback_of_result profile_failure_result));
-      let receipt = match Masc.Tool_result.metadata profile_failure_result with
+      let receipt = match Tool_result.metadata profile_failure_result with
         | Some json -> Yojson.Safe.Util.member "keeper_config_write" json
         | None -> fail "missing committed configuration receipt" in
       check bool "receipt reports committed declaration" true

@@ -12,9 +12,10 @@ type backend = {
     on_created:(connection -> unit) -> (connection, string) result;
   acquire : store:Lane_addon_store.t -> package:package -> binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
-  recover_stop : instance_id:string -> container_id:string -> max_reply_bytes:int ->
+  recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
     (unit, string) result;
 }
+type configuration_owner = { id : string; source_path : string; revision : string }
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable phase : phase; mutable seq : int; mutable output : output;
@@ -24,9 +25,12 @@ type entry = {
   mutable running : bool; persistence_mutex : Eio.Mutex.t;
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
+  mutable configuration : configuration_owner option;
 }
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
-  recovering : (string, unit) Hashtbl.t }
+  recovering : (string, unit) Hashtbl.t;
+  configuration_mutex : Eio.Mutex.t; mutable configuration_status : Yojson.Safe.t;
+  mutable configuration_nudge : unit -> unit }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
 let delivery_handler = ref None
@@ -36,6 +40,16 @@ let text fields key = match List.assoc_opt key fields with
   | _ -> Error (key ^ " requires a non-blank string")
 let object_ = function `Assoc fields -> Ok fields | _ -> Error "expected an object"
 let offload f = Eio_unix.run_in_systhread f
+let configuration_json (owner : configuration_owner) =
+  `Assoc ["id", `String owner.id; "source_path", `String owner.source_path;
+    "revision", `String owner.revision]
+let configuration_of_fields fields =
+  match List.assoc_opt "configuration" fields with
+  | None | Some `Null -> Ok None
+  | Some value ->
+      let* fields = object_ value in
+      let* id = text fields "id" in let* source_path = text fields "source_path" in
+      let* revision = text fields "revision" in Ok (Some {id; source_path; revision})
 let entry_json e =
   `Assoc ["instance_id", `String e.instance_id; "run_id", `String e.run_id;
     "addon_id", `String e.package.id; "title", `String e.package.title;
@@ -43,6 +57,7 @@ let entry_json e =
     "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
     "observation_pending", `Bool e.pending; "coalesced_wakes", `Int e.coalesced_wakes;
     "binding", e.binding; "package", package_to_json e.package;
+    "configuration", Option.fold ~none:`Null ~some:configuration_json e.configuration;
     "container_id", (match e.connection with None -> `Null | Some c -> `String c.container_id)]
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
@@ -77,20 +92,26 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
   | exn -> Log.Misc.error "Lane Add-on background boundary: %s" (Printexc.to_string exn))
 let release_detached m e =
   if e.phase = Detached && not e.running && not e.cleanup_running
-  then Hashtbl.remove m.entries e.instance_id
+  then (Hashtbl.remove m.entries e.instance_id; m.configuration_nudge ())
 let publish_resource lifecycle e container_id detail =
   Lane_addon_resource_events.publish lifecycle
     { instance_id = e.instance_id; run_id = e.run_id;
       package_id = e.package.id; package_revision = e.package.revision;
       container_id; detail }
-let stop_entry ~sw m e =
+let stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
-    match e.connection with
-    | None -> () (* start's on_created callback will resume cleanup *)
-    | Some c ->
+    let cleanup = match e.connection with
+      | Some c -> Some (Some c.container_id, c.stop)
+      | None when not e.running -> Some (None, fun () ->
+          backend.recover_stop ~instance_id:e.instance_id ~container_id:None
+            ~max_reply_bytes:e.package.resources.max_reply_bytes)
+      | None -> None (* startup still owns the unresolved create operation *) in
+    match cleanup with
+    | None -> ()
+    | Some (container_id, stop) ->
         e.cleanup_running <- true;
         fork_isolated ~sw (fun () ->
-          let result = try c.stop () with
+          let result = try stop () with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Error (Printexc.to_string exn) in
           (match result with
@@ -102,11 +123,11 @@ let stop_entry ~sw m e =
                   once, at the transition into Detached. *)
                if not already_detached then
                  publish_resource Lane_addon_resource_events.Release_confirmed e
-                   (Some c.container_id) None
+                   container_id None
            | Error message ->
                e.phase <- Failed ("cleanup incomplete: " ^ message);
                publish_resource Lane_addon_resource_events.Release_incomplete e
-                 (Some c.container_id) (Some message));
+                 container_id (Some message));
           (match persist m e with Ok () -> () | Error message ->
             e.phase <- Failed ("cleanup state persistence: " ^ message));
           e.cleanup_running <- false;
@@ -125,14 +146,14 @@ let run ~sw backend m e =
           publish_resource Lane_addon_resource_events.Acquired e (Some c.container_id) None;
           (match persist m e with Ok () -> () | Error message ->
             e.stopping <- true; e.phase <- Failed message);
-          if e.stopping then stop_entry ~sw m e in
+          if e.stopping then stop_entry ~sw ~backend m e in
         match backend.start ~sw:worker_sw ~instance_id:e.instance_id ~package:e.package ~on_created:created with
         | Error message ->
             publish_resource Lane_addon_resource_events.Acquire_failed e
               (Option.map (fun c -> c.container_id) e.connection) (Some message);
             if e.stopping then (
               match e.connection with None -> e.phase <- Failed ("startup/cleanup: " ^ message)
-              | Some _ -> stop_entry ~sw m e)
+              | Some _ -> stop_entry ~sw ~backend m e)
             else failed m e message
         | Ok c ->
             e.connection <- Some c;
@@ -172,7 +193,9 @@ let run ~sw backend m e =
     | exn -> failed m e (Printexc.to_string exn)
     in
     match work () with
-    | () -> e.running <- false; e.cancel_worker <- None; release_detached m e
+    | () -> e.running <- false; e.cancel_worker <- None;
+        if e.stopping && e.phase <> Detached then stop_entry ~sw ~backend m e;
+        release_detached m e
     | exception exn -> e.running <- false; e.cancel_worker <- None;
         release_detached m e; raise exn)
 let backend () = match !override with
@@ -197,7 +220,8 @@ let manager config =
   match Hashtbl.find_opt managers root with
   | Some m -> m
   | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
-                     recovering = Hashtbl.create 4 } in
+                     recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
+                     configuration_status = `Null; configuration_nudge = (fun () -> ()) } in
       Hashtbl.add managers root m; m
 let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
   |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
@@ -233,7 +257,10 @@ let historical_detach ~sw m fields =
   if previous = Detached then Ok (`Assoc fields)
   else if Hashtbl.mem m.recovering id then Ok (replace_phase fields Detaching)
   else
-    let* container_id = text fields "container_id" in
+    let* container_id = match List.assoc_opt "container_id" fields with
+      | Some `Null -> Ok None
+      | Some _ -> Result.map Option.some (text fields "container_id")
+      | None -> Error "missing persisted container identity" in
     let* package = match List.assoc_opt "package" fields with
       | Some json -> object_ json | None -> Error "missing persisted package" in
     let* run_id = text fields "run_id" in
@@ -261,12 +288,14 @@ let historical_detach ~sw m fields =
          | Ok () -> Lane_addon_resource_events.Release_confirmed
          | Error _ -> Lane_addon_resource_events.Release_incomplete)
         { instance_id = id; run_id; package_id; package_revision;
-          container_id = Some container_id;
+          container_id;
           detail = (match result with Ok () -> None | Error message -> Some message) };
       let json = replace_phase fields phase in
       let persisted = offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:id json) in
       Hashtbl.remove m.recovering id;
-      match persisted with Ok () -> () | Error message ->
+      match persisted with
+      | Ok () -> if phase = Detached then m.configuration_nudge ()
+      | Error message ->
         Log.Misc.error "Lane recovered cleanup persistence: %s" message);
     Ok detaching
 let snapshot m ?instance_id () =
@@ -277,7 +306,8 @@ let snapshot m ?instance_id () =
     Option.fold ~none:true ~some:(fun id -> List.assoc_opt "instance_id" fields = Some (`String id)) instance_id
     | _ -> Option.is_none instance_id) past in
   let* () = if Option.is_some instance_id && live = [] && past = [] then Error "unknown instance" else Ok () in
-  let past = List.map (function `Assoc fields ->
+  let retained = function `Assoc fields ->
+    let* owner = configuration_of_fields fields in
     let phase = match List.assoc_opt "phase" fields with
       | Some json -> phase_of_json json | None -> Error "missing phase" in
     let phase = match phase with
@@ -286,12 +316,17 @@ let snapshot m ?instance_id () =
       | Ok Detaching when (match text fields "instance_id" with
           | Ok id -> Hashtbl.mem m.recovering id | Error _ -> false) -> Detaching
       | _ -> Failed "previous process; explicit detach can verify container cleanup" in
-    `Assoc (("phase", phase_to_json phase) :: List.remove_assoc "phase" fields)
-    | value -> value) past in
+    Ok (`Assoc (("phase", phase_to_json phase)
+      :: ("configuration", Option.fold ~none:`Null ~some:configuration_json owner)
+      :: (fields |> List.remove_assoc "phase" |> List.remove_assoc "configuration")))
+    | _ -> Error "invalid retained instance" in
+  let* past = List.fold_right (fun value acc ->
+    let* values = acc in let* value = retained value in Ok (value :: values)) past (Ok []) in
   let output = { rows = List.concat_map (fun e -> e.output.rows) live;
     coverage = List.concat_map (fun e -> status_coverage e :: e.output.coverage) live } in
   match output_to_json output with
-  | `Assoc fields -> Ok (`Assoc (("instances", `List (List.map entry_json live @ past)) :: fields))
+  | `Assoc fields -> Ok (`Assoc (("configuration", m.configuration_status)
+      :: ("instances", `List (List.map entry_json live @ past)) :: fields))
   | _ -> assert false
 let slice m args =
   let optional_text key = match List.assoc_opt key args with
@@ -338,6 +373,72 @@ let slice m args =
   match output_to_json { rows; coverage } with
   | `Assoc fields -> Ok (`Assoc (("complete", `Bool complete) :: fields))
   | _ -> assert false
+
+let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
+  let promise, resolver = Eio.Promise.create () in
+  let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
+    phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
+    stopping = false; cleanup_running = false; wake = promise; resolver; pending = false;
+    running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
+    cancel_worker = None; configuration } in
+  let* () = persist m e in
+  Hashtbl.add m.entries e.instance_id e;
+  wake e; run ~sw (backend ()) m e;
+  Ok (entry_json e)
+
+let detach_entry ~sw m e =
+  (match e.phase with Detached -> () | _ ->
+    e.stopping <- true; e.phase <- Detaching; wake e;
+    stop_entry ~sw ~backend:(backend ()) m e);
+  let* () = persist m e in Ok (entry_json e)
+
+let configuration_directory config =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
+  Filename.concat resolution.config_root.path "lane-addons"
+
+(* Explicit removal edits the desired configuration. Otherwise the next
+   reconciliation would legitimately create the just-detached observer again. *)
+let remove_configuration_file ~directory (owner : configuration_owner) =
+  let snapshot = Lane_addon_config.load ~directory in
+  if not snapshot.complete then Error "Lane configuration directory could not be read; removal was not applied"
+  else
+    let matches = List.filter (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations in
+    let conflicts = List.filter (fun (i : Lane_addon_config.issue) -> i.id = Some owner.id) snapshot.issues in
+    let path = match matches, conflicts with
+      | [d], [] when d.revision = owner.revision -> Ok (Some d.source_path)
+      | [_], [] -> Error "Lane configuration changed; refresh before removing its current installation"
+      | [], [] when List.mem owner.source_path snapshot.paths ->
+          Error "Lane declaration is invalid; correct or remove the declaration before detaching"
+      | [], [] -> Ok None
+      | _ -> Error "Lane configuration identity is ambiguous; remove its duplicate declarations" in
+    let* path = path in
+    match path with
+    | None -> Ok ()
+    | Some path ->
+        (* Take ownership of the directory entry before validating the bytes
+           to remove. An editor can replace it while the inventory is read.
+           The staged name is outside the *.toml inventory and stays in the
+           same directory so relative manifest/source paths retain meaning. *)
+        let staged = Filename.concat (Filename.dirname path)
+          (".lane-removal-" ^ Random_id.uuid_v7 ()) in
+        let restore message =
+          try
+            (* A hard link restores only an absent destination. A newer save
+               at [path] is never overwritten; retain both files on conflict. *)
+            Unix.link staged path; Unix.unlink staged; Error message
+          with Unix.Unix_error (error, call, _) ->
+            Error (message ^ "; declaration retained at " ^ staged ^ "; "
+              ^ call ^ ": " ^ Unix.error_message error) in
+        (try
+           Unix.rename path staged;
+           match Lane_addon_config.load_file ~path:staged with
+           | Ok current when current.id = owner.id && current.revision = owner.revision ->
+               Unix.unlink staged; Ok ()
+           | Ok _ -> restore "Lane configuration changed during removal; detach was not applied"
+           | Error message -> restore ("Lane declaration could not be verified during removal: " ^ message)
+         with
+         | Unix.Unix_error (Unix.ENOENT, _, _) when not (Sys.file_exists staged) -> Ok ()
+         | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
 let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
   let* args = object_ json in
@@ -401,16 +502,7 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
       let* () = Lane_addon_sources.validate binding in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
-      let promise, resolver = Eio.Promise.create () in
-      let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
-        phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
-        stopping = false; cleanup_running = false; wake = promise; resolver; pending = false;
-        running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
-        cancel_worker = None } in
-      let* () = persist m e in
-      Hashtbl.add m.entries e.instance_id e;
-      wake e; run ~sw (backend ()) m e;
-      Ok (entry_json e)
+      attach_entry ~sw m ~run_id ~package ~binding ~configuration:None
   | Observe ->
       let* e = find m args in
       if e.stopping then Error "instance is stopping or detached"
@@ -420,19 +512,152 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
       let* id = text args "instance_id" in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
-      (match Hashtbl.find_opt m.entries id with
-       | None -> let* fields = persisted_binding m id in historical_detach ~sw m fields
-       | Some e ->
-           (match e.phase with Detached -> () | _ ->
-             e.stopping <- true; e.phase <- Detaching; wake e; stop_entry ~sw m e;
-             if not e.running && Option.is_none e.connection then begin
-               let unverified =
-                 "startup ended without a retained container identity; cleanup is unverified" in
-               e.phase <- Failed unverified;
-               publish_resource Lane_addon_resource_events.Release_incomplete e None
-                 (Some unverified)
-             end);
-           let* () = persist m e in Ok (entry_json e)))
+      (* Each owned transition is recoverable from its binding record.
+         Cancellation releases the serializer so a later pass can reconcile. *)
+      Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+        match Hashtbl.find_opt m.entries id with
+        | None ->
+            let* fields = persisted_binding m id in
+            let* phase = match List.assoc_opt "phase" fields with
+              | Some json -> phase_of_json json | None -> Error "missing retained phase" in
+            let* owner = configuration_of_fields fields in
+            let* () = match phase, owner with
+              | Detached, _ | _, None -> Ok ()
+              | _, Some owner ->
+                  let another_owner = List.exists (fun e -> match e.configuration with
+                    | Some current -> current.id = owner.id | None -> false) (entries m) in
+                  if another_owner then Ok () else
+                    offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner) in
+            historical_detach ~sw m fields
+        | Some e ->
+            let* () = match e.configuration with None -> Ok () | Some owner ->
+              offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner) in
+            detach_entry ~sw m e))
+
+let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
+  let m = manager config in
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
+    let issues = ref snapshot.issues in
+    let add_issue ?id source_path message =
+      issues := { Lane_addon_config.source_path; id; message } :: !issues in
+    let owned e id = match e.configuration with
+      | Some owner -> String.equal owner.id id | None -> false in
+    let live_for id = List.filter (fun e -> owned e id) (entries m) in
+    let root_switch = match Eio_context.get_root_switch_opt () with
+      | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
+    let past = historical m in
+    let histories_readable = ref true in
+    let histories = match past with
+      | Error message -> add_issue directory message; []
+      | Ok values -> List.filter_map (fun json ->
+          match object_ json with
+          | Error message -> histories_readable := false; add_issue directory message; None
+          | Ok fields ->
+              match configuration_of_fields fields with
+              | Ok None -> None
+              | Ok (Some owner) -> Some (owner, fields)
+              | Error message -> histories_readable := false; add_issue directory message; None) values in
+    let can_apply = Result.is_ok past && !histories_readable && snapshot.complete in
+    let retire sw e =
+      match detach_entry ~sw m e with
+      | Ok _ -> ()
+      | Error message ->
+          let path = Option.fold ~none:directory ~some:(fun o -> o.source_path) e.configuration in
+          add_issue path message in
+    let retire_past sw (owner, fields) =
+      match historical_detach ~sw m fields with
+      | Ok _ -> () | Error message -> add_issue ~id:owner.id owner.source_path message in
+    let detached fields =
+      match List.assoc_opt "phase" fields with
+      | Some json -> phase_of_json json = Ok Detached | None -> false in
+    let protected owner =
+      List.exists (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations
+      || List.exists (fun (i : Lane_addon_config.issue) ->
+        i.id = Some owner.id || i.source_path = owner.source_path) snapshot.issues in
+    (match root_switch with
+     | Error message -> add_issue directory message
+     | Ok sw when snapshot.complete && can_apply ->
+         List.iter (fun e -> match e.configuration with
+           | Some owner when not (protected owner) -> retire sw e
+           | Some _ | None -> ()) (entries m);
+         List.iter (fun ((owner, fields) as history) ->
+           if not (protected owner) && not (detached fields) then retire_past sw history) histories
+     | Ok _ -> ());
+    (match root_switch with
+     | Error _ -> ()
+     | Ok sw when can_apply ->
+         List.iter (fun (d : Lane_addon_config.declaration) ->
+           match live_for d.id with
+           | [e] ->
+               let owner = {id=d.id; source_path=d.source_path; revision=d.revision} in
+               (match e.configuration with
+                | Some applied when applied.revision = d.revision && e.running && not e.stopping ->
+                    if applied.source_path <> d.source_path then (
+                      e.configuration <- Some owner;
+                      match persist m e with Ok () -> ()
+                      | Error message -> add_issue ~id:d.id d.source_path message)
+                | Some _ | None -> retire sw e)
+           | [] ->
+               let pending = List.filter (fun (owner, fields) -> owner.id = d.id && not (detached fields)) histories in
+               if pending <> [] then List.iter (retire_past sw) pending
+               else (
+                 let owner = Some {id=d.id; source_path=d.source_path; revision=d.revision} in
+                 match attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner with
+                 | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
+           | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations
+     | Ok _ -> ());
+    let nullable_string = function None -> `Null | Some s -> `String s in
+    let declarations = List.map (fun (d : Lane_addon_config.declaration) ->
+      let active = match live_for d.id with [e] -> Some e | _ -> None in
+      let applied_revision = Option.bind active (fun e -> Option.map (fun o -> o.revision) e.configuration) in
+      `Assoc ["id", `String d.id; "source_path", `String d.source_path;
+        "desired_revision", `String d.revision; "applied_revision", nullable_string applied_revision;
+        "instance_id", nullable_string (Option.map (fun e -> e.instance_id) active)]) snapshot.declarations in
+    let json = `Assoc ["directory", `String directory; "complete", `Bool snapshot.complete;
+      "issues", `List (List.rev_map (fun (i : Lane_addon_config.issue) ->
+        `Assoc ["source_path", `String i.source_path; "id", nullable_string i.id; "message", `String i.message]) !issues);
+      "declarations", `List declarations] in
+    m.configuration_status <- json;
+    Ok json))
+
+let configuration_services : (string, unit -> unit) Hashtbl.t = Hashtbl.create 4
+let start_configuration_service ~config ~sw ~clock =
+  let key = Workspace.masc_dir config in
+  if not (Hashtbl.mem configuration_services key) then (
+    let directory = configuration_directory config in
+    let active = ref true in
+    let consumer : (module Pulse.Consumer) = (module struct
+      let name = "lane-addon-configuration"
+      let should_act _ = !active
+      let on_beat _ =
+        let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
+        match resolution.status with
+        | Config_dir_resolver.Invalid_env_status ->
+            let issue = `Assoc ["source_path", `String directory; "id", `Null;
+              "message", `String (String.concat "; " resolution.warnings)] in
+            (manager config).configuration_status <- `Assoc [
+              "directory", `String directory; "complete", `Bool false;
+              "issues", `List [issue]; "declarations", `List []];
+            Ok ()
+        | Ready | Warn | Missing_status ->
+            Result.map (fun _ -> ()) (reconcile_configuration ~config ~directory)
+    end) in
+    (* Configuration is maintenance work. Reuse the existing maintenance
+       cadence on an independent Pulse, outside Keeper sweeps and turns. *)
+    let interval = Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec in
+    let pulse = Pulse.create ~clock
+      ~rhythm:{Pulse.base_s=interval; min_s=interval; max_s=interval; quiet=(0,0)}
+      ~lifecycle:Always_on ~consumers:[consumer] in
+    let stop () = active := false; Pulse.shutdown pulse in
+    Hashtbl.add configuration_services key stop;
+    let m = manager config in
+    m.configuration_nudge <- (fun () -> Pulse.nudge pulse ~reason:"owned worker released");
+    Eio.Switch.on_release sw (fun () ->
+      stop (); Hashtbl.remove configuration_services key;
+      m.configuration_nudge <- (fun () -> ()));
+    Pulse.run ~sw pulse)
+
 module For_testing = struct
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
@@ -444,10 +669,12 @@ module For_testing = struct
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : store:Lane_addon_store.t -> package:package -> binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
-    recover_stop : instance_id:string -> container_id:string -> max_reply_bytes:int ->
+    recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
       (unit, string) result;
   }
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f
-  let reset () = Hashtbl.clear managers; delivery_handler := None
+  let reset () =
+    Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
+    Hashtbl.clear configuration_services; Hashtbl.clear managers; delivery_handler := None
 end

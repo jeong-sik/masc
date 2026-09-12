@@ -95,6 +95,27 @@ export function LaneAddonsPanel() {
     </header>
     ${reading && html`<p role="status">Reading retained observations…</p>`}
     ${error && html`<p role="alert" class="text-red-400">${error}</p>`}
+    ${snapshot && html`<section class="space-y-2" aria-label="TOML configuration">
+      <h3 class="font-semibold">TOML configuration</h3>
+      ${snapshot.configuration === null
+        ? html`<p>Configuration service has not started.</p>`
+        : html`<p class="break-all">Directory: <code>${snapshot.configuration.directory}</code></p>
+          <p>Configuration read: ${snapshot.configuration.complete ? 'complete' : 'incomplete'}</p>
+          ${snapshot.configuration.issues.map((issue, index) => html`<p key=${index} role="alert" class="text-red-400 break-all">
+            <strong>${issue.source_path}</strong>${issue.id !== null && html` · ${issue.id}`} — ${issue.message}
+          </p>`)}
+          <div class="overflow-x-auto"><table class="w-full text-left" aria-label="TOML declarations"><thead><tr>
+            <th>Declaration / file</th><th>Desired revision</th><th>Applied revision / instance</th><th>Configuration status</th>
+          </tr></thead><tbody>${snapshot.configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
+            <td>${declaration.id}<div class="break-all">${declaration.source_path}</div></td>
+            <td class="break-all">${declaration.desired_revision}</td>
+            <td class="break-all">${declaration.applied_revision ?? 'None'}<div>${declaration.instance_id ?? 'No instance'}</div></td>
+            <td>${declaration.applied_revision === null ? 'Not yet applied'
+              : declaration.applied_revision === declaration.desired_revision ? 'Desired revision applied' : 'Revision change pending'}</td>
+          </tr>`)}</tbody></table></div>
+          ${snapshot.configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
+          <p>Configuration status tracks installed revisions. Observation status is shown per instance below.</p>`}
+    </section>`}
     <details><summary>Attach a package</summary>
       <form class="flex flex-wrap gap-2 py-2" onSubmit=${(event: Event) => {
         event.preventDefault()
@@ -114,7 +135,10 @@ export function LaneAddonsPanel() {
       <th>Instance / package</th><th>Run / revision</th><th>Status</th><th>Cursor / rows</th><th>Actions</th>
     </tr></thead><tbody>${snapshot?.instances.map(item => html`<tr key=${item.instance_id}>
       <td><label><input type="radio" name="addon-instance" checked=${instance === item.instance_id}
-        onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div></td>
+        onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
+        ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>
+          <p>TOML: ${item.configuration.id}</p><p>${item.configuration.source_path}</p><p>Installed configuration: ${item.configuration.revision}</p>
+        </div>`}</td>
       <td>${item.run_id}<div>${item.revision}</div></td>
       <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}</td>
       <td>${item.observation_seq} / ${item.rows_count}</td>

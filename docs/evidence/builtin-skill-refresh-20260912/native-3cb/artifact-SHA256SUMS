@@ -1,0 +1,6 @@
+591b0efb40d2bba2d0985ca75d58d95606dfcd80255f8f21c68fb0a3887c26bd  dist/masc-browser-host-macos-arm64
+2a0b8b469ec6a7f5044f35f8a539011a3515ffc574a5df9f0c01a48e6f4c427f  dist/masc-check-runtime-deployment-preflight-macos-arm64
+6167970414b18ba40c126417e610c7af3a62c1680514b0c487794c3429731f61  dist/masc-deployment-preflight-helper-macos-arm64
+52b5662a5bc179a4d2105198a681caf97462fef5546174945f22793339f25133  dist/masc-macos-arm64
+6425f1d43d09377e1dec1b99c7d6faa7c6540853a223f6871cb179f3cab3540e  dist/masc-runtime-macos-arm64.tar.gz
+d4f0a484ddd7f0c534a0fc7253634e459f6d2c61b80b8fb3d462d62f5d4e866e  dist/masc-tui-macos-arm64

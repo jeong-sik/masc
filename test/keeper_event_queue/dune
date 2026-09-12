@@ -6,6 +6,6 @@
  (name test_schema_generation_pins)
  (libraries masc masc.keeper_runtime)
  (deps
-  ../lib/keeper_runtime/keeper_event_queue_persistence.ml
-  ../lib/keeper_runtime/keeper_event_queue_schema.ml
-  ../lib/keeper_runtime/keeper_event_queue_state.ml))
+  ../../lib/keeper_runtime/keeper_event_queue_persistence.ml
+  ../../lib/keeper_runtime/keeper_event_queue_schema.ml
+  ../../lib/keeper_runtime/keeper_event_queue_state.ml))

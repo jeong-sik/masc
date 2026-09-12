@@ -48,6 +48,8 @@ let compact_receipt_runtime_json receipt =
       [ "name", Json_util.string_opt_to_json (json_string "name" runtime)
       ; "selected_model", `Null
       ; "attempt_count", Json_util.int_opt_to_json (json_int "attempt_count" runtime)
+      ; ( "lane_attempt_count"
+        , Json_util.int_opt_to_json (json_int "lane_attempt_count" runtime) )
       ; ( "fallback_applied"
         , Json_util.bool_opt_to_json (json_bool "fallback_applied" runtime) )
       ; "outcome", Json_util.string_opt_to_json (json_string "outcome" runtime)

@@ -4,34 +4,43 @@
 
 ## 빠른 시작
 
-명령 하나로 최신 릴리스를 설치하고 설정 화면까지 엽니다.
+최신 릴리스의 설치기를 내려받은 뒤, 다운로드가 성공했을 때만 실행합니다.
 
 ```bash
-bash -c "$(curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh)"
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh && bash /tmp/masc-install.sh
 ```
 
-workspace를 어디에 둘지 물어본 뒤 모델 연결과 sandbox를 차례로 안내합니다.
-Claude Code와 Codex는 해당 CLI가 `PATH`에 있으면 목록에 나오고, 연결 검사가
-실패해도 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. sandbox 서비스가
-하나도 없으면 설치를 제안합니다. 배포자와 체크섬을 확인한 다음 그 회사의 설치
-프로그램에 터미널을 넘기므로, 약관 동의나 관리자 암호는 화면에서 직접 보고
-입력합니다.
+설치기는 workspace 위치를 묻습니다. 설치 후 설정 화면이 열리지 않으면 다음
+명령으로 모델 연결과 sandbox를 설정하세요. 아래 경로는 기본 설치 위치입니다.
+`--prefix`를 바꿨다면 그 경로의 `masc`를 실행하세요.
 
-끝나면 새 터미널을 여세요. 설치기가 `~/.local/bin`을 셸 설정에 적어 두기 때문에
-새 터미널에서는 `masc`가 바로 잡힙니다. 방금 쓰던 터미널에서 쓰려면
-`export PATH="$HOME/.local/bin:$PATH"`를 실행하세요.
+```bash
+"$HOME/.local/bin/masc" setup
+```
+
+Claude Code와 Codex는 해당 CLI가 `PATH`에 있으면 목록에 나옵니다. 연결 검사가
+실패하면 고른 모델을 유지한 채 로그인 화면을 열 수 있습니다. sandbox 준비가
+필요하면 설치·시작 동작을 제안합니다. macOS에서는 공식 다운로드나 안내 페이지를
+열며, MASC가 업체 설치기의 서명이나 체크섬을 검증하는 것은 아닙니다. Linux에서는
+제안된 배포판 패키지 명령을 실행합니다.
+
+설치 중 셸 PATH 변경에 동의했다면 새 터미널에서 `masc`를 쓸 수 있습니다.
+변경을 건너뛰었거나 비대화형으로 설치했다면 설치 경로를 PATH에 직접 추가하세요.
+기본 경로는 `export PATH="$HOME/.local/bin:$PATH"`이며, `--prefix`를 바꿨다면
+그 디렉터리를 사용합니다.
 
 스크립트를 먼저 읽어보려면 이렇게 하세요.
 
 ```bash
 curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
-  -o /tmp/masc-install.sh
-less /tmp/masc-install.sh    # q로 나갑니다
+  -o /tmp/masc-install.sh &&
+less /tmp/masc-install.sh && # q로 나갑니다
 bash /tmp/masc-install.sh
 ```
 
-스크립트를 `bash`로 바로 파이프하면 설정 질문이 읽을 터미널이 없습니다. 위 두
-가지 중 하나를 쓰세요.
+먼저 다운로드하면 스크립트를 읽어볼 수 있고, 다운로드 실패 시 불완전한
+설치기를 실행하지 않습니다.
 
 나머지는 참고 자료입니다. 무엇이 설치되는지, 모델을 어떻게 고르는지, sandbox가
 어떻게 다른지, 업그레이드와 삭제는 어떻게 하는지를 다룹니다. 태그와 자산 제공
@@ -121,7 +130,7 @@ masc prerequisite-actions pdf-tools --execute poppler_install
 
 ```bash
 curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
-  -o /tmp/masc-install.sh
+  -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
@@ -130,16 +139,16 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```bash
 TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-  -o /tmp/masc-install.sh
+  -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
 태그에서 받은 `install.sh`는 그 태그의 자산을 설치하고, `--version`이 없으면
 설치기가 최신 릴리스를 찾습니다.
 
-설치기가 `~/.local/bin`을 셸 설정에 적으므로 새 터미널에서는 `masc`가 잡힙니다.
-방금 설치한 터미널에서는 `export PATH="$HOME/.local/bin:$PATH"`를 따로
-실행하세요. 이 명령에는 설치 옵션을 붙이지 않습니다.
+셸 PATH 변경에 동의한 경우 새 터미널에서 `masc`가 잡힙니다. 그 외에는 설치
+디렉터리를 PATH에 직접 추가하세요. 기본 경로라면
+`export PATH="$HOME/.local/bin:$PATH"`를 실행합니다. 이 명령에는 설치 옵션을 붙이지 않습니다.
 
 재설치할 때 `--force`나 `--wizard`는 `bash /tmp/masc-install.sh` 명령 끝에 붙입니다.
 
@@ -169,7 +178,7 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 
 | 실행 상황 | 동작 |
 |---|---|
-| 터미널에서 첫 설치 | 여러 연결·모델 선택 후 실제 응답·도구 검사 |
+| 터미널에서 첫 설치 | workspace 설치 후 설정이 열리지 않으면 `masc setup` 실행. 여러 연결·모델 선택 후 실제 응답·도구 검사 |
 | 입력 파이프/자동화, 출처가 하나 | 해당 출처 선택; 연결 probe 결과 별도 표시 |
 | 입력 파이프/자동화, 출처가 없거나 여러 개 | 선택 보류; 강제 `--wizard`는 `--provider` 필요 |
 | `--provider <id>` | 기존 workspace에서도 지정 공급자 선택 |

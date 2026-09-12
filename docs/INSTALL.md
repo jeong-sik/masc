@@ -4,33 +4,44 @@
 
 ## Quick start
 
-One command installs the latest release and opens setup.
+Download the latest installer, then execute it only after the download succeeds.
 
 ```bash
-bash -c "$(curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh)"
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh && bash /tmp/masc-install.sh
 ```
 
-It asks where to keep the workspace, then walks through the model connection and
-the sandbox. Claude Code and Codex appear when their CLI is on `PATH`, and a
-failed connection check can open their sign-in without losing the selection. When
-no sandbox service is installed, setup offers to install one: it checks the
-vendor's publisher and checksum, then hands the terminal to that installer.
+The installer asks where to keep the workspace. If setup does not open after
+installation, run the installed command to configure the model and sandbox.
+This is the default install location; use your chosen directory if you changed
+`--prefix`.
 
-When it finishes, open a new terminal. The installer records `~/.local/bin` in the
-shell profile, so `masc` is on `PATH` there. To use it in the same terminal
-instead, run `export PATH="$HOME/.local/bin:$PATH"`.
+```bash
+"$HOME/.local/bin/masc" setup
+```
+
+Claude Code and Codex appear when their CLI is on `PATH`. A failed connection
+check can offer sign-in without losing the selection. Setup offers installation
+and startup actions for missing sandbox prerequisites. On macOS these open the
+official download or instructions; MASC does not verify the vendor installer's
+signature or checksum. Linux actions run the offered distribution package commands.
+
+If you accepted the shell PATH prompt, a new terminal can find `masc`. If you
+skipped it or installed noninteractively, add the installation directory yourself.
+For the default prefix use `export PATH="$HOME/.local/bin:$PATH"`; substitute your
+chosen directory when using `--prefix`.
 
 To read the script before running it:
 
 ```bash
 curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
-  -o /tmp/masc-install.sh
-less /tmp/masc-install.sh    # q to exit
+  -o /tmp/masc-install.sh &&
+less /tmp/masc-install.sh && # q to exit
 bash /tmp/masc-install.sh
 ```
 
-Piping the script straight into `bash` leaves the setup questions no terminal to
-read from, so use one of the two forms above.
+Downloading first lets you inspect the script and ensures a failed download
+does not execute a partial installer.
 
 The rest of this document is reference material: what is installed, how to choose
 a model, how the sandboxes differ, and how to upgrade or uninstall. Check tag
@@ -86,7 +97,7 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS requires **macOS 14.0 or later on Apple Silicon** or **macOS 15.0 or later on Intel**. The installer verifies and installs the matching Python and shared-library runtime with the release. It does not install Homebrew or Xcode command-line tools.
 
-The setup screen inspects sandbox services, explains what is missing, and offers to install it. It verifies the vendor's publisher and checksum, then hands the terminal to that vendor's own installer, so its prompts and any administrator password stay in front of you. On supported Apple Silicon Macs it can use Apple Container; Docker is available on macOS and Linux. Model connections require the provider’s subscription or API credit. Claude Code and Codex sign-in can be opened from a failed connection check without losing the selected models.
+The setup screen inspects sandbox services, explains what is missing, and offers to install it. On macOS these actions open official downloads or instructions; MASC does not verify the vendor installer's signature or checksum. Linux actions run the offered package commands. On supported Apple Silicon Macs it can use Apple Container; Docker is available on macOS and Linux. Model connections require the provider’s subscription or API credit. Claude Code and Codex sign-in can be opened from a failed connection check without losing the selected models.
 
 If startup fails, use the executable path and raw stderr shown by the installer to diagnose it. A signal such as `SIGABRT` alone does not identify a missing library. `--force` refreshes the release files while preserving workspace configuration; it does not make an unsupported OS version compatible.
 
@@ -124,7 +135,7 @@ you do not want to be asked:
 
 ```bash
 curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
-  -o /tmp/masc-install.sh
+  -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
@@ -134,17 +145,16 @@ installer and pin it:
 ```bash
 TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
-  -o /tmp/masc-install.sh
+  -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 ```
 
 `install.sh` from a tag installs that tag's assets; without `--version` the
 installer resolves the latest release.
 
-The installer writes `~/.local/bin` into the shell profile, so a new terminal
-finds `masc`. For the terminal you installed from, run
-`export PATH="$HOME/.local/bin:$PATH"` separately; that command takes no
-installer options.
+A new terminal finds `masc` if you accepted the shell PATH prompt. Otherwise,
+add the installation directory yourself. For the default prefix, run
+`export PATH="$HOME/.local/bin:$PATH"`; this command takes no installer options.
 
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command.
 
@@ -179,7 +189,7 @@ Existing connections remain available when you add more models.
 
 | Situation | Behaviour |
 |---|---|
-| First install on a terminal | Workspace → model connections → sandbox → first conversation, through the installed setup journey |
+| First install on a terminal | Install the workspace, then run `masc setup` if setup did not open; configure model connections and sandbox before the first conversation |
 | Piped input/automation, one usable source | Selects that source; reports a connectivity probe separately |
 | Piped input/automation, no usable source or several | Automatic mode leaves selection pending; forced `--wizard` requires `--provider` |
 | `--provider <id>` | Selects that configured provider, including in an existing workspace |

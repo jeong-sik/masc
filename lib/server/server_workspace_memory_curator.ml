@@ -102,19 +102,25 @@ type owner =
 let owners_mutex = Stdlib.Mutex.create ()
 let owners : (string, owner) Hashtbl.t = Hashtbl.create 4
 
+type refresh = Queued | No_owner | Unavailable of string
+
 let wake owner =
-  let resolver = Stdlib.Mutex.protect owner.mutex (fun () ->
-    if owner.stopped then None else (
+  let queued, resolver = Stdlib.Mutex.protect owner.mutex (fun () ->
+    if owner.stopped then false, None else (
       owner.pending <- true;
-      let resolver = owner.wake in owner.wake <- None; resolver)) in
-  Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver
+      let resolver = owner.wake in owner.wake <- None; true, resolver)) in
+  Option.iter (fun resolver -> Eio.Promise.resolve resolver ()) resolver;
+  if queued then Queued else No_owner
 
 let request ~base_path =
-  let base_path = Unix.realpath base_path in
-  let owner = Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.find_opt owners base_path) in
-  Option.iter wake owner
+  match Unix.realpath base_path with
+  | base_path ->
+    let owner = Stdlib.Mutex.protect owners_mutex (fun () -> Hashtbl.find_opt owners base_path) in
+    (match owner with None -> No_owner | Some owner -> wake owner)
+  | exception Unix.Unix_error (error, operation, _) ->
+    Unavailable (operation ^ ": " ^ Unix.error_message error)
 
-let store_error = function Proposals.Invalid detail | Unavailable detail -> detail
+let store_error = function Proposals.Invalid detail | Proposals.Unavailable detail -> detail
 
 let already_published ~base_path ~request_identity registry =
   let rec find = function
@@ -246,7 +252,7 @@ let start_with ~sw ~base_path ~enabled ~prepare =
     else (Hashtbl.add owners base_path owner; true)) in
   if admitted then (
     let unsubscribe = Keeper_memory_commit_notifications.subscribe (fun event ->
-      if String.equal event.keepers_dir keepers_dir then wake owner) in
+      if String.equal event.keepers_dir keepers_dir then ignore (wake owner)) in
     Eio.Switch.on_release sw (fun () ->
       Stdlib.Mutex.protect owner.mutex (fun () -> owner.stopped <- true; owner.wake <- None);
       unsubscribe ();

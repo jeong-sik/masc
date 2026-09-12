@@ -1,0 +1,34 @@
+{
+  "status": "passed",
+  "scope": "source component in Chromium; synthetic HTTP data",
+  "source_sha256": "590dd56fd95b63f56d966502fa65823e5a4dd37541dc08d50d20b31b59574a97",
+  "exact_key_binding": true,
+  "persisted_success_separated_from_refresh": true,
+  "mobile_overflow": false,
+  "mutations": [
+    {
+      "action": "set",
+      "key": "workspace_memory_curator",
+      "status": "queued"
+    },
+    {
+      "action": "clear",
+      "key": "workspace_memory_curator",
+      "status": "no_owner"
+    },
+    {
+      "action": "set",
+      "key": "workspace_memory_curator",
+      "status": "unavailable"
+    }
+  ],
+  "errors": [],
+  "requests": [
+    "/api/v1/prompts",
+    "/api/v1/prompts",
+    "/api/v1/prompts",
+    "/api/v1/prompts"
+  ],
+  "installed_runtime": "not_exercised",
+  "model_execution": "not_exercised"
+}

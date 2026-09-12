@@ -395,14 +395,9 @@ the mode. Only the key that started it ends it.
 Both are control codes rather than letters because every printable key in a
 focused composer row is draft text.
 
-That still leaves an Enter per sentence. `[tui] voice_send_on_stop = true`
-removes it: ending a capture hands the draft to the same send path Enter uses.
-Off by default — the draft is also where a spoken half-sentence waits for
-typing, so sending without a confirmation step is something to ask for.
-
-Note the section: `[tui]`, not `[voice.stt]`. A `send_on_stop` under
-`[voice.stt]` parses, is published by `GET /api/v1/voice/config`, and is read
-by nothing — issue #35670.
+That still leaves an Enter per sentence. `[voice.stt] send_on_stop` removes
+it: ending a capture hands the draft to the same send path Enter uses. Off by
+default, and described under Configuration below.
 
 ## External devices
 

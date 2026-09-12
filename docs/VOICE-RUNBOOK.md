@@ -561,6 +561,35 @@ named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
 of silence) or would have been announced as MP3. A player told the wrong
 type either refuses or plays nothing, and neither says why.
 
+### Speaking to a keeper, not just probing it
+
+The probe and the turn are different code paths, and for a while only the
+probe worked. `POST /api/v1/voice/transcribe` — the route a browser capture
+goes through — reached for HTTP whatever the endpoint kind was, so the one a
+fresh mac has answered:
+
+```
+{"error":"all enabled STT endpoints failed:
+          whisper-local: voice config endpoint whisper-local missing base_url"}
+```
+
+while `voice-verify --audio` on the same configuration transcribed it fine.
+That is the shape worth naming: **a check that passes about a path that does
+not exist.** Fixed in #35627; measured on that build, same workspace, same
+`probe.wav`:
+
+```
+POST /api/v1/voice/transcribe   (raw wav body)
+→ {"status":"transcribed","text":"오늘 음성 설정을 마쳤습니다.",
+   "language_code":"unknown","endpoint_id":"whisper-local"}
+   6.9s wall (first call — the 1.6GB model is loaded per invocation)
+```
+
+`language_code` is `unknown` because the command answers with its transcript
+and no such field. whisper-cli was asked to detect the language (`-l auto`)
+and it does, but on its own stderr rather than on the wire. A caller that
+names a language is answered with that name.
+
 ### What each route refuses, measured
 
 | Request | Answer |

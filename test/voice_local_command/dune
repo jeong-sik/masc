@@ -3,4 +3,4 @@
 
 (test
  (name test_voice_local_command)
- (libraries alcotest astring yojson masc masc.voice_config masc.voice_runtime_overlay))
+ (libraries alcotest astring unix yojson masc masc.voice_config masc.voice_runtime_overlay))

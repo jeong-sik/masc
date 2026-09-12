@@ -84,7 +84,9 @@ let comments contents =
        let trimmed = String.trim line in
        String.length trimmed > 0 && Char.equal trimmed.[0] '#')
 
-let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config.endpoint =
+let endpoint ?base_url ?api_key_env ?timeout_seconds ?command ~id ~kind ()
+  : Voice_config.endpoint
+  =
   { Voice_config.id
   ; kind
   ; base_url
@@ -94,6 +96,7 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config
   ; enabled = true
   ; timeout_seconds
   ; default_voice = None
+  ; command
   }
 
 let apply path changes =

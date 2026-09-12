@@ -136,6 +136,9 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
   ; default_voice = None
+    (* Every provider the wizard offers answers at an address. A command kind
+       is what [command] names, and none of these is one. *)
+  ; command = None
   }
 ;;
 

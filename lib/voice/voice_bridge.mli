@@ -100,6 +100,19 @@ val probe_tts
     section -- the same two states {!Voice_config.load_detailed} separates, kept
     apart here for the same reason. *)
 
+val transcribe_endpoint
+  :  Voice_config.endpoint
+  -> audio_file:string
+  -> model:string
+  -> (string, string) result option
+(** Ask one endpoint for the transcript of [audio_file], the way that endpoint
+    answers: an address is sent an HTTP request, a command kind is run. [None]
+    is a kind that produces audio rather than reading it -- say has no ear --
+    which is an answer about the endpoint rather than a failed call.
+
+    Routing lives here so that a command kind is never sent to an address it
+    does not have. *)
+
 val probe_stt
   :  audio_file:string
   -> unit

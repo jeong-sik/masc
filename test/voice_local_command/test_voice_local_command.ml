@@ -237,6 +237,49 @@ let test_a_line_naming_no_voice_is_dropped () =
   Alcotest.(check int) "nothing to choose, nothing offered" 0
     (List.length (Bridge.say_catalogue_of_output "# just a comment\n\n"))
 
+
+(* Which transport answers a transcript. Before this was routed by kind, every
+   enabled STT endpoint was sent an HTTP request -- including whisper, which
+   has no address, so the only endpoint that can transcribe on this machine was
+   the one that could not be asked. *)
+
+let write_fake_whisper ~prints =
+  let path = Filename.temp_file "fake-whisper" ".sh" in
+  let channel = open_out path in
+  output_string channel (Printf.sprintf "#!/bin/sh\nprintf '%%s\\n' \"%s\"\n" prints);
+  close_out channel;
+  Unix.chmod path 0o755;
+  path
+
+let test_whisper_answers_with_what_the_command_printed () =
+  let command = write_fake_whisper ~prints:" 안녕하세요. 키퍼입니다." in
+  let transcript =
+    Bridge.transcribe_endpoint
+      (endpoint ~kind:Voice_config.Whisper_cli ~command "whisper-local")
+      ~audio_file:"/tmp/captured.wav"
+      ~model:"/tmp/ggml-large-v3-turbo.bin"
+  in
+  Sys.remove command;
+  match transcript with
+  | Some (Ok text) ->
+    Alcotest.(check string) "the command's own output" "안녕하세요. 키퍼입니다." text
+  | Some (Error reason) -> Alcotest.fail reason
+  | None -> Alcotest.fail "whisper transcribes, so it must be asked"
+
+(* A kind that speaks is not a broken transcriber: it is one that was never
+   asked. Reporting it as a refusal would read as an endpoint that is down. *)
+let test_a_speaking_kind_is_not_asked_for_a_transcript () =
+  let asked kind =
+    Option.is_some
+      (Bridge.transcribe_endpoint
+         (endpoint ~kind "endpoint")
+         ~audio_file:"/tmp/captured.wav"
+         ~model:"/tmp/model.bin")
+  in
+  Alcotest.(check bool) "say has no ear" false (asked Voice_config.Macos_say);
+  Alcotest.(check bool) "the mcp endpoint speaks" false (asked Voice_config.Voice_mcp);
+  Alcotest.(check bool) "whisper does" true (asked Voice_config.Whisper_cli)
+
 let () =
   Alcotest.run
     "voice_local_command"
@@ -267,6 +310,12 @@ let () =
             test_a_parenthesised_name_keeps_its_parenthesis
         ; Alcotest.test_case "a line naming no voice is dropped" `Quick
             test_a_line_naming_no_voice_is_dropped
+        ] )
+    ; ( "which transport answers a transcript"
+      , [ Alcotest.test_case "whisper answers with what it printed" `Quick
+            test_whisper_answers_with_what_the_command_printed
+        ; Alcotest.test_case "a speaking kind is not asked" `Quick
+            test_a_speaking_kind_is_not_asked_for_a_transcript
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

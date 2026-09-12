@@ -10,6 +10,30 @@ let run_voice_status = Voice_bridge_transport.run_voice_status
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
 
+(* One transcript, reached two ways. An endpoint that is an address answers
+   with JSON; one that is a command answers with its own output. The kinds
+   that produce audio rather than read it are [None] -- "does not transcribe"
+   is a fact about the endpoint, not a failure of the call. Routing here is
+   what keeps a command kind from being sent to an address it does not have. *)
+let transcribe_endpoint (endpoint : Voice_config.endpoint) ~audio_file ~model =
+  match endpoint.Voice_config.kind with
+  | Voice_config.Voice_mcp | Voice_config.Macos_say -> None
+  | Voice_config.Whisper_cli ->
+    Some (Voice_bridge_transport.transcribe_via_command endpoint ~audio_file ~model)
+  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+    Some
+      (match transcribe_via_http_stt endpoint ~audio_file ~model with
+       (* An endpoint that answers without a transcript field has not heard
+          silence -- it has answered something this code does not read. Said as
+          a refusal, because an empty string here would be reported as a quiet
+          microphone, which is the one thing this probe exists to tell apart. *)
+       | Ok json ->
+         (match Json_util.get_string json "text" with
+          | Some text -> Ok text
+          | None -> Error "the endpoint answered without a text field")
+       | Error reason -> Error reason)
+;;
+
 (* One voice as an endpoint names it. The id is what a configuration stores;
    the name and the language are what let a person pick it. *)
 type catalogue_voice =
@@ -332,25 +356,14 @@ let probe_stt ~audio_file () =
                 if not endpoint.Voice_config.enabled
                 then Skipped "disabled in the configuration"
                 else (
-                  match endpoint.Voice_config.kind with
-                  | Voice_config.Voice_mcp ->
-                    Skipped "this endpoint kind does not transcribe"
-                  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
-                    (match
-                       transcribe_via_http_stt
-                         endpoint
-                         ~audio_file
-                         ~model:stt.Voice_config.default_model
-                     with
-                     | Ok json ->
-                       let text =
-                         match json with
-                         | `Assoc fields ->
-                           (match List.assoc_opt "text" fields with
-                            | Some (`String text) -> text
-                            | Some _ | None -> "")
-                         | _ -> ""
-                       in
+                  match
+                    transcribe_endpoint
+                      endpoint
+                      ~audio_file
+                      ~model:stt.Voice_config.default_model
+                  with
+                  | None -> Skipped "this endpoint kind does not transcribe"
+                  | Some (Ok text) ->
                        (* An empty transcript is an answer, not a failure: the
                           endpoint was reached and heard nothing. Saying which
                           it was keeps a silent microphone apart from a dead
@@ -373,7 +386,7 @@ let probe_stt ~audio_file () =
                          (if String.equal spoken ""
                           then "reached, and heard nothing in the audio"
                           else Printf.sprintf "heard %s" spoken)
-                     | Error reason -> Refused reason))
+                  | Some (Error reason) -> Refused reason)
               in
               { endpoint_id = endpoint.Voice_config.id
               ; kind = endpoint.Voice_config.kind

@@ -91,13 +91,14 @@ test('real DOS input, receipts, read-only observation, incarnation and independe
   } while (initial.rows.length === 0);
   const measurements = [await verifyOutput(initial, 0, 'before')];
   await verifyOutput(await observe(), 0, 'observe-only');
-  const firstPending = act('increment-once');
-  const crossed = await Promise.race([
-    observe().then(output => ({ kind: 'observation', output })),
-    firstPending.then(() => ({ kind: 'action' }))]);
-  assert.equal(crossed.kind, 'observation', 'observation replies while a real DOS action is pending');
-  await verifyOutput(crossed.output, 0, 'during-action');
-  const first = await firstPending;
+  const [first, crossed] = await Promise.all([act('increment-once'), observe()]);
+  // A valid fast action may complete before the observation is serviced. This
+  // real-environment proof permits either snapshot and checks its actual pixels;
+  // it does not manufacture a slow action to force a particular response order.
+  const crossedState = Buffer.from(crossed.artifacts.find(artifact => artifact.id === 'state').data_base64, 'base64');
+  const crossedCounter = crossedState.readUInt16LE(6);
+  assert.ok(crossedCounter === 0 || crossedCounter === 1);
+  await verifyOutput(crossed, crossedCounter, 'overlapping-observe');
   assert.equal(first.status, 'confirmed');
   assert.equal(first.result.confirmation, 'guest_file_and_matching_bar_pixels');
   assert.equal(first.result.before_counter, 0);

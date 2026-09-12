@@ -84,7 +84,9 @@ the actual VGA framebuffer; the adapter does not draw a replacement screenshot.
 The package test speaks real MCP stdio to the server and runs the actual assembled
 program in the pinned WASM engine. It independently checks 0→1, ordinary and
 overlapping duplicate requests, stale incarnation, invalid action, and read-only
-observations, including an observation reply while a DOS action is outstanding.
+observations, including concurrent action and observation requests. Either the
+before or after capture is valid; the proof does not assume which response wins.
+Held-action independence belongs to the host's explicit barrier tests.
 It validates full image geometry and the raw guest file, rather than
 accepting a success label or merely comparing screenshot hashes. The sampling
 interval and outer test timeout are CI controls, not production readiness rules.

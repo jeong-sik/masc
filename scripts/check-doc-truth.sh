@@ -139,7 +139,10 @@ for site_doc in \
   [[ -n "$site_tag" ]] || fail "missing TAG= install pin in $site_doc"
   [[ "$site_tag" == "$readme_tag" ]] || \
     fail "$site_doc install TAG ($site_tag) != README install TAG ($readme_tag)"
-  site_stray="$(grep -n -E '[0-9]+\.[0-9]+\.[0-9]+' "$site_doc" | grep -v -F "${site_tag#v}" || true)"
+  # Compare whole version tokens, not substrings: 0.35.1 is a prefix of
+  # 0.35.12, so a substring filter would hide the very drift this looks for.
+  site_stray="$(grep -n -o -E '[0-9]+\.[0-9]+\.[0-9]+' "$site_doc" \
+    | awk -F: -v want="${site_tag#v}" '$2 != want' || true)"
   [[ -z "$site_stray" ]] || \
     fail "$site_doc names a version other than ${site_tag#v}: $site_stray"
 done

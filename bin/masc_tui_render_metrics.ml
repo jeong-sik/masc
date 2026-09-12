@@ -42,17 +42,32 @@ let held_observation (state : state) =
   observe_source ~observed:state.keeper_tool_approvals_observed
     ~error:state.keeper_tool_approvals_error state.keeper_tool_approvals
 
-let observation_count = function
-  | Current rows -> string_of_int (List.length rows)
-  | Not_observed -> "unread"
+(* What a state is called, once. The pulse row and the section row below it
+   draw the same observation of the same source -- "Gate ..." on one and
+   "Pending Gate Calls: ..." on the other -- so a state named twice is a state
+   the reader has to match up by position. [Not_observed] was "unread" on the
+   pulse and "not observed" in the section. *)
+let observation_name = function
+  | Current _ -> ""
+  | Not_observed -> "not observed"
   | Unavailable _ -> "unavailable"
   | Stale _ -> "stale"
 
-let observation_detail = function
+let observation_count observation =
+  match observation with
   | Current rows -> string_of_int (List.length rows)
-  | Not_observed -> "not observed"
-  | Unavailable detail -> "unavailable: " ^ Terminal_text.single_line detail
-  | Stale detail -> "previous reading; refresh failed: " ^ Terminal_text.single_line detail
+  | Not_observed | Unavailable _ | Stale _ -> observation_name observation
+
+(* The name, then the reason the source gave for it. *)
+let observation_detail observation =
+  match observation with
+  | Current rows -> string_of_int (List.length rows)
+  | Not_observed -> observation_name observation
+  | Unavailable detail ->
+      observation_name observation ^ ": " ^ Terminal_text.single_line detail
+  | Stale detail ->
+      observation_name observation ^ ": previous reading, refresh failed: "
+      ^ Terminal_text.single_line detail
 
 let calculate_kpis (state : state) =
   let turns =
@@ -174,7 +189,9 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (Printf.sprintf "p95 %.3fms · max %.3fms" s.ssch_p95_ms s.ssch_max_ms,
        Printf.sprintf "%d samples · %d stalls" s.ssch_samples s.ssch_stalls,
        if s.ssch_stalls > 0 then Theme.warn () else Theme.recede ())
-    | None -> "Lag not observed", "Probe unavailable", Theme.recede ()
+    (* One condition -- no scheduler reading at all -- so both halves of the
+       card name it the same way. *)
+    | None -> "Lag not observed", "Probe not observed", Theme.recede ()
   in
   let c3_l1, c3_l2 = match kpis.tasks with
     | Some count ->

@@ -2895,6 +2895,13 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_misc_descriptor "msx_peek" "masc_msx_peek" ~readonly:true
   ; masc_misc_descriptor "msx_ram_diff" "masc_msx_ram_diff" ~readonly:true
+  ; masc_misc_descriptor "dos_load" "masc_dos_load" ~readonly:false
+  ; masc_misc_descriptor "dos_eject" "masc_dos_eject" ~readonly:false
+  ; masc_misc_descriptor "dos_screen" "masc_dos_screen" ~readonly:true
+  ; masc_misc_descriptor "dos_step" "masc_dos_step" ~readonly:false
+  ; masc_misc_descriptor "dos_press" "masc_dos_press" ~readonly:false
+  ; masc_misc_descriptor "dos_type" "masc_dos_type" ~readonly:false
+  ; masc_misc_descriptor "dos_peek" "masc_dos_peek" ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
   ; cluster_descriptor

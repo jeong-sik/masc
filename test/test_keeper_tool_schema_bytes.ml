@@ -169,6 +169,30 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
+(* 2026-09-13: the DOS lane adds seven deferred tools -- masc_dos_load, _eject,
+   _screen, _step, _press, _type, _peek. CI 34705960512 measured 114,705 bytes
+   / 133 tools before trimming; the declarations then lost 883 rendered bytes
+   of rationale that belongs in the code rather than in a string every turn
+   carries, which is where this number comes from. What it bought: a second machine keepers drive the way they drive
+   the MSX one (RFC-0439 §3.5) -- a real-mode DOS box that boots a program,
+   takes keys, and says when it wants the next one, with every key in the
+   ledger under the caller's name.
+
+   Worth saying because the number keeps going one way: these two lanes now
+   cost about 11.5 KB of every Keeper turn, and a Keeper that never plays a
+   game still carries them. Tool sets scoped to the lanes a Keeper has
+   attached would give it back; that is a change to how tools are attached,
+   not to this file. RFC-0451 proposes it. *)
+
+(* 2026-09-13: 114,500. The same PR, answering review: masc_dos_press and
+   masc_dos_type now declare max_items = 64 and max_length = 256, and their
+   results carry keys_pressed. Together that is 248 bytes, and 113,822 was
+   set to the measured figure with no room, so the ceiling moves with it.
+   What it bought: one call's work is bounded. The step budget is per key, so
+   a thousand-character type call could run a billion instructions holding
+   the machine's mutex; the caps and the ceiling inside Dos_lane.press_resolved
+   bound it, and keys_pressed is how the caller learns the sequence stopped
+   early. 430 bytes of headroom over the measured result. *)
 (* 2026-09-13: native CI 34708251602 measured 110,899 bytes / 128 tools at
    bb9d1de3d1. The two declaration read/save tools add 1,663 rendered bytes
    to the previous 109,236-byte surface. They let Dashboard and Keeper edit
@@ -176,7 +200,11 @@ open Alcotest
    needs no further tool. Set the ratchet to this measurement with no slack.
    This is the whole available catalog, including deferred tools, not a
    per-turn payload limit or Keeper activity budget. *)
-let ceiling_bytes = 110_899
+(* Combining main's 114,500-byte baseline with the independently measured
+   1,663-byte declaration editor addition preserves main's existing headroom.
+   The combined production renderer is checked by the following native CI;
+   this arithmetic is not a claim that the combined source has run yet. *)
+let ceiling_bytes = 116_163
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -334,6 +362,13 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_dos_eject"
+  ; "masc_dos_load"
+  ; "masc_dos_peek"
+  ; "masc_dos_press"
+  ; "masc_dos_screen"
+  ; "masc_dos_step"
+  ; "masc_dos_type"
   ; "masc_lane_attach"
   ; "masc_lane_declaration_read"
   ; "masc_lane_declaration_save"

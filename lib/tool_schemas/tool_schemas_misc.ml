@@ -45,6 +45,19 @@ let msx_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.msx_peek
   ; Tool_schemas_misc_toml.msx_ram_diff
   ]
+
+(* DOS lane: the same shape for a second machine. Time is instructions rather
+   than frames, and the machine says when it wants a key instead of the lane
+   guessing a settled screen. *)
+let dos_schemas : tool_schema list =
+  [ Tool_schemas_misc_toml.dos_load
+  ; Tool_schemas_misc_toml.dos_eject
+  ; Tool_schemas_misc_toml.dos_screen
+  ; Tool_schemas_misc_toml.dos_step
+  ; Tool_schemas_misc_toml.dos_press
+  ; Tool_schemas_misc_toml.dos_type
+  ; Tool_schemas_misc_toml.dos_peek
+  ]
 let browser_tabs_schema : tool_schema = Tool_schemas_misc_toml.browser_tabs
 let browser_read_schema : tool_schema = Tool_schemas_misc_toml.browser_read
 
@@ -79,7 +92,8 @@ let lane_addon_schemas : tool_schema list =
   ]
 
 let schemas : tool_schema list =
-  lane_addon_schemas @ msx_schemas @ Tool_schemas_operator_surface.schemas
+  lane_addon_schemas @ msx_schemas @ dos_schemas
+  @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
   | Start
@@ -167,6 +181,13 @@ type misc_operation =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_dos_load
+  | Misc_dos_eject
+  | Misc_dos_screen
+  | Misc_dos_step
+  | Misc_dos_press
+  | Misc_dos_type
+  | Misc_dos_peek
 [@@deriving enumerate]
 
 let misc_operations = all_of_misc_operation
@@ -209,6 +230,13 @@ let misc_tool_name = function
   | Misc_msx_step_until_change -> "masc_msx_step_until_change"
   | Misc_msx_peek -> "masc_msx_peek"
   | Misc_msx_ram_diff -> "masc_msx_ram_diff"
+  | Misc_dos_load -> "masc_dos_load"
+  | Misc_dos_eject -> "masc_dos_eject"
+  | Misc_dos_screen -> "masc_dos_screen"
+  | Misc_dos_step -> "masc_dos_step"
+  | Misc_dos_press -> "masc_dos_press"
+  | Misc_dos_type -> "masc_dos_type"
+  | Misc_dos_peek -> "masc_dos_peek"
 ;;
 
 let misc_operation_of_tool_name value =
@@ -250,6 +278,13 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_dos_load
+  | Misc_dos_eject
+  | Misc_dos_screen
+  | Misc_dos_step
+  | Misc_dos_press
+  | Misc_dos_type
+  | Misc_dos_peek
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

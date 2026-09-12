@@ -23,6 +23,14 @@ function isDeclarationFile(directory: string, sourcePath: string): boolean {
     && fileName.endsWith('.toml') && !fileName.includes('\\') && !fileName.includes('\0')
 }
 
+function hasCurrentDeclaration(configuration: LaneAddonSnapshot['configuration'], item: LaneAddonInstance): boolean {
+  const source = item.configuration
+  if (configuration === null || source === null || !isDeclarationFile(configuration.directory, source.source_path)) return false
+  return configuration.declarations.some(current => current.source_path === source.source_path && current.id === source.id)
+    || configuration.issues.some(issue => issue.source_path === source.source_path
+      && (issue.id === source.id || issue.id === null && item.phase.kind !== 'detached'))
+}
+
 type TrackedAction = {
   request: LaneAddonActionRequest
   receipt: LaneAddonActionReceipt | null
@@ -273,7 +281,8 @@ export function LaneAddonsPanel() {
         onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
         ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>
           <p>TOML: ${item.configuration.id}</p><p>${item.configuration.source_path}</p><p>Installed configuration: ${item.configuration.revision}</p>
-          <button type="button" class=${buttonClass} onClick=${() => { if (item.configuration !== null) editToml(item.configuration.source_path) }} aria-label=${`Edit TOML for ${item.instance_id}`}>Edit TOML</button>
+          ${hasCurrentDeclaration(configuration, item) && html`<button type="button" class=${buttonClass}
+            onClick=${() => { if (item.configuration !== null) editToml(item.configuration.source_path) }} aria-label=${`Edit TOML for ${item.instance_id}`}>Edit TOML</button>`}
         </div>`}
         <div aria-label=${`Output ports for ${item.instance_id}`}>
           ${Object.entries(item.package.outputs).map(([id, selection]) => html`<p key=${id}>

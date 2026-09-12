@@ -16,12 +16,8 @@
   unix
   eio
   yojson
-  shared_types
   fs_compat
   masc.dated_jsonl
-  masc.attribution
-  masc.masc_process
   masc.agent_observation
-  masc.masc_exec
   masc_core
   masc_log))

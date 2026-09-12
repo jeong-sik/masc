@@ -29,6 +29,18 @@ let read_blob t (reference : evidence) = protect (fun () ->
   | _ -> Error "evidence is not retained in this Lane store")
 let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
+let action_path ~instance_id ~request_id =
+  Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+let save_action t ~instance_id ~request_id json =
+  write t (action_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
+let load_action t ~instance_id ~request_id = protect (fun () ->
+  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
+      else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with
@@ -132,38 +144,70 @@ let query_observations t ~instance_id ~expected_seq ~max_bytes ~since ~until ~la
     && Option.fold ~none:true ~some:(fun time -> row.observed_at >= time) since
     && Option.fold ~none:true ~some:(fun time -> row.observed_at <= time) until in
   let time = function None -> "unbounded" | Some value -> string_of_float value in
-  let query_coverage ~last ~complete = {
+  let query_coverage ~last ~rows_complete ~coverage_complete ~readable = {
     source_id = "retained:" ^ instance_id; incarnation = instance_id;
-    cursor = Some (Printf.sprintf "scanned:%d/of:%d" last maximum); complete;
-    detail = Some (Printf.sprintf "window [%s, %s]; %s"
-      (time since) (time until)
-      (if complete then "retained sequence range inspected"
-       else "partial retained query: byte envelope reached or an observation is unreadable")) } in
+    cursor = Some (Printf.sprintf "scanned:%d/of:%d" last maximum);
+    complete = rows_complete && coverage_complete && readable;
+    detail = Some (Printf.sprintf
+      "window [%s, %s]; rows and source coverage inspected through %d/of:%d; %s; %s; %s"
+      (time since) (time until) last maximum
+      (if rows_complete then "no matching row records omitted"
+       else "matching row records omitted by byte envelope")
+      (if coverage_complete then "all inspected source coverage returned"
+       else "source coverage omitted by byte envelope")
+      (if readable then "retained observations readable"
+       else "a retained observation is unreadable")) } in
   (* Reserve the longest coverage receipt before accepting any rows. *)
   let reserve = String.length (Yojson.Safe.to_string
-    (output_to_json { rows = []; coverage = [query_coverage ~last:maximum ~complete:false] })) in
+    (output_to_json { rows = []; coverage = [query_coverage ~last:maximum
+      ~rows_complete:false ~coverage_complete:false ~readable:false] })) in
   if max_bytes <= reserve then Error "query byte envelope cannot contain its coverage receipt"
   else
-    let rec scan seq remaining rows coverage complete =
-      if seq > maximum then
-        Ok { rows = List.rev rows; coverage = List.rev coverage @ [query_coverage ~last:maximum ~complete] }
+    let read seq = Result.bind
+      (bounded_file ~max_bytes:max_record_bytes (record_path t instance_id seq)) decode_record in
+    let encoded_size output = String.length (Yojson.Safe.to_string (output_to_json output)) in
+    (* Coverage from old, unselected records must not consume the row budget.
+       Rows remain a bounded prefix of the matching retained records. *)
+    let rec scan_rows seq remaining rows readable =
+      if seq > maximum then maximum, remaining, rows, true, readable
       else
-        match Result.bind (bounded_file ~max_bytes:max_record_bytes (record_path t instance_id seq)) decode_record with
-        | Error _ -> scan (seq + 1) remaining rows coverage false
+        match read seq with
+        | Error _ -> scan_rows (seq + 1) remaining rows false
         | Ok (_, output) ->
             let selected = List.filter matches output.rows in
-            if selected = [] && output.coverage = [] then
-              scan (seq + 1) remaining rows coverage complete
+            if selected = [] then scan_rows (seq + 1) remaining rows readable
             else
-              let chunk = { rows = selected; coverage = output.coverage } in
-              (* Counting each chunk's whole JSON envelope is conservative;
-                 it also bounds the retained coverage arrays, not just rows. *)
-              let bytes = String.length (Yojson.Safe.to_string (output_to_json chunk)) in
+              let bytes = encoded_size { rows = selected; coverage = [] } in
               if bytes > remaining then
-                Ok { rows = List.rev rows; coverage = List.rev coverage @ [query_coverage ~last:(seq - 1) ~complete:false] }
-              else scan (seq + 1) (remaining - bytes)
-                (List.rev_append selected rows) (List.rev_append output.coverage coverage) complete
-    in scan 1 (max_bytes - reserve) [] [] true
+                seq - 1, remaining, rows, false, readable
+              else scan_rows (seq + 1) (remaining - bytes)
+                (List.rev_append selected rows) readable in
+    let last, remaining, rows, rows_complete, readable =
+      scan_rows 1 (max_bytes - reserve) [] true in
+    (* Both buffers are bounded independently by the remaining response space.
+       A later selected record can therefore retain its coverage even when old
+       diagnostics fill the deferred buffer. Whole JSON envelopes are counted
+       conservatively for each entry, including array separators. *)
+    let retain_coverage buffer entries =
+      List.fold_left (fun (remaining, retained, complete) entry ->
+        let bytes = encoded_size { rows = []; coverage = [entry] } in
+        if bytes > remaining then remaining, retained, false
+        else remaining - bytes, entry :: retained, complete) buffer entries in
+    let rec scan_coverage seq selected deferred readable =
+      if seq > last then selected, deferred, readable
+      else match read seq with
+        | Error _ -> scan_coverage (seq + 1) selected deferred false
+        | Ok (_, output) ->
+            if List.exists matches output.rows then
+              scan_coverage (seq + 1) (retain_coverage selected output.coverage) deferred readable
+            else
+              scan_coverage (seq + 1) selected (retain_coverage deferred output.coverage) readable in
+    let (remaining, selected, selected_complete), (_, deferred, deferred_complete), readable =
+      scan_coverage 1 (remaining, [], true) (remaining, [], true) readable in
+    let _, coverage, coverage_complete = retain_coverage
+      (remaining, selected, selected_complete && deferred_complete) (List.rev deferred) in
+    Ok { rows = List.rev rows; coverage = List.rev coverage @
+      [query_coverage ~last ~rows_complete ~coverage_complete ~readable] }
 module Row_ids = Set.Make (String)
 let freeze t ~instance_id ~binding ~row_ids =
   let requested = Row_ids.of_list row_ids in

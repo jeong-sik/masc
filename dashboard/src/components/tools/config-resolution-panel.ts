@@ -59,8 +59,8 @@ function ConfigCard({
     Reference UIs: GitHub file-breadcrumb copy, Vercel deployment path,
     Datadog host path — all copy the canonical absolute form even when
     the display is shortened. Exposed for tests. */
-export function copyablePath(item: Pick<DashboardConfigResolutionItem, 'path'>): string {
-  return item.path ?? ''
+export function copyablePath(item: Pick<DashboardConfigResolutionItem, 'path'>): string | null {
+  return item.path
 }
 
 /**
@@ -136,11 +136,14 @@ function normalizePath(path: string): string {
   return path.replace(/\/+$/, '')
 }
 
-function describePath(path: string, rootPath: string, isRoot: boolean): {
+function describePath(path: string | null, rootPath: string, isRoot: boolean): {
   primary: string
   context: string | null
   kind: string | null
 } {
+  if (path === null) {
+    return { primary: '경로 없음', context: null, kind: null }
+  }
   const normalizedPath = normalizePath(path)
   const normalizedRoot = normalizePath(rootPath)
 
@@ -305,6 +308,7 @@ function providerProbeTone(status: DashboardRuntimeProviderProbe['status']): str
     case 'reachable':
       return 'ok'
     case 'skipped_cli':
+    case 'skipped_native_auth':
       return 'neutral'
     case 'missing_auth':
     case 'auth_failed':
@@ -347,6 +351,8 @@ function providerProbeLabel(status: DashboardRuntimeProviderProbe['status']): st
       return 'not found'
     case 'skipped_cli':
       return 'cli skipped'
+    case 'skipped_native_auth':
+      return 'native auth skipped'
     case 'invalid_endpoint':
       return 'bad endpoint'
     case 'invalid_execution_transport':

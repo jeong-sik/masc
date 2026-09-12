@@ -1,6 +1,8 @@
 open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
+open Masc_tui_render_prim
+open Masc_tui_render_chat
 open Masc_tui_loader
 
 (* How long the pane waits on [gh pr view --web] before reporting it. The
@@ -46,6 +48,7 @@ module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
+module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
@@ -149,7 +152,7 @@ let surface_body_height ~rows
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
-  | None -> current + delta
+  | None -> Masc_tui_scroll.step_uncounted ~delta current
   | Some scrolled ->
       let height = surface_body_height ~rows scrolled in
       if delta >= 0 then
@@ -266,20 +269,32 @@ let identity_pane_columns (state : state) =
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
    a row the frame will not draw. *)
+(* The rows a surface's list can draw in once the cursor is on [cursor].
+
+   Constant on every surface but one: the Memory overview spends rows on the
+   selected keeper's own alerts and read errors, so its body height is a
+   function of the cursor rather than of the surface. A follow worked out
+   from the layout before the move puts the landing outside the window it
+   measured, and the step key and the jump keys were working that out
+   differently -- the step recomputed, the landing did not. *)
+let surface_body_height_at (state : state) ~cursor scrolled =
+  let scrolled =
+    if state.view = Memory && Option.is_none state.memory_facts_keeper then
+      memory_overview_scrolled ~cursor state
+    else scrolled
+  in
+  surface_body_height ~rows:(surface_rows state) scrolled
+
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
-  | None -> (cursor, scroll + delta)
+  | None -> (cursor, Masc_tui_scroll.step_uncounted ~delta scroll)
   | Some ({ sc_count; _ } as scrolled) ->
-      let cursor =
-        if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
-        else Masc_tui_scroll.cursor_up ~count:sc_count cursor
-      in
-      let scrolled =
-        if state.view = Memory && Option.is_none state.memory_facts_keeper then
-          memory_overview_scrolled ~cursor state
-        else scrolled
-      in
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
+      (* [delta], not its sign. The two steppers move one row, and reading
+         only the direction meant a page key that routed through here moved
+         one row while its key table said "page" -- Verification, Harness,
+         Clients and the Git-changes list all read as j/k. *)
+      let cursor = Masc_tui_scroll.cursor_move ~count:sc_count ~delta cursor in
+      let height = surface_body_height_at state ~cursor scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the
@@ -302,10 +317,7 @@ let move_identity_cursor (state : state) ~delta =
           Masc_tui_types.identity_cursor_clamped ~query ~providers
             state.identity_cursor
         in
-        let cursor =
-          if delta >= 0 then Masc_tui_scroll.cursor_down ~count cursor
-          else Masc_tui_scroll.cursor_up ~count cursor
-        in
+        let cursor = Masc_tui_scroll.cursor_move ~count ~delta cursor in
         state.identity_cursor <- cursor;
         match scrolled_surface state state.view with
         | None -> ()
@@ -1511,16 +1523,45 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
+    (* Both of these keys say what they did. The same two stances reached
+       through [/reasoning] and [/tools] answer with a notice, and reached
+       through the key they answered with nothing -- so on a turn that holds
+       no reasoning block and no tool call, the press changed a stance and
+       moved not one cell. That reads as a dead key, and pressing it again to
+       check puts the stance back where it started. The header names a stance
+       only when it is away from its default ([chat_visibility_summary]), so
+       it cannot stand in for this: returning to the default is exactly the
+       press that clears the label. *)
     if c = Some 18 then begin
       (* Ctrl-R cycles the presentation only; transcript bytes stay intact. *)
-      state.msg_reasoning_visibility <-
-        next_reasoning_visibility state.msg_reasoning_visibility;
+      let visibility = next_reasoning_visibility state.msg_reasoning_visibility in
+      state.msg_reasoning_visibility <- visibility;
+      state.last_action <-
+        Some
+          ( "reasoning " ^ reasoning_visibility_to_string visibility
+          , Unix.gettimeofday () );
       true
     end else if c = Some 4 then begin
       (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
       if visibility = Tools_full then load_tool_changes ();
+      state.last_action <-
+        Some
+          ( "tool calls " ^ tool_visibility_to_string visibility
+          , Unix.gettimeofday () );
+      true
+    end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
+      (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
+         where it starts; this is the key that asks for the rest. Saying what
+         it did matters more here than elsewhere -- the fold changes how many
+         rows the block below the conversation takes, and a reader who does
+         not see a row appear has no other way to tell the key landed. *)
+      state.msg_turn_folded <- not state.msg_turn_folded;
+      state.last_action <-
+        Some
+          ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
+          , Unix.gettimeofday () );
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
@@ -1892,11 +1933,16 @@ type async_msg =
   | Image_render_ready of {
       title : string;
       caption : string list;
+      page_url : string;
+      image_url : string;
       result : (string, string) result;
     }
       (** A [v]-requested web image, downloaded and converted to PNG off the
           render loop. [result] is the PNG bytes ready to draw, or why they
-          could not be produced. *)
+          could not be produced. [title] is indented for the screen and is
+          never a location. [image_url] is what was fetched; [page_url] is the
+          link the operator chose, and the one a browser gets when drawing
+          fails (see [Masc_tui_browser.browser_url]). *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -4243,19 +4289,23 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
-      (* Scene geometry belongs to its observation. Browser effects and fresh
+      (* Scene geometry belongs to its observation. Browser effects and explicit
          reads withdraw it before dispatch; a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
          Scene_click retains its exact reference in [operation], and the
-         matching completion can install the newly observed scene. *)
+         matching completion can install the newly observed scene. A cadence
+         refresh keeps its frame visible so periodic observations do not erase
+         the operator's reading position. Operator input supersedes a cadence
+         result; effects still use the observed document/URL checks. Failed
+         refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
@@ -4264,6 +4314,8 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation);
+        read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4277,13 +4329,16 @@ let launch_browser_lane state ~mailbox operation =
         match operation with
         | Discover _ -> Browser_lane_clients_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
-        | Read -> Browser_lane_loaded
+        | Read | Read_refresh -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Scene_read tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ()))
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
+              ~host ~port ~view ~tab_id ~scene_view ~scope))
         | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scope:target ~host ~port ~view ~tab_id ()))
@@ -5252,162 +5307,282 @@ let launch_verification_load state ~mailbox =
         enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
   end
 
+(* One surface's row list: how many rows it has, which one the cursor is on,
+   and how to put the cursor somewhere else.
+
+   These three facts lived in three separate exhaustive matches over
+   [surface], each naming every variant so the compiler would flag a new one.
+   Naming is not agreeing: the Keeper detail's context inspector had a
+   landing and searchable rows but no cursor reading, so [n] and [N] restarted
+   from the first row every press. A fourth match -- the count Home and End
+   need -- would have been a fourth chance to drift, so the three are one
+   record built in one place instead.
+
+   [None] is a surface with no row cursor, or one whose rows only exist once
+   the frame is built. Those keep the keys they already have: Activity has g
+   and G, the Keeper log and Tools have their own Home and End. *)
+type row_list = {
+  rl_count : int;  (** rows the list holds *)
+  rl_cursor : int;  (** the row the cursor is on *)
+  rl_place : int -> unit;
+      (** put the cursor on a row and move the window to show it *)
+}
+
+let row_list (state : state) : row_list option =
+  (* The window follows a named row the same way it follows a step, through
+     [surface_body_height] rather than [rows - sc_chrome]: a surface that
+     gives half its rows to a preview says so in [sc_preview_keep], and a
+     height that ignores it lands the cursor under the preview while
+     [ensure_visible] reports the row as already on screen. *)
+  let follow ~cursor scroll set_scroll =
+    match scrolled_surface state state.view with
+    | None -> ()
+    | Some scrolled ->
+        let height = surface_body_height_at state ~cursor scrolled in
+        set_scroll (Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
+  in
+  (* The count the keypress bound already uses, so a jump cannot land on a
+     row a step cannot reach. [None] here means the state does not own the
+     count; the arms below that need one say where it comes from. *)
+  let counted () =
+    match scrolled_surface state state.view with
+    | Some { sc_count; _ } -> Some sc_count
+    | None -> None
+  in
+  (* A list whose rows the drawing windows around the cursor: nothing to
+     scroll, so the landing is on screen as soon as the cursor names it. *)
+  let windowed ~count ~cursor place = Some { rl_count = count; rl_cursor = cursor; rl_place = place } in
+  (* A list with a scroll of its own, which follows the cursor. *)
+  let scrolling ~count ~cursor ~scroll ~set_cursor ~set_scroll =
+    Some
+      { rl_count = count
+      ; rl_cursor = cursor
+      ; rl_place =
+          (fun index ->
+            set_cursor index;
+            follow ~cursor:index scroll set_scroll)
+      }
+  in
+  let of_counted f = Option.bind (counted ()) f in
+  match state.view with
+  | Keepers Keeper_list ->
+      windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
+        (fun index -> state.keeper_cursor <- index)
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* The request tab's items, counted by the pane that draws them. A
+         landed row is a new item, so its reader starts at the top the way a
+         j/k move does. *)
+      if state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+      then
+        let count, _height = Masc_tui_render.context_inspector_viewport state in
+        if count = 0 then None
+        else
+          windowed ~count ~cursor:state.context_inspector_cursor (fun index ->
+              state.context_inspector_cursor <- index;
+              state.context_inspector_detail_scroll <- 0)
+      else None
+  | Lanes ->
+      (match state.lanes_mode with
+       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       | Lanes_overview ->
+           of_counted (fun count ->
+               windowed ~count ~cursor:state.lanes_standalone_cursor
+                 (fun index -> state.lanes_standalone_cursor <- index)))
+  | Clients ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.clients_surface_cursor
+            ~scroll:state.clients_surface_scroll
+            ~set_cursor:(fun i -> state.clients_surface_cursor <- i)
+            ~set_scroll:(fun s -> state.clients_surface_scroll <- s))
+  | Verification ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.verification_cursor
+            ~scroll:state.verification_scroll
+            ~set_cursor:(fun i -> state.verification_cursor <- i)
+            ~set_scroll:(fun s -> state.verification_scroll <- s))
+  | Harness ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.harness_cursor
+            ~scroll:state.harness_scroll
+            ~set_cursor:(fun i -> state.harness_cursor <- i)
+            ~set_scroll:(fun s -> state.harness_scroll <- s))
+  | Memory ->
+      of_counted (fun count ->
+          if Option.is_some state.memory_facts_keeper then
+            scrolling ~count ~cursor:state.memory_facts_cursor
+              ~scroll:state.memory_facts_scroll
+              ~set_cursor:(fun i -> state.memory_facts_cursor <- i)
+              ~set_scroll:(fun s -> state.memory_facts_scroll <- s)
+          else
+            scrolling ~count ~cursor:state.memory_health_cursor
+              ~scroll:state.memory_health_scroll
+              ~set_cursor:(fun i -> state.memory_health_cursor <- i)
+              ~set_scroll:(fun s -> state.memory_health_scroll <- s))
+  | Repositories ->
+      of_counted (fun count ->
+          if state.repository_changes_open then
+            scrolling ~count ~cursor:state.repository_changes_cursor
+              ~scroll:state.repository_changes_scroll
+              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
+              ~set_scroll:(fun s -> state.repository_changes_scroll <- s)
+          else
+            scrolling ~count ~cursor:state.repositories_cursor
+              ~scroll:state.repositories_scroll
+              ~set_cursor:(fun i -> state.repositories_cursor <- i)
+              ~set_scroll:(fun s -> state.repositories_scroll <- s))
+  | Connectors ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.connectors_cursor
+            ~scroll:state.connectors_scroll
+            ~set_cursor:(fun i -> state.connectors_cursor <- i)
+            ~set_scroll:(fun s -> state.connectors_scroll <- s))
+  | Runtime ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.runtime_cursor
+            ~scroll:state.runtime_surface_scroll
+            ~set_cursor:(fun i -> state.runtime_cursor <- i)
+            ~set_scroll:(fun s -> state.runtime_surface_scroll <- s))
+  | System_logs ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.system_logs_cursor
+            ~scroll:state.system_logs_scroll
+            ~set_cursor:(fun i -> state.system_logs_cursor <- i)
+            ~set_scroll:(fun s -> state.system_logs_scroll <- s))
+  | Changes ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.changes_cursor
+            ~scroll:state.changes_scroll
+            ~set_cursor:(fun i -> state.changes_cursor <- i)
+            ~set_scroll:(fun s -> state.changes_scroll <- s))
+  | Code ->
+      (* Three panes under one surface: the Git changes overlay, the open
+         file, and the tree everything else hangs off. The overlay is the
+         counted one; the file carries its own pane height, and the tree
+         windows itself around the cursor. *)
+      if state.repository_changes_open then
+        of_counted (fun count ->
+            scrolling ~count ~cursor:state.repository_changes_cursor
+              ~scroll:state.repository_changes_scroll
+              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
+              ~set_scroll:(fun s -> state.repository_changes_scroll <- s))
+      else if
+        state.code_focus_file = Right_pane && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+      then
+        (match Masc_tui_fetched.current state.code_file with
+         | Some (_, Masc_tui_fetched.Ready rows) ->
+             Some
+               { rl_count = Array.length rows
+               ; rl_cursor = state.code_file_cursor
+               ; rl_place =
+                   (fun index ->
+                     state.code_file_cursor <- index;
+                     state.code_file_scroll <-
+                       Masc_tui_scroll.ensure_visible ~cursor:index
+                         ~height:(Masc_tui_render.code_pane_content_height state)
+                         state.code_file_scroll)
+               }
+         (* Nothing to move through while the file is still being read, and
+            nothing to move through if it failed. *)
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, Masc_tui_fetched.Absent)
+         | None -> None)
+      else
+        windowed ~count:(List.length state.code_entries)
+          ~cursor:state.code_cursor (fun index -> state.code_cursor <- index)
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> None
+       | Board_list ->
+           windowed ~count:(List.length state.board_posts)
+             ~cursor:state.board_cursor (fun index ->
+               state.board_cursor <- index))
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> None
+       | Planning_list ->
+           let count =
+             match state.planning with
+             | None -> 0
+             | Some snapshot ->
+                 List.length
+                   (planning_visible_goals ~filter:state.planning_filter
+                      ~sort:state.planning_sort snapshot.pl_goals)
+           in
+           windowed ~count ~cursor:state.planning_cursor (fun index ->
+               state.planning_cursor <- index))
+  (* Three lists that carry no row search yet (#35306). Home, End and the
+     page keys reach them through here, which is what makes these arms live
+     rather than a landing nobody calls. *)
+  | Approvals ->
+      windowed ~count:(List.length (approval_items state))
+        ~cursor:state.approval_cursor (fun index ->
+          state.approval_cursor <- index)
+  | Schedules ->
+      (match state.schedule_detail_id with
+       | Some _ -> None
+       | None ->
+           let count =
+             match state.schedules with
+             | None -> 0
+             | Some snapshot -> List.length snapshot.scs_rows
+           in
+           windowed ~count ~cursor:state.schedule_cursor (fun index ->
+               state.schedule_cursor <- index))
+  | Fusion ->
+      (match state.fusion_mode with
+       | Fusion_detail _ | Fusion_historical_detail _ -> None
+       | Fusion_list ->
+           windowed ~count:(List.length (fusion_list_entries state))
+             ~cursor:state.fusion_cursor (fun index ->
+               state.fusion_cursor <- index))
+  (* The list pane draws its window around the cursor rather than holding a
+     scroll of its own, so a landing is on screen the moment the cursor names
+     it. With the text focused j/k scrolls the reading instead and there is no
+     row to land on -- the same condition [surface_row_texts] reads. *)
+  | Resources ->
+      (match state.resource_focus, state.resources_list with
+       | Right_pane, _ | _, None -> None
+       | Left_pane, Some rows ->
+           windowed ~count:(List.length rows) ~cursor:state.resources_cursor
+             (fun index -> state.resources_cursor <- index))
+  (* Named rather than caught. A surface that grows a row cursor is added
+     above in one place, and a [_] here would let it be forgotten silently --
+     which is how the context inspector came to have a landing with no
+     reading. *)
+  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
+  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
+  | Config | Tools ->
+      None
+
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
    the other way. A miss moves nothing. The searched list is the one
    [surface_row_texts] answers -- the same list the row cursor names -- and
    the window follows the landing so the match is visible. *)
-let search_row_cursor state =
-  match state.view with
-  | Keepers Keeper_list -> Some state.keeper_cursor
-  | Lanes -> Some state.lanes_standalone_cursor
-  | Clients -> Some state.clients_surface_cursor
-  | Verification ->
-      if Option.is_some state.verification_detail_request_id then None
-      else Some state.verification_cursor
-  | Harness -> Some state.harness_cursor
-  | Memory ->
-      Some
-        (if Option.is_some state.memory_facts_keeper then
-           state.memory_facts_cursor
-         else state.memory_health_cursor)
-  | Repositories ->
-      Some
-        (if state.repository_changes_open then state.repository_changes_cursor
-         else state.repositories_cursor)
-  | Connectors -> Some state.connectors_cursor
-  | Runtime -> Some state.runtime_cursor
-  | System_logs -> Some state.system_logs_cursor
-  | Code ->
-      if state.repository_changes_open then
-        Some state.repository_changes_cursor
-      else if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then Some state.code_file_cursor
-      else Some state.code_cursor
-  | Board ->
-      (match state.board_mode with
-       | Board_read _ | Board_compose -> None
-       | Board_list -> Some state.board_cursor)
-  | Planning ->
-      (match state.planning_mode with
-       | Planning_detail _ -> None
-       | Planning_list -> Some state.planning_cursor)
-  (* Named rather than left to a wildcard. [surface_row_texts] is exhaustive
-     and will name a new surface; this used to end in [_ -> None], so a
-     surface given searchable rows there still had no cursor to move here and
-     the key did nothing. The three matches -- the rows, this reading, and
-     the write below -- have to agree, and only naming every surface makes
-     the compiler say so. *)
-  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
-  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Approvals | Schedules | Fusion | Changes | Config | Resources | Tools ->
-      None
+let search_row_cursor state = Option.map (fun r -> r.rl_cursor) (row_list state)
 
-let search_land state index =
-  let follow ?(cursor = index) scroll set_scroll =
-    match scrolled_surface state state.view with
-    | None -> ()
-    | Some scrolled ->
-        (* Through [surface_body_height], not [rows - sc_chrome]. A surface that
-           gives half its rows to a preview says so in [sc_preview_keep], and a
-           height that ignores it lands the cursor under the preview while
-           [ensure_visible] reports the row as already on screen. Both movers
-           ask the same helper for the same reason. *)
-        let height = surface_body_height ~rows:(surface_rows state) scrolled in
-        set_scroll (Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
-  in
-  match state.view with
-  | Keepers Keeper_list -> state.keeper_cursor <- index
-  | Keepers Keeper_detail when state.context_inspector_open ->
-      (* A landed search row is a new item: its reader starts at the top of
-         the detail, the way a j/k move does. *)
-      state.context_inspector_cursor <- index;
-      state.context_inspector_detail_scroll <- 0
-  | Lanes -> state.lanes_standalone_cursor <- index
-  | Clients ->
-      state.clients_surface_cursor <- index;
-      follow state.clients_surface_scroll (fun s -> state.clients_surface_scroll <- s)
-  | Verification ->
-      state.verification_cursor <- index;
-      follow state.verification_scroll (fun s -> state.verification_scroll <- s)
-  | Harness ->
-      state.harness_cursor <- index;
-      follow state.harness_scroll (fun s -> state.harness_scroll <- s)
-  | Memory ->
-      if Option.is_some state.memory_facts_keeper then begin
-        state.memory_facts_cursor <- index;
-        follow state.memory_facts_scroll
-          (fun s -> state.memory_facts_scroll <- s)
-      end
-      else begin
-        state.memory_health_cursor <- index;
-        follow state.memory_health_scroll
-          (fun s -> state.memory_health_scroll <- s)
-      end
-  | Repositories ->
-      if state.repository_changes_open then begin
-        state.repository_changes_cursor <- index;
-        follow state.repository_changes_scroll
-          (fun s -> state.repository_changes_scroll <- s)
-      end
-      else begin
-        state.repositories_cursor <- index;
-        follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
-      end
-  | Connectors ->
-      state.connectors_cursor <- index;
-      follow state.connectors_scroll (fun s -> state.connectors_scroll <- s)
-  | Runtime ->
-      state.runtime_cursor <- index;
-      follow state.runtime_surface_scroll
-        (fun s -> state.runtime_surface_scroll <- s)
-  | System_logs ->
-      state.system_logs_cursor <- index;
-      follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
-  | Code ->
-      if state.repository_changes_open then begin
-        state.repository_changes_cursor <- index;
-        follow state.repository_changes_scroll
-          (fun s -> state.repository_changes_scroll <- s)
-      end
-      else if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then begin
-        state.code_file_cursor <- index;
-        state.code_file_scroll <-
-          Masc_tui_scroll.ensure_visible ~cursor:index
-            ~height:(Masc_tui_render.code_pane_content_height state)
-            state.code_file_scroll
-      end
-      else
-        (* The tree pane windows itself around the cursor; no scroll
-           follows. *)
-        state.code_cursor <- index
-  (* Listed rather than caught. A surface becomes searchable by being added to
-     [surface_row_texts], which is exhaustive and will name the new variant at
-     compile time; this match has to move with it or the search finds a row and
-     then goes nowhere. A [_] here would let the two drift apart silently, and
-     the drift shows up as a search that quietly does nothing. *)
-  (* These three lists window themselves around the cursor when they draw --
-     the same reason the Code tree above takes no [follow] -- so the landing
-     is on screen without a scroll to move. [state.board_scroll] is the
-     reading pane's, not the list's. *)
-  | Board ->
-      (match state.board_mode with
-       | Board_read _ | Board_compose -> ()
-       | Board_list -> state.board_cursor <- index)
-  | Planning ->
-      (match state.planning_mode with
-       | Planning_detail _ -> ()
-       | Planning_list -> state.planning_cursor <- index)
-  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
-  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Approvals | Schedules | Fusion | Changes | Config
-  | Resources | Tools ->
-      ()
+let place_row_cursor state index =
+  Option.iter (fun r -> r.rl_place index) (row_list state)
+
+(* Home and End over a surface's list, and the page keys between them. All
+   three name a row rather than stepping to one, so all three go through the
+   one record and the window follows the way it does for a landed search.
+   A surface with no row list is left to the keys it already has. *)
+let move_list_to_edge (state : state) ~(to_bottom : bool) =
+  match row_list state with
+  | None -> ()
+  | Some { rl_count = 0; _ } -> ()
+  | Some r ->
+      r.rl_place (if to_bottom then Masc_tui_scroll.cursor_last ~count:r.rl_count else 0)
+
+let move_list_by_rows (state : state) ~delta =
+  match row_list state with
+  | None | Some { rl_count = 0; _ } -> ()
+  | Some r ->
+      r.rl_place
+        (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor)
+
 
 (* Standalone rows never scroll, so an action notice only has to be retained
    until movement or navigation clears it. *)
@@ -5418,12 +5593,16 @@ let search_jump ?(backwards = false) state ~query ~after =
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
-      let total = List.length texts in
+      (* Into an array before the scan, not walked per index. The scan visits
+         every row once and [List.nth_opt] walked to each from the front, so a
+         query that matched nothing cost the list squared: on a twenty-
+         thousand-line file open on the Code surface, one keystroke took about
+         a third of a second, and the search runs on every keystroke. *)
+      let texts = Array.of_list texts in
+      let total = Array.length texts in
       if String.length query > 0 && total > 0 then begin
         let matches index =
-          match List.nth_opt texts index with
-          | Some text -> Masc_tui_types.palette_contains ~needle:query text
-          | None -> false
+          Masc_tui_types.palette_contains ~needle:query texts.(index)
         in
         let rec scan step =
           if step > total then ()
@@ -5434,7 +5613,7 @@ let search_jump ?(backwards = false) state ~query ~after =
             in
             if matches index then begin
               if state.view = Lanes then state.lanes_action_error <- None;
-              search_land state index
+              place_row_cursor state index
             end
             else scan (step + 1)
           end
@@ -7112,24 +7291,60 @@ let ensure_img_cache_dir () =
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   dir
 
+(* Removes a cached body the cache will not stand behind. A file already gone
+   is the wanted state; the caller's error names why the body was refused. *)
+let discard_cached_image path = try Sys.remove path with Sys_error _ -> ()
+
+(* The cached file for a remote image URL, or why there is none. A hit is
+   decided by the bytes (Masc_tui_image_cache.verdict_of_bytes), never by the
+   file being non-empty: an empty body is removed on sight, a known signature
+   is a hit, and a signature the table does not name is handed to the decoder,
+   which reads formats the table does not (BMP, AVIF, SVG). curl runs with
+   --fail so an HTTP error status writes no body in the first place, and its
+   exit status is kept as the typed reason. *)
 let download_remote_image url =
   let cache_dir = ensure_img_cache_dir () in
   let hash = Digest.to_hex (Digest.string url) in
   let target_file = Filename.concat cache_dir ("img_" ^ hash) in
-  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
-    Ok target_file
-  else
+  let verdict_of_cached () =
+    match read_file_bytes target_file with
+    | Error detail ->
+        discard_cached_image target_file;
+        Error (Masc_tui_image_cache.Cache_unreadable { detail })
+    | Ok bytes -> (
+        match Masc_tui_image_cache.verdict_of_bytes bytes with
+        | Masc_tui_image_cache.Known_image _ | Masc_tui_image_cache.Unknown_signature ->
+            Ok target_file
+        | Masc_tui_image_cache.Empty ->
+            discard_cached_image target_file;
+            Error Masc_tui_image_cache.Empty_body)
+  in
+  let fetch () =
     let cmd =
-      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+      Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
         (Filename.quote target_file)
         (Filename.quote url)
     in
-    match Unix.system cmd with
-    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
-        Ok target_file
-    | _ ->
-        (try Sys.remove target_file with _ -> ())  (* @observe-allowed: removing a partial download on the failure path; the caller's error is the download failure, not this *);
-        Error "could not download remote image"
+    let status = Unix.system cmd in
+    match
+      Masc_tui_image_cache.fetch_failure_of_status status
+        ~body_present:(Sys.file_exists target_file)
+    with
+    | None -> verdict_of_cached ()
+    | Some failure ->
+        discard_cached_image target_file;
+        Error (Masc_tui_image_cache.Fetch_failed failure)
+  in
+  if Sys.file_exists target_file then
+    match verdict_of_cached () with
+    | Ok path -> Ok path
+    | Error
+        ( Masc_tui_image_cache.Fetch_failed _ | Masc_tui_image_cache.Empty_body
+        | Masc_tui_image_cache.Cache_unreadable _ ) ->
+        (* A body cached before this check existed: it is gone now, so ask the
+           URL again rather than report the stale answer. *)
+        fetch ()
+  else fetch ()
 
 let convert_to_png input_path =
   let cache_dir = ensure_img_cache_dir () in
@@ -7169,12 +7384,21 @@ let convert_to_png input_path =
    a narrow terminal skips it rather than wrapping. Decode/draw stay a few ms. *)
 let mosaic_cols = 120
 
-(* Download a preview image and decode it into half-block mosaic lines, or None.
-   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
-   render loop inside run_in_systhread. *)
-let image_url_to_mosaic ~cols url =
+(* Download a preview image and decode it into half-block mosaic lines, or say
+   why not. Every answer is durable for the session: the caller records it so
+   the URL is not fetched or decoded again on every preview parse. A body the
+   decoder rejected is removed from the cache, so a later session downloads
+   afresh instead of decoding the same bytes. Blocking (curl + ffmpeg through
+   Unix.system): the caller runs it off the render loop inside
+   run_in_systhread. *)
+let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
   match download_remote_image url with
-  | Error _ -> None
+  | Error (Masc_tui_image_cache.Fetch_failed failure) ->
+      Masc_tui_link_preview.(
+        Refused (Fetch_failed { detail = Masc_tui_image_cache.fetch_failure_text failure }))
+  | Error Masc_tui_image_cache.Empty_body -> Masc_tui_link_preview.(Refused Empty_body)
+  | Error (Masc_tui_image_cache.Cache_unreadable { detail }) ->
+      Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
   | Ok local_path -> (
       let raw =
         Filename.concat
@@ -7192,28 +7416,39 @@ let image_url_to_mosaic ~cols url =
            rgb24 %s"
           (Filename.quote local_path) cols (Filename.quote raw)
       in
-      match Unix.system cmd with
-      | Unix.WEXITED 0 when Sys.file_exists raw -> (
-          try
-            let ic = open_in_bin raw in
-            let data = really_input_string ic (in_channel_length ic) in
-            close_in ic;
-            let rows = String.length data / (cols * 3) in
-            match Masc_tui_image_mosaic.render ~cols ~rows data with
-            | [] -> None
-            | lines -> Some lines
-          with _ -> None)
-      | _ -> None)
+      let status = Unix.system cmd in
+      let refuse failure =
+        if Masc_tui_image_cache.decode_failure_discards_body failure then
+          discard_cached_image local_path;
+        Masc_tui_link_preview.(
+          Refused (Decode_failed { detail = Masc_tui_image_cache.decode_failure_text failure }))
+      in
+      match
+        Masc_tui_image_cache.decode_failure_of_status status
+          ~output_present:(Sys.file_exists raw)
+      with
+      | Some failure -> refuse failure
+      | None -> (
+          match read_file_bytes raw with
+          | Error detail -> refuse (Masc_tui_image_cache.Frame_unreadable { detail })
+          | Ok data -> (
+              let rows = String.length data / (cols * 3) in
+              match Masc_tui_image_mosaic.render ~cols ~rows data with
+              | [] -> refuse Masc_tui_image_cache.No_frame_written
+              | lines -> Masc_tui_link_preview.Mosaic lines)))
 
 let () =
   compute_and_store_mosaic :=
     fun img ->
-      match
-        Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
-            image_url_to_mosaic ~cols:mosaic_cols img)
-      with
-      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
-      | None -> ()
+      match Masc_tui_link_preview.mosaic_lookup img with
+      | Some (Masc_tui_link_preview.Mosaic _ | Masc_tui_link_preview.Refused _) ->
+          (* Already decided this session; neither a mosaic nor a refusal is
+             fetched again. *)
+          ()
+      | None ->
+          Masc_tui_link_preview.mosaic_store img
+            (Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
+                 image_url_to_mosaic ~cols:mosaic_cols img))
 
 let open_image state ~notice path =
   let refuse reason =
@@ -7241,7 +7476,7 @@ let open_image state ~notice path =
              notice ~role:Message_local
                (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
          | Error _ ->
-             refuse dl_err)
+             refuse (Masc_tui_image_cache.download_error_text dl_err))
     | Ok local_path -> (
         match !terminal_draws_images with
         | Some false -> refuse terminal_draws_no_images
@@ -7281,7 +7516,7 @@ let open_image state ~notice path =
    so it is safe to run on a systhread. *)
 let prepare_remote_image_bytes url =
   match download_remote_image url with
-  | Error e -> Error e
+  | Error e -> Error (Masc_tui_image_cache.download_error_text e)
   | Ok local_path -> (
       match read_file_bytes local_path with
       | Error detail -> Error detail
@@ -7294,6 +7529,9 @@ let prepare_remote_image_bytes url =
               match convert_to_png local_path with
               | Ok png_path -> read_file_bytes png_path
               | Error _ ->
+                  (* No converter read the body, so the cache does not keep
+                     it; the next [v] downloads afresh. *)
+                  discard_cached_image local_path;
                   Error "could not convert the image to a format the terminal draws")))
 
 (* [v] on a link preview: download and convert the image OFF the render loop,
@@ -7301,9 +7539,12 @@ let prepare_remote_image_bytes url =
    render fiber, not here. The blocking curl/sips live inside run_in_systhread
    so the domain keeps rendering; the loading line is shown at once so the
    keypress is not silent. terminal_draws_images = false skips the download and
-   opens a browser instead. *)
-let launch_image_render ~mailbox ~notice ~title ~caption url =
+   opens the page in a browser instead. *)
+let launch_image_render ~mailbox ~notice ~title ~caption ~page_url image_url =
   if !terminal_draws_images = Some false then
+    let url =
+      Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
+    in
     match Masc_tui_browser.open_url url with
     | Ok opener ->
         notice ~role:Message_local
@@ -7311,19 +7552,22 @@ let launch_image_render ~mailbox ~notice ~title ~caption url =
     | Error err ->
         notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
   else begin
-    notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
+    notice ~role:Message_local (Printf.sprintf "Loading image: %s" image_url);
     let run () =
       let result =
-        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () -> prepare_remote_image_bytes url)
+        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
+            prepare_remote_image_bytes image_url)
       in
-      enqueue_async mailbox (Image_render_ready { title; caption; result })
+      enqueue_async mailbox
+        (Image_render_ready { title; caption; page_url; image_url; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         enqueue_async mailbox
           (Image_render_ready
-             { title; caption; result = Error "Eio switch unavailable" })
+             { title; caption; page_url; image_url;
+               result = Error "Eio switch unavailable" })
   end
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
@@ -7488,7 +7732,7 @@ let seek_in_chat state ~target ~restart =
          [msg_find] keeps what they typed, because that is what the pane
          echoes back to them. *)
       match
-        Masc_tui_render.keeper_message_find_scroll state ~keeper_name
+        keeper_message_find_scroll state ~keeper_name
           ~needle:(String.trim state.msg_find)
           ~older_than
       with
@@ -11423,9 +11667,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
+          (* [rows] stays a list for the memo scan and the width fold just
+             below, both of which read it once front to back. The pane keeps
+             the array. *)
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok rows);
+              (Ok (Array.of_list rows));
           (* The jump that asked for this file may have named a line; the
              reset and the jump live together so neither overwrites the
              other. Consumed once -- the next plain open starts at the top. *)
@@ -11507,7 +11754,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                when String.equal open_path location.ll_path ->
                  let cursor =
                    max 0
-                     (min (location.ll_line - 1) (List.length rows - 1))
+                     (min (location.ll_line - 1) (Array.length rows - 1))
                  in
                  state.code_file_cursor <- cursor;
                  (* Follow the jump: a definition past the fold is a cursor
@@ -12001,7 +12248,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error reason -> refuse reason
         | Ok data -> draw_image state ~refuse ~title:name data
       end
-  | Image_render_ready { title; caption; result } ->
+  | Image_render_ready { title; caption; page_url; image_url; result } ->
       if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
@@ -12011,13 +12258,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            draw_image state ~caption ~refuse ~title data
        | Error e -> (
-           match Masc_tui_browser.open_url title with
+           let url =
+             Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
+           in
+           match Masc_tui_browser.open_url url with
            | Ok opener ->
                notice ~role:Message_local
                  (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
-                    e opener title)
-           | Error _ ->
-               notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
+                    e opener url)
+           | Error opener_err ->
+               notice ~role:Message_error
+                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with
@@ -13224,11 +13475,10 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  (* [at_exit] runs its callbacks in the reverse of this order and stops at
-     the first one that raises, so the terminal restore is registered last
-     and runs first. The frame summary appends to a file and can raise on a
-     write -- registered the other way round it would take the restore with
-     it and leave the terminal in raw mode. *)
+  (* [at_exit] runs its callbacks in the reverse of this order. Restore first
+     so an error writing the frame summary cannot prevent the first restore
+     attempt. An exception interrupts that cleanup pass; OCaml may retry
+     remaining callbacks while reporting an uncaught exception. *)
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -13344,8 +13594,22 @@ let main
      sends -- and the composer cannot tell "send this" from "start a new line".
      LF still submits below if some terminal sends it for Return, so this only
      ever adds a key. *)
+  (* Flow control off. IXON lives in c_iflag and ICANON in c_lflag, so raw
+     mode did not touch it: the tty was still answering Ctrl-S by stopping
+     output and Ctrl-Q by resuming it, and neither byte ever reached the
+     key layer. Measured on a pty with the TUI running: ixon=True.
+
+     What an operator saw was small, because IXANY is on too -- the next key
+     they pressed released it, so the screen stalled rather than froze. What
+     it cost was a key: Ctrl-S could not be bound to anything, which is the
+     key a reader reaches for to hold a moving surface still. *)
   let new_term =
-    { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
+    { old_term with
+      Unix.c_icanon = false
+    ; c_echo = false
+    ; c_icrnl = false
+    ; c_ixon = false
+    }
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
@@ -13364,7 +13628,7 @@ let main
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
-  let restore_terminal () =
+  let restore_terminal_outcome () =
     (* No tracking-off here: suspend runs this too, and a terminal that
        re-enters raw mode after Ctrl-Z would silently lose the wheel. The
        off byte is written once, in [cleanup], at real process exit. *)
@@ -13373,7 +13637,12 @@ let main
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
+    (* Keep the known-loss result so exit cleanup does not write a farewell
+       or tracking controls to a terminal that already rejected restoration. *)
+    let outcome =
+      Terminal_restore.put_back ~set:(fun () ->
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
+    in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
        terminal back, and this character is the part it cannot reach.
        [-1] means the descriptor was never a terminal, so there is nothing to
@@ -13384,7 +13653,12 @@ let main
       ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
     if old_discard_output >= 0 then
       (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
-      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool);
+    outcome
+  in
+  let restore_terminal () =
+    match restore_terminal_outcome () with
+    | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ()
   in
 
   (* Cleanup on exit *)
@@ -13392,19 +13666,25 @@ let main
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
-      restore_terminal ();
-      print_endline "Goodbye!";
-      (* Tracking off after Goodbye: a terminal left in report mode keeps
-         swallowing the wheel after this process is gone, and the farewell
-         line is the last thing a reader matches on -- a byte after it cannot
-         disturb that read. *)
-      output_string stdout mouse_tracking_disable;
-      output_string stdout bracketed_paste_disable;
-      (* The mode belongs to this program's screen. A shell that inherited it
-         would see its own keys reported in a form it does not read. *)
-      if Terminal_profile.kitty_keyboard terminal_profile then
-        output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-      flush stdout
+      (* Bound by name: the AST guard pins this call by listing every
+         labelled argument as an identifier, so the exit writer is a named
+         function rather than an inline closure. *)
+      let finish () =
+        print_endline "Goodbye!";
+        (* Tracking off after Goodbye: a terminal left in report mode keeps
+           swallowing the wheel after this process is gone, and the farewell
+           line is the last thing a reader matches on -- a byte after it cannot
+           disturb that read. *)
+        output_string stdout mouse_tracking_disable;
+        output_string stdout bracketed_paste_disable;
+        (* The mode belongs to this program's screen. A shell that inherited it
+           would see its own keys reported in a form it does not read. *)
+        if Terminal_profile.kitty_keyboard terminal_profile then
+          output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+        flush stdout
+      in
+      Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
+        ~finish
     end
   in
 
@@ -15330,7 +15610,7 @@ and is loaded on demand through keeper_skill.
               && (not state.palette_open)
               && (not state.context_inspector_open)
               && Option.is_none state.search
-              && Masc_tui_render.chat_row_action_at ~row
+              && chat_row_action_at ~row
                  = Masc_tui_message_layout.Action_unfold_argument ->
            state.msg_tool_visibility <- Tools_full
        (* A left press on the Lanes overview moves the row cursor (and opens
@@ -15458,6 +15738,10 @@ and is loaded on demand through keeper_skill.
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (match key, browser_lane_on_screen state with
+       | Some _, Some view ->
+           state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
+       | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
        | Some key when Option.is_some state.lane_addons ->
@@ -15692,6 +15976,15 @@ and is loaded on demand through keeper_skill.
                 state.ask_question_scroll <- max 0
                   (min (Masc_tui_render.ask_question_scroll_limit state)
                      (state.ask_question_scroll + delta))
+            (* This arm takes every key while a question is open, so the
+               surface Home and End below never reach it -- and reaching it
+               would be worse than nothing, moving the approvals cursor under
+               a reader that is drawing something else. The question's own
+               ends, against the same limit the page keys clamp to. *)
+            | "home" -> state.ask_question_scroll <- 0
+            | "end" ->
+                state.ask_question_scroll <-
+                  Masc_tui_render.ask_question_scroll_limit state
             | "[" -> move_ask_cursor state (-1)
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
@@ -16061,7 +16354,7 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "@" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
                 (match targets with
                  | [] -> ()
@@ -16093,7 +16386,7 @@ and is loaded on demand through keeper_skill.
                      else if cursor >= state.answering_scroll + height then
                        state.answering_scroll <- cursor - height + 1)
             | "\r" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 (match List.nth_opt lines state.answering_cursor with
                  | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
                      close ();
@@ -16115,17 +16408,20 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "esc" | "q" | "Q" -> close ()
             | "j" | "down" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 1
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
             | "k" | "up" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
             | "d" | "pagedown" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 5
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:5
             | "u" | "pageup" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
             | "g" | "home" ->
                 state.link_modal_scroll <- 0
             | "G" | "end" ->
-                state.link_modal_scroll <- 9999
+                state.link_modal_scroll <-
+                  Masc_tui_types.clamped_scroll_end
             | "n" | "right" | "\t" ->
                 let count = List.length state.link_modal_links in
                 if count > 1 then begin
@@ -16173,7 +16469,7 @@ and is loaded on demand through keeper_skill.
                        @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
                      in
                      launch_image_render ~mailbox:async_messages ~notice ~title
-                       ~caption img_url
+                       ~caption ~page_url:url img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->
@@ -16759,8 +17055,14 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
-         when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+         when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
+           && (not (List.mem key ["tab"; "\t"; "shift-tab"])
+               || match browser_lane_on_screen state with
+                  | Some view ->
+                      Option.is_none view.client_picker && Option.is_none view.url_draft
+                      && (Option.is_some view.scene || Browser_lane_view.busy view)
+                  | None -> false) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -16774,6 +17076,12 @@ and is loaded on demand through keeper_skill.
                 let read view =
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
+                in
+                let reveal_selection selected =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let scroll = Masc_tui_render.browser_lane_selection_scroll
+                    state ~terminal_rows ~cols selected in
+                  state.browser_lane <- Some { selected with scroll }
                 in
                 (match key with
                  | "esc" | "left" ->
@@ -16794,7 +17102,7 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
-                      | Some _, _ -> state.browser_lane <- Some {view with scene = None; scroll = 0}
+                      | Some _, _ -> read {view with scene = None; scroll = 0}
                       | None, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
                       | None, None -> ())
                  | "r" ->
@@ -16808,8 +17116,10 @@ and is loaded on demand through keeper_skill.
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
-                     if count > 0 then state.browser_lane <- Some {view with scene_cursor =
+                     if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
+                     reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
                      (match scene_context view with
                       | Some context -> copy_reference_to_terminal render_schedule context;
@@ -16817,12 +17127,15 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
-                      | Some scene, Some ({kind=Region _;_} as node) ->
+                      | Some scene, Some node ->
+                          (match scene_target_action node with
+                           | Some Read_region ->
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
-                      | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
+                           | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
+                           | None -> ())
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
@@ -17264,7 +17577,8 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Resources ->
            open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->
-           state.resource_scroll <- state.resource_scroll + 1
+           state.resource_scroll <-
+             Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
@@ -17425,7 +17739,7 @@ and is loaded on demand through keeper_skill.
             state.keeper_message_focus <- Right_pane
        | Some "left"
          when message_mode
-              && Masc_tui_render.keeper_roster_pane_shown state
+              && keeper_roster_pane_shown state
                    ~cols:terminal_columns ->
            state.keeper_message_focus <- Left_pane
        | Some "down"
@@ -17676,7 +17990,7 @@ and is loaded on demand through keeper_skill.
            state.answering_cursor <-
              (match
                 Masc_tui_answering.target_indexes
-                  (Masc_tui_render.answering_lines state)
+                  (Masc_tui_render_prim.answering_lines state)
               with
               | index :: _ -> index
               | [] -> 0)
@@ -18074,6 +18388,23 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       (* The reading, not the list. [row_list] answers for the list pane
+          below; with the text focused the rows are the ones the frame wrapped
+          out of the resource body, which the keypress cannot count -- so End
+          names a row past any of them and the frame reports back where that
+          landed. *)
+       | Some ("home" | "end")
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           state.resource_scroll <-
+             (if key = Some "end" then Masc_tui_types.clamped_scroll_end
+              else 0)
+       (* Every other list. The two surfaces above answer first because their
+          rows are drawn newest first, so their Home is the live end rather
+          than the first row -- the rest read oldest first and take the plain
+          meaning. A surface [surface_list_count] cannot count falls through
+          to whatever else claims the key. *)
+       | Some ("home" | "end") when Option.is_some (row_list state) ->
+           move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
@@ -18098,7 +18429,8 @@ and is loaded on demand through keeper_skill.
                      in
                      state.repository_changes_cursor <- cursor;
                      state.repository_changes_scroll <- scroll)
-            | Code -> ()
+            | Code ->
+                move_list_by_rows state ~delta:(direction * page)
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -18237,13 +18569,49 @@ and is loaded on demand through keeper_skill.
                             Masc_tui_scroll.ensure_visible
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
-                 | Lanes_overview -> ())
+                 | Lanes_overview ->
+                     move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
+                 (* Saturating, like every other clamped scroll: the frame
+                    reports the row it drew and until it has, the stored value
+                    may be a row past the end. *)
                  state.metrics_scroll <-
-                   max 0 (state.metrics_scroll + (direction * page))
-             | Overview | Acting | Keepers _ | Approvals | Planning
-            | Memory | Repositories | Changes | Connectors
-            | Runtime | Config | Tools | Resources | System_logs -> ())
+                   (if direction > 0 then
+                      Masc_tui_types.scroll_down_from state.metrics_scroll
+                        ~by:page
+                    else max 0 (state.metrics_scroll + (direction * page)))
+             (* The surfaces whose page key used to be silent. Each has a
+                row list, so a page moves the cursor and the window follows --
+                the same move Home and End make, by a page rather than to an
+                edge. [move_list_by_rows] finds the list itself and answers
+                to nothing when there is none; the arm below is where there
+                is none. *)
+             | Keepers _ | Approvals | Planning | Memory | Repositories
+             | Changes | Connectors | Runtime | System_logs ->
+                 move_list_by_rows state ~delta:(direction * page)
+             (* Two panes, two meanings: the list moves a cursor like the
+                arm above, the reading scrolls. [move_list_by_rows] finds the
+                list only while the list is focused, so the reading's own
+                page is spelled here rather than left silent. *)
+             | Resources ->
+                 (match state.resource_focus with
+                  | Right_pane ->
+                      state.resource_scroll <-
+                        (if direction > 0 then
+                          Masc_tui_types.scroll_down_from state.resource_scroll
+                            ~by:page
+                        else max 0 (state.resource_scroll + (direction * page)))
+                  | Left_pane ->
+                      move_list_by_rows state ~delta:(direction * page))
+             (* No row list to page. Overview's two panes and Activity's ring
+                are built by the frame out of text the frame formats, so the
+                count a page needs does not exist at the keypress; Config's
+                five panes each carry a cursor of their own meaning. Activity
+                goes to the newest with g, Tools with Home and End. Left named
+                rather than folded into the arm above, so the day one of them
+                gains a row list this reads as a lie rather than as silence
+                (#35305). *)
+             | Overview | Acting | Config | Tools -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which
@@ -18829,7 +19197,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19128,7 +19496,8 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <- state.resource_scroll + 1
+                  state.resource_scroll <-
+                    Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
                 else
                   let total =
                     match state.resources_list with
@@ -19138,7 +19507,9 @@ and is loaded on demand through keeper_skill.
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | Metrics -> state.metrics_scroll <- state.metrics_scroll + 1
+            | Metrics ->
+                state.metrics_scroll <-
+                  Masc_tui_types.scroll_down_from state.metrics_scroll ~by:1
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then
                   state.system_logs_detail_scroll <-
@@ -19201,7 +19572,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19590,7 +19961,7 @@ and is loaded on demand through keeper_skill.
                                 (min
                                    (Masc.Tui_decode.file_change_target_line change
                                     - 1)
-                                   (List.length rows - 1))
+                                   (Array.length rows - 1))
                             in
                             state.code_file_cursor <- cursor;
                             state.code_file_scroll <-
@@ -19944,12 +20315,12 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Planning;
             state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render.ctx_goal_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
@@ -20091,11 +20462,11 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Overview;
-            (match change_ctx.Masc_tui_render.ctx_task_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_task_id with
              | Some tid ->
                  state.task_detail_id <- Some tid;
                  state.task_detail_scroll <- 0;
@@ -20486,7 +20857,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
            in
            let change_ctx =
-             Masc_tui_render.resolve_change_context state ~path_opt
+             Masc_tui_render_prim.resolve_change_context state ~path_opt
            in
            (* Only the scope's own repository names a remote. A project-wide
               scope spans every registered repository, and picking the first
@@ -20506,7 +20877,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
              | Some Tui_decode.Repository_change_project | None -> None
            in
-           (match change_ctx.Masc_tui_render.ctx_pr with
+           (match change_ctx.Masc_tui_render_prim.ctx_pr with
             | None ->
                 add_event state "git"
                   "no PR to open: this change names no github.com/…/pull/N link or PR-N token"
@@ -21053,6 +21424,9 @@ and is loaded on demand through keeper_skill.
          | Connectors ->
              (match browser_lane_on_screen state with
               | None -> launch_connectors_load state ~mailbox:async_messages
+              | Some view when not state.image_open ->
+                  Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                    (Browser_lane_view.cadence_operation view)
               | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps

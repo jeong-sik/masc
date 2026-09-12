@@ -31,6 +31,18 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
   let dispatch_blocker =
     Runtime.keeper_dispatch_blocker (Runtime.keeper_dispatch_readiness rt)
   in
+  (* Life state beyond dispatchability: the quota window says whether the
+     provider side of this runtime is currently refusing work (2026-09-12
+     operator ask: the runtime list shows what exists, not what is alive).
+     [Until] is a provider-stated reset deadline; [Observed] is a hard-quota
+     rejection that claimed no reset -- the next success on the scope clears
+     it. A numeric "remaining" is not honest: providers do not expose it,
+     and the window's own contract is these two facts. *)
+  let quota_scope = Runtime.quota_scope_of_runtime rt in
+  let now = Time_compat.now () in
+  let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
+  let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
+  let quota_scope_label = Runtime_quota_window.scope_to_string quota_scope in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
@@ -49,6 +61,9 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
          one document. *)
     ; "keeper_dispatchable", `Bool (Option.is_none dispatch_blocker)
     ; "keeper_dispatch_blocked_reason", string_opt_json dispatch_blocker
+    ; "quota_exhausted", `Bool quota_exhausted
+    ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
+    ; "quota_scope", `String quota_scope_label
     ]
 ;;
 

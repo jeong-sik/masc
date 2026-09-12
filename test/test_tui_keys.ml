@@ -73,7 +73,7 @@ let test_plain_listing_footer_shape () =
      hints between its own keys and the shared meta tail. That order is the
      shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "B:Browser Lane  j/k:scroll  Ctrl-O:Browser screenshot  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "B:Browser Lane  j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  Ctrl-O:Browser screenshot  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
@@ -87,7 +87,7 @@ let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
     (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -120,12 +120,12 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
   check str "Schedules names create and modify"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Schedules)
 
 let schedule_form_row : schedule_row =
@@ -238,24 +238,30 @@ let test_tools_footer_carries_the_keeper_axis () =
 
 let test_resources_footer_steps_through_detail () =
   let tail =
-    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next  Enter:read  Esc:back  r:reload  Tab:next  q:quit"
+    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next"
+    ^ "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back"
   in
-  check str "list names adjacent detail navigation" ("j/k:move" ^ tail)
+  let meta = "  r:reload  Tab:next  q:quit" in
+  check str "list names its search and adjacent detail navigation"
+    ("j/k:move" ^ tail ^ "  /:find  n / N:next / previous match" ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:false);
-  check str "detail names scrolling and adjacent navigation"
-    ("j/k:scroll text" ^ tail)
+  (* The text has no cursor for a match to land on, so it says no [/] --
+     the same answer [surface_row_texts] gives for that focus. Both ends
+     still answer Home and End, which move the reading. *)
+  check str "the text names scrolling without a row search"
+    ("j/k:scroll text" ^ tail ^ meta)
     (Masc_tui_keys.footer_hints_resources ~detail_focus:true)
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
-    "j/k:scroll  H:recent activity  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  H:recent activity  PgUp/PgDn:page  Home/End:top/bottom  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
      same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:move  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists
@@ -265,7 +271,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -371,14 +377,14 @@ let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Enter:open  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
@@ -512,7 +518,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -768,6 +774,30 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
+(* The sheet is the only place the eight keeper marks are named where a reader
+   can read all eight at once: the Keepers rows pair each glyph with its word
+   but show only the states the fleet is in, and the 34-cell roster pane beside
+   the chat draws the glyph with no word at all. The list lived in
+   Masc_tui_keeper_mark with no reader until the sheet took it. *)
+let test_the_sheet_names_every_keeper_mark () =
+  let sections = Masc_tui_keys.help_sections () in
+  let marks =
+    List.assoc_opt "Keeper marks" sections
+  in
+  match marks with
+  | None -> Alcotest.fail "the sheet has no Keeper marks section"
+  | Some entries ->
+      Alcotest.(check int) "every mark the roster can draw is named"
+        (List.length Masc_tui_keeper_mark.legend)
+        (List.length entries);
+      List.iter
+        (fun (glyph, meaning) ->
+          Alcotest.(check bool) ("mark " ^ meaning ^ " is drawn") true
+            (String.length glyph > 0);
+          Alcotest.(check bool) ("mark " ^ glyph ^ " is named") true
+            (String.length meaning > 0))
+        entries
+
 let test_braille_sparkline () =
   Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
     (braille_sparkline []);
@@ -977,6 +1007,56 @@ let test_lanes_search_texts_lead_with_the_standalone_labels () =
        ; "Verifier" ])
     (surface_row_texts state Lanes)
 
+(* Resources draws a list beside a reading, and j/k means one thing in each.
+   The search follows the same split: a match lands the list cursor, and with
+   the reading focused there is no cursor for it to land on.
+
+   The row text is the name the list actually draws -- the server's title
+   when it sent one -- because a search that matches a name nothing on screen
+   shows finds rows the reader cannot see. Both readers take it from
+   [Masc_tui_mcp.display_name]. *)
+let resources_state () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Resources;
+  state.resources_list <-
+    Some
+      [ { Masc_tui_mcp.uri = "masc://board"; name = "board"
+        ; title = Some "Board posts"; description = None
+        ; mime_type = None; size = None }
+      ; { Masc_tui_mcp.uri = "masc://keepers"; name = "keepers"
+        ; title = None; description = None
+        ; mime_type = None; size = None }
+      ; { Masc_tui_mcp.uri = "masc://lanes"; name = "lanes"
+        ; title = Some "   "; description = None
+        ; mime_type = None; size = None }
+      ];
+  state
+
+let test_resources_searches_the_names_the_list_draws () =
+  let state = resources_state () in
+  Alcotest.(check (option (list string)))
+    "the title when there is one, the name otherwise, and a blank title is \
+     not one"
+    (Some [ "Board posts"; "keepers"; "lanes" ])
+    (surface_row_texts state Resources)
+
+let test_the_resource_reading_offers_no_row_search () =
+  let state = resources_state () in
+  state.resource_focus <- Right_pane;
+  Alcotest.(check (option (list string)))
+    "with the text focused there is no cursor to land a match on" None
+    (surface_row_texts state Resources);
+  state.resource_focus <- Left_pane;
+  Alcotest.(check Alcotest.bool) "and the list has one again" true
+    (Option.is_some (surface_row_texts state Resources))
+
+let test_resources_without_a_list_answers_nothing () =
+  let state = resources_state () in
+  state.resources_list <- None;
+  Alcotest.(check (option (list string)))
+    "before the catalog arrives there are no rows" None
+    (surface_row_texts state Resources)
+
 let test_lanes_sub_modes_stay_unsearchable () =
   let state = lanes_state () in
   state.lanes_mode <- Lanes_run_list "librarian_exact";
@@ -1071,6 +1151,10 @@ let planning_state () =
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_done = 0
           ; pb_cancelled = 0 }
+      (* This surface's key tests are about the rows the cursor walks, and the
+         history lines sit above the divider outside them. Empty keeps the
+         fixture about that. *)
+      ; pl_goal_history = []
       ; pl_generated_at = "2026-09-04T00:00:00Z"
       };
   state
@@ -1264,6 +1348,11 @@ let surfaces_that_answer_the_row_search =
   ; "Code", Code
   ; "Board", Board
   ; "Planning", Planning
+  ; "Fusion", Fusion
+  ; "Changes", Changes
+  (* The list pane. The reading has no cursor, and the footer it draws for
+     that focus drops both keys. *)
+  ; "Resources", Resources
   ]
 
 let test_every_searchable_surface_names_its_search () =
@@ -1293,14 +1382,15 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Keeper calls", Keepers Keeper_calls
     ; "Chat", Keepers Keeper_message
     ; "Runtime pick", Keepers Keeper_runtime_pick
-      (* Approvals has rows worth searching and still says no "/": [n] there
-         is deny, unarmed and immediate, so offering the search would invite
-         the reflex that follows it into refusing an approval. *)
+      (* Both have rows worth searching and still say no "/", for the same
+         reason and it is [n]. The key that steps to the next match is the
+         key these two give to something else: on Approvals it denies the
+         presented approval, unarmed and immediate, and on Schedules it opens
+         the form for a new one. A search whose own follow-through refuses an
+         approval is worse than no search, so these wait on a different step
+         key rather than on another arm in [surface_row_texts] (#35306). *)
     ; "Approvals", Approvals
     ; "Schedules", Schedules
-    ; "Fusion", Fusion
-    ; "Resources", Resources
-    ; "Changes", Changes
     ; "Config", Config
     ; "Tools", Tools
     ]
@@ -1532,6 +1622,8 @@ let () =
             test_resources_is_a_config_child
         ; Alcotest.test_case "Tools is a Config child" `Quick
             test_tools_is_a_config_child
+        ; Alcotest.test_case "the sheet names every keeper mark" `Quick
+            test_the_sheet_names_every_keeper_mark
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick
@@ -1578,6 +1670,12 @@ let () =
             test_lanes_search_texts_lead_with_the_standalone_labels
         ; Alcotest.test_case "sub-modes stay unsearchable" `Quick
             test_lanes_sub_modes_stay_unsearchable
+        ; Alcotest.test_case "Resources searches the names it draws" `Quick
+            test_resources_searches_the_names_the_list_draws
+        ; Alcotest.test_case "the resource reading offers no row search"
+            `Quick test_the_resource_reading_offers_no_row_search
+        ; Alcotest.test_case "Resources without a list answers nothing" `Quick
+            test_resources_without_a_list_answers_nothing
         ; Alcotest.test_case "a click reads the frame rows" `Quick
             test_overview_hit_reads_the_frame_rows
         ; Alcotest.test_case "a click pays for the error rows" `Quick

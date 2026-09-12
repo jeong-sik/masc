@@ -1272,7 +1272,10 @@ def wizard_with_credentials(binary, base_path, timeout, credentials):
             print(terminal_text(error), file=sys.stderr)
             action = pick('Connection setup', ['Choose connections again', 'Configure later'])[0]
             if action == 1:
-                return dict(configured=False, readiness='deferred', base_path=str(base_path))
+                # Leaving after a failed save is not the operator deferring the
+                # step: nothing was written, so the caller must not report a
+                # saved workspace or a successful exit.
+                return dict(configured=False, readiness='failed', base_path=str(base_path))
 
 
 def workspace_upgrade_catalog(binary, base_path):
@@ -1553,6 +1556,15 @@ def select_sandbox(binary, base_path, port=8945):
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     conditions = {check['id']: check['condition'] for check in state['checks']}
+    # `invalid` is not one condition. Saving a selection repairs some of them —
+    # configure_locked stages the edit, lets runtime-default-set rewrite it,
+    # and publishes that rewrite — while a declaration the parser cannot
+    # resolve is refused ahead of it. Both serialize to the same string here,
+    # so this cannot decide which one it is holding. Name what is broken and
+    # leave every exit the journey already has, including another workspace.
+    for check in state['checks']:
+        if check['condition'] == 'invalid':
+            print('\n' + check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
     # Persistence permits opening existing history, never a readiness badge.
     # The TUI observes/reconnects the server and reports current execution.
     if (resume and state.get('base_path') and conditions.get('workspace') == 'satisfied'
@@ -1583,6 +1595,13 @@ def journey(binary, base_path, port, timeout, resume=False):
     workspace_port(binary, base, port, save=True)
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
     configured = wizard(binary, base, timeout)
+    if configured.get('readiness') == 'failed':
+        # The reason is already on screen, printed where it was raised. Naming
+        # a cause here would be a guess: this path is reached by an unreadable
+        # workspace, an unreachable server and a refused credential alike.
+        print('The model connection was not saved. Run masc again once the '
+              'problem above is resolved.', file=sys.stderr)
+        return 1
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
         return 0

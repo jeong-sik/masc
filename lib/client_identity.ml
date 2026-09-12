@@ -5,7 +5,7 @@
     - MCP tool calls
     - Workspace workspace
     - Task assignments
-    - Federation/portal messages
+    - Inter-agent coordination messages
 
     @since 0.5.0
 *)

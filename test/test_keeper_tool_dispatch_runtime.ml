@@ -2277,6 +2277,54 @@ let test_real_directory_release_failure_preserves_effect_truth () =
          (Atomic.get provider_reads))
 ;;
 
+(* The constitution tools reach their handler only if the name routes through
+   the descriptor to Tool_constitution_write / Tool_constitution_remove. The
+   RFC-0442 suites call the runtime functions directly, so that hop was carried
+   by the exhaustive match alone: a descriptor pointed at the wrong handler
+   still compiles. This drives it the way a keeper does, by name. *)
+let test_constitution_tools_dispatch_by_name () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_constitution"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let run name input =
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta
+          ~publication_recovery ~ctx_work ~name ~input ()
+      in
+      let written =
+        run "keeper_constitution_write"
+          (`Assoc [ "text", `String "open before you record" ])
+      in
+      let written_json = check_success_result "keeper_constitution_write" written in
+      let article_id = json_string_field ~default:"" "article_id" written_json in
+      check bool "the write returns a minted article id" true
+        (String.length article_id = 34);
+      (* The handler wrote into this world, not somewhere else. *)
+      let ledger =
+        match
+          Masc.World_constitution_store.load ~base_path:config.Workspace.base_path
+        with
+        | Ok ledger -> ledger
+        | Error error ->
+          fail (Masc.World_constitution_store.read_error_to_string error)
+      in
+      check int "the world holds the norm" 1
+        (List.length ledger.Masc.World_constitution_store.articles);
+      let removed =
+        run "keeper_constitution_remove"
+          (`Assoc [ "article_id", `String article_id ])
+      in
+      ignore (check_success_result "keeper_constitution_remove" removed);
+      let after =
+        match
+          Masc.World_constitution_store.load ~base_path:config.Workspace.base_path
+        with
+        | Ok ledger -> ledger.Masc.World_constitution_store.articles
+        | Error error ->
+          fail (Masc.World_constitution_store.read_error_to_string error)
+      in
+      check int "taking it back empties the world" 0 (List.length after))
+;;
+
 let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
   with_exec_fixture
     ~require_sandbox:true
@@ -7972,7 +8020,7 @@ let test_edit_manifest_through_model_projection () =
 ;;
 
 let test_peer_artifact_materializes_exact_binary () =
-  with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+  with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work ->
     let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
       sandbox_image = Some "alpine:peer-fixture" } in
     let peer = { sender with name = "receiving-peer" } in
@@ -7992,7 +8040,7 @@ let test_peer_artifact_materializes_exact_binary () =
     Fs_compat.save_file source bytes;
     let docker = Filename.concat config.base_path "docker" in
     let script = Printf.sprintf
-      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\nshift\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\nexec /bin/cat %s\n"
+      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\ninspect)\n  [ \"$2\" = --format ] || exit 95\n  [ \"$3\" = '{{json .State.Running}}' ] || exit 96\n  printf 'true\\n'; exit 0;;\nexec)\n  shift\n  while [ \"$#\" -gt 0 ]; do\n    case \"$1\" in\n      --user|-w|--env|-e) shift 2;;\n      -i) shift;;\n      masc-keeper-docker-*) shift; break;;\n      *) exit 97;;\n    esac\n  done;;\nrun)\n  while [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\n  shift;;\n*) exit 92;;\nesac\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\n[ \"$#\" = 2 ] || exit 98\nexec /bin/cat %s\n"
       (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root sender.name) "generated.png"))
       (Filename.quote source) in
     Fs_compat.save_file docker script; Unix.chmod docker 0o755;
@@ -8003,17 +8051,33 @@ let test_peer_artifact_materializes_exact_binary () =
     Fun.protect ~finally:(fun () ->
       Unix.putenv "PATH" previous_path;
       Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value ~default:"" previous_fake)) (fun () ->
-    let exported = Masc.Keeper_peer_artifact.handle ~config ~meta:sender
-        ~turn_sandbox_factory:None ~write:(fun _ -> fail "export attempted a write")
-        ~args:(`Assoc ["action", `String "export"; "path", `String "generated.png"; "purpose", `String "Poster image"]) in
-    check bool "sender export completed" true (exported.disposition = Tool_result.Completed ());
-    let exported_json = Yojson.Safe.Util.member "artifact" (parse_json exported.raw_output) in
+    let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta:sender ~publication_recovery ~ctx_snapshot:ctx_work () in
+    Fun.protect ~finally:bundle.cleanup @@ fun () ->
+    let transfer = List.find (fun (tool : Agent_core.Tool.t) ->
+        String.equal tool.schema.name "keeper_artifact_transfer") bundle.tools in
+    let export () = Agent_core.Tool.execute
+        ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+        transfer (`Assoc ["action", `String "export"; "path", `String "generated.png";
+                         "purpose", `String "Poster image"]) in
+    let exported = match export () with
+      | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let manifest = match Tool_output.decode_from_agent_core exported.content with
+      | Tool_output.Decoded reference ->
+        check string "model receives durable export manifest" Tool_output.artifact_manifest_mime reference.mime;
+        reference
+      | _ -> fail "export omitted its durable result manifest" in
+    let exported_json = Yojson.Safe.Util.member "artifact"
+        (structured_tool_output_exn ~base_path:config.base_path exported.content) in
     let request = match Masc.Keeper_invocation_contract.request_of_json
         (`Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
                  "prompt", `String "Reuse this PNG"; "artifacts", `List [exported_json]]) with
       | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in
     let reference = match Masc.Keeper_invocation_contract.artifacts request with
       | [reference] -> reference | _ -> fail "delegation lost reference" in
+    check int "model-visible export preserves complete binary size" (String.length bytes) reference.blob.bytes;
+    check string "model-visible export preserves complete binary digest"
+      Digestif.SHA256.(digest_string bytes |> to_hex) reference.blob.sha256;
     let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
@@ -8024,10 +8088,89 @@ let test_peer_artifact_materializes_exact_binary () =
     let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in
     check string "binary exact" bytes (Fs_compat.load_file path);
     check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
+    (* Block only the already-known manifest destination. The binary export
+       still succeeds, so its post-effect error must preserve the exact handle. *)
+    let manifest_path = Filename.concat
+        (Filename.concat (Tool_blob_store.root_dir store) (String.sub manifest.sha256 0 2))
+        manifest.sha256 in
+    Unix.unlink manifest_path;
+    Fs_compat.mkdir_p manifest_path;
+    (match export () with
+     | Ok _ -> fail "manifest storage failure was disguised as success"
+     | Error error ->
+       let payload = Yojson.Safe.from_string error.Agent_core.Types.message in
+       check string "exported effect remains explicit" "proven_post_effect"
+         Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+       let references = Tool_output.normalized_artifact_refs_in_json payload in
+       check int "post-effect failure retains one exported artifact" 1 (List.length references);
+       check string "post-effect failure retains exact exported bytes" bytes
+         (fetch_artifact_exn ~base_path:config.base_path (List.hd references));
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+         check bool "terminal boundary retains applied export" true
+           (failure.effect_disposition = Tool_result.Proven_post_effect)
+       | _ -> fail "export manifest failure lost terminal effect evidence");
     let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.blob.sha256 0 2)) reference.blob.sha256 in
     Fs_compat.save_file blob "corrupted";
     check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))
 
+
+let test_peer_delegate_schema_reaches_model_wires () =
+  with_exec_fixture "peer-delegate-schema" (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    let descriptor = match Masc.Keeper_tool_descriptor.descriptors_for_internal "masc_keeper_delegate" with
+      | [descriptor] -> descriptor | _ -> fail "canonical delegate descriptor is missing" in
+    let expected = descriptor.input_schema in
+    let member = Yojson.Safe.Util.member in
+    let properties = member "properties" expected in
+    check string "artifact items are objects in the declared tool contract" "object"
+      (properties |> member "artifacts" |> member "items" |> member "type" |> Yojson.Safe.Util.to_string);
+    check bool "target keeper kind constraint is declared" true
+      (properties |> member "target" |> member "properties" |> member "kind" |> member "enum"
+       = `List [`String "keeper"]);
+    let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work () in
+    Fun.protect ~finally:bundle.cleanup @@ fun () ->
+    let bundled = List.find (fun (tool : Agent_core.Tool.t) ->
+        String.equal tool.schema.name "masc_keeper_delegate") bundle.tools in
+    let plain = Masc.Tool_bridge.agent_core_tool_of_masc
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+        ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
+        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:0.0 ~data:input ()) in
+    let erased = Agent_core.Tool.create ~name:plain.schema.name
+        ~description:plain.schema.description ~parameters:plain.schema.parameters
+        (fun _ -> Ok { Agent_core.Types.content = "unused"; content_blocks = None; _meta = None }) in
+    let fingerprint tool = Masc.Keeper_official_client_session_store.tool_surface_sha256
+        ~native_posture:Runtime_native_tools.Native_read [tool] in
+    check bool "client session identity detects lost nested artifact contract" true
+      (fingerprint plain <> fingerprint erased);
+    check string "same delegate contract has one client session identity"
+      (fingerprint plain) (fingerprint bundled);
+    List.iter (fun (label, tool) ->
+      let check_schema boundary observed =
+        check bool (label ^ " retains full delegate schema at " ^ boundary) true
+          (Yojson.Safe.equal expected observed) in
+      check_schema "Agent Core tool" (member "input_schema" (Agent_core.Tool.schema_to_json tool));
+      let provider = Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat ~model_id:"delegate-schema-fixture"
+          ~base_url:"https://fixture.invalid"
+          ~model_capabilities_override:Llm_provider.Capabilities.openai_compat_chat_capabilities () in
+      let request = Llm_provider.Backend_openai.build_request ~config:provider
+          ~messages:[Agent_core.Types.user_msg "Delegate the exported file"]
+          ~tools:[Agent_core.Tool.schema_to_json tool] () |> Yojson.Safe.from_string in
+      let api_tool = request |> member "tools" |> Yojson.Safe.Util.to_list |> List.hd in
+      check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");
+      let dynamic = Masc.Keeper_official_client_host.dynamic_tools
+          ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
+          ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
+          ~event_bus:None ~context_injector:None
+          ~context:(Some (Agent_core.Context.create_sync ()))
+          ~terminal_effect_state:bundle.terminal_effect_state
+          ~terminal_error:(ref None) ~pre_tool_rejects:(ref []) ~raw_trace_run:None () in
+      match dynamic with
+      | Ok [dynamic] -> check_schema "official-client dynamic definition" dynamic.input_schema
+      | Ok _ -> fail "expected one official-client delegate definition"
+      | Error error -> fail (Agent_core.Error.to_string error))
+      ["actual Keeper bundle", bundled; "plain MASC bridge", plain])
 
 let test_binary_write_reference_survives_replay () =
   with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
@@ -8086,6 +8229,7 @@ let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
+    ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);
     ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
     ("direct_gate_resume", [
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick
@@ -8140,6 +8284,8 @@ let () =
         test_workspace_memory_read_dispatch;
       test_case "model-visible local tools dispatch to runtime handlers" `Quick
         test_model_visible_local_tools_dispatch_to_runtime_handlers;
+      test_case "constitution tools dispatch by name" `Quick
+        test_constitution_tools_dispatch_by_name;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
       test_case "unknown tool returns exact error" `Quick

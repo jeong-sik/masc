@@ -18,7 +18,6 @@
   masc_core
   masc_types
   masc_log
-  masc.dashboard_utils
   fs_compat
   time_compat
   yojson

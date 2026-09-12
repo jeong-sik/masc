@@ -187,7 +187,7 @@ type workspace_state = {
 }
 ```
 
-`paused = true`일 때 orchestrator는 새 에이전트를 spawn하지 않는다.
+RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
 
 ### 2.11 Tempo
 
@@ -232,21 +232,7 @@ type a2a_task = {
 }
 ```
 
-### 2.14 Portal
-
-```ocaml
-type portal_state = PortalOpen | PortalClosed
-
-type portal = {
-  portal_from : string;
-  portal_target : string;
-  portal_opened_at : string;
-  portal_status : portal_state;
-  task_count : int;
-}
-```
-
-### 2.15 SSE Session
+### 2.14 SSE Session
 
 ```ocaml
 type sse_session = {
@@ -257,7 +243,7 @@ type sse_session = {
 }
 ```
 
-### 2.16 Tool Result (core)
+### 2.15 Tool Result (core)
 
 `types_core.ml`에 정의된 기본 tool_result:
 
@@ -269,7 +255,7 @@ type tool_result = {
 }
 ```
 
-### 2.17 Claim Next Result
+### 2.16 Claim Next Result
 
 스케줄링 결과를 구조화한 ADT. brittle한 문자열 파싱을 방지한다:
 
@@ -279,6 +265,7 @@ type claim_next_result =
       task_id : string; title : string;
       priority : int;
       message : string;
+      raw_task_json : Yojson.Safe.t option;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of { excluded_count : int }
@@ -289,51 +276,72 @@ type claim_next_result =
 
 ## 3. Error Hierarchy
 
-MASC 는 비즈니스 로직 에러를 단일 sum type `masc_error` 로 표현한다.
+MASC 는 비즈니스 로직 에러를 모듈화된 sum type `masc_error` 로 표현한다.
 
 > Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Workspace / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Workspace / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
 
 ### 3 masc_error (Unified)
 
-**소스**: `lib/types/types_auth.ml`
+**소스**: `lib/types/masc_error.mli`, `lib/types/types_auth.ml`
 
 ```ocaml
-type masc_error =
-  | NotInitialized
-  | AlreadyInitialized
-  | AgentNotFound of string
-  | AgentNotBound of string
-  | AgentAlreadyBound of string
-  | TaskNotFound of string
-  | TaskAlreadyClaimed of { task_id: string; by: string }
-  | TaskNotClaimed of string
-  | TaskInvalidState of string
-  | PortalNotOpen of string
-  | PortalAlreadyOpen of { agent: string; target: string }
-  | PortalClosed of string
-  | InvalidJson of string
-  | IoError of string
-  | InvalidAgentName of string
-  | InvalidTaskId of string
-  | InvalidFilePath of string
-  | Unauthorized of string
-  | Forbidden of { agent: string; action: string }
-  | TokenExpired of string
-  | InvalidToken of string
+module Task_error : sig
+  type t =
+    | NotFound of string
+    | AlreadyClaimed of { task_id: string; by: string }
+    | NotClaimed of string
+    | InvalidState of string
+    | InvalidId of string
+  val to_string : t -> string
+end
+
+module Agent_error : sig
+  type t =
+    | NotFound of string
+    | InvalidName of string
+  val to_string : t -> string
+end
+
+module Auth_error : sig
+  type unauthorized_reason =
+    | Actor_mismatch
+    | Missing_token
+    | Generic
+  type t =
+    | Unauthorized of { reason: unauthorized_reason; message: string }
+    | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
+    | TokenExpired of string
+    | InvalidToken of string
+  val to_string : t -> string
+end
+
+module System_error : sig
+  type t =
+    | NotInitialized
+    | AlreadyInitialized
+    | InvalidJson of string
+    | IoError of string
+    | InvalidFilePath of string
+    | StorageError of string
+    | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+  val to_string : t -> string
+end
+
+type t =
+  | Task of Task_error.t
+  | Agent of Agent_error.t
+  | Auth of Auth_error.t
+  | System of System_error.t
   | RateLimitExceeded of rate_limit_error
-  | AutonomyError of autonomy_error
   | CacheError of cache_error
 ```
 
-25개 variant. `autonomy_error`(3 variants)와 `cache_error`(4 variants)는 상호 재귀 타입으로 정의된다.
+`cache_error`는 캐시 I/O 및 만료 상태를 표현한다:
 
 ```ocaml
-and autonomy_error =
-  | AutonomyGraphQLFailed of string
-  | AutonomyAgentNotCached of string
-  | AutonomyInvalidResponse of string
-
-and cache_error =
+type cache_error =
   | CacheReadFailed of string
   | CacheWriteFailed of string
   | CacheExpired of { key: string; age_hours: float }
@@ -427,12 +435,12 @@ type result = (success_payload, failure_payload) Stdlib.Result.t
 
 ```ocaml
 type channel =
-  | Telegram | Discord | Slack | Signal
-  | Webchat | Api | Internal
-  | Unknown of string
+  | Api
+  | Internal
+  | External of string
 ```
 
-MCP 세션의 접속 경로를 나타낸다. `Unknown`은 미등록 채널에 대한 확장점이다.
+접속 경로를 나타낸다. 코어가 connector vendor에 의존하지 않도록 외부 플랫폼 이름은 `External string`으로 불투명하게 유지된다.
 
 ### 5.2 Agent Identity Record
 
@@ -487,18 +495,22 @@ type agent_role = Worker | Admin
 
 ```ocaml
 type permission =
-  | CanInit | CanReset
-  | CanReadState | CanAddTask | CanClaimTask | CanCompleteTask
+  | CanInit
+  | CanReset
+  | CanReadState
+  | CanAddTask
+  | CanClaimTask
+  | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal | CanSendPortal | CanVote
+  | CanVote
   | CanAdmin
 ```
 
-11개 variant. 각 `agent_role`에 허용된 permission 목록:
+9개 variant. 각 `agent_role`에 허용된 permission 목록:
 
 | Role | Permissions |
 |------|------------|
-| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanVote` |
+| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanVote` |
 | Admin | Worker + `CanInit`, `CanReset`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential
@@ -559,7 +571,7 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-001 | 에이전트 name은 binding scope에서 유일하다. 동일 이름으로 `masc_bind` 시 `AgentAlreadyBound` 반환. | `masc_bind` 중복 호출 테스트 |
+| INV-TYPE-001 | 에이전트 name은 scope 내에서 유일하다. 동일 이름 세션 등록 시 중복 등록을 거부한다. | Client_identity 레지스트리 중복 등록 검증 |
 | INV-TYPE-002 | Newtype ID 모듈(`Agent_id`, `Task_id`, `Thread_id`, `Turn_id`)은 모듈 경계에서 타입이 불투명하다. 서로 다른 ID 타입 간 직접 비교/대입은 컴파일 에러다. | 컴파일러가 강제 |
 
 ### State Machine
@@ -567,8 +579,8 @@ type rate_limit_error = {
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
 | INV-TYPE-003 | `task_status` 전이는 단방향이다: `Todo -> Claimed -> InProgress -> Done\|Cancelled`. `Done`에서 `Todo`로 역전이하거나, `Todo`에서 `Done`으로 건너뛰는 것은 허용되지 않는다. | `task_status` 전이 함수 + 단위 테스트 |
-| INV-TYPE-004 | `checkpoint_status` 전이는 `can_transition`이 정의한 5가지 경로만 허용된다. 터미널 상태(`Completed`, `Rejected`, `Reverted`)에서는 어떤 전이도 불가하다. | `can_transition` 단위 테스트 |
-| INV-TYPE-005 | `agent_status`의 기본 fallback은 `Active`다. 알 수 없는 문자열 입력 시 예외 대신 `Active`를 반환한다. | `agent_status_of_string "unknown"` 테스트 |
+| INV-TYPE-004 | `checkpoint_status` (`Completed`, `Rejected`, `Reverted`) 상태머신은 은퇴한 계약(retired contract)이다. 체크포인트는 `Agent_core.Checkpoint.t` 및 `Keeper_checkpoint_store`가 단일 소유한다. | Checkpoint store invariant 검증 |
+| INV-TYPE-005 | `agent_status` 파싱은 알 수 없는 문자열을 암묵적으로 `Active`로 매핑하지 않는다 (#10748 fail-closed). 알 수 없는 입력 시 `Error` 또는 `None`을 반환한다. | `agent_status_of_string_r "unknown"` 에러 검증 |
 
 ### Error Handling
 
@@ -588,7 +600,7 @@ type rate_limit_error = {
 |----|--------|----------|
 | INV-TYPE-010 | 도구 핸들러 등록은 서버 시작(init) 시점에 완료된다. init 이후 동적 등록은 발생하지 않는다. `is_tag_registry_initialized()`가 `true`를 반환한 후에는 `register_module_tag` 호출이 없어야 한다. | init 직후 `registered_count()` 스냅샷 비교 |
 | INV-TYPE-011 | `dispatch`는 O(1) Hashtbl lookup이다. 등록된 도구 수에 비례하는 순차 탐색은 발생하지 않는다. | 구현 검사 (Hashtbl.find) |
-| INV-TYPE-012 | `pre_hook`이 `Some result`를 반환하면 핸들러를 건너뛴다 (short-circuit). dispatch observer는 실행되지 않는다. | hook 테스트 |
+| INV-TYPE-012 | `pre_hook`이 `Reject result`를 반환하면 핸들러를 건너뛴다 (short-circuit). dispatch observer는 실행되지 않는다. | hook 테스트 |
 
 ### Auth
 
@@ -603,8 +615,8 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-017 | `structured_message`는 roundtrip 무손실이다: `roundtrip msg = Ok msg`. | `roundtrip` 함수의 QuickCheck/단위 테스트 |
-| INV-TYPE-018 | `swarm_envelope`도 roundtrip 무손실이다: `roundtrip_envelope env = Ok env`. | `roundtrip_envelope` 단위 테스트 |
+| INV-TYPE-017 | 도메인 메시지 및 envelope JSON 직렬화는 roundtrip 무손실이다. | 메시지 직렬화 단위 테스트 |
+| INV-TYPE-018 | (Reserved / Retired envelope contract) | N/A |
 | INV-TYPE-019 | 모든 `_to_yojson`/`_of_yojson` 쌍은 roundtrip 호환이다. JSON 직렬화 후 역직렬화하면 원본과 동일한 값을 복원한다. | 주요 타입별 roundtrip 테스트 |
 
 ### Auth Role System

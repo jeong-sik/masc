@@ -30,6 +30,11 @@ let reads_in ~module_path ~binding_name ~fields =
 let reads ~binding_name ~fields =
   reads_in ~module_path:render ~binding_name ~fields
 
+(* A row two surfaces share is drawn by the primitives, not by either of
+   them, so the guard over it names that file. *)
+let reads_prim ~binding_name ~fields =
+  reads_in ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name ~fields
+
 (* The detail under the list is three rows, and [boxed_surface_chrome_rows]
    budgets one for the selected row's own line. Every kind takes that one
    except a held tool call, which answers two questions -- what is being asked,
@@ -332,7 +337,8 @@ let test_repository_changes_keep_the_git_axes () =
   List.iter
     (fun field ->
       Alcotest.(check bool) ("renderer reads " ^ field) true
-        (reads ~binding_name:"repository_change_status" ~fields:[ field ] > 0))
+        (reads_prim ~binding_name:"repository_change_status" ~fields:[ field ]
+         > 0))
     [ "rc_staged"; "rc_unstaged"; "rc_untracked"; "rc_conflicted" ]
 
 let test_project_changes_use_the_requested_workspace_root () =
@@ -451,6 +457,146 @@ let test_visible_navigation_glyphs_are_not_mojibake () =
        ]
 )
 
+(* The Attention panel's badge. Critical and bad share a colour, so the word
+   is the only thing that tells those two rows apart -- and the badge fitted
+   that word to five fixed cells, which cut "critical" to [crit~] and padded
+   the shorter levels inside their own brackets as [bad  ].
+
+   Asserted at the source because nothing links the TUI executable, and
+   because both failures typecheck: a label one cell too long and a column one
+   cell too narrow are the same well-typed program. Two facts carry it -- the
+   vocabulary fits, and nothing cuts it. *)
+let test_the_attention_badge_cannot_cut_its_own_level () =
+  let literals binding names =
+    Ast_grep.count_string_literals_in_value_binding ~module_path:render
+      ~binding_name:binding ~literals:names
+  in
+  Alcotest.(check int) "every level is named and every name is short" 4
+    (literals "attention_severity_label" [ "crit"; "bad"; "warn"; "info" ]);
+  Alcotest.(check int) "the level that did not fit its column is gone" 0
+    (literals "attention_severity_label" [ "critical" ]);
+  let calls binding callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:binding ~callee
+  in
+  Alcotest.(check int) "the column measures the names" 1
+    (calls "attention_severity_badge_cells" "Message_layout.display_width");
+  Alcotest.(check int) "and the badge cuts nothing" 0
+    (calls "attention_severity_badge" "fit_width")
+
+(* Three facts about a surface's row list -- how many rows, which one the
+   cursor is on, how to put the cursor elsewhere -- used to live in three
+   separate matches over [surface], each naming every variant so a new one
+   could not be added without touching it. Naming is not agreeing: the Keeper
+   detail's context inspector had a landing and searchable rows and no cursor
+   reading, so n and N restarted from the first row every press.
+
+   They are one record now, and the keys that need any of the three ask it.
+   Counted here because nothing links the TUI executable, and because the
+   failure this prevents typechecks either way. *)
+let test_the_row_cursor_has_one_source () =
+  let asks binding_name =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee:"row_list"
+  in
+  Alcotest.(check int) "the cursor reading asks the record" 1
+    (asks "search_row_cursor");
+  Alcotest.(check int) "the landing asks the record" 1
+    (asks "place_row_cursor");
+  Alcotest.(check int) "Home and End ask the record" 1
+    (asks "move_list_to_edge");
+  Alcotest.(check int) "the page keys ask the record" 1
+    (asks "move_list_by_rows")
+
+(* The cursor and the window have to be measured against the same layout, and
+   on the Memory overview that layout depends on which keeper the cursor is
+   on: the selected row spends rows on its own alerts and read errors. The
+   step key recomputed it and the landing did not, so a jump could put the
+   cursor outside the window it had just measured. One helper answers both. *)
+let test_the_window_is_measured_where_the_cursor_lands () =
+  let asks binding_name =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee:"surface_body_height_at"
+  in
+  Alcotest.(check int) "a step measures where it lands" 1
+    (asks "move_row_cursor");
+  Alcotest.(check int) "and so does a landing" 1 (asks "row_list");
+  Alcotest.(check int)
+    "the cursor-dependent layout is read in one place" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"surface_body_height_at"
+       ~callee:"memory_overview_scrolled")
+
+(* A lookup in the body of a drawing loop is paid once per visible row. The
+   count is over the whole renderer rather than one binding, because the
+   shape returns wherever a loop draws rows; a call to the same function
+   outside a loop runs once a frame and is fine, which is why this is not
+   [count_calls].
+
+   What it does not see: a helper defined beside the loop and called from
+   inside it, which is where the Code diff pane kept its own walk. Nothing
+   lexically inside the loop named [List.nth_opt] there. That one is held by
+   the type instead -- the open file is an array, so there is no list left to
+   walk -- and the compiler is the stronger guard of the two. This one earns
+   its place on the sites where the index really is written in the loop:
+   three stood when it was added. *)
+let test_no_row_of_a_drawing_loop_walks_a_list () =
+  (* Every render module, not only the big one: the tab strip was in
+     [render] when this was written and moved to [render_prim] the same day
+     (#35333). A count over one file lets the shape leave by moving.
+
+     Read from the tree rather than typed out. The hand-written list had
+     already missed the chat renderer, and a list only records which modules
+     existed the day someone last remembered to edit it. Everything named
+     bin/masc_tui_render*.ml is a render module, and the stanza's deps glob
+     the same shape so a change to any of them reruns this. *)
+  let render_modules =
+    let dir = Filename.concat (Ast_grep.source_root ()) "bin" in
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+         String.starts_with ~prefix:"masc_tui_render" name
+         && Filename.check_suffix name ".ml")
+    |> List.sort String.compare
+    |> List.map (fun name -> Filename.concat "bin" name)
+  in
+  (* A guard that lost its subject passes for the wrong reason. *)
+  Alcotest.(check bool)
+    "the render modules were found" true
+    (List.length render_modules > 1);
+  let inside_for callee =
+    List.fold_left
+      (fun total module_path ->
+        total + Ast_grep.count_calls_inside_for ~module_path ~callee)
+      0 render_modules
+  in
+  Alcotest.(check int) "no row walks a list to find itself" 0
+    (inside_for "List.nth_opt");
+  Alcotest.(check int) "and none walks one unguarded either" 0
+    (inside_for "List.nth")
+
+(* Both strips that a reader walks -- the surface strip across the top and the
+   keeper detail tabs -- mark where they are with one value. The mark is style
+   plus a glyph, and style is the half that does not survive: a monochrome
+   terminal, a terminal that drops underline, and every text capture keep the
+   glyph and lose the bold. So the glyph is the answer, and it has to come from
+   the shared binding rather than a literal spelled twice.
+
+   Asserted here because the screen this draws has no other gate: the frame is
+   pinned in test/test_tui_keyboard_input.py, which is Python, and no CI path
+   runs Python. Re-inlining the literal in either strip typechecks and draws
+   the same thing today, then drifts the first time one of them changes. *)
+let test_both_strips_mark_where_they_are_from_one_value () =
+  let mark binding module_path =
+    Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
+      ~binding_name:binding ~callees:[]
+      ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ]
+  in
+  Alcotest.(check bool) "the keeper detail tabs mark the tab they are on" true
+    (mark "keeper_detail_pane" render > 0);
+  Alcotest.(check bool) "the surface strip reads the same mark" true
+    (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -491,5 +637,15 @@ let () =
             test_a_lane_that_cannot_admit_says_why
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
             `Quick test_visible_navigation_glyphs_are_not_mojibake
+        ; Alcotest.test_case "the attention badge cannot cut its own level"
+            `Quick test_the_attention_badge_cannot_cut_its_own_level
+        ; Alcotest.test_case "the row cursor has one source" `Quick
+            test_the_row_cursor_has_one_source
+        ; Alcotest.test_case "the window is measured where the cursor lands"
+            `Quick test_the_window_is_measured_where_the_cursor_lands
+        ; Alcotest.test_case "no row of a drawing loop walks a list" `Quick
+            test_no_row_of_a_drawing_loop_walks_a_list
+        ; Alcotest.test_case "both strips mark where they are from one value"
+            `Quick test_both_strips_mark_where_they_are_from_one_value
         ] )
     ]

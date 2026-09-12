@@ -87,6 +87,12 @@ type live_tool_call =
       (** When TOOL_CALL_START arrived. A turn age says how long the turn has
           run; only this says whether the thing it is in right now has been
           running that whole time. *)
+  ; attempt : int
+      (** The runtime attempt that opened this call. The trail keeps every
+          attempt's calls as evidence, so a question about what is open *now*
+          has to say which attempt it means: a call left open on the runtime
+          failover walked away from is never going to return, and counting it
+          as running says the new attempt is waiting on something it is not. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
@@ -249,6 +255,16 @@ let revision t = t.revision
 let bump t = t.revision <- t.revision + 1
 let current_runtime_id t = t.current_runtime_id
 
+let runtime_identity_text ~keeper_name ~configured_runtime transcript =
+  let configured = "configured: " ^ safe_line configured_runtime in
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
+    (match t.current_runtime_id with
+     | Some runtime when String.trim runtime <> "" ->
+       "turn: " ^ safe_line runtime ^ " · " ^ configured
+     | Some _ | None -> configured)
+  | Some _ | None -> configured
+
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
    bounded by the turn's shape (rounds), not by its chunking on the wire. *)
@@ -313,19 +329,28 @@ let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
   ; duration
   }
 
-let activity_of_live_call (call : live_tool_call) =
+let activity_of_live_call (t : t) (call : live_tool_call) =
+  (* An ended attempt cannot still be waiting. Keep recorded results ahead
+     of this projection so late result evidence can complete its own call. *)
+  let attempt_ended =
+    call.attempt <> t.attempt
+    || (match t.phase with
+        | Waiting | Working -> false
+        | Stream_ended | Stream_failed _ -> true)
+  in
   make_tool_activity ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
       (if call.failed then Failed
        else if call.result_ready then Returned
+       else if attempt_ended then Never_returned
        else if call.ended then Awaiting_result
        else Started)
     ~duration:call.duration ()
 
 let tool_calls t =
-  List.rev t.reversed_tool_calls |> List.map activity_of_live_call
+  List.rev t.reversed_tool_calls |> List.map (activity_of_live_call t)
 
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
@@ -432,9 +457,11 @@ let compact_outcome (activities : tool_activity list) =
   else if
     List.exists
       (fun activity ->
-        activity.outcome = Started || activity.outcome = Never_returned)
+        activity.outcome = Started)
       activities
   then Started
+  else if List.exists (fun activity -> activity.outcome = Never_returned) activities
+  then Never_returned
   else if
     List.exists
       (fun activity -> activity.outcome = Outcome_unrecorded)
@@ -578,6 +605,8 @@ let handler_activity_kind handler =
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
   | Tool_surface_read
@@ -665,10 +694,10 @@ let skill_activity_of_tool (activity : tool_activity) =
   | Skill_activity ->
       let state =
         match activity.outcome with
-        | Started | Awaiting_result | Never_returned -> Skill_calling
+        | Started | Awaiting_result -> Skill_calling
         | Returned -> Skill_served_pending
         | Failed -> Skill_failed
-        | Outcome_unrecorded -> Skill_evidence_missing
+        | Never_returned | Outcome_unrecorded -> Skill_evidence_missing
       in
       let skill_name =
         Option.value activity.subject
@@ -959,7 +988,7 @@ let trail t =
               let acc = flush_generic acc generic in
               split (Trail_skill skill :: acc) [] rest)
     in
-    group |> List.rev |> List.map activity_of_live_call |> split acc []
+    group |> List.rev |> List.map (activity_of_live_call t) |> split acc []
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)
@@ -999,8 +1028,23 @@ let trail t =
 
 type status_kind =
   | Progress
+  | Answer_needed
   | Attention
   | Approval of approval_outcome
+
+(* Whether a row survives the turn dashboard being folded.
+
+   Folding is a reading aid, not a filter. The progress row is the summary
+   the folded line already is, so it stays and carries the count of what went
+   with it. A row that asks the operator for something cannot fold: the
+   question would go behind a key they have no reason to press, and the turn
+   would sit held with nothing on screen saying so. Everything else --
+   a settled approval, an interrupt already acknowledged, a stream
+   diagnostic that says the recorded outcome is unaffected -- is history the
+   operator can ask for. *)
+let status_row_survives_folding = function
+  | Progress | Answer_needed -> true
+  | Attention | Approval _ -> false
 
 let approval_outcome_of_string = function
   | "approve" | "approved" -> Approved
@@ -1015,19 +1059,6 @@ let approval_outcome_to_string = function
   | Timed_out -> "timed out"
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
-
-(* The oldest call still open. Two calls in flight are rare and the older one
-   is the one a watcher is waiting on. *)
-let oldest_open_call t =
-  t.reversed_tool_calls
-  |> List.filter (fun (call : live_tool_call) -> not call.ended)
-  |> List.fold_left
-       (fun acc (call : live_tool_call) ->
-         match acc with
-         | Some (older : live_tool_call) when older.started_at <= call.started_at -> acc
-         | Some _ | None -> Some call)
-       None
-;;
 
 let phase_text ~now t =
   match t.phase with
@@ -1047,10 +1078,6 @@ let phase_text ~now t =
           (* The server had already run this operation and replayed its
              outcome. Nothing is waiting on a run that finished. *)
           "accepted; replaying an operation that already ran")
-  | Working when Option.is_some t.awaiting ->
-      (* The turn is not working, it is waiting on a person. Saying "working"
-         here would read as a slow tool rather than a question on screen. *)
-      "held at a tool call, waiting for your answer"
   | Working ->
       let activities = tool_calls t in
       let calls = List.length activities in
@@ -1062,36 +1089,80 @@ let phase_text ~now t =
          Named rather than counted, and placed before the mix: the question is
          which call is still out, the names are few -- a round holds a handful
          -- and a long tool mix is what a narrow row loses first. *)
-      let still_running =
-        List.filter
-          (fun activity ->
-            match activity.outcome with
-            | Started | Awaiting_result -> true
-            | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
-          activities
+      (* Preparation, a pending result and an approval are different facts.
+         Only the current attempt contributes to current activity; earlier
+         attempts remain in the transcript and in the total tool mix. *)
+      let current_calls =
+        t.reversed_tool_calls
+        |> List.filter (fun (call : live_tool_call) -> call.attempt = t.attempt)
+        |> List.rev
+      in
+      let awaiting_call =
+        match t.awaiting with
+        | None -> None
+        | Some awaiting ->
+            (* Provider ids need not be unique. Exclude a held call only when
+               the current attempt identifies exactly one pending occurrence.
+               A completed earlier use of the same provider id cannot be held. *)
+            (match List.filter
+               (fun (call : live_tool_call) ->
+                 Option.exists (String.equal awaiting.call_id) call.call_id
+                 && (match (activity_of_live_call t call).outcome with
+                     | Started | Awaiting_result -> true
+                     | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
+               current_calls with
+             | [call] -> Some call.local_id
+             | _ -> None)
+      in
+      let activities_now =
+        current_calls
+        |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> awaiting_call)
+        |> List.map (activity_of_live_call t)
+      in
+      let describe_pending label outcome =
+        match List.filter (fun activity -> activity.outcome = outcome) activities_now with
+        | [] -> ""
+        | pending -> " · " ^ label ^ ": " ^ String.concat ", " (compact_tool_parts pending)
       in
       let running =
-        match still_running with
-        | [] -> ""
-        | running ->
-            Printf.sprintf " · still running: %s"
-              (String.concat ", " (compact_tool_parts running))
+        describe_pending "preparing" Started
+        ^ describe_pending "awaiting results" Awaiting_result
       in
-      (* The turn age alone cannot tell a slow tool from a stall. This says how
-         long the call it is sitting in has been open, which is the number that
-         stops moving when something is stuck.
-
-         Beside the names rather than after the mix (#32955 put it there before
-         the names existed): the two describe the same open calls, and the mix
-         is long enough to push whatever follows it off a narrow row. *)
+      (* No pending tool does not prove that the model has stopped. Report the
+         outstanding approval as its own fact while preserving turn activity. *)
+      let has_pending_activity = List.exists
+        (fun activity -> match activity.outcome with
+          | Started | Awaiting_result -> true
+          | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
+        activities_now in
+      let approval_pending = match t.awaiting, has_pending_activity with
+        | Some awaiting, false -> "approval pending: " ^ awaiting.tool_name ^ " · "
+        | Some _, true | None, _ -> "" in
+      (* Keep the age beside the current pending calls. A held approval's
+         age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
-        match oldest_open_call t with
-        | None -> ""
-        | Some call -> (
+        match List.filter
+          (fun (call : live_tool_call) ->
+            Some call.local_id <> awaiting_call
+            && (match (activity_of_live_call t call).outcome with
+                | Started | Awaiting_result -> true
+                | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
+          current_calls
+          |> List.sort (fun (a : live_tool_call) b -> Float.compare a.started_at b.started_at)
+        with
+        | [] -> ""
+        | call :: _ -> (
           match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
           | None -> ""
           | Some age -> Printf.sprintf " · in this call %s" age)
       in
+      (* Counted from 0 internally, shown from 1 -- the superseded blocks on
+         the same screen label themselves [attempt + 1] (render.ml), so a
+         0-based number here put "attempt 1" on screen twice for two
+         different attempts: once on the block the failover left behind, and
+         once on the one now running. The word "failover" used to be the only
+         thing telling them apart, and it is no longer on this row. *)
+      let attempt_shown = t.attempt + 1 in
       let work =
         if calls = 0 then
           match t.current_runtime_id, t.endpoint_streaming with
@@ -1099,21 +1170,29 @@ let phase_text ~now t =
               Printf.sprintf "streaming from [%s]%s" rid in_this_call
           | Some rid, false when t.attempt > 0 ->
               Printf.sprintf "failover: connecting to [%s] (attempt %d)%s"
-                rid t.attempt in_this_call
+                rid attempt_shown in_this_call
           | Some rid, false ->
               Printf.sprintf "connecting to [%s]%s" rid in_this_call
           | None, _ when t.attempt > 0 ->
-              Printf.sprintf "failover working (attempt %d)%s" t.attempt in_this_call
+              Printf.sprintf "failover working (attempt %d)%s" attempt_shown
+                in_this_call
           | None, _ -> "working" ^ in_this_call
         else
+          (* The heading above this row already says which of the two states
+             it is ("IN PROGRESS" / "FAILOVER IN PROGRESS", render.ml). Saying
+             it again here spent forty-eight cells on "failover [rid] (attempt
+             1) · " before the row reached its first fact, and what fell off
+             the far end was the open call's age -- the one number that tells
+             a slow call from a stuck one. The tag now carries only what the
+             heading cannot: which runtime, and which attempt. *)
           let runtime_tag =
             match t.current_runtime_id with
             | Some rid when t.attempt > 0 ->
-                Printf.sprintf "failover [%s] (attempt %d) · " rid t.attempt
-            | Some rid -> Printf.sprintf "working [%s] · " rid
+                Printf.sprintf "[%s] attempt %d · " rid attempt_shown
+            | Some rid -> Printf.sprintf "[%s] · " rid
             | None when t.attempt > 0 ->
-                Printf.sprintf "failover (attempt %d) · " t.attempt
-            | None -> "working · "
+                Printf.sprintf "attempt %d · " attempt_shown
+            | None -> ""
           in
           Printf.sprintf "%s%s%s%s · %s"
             runtime_tag (plural calls "tool") running in_this_call
@@ -1122,6 +1201,7 @@ let phase_text ~now t =
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
          the difference between that and a stall. *)
+      let work = approval_pending ^ work in
       if t.checkpoints = 0 then work
       else
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work
@@ -1181,7 +1261,8 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      let base = Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question in
+      let base = Printf.sprintf "[y] allow  [n] deny · approval for %s: %s"
+        awaiting.tool_name awaiting.question in
       match awaiting.because with
       | "" -> base
       | because -> Printf.sprintf "%s\n  because %s" base because)
@@ -1189,7 +1270,7 @@ let awaiting_text t =
 
 let status_rows ~now t =
   [ Some (Progress, progress_text ~now t)
-  ; Option.map (fun text -> (Attention, text)) (awaiting_text t)
+  ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
         ( Approval settlement.settled_outcome
@@ -1399,10 +1480,14 @@ let apply_delta ~now t (delta : Live.delta) =
                ; nodes
                }
              :: older);
-      (match attempt_index with
-       | Some idx -> t.attempt <- idx
-       | None -> t.attempt <- t.attempt + 1);
-      if Option.is_some runtime_id then t.current_runtime_id <- runtime_id;
+      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
+      let new_attempt = next_attempt <> t.attempt in
+      t.attempt <- next_attempt;
+      (* Unknown identity belongs to the new attempt. Keeping the previous
+         runtime here also prevents STREAM_MODEL_STARTED from naming the new
+         one. A repeated event for this same attempt adds no missing fact. *)
+      if new_attempt || Option.is_some runtime_id then
+        t.current_runtime_id <- runtime_id;
       t.endpoint_streaming <- false;
       t.awaiting <- None;
       (match t.phase with
@@ -1446,6 +1531,7 @@ let apply_delta ~now t (delta : Live.delta) =
          t.reversed_tool_calls <-
            { local_id
            ; started_at = now
+           ; attempt = t.attempt
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

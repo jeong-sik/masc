@@ -1,7 +1,7 @@
 (** Workspace lifecycle hook registry.
 
     Atomic refs filled at boot by the runtime so the workspace layer
-    can call back into keeper / agent / relation
+    can call back into keeper / agent
     subsystems without a static dependency. Default values are
     no-ops; the runtime overrides each ref via the wiring in
     [lib/workspace.ml]. *)
@@ -53,9 +53,6 @@ val keeper_registered_fn :
     keeper dependency (RFC-0194). *)
 val schedule_wake_target_registered_fn :
   (Workspace_utils_backend_setup.config -> string -> (bool, string) result) Atomic.t
-val relation_on_leave_fn : (leaving_agent:string -> active_agents:string list -> unit)
-           Atomic.t
-val relation_on_task_done_fn : (assignee:string -> active_agents:string list -> unit) Atomic.t
 val hebbian_on_task_done_fn : (Workspace_utils_backend_setup.config ->
             assignee:string -> active_agents:string list -> unit)
            Atomic.t

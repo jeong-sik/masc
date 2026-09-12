@@ -6,7 +6,8 @@ let runtime id : Masc.Tui_decode.runtime_option =
   { ro_id = id; ro_provider = "provider"; ro_model = "model";
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_is_local = false;
-    ro_dispatchable = true; ro_blocked_reason = None; ro_is_default = false }
+    ro_dispatchable = true; ro_blocked_reason = None; ro_is_default = false;
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 
@@ -50,7 +51,13 @@ let test_cli_probe_is_a_note () =
     [Runtime_provider_network_error; Runtime_provider_endpoint_not_found;
      Runtime_provider_auth_failed; Runtime_provider_invalid_execution_transport];
   Alcotest.(check bool) "no diagnostic is invented" true
-    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli None = None)
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli None = None);
+  let adc = "Vertex Gemini authenticates with Google Application Default Credentials" in
+  Alcotest.(check bool) "a native-auth skip is informational too" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_native_auth (Some adc)
+     = Some (Runtime_probe_note adc));
+  Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
+    (runtime_probe_status_label Runtime_provider_skipped_native_auth)
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [

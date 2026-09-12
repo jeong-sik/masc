@@ -21,10 +21,13 @@ CASE_IDS="${CODING_EVAL_CASE_IDS:-}"
 REPEATS="${CODING_EVAL_REPEATS:-2}"
 PASS_AT_K="${CODING_EVAL_K:-1}"
 MEMORY_MODE="${CODING_EVAL_MEMORY_MODE:-seeded}"
+EXECUTION_MODE="${CODING_EVAL_EXECUTION_MODE:-live}"
+MANIFEST="${CODING_EVAL_MANIFEST:-}"
 PORT="${CODING_EVAL_PORT:-}"
 POLL_INTERVAL_SEC="${CODING_EVAL_POLL_INTERVAL_SEC:-2}"
 TIMEOUT_SEC="${CODING_EVAL_MCP_TIMEOUT_SEC:-30}"
 CLI_EXE="${ROOT_DIR}/_build/default/test/coding_eval_report_cli.exe"
+CHECKER_EXE="${ROOT_DIR}/_build/default/bin/masc_reliable_change_g1_check.exe"
 
 SERVER_PID=""
 LIVE_RUN_DIR=""
@@ -39,6 +42,8 @@ Usage:
                                  [--cases DIR] [--case-ids CSV] [--repeats N]
                                  [--out DIR] [--k N] [--port N]
                                  [--memory-mode seeded|verified|filtered|source-bound|off]
+                                 [--execution-mode live|matrix]
+                                 [--manifest FILE]
 
 Runs each selected coding case against each model, records one evidence row
 per run into <out>/runs.jsonl, and summarizes with coding_eval_report_cli.
@@ -67,6 +72,8 @@ while [[ $# -gt 0 ]]; do
     --repeats) REPEATS="$2"; shift 2 ;;
     --k) PASS_AT_K="$2"; shift 2 ;;
     --memory-mode) MEMORY_MODE="$2"; shift 2 ;;
+    --execution-mode) EXECUTION_MODE="$2"; shift 2 ;;
+    --manifest) MANIFEST="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
@@ -75,6 +82,11 @@ done
 
 if [[ "${MEMORY_MODE}" != "seeded" && "${MEMORY_MODE}" != "verified" && "${MEMORY_MODE}" != "filtered" && "${MEMORY_MODE}" != "source-bound" && "${MEMORY_MODE}" != "off" ]]; then
   echo "--memory-mode must be seeded, verified, filtered, source-bound, or off, got: ${MEMORY_MODE}" >&2
+  exit 2
+fi
+
+if [[ "${EXECUTION_MODE}" != "live" && "${EXECUTION_MODE}" != "matrix" ]]; then
+  echo "--execution-mode must be live or matrix, got: ${EXECUTION_MODE}" >&2
   exit 2
 fi
 
@@ -99,8 +111,12 @@ RUNS_JSONL="${OUT_DIR}/runs.jsonl"
 ensure_cli_built() {
   (
     cd "${ROOT_DIR}"
-    if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" ]]; then
-      scripts/dune-local.sh build ./test/coding_eval_report_cli.exe ./bin/main_eio.exe >/dev/null
+    local targets=(./test/coding_eval_report_cli.exe ./bin/main_eio.exe)
+    if [[ -n "${MANIFEST}" || -x "${CHECKER_EXE}" ]]; then
+      targets+=(./bin/masc_reliable_change_g1_check.exe)
+    fi
+    if [[ "${CODING_EVAL_SKIP_BUILD:-0}" != "1" || ! -x "${CLI_EXE}" || ( -n "${MANIFEST}" && ! -x "${CHECKER_EXE}" ) ]]; then
+      scripts/dune-local.sh build "${targets[@]}" >/dev/null
     fi
   )
 }
@@ -226,8 +242,6 @@ start_live_server() {
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
     fi
-    export GRAPHQL_API_KEY=""
-    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
@@ -251,8 +265,6 @@ start_live_server() {
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
     fi
-    export GRAPHQL_API_KEY=""
-    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
@@ -560,6 +572,8 @@ evidence_row() {
     --argjson edited_source_files "${16}" \
     --argjson edited_target_files "${17}" \
     --argjson build_exit "${18}" \
+    --arg execution_mode "${19}" \
+    --argjson artifact_references "${20}" \
     '{
       case_id: $case_id,
       run_index: $run_index,
@@ -587,8 +601,8 @@ evidence_row() {
       target_revision: $model,
       requested_revision: $model,
       verdict_run_identity: ("verdict-" + $run_id),
-      artifact_references: $edited_target_files,
-      execution_mode: "live"
+      artifact_references: $artifact_references,
+      execution_mode: $execution_mode
     }'
 }
 
@@ -629,6 +643,30 @@ count_edited_target_files() {
     fi
   done < <(find "${solution_dir}" -type f)
   printf '%s' "${count}"
+}
+
+# List the reference-solution target files that the candidate actually changed,
+# as a JSON array of relative paths. Returns [] if none were edited.
+list_edited_target_files() {
+  local case_dir="$1" workspace="$2"
+  local solution_dir="${case_dir}/solution"
+  local pristine_dir="${case_dir}/workspace"
+  local -a edited=()
+  local rel
+  if [[ -d "${solution_dir}" ]]; then
+    while IFS= read -r target_path; do
+      rel="${target_path#"${solution_dir}/"}"
+      if [[ -f "${workspace}/${rel}" ]] \
+        && ! cmp -s "${pristine_dir}/${rel}" "${workspace}/${rel}"; then
+        edited+=("${rel}")
+      fi
+    done < <(find "${solution_dir}" -type f)
+  fi
+  if [[ ${#edited[@]} -eq 0 ]]; then
+    printf '[]'
+  else
+    printf '%s\n' "${edited[@]}" | jq -R . | jq -s .
+  fi
 }
 
 # Count the pristine source files (everything in the canonical workspace except
@@ -714,6 +752,7 @@ run_one() {
 
   local finish_status="ok" error_text="" verify_exit_json="null" regression_exit_json="null"
   local build_exit_json="null" edited_source_json="null" edited_target_json="null"
+  local artifact_references_json="[]"
   local tool_calls_json='[]' input_tokens_json="null" output_tokens_json="null"
   local cost_usd_json="null"
   local memory_seeded=0
@@ -873,6 +912,7 @@ run_one() {
     # edits are. The report splits a verify-red run by these without guessing.
     edited_source_json="$(count_edited_source_files "${case_dir}" "${workspace}" "${test_files}")"
     edited_target_json="$(count_edited_target_files "${case_dir}" "${workspace}")"
+    artifact_references_json="$(list_edited_target_files "${case_dir}" "${workspace}")"
 
     # SWE-bench-style honest oracle: restore each protected test file from the
     # case's canonical workspace before grading, so a run cannot pass by
@@ -947,7 +987,7 @@ run_one() {
     "${tool_calls_json}" "${input_tokens_json}" "${output_tokens_json}" \
     "${cost_usd_json}" "$(json_string_or_null "${error_text}")" \
     "${regression_exit_json}" "${edited_source_json}" "${edited_target_json}" \
-    "${build_exit_json}")"
+    "${build_exit_json}" "${EXECUTION_MODE}" "${artifact_references_json}")"
   append_row "${row}" "${evidence_path}"
   echo "[coding-eval] ${run_id}: status=${finish_status} verify_exit=${verify_exit_json} regression_exit=${regression_exit_json} edited_target=${edited_target_json} build=${build_exit_json}" >&2
 }
@@ -983,6 +1023,10 @@ main() {
   "${CLI_EXE}" --cases "${CASES_DIR}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}" \
     --k "${PASS_AT_K}"
   echo "[coding-eval] report: ${OUT_DIR}/REPORT.md" >&2
+  if [[ -n "${MANIFEST}" && -f "${MANIFEST}" ]]; then
+    "${CHECKER_EXE}" --manifest "${MANIFEST}" --runs "${RUNS_JSONL}" --out "${OUT_DIR}"
+    echo "[coding-eval] checker: ${OUT_DIR}/checker.json" >&2
+  fi
 }
 
 main

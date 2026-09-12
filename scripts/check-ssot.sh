@@ -357,6 +357,50 @@ check_rule "R13-tui-footer-fact-literal" 0 \
   'bin/masc_tui_footer\.mli?:' \
   bin
 
+# SSOT-R14 — a draw loop reads its row by walking the list.
+#
+# `List.nth` on a list walks from the front, so a window drawn at row N of a
+# long list cost N steps per visible row, every frame, while a key was held.
+# On this repository's own masc_tui.ml opened in the Code surface (21,158
+# rows) that was 169.8 ms of every second spent walking. Masc_tui_rows cuts
+# the window once instead; #35307 converted the fifty-odd sites.
+#
+# The pattern is the index, not the call: `List.nth <list> (<a> + <b>)`, the
+# sum written at the call. A point lookup -- the row under a cursor, the
+# surface ring's ten entries -- does not match and is not what this rule is
+# about.
+#
+# It does not match `let idx = i + scroll in ... List.nth_opt rows idx`, one
+# line apart, which this comment used to claim. Three of those stood in the
+# Memory and Metrics renderers while this reported zero. That shape is held
+# by test_tui_row_wiring instead, which parses the file and counts the call
+# inside the loop body rather than matching text.
+r14_pattern='List\.nth(_opt)?\s+[A-Za-z_][A-Za-z0-9_.'"'"']*\s+\((scroll|first|offset|[a-z_]*scroll[a-z_]*|[a-z_]*offset)\s*\+|List\.nth(_opt)?\s+[A-Za-z_][A-Za-z0-9_.'"'"']*\s+\([a-z_]+\s*\+\s*(scroll|first|offset|[a-z_]*scroll[a-z_]*|[a-z_]*offset)\)'
+# Plant one, the way the other rules self-test: a shape that must match, and
+# one that must not, so a pattern that quietly stops matching is caught here
+# rather than by the next regression it lets through.
+r14_should_match='List.nth_opt rows (scroll + i)'
+r14_should_not='List.nth_opt rows state.config_models_cursor'
+r14_self_test_failed=0
+if ! printf '%s\n' "$r14_should_match" | rg -q "$r14_pattern"; then
+  echo "ERROR[R14-pattern-self-test]: did not match a windowed read" >&2
+  r14_self_test_failed=1
+fi
+if printf '%s\n' "$r14_should_not" | rg -q "$r14_pattern"; then
+  echo "ERROR[R14-pattern-self-test]: matched a point lookup" >&2
+  r14_self_test_failed=1
+fi
+if [ "$r14_self_test_failed" -eq 0 ]; then
+  echo "OK[R14-pattern-self-test]: a windowed read matches, a cursor lookup does not."
+else
+  fail=1
+fi
+check_rule "R14-tui-row-walk" 0 \
+  "Masc_tui_rows.of_list once, then Masc_tui_rows.at" \
+  "$r14_pattern" \
+  '' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

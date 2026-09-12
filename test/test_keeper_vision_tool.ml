@@ -830,6 +830,69 @@ let test_retryable_provider_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
+(* 2026-09-12, msx-retro-mania: one candidate answered malformed JSON under
+   json_object (unescaped quotes inside the string value) and the walk
+   returned that reply as its final verdict -- the terminal composition
+   above it killed the whole turn. A broken structured reply is as
+   candidate-local as a length stop: which backends break JSON escaping
+   differs per model, and the walk exists to move on. *)
+let test_invalid_structured_response_tries_next_runtime () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-invalid-json-failover" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let invalid_labels =
+        [ "runtime_id", "p1.vision-a"
+        ; "result", "error"
+        ; "reason", "invalid_structured_output"
+        ]
+      in
+      let ok_labels =
+        [ "runtime_id", "p2.vision-b"
+        ; "result", "ok"
+        ; "reason", "provider_response"
+        ]
+      in
+      let before_invalid =
+        metric_value Keeper_metrics.VisionCandidateAttempts
+          ~labels:invalid_labels
+      in
+      let before_ok =
+        metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels
+      in
+      let calls = ref 0 in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+        incr calls;
+        if !calls = 1 then Ok (text_response "not-json")
+        else Ok (ok_response "second runtime answered")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (!calls = 2);
+      assert (String.equal (assoc_string "text" json) "second runtime answered");
+      assert (assoc_string "runtime_id" json = "p2.vision-b");
+      assert_metric_increment
+        "vision_candidate invalid_structured_output"
+        before_invalid
+        (metric_value Keeper_metrics.VisionCandidateAttempts
+           ~labels:invalid_labels);
+      assert_metric_increment
+        "vision_candidate provider_response"
+        before_ok
+        (metric_value Keeper_metrics.VisionCandidateAttempts
+           ~labels:ok_labels)))
+
 (* 2026-09-07: glm-coding.glm-4.6v answered HTTP 400 (max_tokens out of its
    range) and the walk stopped there, never reaching the local runtime behind
    it that takes the same pixels. A 400 is one binding's verdict, so the walk
@@ -1965,6 +2028,8 @@ let test_max_tokens_exhaustion_remains_visible_tool_failure () =
       assert (assoc_string "failure_class" json = "runtime_failure")))
 
 let test_non_length_response_does_not_trigger_vision_failover () =
+  (* A Refusal or ContentFilter stop is the model answering "no"; re-rolling
+     the same pixels on the next candidate cannot change that verdict. *)
   List.iter
     (fun stop_reason ->
       with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
@@ -1984,7 +2049,31 @@ let test_non_length_response_does_not_trigger_vision_failover () =
         match outcome with
         | Vt.Vo_invalid_structured_response _ -> ()
         | _ -> failwith "non-length terminal response must retain its original classification"))
-    [ Agent_core.Types.EndTurn; Agent_core.Types.Refusal; Agent_core.Types.ContentFilter ]
+    [ Agent_core.Types.Refusal; Agent_core.Types.ContentFilter ]
+
+(* A finished reply (EndTurn) whose JSON broke mid-string is the json_object
+   flake, not a verdict: the walk advances, and when every candidate breaks
+   the same way the exhausted walk still reports the typed failure. *)
+let test_end_turn_broken_json_walks_and_exhaustion_reports_typed_failure () =
+  with_temp_runtime_toml vision_output_limit_runtime_toml (fun () ->
+    let calls = ref 0 in
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ ?tools:_ () =
+      incr calls;
+      Ok (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
+            ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" ()))
+    in
+    assert (!calls = 2);
+    match outcome with
+    | Vt.Vo_invalid_structured_response detail ->
+      (* the exhausted walk reports the LAST candidate that answered *)
+      assert (String_util.contains_substring detail "p2.vision-b")
+    | _ -> failwith "exhausted broken-json walk must report the typed failure")
 
 let test_length_failover_preserves_candidate_http_recovery () =
   List.iter
@@ -2301,6 +2390,8 @@ let () =
   test_run_vision_invalid_structured_response_is_typed ();
   test_explicit_vision_runtime_selection ();
   test_retryable_provider_error_tries_next_runtime ();
+  test_invalid_structured_response_tries_next_runtime ();
+  test_end_turn_broken_json_walks_and_exhaustion_reports_typed_failure ();
   test_candidate_policy_error_tries_next_runtime ();
   test_policy_error_on_every_candidate_is_reported ();
   test_policy_error_then_transient_reports_the_last_candidate ();

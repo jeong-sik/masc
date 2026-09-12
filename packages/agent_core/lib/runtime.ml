@@ -235,11 +235,6 @@ type failure_cause =
       }
 [@@deriving yojson, show]
 
-let failure_cause_to_string = function
-  | Execution_error detail -> detail
-  | Persistence_failure { phase; detail } -> Printf.sprintf "%s: %s" phase detail
-;;
-
 type participant_event_common =
   { participant_name : string
   ; summary : string option
@@ -395,29 +390,5 @@ let request_to_json = request_to_yojson
 let request_of_json json = request_of_yojson json
 let response_to_json = response_to_yojson
 let response_of_json json = response_of_yojson json
-let protocol_message_to_json = protocol_message_to_yojson
-let protocol_message_of_json json = protocol_message_of_yojson json
-let request_to_string req = req |> request_to_json |> Yojson.Safe.to_string
-let response_to_string resp = resp |> response_to_json |> Yojson.Safe.to_string
 let protocol_version = "agent_core-runtime-0.2"
 
-let protocol_message_to_string msg =
-  msg |> protocol_message_to_json |> Yojson.Safe.to_string
-;;
-
-let request_of_string raw =
-  try request_of_json (Yojson.Safe.from_string raw) with
-  | Yojson.Json_error msg -> Error (Printf.sprintf "Invalid runtime request JSON: %s" msg)
-;;
-
-let response_of_string raw =
-  try response_of_json (Yojson.Safe.from_string raw) with
-  | Yojson.Json_error msg ->
-    Error (Printf.sprintf "Invalid runtime response JSON: %s" msg)
-;;
-
-let protocol_message_of_string raw =
-  try protocol_message_of_json (Yojson.Safe.from_string raw) with
-  | Yojson.Json_error msg ->
-    Error (Printf.sprintf "Invalid runtime protocol JSON: %s" msg)
-;;

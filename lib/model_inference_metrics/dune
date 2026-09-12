@@ -18,7 +18,6 @@
  (libraries
   masc.cost_ledger
   dated_jsonl
-  digestif
   eio
   fs_compat
   masc_core

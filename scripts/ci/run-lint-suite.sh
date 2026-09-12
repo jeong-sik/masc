@@ -135,6 +135,8 @@ blocking_lints() {
   run_lint "Harness connector env ratchet (#28807)" \
     bash scripts/lint/harness-connector-env-ratchet.sh --self-test
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
+  run_lint "Wire-field removal schema gate (#29516/#29601/#29666)" \
+    bash scripts/wire-field-removal-schema-gate-selftest.sh
   run_lint "Timeout env knob ceiling (RFC-0138)" bash scripts/lint/timeout-env-ceiling.sh
   run_self_test_when_changed ".mli env knob exists self-test" \
     scripts/lint/mli-env-knob-exists.sh \
@@ -291,6 +293,13 @@ blocking_pr_lints() {
   # .ml is allow-listed, without the .mli, reports PAIR-GATE FAIL.
   run_lint "Boundary-guard .mli pairing" \
     env BASE_REF="${base}" bash scripts/check-boundary-guard-mli-pairs.sh
+  # A deleted wire field/variant in a persistence schema is a deploy event,
+  # not a refactor: three fleet freezes in one day (#29516/#29601/#29666)
+  # came from strict decoders that stopped accepting rows live stores still
+  # carry. The removal must ride a version bump, a store strip/migration, or
+  # an explicit schema-compat: proof (#29553's rule, now a gate).
+  run_lint "Wire-field removal schema gate" \
+    env BASE_REF="${base}" bash scripts/wire-field-removal-schema-gate.sh
   # A wildcard catch that swallows Eio.Cancel.Cancelled is the bug this repo
   # modelled in TLA+ (CancelledAbsorbed / CancelledNeverAbsorbed) and hit at
   # runtime as an Assert_failure. The lint existed but no workflow ran it, so

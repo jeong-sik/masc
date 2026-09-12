@@ -10,7 +10,7 @@ status: reference
 
 ## Purpose
 
-Every open issue in `masc` and `agent core` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
+Every open issue in `masc` and `agent core` should be classifiable into one or more of eight categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
 
 The rubric is applied two ways:
 
@@ -95,7 +95,7 @@ The rubric is applied two ways:
 
 ## Mapping from Prior Categorizations
 
-The Model-Agnostic MASC Epic (`#6715`, 2026-04-12) and the 2026-04-09 tool-failure memory used partially overlapping taxonomies. The 7-category rubric subsumes them:
+The Model-Agnostic MASC Epic (`#6715`, 2026-04-12) and the 2026-04-09 tool-failure memory used partially overlapping taxonomies. The 8-category rubric subsumes them:
 
 | Prior category | New categories |
 |----------------|----------------|
@@ -116,16 +116,16 @@ Complex issues carry multiple labels. Empirically ≥30% of open issues fall int
 For a new or existing issue:
 
 1. Read title + body first 800 chars.
-2. For each of the 7 triggers above, check marker match.
+2. For each of the 8 triggers above, check marker match.
 3. Put the matching value in the issue body's `masc-triage` block under `root:`. Do not add the label by hand;
    the workflow reconciles labels from the block and will remove one that the block does not declare.
 4. If no marker matches, do not apply a default label — either the rubric is underspecified for this case (data for next iteration) or the issue is a pure feature request, not a root-cause fix.
 
 ## Benchmark Linkage
 
-The `~/me/lab/keeper-benchmark/bookshelf/` synthetic project seeds one bug per category. When Keeper processes the benchmark, its Detection rate against the 7 bugs directly measures whether this rubric's markers are concrete enough for an LLM agent to apply.
+The `~/me/lab/keeper-benchmark/bookshelf/` synthetic project seeds one bug per category. When Keeper processes the benchmark, its Detection rate against the 8 bugs directly measures whether this rubric's markers are concrete enough for an LLM agent to apply.
 
-If Detection drops below 5/7, the markers are too abstract and need to be tightened — this document gets updated, not the Keeper prompt.
+If Detection drops below 6/8, the markers are too abstract and need to be tightened — this document gets updated, not the Keeper prompt.
 
 ## Non-Goals
 

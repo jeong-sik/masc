@@ -21,6 +21,13 @@ val normalize : count:int -> height:int -> int -> int
 val down : count:int -> height:int -> int -> int
 val up : count:int -> height:int -> int -> int
 
+val step_uncounted : delta:int -> int -> int
+(** A scroll moved by [delta] on a surface no listing counts, held at the
+    top. There is no bound below to hold it at, but a negative scroll is not
+    a position either: the frame indexes the list with it. The Git-changes
+    overlay opened over the Keepers surface was unlisted, and one up-key
+    from the top stored -1. *)
+
 val page_down : count:int -> height:int -> int -> int
 val page_up : count:int -> height:int -> int -> int
 (** A whole window, less one row kept from the window being left. Reading a
@@ -36,6 +43,16 @@ val page_up : count:int -> height:int -> int -> int
 
 val cursor_down : count:int -> int -> int
 val cursor_up : count:int -> int -> int
+
+val cursor_move : count:int -> delta:int -> int -> int
+(** The cursor moved by [delta] rows, clamped to the list. The steppers above
+    move one row and are this with [delta] of 1 and -1; a page key passes its
+    own size. Before this existed the movers took a delta and used only its
+    sign, so a page moved a single row. *)
+
+val cursor_last : count:int -> int
+(** The last row a cursor can name, and 0 for an empty list. What End lands
+    on. *)
 
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)

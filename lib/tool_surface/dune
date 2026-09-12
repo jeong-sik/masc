@@ -45,7 +45,6 @@
   masc.masc_exec
   masc.agent_core
   masc.agent_core.base
-  mcp_protocol
   time_compat
   fs_compat
   yojson

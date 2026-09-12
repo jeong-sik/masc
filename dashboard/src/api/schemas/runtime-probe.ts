@@ -13,6 +13,7 @@ const DashboardRuntimeProviderProbeStatusSchema = Schema.Literal(
   'server_error',
   'http_error',
   'skipped_cli',
+  'skipped_native_auth',
   'invalid_execution_transport',
   'invalid_endpoint',
   'missing_auth',

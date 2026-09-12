@@ -214,6 +214,57 @@ val string_of_drop_reason : drop_reason -> string
 (** Operator-facing rendering. Single source for the wording, so a reason read
     from a runtime message and one read from a load error cannot drift. *)
 
+type reference_shape =
+  | Scalar
+  | List_entry
+      (** How a reference names its id. A list entry reads as [field entry "id"]
+          and a scalar as [field = "id"]; keeping both apart stops a message
+          from telling an operator a list field equals one id. *)
+
+type resolution_failure =
+  { unresolved_id : string
+  ; declared_drop : drop_reason option
+  ; runtime_count : int
+  }
+(** Why an id did not resolve to a runtime. [reason] is the binding's own drop
+    reason when one was declared under that id, [None] when nothing declared
+    it. *)
+
+type load_failure =
+  | Toml_unparsable of Runtime_toml.parse_error list
+  | Undeclared_bindings of (string * drop_reason) list
+  | Default_runtime_absent
+  | Default_runtime_unresolved of resolution_failure
+  | Reference_unresolved of
+      { site : string
+      ; shape : reference_shape
+      ; resolution : resolution_failure
+      }
+  | Lane_candidate_unresolved of
+      { lane_id : string
+      ; resolution : resolution_failure
+      }
+  | Max_context_absent of
+      { runtime_id : string
+      ; execution_model : string
+      ; declared_model : string
+      }
+      (** Why {!load_list} refused a configuration. Closed, so a consumer
+          decides per case instead of matching rendered text — the contract
+          {!drop_reason} keeps one level down. [Toml_unparsable] is the one case
+          whose text comes from the parser and can quote operator input; the
+          rest name ids and config keys this repository authored. *)
+
+val to_diagnostic_text : config_path:string -> load_failure -> string
+(** The operator-facing account of a refused configuration, and the wording the
+    CLI has always printed. A consumer that shows a failure to a person on a
+    surface where parser text is unwelcome should match on the case instead. *)
+
+val to_operator_text : config_path:string -> load_failure -> string
+(** The same account with the parser's own text withheld: {!Toml_unparsable}
+    renders as a count and a pointer at [masc runtime-probe], every other case
+    identically to {!to_diagnostic_text}. *)
+
 val of_binding : config -> binding -> (t, drop_reason) result
 (** Materialize one binding while preserving failure information. [Error reason]
     when the binding is disabled, its provider/model id is unresolved, or the
@@ -306,7 +357,7 @@ val load_list :
        * (string * string) list
        * string list
        * Runtime_lane.t list
-     , string )
+     , load_failure )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
     keeper_assignments, media_failover, lanes)].
@@ -465,6 +516,26 @@ type dashboard_runtime_defaults_snapshot =
 val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_snapshot
 (** Capture every value consumed by the dashboard runtime-defaults endpoint from
     one immutable loaded-state snapshot. *)
+
+type exact_lane =
+  | Librarian
+  | Hitl_auto_judge
+  | Board_attention
+  | Verifier
+
+val all_exact_lanes : exact_lane list
+(** Every exact-output lane. *)
+
+val exact_lane_id : exact_lane -> string
+(** The lane table key under [\[runtime.exact_output_lanes\]]. *)
+
+val exact_lane_of_id : string -> exact_lane option
+(** Parse a lane table key into the closed exact-output lane variant. *)
+
+val exact_lane_supports_cli_tail : exact_lane -> bool
+(** Whether this exact lane has a CLI oneshot runner to walk [cli_slots]
+    when HTTP provider slots are absent or exhausted. [Verifier] does not
+    have a CLI runner and requires provider slots. *)
 
 val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]

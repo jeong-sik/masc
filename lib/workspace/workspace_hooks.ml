@@ -1,7 +1,7 @@
 (** Workspace Hooks — Callback refs for upper-layer dependencies.
 
-    Workspace modules must not depend on Activity_graph, Board,
-    Relation_materializer or the runtime execution boundary directly.
+    Workspace modules must not depend on Activity_graph, Board
+    or the runtime execution boundary directly.
     Instead, they call these callback refs which are wired at startup
     by workspace.ml (the hub module that already depends on everything).
 
@@ -63,16 +63,6 @@ let keeper_registered_fn
 let schedule_wake_target_registered_fn
   : (Workspace_utils_backend_setup.config -> string -> (bool, string) result) Atomic.t
   = Atomic.make (fun _config _keeper_name -> Ok true)
-
-(** Relation materializer: agent session end — wraps Relation_materializer.on_agent_session_ended. *)
-let relation_on_leave_fn
-  : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t
-  = Atomic.make (fun ~leaving_agent:_ ~active_agents:_ -> ())
-
-(** Relation materializer: task done — wraps Relation_materializer.on_task_done. *)
-let relation_on_task_done_fn
-  : (assignee:string -> active_agents:string list -> unit) Atomic.t
-  = Atomic.make (fun ~assignee:_ ~active_agents:_ -> ())
 
 (** Hebbian learning: strengthen collaboration on task completion. *)
 let hebbian_on_task_done_fn

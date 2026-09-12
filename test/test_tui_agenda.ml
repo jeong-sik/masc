@@ -196,20 +196,29 @@ let calls ~module_path ~binding_name ~callee =
    the drawing never reaches for the composer's height itself: a surface that
    wants a body height has to ask [surface_body_rows], which is where the
    strip's rows come off. *)
+(* The drawing is no longer one file. A count that means "nowhere in the
+   drawing" has to read every file the drawing lives in, or a definition
+   answers the question by moving rather than by changing. *)
+let render_family =
+  [ "bin/masc_tui_render.ml"
+  ; "bin/masc_tui_render_prim.ml"
+  ; "bin/masc_tui_render_chat.ml"
+  ]
+
 let test_the_drawing_does_not_measure_the_body_itself () =
   check
     int
     "no render site computes a body height from the composer's rows"
     0
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml"
+    (Ast_grep.count_calls_across_files
+       ~module_paths:render_family
        ~callee:"Composer.rows_for");
   check
     bool
     "they ask the owner instead"
     true
-    (Ast_grep.count_calls
-       ~module_path:"bin/masc_tui_render.ml"
+    (Ast_grep.count_calls_across_files
+       ~module_paths:render_family
        ~callee:"Masc_tui_types.surface_body_rows"
      >= 40);
   check
@@ -228,7 +237,7 @@ let test_the_frame_and_the_bound_read_the_same_number () =
     "the frame subtracts the strip's rows"
     true
     (calls
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"finish_surface"
        ~callee:"Masc_tui_types.agenda_chrome_rows"
      >= 1);

@@ -6,7 +6,7 @@ status: reference
 
 > Status: Living draft
 > Last Updated: 2026-09-06
-> Snapshot baseline: `dune-project` version `0.35.12`
+> Snapshot baseline: `dune-project` version `0.35.14`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
 
@@ -18,7 +18,7 @@ used as evidence.
 
 | 항목 | 값 |
 |------|-----|
-| Release baseline | 0.35.5 |
+| Release baseline | 0.35.14 |
 | Language | OCaml 5.x (Eio-native, effect-based concurrency) |
 | LOC (lib, `.ml` + `.mli`) | 597,241 |
 | LOC (test, `.ml` + `.mli`) | 505,874 |
@@ -26,7 +26,7 @@ used as evidence.
 | `.mli` interfaces under `lib/` | 1,401 |
 | MCP tool modules (`lib/**/tool_*.ml`) | 117 |
 | Test files (`test/*.ml`, top level) | 1,171 |
-| Executables | 12 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`) + 2 internal (`public_tool_manifest`, `keeper_store_layout_manifest`) |
+| Executables | 15 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-browser-host`, `masc-reliable-change-g1-check`, `masc-http-probe`) + 3 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`) |
 
 숫자는 2026-09-04 (v0.31.0) 기준. `git ls-files` 로 추적 파일만 세고 `wc -l` 로 합산했으며, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다. 표의 baseline 행은 `scripts/bump-version.sh` 가 릴리스마다 고쳐 쓰므로, 나머지 행이 그 baseline 보다 오래되면 표가 재보지 않은 숫자를 그 버전의 것이라고 말하게 된다.
 

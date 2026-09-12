@@ -137,13 +137,31 @@ let test_state_projection_has_one_structural_owner () =
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
        ~binding_name:"handle_composer_key"
        ~callee:"Composer_projection.of_state");
+  (* Both rows are drawn by the shared primitives, not by a surface: the
+     composer is the one row every surface ends with. *)
   List.iter
     (fun binding_name ->
        check int (binding_name ^ " calls the projection owner") 1
          (Ast_grep.count_calls_in_value_binding
-            ~module_path:"bin/masc_tui_render.ml" ~binding_name
+            ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name
             ~callee:"Composer_projection.of_state"))
-    [ "composer_line"; "composer_cursor" ]
+    [ "composer_line"; "composer_cursor" ];
+  (* And nowhere else. These rows sat in the godfile until the primitives
+     moved out of it; a copy left behind, or a surface growing its own, is a
+     second reading of the same state, which is what this suite exists to
+     stop. *)
+  List.iter
+    (fun (module_path, binding_name) ->
+       check int
+         (binding_name ^ " is not drawn a second time in "
+          ^ Filename.basename module_path)
+         0
+         (Ast_grep.count_value_bindings ~module_path ~name:binding_name))
+    [ ("bin/masc_tui_render.ml", "composer_line")
+    ; ("bin/masc_tui_render.ml", "composer_cursor")
+    ; ("bin/masc_tui_render_chat.ml", "composer_line")
+    ; ("bin/masc_tui_render_chat.ml", "composer_cursor")
+    ]
 
 let () =
   run "tui-composer-projection"

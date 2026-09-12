@@ -125,10 +125,26 @@ type planning_backlog = {
   pb_cancelled : int;
 }
 
+(** One goal the event log remembers that [goals.json] no longer lists, as
+    [GET /api/v1/dashboard/planning] reports it under [goal_history.unlisted].
+    Every field past the id is nullable on the wire and stays optional here: a
+    goal opened before the server recorded openings has no [pgh_opened_at], and
+    one that left the list without a terminal phase has no [pgh_closed_at].
+    Reading either as a zero would date something that never happened. *)
+type planning_goal_history = {
+  pgh_goal_id : string;
+  pgh_title : string option;
+  pgh_opened_at : string option;
+  pgh_closed_at : string option;
+  pgh_final_phase : string option;
+  pgh_lifetime_hours : float option;
+}
+
 type planning_snapshot = {
   pl_goals : planning_goal list;
   pl_rollup : planning_rollup;
   pl_backlog : planning_backlog;
+  pl_goal_history : planning_goal_history list;
   pl_generated_at : string;
 }
 
@@ -602,6 +618,7 @@ type runtime_provider_status =
   | Runtime_provider_http_error
   | Runtime_provider_unknown_http_status
   | Runtime_provider_skipped_cli
+  | Runtime_provider_skipped_native_auth
   | Runtime_provider_invalid_endpoint
   | Runtime_provider_invalid_execution_transport
 
@@ -665,6 +682,9 @@ type runtime_option = {
   ro_dispatchable : bool;
   ro_blocked_reason : string option;
   ro_is_default : bool;
+  ro_quota_exhausted : bool;
+  ro_quota_resets_at : float option;
+  ro_quota_scope : string option;
 }
 
 type runtime_resolved_lane = {
@@ -2482,6 +2502,12 @@ type file_activity_snapshot = {
           target is unknowable, so they are not claimed for this file. *)
   fas_unattributed_malformed : int;
 }
+
+val file_change_address : file_change -> string
+(** The address the change is listed and searched under: [repo_id:path] for a
+    file in a clone, and the path itself for a scratch file or an absolute
+    one. One spelling, so a row cannot be drawn under one address and found
+    under another. *)
 
 val file_change_target_line : file_change -> int
 (** Exact producer-recorded line to open. A deletion opens at its old start,

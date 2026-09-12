@@ -1,9 +1,9 @@
 # masc Roadmap
 
-> Current package version: v0.35.12
-> Latest changelog entry: v0.35.12 (2026-09-12)
+> Current package version: v0.35.14
+> Latest changelog entry: v0.35.14 (2026-09-12)
 > Latest published GitHub release: v0.35.12 (2026-09-12)
-> Updated: 2026-09-11
+> Updated: 2026-09-12
 
 A planning view, not a release promise. The operating model behind it
 (labels, priority, pull-request and release rules) is

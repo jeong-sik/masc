@@ -365,6 +365,8 @@ let make_tool_bundle_for_descriptors_with_policy
                  | Keeper_tool_descriptor.Tool_memory_search
                  | Keeper_tool_descriptor.Tool_memory_retract
                  | Keeper_tool_descriptor.Tool_memory_write
+                 | Keeper_tool_descriptor.Tool_constitution_write
+                 | Keeper_tool_descriptor.Tool_constitution_remove
                  | Keeper_tool_descriptor.Tool_library_search
                  | Keeper_tool_descriptor.Tool_library_read
                  | Keeper_tool_descriptor.Tool_surface_read

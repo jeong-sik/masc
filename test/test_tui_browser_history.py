@@ -87,7 +87,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
                 os.write(fd, b"Q")
                 return
             count = len(requests)
-            h.write_all(fd, output, b"\rsvgo\x0f")
+            h.write_all(fd, output, b"\rsvgo\x0fR")
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
                 needle=b"SAVED ALPHA CONTENT", controls=(h.FULL_REDRAW,))
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=100,

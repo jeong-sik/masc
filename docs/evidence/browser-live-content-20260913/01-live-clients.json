@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "data": {
+    "clients": [
+      {
+        "clientId": "a93a5385-6faa-44ea-8bfc-e576f2cfadf4",
+        "browser": "firefox",
+        "version": "155.0.1",
+        "engineVersion": "155.0.1"
+      }
+    ]
+  }
+}

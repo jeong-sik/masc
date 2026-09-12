@@ -45,9 +45,12 @@ def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/
     return result
 
 
-def presentation_readiness(base='/tmp/workspace', parser='started', renderer='missing'):
+def presentation_readiness(base='/tmp/workspace', parser='started', renderer='missing') -> dict:
     return dict(schema='masc.presentation_tools_readiness.v1', scope='workspace_host_runtime',
                 base_path=base, presentation_inspection='not_run',
+                pdf_tools=dict(schema='masc.pdf_tools_readiness.v1', status='tools_available',
+                    scope='current_process_environment', pdf_inspection='not_run',
+                    checks=[dict(command=tool, status='started') for tool in ('pdftotext', 'pdftoppm')]),
                 status='tools_available' if parser == renderer == 'started' else 'unavailable',
                 checks=[dict(component='python_pptx', command=base + '/.masc/runtime-tools/presentation/bin/python3', status=parser),
                         dict(component='libreoffice', command='soffice', status=renderer)])
@@ -81,6 +84,42 @@ class PresentationPrerequisites(unittest.TestCase):
         with self.assertRaisesRegex(SETUP.SetupError, 'another workspace'):
             SETUP.decode_presentation_tools_readiness(
                 presentation_readiness(base='/tmp/other', renderer='started'), '/tmp/selected')
+
+    def test_presentation_readiness_requires_poppler(self):
+        readiness = presentation_readiness(renderer='started')
+        readiness['pdf_tools']['checks'][1]['status'] = 'missing'
+        readiness['pdf_tools']['status'] = 'unavailable'
+        with self.assertRaises(SETUP.SetupError):
+            SETUP.decode_presentation_tools_readiness(readiness)
+        readiness['status'] = 'unavailable'
+        self.assertFalse(SETUP.decode_presentation_tools_readiness(readiness).available)
+
+    def test_presentation_timeout_returns_to_setup(self):
+        with patch.object(SETUP.subprocess, 'run', side_effect=subprocess.TimeoutExpired('masc', 20)):
+            with self.assertRaisesRegex(SETUP.SetupError, 'in time'):
+                SETUP.presentation_tools_status('masc', '/tmp/workspace')
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_impress_readiness_requires_generated_pdf(self):
+        for output, expected in [(None, 'failed'), ('not a PDF', 'failed'), ('%PDF-1.7\n', 'started')]:
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+                commands = Path(directory) / 'commands'
+                commands.mkdir()
+                renderer = commands / 'soffice'
+                renderer.write_text('#!' + sys.executable + '\n' +
+                    'import pathlib, sys\n' +
+                    "assert sys.argv[sys.argv.index('--convert-to') + 1] == 'pdf:impress_pdf_Export'\n" +
+                    "directory = pathlib.Path(sys.argv[sys.argv.index('--outdir') + 1])\n" +
+                    "assert pathlib.Path(sys.argv[-1]).suffix == '.fodp'\n" +
+                    ('pass\n' if output is None else "(directory / 'probe.pdf').write_text(" + repr(output) + ")\n"))
+                renderer.chmod(0o755)
+                env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ.get('PATH', ''))
+                assert BINARY is not None
+                result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools',
+                    '--base-path', directory], env=env, capture_output=True, text=True, check=True)
+                observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
+                renderer_check = next(row for row in observed.checks if row['component'] == 'libreoffice')
+                self.assertEqual(renderer_check['status'], expected)
 
     @unittest.skipUnless(BINARY, 'requires CI-built native executable')
     def test_successful_install_commands_cannot_hide_failed_renderer_probe(self):
@@ -124,10 +163,10 @@ class PresentationPrerequisites(unittest.TestCase):
                                     env=env, capture_output=True, text=True, check=True)
             self.assertEqual(list(base.iterdir()), before, 'detection must not install or create a workspace environment')
             observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
-            checks = {row['component']: row for row in observed['checks']}
+            checks = {row['component']: row for row in observed.checks}
             self.assertEqual(checks['python_pptx']['status'], 'missing')
-            self.assertEqual(checks['libreoffice']['status'], 'started')
-            self.assertEqual(observed['status'], 'unavailable')
+            self.assertEqual(checks['libreoffice']['status'], 'failed')
+            self.assertFalse(observed.available)
             # An actual isolated interpreter without third-party packages must
             # fail the import, even though the interpreter itself starts.
             venv = base / '.masc/runtime-tools/presentation'
@@ -135,10 +174,10 @@ class PresentationPrerequisites(unittest.TestCase):
             result = subprocess.run([BINARY, 'prerequisite-actions', 'presentation-tools', '--base-path', str(base)],
                                     env=env, capture_output=True, text=True, check=True)
             observed = SETUP.decode_presentation_tools_readiness(json.loads(result.stdout)['dependency_readiness'])
-            parser = next(row for row in observed['checks'] if row['component'] == 'python_pptx')
+            parser = next(row for row in observed.checks if row['component'] == 'python_pptx')
             self.assertEqual(parser['status'], 'failed')
             self.assertIn('pptx', parser['detail'])
-            self.assertEqual(observed['status'], 'unavailable')
+            self.assertFalse(observed.available)
 
 
 class ModelSelection(unittest.TestCase):

@@ -497,3 +497,16 @@ let read_complete_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host
   let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
       ~command_argv:["cat"; path] ~max_bytes:None ~timeout_sec () in
   Ok bytes
+
+let read_raw_prefix ?turn_sandbox_factory ~config ~(meta : keeper_meta)
+    ~host_path ~max_bytes ~timeout_sec () =
+  let ( let* ) = Result.bind in
+  if max_bytes <= 0 then Error "Raw prefix byte limit must be positive" else
+  let* path = container_path_of_host ~config ~meta ~host_path in
+  (* Binary capture must retain exact bytes; limiting its text projection would
+     corrupt media. Bound the producing command instead, including endpoint
+     reads where the host cannot stat the source. *)
+  let* _, bytes = run_command_with_capture ?turn_sandbox_factory ~config ~meta
+      ~command_argv:["head"; "-c"; string_of_int max_bytes; path]
+      ~max_bytes:None ~timeout_sec () in
+  Ok bytes

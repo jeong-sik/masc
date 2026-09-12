@@ -90,6 +90,8 @@ let test_presentation_install_is_workspace_owned () =
        [["python3";"-I";"-m";"venv";"--copies";base_path ^ "/.masc/runtime-tools/presentation"];
         [base_path ^ "/.masc/runtime-tools/presentation/bin/python3";"-I";"-m";"pip";"--isolated";"install";"--require-virtualenv";"python-pptx"]] steps
    | _ -> fail "parser must use explicit commands");
+  let poppler = find "poppler_install" catalog in
+  check bool "PDF tools remain installable from presentation setup" false poppler.requires_admin;
   let renderer = find "presentation_renderer_install" catalog in
   (match renderer.action_effect with
    | P.Run_commands steps -> check (list (list string)) "mac renderer is the official Homebrew cask"

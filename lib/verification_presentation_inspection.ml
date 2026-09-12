@@ -156,7 +156,7 @@ let inspect ~base_path ~max_image_bytes ~bytes =
           ["-env:UserInstallation=" ^ profile_uri; "--headless"; "--nologo";
            "--nodefault"; "--norestore"; "--convert-to"; pdf_filter; "--outdir"; root; source] in
       let* pdf_bytes = read_owned root (Filename.concat root "source.pdf") in
-      let* rendered_pdf = Verification_pdf_inspection.inspect ~base_path ~max_image_bytes ~bytes:pdf_bytes
+      let* rendered_pdf = Verification_pdf_inspection.inspect ~base_path ~max_image_bytes ~bytes:pdf_bytes ()
         |> Result.map_error (fun error -> Pdf_inspection_failed error) in
       let* () = if List.length slides = List.length rendered_pdf.pages then Ok ()
         else Error (Invalid_output (Printf.sprintf "PPTX has %d slides but rendering has %d PDF pages"

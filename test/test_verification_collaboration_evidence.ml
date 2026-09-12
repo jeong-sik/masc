@@ -49,8 +49,10 @@ let invalid_input surface name args =
       (String.trim (Tool_result.message result) <> "")
   | _ -> fail "malformed source input unexpectedly succeeded"
 let post ~author ~visibility ?origin ?meta_json content =
-  Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
-    ~visibility ~ttl_hours:0 ?origin ?meta_json () |> require "post"
+  match Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
+    ~visibility ~ttl_hours:0 ?origin ?meta_json () with
+  | Ok post -> post
+  | Error error -> failf "post: %s" (Board_tool.board_error_to_string error)
 let post_args (post : Board.post) = `Assoc ["post_id", `String (Board.Post_id.to_string post.id)]
 let run_args id = `Assoc ["run_id", `String id]
 let metadata = `Assoc
@@ -58,11 +60,11 @@ let metadata = `Assoc
   ; "panel", `List [ `Assoc ["model", `String "first"; "answer", `String "Keep A"];
                        `Assoc ["model", `String "second"; "answer", `String "B preserves the constraint"] ]
   ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"] ]
-let fusion ~author ~visibility ~source run_id =
+let fusion ~author ~visibility ~source ?(content="Original independent advice") run_id =
   post ~author ~visibility ~meta_json:metadata
     ~origin:Board.{turn_ref=Some (Ids.Turn_ref.make ~trace_id:"origin-trace" ~absolute_turn:7);
                   source=Some source; fusion_run_id=Some run_id}
-    "Original independent advice"
+    content
 
 let test_shared_thread_and_pagination () = with_fixture (fun _config task goal ->
   let p = post ~author:"peer" ~visibility:Board.Internal "Exact peer objection" in
@@ -178,7 +180,9 @@ let test_fusion_foreign_wrong_origin_and_no_write () = with_fixture (fun config 
   ignore (fusion ~author:"peer" ~visibility:Board.Internal ~source:"fusion" id);
   denied task "masc_fusion_status" (run_args id) "verification_source_access_denied";
   ignore (read goal "masc_fusion_status" (run_args id));
-  ignore (fusion ~author:"peer" ~visibility:Board.Direct ~source:"fusion" "private-source");
+  ignore (fusion ~author:"peer" ~visibility:Board.Direct ~source:"fusion"
+    ~content:"@producer Original private independent advice" "private-source");
+  denied task "masc_fusion_status" (run_args "private-source") "verification_source_access_denied";
   denied goal "masc_fusion_status" (run_args "private-source") "verification_source_access_denied";
   ignore (fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"not-fusion" "wrong-origin");
   denied task "masc_fusion_status" (run_args "wrong-origin") "verification_source_unavailable";

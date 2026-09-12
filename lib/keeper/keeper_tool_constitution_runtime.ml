@@ -88,7 +88,8 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
                (List.length held))
         else (
           match
-            World_constitution_store.append ~base_path
+            World_constitution_store.append_at ~base_path
+              ~expected_end_offset:ledger.World_constitution_store.end_offset
               (World_constitution_types.Added article)
           with
           | Error error ->
@@ -132,7 +133,8 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
                "no article %s is held by this world; nothing was removed" raw)
         else (
           match
-            World_constitution_store.append ~base_path
+            World_constitution_store.append_at ~base_path
+              ~expected_end_offset:ledger.World_constitution_store.end_offset
               (World_constitution_types.Removed
                  { id; by = meta.name; at = Time_compat.now () })
           with

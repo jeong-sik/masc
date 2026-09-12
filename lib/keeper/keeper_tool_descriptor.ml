@@ -452,6 +452,10 @@ let descriptor
     match runtime_handler with
     | Tool_surface_post -> Terminal
     | Tool_memory_write | Tool_memory_retract -> Direct_terminal
+    (* The constitution tools are the memory writes' peers in layer (both are
+       durable self-writes on base_tools) but not on this axis. A memory write
+       is the conclusion of a turn; recording a decision the board already made
+       is not, so these stay Ordinary and the keeper keeps working. *)
     | ( Tool_execute
       | Tool_constitution_write
       | Tool_constitution_remove

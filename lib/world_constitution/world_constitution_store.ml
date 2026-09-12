@@ -10,6 +10,10 @@ type append_error =
       path : string;
       detail : string;
     }
+  | Ledger_moved of {
+      expected : int;
+      actual : int;
+    }
   | Write_failed of {
       path : string;
       detail : string;
@@ -18,25 +22,61 @@ type append_error =
 let append_error_to_string = function
   | Directory_unavailable { path; detail } ->
     Printf.sprintf "constitution directory %s is unavailable: %s" path detail
+  | Ledger_moved { expected; actual } ->
+    Printf.sprintf
+      "the constitution ledger moved from %d to %d bytes while this call was \
+       deciding; read it again"
+      expected actual
   | Write_failed { path; detail } ->
     Printf.sprintf "constitution ledger %s could not be appended: %s" path
       detail
 
-let append ~base_path entry =
+(* The durable failure carries a nested rollback story this caller cannot act
+   on differently; the phase is what distinguishes the outcomes. *)
+let append_failure_detail : Fs_compat.private_jsonl_append_error -> string =
+  function
+  | Fs_compat.Incomplete_jsonl_tail ->
+    "the ledger does not end at a line boundary"
+  | Fs_compat.Invalid_jsonl_suffix -> "the entry is not one complete JSONL line"
+  | Fs_compat.Negative_expected_end_offset offset ->
+    Printf.sprintf "the caller passed a negative end offset (%d)" offset
+  | Fs_compat.End_offset_mismatch { expected; actual } ->
+    Printf.sprintf "the ledger ends at %d, not %d" actual expected
+  | Fs_compat.Durable_jsonl_append_failed _ ->
+    "the durable append did not commit"
+
+let append_at ~base_path ~expected_end_offset entry =
   let dir = Config_dir_resolver.constitution_dir ~base_path in
   let path = ledger_path ~base_path in
+  let line =
+    Yojson.Safe.to_string (World_constitution_wire.entry_to_json entry) ^ "\n"
+  in
   match Fs_compat.mkdir_p dir with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Error (Directory_unavailable { path = dir; detail = Printexc.to_string exn })
   | () -> (
     match
-      Fs_compat.append_jsonl path (World_constitution_wire.entry_to_json entry)
+      Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result path
+        ~expected_end_offset line
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn ->
       Error (Write_failed { path; detail = Printexc.to_string exn })
-    | () -> Ok ())
+    | Fs_compat.Private_file_succeeded _
+    | Fs_compat.Private_file_succeeded_with_cleanup_failure _ ->
+      (* The durable effect committed. A cleanup failure is about descriptor
+         settlement, and reporting it as a write failure would invite a retry
+         that appends the entry twice. *)
+      Ok ()
+    | Fs_compat.Private_file_failed
+        (Fs_compat.End_offset_mismatch { expected; actual })
+    | Fs_compat.Private_file_failed_with_cleanup_failure
+        { error = Fs_compat.End_offset_mismatch { expected; actual }; _ } ->
+      Error (Ledger_moved { expected; actual })
+    | Fs_compat.Private_file_failed error
+    | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } ->
+      Error (Write_failed { path; detail = append_failure_detail error }))
 
 type rejected_line = {
   line_number : int;
@@ -44,6 +84,7 @@ type rejected_line = {
 }
 
 type ledger = {
+  end_offset : int;
   articles : World_constitution_types.t list;
   rejected : rejected_line list;
 }
@@ -76,8 +117,9 @@ let apply held = function
     List.filter (fun existing -> not (same_id id existing)) held
 
 let parse contents =
+  let end_offset = String.length contents in
   let rec scan line_number held rejected = function
-    | [] -> { articles = held; rejected = List.rev rejected }
+    | [] -> { end_offset; articles = held; rejected = List.rev rejected }
     | line :: rest ->
       if String.equal (String.trim line) "" then
         scan (line_number + 1) held rejected rest
@@ -101,5 +143,5 @@ let load ~base_path =
   match Fs_compat.load_file_opt path with
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Unreadable { path; detail = Printexc.to_string exn })
-  | None -> Ok { articles = []; rejected = [] }
+  | None -> Ok { end_offset = 0; articles = []; rejected = [] }
   | Some contents -> Ok (parse contents)

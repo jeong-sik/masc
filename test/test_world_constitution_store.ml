@@ -17,14 +17,25 @@ let article ?(author = "lane-smith") ?(at = 1.0) text =
   | Error invalid ->
     Alcotest.failf "article rejected: %s" (invalid_to_string invalid)
 
+let end_offset ~base_path =
+  match Store.load ~base_path with
+  | Ok ledger -> ledger.Store.end_offset
+  | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+
 let add ~base_path article =
-  match Store.append ~base_path (Added article) with
+  match
+    Store.append_at ~base_path
+      ~expected_end_offset:(end_offset ~base_path)
+      (Added article)
+  with
   | Ok () -> ()
   | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)
 
 let remove ~base_path (article : t) =
   match
-    Store.append ~base_path (Removed { id = article.id; by = "critic"; at = 9.0 })
+    Store.append_at ~base_path
+      ~expected_end_offset:(end_offset ~base_path)
+      (Removed { id = article.id; by = "critic"; at = 9.0 })
   with
   | Ok () -> ()
   | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)
@@ -99,6 +110,30 @@ let test_a_norm_written_again_after_removal_returns_at_the_end () =
         [ "an undisputed norm"; "a disputed norm" ]
         (texts (load_or_fail ~base_path)))
 
+(* Two keepers reading the same world, one writing first. The second decided
+   something from what it read -- the byte ceiling is decided exactly this way
+   -- so its write must not land on a ledger it never saw. *)
+let test_a_write_built_on_a_stale_read_is_refused () =
+  with_world (fun base_path ->
+      add ~base_path (article "first norm");
+      let stale = end_offset ~base_path in
+      add ~base_path (article "a norm written by someone else");
+      match
+        Store.append_at ~base_path ~expected_end_offset:stale
+          (Added (article "a norm decided from the old ledger"))
+      with
+      | Error (Store.Ledger_moved { expected; actual }) ->
+        Alcotest.(check int) "it names the read it was built on" stale expected;
+        Alcotest.(check bool) "and where the ledger actually ends" true
+          (actual > stale);
+        Alcotest.(check (list string))
+          "the stale write did not land"
+          [ "first norm"; "a norm written by someone else" ]
+          (texts (load_or_fail ~base_path))
+      | Ok () -> Alcotest.fail "a write built on a stale read landed"
+      | Error other ->
+        Alcotest.failf "wrong error: %s" (Store.append_error_to_string other))
+
 let test_a_line_that_does_not_decode_is_reported_not_dropped () =
   with_world (fun base_path ->
       add ~base_path (article "a readable norm");
@@ -140,6 +175,8 @@ let () =
             test_rewriting_a_held_norm_edits_it_in_place;
           Alcotest.test_case "a norm written again after removal returns last"
             `Quick test_a_norm_written_again_after_removal_returns_at_the_end;
+          Alcotest.test_case "a write built on a stale read is refused" `Quick
+            test_a_write_built_on_a_stale_read_is_refused;
         ] );
       ( "rejections",
         [ Alcotest.test_case "a broken line is reported, not dropped" `Quick

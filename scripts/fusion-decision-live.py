@@ -145,8 +145,10 @@ def main():
         env = {key: value for key, value in os.environ.items() if not any(part in key for part in ['TOKEN', 'SECRET', 'API_KEY']) and not key.startswith('MASC_')}
         runtime_config = tomllib.loads((base / '.masc/config/runtime.toml').read_text())
         for provider in runtime_config['providers'].values():
-            if provider.get('protocol') == 'codex-app-server' and 'credentials' not in provider:
-                continue  # The configured CLI owns its existing subscription authentication.
+            if provider.get('protocol') in ('codex-app-server', 'ollama-http') and 'credentials' not in provider:
+                # Codex owns its subscription authentication. An explicitly
+                # credential-free Ollama connection needs no secret injected.
+                continue
             credential = provider.get('credentials', {})
             if credential.get('type') != 'env':
                 raise ValueError('This scenario expects explicit environment credential references')

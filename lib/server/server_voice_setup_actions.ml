@@ -6,10 +6,12 @@ let error_message = function
   | Invalid_request detail -> detail
   | Setup_failed error -> Voice_setup.error_message error
 
+(* The resolver, not a rebuilt path: MASC_CONFIG_DIR moves the config root, and
+   a hand-joined <base_path>/.masc/config/runtime.toml reads and writes a
+   different file from the one the runtime loads under that override -- an apply
+   would report success over a file nothing consumes. *)
 let runtime_config_path ~base_path =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config")
-    Config_dir_resolver.runtime_toml_filename
+  Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
 
 (* ── wire shapes ───────────────────────────────────────────────────────── *)
 
@@ -23,10 +25,46 @@ let string_field ~what fields key =
   | Some _ | None ->
     Error (Invalid_request (Printf.sprintf "%s needs a non-empty %S" what key))
 
-let optional_string fields key =
+(* Absence and a wrong type are different answers. Substituting a default for a
+   mistyped value commits configuration the caller did not send: "enabled":
+   "false" read as true, a string timeout dropped. Each reader below refuses
+   what it cannot read rather than filling it in. *)
+let optional_string ~what fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | Some _ | None -> None
+  | None -> Ok None
+  | Some `Null -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some (`String _) ->
+    Error (Invalid_request (Printf.sprintf "%s needs %S to be a non-empty string" what key))
+  | Some _ ->
+    Error (Invalid_request (Printf.sprintf "%s needs %S to be a string" what key))
+
+let optional_bool ~what fields key =
+  match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some _ -> Error (Invalid_request (Printf.sprintf "%s needs %S to be a boolean" what key))
+
+let optional_seconds ~what fields key =
+  match List.assoc_opt key fields with
+  | None -> Ok None
+  | Some (`Float value) -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (float_of_int value))
+  | Some _ -> Error (Invalid_request (Printf.sprintf "%s needs %S to be a number" what key))
+
+(* A name this decoder does not read is a request it is not carrying out. The
+   misspelling that matters is a credential one: api_key_en writes an endpoint
+   with no key and reports success. *)
+let no_unknown_fields ~what ~allowed fields =
+  match List.filter (fun (key, _) -> not (List.mem key allowed)) fields with
+  | [] -> Ok ()
+  | unknown ->
+    Error
+      (Invalid_request
+         (Printf.sprintf
+            "%s does not take %s"
+            what
+            (String.concat ", " (List.map (fun (key, _) -> Printf.sprintf "%S" key) unknown))))
 
 let section_of_string ~what = function
   | "tts" -> Ok Voice_setup.Tts
@@ -44,42 +82,71 @@ let kind_of_string = function
   | "openai_compat" -> Ok Voice_config.Openai_compat
   | "elevenlabs_direct" -> Ok Voice_config.Elevenlabs_direct
   | "voice_mcp" -> Ok Voice_config.Voice_mcp
+  (* The observation emits these two, so refusing them here made the API unable
+     to put back what it had just handed out. They carry no address and run a
+     command instead; [command] stays out of the request because each kind
+     already knows the argv it runs (Voice_runtime_overlay.endpoint_command
+     falls back to it), and a path this route cannot check is not one to take
+     from a caller. *)
+  | "macos_say" -> Ok Voice_config.Macos_say
+  | "whisper_cli" -> Ok Voice_config.Whisper_cli
   | other ->
     Error
       (Invalid_request
          (Printf.sprintf
             "unknown endpoint kind %S; expected \"openai_compat\", \
-             \"elevenlabs_direct\" or \"voice_mcp\""
+             \"elevenlabs_direct\", \"voice_mcp\", \"macos_say\" or \"whisper_cli\""
             other))
+
+(* Which section a kind can serve. A kind installed in the section it cannot
+   answer is a success report over an endpoint that never runs: voice_mcp is
+   asked to speak and skipped by the STT probe, and say has no transcription at
+   all. Every kind is named rather than folded into a default so a kind added
+   later stops the compiler here. *)
+let kind_serves_section kind (section : Voice_setup.section) =
+  match kind, section with
+  | Voice_config.Openai_compat, (Voice_setup.Tts | Voice_setup.Stt)
+  | Voice_config.Elevenlabs_direct, (Voice_setup.Tts | Voice_setup.Stt)
+  | Voice_config.Voice_mcp, Voice_setup.Tts
+  | Voice_config.Macos_say, Voice_setup.Tts
+  | Voice_config.Whisper_cli, Voice_setup.Stt -> true
+  | Voice_config.Voice_mcp, Voice_setup.Stt
+  | Voice_config.Macos_say, Voice_setup.Stt
+  | Voice_config.Whisper_cli, Voice_setup.Tts -> false
 
 let ( let* ) = Result.bind
 
+let endpoint_allowed_fields =
+  [ "id"; "kind"; "enabled"; "timeout_seconds"; "base_url"; "mcp_url"; "health_url";
+    "api_key_env"; "default_voice" ]
+
 let endpoint_of_json json =
+  let what = "an endpoint" in
   let* fields = fields json in
-  let* id = string_field ~what:"an endpoint" fields "id" in
-  let* kind_text = string_field ~what:"an endpoint" fields "kind" in
+  let* () = no_unknown_fields ~what ~allowed:endpoint_allowed_fields fields in
+  let* id = string_field ~what fields "id" in
+  let* kind_text = string_field ~what fields "kind" in
   let* kind = kind_of_string kind_text in
-  let enabled =
-    match List.assoc_opt "enabled" fields with
-    | Some (`Bool value) -> value
-    | Some _ | None -> true
-  in
-  let timeout_seconds =
-    match List.assoc_opt "timeout_seconds" fields with
-    | Some (`Float value) -> Some value
-    | Some (`Int value) -> Some (float_of_int value)
-    | Some _ | None -> None
-  in
+  let* enabled = optional_bool ~what fields "enabled" in
+  let* timeout_seconds = optional_seconds ~what fields "timeout_seconds" in
+  let* base_url = optional_string ~what fields "base_url" in
+  let* mcp_url = optional_string ~what fields "mcp_url" in
+  let* health_url = optional_string ~what fields "health_url" in
+  let* api_key_env = optional_string ~what fields "api_key_env" in
+  let* default_voice = optional_string ~what fields "default_voice" in
   Ok
     { Voice_config.id
     ; kind
-    ; base_url = optional_string fields "base_url"
-    ; mcp_url = optional_string fields "mcp_url"
-    ; health_url = optional_string fields "health_url"
-    ; api_key_env = optional_string fields "api_key_env"
-    ; enabled
+    ; base_url
+    ; mcp_url
+    ; health_url
+    ; api_key_env
+    (* Absent means enabled: an endpoint written without the field is one the
+       operator means to use. Spelled as a match because absence is a case
+       here, not a value to fill in. *)
+    ; enabled = (match enabled with Some value -> value | None -> true)
     ; timeout_seconds
-    ; default_voice = optional_string fields "default_voice"
+    ; default_voice
     (* Not taken from the request. A command kind knows the name it is
        installed under, and an override is a path this route cannot check;
        someone who needs one edits the file. *)
@@ -109,38 +176,67 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
 let change_of_json json =
   let* fields = fields json in
   let* change = string_field ~what:"a change" fields "change" in
-  let section () =
-    let* text = string_field ~what:"a change" fields "section" in
-    section_of_string ~what:"a change" text
+  (* Each variant takes exactly its own fields. A name the variant does not read
+     is a contradiction worth refusing rather than obeying halfway:
+     set_agent_voice with "section":"stt" used to succeed and write
+     voice.tts.agent_voices, the opposite of what the caller named. *)
+  let only ~what allowed = no_unknown_fields ~what ~allowed:("change" :: allowed) fields in
+  let section ~what =
+    let* text = string_field ~what fields "section" in
+    section_of_string ~what text
   in
   match change with
   | "put_endpoint" ->
-    let* section = section () in
+    let what = "put_endpoint" in
+    let* () = only ~what [ "section"; "endpoint" ] in
+    let* section = section ~what in
     let* endpoint =
       match List.assoc_opt "endpoint" fields with
       | Some endpoint -> endpoint_of_json endpoint
       | None -> Error (Invalid_request "put_endpoint needs an \"endpoint\" object")
     in
-    Ok (Voice_setup.Put_endpoint (section, endpoint))
+    if not (kind_serves_section endpoint.Voice_config.kind section)
+    then
+      Error
+        (Invalid_request
+           (Printf.sprintf
+              "endpoint kind %S does not serve the %S section"
+              (Voice_config.string_of_endpoint_kind endpoint.Voice_config.kind)
+              (match section with Voice_setup.Tts -> "tts" | Voice_setup.Stt -> "stt")))
+    else Ok (Voice_setup.Put_endpoint (section, endpoint))
   | "remove_endpoint" ->
-    let* section = section () in
-    let* id = string_field ~what:"remove_endpoint" fields "id" in
+    let what = "remove_endpoint" in
+    let* () = only ~what [ "section"; "id" ] in
+    let* section = section ~what in
+    let* id = string_field ~what fields "id" in
     Ok (Voice_setup.Remove_endpoint (section, id))
   | "set_default_model" ->
-    let* section = section () in
-    let* model = string_field ~what:"set_default_model" fields "model" in
+    let what = "set_default_model" in
+    let* () = only ~what [ "section"; "model" ] in
+    let* section = section ~what in
+    let* model = string_field ~what fields "model" in
     Ok (Voice_setup.Set_default_model (section, model))
   | "set_tts_default_voice" ->
-    let* voice = string_field ~what:"set_tts_default_voice" fields "voice" in
+    let what = "set_tts_default_voice" in
+    let* () = only ~what [ "voice" ] in
+    let* voice = string_field ~what fields "voice" in
     Ok (Voice_setup.Set_tts_default_voice voice)
   | "set_agent_voice" ->
-    let* agent = string_field ~what:"set_agent_voice" fields "agent" in
+    let what = "set_agent_voice" in
+    let* () = only ~what [ "agent"; "voice" ] in
+    let* agent = string_field ~what fields "agent" in
     (* A null voice clears the mapping, which is a different request from not
-       mentioning the field at all. *)
+       mentioning the field at all. Folding the two together turned a payload
+       that forgot the field into a deletion. *)
     (match List.assoc_opt "voice" fields with
-     | Some `Null | None -> Ok (Voice_setup.Set_agent_voice (agent, None))
+     | Some `Null -> Ok (Voice_setup.Set_agent_voice (agent, None))
      | Some (`String voice) when String.trim voice <> "" ->
        Ok (Voice_setup.Set_agent_voice (agent, Some voice))
+     | None ->
+       Error
+         (Invalid_request
+            "set_agent_voice needs \"voice\": a non-empty string to set one, or null to \
+             clear it")
      | Some _ ->
        Error
          (Invalid_request "set_agent_voice needs \"voice\" to be a non-empty string or null"))
@@ -162,6 +258,9 @@ let changes_of_json fields =
 
 let request_of_json json =
   let* fields = fields json in
+  let* () =
+    no_unknown_fields ~what:"the request" ~allowed:[ "expected_revision"; "changes" ] fields
+  in
   let* revision = string_field ~what:"the request" fields "expected_revision" in
   let* changes = changes_of_json fields in
   Ok (revision, changes)
@@ -169,6 +268,15 @@ let request_of_json json =
 (* ── routes ────────────────────────────────────────────────────────────── *)
 
 let section_json ~endpoints ~extra = `Assoc (extra @ [ "endpoints", `List endpoints ])
+
+(* The tuning actually used when synthesizing. Left out, an admin client showed
+   provider defaults for a voice the file had already tuned. *)
+let tuning_json (tuning : Voice_config.voice_tuning) =
+  `Assoc
+    [ "stability", `Float tuning.Voice_config.stability
+    ; "similarity_boost", `Float tuning.Voice_config.similarity_boost
+    ; "style", `Float tuning.Voice_config.style
+    ]
 
 let observe ~base_path =
   match Voice_setup.observe ~runtime_config_path:(runtime_config_path ~base_path) with
@@ -186,11 +294,17 @@ let observe ~base_path =
              ~extra:
                [ "default_model", `String tts.Voice_config.default_model
                ; "default_voice", `String tts.Voice_config.default_voice
+               ; "default_voice_settings", tuning_json tts.Voice_config.default_voice_settings
                ; ( "agent_voices"
                  , `Assoc
                      (List.map
                         (fun (agent, voice) -> agent, `String voice)
                         tts.Voice_config.agent_voices) )
+               ; ( "agent_voice_settings"
+                 , `Assoc
+                     (List.map
+                        (fun (agent, tuning) -> agent, tuning_json tuning)
+                        tts.Voice_config.agent_voice_settings) )
                ])
     in
     let stt =
@@ -202,7 +316,13 @@ let observe ~base_path =
          | Some stt ->
            section_json
              ~endpoints:(List.map endpoint_json stt.Voice_config.endpoints)
-             ~extra:[ "default_model", `String stt.Voice_config.default_model ])
+             ~extra:
+               [ "default_model", `String stt.Voice_config.default_model
+               (* Behaviourally significant and it was missing: with this on,
+                  ending a capture sends the transcript straight away, and a
+                  client that could not see it showed the default-off flow. *)
+               ; "send_on_stop", `Bool stt.Voice_config.send_on_stop
+               ])
     in
     Ok (`Assoc [ "revision", `String revision; "tts", tts; "stt", stt ])
 

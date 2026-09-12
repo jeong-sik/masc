@@ -259,6 +259,206 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
                Alcotest.(check (option string)) "and no credential it was not given"
                  None endpoint.Voice_config.api_key_env))))
 
+(* [voice.tts] cannot be created a field at a time -- the section validates on
+   commit and wants its model and default voice -- so every case that needs one
+   sends them with whatever else it is testing, in a single transaction. *)
+let tts_section_changes rest =
+  [ `Assoc
+      [ "change", `String "set_default_model"
+      ; "section", `String "tts"
+      ; "model", `String "eleven_v3"
+      ]
+  ; `Assoc [ "change", `String "set_tts_default_voice"; "voice", `String "cassidy" ]
+  ; `Assoc
+      [ "change", `String "put_endpoint"
+      ; "section", `String "tts"
+      ; "endpoint",
+        `Assoc
+          [ "id", `String "eleven"
+          ; "kind", `String "elevenlabs_direct"
+          ; "base_url", `String "https://fixture.invalid/v1"
+          ]
+      ]
+  ]
+  @ rest
+
+(* A request that is refused must leave the file alone, which is what every
+   case below checks alongside the refusal itself. *)
+let refused ~what change =
+  with_workspace (fun ~base_path ~path ->
+    let before = read path in
+    match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+    | Ok _ -> Alcotest.failf "%s must be refused" what
+    | Error _ -> Alcotest.(check string) "nothing was written" before (read path))
+
+(* The observation emits these two kinds, so refusing them here made the API
+   unable to put back what it had just handed out. *)
+let test_a_command_kind_round_trips () =
+  with_workspace (fun ~base_path ~path ->
+    let changes =
+      tts_section_changes
+        [ `Assoc
+            [ "change", `String "put_endpoint"
+            ; "section", `String "tts"
+            ; "endpoint", `Assoc [ "id", `String "say"; "kind", `String "macos_say" ]
+            ]
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) changes) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ ->
+      Alcotest.(check bool) "the kind reached the file" true
+        (Astring.String.is_infix ~affix:"macos_say" (read path));
+      (match Actions.observe ~base_path with
+       | Error error -> Alcotest.fail (Actions.error_message error)
+       | Ok json ->
+         let kinds =
+           match member "endpoints" (member "tts" json) with
+           | `List endpoints -> List.map (string_member "kind") endpoints
+           | _ -> Alcotest.fail "tts endpoints must be a list"
+         in
+         Alcotest.(check bool) "and comes back out of the observation" true
+           (List.mem "macos_say" kinds)))
+
+(* say has no transcription at all, so installing it as an STT endpoint would
+   report success over something that never runs. *)
+let test_a_kind_that_cannot_serve_the_section_is_refused () =
+  refused ~what:"a TTS-only kind in the STT section"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint", `Assoc [ "id", `String "say"; "kind", `String "macos_say" ]
+       ])
+
+(* "false" is not false. Substituting the default committed the opposite of
+   what the caller sent. *)
+let test_a_mistyped_optional_field_is_refused () =
+  refused ~what:"a string where a boolean belongs"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint",
+         `Assoc
+           [ "id", `String "x"
+           ; "kind", `String "openai_compat"
+           ; "enabled", `String "false"
+           ]
+       ])
+
+let test_a_mistyped_timeout_is_refused () =
+  refused ~what:"a string where a number belongs"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint",
+         `Assoc
+           [ "id", `String "x"
+           ; "kind", `String "openai_compat"
+           ; "timeout_seconds", `String "60"
+           ]
+       ])
+
+(* The misspelling that matters is a credential one: the endpoint lands without
+   the key and the call reports success. *)
+let test_a_misspelled_endpoint_property_is_refused () =
+  refused ~what:"an endpoint property this route does not read"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint",
+         `Assoc
+           [ "id", `String "x"
+           ; "kind", `String "openai_compat"
+           ; "api_key_en", `String "MASC_KEY"
+           ]
+       ])
+
+(* This one used to succeed and write voice.tts.agent_voices -- the opposite of
+   the section the caller named. *)
+let test_a_field_the_change_does_not_read_is_refused () =
+  refused ~what:"set_agent_voice naming a section"
+    (`Assoc
+       [ "change", `String "set_agent_voice"
+       ; "section", `String "stt"
+       ; "agent", `String "rondo"
+       ; "voice", `String "aria"
+       ])
+
+(* Forgetting the field is not the same request as sending null, and folding
+   them together turned a malformed payload into a deletion. *)
+let test_set_agent_voice_without_a_voice_is_refused () =
+  refused ~what:"set_agent_voice with no voice field"
+    (`Assoc [ "change", `String "set_agent_voice"; "agent", `String "rondo" ])
+
+let test_an_explicit_null_voice_clears_the_mapping () =
+  with_workspace (fun ~base_path ~path ->
+    let set =
+      tts_section_changes
+        [ `Assoc
+            [ "change", `String "set_agent_voice"
+            ; "agent", `String "rondo"
+            ; "voice", `String "aria"
+            ]
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) set) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ ->
+      Alcotest.(check bool) "the mapping was written" true
+        (Astring.String.is_infix ~affix:"aria" (read path));
+      let clear =
+        `Assoc
+          [ "change", `String "set_agent_voice"
+          ; "agent", `String "rondo"
+          ; "voice", `Null
+          ]
+      in
+      (match Actions.apply ~base_path (request (revision ~base_path) [ clear ]) with
+       | Error error -> Alcotest.fail (Actions.error_message error)
+       | Ok _ ->
+         Alcotest.(check bool) "and an explicit null took it away" false
+           (Astring.String.is_infix ~affix:"aria" (read path))))
+
+(* With this on, ending a capture sends the transcript straight away. A client
+   that could not see it showed the default-off flow. *)
+let test_the_observation_names_send_on_stop () =
+  with_workspace (fun ~base_path ~path:_ ->
+    match Actions.observe ~base_path with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok json ->
+      (match member "send_on_stop" (member "stt" json) with
+       | `Bool _ -> ()
+       | other ->
+         Alcotest.failf "stt.send_on_stop must be a boolean, got %s"
+           (Yojson.Safe.to_string other)))
+
+let test_the_observation_names_the_tts_tuning () =
+  with_workspace (fun ~base_path ~path ->
+    (* The fixture has no [voice.tts]; write one so the projection has a section
+       to describe. *)
+    match Actions.apply ~base_path (request (revision ~base_path) (tts_section_changes [])) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ ->
+      ignore (read path);
+      (match Actions.observe ~base_path with
+       | Error error -> Alcotest.fail (Actions.error_message error)
+       | Ok json ->
+         (match member "default_voice_settings" (member "tts" json) with
+          | `Assoc fields ->
+            List.iter
+              (fun key ->
+                Alcotest.(check bool) (Printf.sprintf "tuning names %s" key) true
+                  (List.mem_assoc key fields))
+              [ "stability"; "similarity_boost"; "style" ]
+          | other ->
+            Alcotest.failf "tts.default_voice_settings must be an object, got %s"
+              (Yojson.Safe.to_string other));
+         (match member "agent_voice_settings" (member "tts" json) with
+          | `Assoc _ -> ()
+          | other ->
+            Alcotest.failf "tts.agent_voice_settings must be an object, got %s"
+              (Yojson.Safe.to_string other))))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -277,6 +477,32 @@ let () =
         ; Alcotest.test_case "a stale revision is a conflict" `Quick
             test_a_stale_revision_is_a_conflict
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
+        ] )
+    ; ( "a kind is taken or refused for what it can do"
+      , [ Alcotest.test_case "a command kind round-trips" `Quick
+            test_a_command_kind_round_trips
+        ; Alcotest.test_case "a kind that cannot serve the section" `Quick
+            test_a_kind_that_cannot_serve_the_section_is_refused
+        ] )
+    ; ( "a field is read as sent or not at all"
+      , [ Alcotest.test_case "a mistyped boolean" `Quick
+            test_a_mistyped_optional_field_is_refused
+        ; Alcotest.test_case "a mistyped timeout" `Quick test_a_mistyped_timeout_is_refused
+        ; Alcotest.test_case "a misspelled endpoint property" `Quick
+            test_a_misspelled_endpoint_property_is_refused
+        ; Alcotest.test_case "a field the change does not read" `Quick
+            test_a_field_the_change_does_not_read_is_refused
+        ] )
+    ; ( "clearing a mapping is asked for explicitly"
+      , [ Alcotest.test_case "no voice field at all" `Quick
+            test_set_agent_voice_without_a_voice_is_refused
+        ; Alcotest.test_case "an explicit null clears it" `Quick
+            test_an_explicit_null_voice_clears_the_mapping
+        ] )
+    ; ( "the observation describes what is in effect"
+      , [ Alcotest.test_case "send_on_stop" `Quick test_the_observation_names_send_on_stop
+        ; Alcotest.test_case "the tts tuning" `Quick
+            test_the_observation_names_the_tts_tuning
         ] )
     ; ( "the wizard and the routes agree"
       , [ Alcotest.test_case "what the wizard sends is what the routes read" `Quick

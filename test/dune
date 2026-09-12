@@ -5724,6 +5724,11 @@
  (libraries alcotest masc yojson unix))
 
 (test
+ (name test_lane_addon_declaration)
+ (modules test_lane_addon_declaration)
+ (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
  (libraries masc_test_deps eio eio_main yojson unix))

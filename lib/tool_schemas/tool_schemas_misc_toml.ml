@@ -38,6 +38,8 @@ let msx_peek = schema_of_name "masc_msx_peek"
 let msx_ram_diff = schema_of_name "masc_msx_ram_diff"
 
 let lane_attach = schema_of_name "masc_lane_attach"
+let lane_declaration_read = schema_of_name "masc_lane_declaration_read"
+let lane_declaration_save = schema_of_name "masc_lane_declaration_save"
 let lane_inspect = schema_of_name "masc_lane_inspect"
 let lane_observe = schema_of_name "masc_lane_observe"
 let lane_slice = schema_of_name "masc_lane_slice"

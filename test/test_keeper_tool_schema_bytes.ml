@@ -324,6 +324,8 @@ let all_surface_golden_names =
   ; "masc_library_add"
   ; "masc_library_list"
   ; "masc_lane_attach"
+  ; "masc_lane_declaration_read"
+  ; "masc_lane_declaration_save"
   ; "masc_lane_act"
   ; "masc_lane_action_status"
   ; "masc_lane_detach"

@@ -560,6 +560,32 @@ let configuration_directory config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
   Filename.concat resolution.config_root.path "lane-addons"
 
+let edit_directory config =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
+  match resolution.status with
+  | Config_dir_resolver.Invalid_env_status -> Error {Lane_addon_declaration.code=Io_error;
+      message=String.concat "; " resolution.warnings; current=None}
+  | Ready | Warn | Missing_status -> Ok (Filename.concat resolution.config_root.path "lane-addons")
+
+let read_declaration ~config json = Eio_context.run_on_owner_domain (fun () ->
+  let* source_path = Lane_addon_declaration.read_request json in
+  let* directory = edit_directory config in
+  let m = manager config in
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    offload (fun () -> Lane_addon_declaration.read ~directory ~source_path)
+    |> Result.map Lane_addon_declaration.document_to_json))
+
+let save_declaration ~config json = Eio_context.run_on_owner_domain (fun () ->
+  let* request = Lane_addon_declaration.write_request json in
+  let* directory = edit_directory config in
+  let m = manager config in
+  (* Like reconcile and Detach, this recoverable serializer uses use_ro so an
+     exception releases it without poisoning later configuration repairs. *)
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request) in
+    m.configuration_nudge ();
+    Ok (Lane_addon_declaration.receipt_to_json receipt)))
+
 (* Explicit removal edits the desired configuration. Otherwise the next
    reconciliation would legitimately create the just-detached observer again. *)
 let remove_configuration_file ~directory (owner : configuration_owner) =
@@ -921,7 +947,7 @@ let start_configuration_service ~config ~sw ~clock =
     let stop () = active := false; Pulse.shutdown pulse in
     Hashtbl.add configuration_services key stop;
     let m = manager config in
-    m.configuration_nudge <- (fun () -> Pulse.nudge pulse ~reason:"owned worker released");
+    m.configuration_nudge <- (fun () -> Pulse.nudge pulse ~reason:"configuration reconciliation requested");
     Eio.Switch.on_release sw (fun () ->
       stop (); Hashtbl.remove configuration_services key;
       m.configuration_nudge <- (fun () -> ()));

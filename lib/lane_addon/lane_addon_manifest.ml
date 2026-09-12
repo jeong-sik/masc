@@ -70,3 +70,4 @@ let load ~path =
   | Sys_error message -> Error message
   | Unix.Unix_error (error, call, arg) -> Error (call ^ " " ^ arg ^ ": " ^ Unix.error_message error)
   | Otoml.Parse_error (_, message) -> Error message
+  | Otoml.Duplicate_key message -> Error message

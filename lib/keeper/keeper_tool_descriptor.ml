@@ -2873,6 +2873,8 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "lane_act" "masc_lane_act" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_action_status" "masc_lane_action_status" ~readonly:true
   ; masc_misc_descriptor "lane_attach" "masc_lane_attach" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_declaration_read" "masc_lane_declaration_read" ~readonly:true
+  ; masc_misc_descriptor "lane_declaration_save" "masc_lane_declaration_save" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_inspect" "masc_lane_inspect" ~readonly:true
   ; masc_misc_descriptor "lane_observe" "masc_lane_observe" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_slice" "masc_lane_slice" ~readonly:true

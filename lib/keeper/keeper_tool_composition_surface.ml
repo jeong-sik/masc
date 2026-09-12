@@ -317,6 +317,7 @@ let node_result_to_json (result : Executor.node_result) =
 ;;
 
 let observe_node_result
+      ?on_receipt_committed
       ~composition_tool
       ~composition_execution
       ~composition_tool_kind
@@ -376,7 +377,9 @@ let observe_node_result
       ?sandbox_roots:context.sandbox_roots
       ?network_mode:context.network_mode
       ?runtime_profile:context.runtime_profile
-      ~on_committed:(fun () -> committed := true)
+      ~on_committed:(fun () ->
+        committed := true;
+        Option.iter (fun record -> record result.execution_id) on_receipt_committed)
       ();
     if not !committed
     then failwith "composition telemetry commit callback was not delivered";
@@ -692,6 +695,7 @@ let evidence_nodes_of_execution = function
 ;;
 
 let record_skill_composition_evidence
+      ~on_publication_failure
       ~config
       ~reference
       ~composition_run_id
@@ -703,6 +707,7 @@ let record_skill_composition_evidence
       ~execution
       ~result =
   let report detail =
+    on_publication_failure detail;
     Log.Keeper.warn
       "Skill composition evidence publication failed: tool=%s run=%s error=%s"
       composition_tool
@@ -835,6 +840,7 @@ let async_worker_result
   Option.iter
     (fun reference ->
        record_skill_composition_evidence
+         ~on_publication_failure:(fun _ -> ())
          ~config
          ~reference
          ~composition_run_id
@@ -1557,6 +1563,45 @@ module For_testing = struct
   let cancel_result = cancel_result
 end
 
+(* This is same-turn read recovery, not permission to replay a graph after
+   provider restart. Only acknowledged atomic settlements can preserve the
+   provider loop; the failed result and its aggregate effect evidence stay intact. *)
+let recoverable_read_failure ~plan ~committed (failure : Executor.failure) =
+  let ordinary_atomic descriptor =
+    match descriptor.Keeper_tool_descriptor.execution, descriptor.tool_kind with
+    | Ordinary _, Atomic_tool -> true
+    | (Terminal | Direct_terminal), _
+    | Ordinary _, (Composition_tool | Async_composition_tool) -> false
+  in
+  let descriptor node_id = Keeper_tool_plan.descriptor plan node_id in
+  let readonly (node : Executor.node_result) =
+    match descriptor node.node_id with
+    | Some d -> ordinary_atomic d
+                && Keeper_tool_descriptor.readonly_for_input d ~input:node.input = Some true
+    | None -> false
+  in
+  let eligible (node : Executor.node_result) =
+    List.exists (fun id -> id = node.execution_id) committed
+    && node.output_validation_error = None
+    && match node.result with
+       | Tool_result.Completed _ -> true
+       | Tool_result.Failed _ -> readonly node
+       | Tool_result.Deferred _ -> false
+  in
+  List.for_all (fun (node : Keeper_tool_plan.node) ->
+    match descriptor node.id with Some d -> ordinary_atomic d | None -> false)
+    (Keeper_tool_plan.nodes plan)
+  && match failure.cause with
+     | Executor.Tool_did_not_complete node ->
+       (match node.result with
+        | Tool_result.Failed _ -> readonly node && eligible node
+          && List.exists (fun (settled : Executor.node_result) -> settled.execution_id = node.execution_id) failure.settled
+          && List.for_all eligible failure.settled
+        | Tool_result.Completed _ | Tool_result.Deferred _ -> false)
+     | Executor.Plan_execution_failed _ | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ -> false
+;;
+
 let make_tools_with_authority
       ?(instruction_skills : instruction_skill list = [])
       ?(skill_compositions : composition_skill list = [])
@@ -1785,6 +1830,7 @@ let make_tools_with_authority
               | Ok () ->
              let run_id = Keeper_tool_plan.Run_id.fresh () in
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
+             let committed_receipts = ref [] in
              let execution =
                execute_keeper_plan
                  ~capability_authority
@@ -1810,6 +1856,8 @@ let make_tools_with_authority
                    (Option.map
                       (fun turn_context ->
                          observe_node_result
+                           ~on_receipt_committed:(fun execution_id ->
+                             committed_receipts := execution_id :: !committed_receipts)
                            ~composition_tool:tool_name
                            ~composition_execution:entry.execution
                            ~composition_tool_kind:(Catalog.tool_kind entry)
@@ -1833,6 +1881,7 @@ let make_tools_with_authority
                    a sibling's unknown/post-effect failure.  Composition
                    execution has no persisted cursor, so only an entirely
                    proven-pre-effect defer may remain resumable. *)
+                if not (recoverable_read_failure ~plan ~committed:!committed_receipts failure) then
                 Option.iter
                   (fun mark_failed ->
                      let diagnostic =
@@ -1889,6 +1938,14 @@ let make_tools_with_authority
                    "composition result manifest persistence failed"
              in
              record_skill_composition_evidence
+               ~on_publication_failure:(fun detail ->
+                 match execution with
+                 | Error failure when recoverable_read_failure ~plan ~committed:!committed_receipts failure ->
+                   Option.iter (fun mark_failed -> mark_failed
+                     { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure;
+                       effect_disposition = failure.effect_disposition;
+                       diagnostic = "composition recovery evidence persistence failed: " ^ detail }) on_failed
+                 | Ok _ | Error _ -> ())
                ~config
                ~reference:skill.reference
                ~composition_run_id

@@ -3816,19 +3816,28 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
-    narrow = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=24,
-        columns=80,
-        needle=b"MASC Planning",
-        controls=(FULL_REDRAW,),
-        final_cursor=b"\x1b[?25l",
+    mode_prefix = re.search(
+        rb" MASC Planning[^\r\n]*?filter:active", CSI_RE.sub(b"", frame)
     )
-    plain_narrow = CSI_RE.sub(b"", narrow)
-    if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
-        raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
+    if mode_prefix is None:
+        raise AssertionError(f"Planning wide header omitted its modes: {frame!r}")
+    # Four cells belong to the frame margins. At this width the title and
+    # modes exactly fill the content area, before the timestamp is appended.
+    boundary_cols = fixture_cell_width(mode_prefix.group().decode("utf-8")) + 4
+    for columns in (80, boundary_cols):
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=24,
+            columns=columns,
+            needle=b"MASC Planning",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain_narrow = CSI_RE.sub(b"", narrow)
+        if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
+            raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
     terminal_rows = 24
 
     # One press, not two. The pane opens on Planning_filter_active, so the

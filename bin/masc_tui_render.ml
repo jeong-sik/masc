@@ -3124,7 +3124,8 @@ let render_planning_list (state : state) =
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter) in
   let modes_fit_header =
-    Message_layout.display_width (title ^ "  " ^ modes) <= framed_inner_width cols
+    (* The timestamp can overflow and require a truncation cell after modes. *)
+    Message_layout.display_width (title ^ "  " ^ modes) < framed_inner_width cols
   in
   let header = Printf.sprintf "%s%s  %s  %s" title
     (if modes_fit_header then "  " ^ modes else "")

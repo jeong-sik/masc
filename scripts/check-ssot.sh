@@ -417,9 +417,9 @@ check_rule "R15-tui-title-not-loaded-literal" 0 \
   'bin/masc_tui_render_prim\.mli?:' \
   bin
 
-# The failure note the body draws under an empty page. Nine surfaces read it
-# from one place and two spelled it again, so two screens could drift from the
-# other nine on a word.
+# The failure note the body draws under an empty page. Twelve sites draw it:
+# ten read it from one place and two spelled the literal again, so two screens
+# could drift from the other ten on a word.
 check_rule "R16-tui-page-failed-note-literal" 0 \
   "Masc_tui_render_prim.page_failed_note" \
   'load failed; nothing here is a reading' \

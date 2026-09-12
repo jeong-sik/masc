@@ -58,6 +58,12 @@ val read_owned_bytes :
 (** Binary prefix through the same owned Read resolver and regular-file
     containment. The caller supplies a bounded byte limit. *)
 
+val read_complete_owned_bytes :
+  ownership_root:string -> path:string -> ?cwd:string -> unit ->
+  (string, string) result
+(** Complete immutable read through the same owned resolver and descriptor
+    containment. Used when a binary parser needs the whole source. *)
+
 val handle_owned_read_file_with_outcome :
   ownership_root:string ->
   args:Yojson.Safe.t ->

@@ -22,6 +22,16 @@ let trees signals =
 let parse_html source =
   source |> Markup.string |> Markup.parse_html |> Markup.signals |> trees
 
+let parse_xml source =
+  let first_error = ref None in
+  let report location error =
+    if Option.is_none !first_error then
+      first_error := Some (Markup.Error.to_string ~location error)
+  in
+  let document = source |> Markup.string |> Markup.parse_xml ~report
+    |> Markup.signals |> trees in
+  match !first_error with None -> Ok document | Some detail -> Error detail
+
 let rec text_content = function
   | Text value -> value
   | Element { children; _ } ->

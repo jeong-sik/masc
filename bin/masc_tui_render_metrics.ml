@@ -471,6 +471,7 @@ let render_section_tools ~cols (state : state) : string list =
   @ List.map clip tool_bars
 
 let render_metrics_body ~cols ~budget (state : state)
+    ~(report_scroll : int -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~push_selected:_
@@ -499,6 +500,10 @@ let render_metrics_body ~cols ~budget (state : state)
   let available = max 0 (room - hint_rows) in
   let max_scroll = max 0 (total_lines - available) in
   let scroll = max 0 (min state.metrics_scroll max_scroll) in
+  (* The row this frame could actually start at, handed back so the next
+     keypress steps from it rather than from wherever the last one left the
+     stored value. *)
+  report_scroll scroll;
   let section_lines_window =
     Rows.of_list ~first:scroll ~height:available section_lines
   in

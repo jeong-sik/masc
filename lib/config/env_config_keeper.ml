@@ -363,6 +363,24 @@ module KeeperVision = struct
     |> clamp_int ~min_value:1 ~max_value:max_image_bytes_ceiling
   ;;
 
+  let max_pdf_source_bytes_default = 32 * 1024 * 1024
+  let max_pdf_source_bytes_ceiling = 256 * 1024 * 1024
+
+  (** Maximum raw PDF bytes read into this process before Poppler sees them. A
+      PDF is not one image and is legitimately larger than
+      [max_image_bytes], but the complete read happens in the server process,
+      so a producer-controlled document with no ceiling is the whole server's
+      memory. Default 32 MiB covers a scanned document of a few hundred pages;
+      the range ends at 256 MiB so raising it stays a decision rather than an
+      accident.
+
+      @category Policies @ops_class operator *)
+  let max_pdf_source_bytes () =
+    get_int_nonneg ~default:max_pdf_source_bytes_default
+      "MASC_KEEPER_VISION_MAX_PDF_SOURCE_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_pdf_source_bytes_ceiling
+  ;;
+
   let max_output_tokens_default = 64 * 1024
   let max_output_tokens_floor = 4096
   let max_output_tokens_ceiling = 128 * 1024

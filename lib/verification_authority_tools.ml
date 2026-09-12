@@ -418,26 +418,67 @@ let media_result t tool ~name ~args ~start_time =
          match List.assoc_opt "cwd" fields with Some (`String cwd) -> Some cwd | _ -> None
        in
        let limit = Env_config_keeper.KeeperVision.max_image_bytes () in
+       let pdf_limit = Env_config_keeper.KeeperVision.max_pdf_source_bytes () in
+       (* Nothing stood between a producer's document and this process's memory.
+          The complete reads below run in the server, and the only size check
+          was further down on a rendered PNG -- the PDF path does not reach it
+          at all, so one evidence file could take the memory every Keeper is
+          sharing.
+
+          [sized_source] asks for one byte more than the ceiling first. A source
+          that answers with more than the ceiling is refused before the complete
+          read runs. The complete read is still what becomes evidence, because
+          this lane does not hash the bounded body, and it is measured again on
+          the way out: a producer can grow the file between the two reads, and
+          that second measurement is what notices. Refusing before the bytes
+          arrive in that case would need a bounded exact read the sandbox runner
+          does not expose. *)
+       let sized_source ~ceiling ~probe ~complete =
+         match probe ~max_bytes:(ceiling + 1) with
+         | Error _ as error -> error
+         | Ok sample when String.length sample > ceiling -> Ok sample
+         | Ok _ ->
+           (match complete () with
+            | Error _ as error -> error
+            | Ok bytes -> Ok bytes)
+       in
        let bytes =
          match t.producer_scope with
          | Keeper_producer meta ->
+           let probe ~max_bytes =
+             Keeper_tool_filesystem_runtime.read_sandbox_bytes
+               ~config:t.config ~meta ~path ?cwd ~max_bytes ()
+           in
            (* The bounded probe identifies the format only. Its potentially
               text-projected body never becomes image input or hash evidence. *)
-           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
-                    ~config:t.config ~meta ~path ?cwd
-                    ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
+           (match probe
+                    ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) with
             | Error _ as error -> error
-            | Ok probe ->
-              (match is_pdf path probe, Keeper_vision_tool.sniff_image_media_type probe with
-               | false, Error _ -> Ok probe
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                   ~config:t.config ~meta ~path ?cwd ()))
+            | Ok format_probe ->
+              (match is_pdf path format_probe,
+                     Keeper_vision_tool.sniff_image_media_type format_probe with
+               | false, Error _ -> Ok format_probe
+               | true, _ ->
+                 sized_source ~ceiling:pdf_limit ~probe
+                   ~complete:(fun () ->
+                     Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
+                       ~config:t.config ~meta ~path ?cwd ())
+               | false, Ok _ ->
+                 sized_source ~ceiling:limit ~probe
+                   ~complete:(fun () ->
+                     Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
+                       ~config:t.config ~meta ~path ?cwd ())))
          | Workspace_producer ->
-           (match Keeper_tool_filesystem_runtime.read_owned_bytes
-             ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
-            | Ok probe when is_pdf path probe ->
-              Keeper_tool_filesystem_runtime.read_complete_owned_bytes
-                ~ownership_root:t.ownership_root ~path ?cwd ()
+           let probe ~max_bytes =
+             Keeper_tool_filesystem_runtime.read_owned_bytes
+               ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes ()
+           in
+           (match probe ~max_bytes:(limit + 1) with
+            | Ok format_probe when is_pdf path format_probe ->
+              sized_source ~ceiling:pdf_limit ~probe
+                ~complete:(fun () ->
+                  Keeper_tool_filesystem_runtime.read_complete_owned_bytes
+                    ~ownership_root:t.ownership_root ~path ?cwd ())
             | result -> result)
        in
        (match bytes with
@@ -446,7 +487,13 @@ let media_result t tool ~name ~args ~start_time =
             ~tool_name:name ~start_time detail)
         | Error _ -> None (* The ordinary Read preserves its own error contract. *)
         | Ok bytes when is_pdf path bytes ->
-          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+          if String.length bytes > pdf_limit then
+            Some (Tool_result.error ~failure_class:Tool_result.Policy_rejection
+              ~tool_name:name ~start_time
+              (Printf.sprintf
+                 "PDF source has more than the configured %d source bytes; nothing was inspected"
+                 pdf_limit))
+          else if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
               ~tool_name:name ~start_time "PDFs are inspected whole; omit line offset and limit")
           else Some (pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes:limit)

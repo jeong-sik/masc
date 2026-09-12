@@ -397,6 +397,15 @@ let all =
       ~category:"media"
       "Maximum image bytes accepted by the vision tool"
   ; setting
+      ~range:(int_range ~min:1 ~max:268435456 ())
+      ~env_name:"MASC_KEEPER_VISION_MAX_PDF_SOURCE_BYTES"
+      ~exposure:Env_only
+      ~value_kind:Integer
+      ~default:"33554432"
+      ~consumers:[ "Verification evidence reader" ]
+      ~category:"media"
+      "Maximum PDF source bytes read into the server before inspection"
+  ; setting
       ~range:(int_range ~min:4096 ~max:131072 ())
       ~env_name:"MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS"
       ~exposure:(Toml_and_env "vision.max_output_tokens")

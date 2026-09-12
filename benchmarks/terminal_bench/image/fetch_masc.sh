@@ -3,15 +3,37 @@
 # linux container of the target architecture. No local build (constitution).
 set -euo pipefail
 
-MASC_VERSION="${MASC_VERSION:-0.35.8}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DIST_DIR="${SCRIPT_DIR}/../dist"
-ARCH="${MASC_LINUX_ARCH:-arm64}"   # Apple Silicon docker → arm64; Intel/amd64 호스트면 x64
+
+# Resolved, not pinned. This repository prunes old releases — the previous
+# pin (0.35.8) stopped existing and the script then failed with a bare
+# "release not found". Pass MASC_VERSION to hold a specific one; dist/.version
+# records whichever was used, so a run stays attributable either way.
+MASC_VERSION="${MASC_VERSION:-}"
+if [[ -z "${MASC_VERSION}" ]]; then
+  MASC_VERSION="$(gh release view -R jeong-sik/masc --json tagName --jq '.tagName' 2>/dev/null | sed 's/^v//')"
+  if [[ -z "${MASC_VERSION}" ]]; then
+    echo "could not resolve the latest masc release; pass MASC_VERSION=<x.y.z>" >&2
+    exit 1
+  fi
+  echo "[fetch] latest release: v${MASC_VERSION}"
+fi
+
+# The architecture of the *task images*, not of this host. Terminal-Bench
+# publishes amd64 images only, so on an Apple Silicon machine docker runs them
+# emulated and an arm64 masc cannot execute inside them at all — which reads
+# as "missing shared libraries" three layers later.
+ARCH="${MASC_LINUX_ARCH:-x64}"
 if [[ "${ARCH}" == "x64" ]]; then PLATFORM="linux/amd64"; else PLATFORM="linux/arm64"; fi
 
 mkdir -p "${DIST_DIR}"
-gh release download "v${MASC_VERSION}" -R jeong-sik/masc \
-  -p "masc-linux-${ARCH}" -O "${DIST_DIR}/masc" --clobber
+if ! gh release download "v${MASC_VERSION}" -R jeong-sik/masc \
+     -p "masc-linux-${ARCH}" -O "${DIST_DIR}/masc" --clobber; then
+  echo "no masc-linux-${ARCH} asset on v${MASC_VERSION}. Releases that exist:" >&2
+  gh release list -R jeong-sik/masc --limit 5 >&2 || true
+  exit 1
+fi
 # The remote_ssh exec lane invokes `masc-exec-shim` on the remote PATH; the
 # release ships it as a separate static binary (note: the x64 asset is amd64).
 SHIM_ARCH="${ARCH}"; [[ "${ARCH}" == "x64" ]] && SHIM_ARCH="amd64"

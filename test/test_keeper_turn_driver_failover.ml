@@ -1,3 +1,11 @@
+
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+;;
+
 module Runtime_manifest = Masc.Keeper_runtime_manifest
 module Driver = Masc.Keeper_turn_driver
 module Deferred_store = Masc.Keeper_deferred_runtime_lane_store
@@ -630,7 +638,7 @@ let test_assignment_to_lane_id_rejected_at_load () =
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ -> Alcotest.fail "expected load to fail on lane-targeted assignment"
        | Error msg ->
          Alcotest.(check bool)
@@ -644,7 +652,7 @@ let test_unknown_lane_candidate_rejected_at_load () =
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ -> Alcotest.fail "expected load to fail on unknown lane candidate"
        | Error msg ->
          Alcotest.(check bool)

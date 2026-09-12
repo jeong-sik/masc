@@ -42,11 +42,13 @@
 
 set -eu
 
-REPO_ROOT="${WIRE_GATE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-# Guard against the mis-root failure observed in this sandbox: the ROOT
-# formula can land OUTSIDE any real checkout, where the gate would silently
-# report "no protected module changed" while scanning nothing. A correct
-# root (live or synthetic) must at least be a git worktree.
+REPO_ROOT="${WIRE_GATE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# The gate lives at <root>/scripts/, so ONE level up is the repo root. An
+# earlier revision copied the two-level "../.." formula from the
+# scripts/lint/ ratchet and landed one directory too high — locally on the
+# keeper playground root, and on GitHub Actions at /home/runner/work/masc
+# (checkout is /home/runner/work/masc/masc). The worktree guard below is
+# what turned that silent mis-scan into a loud failure both times; keep it.
 if ! git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "WIRE-GATE ERROR: REPO_ROOT '${REPO_ROOT}' is not a git worktree (set WIRE_GATE_ROOT explicitly)" >&2
   exit 2

@@ -88,4 +88,24 @@ schema-compat: rg -c 'field_change' on live memory snapshots == 0 (swept)"
 rc="$(run_gate HEAD~1)"
 [ "$rc" = "0" ] || { echo "self-test FAILED: schema-compat note must pass, got $rc" >&2; cat /tmp/wg-st.out >&2; exit 1; }
 
+# G) the default ROOT formula itself: invoked WITHOUT WIRE_GATE_ROOT from the
+#    standard layout (script at <root>/scripts/), the gate must resolve the
+#    synthetic repo root — one level up, not two. The ../.. off-by-one shipped
+#    in the first revision and failed in CI with
+#    "REPO_ROOT '/home/runner/work/masc' is not a git worktree" while every
+#    explicit-WIRE_GATE_ROOT scenario stayed green. Guard: the synthetic tree
+#    here sits at $TMP/scripts/…, so a two-level formula resolves above the
+#    worktree and the gate must die loudly (exit 2), not scan nothing.
+unset WIRE_GATE_ROOT
+mkdir -p "$TMP/root/scripts"
+cp scripts/wire-field-removal-schema-gate.sh "$TMP/root/scripts/"
+git -C "$TMP/root" init -q 2>/dev/null || true
+if (cd "$TMP/root" && bash scripts/wire-field-removal-schema-gate.sh HEAD >/tmp/wg-st.out 2>&1); then
+  rc_ok=0
+else
+  rc_ok=$?
+fi
+[ "$rc_ok" = "0" ] || { echo "self-test FAILED: default formula must resolve the standard layout (got exit $rc_ok)" >&2; cat /tmp/wg-st.out >&2; exit 1; }
+grep -q "not a git worktree\|ERROR" /tmp/wg-st.out && { echo "self-test FAILED: standard layout must not trip the worktree guard" >&2; exit 1; }
+
 echo "wire-field-removal-schema-gate self-test: pass"

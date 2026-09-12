@@ -414,7 +414,7 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
       (* A document refused for its size is the submitter's to fix, same as a
          page over the image limit -- not a fault of this runtime. *)
       | Verification_pdf_inspection.Image_policy_rejected _
-      | Page_budget_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
+      | Too_many_pages _ | Rendered_bytes_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
       | Dependency_unavailable _ -> Tool_result.Dependency_unavailable
       | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in

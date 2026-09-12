@@ -1811,7 +1811,7 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
   in
   let drawn =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
@@ -1823,7 +1823,7 @@ let test_the_budget_and_the_pane_agree_about_queue_rows () =
   in
   let drawn_preview =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"keeper_message_pending_preview"
   in
@@ -1850,7 +1850,7 @@ let test_the_budget_and_the_pane_agree_about_the_scrollback_row () =
   in
   let drawn =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"Masc_tui_types.keeper_message_reading_back"
   in
@@ -1904,7 +1904,7 @@ let layout_binding = "keeper_message_layout_entries"
 let test_the_pane_builds_one_full_message_layout () =
   let layout_calls =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"keeper_message_layout_entries"
   in
@@ -1920,7 +1920,7 @@ let test_pending_input_is_not_mixed_into_the_transcript () =
   in
   let next_reads =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"Masc_tui_keeper_chat_queue.waiting_for_keeper"
   in
@@ -2047,7 +2047,7 @@ let test_esc_dispatch_and_footer_read_the_interrupt_table () =
       dispatch;
   let footer =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"Masc_tui_esc_interrupt.action"
   in
@@ -2068,13 +2068,13 @@ let test_esc_dispatch_and_footer_read_the_interrupt_table () =
 let test_roster_footer_names_arrows_not_vim_letters () =
   let named_arrows =
     Ast_grep.count_string_literals_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~literals:[ "Up/Down:move  Enter:open  Right/Esc:chat" ]
   in
   let named_letters =
     Ast_grep.count_string_literals_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:"render_keeper_message"
       ~literals:[ "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat" ]
   in
@@ -2318,7 +2318,7 @@ let test_both_readers_share_one_disposition () =
           "%s must decide %s from send_disposition, not from its own reading            of the state; it is called %d time(s)"
           module_path what n)
     [ ("bin/masc_tui.ml", "what Enter does")
-    ; ("bin/masc_tui_render.ml", "what the footer says Enter does")
+    ; ("bin/masc_tui_render_chat.ml", "what the footer says Enter does")
     ]
 ;;
 
@@ -2344,13 +2344,13 @@ let test_the_calls_table_says_what_came_back () =
    the pane actually asks for it. *)
 let test_the_sending_rows_show_an_age () =
   let n =
-    calls ~module_path:"bin/masc_tui_render.ml"
+    calls ~module_path:"bin/masc_tui_render_chat.ml"
       ~callee:"Message_layout.age_text"
   in
   if n < 1 then
     failf
-      "bin/masc_tui_render.ml must age the rows it draws for a request in \
-       flight; Message_layout.age_text is called %d time(s)"
+      "bin/masc_tui_render_chat.ml must age the rows it draws for a request \
+       in flight; Message_layout.age_text is called %d time(s)"
       n
 ;;
 

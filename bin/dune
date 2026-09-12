@@ -1209,6 +1209,7 @@
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
+  masc_tui_rows
   masc_tui_keeper_mark
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
@@ -1225,6 +1226,43 @@
   masc_tui_fetched
   masc_tui_markdown
   masc_tui_agenda
+  unix))
+
+; The Keeper chat surface as its own library. Its dependency list may name
+; masc_tui_render_prim but never masc_tui_render: the definitions moved here
+; are the ones no other screen reaches, so the direction holds.
+(library
+ (name masc_tui_render_chat)
+ (wrapped false)
+ (modules masc_tui_render_chat)
+ (libraries
+  masc_tui_render_prim
+  masc_tui_ansi
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout
+  masc_tui_tool_detail
+  masc_tui_theme
+  masc_tui_gate_text
+  masc_tui_link_preview
+  masc_tui_terminal_palette
+  masc_tui_roster_pane
+  masc_tui_keeper_chat_queue
+  masc_tui_answering
+  masc_tui_esc_interrupt
+  mtime.clock.os
+  masc_tui_keeper_selection
+  masc_tui_command
+  masc_tui_footer
+  masc_tui_context_state
+  masc_tui_frame_presenter
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_diff
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_control
+  masc_tui_markdown
+  masc_tui_observation_layout
+  masc
+  masc_tui_types
   unix))
 
 (executable
@@ -1280,6 +1318,7 @@
   masc_tui_credential
   masc_tui_types
   masc_tui_render_prim
+  masc_tui_render_chat
   masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick

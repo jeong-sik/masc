@@ -29,10 +29,12 @@ module Agenda = Masc_tui_agenda
 module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
 module Frame_presenter = Masc_tui_frame_presenter
+module Status = Masc.Keeper_status_runtime
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
+module Rows = Masc_tui_rows
 
 let acting_pane_reserved_cols = ref 0
 
@@ -1040,3 +1042,134 @@ let connection_badge (state : state) =
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
+
+
+let count_frame_lines buf =
+  let len = Buffer.length buf in
+  if len = 0 then 0
+  else
+    let n = ref 0 in
+    for i = 0 to len - 1 do
+      if Buffer.nth buf i = '\n' then incr n
+    done;
+    if Buffer.nth buf (len - 1) = '\n' then !n
+    else !n + 1
+
+
+(* The roster shows when the terminal can spare its columns and the reader
+   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
+   is theirs, and hiding survives a resize because it is a decision rather
+   than a measurement. *)
+let keeper_roster_pane_shown (state : state) ~cols =
+  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+
+
+(** Render the keeper list view *)
+(* Status is shown as a glyph and a word. The glyph is the coarse reading an
+   operator scans a column for -- a fiber running, a fiber sleeping, no fiber,
+   nothing observed -- and the word next to it is the exact published status,
+   so the column stays legible at four shapes instead of needing a distinct
+   glyph per label. *)
+(* One keeper is described by four separate readings, and the status cell draws
+   three of them in three separate channels rather than folding them into one
+   word:
+
+     colour  what to do about it   from next_action, which the runtime derives
+     glyph   whether it is paused  a person's decision, not a health reading
+     word    how it is reporting   from health
+
+   The lifecycle cell is the fourth and has its own column. The cell used to
+   show a single word from [surface_status], which restates health with stale,
+   degraded and zombie folded together and hides health entirely while a keeper
+   is paused. *)
+let keeper_action_color
+    (action : Status.keeper_next_action_path option) =
+  match action with
+  | None -> Ansi.dim
+  | Some Status.Auto_restart -> (Theme.bad ())
+  | Some Status.Recover -> (Theme.warn ())
+  | Some Status.Probe -> Theme.action_probe ()
+  (* Green until this measurement. The cell draws four readings in four
+     channels and this is the only one carried by colour alone, so the four
+     colours have to stay apart for a reader who cannot separate red from
+     green -- roughly one man in twelve.
+
+     Simulated (Machado 2009, severity 1.0) over the twelve base16 schemes the
+     contrast harness measures, the closest pair was not red against green but
+     [Recover] against [Direct_message] -- yellow and green both arrive
+     yellowish -- at 0.015 in Oklab. Magenta is the only candidate that
+     improves every reading rather than trading one for another: 0.070 to
+     0.121 for ordinary vision, 0.015 to 0.044 for deuteranopia, 0.019 to
+     0.027 for protanopia. Blue and white came out worse than green even for
+     ordinary vision, because they close on [Probe]'s cyan. *)
+  | Some Status.Direct_message -> Theme.action_message ()
+
+
+let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
+  Masc_tui_keeper_mark.glyph ~paused
+    (Option.map Tui_decode.keeper_health_reading health)
+
+
+(* Runtime ids are opaque identifiers, so a fixed-width surface keeps both
+   ends instead of sacrificing the distinguishing tail to a shared prefix.
+   Returning the unpadded id when it already fits lets a chat header spend the
+   remaining cells on context instead of blank padding. *)
+let fit_runtime_id width runtime_id =
+  if Message_layout.display_width runtime_id <= width then runtime_id
+  else Message_layout.fit_middle width runtime_id
+
+
+(* A narrow roster beside the detail: position context, not a second input
+   surface -- the keys keep their detail meaning. The window follows the
+   cursor the way the detail follows the selection. *)
+let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
+  framed_top buf cols;
+  let title = " KEEPERS" in
+  let hint = if focused then "ENTER OPEN" else "^B HIDE" in
+  let title_gap = max 1 (framed_inner_width cols - String.length title - String.length hint) in
+  let title_row = title ^ String.make title_gap ' ' ^ hint in
+  framed_line buf cols
+    (if focused then Theme.selection ^ title_row ^ Ansi.reset
+     else
+       Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
+       ^ hint ^ Ansi.reset);
+  framed_divider buf cols;
+  let content_height = max 0 (rows - framed_chrome_rows) in
+  let first =
+    if state.keeper_cursor < content_height then 0
+    else state.keeper_cursor - content_height + 1
+  in
+  let keepers_window = Rows.of_list ~first:first ~height:content_height state.keepers in
+  for i = 0 to content_height - 1 do
+    match Rows.at keepers_window (first + i) with
+    | Some (k : keeper) ->
+        let selected = first + i = state.keeper_cursor in
+        let name = Terminal_text.single_line k.k_name in
+        let name =
+          Masc_tui_roster_pane.name_window ~selected
+            ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7)) name
+        in
+        (* The same glyph the Keepers surface draws, for the same reading.
+           Without it the pane says a keeper exists and nothing else, so a
+           roster of ten looks identical whether one of them is offline. *)
+        let reading = keeper_reading state k in
+        let glyph =
+          keeper_state_glyph
+            ~paused:reading.Keeper_control.paused
+            ~health:(Keeper_control.health reading)
+        in
+        (* Reverse video is the one selection signal every terminal
+           renders, colour or not, and it owns the whole row: a glyph
+           tinted inside it reads as a second highlight. *)
+        let line =
+          if selected then
+            Theme.selection ^ " " ^ glyph ^ " " ^ name ^ Ansi.reset
+          else
+            " "
+            ^ keeper_action_color (Keeper_control.next_action reading)
+            ^ glyph ^ Ansi.reset ^ " " ^ Ansi.dim ^ name ^ Ansi.reset
+        in
+        framed_line buf cols line
+    | None -> framed_empty buf cols
+  done;
+  framed_bottom buf cols

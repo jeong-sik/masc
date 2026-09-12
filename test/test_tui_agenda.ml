@@ -200,7 +200,10 @@ let calls ~module_path ~binding_name ~callee =
    drawing" has to read every file the drawing lives in, or a definition
    answers the question by moving rather than by changing. *)
 let render_family =
-  [ "bin/masc_tui_render.ml"; "bin/masc_tui_render_prim.ml" ]
+  [ "bin/masc_tui_render.ml"
+  ; "bin/masc_tui_render_prim.ml"
+  ; "bin/masc_tui_render_chat.ml"
+  ]
 
 let test_the_drawing_does_not_measure_the_body_itself () =
   check

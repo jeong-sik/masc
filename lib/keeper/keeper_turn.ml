@@ -855,21 +855,11 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
-                let run_result = match run_result, gate_resume with
-                  | Ok _, Some admission ->
-                    (match Keeper_direct_gate_continuation.complete_native ~config:ctx.config
-                       ~keeper_name:meta.name ~operation_id admission with
-                     | Ok () -> run_result
-                     | Error detail -> Error (Agent_core.Error.Internal detail))
-                  | Error _, _ | Ok _, None -> run_result in
-                let () = match run_result, gate_resume with
-                  | Ok _, Some admission ->
-                    (match Keeper_direct_gate_continuation.record_completed ~config:ctx.config ~keeper_name:meta.name admission with
-                     | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
-                     | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
-                       Log.Keeper.warn "completed direct Gate continuation has no settled replay authority"
-                     | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
-                  | Error _, _ | Ok _, None -> () in
+                let run_result = match gate_resume with
+                  | None -> run_result
+                  | Some admission ->
+                    Keeper_direct_gate_continuation.finish_run ~config:ctx.config
+                      ~keeper_name:meta.name ~operation_id admission run_result in
                 let official_client = match run_result with
                   | Ok ({Keeper_agent_run.checkpoint=None; runtime_id; _}, _) ->
                     (match Keeper_repetition_scope.Execution.snapshot repetition_execution with

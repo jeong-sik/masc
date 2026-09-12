@@ -290,10 +290,11 @@ let observe_native_input ?blocks ~(prepared : Keeper_gate_replay.model_message) 
         let* durable_identity = input_identity durable in
         if prepared_identity <> durable_identity then Error "native Gate input does not identify the durable replay receipt"
         else Ok ()
-      | Semantic.Gate_denied _, None, None ->
-        if prepared.denied_resolution = Some admission.resolution then Ok ()
-        else Error "native Gate input does not identify the admitted denial"
-      | Semantic.Gate_approved, None, (None | Some _)
+      | (Semantic.Gate_denied _ | Semantic.Gate_approved), None, None ->
+        if prepared.instruction_resolution = Some admission.resolution
+           && expected.instruction_resolution = Some admission.resolution then Ok ()
+        else Error "native Gate input does not identify the admitted resolution instruction"
+      | Semantic.Gate_approved, None, Some _
       | Semantic.Gate_approved, Some _, None
       | Semantic.Gate_denied _, Some _, (None | Some _)
       | Semantic.Gate_denied _, None, Some _ ->
@@ -357,5 +358,33 @@ let pending ~base_path ~keeper_name ~operation_id =
         | None -> Ok None
 
 let record_completed ~config ~keeper_name admission =
-  Keeper_approval_queue.ensure_settled_continuation_chat_projection
-    ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
+  match admission.authority, admission.transmitted_input with
+  | Official_client checkpoint, Some _ ->
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* () = Native.validate_completed_continuation ~checkpoint ~expected in
+    Keeper_approval_queue.record_native_continuation_delivery
+      ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
+  | Official_client _, None -> Ok Keeper_approval_queue.Continuation_projection_not_ready
+  | Agent_core _, _ ->
+    Keeper_approval_queue.ensure_settled_continuation_chat_projection
+      ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
+
+let finish_run ~config ~keeper_name ~operation_id admission run_result =
+  match admission.authority, run_result with
+  | Agent_core _, Error _ -> run_result
+  | (Agent_core _ | Official_client _), _ ->
+    match complete_native ~config ~keeper_name ~operation_id admission with
+    | Error detail ->
+      (match run_result with
+       | Ok _ -> Error (Agent_core.Error.Internal detail)
+       | Error _ ->
+         Log.Keeper.warn "direct Gate input remains unsettled after runtime failure: %s" detail;
+         run_result)
+    | Ok () ->
+      (match record_completed ~config ~keeper_name admission with
+       | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+       | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+         Log.Keeper.warn "settled direct Gate input has no completed resolution projection"
+       | Error detail ->
+         Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail);
+      run_result

@@ -448,16 +448,20 @@ let for_surface = function
            does, and none of them were listed: presets could be made and put
            back, and the prompt list could be switched between three readings,
            with nothing on screen saying so. *)
-      ; b Act "n" "new preset"
+        (* Short labels: this row is one line and was already truncated at a
+           hundred columns before these five arrived. The pane each belongs to
+           and what it does are in the help, which the ? overlay draws in
+           full. *)
+      ; b Act "n" "new"
           ~help:"on presets, name a preset holding the configuration as it stands"
-      ; b Act "u" "restore preset"
+      ; b Act "u" "restore"
           ~help:"on presets, put the selected one back; press twice to confirm"
-      ; b Act "i" "model input"
+      ; b Act "i" "input"
           ~help:"on prompts, the input this prompt was last given"
       ; b Act "a" "fragments"
           ~help:"on prompts, show or hide the internal pieces the main prompts \
                  are built from; not on the runtime assets reading"
-      ; b Act "o" "runtime assets"
+      ; b Act "o" "assets"
           ~help:"on prompts, switch between the read-only runtime assets and \
                  the registry you can override"
       ; b Act "Esc" "overview"

@@ -919,7 +919,12 @@ let help_sections ?current () =
            read it. Its shape is already the sheet's: a mark, and what it
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
-        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend) ])
+        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* Planning's own legend says the marks its list is drawing, which
+             is what keeps that line inside a narrow frame -- so a mark no
+             goal carries right now has nowhere else to be explained. Here. *)
+          ; ("Judge marks", Masc_tui_planning_proof_mark.legend)
+          ])
 
 let footer_hints_browser_lane =
   hints_of_bindings

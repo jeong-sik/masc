@@ -290,6 +290,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0447 | 서버는 영속 포트에 붙거나 기동을 거부한다 | Draft | - |
 | 0448 | manual keeper 는 부팅 없인 돌지 않고, 대기 작업은 보인다 | Draft | - |
 | 0449 | 402 는 429 가 아니다 — Hard_quota 는 운영자 행동과 즉시 회전 | Draft | - |
+| 0450 | witness 원장은 먼저 재고, 그 다음 WAL 이다 | Draft | - |
 | 0451 | CLI 레인은 턴이 시작될 때 집합을 고른다 — 매 요청 82KB 는 스스로 안 실려도 된다고 적은 도구들이다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |

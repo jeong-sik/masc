@@ -121,10 +121,13 @@ let test_legend_preserves_height_and_complete_text () =
     (render_legend ~cols:80 ~max_rows:2 [ Decode.Proof_idle ])
 
 let test_legend_uses_cells_not_utf8_bytes () =
-  (* 8 cells of label + 1 mark + 1 space + 7 of 'waiting', plus frame chrome. *)
-  let rows = render_legend ~cols:21 ~max_rows:1 [ Decode.Proof_pending ] in
+  (* The narrowest frame the one-row legend fits in: "  JUDGE  " is 9 cells,
+     the mark and its space 2, "waiting" 7, and the frame's border and padding
+     4 more. Counted in bytes instead the mark is 3 and the text needs 11 of
+     the 9 it has, so the row wraps and a one-row budget draws nothing. *)
+  let rows = render_legend ~cols:22 ~max_rows:1 [ Decode.Proof_pending ] in
   check int "the UTF-8 mark fits in its one cell" 1 (List.length rows);
-  check_frame_width 21 rows;
+  check_frame_width 22 rows;
   check (list string) "the narrow rendered legend is complete"
     [ "JUDGE"; "…"; "waiting" ]
     (words (String.concat " " (plain_rows rows)))

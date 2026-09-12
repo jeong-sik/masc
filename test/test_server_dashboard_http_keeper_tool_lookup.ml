@@ -181,6 +181,10 @@ let test_raw_io_routes_require_admin () =
     let router = Server_routes_http_routes_dashboard.add_routes
       ~sw ~clock:(Eio.Stdenv.clock env) (Http_server_eio.Router.create ()) in
     let secret = "operator-only retained Read or Shell output" in
+    (* Exact lookup opens the supplied ledger directly; the ordinary tail
+       reads the startup-initialized log store. Point both at this fixture. *)
+    Keeper_tool_call_log.init ~base_path:config.base_path ();
+    Eio.Switch.on_release sw Keeper_tool_call_log.reset_for_testing;
     append store (row ~keeper:"editor" ~execution_id:"protected"
       ~ts:(Unix.gettimeofday ()) ~output:secret);
     List.iter (fun path ->

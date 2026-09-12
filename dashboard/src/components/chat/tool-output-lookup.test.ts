@@ -3,7 +3,7 @@ import { webcrypto } from 'node:crypto'
 import { html } from 'htm/preact'
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { get, ApiRequestError } from '../../api/core'
+import { get, ApiRequestError, clearStoredToken, setStoredToken } from '../../api/core'
 import { fetchToolBlob } from '../../api/tool-blob'
 import { ChatTranscript, _resetTraceCardOpenChoicesForTests } from './primitives'
 import { chatHistoryEntriesFromRest } from '../../keeper-state'
@@ -29,9 +29,42 @@ async function artifact(content: string) {
   return { content, bytes: bytes.length, sha256, mime: 'application/vnd.masc.tool-result-manifest+json' }
 }
 const openTurn = (view: { container: Element }) => fireEvent.click(view.container.querySelector<HTMLButtonElement>('.chat-block-trace-hd')!)
-beforeEach(() => { vi.stubGlobal('crypto', webcrypto); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
-afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); clearStoredToken(); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
 describe('historical autonomous tool outputs', () => {
+  it('rechecks denied historical output after the operator changes credentials', async () => {
+    vi.mocked(get).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 403 }))
+      .mockResolvedValue(response())
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    act(() => setStoredToken('fixture-admin'))
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    expect(get).toHaveBeenCalledTimes(2)
+  })
+  it('removes already loaded privileged rows when the token is cleared', async () => {
+    setStoredToken('fixture-admin')
+    vi.mocked(get).mockResolvedValueOnce(response())
+      .mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 401 }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByText('writer.md · 1곳 편집')).toBeTruthy())
+    act(() => clearStoredToken())
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+    expect(lookupToolCallOutput('writer', id)).toBeNull()
+  })
+  it('cannot repopulate a new credential session with a late Admin response', async () => {
+    setStoredToken('fixture-admin')
+    let finish!: (value: unknown) => void
+    vi.mocked(get).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      .mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: 403 }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
+    act(() => setStoredToken('fixture-worker'))
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    await act(async () => { finish(response()); await Promise.resolve() })
+    expect(lookupToolCallOutput('writer', id)).toBeNull()
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull()
+  })
   it.each([401, 403])('requires administrator access for HTTP %i without a futile lookup retry', async status => {
     vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
     const view = render(transcript()); openTurn(view)

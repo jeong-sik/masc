@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ToolCallEntry } from './api/dashboard'
+import { clearStoredToken, setStoredToken } from './api/core'
 import {
   lookupToolCallOutput,
   markToolCallOutputsHydrationFailed,
@@ -30,6 +31,7 @@ function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
 
 describe('tool-call-output-store', () => {
   afterEach(() => {
+    clearStoredToken()
     resetToolCallOutputs()
   })
 
@@ -41,6 +43,18 @@ describe('tool-call-output-store', () => {
   it('looks up by canonical execution_id', () => {
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'hello' })])
     expect(lookupToolCallOutput('sangsu', 'exec-abc')?.output).toBe('hello')
+  })
+
+  it('discards privileged output and coverage on credential replacement or logout', () => {
+    setStoredToken('fixture-admin')
+    recordToolCallOutputs([toolCall({ execution_id: 'privileged' })])
+    markToolCallOutputsHydrated('sangsu', 10, 1)
+    setStoredToken('fixture-worker')
+    expect(lookupToolCallOutput('sangsu', 'privileged')).toBeNull()
+    expect(toolCallOutputHydrationStatus('sangsu')).toBe('idle')
+    recordToolCallOutputs([toolCall({ execution_id: 'new-session' })])
+    clearStoredToken()
+    expect(toolCallOutputsByIdentity.value.size).toBe(0)
   })
 
   it('preserves canonical identity bytes after rejecting blank values', () => {

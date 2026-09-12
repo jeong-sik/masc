@@ -1,7 +1,8 @@
 import { createContext } from 'preact'
 import { useContext, useEffect, useState } from 'preact/hooks'
 import { html } from 'htm/preact'
-import { ApiRequestError } from '../../api/core'
+import { ApiRequestError, currentStoredTokenRevision } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 import { fetchKeeperToolCall, type ToolCallEntry } from '../../api/dashboard-keeper-tool-calls'
 import { recordToolCallOutputs } from '../../tool-call-output-store'
@@ -15,11 +16,12 @@ type State = { kind: 'idle' } | { kind: 'loading' }
 
 export function useToolOutputLookup(executionId: string | null | undefined, known: ToolCallEntry | null) {
   const keeper = useContext(KeeperToolOutputScope)
+  const authRevision = storedTokenRevision.value
   const [ref, inView] = useInViewOnce<HTMLDivElement>()
   const [attempt, retry] = useState(0)
-  const [result, setResult] = useState<{ keeper: string; executionId: string; state: State } | null>(null)
+  const [result, setResult] = useState<{ keeper: string; executionId: string; authRevision: number; state: State } | null>(null)
   const output = known && keeper && known.keeper === keeper && known.execution_id === executionId ? known : null
-  const state: State = result?.keeper === keeper && result?.executionId === executionId
+  const state: State = result?.keeper === keeper && result?.executionId === executionId && result?.authRevision === authRevision
     ? result.state : { kind: 'idle' }
   // Peer hydration can replace this execution ID in the shared store. A
   // successfully loaded result for this exact scope still satisfies the lookup.
@@ -28,22 +30,22 @@ export function useToolOutputLookup(executionId: string | null | undefined, know
     if (!keeper || !executionId || !inView || !needsFetch) return
     const controller = new AbortController()
     const set = (state: State) => {
-      if (!controller.signal.aborted) setResult({ keeper, executionId, state })
+      if (!controller.signal.aborted && authRevision === currentStoredTokenRevision()) setResult({ keeper, executionId, authRevision, state })
     }
     set({ kind: 'loading' })
     void fetchKeeperToolCall(keeper, executionId, { signal: controller.signal }).then(entry => {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || authRevision !== currentStoredTokenRevision()) return
       set({ kind: 'loaded', entry })
       recordToolCallOutputs([entry])
     }, error => {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted || authRevision !== currentStoredTokenRevision()) return
       if (isAdminRequired(error)) set({ kind: 'admin-required' })
       else if (error instanceof ApiRequestError && error.status === 404) set({ kind: 'missing' })
       else if (error instanceof ApiRequestError && error.status === 409) set({ kind: 'ambiguous' })
       else set({ kind: 'failed' })
     })
     return () => controller.abort()
-  }, [keeper, executionId, inView, needsFetch, attempt])
+  }, [keeper, executionId, inView, needsFetch, attempt, authRevision])
   return { ref, output: output ?? (state.kind === 'loaded' ? state.entry : null),
     state: output ? { kind: 'loaded', entry: output } as const : state,
     retry: () => retry(value => value + 1) }

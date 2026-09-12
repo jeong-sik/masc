@@ -9,6 +9,7 @@
 // it may be blank or reused and never identifies a dashboard row or output.
 import { signal } from '@preact/signals'
 import type { ToolCallEntry } from './api/dashboard'
+import { subscribeStoredTokenChanges } from './api/core'
 
 export function nonBlankToolCallId(
   toolCallId: string | null | undefined,
@@ -213,3 +214,6 @@ export function resetToolCallOutputs(): void {
   toolCallOutputsByIdentity.value = new Map()
   toolCallOutputHydrationByKeeper.value = {}
 }
+
+// Raw results belong to the credentials that authorized their retrieval.
+subscribeStoredTokenChanges(resetToolCallOutputs)

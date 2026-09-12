@@ -20,8 +20,48 @@
   },
   "mutations_in_memory_only": true,
   "fresh_runtime_execution": false,
-  "rejected_controls": 22,
+  "rejected_controls": 30,
   "controls": [
+    {
+      "case": "execution_image_mismatch",
+      "rejected": true,
+      "reason": "DOS execution image differs from qualified input"
+    },
+    {
+      "case": "skill_writable",
+      "rejected": true,
+      "reason": "Skill read is not ready and read-only"
+    },
+    {
+      "case": "skill_wrong_installation",
+      "rejected": true,
+      "reason": "Skill belongs to another installation"
+    },
+    {
+      "case": "skill_read_after_removal",
+      "rejected": true,
+      "reason": "removed Skill still readable"
+    },
+    {
+      "case": "retained_statistics_missing",
+      "rejected": true,
+      "reason": "post-detach statistics row missing"
+    },
+    {
+      "case": "retained_consumer_coverage_missing",
+      "rejected": true,
+      "reason": "retained consumer coverage absent"
+    },
+    {
+      "case": "missing_input_coverage_complete",
+      "rejected": true,
+      "reason": "missing input coverage is not unavailable"
+    },
+    {
+      "case": "missing_input_coverage_absent",
+      "rejected": true,
+      "reason": "missing bound-source coverage absent"
+    },
     {
       "case": "capture_measurement_wrong_row",
       "rejected": true,

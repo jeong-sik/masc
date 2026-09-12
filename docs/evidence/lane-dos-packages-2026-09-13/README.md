@@ -75,10 +75,17 @@ new live run, model reasoning, performance acceptance or broad DOS compatibility
 
 [negative_controls.py](negative_controls.py) first verifies the untouched
 archive, then changes copies of selected records in memory to exercise these
-cross-record checks independently of manifest hash failures. All 22 controls
+cross-record checks independently of manifest hash failures. All 30 controls
 must be rejected, including disconnected capture blobs, missing cleanup fields
 or entries, changed producer/run/installation/consumer identities, incorrect
 upstream rows, and a detached or replaced companion.
 [audit-negative-controls.json](audit-negative-controls.json) records the results.
 These deliberately corrupted test inputs are not new runtime observations and
 are never written into the original archive or manifest.
+
+The supplementary directory contains the two original statistics browser capture
+records and the installed DOS Skill bytes, with their own source/hash manifest.
+The verifier links screenshot digests to these original browser records, Skill
+reads/removal to their catalog identity, and the running image to its recorded
+package image. It also verifies retained statistics rows and missing-source
+coverage. Optimized Python execution is rejected before any success report.

@@ -1,4 +1,7 @@
 """Offline verification of recorded bytes, not a new runtime execution."""
+if not __debug__:
+    raise RuntimeError("Evidence verification requires Python assertions; remove -O/PYTHONOPTIMIZE")
+
 from pathlib import Path
 import hashlib
 import io
@@ -23,6 +26,10 @@ for name, metadata in manifest['screenshots'].items():
 
 def read(name):
     return json.loads(files[name])
+
+supplementary = json.loads((ROOT / 'supplementary/manifest.json').read_text())
+for name, metadata in supplementary.items():
+    assert sha((ROOT / 'supplementary' / name).read_bytes()) == metadata['sha256']
 
 def check_recorded_joins(recorded_files, export_manifest):
     """Cross-record claims, also exercised against in-memory negative controls."""
@@ -77,6 +84,24 @@ def check_recorded_joins(recorded_files, export_manifest):
         installation(before, dos)
         installation(after, owner(after, dos_id))
         dos_identities[probe] = identity(dos)
+        container = document(prefix + 'container.json')
+        assert container['Image'] == process['image_id'] == dos['package']['image'], 'DOS execution image differs from qualified input'
+        assert document(prefix + 'package-image.json')['Id'] == container['Image'], 'running image differs from retained image receipt'
+        catalog_id, read_id, removed_id, rejected_id = ('0013','0014','0027','0028') if probe == 'dos-host' else ('0005','0006','0016','0017')
+        catalog, skill = document(prefix + catalog_id + '.raw'), document(prefix + read_id + '.raw')
+        reference = skill['reference']
+        expected_identity = {'source_id': 'lane-' + sha(('declaration\0' + dos['configuration']['id']).encode()), 'package_id': 'dos-observe', 'name': 'dos-observe'}
+        assert reference['identity'] == expected_identity, 'Skill belongs to another installation'
+        assert skill['status'] == 'ready' and skill['access'] == 'read_only', 'Skill read is not ready and read-only'
+        assert skill['source_text'].encode() == (ROOT / 'supplementary/dos-SKILL.md').read_bytes(), 'Skill source bytes differ from package'
+        assert one(catalog['snapshot']['skills'], lambda x: x['identity'] == expected_identity, 'Skill absent from catalog')['content_revision'] == reference['content_revision']
+        assert one(catalog['surfaces'], lambda x: x['reference'] == reference, 'Skill surface absent')['kind'] == 'instruction'
+        assert document(prefix + read_id + '.json')['request']['reference'] == reference
+        removed, rejected = document(prefix + removed_id + '.raw'), document(prefix + rejected_id + '.raw')
+        assert not any(x['identity']['source_id'] == expected_identity['source_id'] for x in removed['snapshot']['skills']), 'removed Skill remains in catalog'
+        assert not any(x['reference']['identity']['source_id'] == expected_identity['source_id'] for x in removed['surfaces']), 'removed Skill surface remains'
+        assert document(prefix + rejected_id + '.json')['request']['reference'] == reference
+        assert document(prefix + rejected_id + '.json')['status'] == 404 and rejected['code'] == 'reference_not_current', 'removed Skill still readable'
         assert len(summary['measurements']) == 2, 'both capture measurements required'
         measurements = summary['measurements']
         after_row = None
@@ -184,12 +209,19 @@ def check_recorded_joins(recorded_files, export_manifest):
         supplied = one(record['sources'], lambda item: item['source_id'] == fields['source_id'], 'retained consumer source missing')
         observation = one(supplied['observations'], lambda item: item['id'] == fields['source_event_id'], 'retained producer observation missing')
         assert observation['producer'] == expected_producer and observation['output']['rows'] == [dos_row], 'retained supplied output differs from producer'
+    retained_slice = document(stats + '0018.raw')
+    for stage in ('before', 'after', 'same-cursor-1', 'same-cursor-2'):
+        assert document(stats + 'statistics-' + stage + '.json')['statistics'] in retained_slice['rows'], 'post-detach statistics row missing'
+    retained_coverage = one(retained_slice['coverage'], lambda c: c['source_id'] == 'retained:' + consumer_identity['instance_id'], 'retained consumer coverage absent')
+    assert retained_coverage['incarnation'] == consumer_identity['incarnation'] and retained_coverage['complete'] is True and retained_coverage['cursor'] == 'scanned:8/of:8', 'retained consumer range incomplete'
     missing = document(stats + '0015.raw')
     consumer = owner(missing, consumer_identity['instance_id'])
     assert identity(consumer) == consumer_identity and consumer['phase']['kind'] == 'attached' and consumer['rows_count'] == 0, 'missing input must retain the same attached consumer'
     missing_producer = owner(missing, producer_identity['instance_id'])
     assert identity(missing_producer) == producer_identity and missing_producer['phase']['kind'] == 'detached', 'same missing-input producer must be detached'
     assert not any('observed_row_count' in row['fields'] for row in missing['rows']), 'missing input invented a count'
+    unavailable = one(missing['coverage'], lambda c: c['source_id'] == consumer['binding']['sources'][0]['source_id'], 'missing bound-source coverage absent')
+    assert unavailable['complete'] is False and unavailable['cursor'] is None and unavailable['incarnation'] == 'unobserved', 'missing input coverage is not unavailable'
 
     host = 'dos-host/evidence/'
     companion = document(host + 'companion-progress.json')
@@ -292,5 +324,13 @@ for name, data in files.items():
     except (ValueError, UnicodeDecodeError):
         continue
     check_refs(name.split('/')[0], value)
+for exported, probe, summary_path, original in [
+    ('dos-action.png', 'dos-host', 'browser/result.json', 'action-receipt.png'),
+    ('dos-timeline.png', 'dos-host', 'browser/result.json', 'timeline.png'),
+    ('statistics-current.png', None, 'statistics-browser-after.json', 'retained-fields-2.png'),
+    ('statistics-missing.png', None, 'statistics-browser-unavailable.json', 'source-coverage.png')]:
+    record = read(probe + '/evidence/' + summary_path) if probe else json.loads((ROOT / 'supplementary' / summary_path).read_text())
+    assert record['source_commit'] == manifest['dashboard_source'] and record['response_mocking'] is False and record['page_errors'] == []
+    assert record['screenshots'][original] == sha((ROOT / exported).read_bytes()), 'screenshot differs from original browser record'
 joins = check_recorded_joins(files, manifest)
 print(json.dumps({'recorded_evidence_files': len(files), 'api_response_hashes': api_count, 'browser_response_hashes': browser_count, 'host_blobs': blobs, 'evidence_reference_checks': references, 'guest_transitions': ['0->1', '0->1'], 'full_pixel_checks': 6, 'fresh_runtime_execution': False, **joins}, indent=2))

@@ -48,6 +48,14 @@ def statistics_attribution(files, field, value):
 
 
 cases = [
+    ('execution_image_mismatch', lambda f: change(f, 'dos-host/evidence/container.json', lambda v: v.update(Image='sha256:unrelated')), 'DOS execution image differs'),
+    ('skill_writable', lambda f: change(f, 'dos-host/evidence/0014.raw', lambda v: v.update(access='writable')), 'Skill read is not ready and read-only'),
+    ('skill_wrong_installation', lambda f: change(f, 'dos-host/evidence/0014.raw', lambda v: v['reference']['identity'].update(source_id='another-source')), 'Skill belongs to another installation'),
+    ('skill_read_after_removal', lambda f: change(f, 'dos-host/evidence/0028.json', lambda v: v.update(status=200)), 'removed Skill still readable'),
+    ('retained_statistics_missing', lambda f: change(f, 'dos-statistics/evidence/0018.raw', lambda v: v.update(rows=[r for r in v['rows'] if 'observed_row_count' not in r['fields']])), 'post-detach statistics row missing'),
+    ('retained_consumer_coverage_missing', lambda f: change(f, 'dos-statistics/evidence/0018.raw', lambda v: v.update(coverage=[c for c in v['coverage'] if c['source_id']!='retained:01a0962f-beac-7000-9f49-61da64f6290a'])), 'retained consumer coverage absent'),
+    ('missing_input_coverage_complete', lambda f: change(f, 'dos-statistics/evidence/0015.raw', lambda v: next(c for c in v['coverage'] if c['source_id']=='dos-output').update(complete=True)), 'missing input coverage is not unavailable'),
+    ('missing_input_coverage_absent', lambda f: change(f, 'dos-statistics/evidence/0015.raw', lambda v: v.update(coverage=[c for c in v['coverage'] if c['source_id']!='dos-output'])), 'missing bound-source coverage absent'),
     ('capture_measurement_wrong_row', summary('dos-host', lambda v: v['measurements'][0].update(row_id='another-instance/1/capture-2')), 'measured capture missing'),
     ('capture_export_changed', lambda f: f.__setitem__('dos-host/evidence/after.png', f['dos-host/evidence/before.png']), 'exported capture digest differs'),
     ('capture_blob_changed', lambda f: f.__setitem__('dos-host/.masc/lane-addons/evidence/' + hashlib.sha256(f['dos-host/evidence/before.png']).hexdigest() + '.json', b'unrelated blob'), 'capture export differs from retained blob'),

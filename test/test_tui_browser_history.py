@@ -104,7 +104,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             assert b"URL>" not in h.screen_text(frame), "Escape did not close the URL editor"
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             # Global navigation must release the hidden history's key ownership.
-            h.send_and_wait(process, fd, output, b"\x1b[<0;5;1M\x1b[<0;5;1m", b"MASC Overview")
+            h.palette_go(process, fd, output, b"go Overview", b"MASC Overview")
             os.write(fd, b"q")
         finally:
             beta_release.set()

@@ -1,0 +1,6 @@
+; The two voice kinds that run a command instead of reaching an address, and
+; the argv each one takes. Every argv here was run before it was written down.
+
+(test
+ (name test_voice_local_command)
+ (libraries alcotest astring yojson masc masc.voice_config masc.voice_runtime_overlay))

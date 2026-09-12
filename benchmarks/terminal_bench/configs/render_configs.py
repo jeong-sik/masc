@@ -2,7 +2,7 @@
 
 Arm 체인 (spec §6.2): b(1 keeper, 전부 off) -> c(+skills) -> d(+composition)
 -> e(+parallel) -> f(4 keepers) -> g(8 keepers) -> h(fusion on).
-Arm A는 Harbor 빌트인 terminus-2라 여기서 렌더하지 않는다.
+Arm A는 Harbor 빌트인 kimi-cli라 여기서 렌더하지 않는다.
 
 스키마 근거 (main checkout에서 확인):
 - keeper TOML: lib/keeper/keeper_types_profile_toml_parser.ml — 허용 키는

@@ -100,6 +100,7 @@ let endpoint ~kind ~base_url =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; command = None
   }
 
 let test_elevenlabs_is_asked_on_the_catalogue_version () =

@@ -80,6 +80,10 @@ let endpoint_of_json json =
     ; enabled
     ; timeout_seconds
     ; default_voice = optional_string fields "default_voice"
+    (* Not taken from the request. A command kind knows the name it is
+       installed under, and an override is a path this route cannot check;
+       someone who needs one edits the file. *)
+    ; command = None
     }
 
 let endpoint_json (endpoint : Voice_config.endpoint) =
@@ -254,5 +258,8 @@ let catalogue_endpoint_of_json json =
     ; enabled = true
     ; timeout_seconds = None
     ; default_voice = None
+    (* Same reason as the endpoint decode above: a path this route cannot check
+       is not something a request gets to choose. *)
+    ; command = None
     }
 ;;

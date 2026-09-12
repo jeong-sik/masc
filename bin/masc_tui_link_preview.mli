@@ -60,12 +60,18 @@ val mosaic_refusal_text : mosaic_refusal -> string
 
 val mosaic_lookup : string -> mosaic_entry option
 (** What the background fetch decided about an image URL, or [None] while it
-    has not decided yet. An entry lasts the session; [v] and /image fetch on
-    their own and do not read or clear it. *)
+    has not decided yet. Refusals remain visible until an explicit retry;
+    no refusal is evidence of permanent failure. *)
 
 val mosaic_store : string -> mosaic_entry -> unit
 (** Record the decision for an image URL. Called off the render loop once the
     preview's image has been downloaded and decoded, or refused. *)
+
+val retry_mosaic : retry:(unit -> unit) -> string -> bool
+(** Consume a recorded refusal and call [retry] once, outside the cache lock.
+    Returns [false] for a ready or pending preview. The modal uses this only
+    for an explicit [r] keypress; the callback refreshes input and stores the
+    next outcome. Render/background ticks do not call this. *)
 
 val parse_og_html : url:string -> body:string -> og_preview
 (** Merge a fetched page's <title> and og:* meta tags onto the URL-synthesized

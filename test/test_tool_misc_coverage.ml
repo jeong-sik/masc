@@ -106,6 +106,20 @@ let () = test "dispatch_unknown_tool" (fun () ->
   assert (Tool_misc.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
 
+let () = test "inventory_preserves_full_tool_description" (fun () ->
+  let ctx = make_test_ctx () in
+  let schema = List.find (fun (schema : Masc_domain.tool_schema) ->
+      String.equal schema.name "masc_board_list") Config.raw_all_tool_schemas in
+  let summary = (Tool_help_registry.entry_of_schema schema).short_description in
+  Alcotest.(check bool) "fixture has full content beyond its summary" true
+    (String.length schema.description > String.length summary);
+  let inventory = Tool_misc.tool_inventory_json ctx ~include_hidden:true in
+  let row = inventory |> Yojson.Safe.Util.member "tools" |> Yojson.Safe.Util.to_list
+    |> List.find (fun item -> json_string_member "name" item = schema.name) in
+  Alcotest.(check string) "inventory exposes the exact canonical description"
+    schema.description (json_string_member "description" row)
+)
+
 let tool_help_description dispatch ctx name =
   match
     dispatch

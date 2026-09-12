@@ -31,6 +31,12 @@ val say_catalogue_of_output : string -> catalogue_voice list
     to show, in words meant for a reader who will type the name instead. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
+val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
+(** The container a kind's clips are written in. [say] encodes WAVE and has no
+    MP3 encoder at all; everything reached over a wire answers MP3. The clip
+    filename carries this, and every reader resolves a token by it, so the two
+    sides cannot disagree about what the bytes are. *)
+
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string
@@ -99,6 +105,23 @@ val probe_tts
     [Error] when the voice configuration itself does not load, or has no [tts]
     section -- the same two states {!Voice_config.load_detailed} separates, kept
     apart here for the same reason. *)
+
+(** How an endpoint transcribes, if it does. A kind added to
+    {!Voice_config.endpoint_kind} stops {!transcriber_of_kind} compiling until
+    it has an answer here -- the step that was missing when the two command
+    kinds reached main while the probe still matched on three. *)
+type transcriber =
+  | Over_http
+  | By_command
+  | Does_not_transcribe
+
+val transcriber_of_kind : Voice_config.endpoint_kind -> transcriber
+
+val transcript_of_stt_json : Yojson.Safe.t -> (string, string) result
+(** The transcript inside what an HTTP endpoint answered. [Error] when the body
+    carries no [text] string: that is an answer this code cannot read, not a
+    microphone that heard nothing, and the probe reports those two differently
+    on purpose. *)
 
 val probe_stt
   :  audio_file:string

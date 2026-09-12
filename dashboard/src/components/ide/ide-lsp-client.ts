@@ -22,6 +22,7 @@ import {
   TRANSPORT_RETRY_MAX_MS,
 } from '../../config/constants'
 import { DEFAULT_LANGUAGE_ID } from './ide-language'
+import { ownLspDocument, ownsLspDocument, publishLspDocument, type LspDocumentConnection, type LspDocumentDiagnostics } from './ide-lsp-document-status'
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -49,9 +50,21 @@ const EMPTY_LSP_SCOPE: LspScope = { repoId: null, codebase: null, keeper: null }
  * when it opens a socket and when it checks whether its socket went stale.
  */
 let currentLspScope: LspScope = EMPTY_LSP_SCOPE
+const scopeConnections = new Set<LspConnection>()
+
+export function lspScopeKey(scope: LspScope): string {
+  return JSON.stringify([scope.repoId, scope.codebase, scope.keeper])
+}
 
 export function publishLspScope(scope: LspScope): void {
+  if (lspScopeKey(currentLspScope) === lspScopeKey(scope)) return
   currentLspScope = scope
+  // The workspace publisher runs in a signal effect. Notify after its snapshot
+  // commits, without reading LSP signals into that effect's dependency graph.
+  queueMicrotask(() => {
+    if (currentLspScope !== scope) return
+    for (const connection of scopeConnections) connection.refreshScopeIfStale()
+  })
 }
 
 export function lspScopeSnapshot(): LspScope {
@@ -159,6 +172,7 @@ const setDiagnostics = StateEffect.define<ReadonlyMap<number, LspDiagnostic[]>>(
 const codeLensField = StateField.define<ReadonlyMap<number, LspCodeLens[]>>({
   create() { return new Map() },
   update(state, tr) {
+    if (tr.docChanged) return new Map()
     for (const eff of tr.effects) {
       if (eff.is(setCodeLenses)) return eff.value
     }
@@ -169,6 +183,7 @@ const codeLensField = StateField.define<ReadonlyMap<number, LspCodeLens[]>>({
 const inlayHintField = StateField.define<ReadonlyMap<number, LspInlayHint[]>>({
   create() { return new Map() },
   update(state, tr) {
+    if (tr.docChanged) return new Map()
     for (const eff of tr.effects) {
       if (eff.is(setInlayHints)) return eff.value
     }
@@ -179,6 +194,7 @@ const inlayHintField = StateField.define<ReadonlyMap<number, LspInlayHint[]>>({
 const diagnosticField = StateField.define<ReadonlyMap<number, LspDiagnostic[]>>({
   create() { return new Map() },
   update(state, tr) {
+    if (tr.docChanged) return new Map()
     for (const eff of tr.effects) {
       if (eff.is(setDiagnostics)) return eff.value
     }
@@ -419,6 +435,78 @@ export class LspConnection {
    */
   private workspaceRoot: string | null = null
   private connectedScope: LspScope = EMPTY_LSP_SCOPE
+  private generation = 0
+  private document: { filePath: string; language: string; text: string; version: number; openedVersion: number | null } | null = null
+  private connectionState: LspDocumentConnection = { kind: 'connecting' }
+  private diagnosticState: LspDocumentDiagnostics = { kind: 'pending' }
+  private languageStatus: LspLanguageStatus | null = null
+
+  private publishDocument(): void {
+    const doc = this.document
+    if (!doc) return
+    publishLspDocument(this, {
+      filePath: doc.filePath, scope: lspScopeKey(this.connectedScope), language: doc.language,
+      version: doc.version, command: this.languageStatus?.command ?? null,
+      connection: this.connectionState, diagnostics: this.diagnosticState,
+    })
+  }
+
+  private clearAnalysis(connection: LspDocumentConnection): void {
+    this.generation += 1
+    this.connectionState = connection
+    this.diagnosticState = { kind: 'pending' }
+    this.languageStatus = null
+    if (this.document) {
+      this.document.openedVersion = null
+      if (ownsLspDocument(this)) clearLspDiagnosticSnapshot(this.document.filePath)
+      this.onDiagnostics(this.document.filePath, new Map())
+    }
+    if (publishLspDocument(this, null)) {
+      lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
+      lspStatusRejected.value = false
+    }
+    this.publishDocument()
+  }
+
+  documentGeneration(): number { return this.generation }
+  ownsDocumentObservation(): boolean { return ownsLspDocument(this) }
+  hasDocument(filePath: string): boolean { return this.document?.filePath === filePath }
+
+  syncDocument(filePath: string, text: string, scope: LspScope = lspScopeSnapshot()): void {
+    if (this.disposed) return
+    if (lspScopeKey(scope) !== lspScopeKey(lspScopeSnapshot())) return
+    const previous = this.document
+    if (previous?.filePath === filePath && previous.text === text) return
+    if (previous && previous.filePath !== filePath) this.notifyDidClose(previous.filePath)
+    const language = languageIdFromPath(filePath)
+    this.document = { filePath, language: language ?? DEFAULT_LANGUAGE_ID, text,
+      version: previous?.filePath === filePath ? previous.version + 1 : 1,
+      openedVersion: previous?.filePath === filePath ? previous.openedVersion : null }
+    ownLspDocument(this)
+    this.generation += 1
+    this.diagnosticState = { kind: 'pending' }
+    clearLspDiagnosticSnapshot(filePath)
+    if (language === null) this.connectionState = { kind: 'unsupported' }
+    this.publishDocument()
+    if (!this.initialized || language === null) return
+    const uri = this.documentUri(filePath)
+    if (uri === null) return
+    if (this.document.openedVersion === null) this.openDocument()
+    else this.sendNotification('textDocument/didChange', {
+      textDocument: { uri, version: this.document.version },
+      contentChanges: [{ text }],
+    })
+  }
+
+  private openDocument(): void {
+    const doc = this.document
+    if (!doc || !this.initialized || languageIdFromPath(doc.filePath) === null) return
+    const uri = this.documentUri(doc.filePath)
+    if (uri === null) return
+    if (this.sendNotification('textDocument/didOpen', {
+      textDocument: { uri, languageId: doc.language, version: doc.version, text: doc.text },
+    })) doc.openedVersion = doc.version
+  }
 
   constructor(
     private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
@@ -429,10 +517,17 @@ export class LspConnection {
   connect(): void {
     if (this.disposed) return
     this.clearReconnectTimer()
+    const previous = this.ws
+    this.ws = null
+    previous?.close()
+    this.rejectPending(new Error('LSP connection replaced'))
+    this.initialized = false
+    scopeConnections.add(this)
     const origin = typeof window !== 'undefined' ? window.location.origin : DEFAULT_MASC_ORIGIN
     const scope = lspScopeSnapshot()
     this.connectedScope = scope
     this.workspaceRoot = null
+    this.clearAnalysis(this.document && languageIdFromPath(this.document.filePath) === null ? { kind: 'unsupported' } : { kind: 'connecting' })
     const wsUrl =
       origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp' + lspScopeQuery(scope)
     const ws = new WebSocket(wsUrl)
@@ -440,7 +535,7 @@ export class LspConnection {
 
     ws.onopen = () => {
       if (this.disposed || this.ws !== ws) { ws.close(); return }
-      this.initialize()
+      void this.initialize(ws)
     }
 
     ws.onmessage = (event) => {
@@ -458,6 +553,8 @@ export class LspConnection {
       this.ws = null
       this.initialized = false
       const reason = new Error(lspCloseReason(event))
+      this.workspaceRoot = null
+      this.clearAnalysis({ kind: 'disconnected', reason: reason.message })
       this.rejectPending(reason)
       if (shouldReconnectLspClose(event)) {
         this.scheduleReconnect()
@@ -466,10 +563,9 @@ export class LspConnection {
       }
     }
 
-    ws.onerror = (err) => {
+    ws.onerror = () => {
       if (this.disposed || this.ws !== ws) return
-      console.error('[LSP] WebSocket error:', err)
-      this.onError(err)
+      this.handleSocketSendFailure(ws, new Error('Language server WebSocket error'))
     }
   }
 
@@ -489,17 +585,42 @@ export class LspConnection {
     }
 
     if (msg.method === 'textDocument/publishDiagnostics' && msg.params) {
-      const params = msg.params as { uri?: string; diagnostics?: LspDiagnostic[] }
-      const diagByLine = new Map<number, LspDiagnostic[]>()
-      for (const diag of params.diagnostics ?? []) {
-        const line = (diag.range?.start?.line ?? 0) + 1
-        const existing = diagByLine.get(line) ?? []
-        existing.push(diag)
-        diagByLine.set(line, existing)
+      const params = msg.params as { uri?: string; version?: number; diagnostics?: unknown }
+      const doc = this.document
+      if (!doc || params.uri !== this.documentUri(doc.filePath)) return
+      if (params.version !== undefined && params.version !== doc.version) return
+      const diagnostics = parseDiagnostics(params.diagnostics)
+      if (diagnostics === null) {
+        this.diagnosticState = { kind: 'failed', reason: 'Malformed published diagnostics' }
+        this.publishDocument()
+        return
       }
-      this.onDiagnostics(params.uri, diagByLine)
+      // Some servers (including ocamllsp) omit the optional version even when
+      // versionSupport is advertised. Keep their reports usable, but never
+      // label a post-change unversioned report as verified for this revision.
+      this.diagnosticState = params.version === undefined && doc.openedVersion !== doc.version
+        ? { kind: 'unversioned', count: diagnostics.length }
+        : { kind: 'complete', count: diagnostics.length }
+      this.publishDocument()
+      this.onDiagnostics(params.uri, indexByLine(diagnostics, diag => diag.range.start.line + 1))
     } else if (msg.method === 'masc/lspStatus') {
       publishLspStatusSnapshot(msg.params)
+      const snapshot = parseLspStatusSnapshot(msg.params)
+      if (this.document) {
+        this.languageStatus = snapshot?.langs.find(lang => lang.lang === serverLanguageId(this.document!.language)) ?? null
+        if (this.languageStatus) {
+          this.connectionState = this.languageStatus.connected ? { kind: 'connected' }
+            : { kind: 'unavailable', reason: this.languageStatus.last_error ?? 'Language server unavailable' }
+          if (!this.languageStatus.connected) {
+            this.diagnosticState = { kind: 'pending' }
+            if (ownsLspDocument(this)) clearLspDiagnosticSnapshot(this.document.filePath)
+            this.onDiagnostics(this.document.filePath, new Map())
+          }
+        } else if (snapshot === null) {
+          this.connectionState = { kind: 'failed', reason: 'Unreadable language server status' }
+        }
+        this.publishDocument()
+      }
     }
   }
 
@@ -541,6 +662,8 @@ export class LspConnection {
     this.onError(reason)
     this.ws = null
     this.initialized = false
+    this.workspaceRoot = null
+    this.clearAnalysis({ kind: 'disconnected', reason: reason.message })
     this.rejectPending(reason)
     try {
       ws.close()
@@ -570,6 +693,11 @@ export class LspConnection {
     this.workspaceRoot = null
     this.rejectPending(new Error('LSP scope changed'))
     previous?.close()
+    this.clearAnalysis({ kind: 'disconnected', reason: 'Workspace changed' })
+    // The old document belongs to the old tree, even if the next tree has the
+    // same relative path. Only a fresh store snapshot may open the next one.
+    this.document = null
+    publishLspDocument(this, null)
     this.resetReconnectBackoff()
     this.connect()
   }
@@ -587,7 +715,7 @@ export class LspConnection {
     this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, TRANSPORT_RETRY_MAX_MS)
   }
 
-  private async initialize(): Promise<void> {
+  private async initialize(socket: WebSocket): Promise<void> {
     try {
       const result = await this.sendRequest('initialize', {
         processId: null,
@@ -601,17 +729,23 @@ export class LspConnection {
             codeLens: {},
             inlayHint: {},
             diagnostic: {},
+            publishDiagnostics: { versionSupport: true },
           },
         },
       })
+      if (this.disposed || this.ws !== socket) return
       this.workspaceRoot = workspaceRootOfInitializeResult(result)
+      if (this.workspaceRoot === null) throw new Error('Language server did not resolve the workspace root')
       this.initialized = this.sendNotification('initialized', {})
       if (this.initialized) {
         this.resetReconnectBackoff()
+        this.openDocument()
         this.onReady()
       }
     } catch (err) {
-      if (!this.disposed) {
+      if (!this.disposed && this.ws === socket) {
+        this.clearAnalysis({ kind: 'failed', reason: err instanceof Error ? err.message : String(err) })
+        this.onError(err)
         console.error('[LSP] initialize failed:', err)
       }
     }
@@ -660,15 +794,31 @@ export class LspConnection {
 
   async requestDiagnostics(filePath: string): Promise<ReadonlyMap<number, LspDiagnostic[]>> {
     const uri = this.documentUri(filePath)
-    if (uri === null) return new Map()
+    const generation = this.generation
+    if (uri === null || !this.initialized) throw new Error('Language server is not ready')
     try {
-      const result = await this.sendRequest('textDocument/diagnostic', {
-        textDocument: { uri },
-      }) as { items?: LspDiagnostic[] } | null
-      const items = result?.items ?? []
-      return indexByLine(items, (d) => (d.range?.start?.line ?? 0) + 1)
-    } catch {
-      return new Map()
+      const result = await this.sendRequest('textDocument/diagnostic', { textDocument: { uri } })
+      if (generation !== this.generation || this.disposed) throw new Error('Superseded document diagnostics')
+      const report = typeof result === 'object' && result !== null
+        ? result as { kind?: unknown; items?: unknown } : null
+      const diagnostics = parseDiagnostics(report?.kind === 'full' ? report.items : undefined)
+      if (diagnostics === null) throw new Error('Malformed document diagnostics')
+      if (this.document && this.languageStatus?.connected !== true) {
+        throw new Error('Language server has not confirmed availability')
+      }
+      this.diagnosticState = { kind: 'complete', count: diagnostics.length }
+      this.publishDocument()
+      return indexByLine(diagnostics, diagnostic => diagnostic.range.start.line + 1)
+    } catch (error) {
+      if (generation === this.generation && !this.disposed) {
+        // A server using push diagnostics may reject the optional pull method.
+        // Preserve a confirmed current push result, never synthesize an empty one.
+        if (this.diagnosticState.kind !== 'complete' && this.diagnosticState.kind !== 'unversioned') {
+          this.diagnosticState = { kind: 'failed', reason: error instanceof Error ? error.message : JSON.stringify(error) }
+          this.publishDocument()
+        }
+      }
+      throw error
     }
   }
 
@@ -676,22 +826,15 @@ export class LspConnection {
     const uri = this.documentUri(filePath)
     if (uri === null) return null
     try {
-      return await this.sendRequest('textDocument/hover', {
+      const generation = this.generation
+      const result = await this.sendRequest('textDocument/hover', {
         textDocument: { uri },
         position: { line, character },
       })
+      return generation === this.generation && !this.disposed ? result : null
     } catch {
       return null
     }
-  }
-
-  notifyDidOpen(filePath: string, languageId: string): void {
-    if (!this.initialized) return
-    const uri = this.documentUri(filePath)
-    if (uri === null) return
-    this.sendNotification('textDocument/didOpen', {
-      textDocument: { uri, languageId, version: 1, text: '' },
-    })
   }
 
   notifyDidClose(filePath: string): void {
@@ -714,6 +857,9 @@ export class LspConnection {
 
   dispose(): void {
     this.disposed = true
+    scopeConnections.delete(this)
+    this.clearAnalysis({ kind: 'disconnected', reason: 'Editor document closed' })
+    publishLspDocument(this, null)
     this.clearReconnectTimer()
     this.rejectPending(new Error('Connection disposed'))
     if (this.ws) {
@@ -794,6 +940,22 @@ function decodeUriPath(rawPath: string): string {
   } catch {
     return rawPath
   }
+}
+
+function parseDiagnostics(value: unknown): LspDiagnostic[] | null {
+  if (!Array.isArray(value)) return null
+  const validPosition = (position: unknown): boolean => {
+    if (typeof position !== 'object' || position === null) return false
+    const { line, character } = position as { line?: unknown; character?: unknown }
+    return Number.isSafeInteger(line) && Number(line) >= 0
+      && Number.isSafeInteger(character) && Number(character) >= 0
+  }
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || typeof item.message !== 'string'
+      || typeof item.range !== 'object' || item.range === null
+      || !validPosition(item.range.start) || !validPosition(item.range.end)) return null
+  }
+  return value as LspDiagnostic[]
 }
 
 function indexByLine<T>(items: ReadonlyArray<T>, getLine: (item: T) => number): Map<number, T[]> {
@@ -902,15 +1064,24 @@ function lineSeverityOrder(diagnostic: LspDiagnosticAnchor): number {
   return diagnostic.severity ?? 99
 }
 
+function serverLanguageId(language: string): string {
+  return language === 'typescriptreact' ? 'typescript' : language === 'javascriptreact' ? 'javascript' : language
+}
+
 function languageIdFromPath(filePath: string): string | null {
-  const ext = filePath.slice(filePath.lastIndexOf('.'))
+  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
   const MAP: Record<string, string> = {
     '.ts': 'typescript', '.tsx': 'typescriptreact',
     '.js': 'javascript', '.jsx': 'javascriptreact',
-    '.py': 'python', '.ml': 'ocaml', '.mli': 'ocaml',
+    '.py': 'python', '.pyi': 'python', '.ml': 'ocaml', '.mli': 'ocaml',
+    '.mjs': 'javascript', '.cjs': 'javascript',
+    '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.hpp': 'cpp', '.hh': 'cpp', '.hxx': 'cpp',
+    '.swift': 'swift', '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin',
+    '.rb': 'ruby', '.php': 'php', '.lua': 'lua', '.sh': 'shellscript', '.bash': 'shellscript', '.zsh': 'shellscript',
+    '.zig': 'zig', '.hs': 'haskell', '.ex': 'elixir', '.exs': 'elixir', '.dart': 'dart',
+    '.scala': 'scala', '.sc': 'scala', '.cs': 'csharp',
     '.rs': 'rust', '.go': 'go', '.json': 'json',
-    '.md': 'markdown', '.html': 'html', '.css': 'css',
-    '.toml': 'toml', '.yaml': 'yaml', '.yml': 'yaml',
+    '.md': 'markdown', '.markdown': 'markdown', '.yaml': 'yaml', '.yml': 'yaml',
   }
   return MAP[ext] ?? null
 }
@@ -934,6 +1105,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
   class {
     private conn: LspConnection
     private filePath: string
+    private readonly documentScope = lspScopeSnapshot()
     private refreshTimer: ReturnType<typeof setTimeout> | null = null
     private hoverTimer: ReturnType<typeof setTimeout> | null = null
     private tooltip: HTMLDivElement | null = null
@@ -949,25 +1121,24 @@ const lspViewPlugin = ViewPlugin.fromClass(
         (diagnosticUri, diags) => {
           const filePath = resolveLspDiagnosticFilePath(diagnosticUri, this.filePath)
           if (filePath === null) return
-          publishLspDiagnosticSnapshot(filePath, diags)
-          const normalizedFilePath = normalizeIdeContextFilePath(filePath)
-          const normalizedCurrentFilePath = normalizeIdeContextFilePath(this.filePath)
-          if (normalizedFilePath !== null && normalizedFilePath === normalizedCurrentFilePath) {
-            this.dispatch(setDiagnostics.of(diags))
-          }
+          const generation = this.conn.documentGeneration()
+          queueMicrotask(() => {
+            if (!this.view.dom.isConnected || !this.conn.ownsDocumentObservation()
+              || generation !== this.conn.documentGeneration()) return
+            publishLspDiagnosticSnapshot(filePath, diags)
+            const normalizedFilePath = normalizeIdeContextFilePath(filePath)
+            const normalizedCurrentFilePath = normalizeIdeContextFilePath(this.filePath)
+            if (normalizedFilePath !== null && normalizedFilePath === normalizedCurrentFilePath) {
+              this.dispatch(setDiagnostics.of(diags))
+            }
+          })
         },
         (err) => console.error('[LSP] connection error:', err),
         () => {
-          const currentFilePath = this.filePath
-          if (currentFilePath !== '') {
-            this.conn.notifyDidOpen(
-              currentFilePath,
-              languageIdFromPath(currentFilePath) ?? DEFAULT_LANGUAGE_ID,
-            )
-          }
           this.scheduleRefresh()
         },
       )
+      this.conn.syncDocument(filePath, view.state.doc.toString(), this.documentScope)
       this.conn.connect()
       this.boundHoverMove = (e) => this.onHoverMove(e)
       this.boundHoverLeave = () => this.onHoverLeave()
@@ -977,8 +1148,12 @@ const lspViewPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      if (update.docChanged) this.hideTooltip()
       this.conn.refreshScopeIfStale()
+      if (update.docChanged) {
+        this.hideTooltip()
+        this.conn.syncDocument(this.filePath, update.state.doc.toString(), this.documentScope)
+        this.scheduleRefresh()
+      }
     }
 
     private scheduleRefresh(): void {
@@ -989,7 +1164,8 @@ const lspViewPlugin = ViewPlugin.fromClass(
     private async refresh(): Promise<void> {
       const fp = this.filePath
       const view = this.view
-      if (!view.dom.isConnected) return
+      const generation = this.conn.documentGeneration()
+      if (!view.dom.isConnected || !this.conn.hasDocument(fp)) return
 
       const [lenses, hints, diags] = await Promise.allSettled([
         this.conn.requestCodeLenses(fp),
@@ -998,7 +1174,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
       ])
 
       if (!view.dom.isConnected) return
-      if (fp !== this.filePath) return
+      if (fp !== this.filePath || generation !== this.conn.documentGeneration()) return
       const effects: StateEffect<unknown>[] = []
       if (lenses.status === 'fulfilled') effects.push(setCodeLenses.of(lenses.value))
       if (hints.status === 'fulfilled') effects.push(setInlayHints.of(hints.value))
@@ -1122,4 +1298,3 @@ export function lspExtension(opts: LspExtensionOpts): Extension {
     lspViewPlugin,
   ]
 }
-

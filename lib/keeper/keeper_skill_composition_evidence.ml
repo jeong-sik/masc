@@ -160,7 +160,11 @@ let valid_node = function
        && Result.is_ok (Ids.Execution_id.of_yojson execution_id)
        && valid_schedule schedule
        && valid_result result
-       && Json_util.assoc_member_opt "tool_name" result = Some (`String tool_name)
+       && (match Json_util.assoc_member_opt "tool_name" result with
+           | Some (`String result_tool_name) ->
+             let canonical = Keeper_tool_descriptor_resolution.canonical_tool_name in
+             String.equal (canonical tool_name) (canonical result_tool_name)
+           | _ -> false)
      | _ -> false)
   | _ -> false
 ;;

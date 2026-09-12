@@ -168,9 +168,10 @@ let test_canonical_failed_results () =
       let failure tool_name = Tool_result.make_err ~tool_name ~start_time:(Time_compat.now ())
         ~class_:Tool_result.Workflow_rejection ~effect_disposition:phase
         "Missing host permission for the tab" in
-      let node_result = Tool_result.to_json (failure "keeper_time_now") in
+      let node_result = Tool_result.to_json (failure "masc_browser_read") in
       let settled = node ~node_id:"read" ~schedule:{planned_index=1;batch_index=1;
         batch_size=1;execution_mode=Agent_core.Tool_contract.Serial} ()
+        |> replace "tool_name" (`String "BrowserRead")
         |> replace "result" node_result in
       let result = failure "keeper_compose_failed-read" in
       let evidence = E.make ~reference
@@ -186,6 +187,11 @@ let test_canonical_failed_results () =
         (member "result" loaded = Tool_result.to_json result);
       Alcotest.(check bool) "failed node result round-trips exactly" true
         (member "executor_settlements" loaded |> to_list = [settled]);
+      let wrong_node = replace "result"
+        (Tool_result.to_json (failure "masc_browser_act")) settled in
+      Alcotest.(check bool) "unrelated registered tool identity is rejected" true
+        (Result.is_error (E.of_yojson
+           (replace "executor_settlements" (`List [wrong_node]) loaded)));
       let fields = member "result" loaded |> to_assoc in
       List.iter (fun malformed ->
         Alcotest.(check bool) "missing or ambiguous failure phase is rejected" true

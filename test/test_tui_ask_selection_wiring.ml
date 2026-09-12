@@ -63,6 +63,30 @@ let test_the_bracket_keys_keep_one_vocabulary () =
     (Ast_grep.count_string_literals ~module_path:render ~needle:"[/]:")
 ;;
 
+(* The question reader takes every key while it is open, so the surface-wide
+   Home and End never reach it -- and reaching it would move the approvals
+   cursor under a reader drawing something else. It answers them itself,
+   against the same limit its page keys clamp to, and says so: a key that
+   works and is not named is the drift the footers already taught. *)
+let test_the_reader_reaches_its_own_ends () =
+  let writes field =
+    Ast_grep.count_field_writes_in_module ~module_path:executable ~field
+  in
+  Alcotest.(check bool) "the reader moves its own scroll" true
+    (writes "ask_question_scroll" > 0);
+  (* The page keys and End, and nothing else: both ask the renderer where the
+     text ends rather than counting the lines a second time. *)
+  Alcotest.(check int) "both movers ask the renderer for the end" 2
+    (Ast_grep.count_calls ~module_path:executable
+       ~callee:"Masc_tui_render.ask_question_scroll_limit");
+  Alcotest.(check int) "the reader names the ends it answers" 1
+    (Ast_grep.count_string_literals ~module_path:render
+       ~needle:"Home/End: top/bottom");
+  Alcotest.(check int) "and the page it already answered" 1
+    (Ast_grep.count_string_literals ~module_path:render
+       ~needle:"PgUp/PgDn: page")
+;;
+
 (* The panel is drawn by [draw_ask_questions], and the caret it draws is the
    only mark saying where the cursor sits. It reads [ask_cursor] and
    [ask_question_cursor] -- the same two fields the keys move -- so what the
@@ -202,6 +226,10 @@ let () =
     ; ( "budget"
       , [ Alcotest.test_case "the panel draws against a budget" `Quick
             test_the_panel_draws_against_a_budget
+        ] )
+    ; ( "ends"
+      , [ Alcotest.test_case "the reader reaches its own ends" `Quick
+            test_the_reader_reaches_its_own_ends
         ] )
     ]
 ;;

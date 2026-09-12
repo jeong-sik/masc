@@ -1,0 +1,78 @@
+{
+  "source_commit": "78049dd1685e531445af721c506c2e92cf3b6958",
+  "server_sha256": "5cfe7bc09b3aa7859a71131e15876538d6035b28e68c78bff700f3f20b603a89",
+  "tui_sha256": "35af6ab452319a4c928889579c7c4632a2e46395fd40f88ab66f8567fae095da",
+  "port": 58181,
+  "via_automation": false,
+  "scope": "owned scratch runtime; saved observation reader with no browser process",
+  "health_build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "78049dd1685e531445af721c506c2e92cf3b6958",
+    "commit_source": "embedded",
+    "binary_commit": "78049dd1685e531445af721c506c2e92cf3b6958",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "5cfe7bc09b3aa7859a71131e15876538d6035b28e68c78bff700f3f20b603a89",
+    "binary_commit_unix_ts": 1789230249.0,
+    "binary_commit_age_seconds": 833,
+    "executable_path": "/private/tmp/browser-history-native-780/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-history-native-780/runtime",
+    "runtime_instance_id": "01a0967b-a8e2-7000-ae7d-d21642855257",
+    "started_at": "2026-09-12T16:38:01Z",
+    "uptime_seconds": 0
+  },
+  "clients": {
+    "ok": true,
+    "data": {
+      "clients": []
+    }
+  },
+  "keeper": "browser-handoff-proof-15958000",
+  "verified_artifact_reads": [
+    {
+      "execution_id": "exec-1789228092128-0005",
+      "artifact": {
+        "sha256": "dcfc853c7dd8c1c0c3906c0c6addbfee63b4cf0fc8f6a8d58a775b23de5354f7",
+        "bytes": 1826,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:63795/index.html"
+    },
+    {
+      "execution_id": "exec-1789228094791-0007",
+      "artifact": {
+        "sha256": "69a2433e197011a2ba7fcd81e479302521b9525c404bce355f3204eb74f78bc3",
+        "bytes": 5831,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:63795/alpha.html"
+    },
+    {
+      "execution_id": "exec-1789228097043-000a",
+      "artifact": {
+        "sha256": "a9bc048829d3f08df40cce0dbb058197aa004816c6a52210f3811ba814273dcf",
+        "bytes": 4688,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:63795/beta.html"
+    },
+    {
+      "execution_id": "exec-1789228099847-000d",
+      "artifact": {
+        "sha256": "1ebafb22d3f9e993f22a3a7ed12a0b13c89336c67150c7533d07b05a8964d061",
+        "bytes": 4681,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      },
+      "url": "http://127.0.0.1:63795/gamma.html"
+    }
+  ],
+  "capture_exit": 0,
+  "capture_output": "capture directory /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/history-capture-1789231082486662000\nsending 3a676f204b6565706572730d awaiting b'MASC Keepers'\nsending 3a676f2042726f77736572204c616e650d awaiting b'Browser bridge not connected'\nsending 68 awaiting b'retained observations'\nsending 5d awaiting b'Observation 2/4'\nsending 5d awaiting b'Observation 3/4'\nsending 5d awaiting b'Observation 4/4'\nsending 5b awaiting b'Observation 3/4'\n/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/history-capture-1789231082486662000\n",
+  "result": "native_reader_pass",
+  "server_exit": -9
+}

@@ -422,7 +422,7 @@ let for_surface = function
       [ b Navigate "j/k" "select / scroll"
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
-      ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "p" "runtime.toml / models / params / prompts / presets / themes / voice"
       ; b Navigate "v" "runtime.toml read status"
           ~help:"source revision, validation issues, and application/restart details"
       ; b Navigate "9" "Runtime"
@@ -433,7 +433,9 @@ let for_surface = function
           ~help:"the tool catalog, receipts, and usage, off the ring under \
                  Config"
       ; b Act "e" "edit"
-          ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
+          ~help:"params use a type-aware field; runtime.toml previews; prompts \
+                 save an override; voice opens the setup wizard; models jumps \
+                 to that model's line in the source"
       ; b Act "E" "advanced JSON"
           ~help:"on params only: edit the exact JSON value"
       ; b Act "Enter" "edit / use"

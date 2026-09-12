@@ -283,7 +283,7 @@ let test_entry_ids_read_in_file_order () =
 let test_upsert_edits_only_the_addressed_entry () =
   let out =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
-      ~fields:[ "base_url", Toml_line_editor.String "http://127.0.0.1:9000/v1" ]
+      ~fields:[ "base_url", Some (Toml_line_editor.String "http://127.0.0.1:9000/v1") ]
   in
   check_comments_unchanged endpoints_fixture out;
   Alcotest.(check bool) "the addressed entry took the new value" true
@@ -301,7 +301,7 @@ let test_upsert_edits_only_the_addressed_entry () =
 let test_a_float_field_keeps_its_point () =
   let out =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
-      ~fields:[ "timeout_seconds", Toml_line_editor.Float 35.0 ]
+      ~fields:[ "timeout_seconds", Some (Toml_line_editor.Float 35.0) ]
   in
   Alcotest.(check bool) "35.0 does not render as a bare 35" true
     (has_line out "timeout_seconds = 35.0")
@@ -309,7 +309,7 @@ let test_a_float_field_keeps_its_point () =
 let test_a_bool_field_is_not_quoted () =
   let out =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
-      ~fields:[ "enabled", Toml_line_editor.Bool false ]
+      ~fields:[ "enabled", Some (Toml_line_editor.Bool false) ]
   in
   Alcotest.(check bool) "enabled reads as a bool" true (has_line out "enabled = false");
   Alcotest.(check bool) "not as a string" false (has_line out {|enabled = "false"|})
@@ -317,7 +317,7 @@ let test_a_bool_field_is_not_quoted () =
 let test_a_field_the_entry_lacks_is_appended_to_it_alone () =
   let out =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
-      ~fields:[ "health_url", Toml_line_editor.String "http://127.0.0.1:2022/health" ]
+      ~fields:[ "health_url", Some (Toml_line_editor.String "http://127.0.0.1:2022/health") ]
   in
   Alcotest.(check int) "the new field is written exactly once" 1
     (count_line out {|health_url = "http://127.0.0.1:2022/health"|});
@@ -329,10 +329,10 @@ let test_a_new_entry_lands_after_the_last_one () =
   let out =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"mlx-audio"
       ~fields:
-        [ "kind", Toml_line_editor.String "openai_compat"
-        ; "base_url", Toml_line_editor.String "http://127.0.0.1:8000/v1"
-        ; "enabled", Toml_line_editor.Bool true
-        ; "timeout_seconds", Toml_line_editor.Float 60.0
+        [ "kind", Some (Toml_line_editor.String "openai_compat")
+        ; "base_url", Some (Toml_line_editor.String "http://127.0.0.1:8000/v1")
+        ; "enabled", Some (Toml_line_editor.Bool true)
+        ; "timeout_seconds", Some (Toml_line_editor.Float 60.0)
         ]
   in
   check_comments_unchanged endpoints_fixture out;
@@ -352,7 +352,7 @@ default_model = "eleven_multilingual_v2"
 |} in
   let out =
     upsert source ~path:"voice.tts.endpoints" ~id_key:"id" ~id:"elevenlabs-direct"
-      ~fields:[ "kind", Toml_line_editor.String "elevenlabs_direct" ]
+      ~fields:[ "kind", Some (Toml_line_editor.String "elevenlabs_direct") ]
   in
   Alcotest.(check (list string)) "the entry is addressable" [ "elevenlabs-direct" ]
     (Toml_line_editor.table_array_entry_ids out ~path:"voice.tts.endpoints" ~id_key:"id");
@@ -365,7 +365,7 @@ let test_an_id_inside_fields_is_ignored () =
   let out =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
       ~fields:
-        [ "id", Toml_line_editor.String "renamed"; "enabled", Toml_line_editor.Bool false ]
+        [ "id", Some (Toml_line_editor.String "renamed"); "enabled", Some (Toml_line_editor.Bool false) ]
   in
   Alcotest.(check bool) "the id stays as addressed" true
     (has_line out {|id = "whisper-local"|});
@@ -442,8 +442,8 @@ let test_add_then_remove_restores_the_file () =
   let added =
     upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"mlx-audio"
       ~fields:
-        [ "kind", Toml_line_editor.String "openai_compat"
-        ; "base_url", Toml_line_editor.String "http://127.0.0.1:8000/v1"
+        [ "kind", Some (Toml_line_editor.String "openai_compat")
+        ; "base_url", Some (Toml_line_editor.String "http://127.0.0.1:8000/v1")
         ]
   in
   let back =
@@ -451,6 +451,51 @@ let test_add_then_remove_restores_the_file () =
       ~id:"mlx-audio"
   in
   Alcotest.(check string) "the file comes back byte-for-byte" endpoints_fixture back
+
+let count_key content key =
+  lines_of content
+  |> List.filter (fun line ->
+       match Toml_line_editor.key_of_line line with
+       | Some found -> String.equal found key
+       | None -> false)
+  |> List.length
+
+(* Switching an endpoint from a hosted provider to a local one has to drop
+   api_key_env. Left behind it sends an Authorization header the local server
+   never asked for, and the endpoint answers 401 instead of serving. *)
+let test_a_none_field_is_dropped_from_the_entry () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"elevenlabs-stt"
+      ~fields:
+        [ "api_key_env", None
+        ; "base_url", Some (Toml_line_editor.String "http://127.0.0.1:8000/v1")
+        ]
+  in
+  Alcotest.(check bool) "the dropped key is gone" false
+    (has_line out {|api_key_env = "ELEVENLABS_API_KEY"|});
+  Alcotest.(check bool) "the field set in the same call landed" true
+    (has_line out {|base_url = "http://127.0.0.1:8000/v1"|});
+  Alcotest.(check bool) "the sibling entry keeps its own base_url" true
+    (has_line out {|base_url = "http://127.0.0.1:2022/v1"|});
+  check_comments_unchanged endpoints_fixture out
+
+let test_a_new_entry_skips_its_none_fields () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"local-tts"
+      ~fields:
+        [ "kind", Some (Toml_line_editor.String "openai_compat"); "api_key_env", None ]
+  in
+  Alcotest.(check bool) "the field that has a value is written" true
+    (has_line out {|kind = "openai_compat"|});
+  Alcotest.(check int) "only the pre-existing api_key_env line is in the file" 1
+    (count_key out "api_key_env")
+
+let test_dropping_a_field_the_entry_lacks_changes_nothing () =
+  let out =
+    upsert endpoints_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "default_voice", None ]
+  in
+  Alcotest.(check string) "the file is untouched" endpoints_fixture out
 
 let () =
   Alcotest.run "toml_line_editor"
@@ -510,5 +555,11 @@ let () =
             test_a_value_line_renders_each_type
         ; Alcotest.test_case "add then remove restores the file" `Quick
             test_add_then_remove_restores_the_file
+        ; Alcotest.test_case "a None field is dropped from the entry" `Quick
+            test_a_none_field_is_dropped_from_the_entry
+        ; Alcotest.test_case "a new entry skips its None fields" `Quick
+            test_a_new_entry_skips_its_none_fields
+        ; Alcotest.test_case "dropping an absent field changes nothing" `Quick
+            test_dropping_a_field_the_entry_lacks_changes_nothing
         ] )
     ]

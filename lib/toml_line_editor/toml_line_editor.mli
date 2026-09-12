@@ -88,7 +88,7 @@ val upsert_table_array_entry
   -> path:string
   -> id_key:string
   -> id:string
-  -> fields:(string * value) list
+  -> fields:(string * value option) list
   -> string
 (** Set [fields] on the [\[\[path\]\]] entry whose [id_key] is [id], appending a
     new entry after the last existing one when no entry carries that id.
@@ -96,6 +96,12 @@ val upsert_table_array_entry
     Only the lines named in [fields] are written. Every other line in the entry —
     comments, blanks, fields not named — passes through unchanged, and a named
     field the entry does not have yet is appended to the end of its body.
+
+    A field whose value is [None] is dropped from the entry, the way
+    {!edit_table_scalar} removes a key. Switching an endpoint from a hosted
+    provider to a local one has to drop [api_key_env]: left behind, it would
+    send an Authorization header the local server never asked for, and the
+    endpoint would answer 401 rather than fall through the chain.
 
     [id_key] is skipped if it also appears in [fields]: [id] is the one source of
     the entry's identity, and writing a second spelling of it from the field list

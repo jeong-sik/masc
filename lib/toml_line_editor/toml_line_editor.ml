@@ -520,7 +520,10 @@ let upsert_table_array_entry content ~path ~id_key ~id ~fields =
   let fields = List.filter (fun (key, _) -> not (String.equal key id_key)) fields in
   let set_fields body =
     List.fold_left
-      (fun body (key, value) -> replace_or_append_value body ~key ~value)
+      (fun body (key, value) ->
+        match value with
+        | Some value -> replace_or_append_value body ~key ~value
+        | None -> remove_scalar body ~key)
       body
       fields
   in
@@ -541,7 +544,10 @@ let upsert_table_array_entry content ~path ~id_key ~id ~fields =
     else (
       let block =
         (Printf.sprintf "[[%s]]" path :: value_line ~key:id_key ~value:(String id)
-         :: List.map (fun (key, value) -> value_line ~key ~value) fields)
+         :: List.filter_map
+              (fun (key, value) ->
+                Option.map (fun value -> value_line ~key ~value) value)
+              fields)
       in
       append_table_array_entry edited ~path ~block)
   in

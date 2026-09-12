@@ -15,6 +15,10 @@ observations help the current task. Read the selected row's `fields.state`,
 - `unknown` or incomplete coverage does not establish that the game stopped.
   Keep the missing-input or discontinuity reason. Existing work can continue.
 
+The calculation clears a baseline for unavailable or invalid capture data in a
+valid source envelope. A malformed protocol request rejected before observation
+does not transition that baseline; a request error is not a new measurement.
+
 When forwarding a measurement to a Keeper, select the row and its retained
 evidence through the existing Lane Slice path. Both original captures and
 their screenshot/output references are available under `previous` and

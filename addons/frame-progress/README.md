@@ -24,14 +24,21 @@ Each value row has `unit = "frames"` and `scope = "between_supplied_msx_captures
 | `measured` | `value` is current frame minus previous frame within the same producer and machine incarnation. Zero means those two frames were equal. |
 | `unknown` | Incomplete input or inconsistent/reversed producer cursor; `value = null` and the baseline is cleared. |
 
-Missing, malformed, mismatched or ambiguous input has incomplete coverage and
-no metric row. It clears that source's baseline. A following complete sample
+Within a valid source envelope, missing, malformed, mismatched or ambiguous
+capture data has incomplete coverage and no metric row. It clears that source's
+baseline. A following complete sample
 starts a new baseline; it never reports a zero to conceal the gap. Removing a
 source from the input clears its baseline too. Different producer installation,
 instance, run, configuration or package revision starts a fresh baseline. A
 restore changes the machine incarnation and starts a fresh baseline even when
 its frame number happens to match an earlier frame. Frame regression within
 one incarnation is also a baseline discontinuity, never negative progress.
+
+Malformed JSON-RPC, binding or top-level source envelopes are rejected by the
+shared protocol before this calculation receives an observation. Those rejected
+requests do not transition the baseline. Normal MASC source acquisition supplies
+typed envelopes and represents acquisition failure as unavailable coverage;
+that unavailable input reaches the calculation and clears its baseline.
 
 Repeated reads of the same producer cursor and capture return the previously
 computed interval. They do not move the baseline or accumulate a total. A later

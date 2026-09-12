@@ -144,8 +144,35 @@ let test_review mode =
   let serialized = Yojson.Safe.to_string (`List rows) in
   check bool "real contained text reaches tool response" true
     (String_util.contains_substring serialized "verified-file-receipt");
-  check bool "exact initial and lookup image reaches client" true
-    (String_util.contains_substring serialized png);
+  let images content = Yojson.Safe.Util.to_list content
+    |> List.filter (fun block -> member "type" block = `String "image") in
+  let user = List.find (fun row -> member "type" row = `String "user") rows in
+  let initial_images = user |> member "message" |> member "content" |> images in
+  check int "one initial image reaches client" 1 (List.length initial_images);
+  let initial_source = List.hd initial_images |> member "source" in
+  check string "initial image encoding" "base64"
+    (initial_source |> member "type" |> Yojson.Safe.Util.to_string);
+  check string "initial image media type" "image/png"
+    (initial_source |> member "media_type" |> Yojson.Safe.Util.to_string);
+  check string "exact initial image bytes" png
+    (initial_source |> member "data" |> Yojson.Safe.Util.to_string);
+  let image_reply = List.find (fun row ->
+    member "type" row = `String "control_response"
+    && (row |> member "response" |> member "request_id") = `String "4") rows in
+  let reply = image_reply |> member "response" in
+  check string "image control response succeeds" "success"
+    (reply |> member "subtype" |> Yojson.Safe.Util.to_string);
+  let mcp = reply |> member "response" |> member "mcp_response" in
+  check int "image lookup response identity" 4 (mcp |> member "id" |> Yojson.Safe.Util.to_int);
+  let result = mcp |> member "result" in
+  check bool "image lookup did not fail" false (member "isError" result = `Bool true);
+  let lookup_images = result |> member "content" |> images in
+  check int "Read has its own visual block" 1 (List.length lookup_images);
+  let lookup_image = List.hd lookup_images in
+  check string "Read image media type" "image/png"
+    (lookup_image |> member "mimeType" |> Yojson.Safe.Util.to_string);
+  check string "exact Read image bytes" png
+    (lookup_image |> member "data" |> Yojson.Safe.Util.to_string);
   check bool "workspace Skills not exposed" false
     (String_util.contains_substring serialized "masc_skill");
   check int "each tool result observed" (if mode = "missing" then 2 else if mode = "duplicate" then 4 else 3)

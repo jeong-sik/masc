@@ -784,6 +784,30 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
+(* The sheet is the only place the eight keeper marks are named where a reader
+   can read all eight at once: the Keepers rows pair each glyph with its word
+   but show only the states the fleet is in, and the 34-cell roster pane beside
+   the chat draws the glyph with no word at all. The list lived in
+   Masc_tui_keeper_mark with no reader until the sheet took it. *)
+let test_the_sheet_names_every_keeper_mark () =
+  let sections = Masc_tui_keys.help_sections () in
+  let marks =
+    List.assoc_opt "Keeper marks" sections
+  in
+  match marks with
+  | None -> Alcotest.fail "the sheet has no Keeper marks section"
+  | Some entries ->
+      Alcotest.(check int) "every mark the roster can draw is named"
+        (List.length Masc_tui_keeper_mark.legend)
+        (List.length entries);
+      List.iter
+        (fun (glyph, meaning) ->
+          Alcotest.(check bool) ("mark " ^ meaning ^ " is drawn") true
+            (String.length glyph > 0);
+          Alcotest.(check bool) ("mark " ^ glyph ^ " is named") true
+            (String.length meaning > 0))
+        entries
+
 let test_braille_sparkline () =
   Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
     (braille_sparkline []);
@@ -1604,6 +1628,8 @@ let () =
             test_resources_is_a_config_child
         ; Alcotest.test_case "Tools is a Config child" `Quick
             test_tools_is_a_config_child
+        ; Alcotest.test_case "the sheet names every keeper mark" `Quick
+            test_the_sheet_names_every_keeper_mark
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
         ; Alcotest.test_case "Logs is an Activity child" `Quick

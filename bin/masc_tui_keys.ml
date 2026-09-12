@@ -887,7 +887,22 @@ let help_sections ?current () =
   in
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
-    :: List.map (fun (_, section) -> section) rest
+    :: (List.map (fun (_, section) -> section) rest
+        (* The marks last, as reference, the way the slash commands read as
+           reference. One reader of them has no words beside it: the Keepers
+           rows draw each glyph with its status word and so does the chat
+           header, but the roster pane beside the chat is 34 cells wide and
+           draws the glyph alone (masc_tui_render_prim.ml: "Without it the pane
+           says a keeper exists and nothing else"). Selecting keepers until
+           every state has been seen was the only way that reader could learn
+           the eight, and two of them -- stale and zombie -- may never be
+           selected.
+
+           Masc_tui_keeper_mark carried this list for exactly this and nothing
+           read it. Its shape is already the sheet's: a mark, and what it
+           means. Last rather than beside Global because the section order up
+           to there is asserted. *)
+        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend) ])
 
 let footer_hints_browser_lane =
   hints_of_bindings

@@ -50,7 +50,13 @@ let test_cli_probe_is_a_note () =
     [Runtime_provider_network_error; Runtime_provider_endpoint_not_found;
      Runtime_provider_auth_failed; Runtime_provider_invalid_execution_transport];
   Alcotest.(check bool) "no diagnostic is invented" true
-    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli None = None)
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_cli None = None);
+  let adc = "Vertex Gemini authenticates with Google Application Default Credentials" in
+  Alcotest.(check bool) "a native-auth skip is informational too" true
+    (runtime_probe_annotation ~status:Runtime_provider_skipped_native_auth (Some adc)
+     = Some (Runtime_probe_note adc));
+  Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
+    (runtime_probe_status_label Runtime_provider_skipped_native_auth)
 
 let () = Alcotest.run "runtime list geometry"
   ["operator states", [

@@ -602,6 +602,7 @@ type runtime_provider_status =
   | Runtime_provider_http_error
   | Runtime_provider_unknown_http_status
   | Runtime_provider_skipped_cli
+  | Runtime_provider_skipped_native_auth
   | Runtime_provider_invalid_endpoint
   | Runtime_provider_invalid_execution_transport
 

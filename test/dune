@@ -5738,3 +5738,17 @@
 
 (include stanzas/test_browser_observation.inc)
 (include stanzas/test_browser_observation_composition.inc)
+
+(rule
+ (alias runtest-test_tui_browser_history)
+ (deps test_tui_browser_history.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_browser_history.py} %{dep:../bin/masc_tui.exe})))
+
+(rule
+ (alias runtest)
+ (deps (alias runtest-test_tui_browser_history)))
+
+(test
+ (name test_tui_browser_history_model)
+ (modules test_tui_browser_history_model)
+ (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))

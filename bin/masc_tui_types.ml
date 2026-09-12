@@ -3317,6 +3317,76 @@ module Browser_lane_view = struct
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle; read_view = Text_view }
 end
 
+module Browser_history = struct
+  type entry = {
+    at : float; execution_id : string; artifact : Tool_output.artifact_ref;
+  }
+  type selection =
+    | Loading
+    | Failed of string
+    | Observed of Masc.Browser_observation.t
+  type content =
+    | Listing
+    | List_failed of string
+    | Entries of { entries : entry list; cursor : int; selection : selection }
+  type t = { keeper_name : string; content : content; scroll : int }
+  let create keeper_name = {keeper_name;content=Listing;scroll=0}
+  let entries (snapshot : Tui_decode.keeper_calls_snapshot) =
+    snapshot.kcs_entries |> List.rev |> List.concat_map (fun (call : Tui_decode.keeper_call) ->
+      match call.kc_execution_id with
+      | None -> []
+      | Some execution_id -> call.kc_artifact_refs |> List.filter_map (fun artifact ->
+        if artifact.Tool_output.mime = Masc.Browser_observation.mime
+        then Some {at=call.kc_at;execution_id;artifact} else None))
+  let selected t = match t.content with
+    | Entries {entries;cursor;_} -> List.nth_opt entries cursor
+    | Listing | List_failed _ -> None
+  let select cursor entries t =
+    {t with content=Entries {entries;cursor;selection=Loading};scroll=0}
+  let move delta t = match t.content with
+    | Entries {entries;cursor;_} when entries <> [] ->
+        let next = max 0 (min (List.length entries - 1) (cursor + delta)) in
+        if next=cursor then None else Some (select next entries t)
+    | Entries _ | Listing | List_failed _ -> None
+  let accept result t = match t.content with
+    | Entries entries -> {t with content=Entries {entries with selection=(match result with
+        | Ok observation -> Observed observation | Error detail -> Failed detail)}}
+    | Listing | List_failed _ -> t
+  let observation t = match t.content with
+    | Entries {selection=Observed observation;_} -> Some observation
+    | Entries _ | Listing | List_failed _ -> None
+  let page_view t =
+    let view = Browser_lane_view.create () in
+    match observation t with
+    | None -> view
+    | Some observation ->
+      let source = match observation.source with
+        | Masc.Browser_surface.Live -> Browser_lane_view.Live
+        | Automation -> Browser_lane_view.Automation in
+      let client_id = Option.map Browser_lane.client_id_to_string observation.client_id in
+      {view with source;selected_tab=Some observation.tab_id;scroll=t.scroll;
+       scene=Some {source;client_id;tab_id=observation.tab_id;content=observation.scene;elapsed_ms=0.}}
+  let decode_artifact (reference : Tool_output.artifact_ref) json =
+    let open Yojson.Safe.Util in
+    match member "sha256" json, member "bytes" json, member "content" json with
+    | `String hash, `Int bytes, `String content
+      when hash=reference.sha256 && bytes=reference.bytes && String.length content=bytes ->
+        (match Yojson.Safe.from_string content with
+         | scene -> Masc.Browser_observation.of_json scene
+         | exception Yojson.Json_error detail -> Error ("Retained scene is not JSON: " ^ detail))
+    | _ -> Error "Retained scene response does not match its recorded artifact"
+  let context t = match observation t, selected t with
+    | Some observation, Some entry -> Some (Yojson.Safe.to_string (`Assoc [
+        "kind",`String "retained_browser_observation";
+        "keeper",`String t.keeper_name;"execution_id",`String entry.execution_id;
+        "observed_at",`Float entry.at;
+        "artifact",Tool_output.normalized_artifact_ref_to_json entry.artifact;
+        "current",`Bool false;"url",`String observation.scene.url;
+        "documentId",`String observation.scene.document_id;
+        "truncated",`Bool observation.scene.truncated]))
+    | _ -> None
+end
+
 let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
   let wrap text =
     String.split_on_char '\n'
@@ -4069,6 +4139,8 @@ type state = {
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
+  mutable browser_history: Browser_history.t option;
+  mutable browser_history_generation: int;
   mutable browser_lane_visibility: browser_lane_visibility;
   mutable browser_lane_generation: int;
   mutable connectors: Tui_decode.connector_snapshot option;
@@ -5438,6 +5510,8 @@ let create_state
   lane_addons = None;
   lane_addons_generation = 0;
   browser_lane = None;
+  browser_history = None;
+  browser_history_generation = 0;
   browser_lane_visibility = Browser_lane_hidden;
   browser_lane_generation = 0;
   connectors = None;

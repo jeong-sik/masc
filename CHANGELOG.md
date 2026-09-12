@@ -19,7 +19,7 @@
 - Keeper: preserve current context and the original official-client session during native resumption and Gate continuation; reject invalid incoming Gate bindings without disabling the Owner (#35419, #35444, #35449, #35459, #35516).
 - TUI: open the original page URL when an inline image cannot be drawn; retain cached input after converter failures and offer an explicit retry for refused previews (#35346, #35349, #35525).
 - TUI: finish known-lost-terminal cleanup without further terminal output, keep Git overlay scrolling within its geometry, and draw dividers using the terminal-aware palette (#35345, #35351, #35463).
-- TUI: show only applicable Config actions, preserve Activity's filter hint, retain Planning modes at narrow widths, wrap complete judge legends, and keep conflict paths and actionable warnings intact alongside exit controls (#35401, #35418, #35445, #35467, #35475).
+- TUI: show only applicable Config actions, preserve Activity's filter hint, retain Planning modes at narrow widths, wrap complete judge legends naming the marks the list draws, and keep conflict paths and actionable warnings intact alongside exit controls (#35401, #35418, #35445, #35467, #35475).
 - TUI: distinguish Memory loading failures from waiting and name fields rejected by strict response decoding (#35457, #35460).
 - Browser Lane: follow the current page and keep read-failure badges consistent with the surrounding surface (#35446, #35470).
 - Dashboard: keep authenticated read observations outside the per-agent operation quota while retaining the per-IP resource boundary (#35447).
@@ -34,12 +34,21 @@
 - TUI: Resources search and navigation to the beginning/end of either pane (#35370).
 - Verification: support configured official clients and original PDF evidence inspection, with PDF installation prerequisites available through setup (#35372, #35398, #35409).
 - Media: carry image tool results through official clients and support declared official-client vision candidates (#35384, #35405).
-- Lane packages: install observation packages from TOML and expose their Skills through the existing Keeper catalog (#35465, #35482).
+- Lanes: observation packages install from TOML, expose their Skills through the existing Keeper catalog, connect package outputs through TOML world inputs, and carry optional world actions with retained artifact bytes. A self-contained DOS world package ships as one of them (#35465, #35482, #35497, #35521, #35522).
 - Browser: compose navigation with landing-page region observations (#35513).
 - TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
 - Goals: record creation events and recover names and lifetime observations for goals no longer in the active store; show that history in Planning (#35375, #35388, #35408).
 - TUI: fold the turn dashboard to its progress line, retain questions requiring an answer, and use Ctrl-S to expand it with terminal flow control disabled (#35458).
-- Lane packages: connect package outputs through declared TOML world inputs (#35497).
+- Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
+- TUI: chat holds one timeline, with promoted and NEXT rows inside the flow rather than beside it (#35492).
+- TUI: the keeper detail screen shows its tabs and stops saying its hints twice (#35490).
+- Skills: builtin packages refresh as complete packages (#35442).
+- TOML line editor: array-of-tables entries are addressed by an identifying key rather than by position (#35365).
+- Voice: setup runs over HTTP and refuses unknown input by name, every endpoint is probed over HTTP rather than only from the CLI, and an endpoint can be asked which voices it has (#35431, #35609, #35629).
+- Lanes: a DOS machine lives on the server behind seven masc_dos_* tools, MSX observations reach frame progress through TOML, and named package outputs connect the same way (#35548, #35562, #35572).
+- Browser: the navigate-content composition ships, and tool receipts retain the scenes a TUI review reads (#35620, #35546).
+- TUI: the Board column's marks carry names, and the help sheet holds the same words (#35528).
+- Benchmarks: arm K also runs on opencode, without Anthropic credentials (#35406).
 
 ### Documentation
 

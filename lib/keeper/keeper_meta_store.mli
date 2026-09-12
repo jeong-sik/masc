@@ -23,6 +23,24 @@ val read_meta_file_path :
   string ->
   (Keeper_meta_contract.keeper_meta option, string) result
 
+(** What the store holds at a Keeper's canonical path, keeping the two
+    cases [read_meta_file_path] folds into [Ok None] apart. *)
+type meta_presence =
+  | Meta_absent  (** No file at the path. *)
+  | Meta_present of Keeper_meta_contract.keeper_meta
+      (** The file decodes, directly or after the enumerated-field repair. *)
+  | Meta_not_current of string
+      (** A file is at the path but this binary does not decode it as the
+          current schema, or its repair could not be persisted.
+          [read_meta_file_path] reads it as absent and the boot path
+          re-materialises the Keeper from its declaration. The string is the
+          decode detail the runtime logs. *)
+
+(** [read_meta_file_path] with the presence kept; the same decode decision,
+    repair write, and failure reporting. *)
+val read_meta_file_path_presence :
+  ?ownership_root:string -> string -> (meta_presence, string) result
+
 (** Why the deployment gate rejects a persisted Keeper meta, split by what
     the boot path does with the same file.  The two classes need different
     operator action, so the split is typed here rather than read out of the
@@ -126,6 +144,14 @@ val read_effective_meta_resolved :
 (** Like [read_effective_meta_resolved] but discards the filename component. *)
 val read_effective_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
+
+(** [read_effective_meta] with the presence kept: [Meta_present] carries the
+    TOML-overlaid snapshot, and an overlay failure is [Error]. An empty name
+    is [Error]. Readers that decide on absence use this, since [Ok None]
+    from [read_effective_meta] also covers a file this binary cannot
+    decode. *)
+val read_effective_meta_presence :
+  Workspace.config -> string -> (meta_presence, string) result
 
 (** Durably replace the complete current snapshot. The per-Keeper Owner is the
     only production caller and therefore the only write authority. Any failed

@@ -8,8 +8,8 @@ distinguishes authors from assigned owners; this confounds answer-quality attrib
 
 | Observed run | Outer calls | Failed calls | Compositions | Observed seconds | Full outer result bytes | TUI page/message pairs |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Regions then scoped article | 10 | 1 | 3 | 55.832 | 21,904 | 3/3 |
-| Visible content immediately | 6 | 1 | 3 | 35.336 | 22,033 | 1/3 |
+| Regions then scoped article | 10 | 1 | 3 | 55.832 | 21,905 | 3/3 |
+| Visible content immediately | 6 | 1 | 3 | 35.336 | 22,034 | 1/3 |
 
 The results show fewer model invocations, not lower returned payload volume. These
 are single runs with different plans/instruction text and polling latency; the
@@ -40,3 +40,13 @@ This experiment does not implement that feature.
 
 `firefox-final.png` is an actual isolated Firefox screenshot; `tui-gamma.png` is
 xterm replay of native PTY. No live Slack session or user executable was touched.
+
+Byte audit correction: every outer output, including untruncated previews, is
+joined to its raw `tool_execution_finished` event by exact `tool_use_id`.
+Durable previews can normalize trailing newlines. `raw_result_bytes` records
+the UTF-8 raw string length; `declared_result_bytes` preserves the producer
+receipt value or null when absent. Comparisons and any mismatches are retained
+in the audit. The first two runs each have a failed result whose raw string is
+257 bytes while its producer receipt declares 55 bytes; the raw failure includes
+a bridge-added failure-class explanation. This is not provider wire input size.
+Original durable receipts are unchanged.

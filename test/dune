@@ -1076,6 +1076,17 @@
  (modules test_tool_call_id_is_not_invented)
  (libraries alcotest ast_grep))
 
+; The wizard is drawn and keyed from two large dispatchers; these assert the
+; call sites rather than trusting the key help table.
+
+(test
+ (name test_tui_voice_wizard_wiring)
+ (modules test_tui_voice_wizard_wiring)
+ ; Read through Ast_grep, so the sources are deps: without them the test reads
+ ; a cached verdict and stays green while the wiring it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui.ml %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep))
+
 (test
  (name test_keeper_turn_finish_cancel_protect)
  (modules test_keeper_turn_finish_cancel_protect)

@@ -4904,10 +4904,19 @@ let test_main_eio_start_records_default_with_flag () =
                 let record_file =
                   Filename.concat (Filename.concat config_home "masc") "default-base-path"
                 in
+                (* /health is available during initialization. Recording waits
+                   until both the owner and its listener are ready. *)
+                let deadline = Unix.gettimeofday () +. 10.0 in
+                let rec await_record () =
+                  if Sys.file_exists record_file then true
+                  else if not (process_alive pid) || Unix.gettimeofday () >= deadline
+                  then false
+                  else (Unix.sleepf 0.1; await_record ())
+                in
                 Alcotest.(check bool)
                   "default-base-path record exists with --record-default"
                   true
-                  (Sys.file_exists record_file);
+                  (await_record ());
                 let recorded = String.trim (read_file record_file) in
                 let expected =
                   match Unix.realpath dir with
@@ -4919,6 +4928,52 @@ let test_main_eio_start_records_default_with_flag () =
                   expected
                   recorded
               end)))
+
+let test_main_eio_failed_start_preserves_default () =
+  with_temp_dir "failed-start-record-default" (fun dir ->
+      with_temp_dir "failed-start-record-config-home" (fun config_home ->
+          let previous = Filename.concat dir "previous" in
+          Fs_compat.mkdir_p (Filename.concat previous Common.masc_dirname);
+          let record_dir = Filename.concat config_home "masc" in
+          Fs_compat.mkdir_p record_dir;
+          let record_file = Filename.concat record_dir "default-base-path" in
+          let previous_record = previous ^ "\n" in
+          write_file record_file previous_record;
+          let attempted = Filename.concat dir "attempted" in
+          let exe = Masc_test_runtime.find_main_eio_exe () in
+          let port = find_free_port () in
+          let log_file = Filename.concat dir "server.log" in
+          let log_fd =
+            Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+          in
+          let env =
+            main_eio_env_overrides
+              [ "XDG_CONFIG_HOME", config_home
+              ; "MASC_BASE_PATH", attempted
+              ; "MASC_SHUTDOWN_FORCE_TIMEOUT", "0"
+              ; "MASC_KEEPER_AUTONOMOUS_ENABLED", "0"
+              ; "MASC_ORCHESTRATOR_ENABLED", "0"
+              ; "MASC_USE_H2", "0"
+              ; "DUNE_SOURCEROOT", project_root ()
+              ]
+          in
+          let pid =
+            Unix.create_process_env exe
+              [| exe; "start"; "--host"; "127.0.0.1"; "--port";
+                 string_of_int port; "--base-path"; attempted; "--record-default" |]
+              env Unix.stdin log_fd log_fd
+          in
+          Unix.close log_fd;
+          Fun.protect
+            ~finally:(fun () -> stop_process pid)
+            (fun () ->
+              if not (wait_for_process_exit ~pid ~timeout_s:5.0) then
+                Alcotest.failf "invalid startup did not exit\nlog:\n%s" (read_file log_file);
+              Alcotest.(check bool) "startup rejected the invalid shutdown timeout" true
+                (String_util.contains_substring (read_file log_file)
+                   "MASC_SHUTDOWN_FORCE_TIMEOUT must be greater than zero");
+              Alcotest.(check string) "failed startup preserves the previous default"
+                previous_record (read_file record_file))))
 
 (* A wedged case in this suite has burned 57 CI minutes in silence: a hang
    never fails, so dune kept the Alcotest stream buffered and the log showed
@@ -5285,5 +5340,9 @@ let () =
             "main_eio start records default with flag"
             `Slow
             test_main_eio_start_records_default_with_flag;
+          Alcotest.test_case
+            "main_eio failed start preserves default"
+            `Slow
+            test_main_eio_failed_start_preserves_default;
         ] );
     ]

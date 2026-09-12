@@ -95,6 +95,7 @@ val mark_completed
 val list_runs : t -> run list
 val get : t -> verification_id:string -> run option
 val outcome_label : outcome -> string
+val infrastructure_stage_label : infrastructure_stage -> string
 val status_label : run_status -> string
 val run_to_yojson : run -> Yojson.Safe.t
 val observe_tool_result

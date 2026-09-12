@@ -1283,6 +1283,57 @@ let test_sleep_distinguishes_rate_limited_route_from_cadence () =
 
 (* ── Test runner ─── *)
 
+(* Audit S9: the Owner-registry rejection at shutdown comes in two shapes,
+   the Owner itself stopping and the Owner inventory stopping. Both must
+   complete the cycle without a turn; only the second used to fall into the
+   crash arm. *)
+let test_owner_inventory_stopping_completes_the_cycle () =
+  let status = Keeper_heartbeat_loop.owner_turn_rejection_cycle_status in
+  let name = function
+    | Keeper_heartbeat_loop.Turn_cycle_completed -> "completed"
+    | Keeper_heartbeat_loop.Turn_cycle_interrupted -> "interrupted"
+    | Keeper_heartbeat_loop.Turn_cycle_crashed -> "crashed"
+    | Keeper_heartbeat_loop.Turn_cycle_busy _ -> "busy"
+  in
+  check string "inventory stopping completes the cycle" "completed"
+    (name
+       (status
+          (Keeper_owner_registry.Command_lookup_failed
+             Keeper_owner_registry.Inventory_stopping)));
+  check string "owner stopping completes the cycle" "completed"
+    (name
+       (status
+          (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping)));
+  check string "owner not found is a crash" "crashed"
+    (name
+       (status
+          (Keeper_owner_registry.Command_lookup_failed
+             (Keeper_owner_registry.Owner_not_found "keeper-a"))));
+  check string "owner closed is a crash" "crashed"
+    (name
+       (status (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_closed)))
+;;
+
+let test_owner_inventory_stopping_refreshes_work_heartbeat () =
+  let action =
+    Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      (Keeper_heartbeat_loop.owner_turn_rejection_cycle_status
+         (Keeper_owner_registry.Command_lookup_failed
+            Keeper_owner_registry.Inventory_stopping))
+  in
+  let refreshes =
+    match action with
+    | Keeper_heartbeat_loop.Record_turn_status
+        Keeper_heartbeat_loop.Refresh_work_heartbeat -> true
+    | Keeper_heartbeat_loop.Record_turn_status
+        Keeper_heartbeat_loop.Preserve_work_heartbeat
+    | Keeper_heartbeat_loop.Skip_interrupted_turn
+    | Keeper_heartbeat_loop.Defer_autonomous_work _ -> false
+  in
+  check bool "shutdown boundary does not preserve the lease as a crash would" true
+    refreshes
+;;
+
 let () =
   run
     "keeper keepalive helpers"
@@ -1291,6 +1342,12 @@ let () =
             "heartbeat reconciles empty current_task_id from active backlog"
             `Quick
             test_current_task_id_for_agent_reconciles_from_empty_registry_task
+        ] )
+    ; ( "owner_turn_rejection"
+      , [ test_case "owner inventory stopping completes the cycle" `Quick
+            test_owner_inventory_stopping_completes_the_cycle
+        ; test_case "owner inventory stopping refreshes the work heartbeat" `Quick
+            test_owner_inventory_stopping_refreshes_work_heartbeat
         ] )
     ; ( "directive_orphan_warn_gate"
       , [ test_case "first unknown keeper directive warns" `Quick

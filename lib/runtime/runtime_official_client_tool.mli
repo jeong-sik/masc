@@ -59,10 +59,11 @@ val dynamic_tool_bytes : dynamic_tool list -> int
 
 type content_transport = Codex | Mcp
 
-val codex_image_media_types : string list
-(** The closed media-type set the Codex app-server image item accepts. Shared
-    with {!Runtime_codex_app_server.validate_images} so a turn image and a
-    tool-result image are judged by one list. *)
+val official_client_image_media_types : string list
+(** The closed media-type set an official-client image item accepts, on either
+    transport. Shared with {!Runtime_codex_app_server.validate_images} and
+    {!Runtime_claude_code.validate_images} so a turn image and a tool-result
+    image are judged by one list. *)
 
 val project_content :
   content_transport -> content:string ->

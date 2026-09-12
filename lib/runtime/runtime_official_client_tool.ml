@@ -47,11 +47,13 @@ let dynamic_tool_bytes tools =
    result; neither may silently turn a non-text result into successful prose. *)
 type content_transport = Codex | Mcp
 
-(* The media types the Codex app-server image item accepts. The same closed set
-   guards the initial images ([Runtime_codex_app_server.validate_images]), which
-   reads it from here so a tool-result image and a turn image cannot be judged
-   by two lists that drift apart. *)
-let codex_image_media_types =
+(* The media types an official-client image item accepts. Both transports
+   close on the same set: the Codex app-server item and the Claude Code MCP
+   ImageContent. The initial-image validators
+   ([Runtime_codex_app_server.validate_images],
+   [Runtime_claude_code.validate_images]) read it from here so a turn image and
+   a tool-result image are never judged by two lists that drift apart. *)
+let official_client_image_media_types =
   [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
 ;;
 
@@ -59,7 +61,14 @@ let project_content transport ~content ~content_blocks =
   (* DET-OK: [None] is the producer's text-only result, so [content] is the payload;
      [Some] stays authoritative even when empty, and unsupported media error below. *)
   let blocks = Option.value ~default:[Agent_core.Types.Text content] content_blocks in
-  let text value = match transport with
+  (* [Api_common.content_block_to_json] sanitizes every Text it serializes, so
+     a block that reaches a provider through the canonical path can never carry
+     invalid UTF-8. This path writes the client's JSON itself; without the same
+     call a tool could emit bytes the app-server or MCP client refuses to parse
+     after the tool has already run. *)
+  let text value =
+    let value = Llm_provider.Utf8_sanitize.sanitize value in
+    match transport with
     | Codex -> `Assoc ["type", `String "inputText"; "text", `String value]
     | Mcp -> `Assoc ["type", `String "text"; "text", `String value]
   in
@@ -77,14 +86,14 @@ let project_content transport ~content ~content_blocks =
     then malformed "base64 data must not contain newlines"
     else Ok (media_type, data)
   in
-  let codex_base64 ~media_type data =
-    if not (List.mem media_type codex_image_media_types)
+  let checked_base64 ~media_type data =
+    if not (List.mem media_type official_client_image_media_types)
     then
       malformed
         (Printf.sprintf
            "media type %S is not one of %s"
            media_type
-           (String.concat ", " codex_image_media_types))
+           (String.concat ", " official_client_image_media_types))
     else base64_payload ~media_type data
   in
   let project = function
@@ -96,16 +105,19 @@ let project_content transport ~content ~content_blocks =
            (fun (media_type, data) -> `Assoc
               ["type", `String "inputImage";
                "imageUrl", `String ("data:" ^ media_type ^ ";base64," ^ data)])
-           (codex_base64 ~media_type data)
+           (checked_base64 ~media_type data)
        | Codex, Url -> Ok (`Assoc ["type", `String "inputImage"; "imageUrl", `String data])
-       (* MCP's ImageContent does not close the media-type set the way the
-          app-server does, so only the payload shape is checked here. *)
+       (* MCP's own ImageContent leaves the media-type set open, but the client
+          behind this transport does not: Claude Code refuses anything outside
+          the shared set before it spawns. Letting a tool result through here
+          would reach the provider in a format the initial-image path already
+          rejects, and fail the turn after the tool ran. *)
        | Mcp, Base64 ->
          Result.map
            (fun (media_type, data) -> `Assoc
               ["type", `String "image"; "mimeType", `String media_type;
                "data", `String data])
-           (base64_payload ~media_type data)
+           (checked_base64 ~media_type data)
        | (Codex | Mcp), File_id -> unsupported "file-id image content"
        | Mcp, Url -> unsupported "URL image content over MCP")
     | Agent_core.Types.Audio _ -> unsupported "audio content"

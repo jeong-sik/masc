@@ -585,6 +585,72 @@ let test_unsupported_media_is_a_delivery_error () =
     (List.map (fun item -> member "text" item |> Yojson.Safe.Util.to_string) content)
 ;;
 
+(* Claude Code is the client behind this transport, and its initial-image path
+   ([Runtime_claude_code.validate_images]) refuses anything outside the shared
+   set before it spawns. MCP's own ImageContent leaves the set open, so without
+   the same gate here a tool result reached the provider in a format the turn
+   path had already rejected -- and only after the tool had run. *)
+let test_image_media_type_outside_the_shared_set_is_refused () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+    ~secure_random:env#secure_random ~server_name:"masc"
+    ~tool_specs:(fun () -> [`Assoc ["name", `String "diagram"]])
+    ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> Some
+      { Runtime_official_client_mcp_http.outcome =
+          { Runtime_official_client_mcp.success = true
+          ; content = "diagram receipt"
+          ; content_blocks = Some [Agent_core.Types.Image
+              {media_type="image/svg+xml"; data="PHN2Zz48L3N2Zz4="; source_type=Base64}]
+          }
+      ; after_response_sent = (fun () -> ()) }) () in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+    (json_request 2 "tools/call" (`Assoc ["name",`String "diagram";"arguments",`Assoc []])) in
+  let result = Yojson.Safe.from_string response.body |> member "result" in
+  check bool "a media type the client refuses never reports success" true
+    (member "isError" result = `Bool true);
+  let content = member "content" result |> Yojson.Safe.Util.to_list
+    |> List.map (fun item -> member "text" item |> Yojson.Safe.Util.to_string) in
+  check bool "the refusal names the media type and keeps the receipt" true
+    (match content with
+     | [detail; receipt] ->
+       String_util.contains_substring detail "image/svg+xml"
+       && String_util.contains_substring detail "image/png"
+       && receipt = "diagram receipt"
+     | _ -> false)
+;;
+
+(* [Api_common.content_block_to_json] sanitizes every Text it serializes. This
+   transport writes its own JSON, so without the same call a tool could put
+   invalid UTF-8 on the wire and the client would reject the message after the
+   tool had already run. *)
+let test_structured_text_is_sanitized_before_it_reaches_the_client () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let raw = "before \xC3\x28 after" in
+  let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+    ~secure_random:env#secure_random ~server_name:"masc"
+    ~tool_specs:(fun () -> [`Assoc ["name", `String "note"]])
+    ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> Some
+      { Runtime_official_client_mcp_http.outcome =
+          { Runtime_official_client_mcp.success = true
+          ; content = "note receipt"
+          ; content_blocks = Some [Agent_core.Types.Text raw]
+          }
+      ; after_response_sent = (fun () -> ()) }) () in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+    (json_request 2 "tools/call" (`Assoc ["name",`String "note";"arguments",`Assoc []])) in
+  let result = Yojson.Safe.from_string response.body |> member "result" in
+  check bool "a structured text result still succeeds" true
+    (member "isError" result <> `Bool true);
+  let content = member "content" result |> Yojson.Safe.Util.to_list
+    |> List.map (fun item -> member "text" item |> Yojson.Safe.Util.to_string) in
+  check (list string) "the client receives what the canonical serializer would write"
+    [Llm_provider.Utf8_sanitize.sanitize raw] content
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -595,6 +661,10 @@ let () =
             test_turn_scoped_capability_and_protocol
         ; test_case "unsupported media is an explicit delivery error" `Quick
             test_unsupported_media_is_a_delivery_error
+        ; test_case "image media type outside the shared set is refused" `Quick
+            test_image_media_type_outside_the_shared_set_is_refused
+        ; test_case "structured text is sanitized before it reaches the client"
+            `Quick test_structured_text_is_sanitized_before_it_reaches_the_client
         ] )
     ; ( "effect boundary"
       , [ test_case

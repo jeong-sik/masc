@@ -1106,7 +1106,7 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
    the tool-result projection that applies the same set, so the two paths into
    the same wire item cannot drift. *)
 let supported_image_media_types =
-  Runtime_official_client_tool.codex_image_media_types
+  Runtime_official_client_tool.official_client_image_media_types
 ;;
 
 (* The app-server README is explicit: the [image] input variant takes an inline

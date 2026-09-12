@@ -1599,7 +1599,7 @@ let validate_config config ~session_mode ~prompt =
    analyze_image tool schema and the dashboard composer, so a file the operator
    can attach is a file this transport can carry. *)
 let supported_image_media_types =
-  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+  Runtime_official_client_tool.official_client_image_media_types
 ;;
 
 (* Fail closed before spawning the CLI. A malformed image reaches the provider

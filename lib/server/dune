@@ -112,6 +112,7 @@
   masc.keeper_chat_delivery_identity
   masc.keeper_failure_taxonomy
   masc.keeper_toml
+  masc.config_journal
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics

@@ -451,6 +451,49 @@ let test_visible_navigation_glyphs_are_not_mojibake () =
        ]
 )
 
+(* Three facts about a surface's row list -- how many rows, which one the
+   cursor is on, how to put the cursor elsewhere -- used to live in three
+   separate matches over [surface], each naming every variant so a new one
+   could not be added without touching it. Naming is not agreeing: the Keeper
+   detail's context inspector had a landing and searchable rows and no cursor
+   reading, so n and N restarted from the first row every press.
+
+   They are one record now, and the keys that need any of the three ask it.
+   Counted here because nothing links the TUI executable, and because the
+   failure this prevents typechecks either way. *)
+let test_the_row_cursor_has_one_source () =
+  let asks binding_name =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee:"row_list"
+  in
+  Alcotest.(check int) "the cursor reading asks the record" 1
+    (asks "search_row_cursor");
+  Alcotest.(check int) "the landing asks the record" 1
+    (asks "place_row_cursor");
+  Alcotest.(check int) "Home and End ask the record" 1
+    (asks "move_list_to_edge");
+  Alcotest.(check int) "the page keys ask the record" 1
+    (asks "move_list_by_rows")
+
+(* The cursor and the window have to be measured against the same layout, and
+   on the Memory overview that layout depends on which keeper the cursor is
+   on: the selected row spends rows on its own alerts and read errors. The
+   step key recomputed it and the landing did not, so a jump could put the
+   cursor outside the window it had just measured. One helper answers both. *)
+let test_the_window_is_measured_where_the_cursor_lands () =
+  let asks binding_name =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+      ~binding_name ~callee:"surface_body_height_at"
+  in
+  Alcotest.(check int) "a step measures where it lands" 1
+    (asks "move_row_cursor");
+  Alcotest.(check int) "and so does a landing" 1 (asks "row_list");
+  Alcotest.(check int)
+    "the cursor-dependent layout is read in one place" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"surface_body_height_at"
+       ~callee:"memory_overview_scrolled")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -491,5 +534,9 @@ let () =
             test_a_lane_that_cannot_admit_says_why
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
             `Quick test_visible_navigation_glyphs_are_not_mojibake
+        ; Alcotest.test_case "the row cursor has one source" `Quick
+            test_the_row_cursor_has_one_source
+        ; Alcotest.test_case "the window is measured where the cursor lands"
+            `Quick test_the_window_is_measured_where_the_cursor_lands
         ] )
     ]

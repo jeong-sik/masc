@@ -64,6 +64,19 @@ let keeper_actions =
 
   ]
 
+(* The keys that move a row list by more than a step. Shared rather than
+   retyped per surface: they answer wherever [row_list] in masc_tui.ml finds a
+   list, and that is one decision, so the table should not be able to claim
+   them for one listing and forget them on the next. *)
+let row_list_jumps =
+  [ b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "top/bottom"
+  ]
+
+(* The same two, minus the page key, for the surfaces whose own entry already
+   spells one because a detail pane under them pages too. *)
+let row_list_edges = [ b Navigate "Home/End" "top/bottom" ]
+
 let for_surface = function
   | Overview ->
       [ b Navigate "j/k" "events" ~help:"scroll events"
@@ -109,7 +122,7 @@ let for_surface = function
         ; b Search "n / N" "next / previous match"
         ; b Act "Esc" "overview"
         ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
       ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
@@ -183,7 +196,7 @@ let for_surface = function
                  and a run's detail carry no searchable rows"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Clients ->
       [ b Navigate "j/k" "move" ~help:"move the roster cursor"
       ; b Navigate "p" "runtime"
@@ -193,7 +206,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching attached name"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
@@ -220,7 +233,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Approvals ->
       [ b Navigate "j/k" "move"
         (* The list draws each ask on one row. Enter is where a multi-line
@@ -237,7 +250,7 @@ let for_surface = function
       ; b Act "e" "external Gate lane"
           ~help:"choose how calls into outside services are reviewed; Enter applies"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
       ; b Navigate "v" "next Planning tab"
@@ -258,7 +271,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Navigate "PgUp/PgDn" "page"
@@ -272,7 +285,7 @@ let for_surface = function
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Planning tab"
@@ -288,7 +301,7 @@ let for_surface = function
                  the queue answers this, an open detail does not"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
@@ -305,7 +318,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
@@ -320,7 +333,7 @@ let for_surface = function
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Memory ->
       [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
@@ -332,7 +345,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Repositories ->
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
@@ -348,7 +361,7 @@ let for_surface = function
                  path while Git changes is open"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Changes ->
       (* "move", not "scroll": the keys move the marked row and the window
          follows it, which is also what the surface's own footer says. *)
@@ -363,7 +376,7 @@ let for_surface = function
                  workspace"
       ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
           ~help:"read browser tabs and page text; select live / automation inside Browser"
@@ -375,7 +388,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Runtime ->
       [ b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
@@ -392,7 +405,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching lane id or runtime id"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Config ->
       [ b Navigate "j/k" "select / scroll"
         (* Config combines persisted files, typed live params, and the local
@@ -490,7 +503,7 @@ let for_surface = function
           ~help:"the commits that touched the open file, newest first \
                  (H or Esc closes)"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Tools ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "Home/End" "top/bottom"
@@ -701,7 +714,7 @@ let footer_hints_memory_facts =
      ; b Search "n / N" "next / previous match"
      ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
      ]
-     @ listing_meta)
+     @ row_list_edges @ listing_meta)
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)

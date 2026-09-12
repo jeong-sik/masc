@@ -1,0 +1,7 @@
+1393: 2026-09-12T18:10:59.8109700Z [2026-09-12 18:10:35] [WARN] [Task] [verification-lookup] tool=tool_read_file root=/var/folders/s6/5hzmn6lx4dz5nxs7k_0slzph0000gn/T/build_e3ef0c_dune/masc-vat-51656-895027173/.masc/playground/video-producer argument={"file_path":"clip.mp4"} outcome=rejected
+1394: 2026-09-12T18:10:59.8111070Z ASSERT video_dependency_unavailable: install FFmpeg with ffprobe in the verifier service environment; missing ffprobe, ffmpeg
+1395: 2026-09-12T18:10:59.8112160Z FAIL video_dependency_unavailable: install FFmpeg with ffprobe in the verifier service environment; missing ffprobe, ffmpeg
+1396: 2026-09-12T18:10:59.8113110Z Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+1397: 2026-09-12T18:10:59.8114860Z Called from Dune__exe__Test_verification_authority_tools.test_goal_and_task_inspect_real_mp4 in file "test/test_verification_authority_tools.ml", line 1040, characters 12-54
+1398: 2026-09-12T18:10:59.8115920Z Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+1399: 2026-09-12T18:10:59.8117020Z Called from Dune__exe__Test_verification_authority_tools.test_goal_and_task_inspect_real_mp4 in file "test/test_verification_authority_tools.ml", lines 1019-1047, characters 2-38

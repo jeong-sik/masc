@@ -1,5 +1,9 @@
 {
   "README.md": "8898edb9b2d6ca05b277bf11090a14eec17614551907bbb8d8f9e3218487b121",
+  "cli-capture-cwd/README.md": "2e28db9396071e1cb3e55ec4a38a61d0946fda738c824f13542d9ecd939fab68",
+  "cli-capture-cwd/failures.json": "23c205cc9e9cef31a37f2a26147723ac4f89bb4ee433e700b43a014467966dbe",
+  "cli-capture-cwd/masc-e517-macos-failed.log.excerpt.txt": "f64e90cbf25fbfa368ac953de31c521f4ed0f6d52a2cf4afeffed6ad4715c4ad",
+  "cli-capture-cwd/masc-e517-test-failed.log.excerpt.txt": "51777782cdfd978be1c35c649b42c38461c4162b513fe25f7d04f32f1e34d3df",
   "cli-direct-dependency/failure.json": "8d2deb23aee71b4f3d7d055030c42d77c9d42042b3f8dd5d3cfd2cc066779a3c",
   "cli-direct-dependency/macos-failure-excerpt.txt": "e23bd35f6f0254cc78d5b8d51b34b9b85f918d80f7c4f970674a153eb532b279",
   "det.txt": "47f548691a51174d7e0cd7661d236ef8a9ae88e4d3f6b905999afbc187b43bcc",

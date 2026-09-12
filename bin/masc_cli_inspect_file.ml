@@ -3,7 +3,10 @@ open Masc
 let run ~base_path ~path =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs env#fs;
-  Process_eio.init ~cwd_default:env#cwd ~proc_mgr:env#process_mgr ~clock:env#clock;
+  (* Inspector captures use absolute paths in the selected workspace, which
+     can be outside the invoking shell's restricted cwd capability. *)
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / Sys.getcwd ())
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   let absolute path = if path = "" then path else if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
   let base_path = absolute base_path in

@@ -14,7 +14,6 @@
   masc.discovery_cache
   masc_core
   masc_log
-  time_compat
   unix
   uri
   yojson))

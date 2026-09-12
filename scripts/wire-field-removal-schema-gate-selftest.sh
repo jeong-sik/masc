@@ -33,9 +33,9 @@ EOF
 cd "$TMP"
 git init -q .
 git add -A
-git -c user.email=t@t -c user.name=t commit -qm base
+git -c core.hooksPath=/dev/null -c user.email=t@t -c user.name=t commit -qm base --no-verify
 
-commit() { git add -A; git -c user.email=t@t -c user.name=t commit -qm "$1"; }
+commit() { git add -A; git -c core.hooksPath=/dev/null -c user.email=t@t -c user.name=t commit -qm "$1" --no-verify; }
 run_gate() { bash scripts/wire-field-removal-schema-gate.sh "$1" >/tmp/wg-st.out 2>&1; echo $?; }
 
 # F first: pointed at a directory that is not a git worktree -> loud exit 2.

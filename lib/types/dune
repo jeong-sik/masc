@@ -27,7 +27,6 @@
   masc_core
   masc_string_util
   masc.skill_reference
-  base64
   uuidm)
  (preprocess
   (pps

@@ -48,13 +48,31 @@ let contains needle haystack =
   in
   if n = 0 then true else go 0
 
+(* The source pins read repo files relative to the process cwd. dune's
+   (test) clone engine compiles a copy of this test into
+   .test_schema_generation_pins.d/ (three levels below the repo root) and
+   runs it with that directory as cwd, so resolve the repo root by
+   walking up: process cwd (developer build, runtest alias), then one,
+   two, three levels up — whichever first contains the requested file. *)
+let repo_file path =
+  let rec go up =
+    if up > 4 then path
+    else
+      let candidate =
+        String.concat Filename.dir_sep
+          (Array.to_list (Array.make up "..") @ [ path ])
+      in
+      if Sys.file_exists candidate then candidate else go (up + 1)
+  in
+  go 0
+
+let read_source path =
+  In_channel.with_open_text (repo_file path) In_channel.input_all
+
 let test_event_queue_wal_row_schema_marker_is_pinned () =
   (* The WAL row schema is owned by the registry; the persistence writer
      must carry the registry name, and the registry the golden literal. *)
-  let source =
-    In_channel.with_open_text "lib/keeper_runtime/keeper_event_queue_persistence.ml"
-      In_channel.input_all
-  in
+  let source = read_source "lib/keeper_runtime/keeper_event_queue_persistence.ml" in
   assert
     (contains "let transition_wal_schema = Keeper_event_queue_schema.transition_wal" source)
 
@@ -62,12 +80,17 @@ let test_event_queue_snapshot_filename_pins_store_generation () =
   (* Same textual pin: the snapshot filename generation rides on the
      registry constant (v18 data / v19 filename), not on an inline
      literal that can drift from the payload marker. *)
-  let source =
-    In_channel.with_open_text "lib/keeper_runtime/keeper_event_queue_persistence.ml"
-      In_channel.input_all
-  in
+  let source = read_source "lib/keeper_runtime/keeper_event_queue_persistence.ml" in
   assert
-    (contains "let snapshot_filename = Keeper_event_queue_schema.snapshot_filename" source)
+    (contains "let snapshot_filename = Keeper_event_queue_schema.snapshot_filename" source);
+  (* F3: the WAL file generation rides on the row marker (transition.v8)
+     too — the filename constant lives in the registry, and the writer
+     references it by name. A marker-only bump otherwise leaves the
+     filename pointing at the old generation: silent miss. *)
+  assert
+    (contains
+       "let transition_wal_filename = Keeper_event_queue_schema.transition_wal_filename"
+       source)
 
 (* ── The typed comparison itself: a foreign marker is rejected ──── *)
 
@@ -146,19 +169,9 @@ let test_registry_is_the_single_source_of_truth () =
      embed their own literals. A drift here reintroduces the
      filename-only-bump channel: the file renames while the payload marker
      stays, and old stores silently stop being found. *)
-  let persistence =
-    In_channel.with_open_text "lib/keeper_runtime/keeper_event_queue_persistence.ml"
-      In_channel.input_all
-  in
-  let state =
-    In_channel.with_open_text "lib/keeper_runtime/keeper_event_queue_state.ml"
-      In_channel.input_all
-  in
-  let schema_module =
-    In_channel.with_open_text "lib/keeper_runtime/keeper_event_queue_schema.ml"
-      In_channel.input_all
-  in
-  ignore schema_module;
+  let persistence = read_source "lib/keeper_runtime/keeper_event_queue_persistence.ml" in
+  let state = read_source "lib/keeper_runtime/keeper_event_queue_state.ml" in
+  let schema_module = read_source "lib/keeper_runtime/keeper_event_queue_schema.ml" in
   (* Only the registry carries the literal; the writers carry the name. *)
   if contains "\"keeper.event_queue.state.v18\"" state then
     fail "keeper_event_queue_state.ml embeds the state schema literal";
@@ -168,11 +181,14 @@ let test_registry_is_the_single_source_of_truth () =
     fail "keeper_event_queue_persistence.ml embeds the snapshot filename literal";
   if contains "\"masc.keeper_event_queue.fleet_summary.v4\"" persistence then
     fail "keeper_event_queue_persistence.ml embeds the fleet summary literal";
+  if contains "\"event-queue-transitions-v8.jsonl\"" persistence then
+    fail "keeper_event_queue_persistence.ml embeds the WAL filename literal";
   if
     not
       (contains "\"keeper.event_queue.state.v18\"" schema_module
       && contains "\"masc.keeper_event_queue.transition.v8\"" schema_module
-      && contains "\"event-queue-v19.json\"" schema_module)
+      && contains "\"event-queue-v19.json\"" schema_module
+      && contains "\"event-queue-transitions-v8.jsonl\"" schema_module)
   then fail "registry must carry every generation constant"
 
 let () =

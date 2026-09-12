@@ -93,7 +93,7 @@ type transfer_projection_result = State.transfer_projection_result =
    v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
    so both files hard-cut together; there is no compatibility decoder. *)
 let snapshot_filename = Keeper_event_queue_schema.snapshot_filename
-let transition_wal_filename = "event-queue-transitions-v8.jsonl"
+let transition_wal_filename = Keeper_event_queue_schema.transition_wal_filename
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 

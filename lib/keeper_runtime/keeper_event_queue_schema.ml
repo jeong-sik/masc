@@ -32,6 +32,12 @@ let fleet_summary = "masc.keeper_event_queue.fleet_summary.v4"
    to make loud. *)
 let snapshot_filename = "event-queue-v19.json"
 
+(* The WAL file generation rides on the row marker (transition.v8): bump
+   both together or a bumped marker writes a file the older binary's
+   rotation/lookup never opens — the silent-miss channel that
+   "writer 3곳은 전부 참조" diff-only reading missed. *)
+let transition_wal_filename = "event-queue-transitions-v8.jsonl"
+
 type mismatch =
   { store : string (* which store: "snapshot" | "transition_wal" | ... *)
   ; path : string (* file the generation was read from, when known *)

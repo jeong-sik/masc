@@ -1,5 +1,7 @@
 {
-  "README.md": "e326b022b70023e6306c0575b5af08ce86c11b4857e8ad0a774bd444cd22591e",
+  "README.md": "8898edb9b2d6ca05b277bf11090a14eec17614551907bbb8d8f9e3218487b121",
+  "cli-direct-dependency/failure.json": "8d2deb23aee71b4f3d7d055030c42d77c9d42042b3f8dd5d3cfd2cc066779a3c",
+  "cli-direct-dependency/macos-failure-excerpt.txt": "e23bd35f6f0254cc78d5b8d51b34b9b85f918d80f7c4f970674a153eb532b279",
   "det.txt": "47f548691a51174d7e0cd7661d236ef8a9ae88e4d3f6b905999afbc187b43bcc",
   "host-prerequisites/managed-parser.json": "e0b5ab0ea4a4b43df2a7482fc72da6210b25da135371163bae169611473726a7",
   "host-prerequisites/portable-probe.json": "0993719c7ae0ef86ac06c07b042801621225efbd2024553a15b70089707b09f6",

@@ -48,6 +48,7 @@
   masc.server
   masc.config
   masc.runtime
+  masc.tool_types
   masc.config_dir_resolver
   masc.embedded_config
   masc.host_config

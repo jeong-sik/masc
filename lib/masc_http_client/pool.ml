@@ -216,6 +216,17 @@ let client_is_live client =
   | Some _ -> false
   | None -> not (Eio.Promise.is_resolved client.closed)
 
+(* A protocol fiber may fail before Piaf registers a response callback.
+   Scope teardown then closes the socket but cannot settle Piaf's promise.
+   Observe that teardown during every network wait. The watcher must end
+   before normal release, which can itself close the client scope. *)
+let with_client_scope client ~on_error f =
+  Eio.Fiber.first f (fun () ->
+    match Eio.Promise.await client.closed with
+    | Ok () -> Error (on_error Client_scope_closed)
+    | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | Error exn -> Error (on_error exn))
+
 (* ── Idle entry ────────────────────────────────────────────────── *)
 
 (* A reusable piaf Client.t parked on the pool's switch.  Each entry
@@ -760,9 +771,10 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
             (fun () ->
                try
-                 Piaf.Client.request client.piaf
-                   ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
-                   ~meth:(method_to_piaf method_) path
+                 with_client_scope client ~on_error:(fun exn -> `Exn exn)
+                   (fun () -> Piaf.Client.request client.piaf
+                     ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                     ~meth:(method_to_piaf method_) path)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn -> Error (`Msg (Printexc.to_string exn)))
@@ -777,7 +789,9 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
           let headers_list =
             Piaf.Response.headers resp |> Piaf.Headers.to_list
           in
-          let body_result = Piaf.Body.to_string (Piaf.Response.body resp) in
+          let body_result =
+            with_client_scope client ~on_error:(fun exn -> `Exn exn)
+              (fun () -> Piaf.Body.to_string (Piaf.Response.body resp)) in
           (match body_result with
            | Error err ->
              release_once ~close_only:true;
@@ -952,9 +966,10 @@ let do_request_streaming
             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
             (fun () ->
                try
-                 Piaf.Client.request client.piaf
-                   ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
-                   ~meth:(method_to_piaf method_) path
+                 with_client_scope client ~on_error:(fun exn -> `Exn exn)
+                   (fun () -> Piaf.Client.request client.piaf
+                     ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
+                     ~meth:(method_to_piaf method_) path)
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
                | exn -> Error (`Msg (Printexc.to_string exn)))
@@ -975,10 +990,12 @@ let do_request_streaming
             if status_is_success status then Some on_chunk else None
           in
           (match
-             read_body_with_idle ?on_chunk ~clock ~start_sec ~idle_timeout_sec
-               (Piaf.Response.body resp)
+             with_client_scope client ~on_error:Printexc.to_string (fun () ->
+               read_body_with_idle ?on_chunk ~clock ~start_sec ~idle_timeout_sec
+                 (Piaf.Response.body resp)
+               |> Result.map_error fst)
            with
-           | Error (detail, _progress) ->
+           | Error detail ->
              release_once ~close_only:true;
              Error detail
            | Ok (body_str, progress) ->

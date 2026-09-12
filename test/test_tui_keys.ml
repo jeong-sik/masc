@@ -73,7 +73,7 @@ let test_plain_listing_footer_shape () =
      hints between its own keys and the shared meta tail. That order is the
      shape being pinned: groups, then declaration order inside each. *)
   let canonical =
-    "B:Browser Lane  j/k:scroll  Ctrl-O:Browser screenshot  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "B:Browser Lane  j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  Ctrl-O:Browser screenshot  b / u:bind / unbind  Esc:keeper  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
   in
   check str "the plain listing keeps its footer" canonical
     (Masc_tui_keys.footer_hints Connectors)
@@ -87,7 +87,7 @@ let test_lanes_footer_opens_standalone_runs () =
   check str "Lanes names its run drill-down, config source, and way back"
     (* [hints_of_bindings] stable-sorts by group: Navigate (j/k, e, p)
        precedes Act (Right/Enter, Esc) regardless of declaration order. *)
-    "j/k:move  e:lane config  p:runtime  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  e:lane config  p:runtime  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:runs  a:append slot  Esc:runtime  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Lanes)
 
 let test_lanes_scroll_reserves_standalone_matrix_rows () =
@@ -120,12 +120,12 @@ let test_lanes_scroll_reserves_standalone_matrix_rows () =
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
-    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:verdict  Left / Esc:back  y:agree  x:overrule  Y:copy task  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
 let test_schedules_footer_names_write_and_read_controls () =
   check str "Schedules names create and modify"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  n:new  e:modify  x:cancel  Y:copy link  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Schedules)
 
 let schedule_form_row : schedule_row =
@@ -248,14 +248,14 @@ let test_resources_footer_steps_through_detail () =
 
 let test_repositories_footer_offers_code_and_git_changes () =
   check str "repositories names the Code and Git changes paths"
-    "j/k:scroll  H:recent activity  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  H:recent activity  PgUp/PgDn:page  Home/End:top/bottom  Enter:browse  d:Git changes  a:add  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Repositories)
 
 let test_memory_footer_offers_the_fact_browser () =
   (* One spelling for the keeper row. [ / ] was listed beside j/k for the
      same movement and no arm answered it. *)
   check str "the health table names the way into the facts"
-    "j/k:move  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  a / A:all fleet  s:sort  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Memory);
   check Alcotest.bool "the dead bracket hint is gone" false
     (List.exists
@@ -265,7 +265,7 @@ let test_memory_footer_offers_the_fact_browser () =
 
 let test_memory_facts_footer_names_filter_and_way_back () =
   check str "the browser names movement, the category cycle, and Esc"
-    "j/k:move  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close / clear  /:filter  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_memory_facts
 
 let sample_memory_fact ~category ~claim : Tui_decode.memory_fact =
@@ -371,14 +371,14 @@ let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
   check str "verification names detail, approve, and reject"
-    "j/k:move  v:next Planning tab  [ / ]:previous / next  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:details  Left / Esc:back  a:approve  x:reject  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Verification)
 
 let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Enter:open  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
@@ -512,7 +512,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =

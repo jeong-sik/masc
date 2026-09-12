@@ -78,13 +78,13 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.5).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.14).
 It verifies and installs the assets for the selected release.
 
-> Installation target: v0.35.12 (check tag availability on GitHub Releases).
+> Installation target: v0.35.14 (check tag availability on GitHub Releases).
 
 ```bash
-TAG=v0.35.12
+TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG"

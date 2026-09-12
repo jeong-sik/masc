@@ -162,6 +162,48 @@ let test_startup_does_not_upgrade () = with_base (fun base ->
   (match install base Package.Seed_missing second with Package.Already_present -> () | _ -> fail "startup only seeds");
   check string "startup retains complete recorded package" "old instruction" (read (file base "SKILL.md")))
 
+let test_symlinked_deployment_root () = with_base (fun base ->
+  let mounted = Filename.concat base "mounted-volume" in
+  Unix.mkdir mounted 0o700;
+  Unix.symlink mounted (Filename.concat base ".masc");
+  ignore (install base Package.Automatic first);
+  let backup = match install base Package.Automatic second with
+    | Package.Updated {backup} -> backup | _ -> fail "mounted deployment must update" in
+  assert_second base;
+  let physical = Unix.realpath mounted in
+  check bool "backup pinned beneath physical deployment root" true
+    (String.starts_with ~prefix:(physical ^ "/skill-packages/") backup);
+  check string "mounted receipt records current tree" (revision (inspect base second) ^ "\n")
+    (read (Filename.concat physical "skill-packages/browser-fixture.sha256"));
+  Fs_compat.save_file (file base "SKILL.md") "operator edit";
+  let request = reviewed_request (inspect base first) in
+  ignore (install base request first);
+  check string "reviewed replacement through deployment link succeeds" "old instruction" (read (file base "SKILL.md"));
+  let outside = Filename.concat base "outside-resource" in
+  Fs_compat.save_file outside "outside";
+  Unix.unlink (file base "references/old.md");
+  Unix.symlink outside (file base "references/old.md");
+  (match install base Package.Automatic second with
+   | Package.Preserved_uninspectable _ -> ()
+   | _ -> fail "deployment link support must not permit resource links");
+  check string "outside resource remains untouched" "outside" (read outside))
+
+let test_invalid_deployment_roots () =
+  List.iter (fun kind -> with_base (fun base ->
+    let deployment = Filename.concat base ".masc" in
+    (match kind with
+     | "dangling" -> Unix.symlink (Filename.concat base "missing-volume") deployment
+     | "file-link" ->
+       let file = Filename.concat base "not-directory" in
+       Fs_compat.save_file file "operator file"; Unix.symlink file deployment
+     | _ -> Fs_compat.save_file deployment "operator file");
+    List.iter (fun result -> match result with
+      | Error (Package.Invalid_path _) -> ()
+      | _ -> fail (kind ^ " deployment root must reject explicitly"))
+      [Package.inspect ~base_path:base second |> Result.map (fun _ -> ());
+       Package.install ~base_path:base ~request:Package.Automatic second |> Result.map (fun _ -> ())]))
+    ["dangling";"file-link";"file"]
+
 let test_parallel_installers () = with_base (fun base ->
   ignore (install base Package.Automatic first);
   let third = package [ "SKILL.md", "third instruction"; "third.md", "third resource" ] in
@@ -190,4 +232,6 @@ let () = run "Builtin Skill package updates"
                     ; test_case "unreadable operator directory is preserved" `Quick test_unreadable_operator_directory
                     ; test_case "symlink resource rejected" `Quick test_symlink_is_not_a_package
                     ; test_case "startup does not upgrade" `Quick test_startup_does_not_upgrade
+                    ; test_case "symlinked deployment volume" `Quick test_symlinked_deployment_root
+                    ; test_case "invalid deployment roots reject" `Quick test_invalid_deployment_roots
                     ; test_case "same-process installers serialize" `Quick test_parallel_installers ] ]

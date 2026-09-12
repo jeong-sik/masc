@@ -132,7 +132,20 @@ type locations = { root : string; skills : string; state : string; target : stri
 
 let locations ~base_path package =
   let base_path = Unix.realpath base_path in
-  let root = Common.masc_dir_from_base_path ~base_path in
+  let deployment_root = Common.masc_dir_from_base_path ~base_path in
+  (* The deployment root may intentionally point at a mounted volume.
+     Resolve it once for this operation; every descendant and receipt uses
+     the same physical root. Descendant symlinks remain disallowed. *)
+  let root = match stat deployment_root with
+    | None -> deployment_root
+    | Some _ ->
+      let physical =
+        try Unix.realpath deployment_root with
+        | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR | Unix.ELOOP), _, _) ->
+          raise (Rejected (Invalid_path deployment_root)) in
+      (match stat physical with
+       | Some info when info.Unix.st_kind = Unix.S_DIR -> physical
+       | None | Some _ -> raise (Rejected (Invalid_path deployment_root))) in
   let skills = Filename.concat root "skills" in
   let state = Filename.concat root "skill-packages" in
   { root; skills; state; target = Filename.concat skills package.name

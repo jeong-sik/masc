@@ -1816,6 +1816,7 @@ type async_msg =
   | Keeper_chat_stream_deltas of
       Keeper_chat.request * (int option * Keeper_chat_live.delta) list
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
+  | Keeper_run_next_done of Keeper_chat.request * (string, string) result
   | Keeper_observed_interrupt_done of
       string * string * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_interrupt_done of
@@ -6275,14 +6276,41 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
     true
 ;;
 
-let interrupt_observed_keeper state ~mailbox keeper_name =
-  match keeper_observed_turn state keeper_name with
+let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
+  if explicit then
+    state.keeper_observed_interrupts <- List.filter (fun item ->
+      item.oi_keeper <> keeper_name || match item.oi_status with
+        | Interrupt_failed _ | Interrupt_declined _ -> false
+        | Interrupt_sending | Interrupt_signalled -> true) state.keeper_observed_interrupts;
+  match keeper_observed_interrupt_action state keeper_name with
   | None -> None
-  | Some (started_at, interrupt_token) ->
-    Some (match keeper_observed_interrupt state keeper_name started_at with
-    | Some item -> Int64.sub (Mtime_clock.elapsed_ns ()) item.oi_sent_ns
-        <= Masc_tui_esc_interrupt.grace_window_ns
-    | None -> launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
+  | Some Masc_tui_esc_interrupt.Swallow -> Some true
+  | Some Leave -> Some false
+  | Some Launch_interrupt ->
+    match keeper_observed_turn state keeper_name with
+    | None -> Some false
+    | Some (started_at, interrupt_token) ->
+      Some (launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
+;;
+
+let launch_keeper_run_next state ~mailbox request =
+  if Option.is_some state.keeper_run_next_inflight then ()
+  else begin
+    let keeper_name = request.Keeper_chat.keeper_name in
+    let request_id = request.Keeper_chat.request_id in
+    let interrupt_token = Option.map snd (keeper_observed_turn state keeper_name) in
+    state.keeper_run_next_inflight <- Some request_id;
+    append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
+    let run () =
+      let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
+        ~port:state.port ~keeper_name ~request_id ~interrupt_token
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      enqueue_async mailbox (Keeper_run_next_done (request, result)) in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> enqueue_async mailbox (Keeper_run_next_done (request, Error "Eio switch is unavailable"))
+  end
 ;;
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
@@ -8073,9 +8101,25 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Masc_tui_command.Keeper_unknown ->
           notice ~role:Message_error
             (Printf.sprintf "no keeper named %S on the roster" name))
+  | Masc_tui_command.Run_next ->
+      Buffer.clear state.msg_input;
+      (match state.msg_target_keeper_name with
+       | None -> notice ~role:Message_error "Select a Keeper first"
+       | Some name ->
+         match inflight_for state name, live_for_keeper state name with
+         | Some request, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
+           ignore request;
+           notice ~role:Message_local "Your message has already started; no new run was created"
+         | Some request, Some live ->
+           (match Keeper_chat_transcript.admission live.tl_transcript with
+            | Some (Keeper_chat_live.Queued, _) -> launch_keeper_run_next state ~mailbox request
+            | Some (Running, _) -> notice ~role:Message_local "Your message has already started; no new run was created"
+            | Some (Settled, _) -> notice ~role:Message_local "Your message already finished; its result is being replayed"
+            | None -> notice ~role:Message_local "Waiting for server admission; /run-next is available once this message is queued")
+         | _ -> notice ~role:Message_local "No submitted message is waiting; send your message with Enter first")
   | Masc_tui_command.Interrupt_turn -> (
       Buffer.clear state.msg_input;
-      match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper state ~mailbox) with
+      match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper ~explicit:true state ~mailbox) with
       | Some _ -> ()
       | None -> match state.msg_live with
       | Some live
@@ -8101,7 +8145,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
 
          Matched by the name the row prints, so what the operator types is
          what they just read. *)
-      match interrupt_observed_keeper state ~mailbox name with
+      match interrupt_observed_keeper ~explicit:true state ~mailbox name with
       | Some _ -> ()
       | None -> match Masc_tui_types.inflight_for_keeper state name with
       | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
@@ -10642,6 +10686,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Set_embeds _
         | Masc_tui_command.Interrupt_turn
         | Masc_tui_command.Interrupt_keeper_turn _
+        | Masc_tui_command.Run_next
         | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
@@ -12441,6 +12486,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Keeper_chat.compact_request_id tool_call_id)
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
+  | Keeper_run_next_done (request, result) ->
+      if state.keeper_run_next_inflight = Some request.Keeper_chat.request_id then begin
+        state.keeper_run_next_inflight <- None;
+        append_chat_history state request Message_status
+          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail)
+      end
   | Keeper_observed_interrupt_done (keeper_name, interrupt_token, result) ->
       state.keeper_observed_interrupts <- List.map (fun item ->
         if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item

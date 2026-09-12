@@ -3887,6 +3887,7 @@ type state = {
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
   mutable keeper_observed_interrupts: observed_interrupt list;
+  mutable keeper_run_next_inflight: string option;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -5347,6 +5348,7 @@ let create_state
   keeper_turns_error = None;
   keeper_turns_inflight = false;
   keeper_observed_interrupts = [];
+  keeper_run_next_inflight = None;
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -7145,6 +7147,15 @@ let keeper_observed_interrupt (state : state) keeper_name started_at =
     state.keeper_observed_interrupts
 ;;
 
+let keeper_observed_interrupt_action (state : state) keeper_name =
+  let current_token = Option.map snd (keeper_observed_turn state keeper_name) in
+  let previous = List.find_opt (fun item -> item.oi_keeper = keeper_name)
+    state.keeper_observed_interrupts
+    |> Option.map (fun item -> item.oi_token, item.oi_sent_ns,
+      match item.oi_status with Interrupt_declined _ | Interrupt_failed _ -> true | _ -> false) in
+  Masc_tui_esc_interrupt.observed_action ~now_ns:(Mtime_clock.elapsed_ns ()) ~current_token ~previous
+;;
+
 let keeper_observed_interrupt_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -7160,7 +7171,7 @@ let keeper_observed_interrupt_rows (state : state) =
            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
          | None when Option.is_some interrupt_token ->
-           Some "Esc: stop this turn · queued messages run after it settles · /steer <text>: replace my active request"
+           Some "Esc: stop this turn · /run-next: put my submitted message first and stop this turn"
          | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
       | _ -> None) state.keeper_turns
 ;;

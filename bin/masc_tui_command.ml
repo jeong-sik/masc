@@ -22,6 +22,7 @@ type t =
   | Acting_pane_tab_unknown of string
   | Switch_keeper of string
   | Switch_keeper_missing_name
+  | Run_next
   | Interrupt_turn
   | Interrupt_keeper_turn of string
   | Steer_turn of string
@@ -103,6 +104,10 @@ let catalog =
   ; { word = "changes"
     ; args = ""
     ; summary = "open recorded file changes for this keeper"
+    }
+  ; { word = "run-next"
+    ; args = ""
+    ; summary = "put my submitted message first, then stop the observed turn"
     }
   ; { word = "interrupt"
     ; args = "[keeper]"
@@ -260,6 +265,7 @@ let parse text =
     | "activity", other -> Acting_pane_tab_unknown other
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
+    | "run-next", "" -> Run_next
     | "interrupt", "" -> Interrupt_turn
     | "interrupt", name -> Interrupt_keeper_turn name
     | "steer", "" -> Steer_missing_message

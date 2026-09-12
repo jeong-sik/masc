@@ -406,6 +406,8 @@ let handle_keeper_turns_list state request reqd =
          ])
   | keeper_names ->
     let row keeper_name =
+      let interrupt_token = Keeper_registry.current_turn_interrupt_token
+        ~base_path:config.base_path keeper_name in
       match
         Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name
       with
@@ -418,8 +420,6 @@ let handle_keeper_turns_list state request reqd =
           ; ("turn", `Null)
           ]
       | Ok owner ->
-        let interrupt_token = Keeper_registry.current_turn_interrupt_token
-          ~base_path:config.base_path keeper_name in
         let turn_json =
           match Keeper_owner.turn_in_flight owner with
           | None -> `Null
@@ -541,6 +541,56 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
              ])))
 ;;
 
+let handle_keeper_run_next state ~actor request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try match Yojson.Safe.from_string body with
+      | `Assoc fields ->
+        (match List.assoc_opt "name" fields, List.assoc_opt "request_id" fields,
+          List.assoc_opt "interrupt_token" fields with
+         | Some (`String name), Some (`String id), token when String.trim name <> "" ->
+           let token = match token with
+             | None | Some `Null -> Ok None
+             | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Option.map Uuidm.to_string (Uuidm.of_string token))
+             | _ -> Error "interrupt_token must be a UUID or null" in
+           (match Keeper_chat_operation.Operation_id.of_string id, token with
+            | Ok operation_id, Ok token -> Ok (name, id, operation_id, token)
+            | Error error, _ | _, Error error -> Error error)
+         | _ -> Error "name and request_id are required")
+      | _ -> Error "JSON object required"
+      with Yojson.Json_error error -> Error error
+    in
+    let respond_error status error = respond_json_value_with_cors ~status request reqd
+      (`Assoc ["error", `String error]) in
+    match parsed with
+    | Error error -> respond_error `Bad_request error
+    | Ok (name, request_id, operation_id, token) ->
+      match Keeper_owner_registry.exact_operation ~base_path ~keeper_name:name operation_id with
+      | Error error -> respond_error `Service_unavailable (Keeper_owner_registry.command_error_to_string error)
+      | Ok None -> respond_error `Not_found "operation not found"
+      | Ok (Some operation) ->
+        match Keeper_chat_operation_payload.source_of_json operation.source with
+        | Error error -> respond_error `Service_unavailable error
+        | Ok source when not (String.equal actor source.submitted_by) ->
+          respond_error `Forbidden "only your own queued message can be prioritized"
+        | Ok _ ->
+          match Keeper_owner_registry.move_queued_operation_to_front ~base_path ~keeper_name:name operation_id with
+          | Error error -> respond_error `Conflict (Keeper_owner_registry.command_error_to_string error)
+          | Ok _ ->
+            let signal, detail = match token with
+              | None -> false, "queued first; no observed turn was interrupted"
+              | Some interrupt_token ->
+                match Keeper_registry.interrupt_observed_turn ~base_path name ~interrupt_token with
+                | Observed_turn_signalled -> true, "queued first; interrupt received; waiting for the turn to settle"
+                | Observed_turn_changed -> false, "queued first; the observed turn changed, so its successor was not interrupted"
+                | Observed_turn_signal_failed error -> false, "queued first; interrupt failed: " ^ error
+            in
+            respond_json_value_with_cors ~status:`OK request reqd
+              (`Assoc ["request_id", `String request_id; "prioritized", `Bool true;
+                "signalled", `Bool signal; "detail", `String detail]))
+;;
+
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -561,7 +611,7 @@ let handle_keeper_turn_interrupt state request reqd =
              let interrupt_token_result =
                match List.assoc_opt "interrupt_token" fields with
                | None -> Ok None
-               | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Some token)
+               | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Option.map Uuidm.to_string (Uuidm.of_string token))
                | Some _ -> Error "interrupt_token must be a UUID"
              in
              (match request_id_result, interrupt_token_result with

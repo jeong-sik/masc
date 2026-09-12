@@ -191,6 +191,11 @@ val handle_keeper_tool_approval_mode_set :
     [yolo] runs every tool call unasked. [actor] is the authenticated
     operator who changed the stance and is recorded in the change log. *)
 
+val handle_keeper_run_next :
+  Mcp_server.server_state -> actor:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Prioritize the authenticated caller's exact queued operation, then signal
+    only the observed current turn. Existing inputs and other queue order stay intact. *)
+
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].

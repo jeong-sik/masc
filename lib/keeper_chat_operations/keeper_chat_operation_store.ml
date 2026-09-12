@@ -1215,6 +1215,44 @@ let move_queued_to_end store ~operation_id =
        _ -> Error error)
 ;;
 
+let move_queued_to_front store ~operation_id =
+  let* () = ensure_open store in
+  let* () = with_transaction store (fun () ->
+    let* target = operation_or_unknown store.db operation_id in
+    let* () = match target.state with
+      | Operation.Queued -> Ok ()
+      | _ -> Error (Not_queued operation_id) in
+    let* queued = with_statement store.db ~operation:"read queue order"
+      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
+      (fun stmt ->
+        let rec read rows = match Sqlite3.step stmt with
+          | Sqlite3.Rc.DONE -> Ok (List.rev rows)
+          | ROW -> let* row = decode_operation stmt in read (row :: rows)
+          | rc -> Error (Store_unavailable (sqlite_error store.db "read queue order" rc)) in
+        read []) in
+    match queued with
+    | first :: _ when Id.equal first.operation_id operation_id -> Ok ()
+    | _ ->
+      (* Sequences remain non-negative and unique. Moving every other queued
+         row to fresh positions preserves their order without touching running
+         work, input, ownership, or operation identities. *)
+      let rec move = function
+        | [] -> Ok ()
+        | (row : Operation.t) :: rest when Id.equal row.operation_id operation_id -> move rest
+        | row :: rest ->
+          let* sequence = next_sequence store.db in
+          let* () = with_statement store.db ~operation:"prioritize queued operation"
+            "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'"
+            (fun stmt ->
+              let* () = bind_int64 store.db stmt ~operation:"bind sequence" 1 sequence in
+              let* () = bind_text store.db stmt ~operation:"bind operation" 2 (Id.to_string row.operation_id) in
+              let* () = expect_done store.db stmt ~operation:"move queue position" in
+              if Sqlite3.changes store.db = 1 then Ok () else Error (Not_queued row.operation_id)) in
+          move rest in
+      move queued) in
+  operation_or_unknown store.db operation_id
+;;
+
 type semantic_error =
   | Semantic_store_error of error
   | Unknown_execution of Keeper_execution_scope_id.t

@@ -182,6 +182,8 @@ type _ command =
       ; input : Yojson.Safe.t
       }
       -> (Chat_operation.t, error) result command
+  | Move_queued_operation_to_front :
+      Operation_id.t -> (Chat_operation.t, error) result command
   | Move_queued_operation_to_end :
       Operation_id.t -> (Chat_operation.t, error) result command
   | Cancel_queued_operation :
@@ -1128,6 +1130,13 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Move_queued_operation_to_front operation_id, resolve) ->
+          let response = reject_if_stopping state (fun () ->
+            run_operation_command t ~label:"prioritize queued Keeper chat operation" (fun () ->
+              Chat_operation_store.move_queued_to_front t.operation_store ~operation_id)
+            |> Result.map fst) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Move_queued_operation_to_end operation_id, resolve) ->
           let response =
             reject_if_stopping state (fun () ->
@@ -1416,6 +1425,10 @@ let list_queued_operations t ~after_sequence ~limit =
 
 let edit_queued_operation t ~operation_id ~input =
   request t (Edit_queued_operation { operation_id; input })
+;;
+
+let move_queued_operation_to_front t operation_id =
+  request t (Move_queued_operation_to_front operation_id)
 ;;
 
 let move_queued_operation_to_end t operation_id =

@@ -2879,25 +2879,19 @@ let render_keeper_message (state : state) =
        interrupt Esc will not spend itself on, nor say "interrupt sent" after
        the grace window when Esc would leave. *)
     let escape_hint =
-      match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_turn state) with
-      | Some (started_at, _) ->
-          (match Option.bind state.msg_target_keeper_name
-            (fun name -> Masc_tui_types.keeper_observed_interrupt state name started_at) with
-           | None -> "Esc:stop current turn"
-           | Some item ->
-             if Int64.sub (Mtime_clock.elapsed_ns ()) item.oi_sent_ns
-               <= Masc_tui_esc_interrupt.grace_window_ns then "Esc:interrupt requested"
-             else return_hint ())
-      | None -> match state.msg_live with
-      | Some live ->
-          (match
-             Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
-               (Keeper_chat_transcript.interrupt live.tl_transcript)
-           with
-           | Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:interrupt turn"
-           | Masc_tui_esc_interrupt.Swallow -> "Esc:interrupt sent"
-           | Masc_tui_esc_interrupt.Leave -> return_hint ())
-      | None -> return_hint ()
+      match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_interrupt_action state) with
+      | Some Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:stop current turn"
+      | Some Swallow -> "Esc:interrupt requested"
+      | Some Leave -> return_hint ()
+      | None ->
+        match state.msg_live with
+        | Some live ->
+          (match Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
+            (Keeper_chat_transcript.interrupt live.tl_transcript) with
+           | Launch_interrupt -> "Esc:interrupt turn"
+           | Swallow -> "Esc:interrupt sent"
+           | Leave -> return_hint ())
+        | None -> return_hint ()
     in
     (* Named beside the empty-draft Q arm in the dispatch, and reading the
        same condition it does, chat focus included: the hint exists exactly

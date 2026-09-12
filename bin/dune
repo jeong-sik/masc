@@ -1046,7 +1046,7 @@
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries
+ (libraries masc_tui_esc_interrupt
   masc_tui_answering
   masc_tui_lane_addons
   masc.browser_lane

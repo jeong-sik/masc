@@ -86,7 +86,8 @@ def main():
                 def mcp(index):
                     return http('/mcp', {'jsonrpc': '2.0', 'id': index, 'method': 'tools/call',
                         'params': {'name': 'masc_status', 'arguments': {}, '_meta': meta}},
-                        extra={'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/call'})
+                        extra={'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/call',
+                               'mcp-name': 'masc_status'})
                 for index in range(4):
                     status, raw = mcp(index)
                     assert status == 200, (index, status, raw)

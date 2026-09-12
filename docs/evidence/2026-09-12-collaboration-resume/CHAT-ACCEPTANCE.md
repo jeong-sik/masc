@@ -31,3 +31,9 @@ The expanded attempt still failed to find the snapshot-bearing row after 183 his
 Both attempts are preserved under `reassessment-aad94/chat-collapsed-failure/` and `chat-expanded-failure/`, with screenshots, page text and raw receipts. The older failed receipt's scope text was an unconditional description of intended assertions; its `probe_passed=false` and absent `rendered` establish that displayed-byte and diff checks did not pass. The updated script makes that scope conditional explicitly. Script changes received independent review; no P1/P2 findings. This inspection does not establish a product root cause or a fresh native Gate replay.
 
 The browser dependency was resolved from the existing workspace Dashboard node_modules through NODE_PATH. A first invocation without that environment failed before browser launch with MODULE_NOT_FOUND; no local product build or dependency install was performed.
+
+## Original direction correction and output lookup candidate
+
+The retained Edit0129 output is a verified 1345B tool-result manifest. Its explicit snapshots are before5237…12602B and after18e0…12641B; artifact_refs lists the reverse order and does not define direction. The probe now verifies the manifest hash/bytes, its Edit content/structured consistency, explicit before/after refs and unordered reference membership. Previous failed receipts preserve their original assumptions; they never reached displayed-original checks. The corrected helper passed nine real-file/invalid-input checks and Node syntax review. It has not been rerun against an upgraded server yet.
+
+PR35567 head26ee98cf40 adds exact historical output lookup and verified manifest display, with Test34702833667 and Release34702835195 requested. It follows the successful f75aa4 native projection test while remaining distinct from the current remote parent main merge. New installed-browser acceptance is still pending.

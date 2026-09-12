@@ -13,8 +13,47 @@ assert.ok(prefix && expectedCommit && baseUrl && outputDirectory && tokenFile &&
 const output = resolve(outputDirectory)
 await mkdir(output)
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
+async function readVerifiedBlob(ref) {
+  assert.ok(ref && typeof ref === 'object', 'Expected an explicit blob reference')
+  assert.match(ref.sha256, /^[0-9a-f]{64}$/)
+  assert.ok(Number.isSafeInteger(ref.bytes) && ref.bytes >= 0, 'Expected an exact blob byte length')
+  const bytes = await readFile(resolve(runtimeRoot, 'tool_blobs', ref.sha256.slice(0, 2), ref.sha256))
+  assert.equal(bytes.length, ref.bytes, 'Stored blob byte length')
+  assert.equal(digest(bytes), ref.sha256, 'Stored blob SHA-256')
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  assert.equal(digest(Buffer.from(text)), ref.sha256, 'UTF-8 round-trip SHA-256')
+  return { sha256: ref.sha256, bytes: ref.bytes, text }
+}
+async function readEditOriginals(receipt) {
+  let result = typeof receipt.output === 'string' ? JSON.parse(receipt.output) : receipt.output
+  let source = { kind: 'inline_json' }
+  if (result?._blob) {
+    assert.equal(result._blob.mime, 'application/vnd.masc.tool-result-manifest+json')
+    const { text, ...ref } = await readVerifiedBlob(result._blob)
+    const manifest = JSON.parse(text)
+    assert.equal(manifest.schema, 'masc.tool-result-artifact-manifest.v1')
+    assert.equal(typeof manifest.content, 'string')
+    result = JSON.parse(manifest.content)
+    assert.deepEqual(manifest.structured_content, result, 'Manifest content and structured_content must agree')
+    source = { kind: 'verified_manifest', ...ref }
+  }
+  assert.equal(result?.ok, true)
+  assert.equal(result.edit_snapshots?.status, 'stored')
+  assert.ok(Array.isArray(receipt.artifact_refs), 'Expected receipt artifact references')
+  const originals = await Promise.all(['before', 'after'].map(async side => {
+    const artifact = result.edit_snapshots[side]
+    assert.ok(artifact?._blob, `Missing explicit ${side} snapshot reference`)
+    assert.ok(receipt.artifact_refs.some(ref => ref?._blob?.sha256 === artifact._blob.sha256),
+      `${side} snapshot must be present in receipt artifact_refs`)
+    for (const ref of receipt.artifact_refs.filter(ref => ref?._blob?.sha256 === artifact._blob.sha256)) {
+      assert.deepEqual(ref, artifact, `${side} snapshot artifact reference must agree`)
+    }
+    return { side, ...await readVerifiedBlob(artifact._blob) }
+  }))
+  return { source, originals }
+}
 const events = [], assets = [], errors = [], failures = [], blocked = [], workers = [], matchedReceipts = [], navigation = []
-let browser, page, health, release, expected, originals, rendered, probePassed = false, assertionFailure = null
+let browser, page, health, release, expected, originals, editOutputSource, rendered, probePassed = false, assertionFailure = null
 try {
   const binary = await realpath(resolve(prefix, 'masc'))
   release = JSON.parse(await readFile(resolve(dirname(binary), 'release.json'), 'utf8'))
@@ -32,16 +71,9 @@ try {
   assert.equal(expected.success, true)
   assert.equal(expected.turn_kind, 'autonomous')
   assert.match(expected.execution_id, /^[A-Za-z0-9:_-]+$/)
-  assert.equal(expected.artifact_refs.length, 2)
-  originals = await Promise.all(expected.artifact_refs.map(async ({ _blob: ref }) => {
-    assert.match(ref.sha256, /^[0-9a-f]{64}$/)
-    const bytes = await readFile(resolve(runtimeRoot, 'tool_blobs', ref.sha256.slice(0, 2), ref.sha256))
-    assert.equal(bytes.length, ref.bytes)
-    assert.equal(digest(bytes), ref.sha256)
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    assert.equal(digest(Buffer.from(text)), ref.sha256)
-    return { sha256: ref.sha256, bytes: ref.bytes, text }
-  }))
+  const editOriginals = await readEditOriginals(expected)
+  originals = editOriginals.originals
+  editOutputSource = editOriginals.source
   const files = new Map(release.files.map(file => [file.path, file]))
   function collectExactReceipt(value) {
     if (!value || typeof value !== 'object') return
@@ -188,6 +220,7 @@ try {
     probe_passed: probePassed, assertion_failure: assertionFailure,
     runtime_build: health?.build, runtime_status: health?.status, keeper,
     execution_id: expected?.execution_id, tool_use_id: expected?.tool_use_id,
+    edit_output_source: editOutputSource,
     originals: originals?.map(({ text, ...ref }) => ref), rendered,
     assets, events, matched_receipts: matchedReceipts, navigation, workers, errors, failures, blocked,
     scope: 'Read-only installed Dashboard acceptance probe. Original-byte equality and diff reconstruction are established only when probe_passed and rendered are present. Domain writes and WebSockets blocked. No fresh model turn, Gate replay, or general Dashboard health claim.',

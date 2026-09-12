@@ -2,7 +2,17 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
-## 현재 구현 진척 (2026-09-13 00:18 KST)
+## 현재 구현과 시나리오 상태 (2026-09-13 00:45 KST)
+
+- 오래된 자율턴 출력과 blob-backed 편집 manifest를 연결한 PR #35567 head `26ee98cf40`를 제출했다. Keeper별 정확한 execution_id GET 조회, 없음404·중복409·저장소503, 취소/동시Keeper 캐시 경계, 검증된 manifest의 before/after로 원본 버튼 표시를 구현했다. UI191개·Dashboard 타입 검사·선택 ESLint·OCaml파싱·독립 리뷰를 통과했고 Test34702833667과 Release34702835195를 요청했다. 설치본브라우저 수용은 남는다.
+- 부모 Chat `f75aa4`의 Test34701658049는 통과했다. 원격 #35547에는 다른 main 병합 `2bb237b`가 추가돼 voice 타입 오류가 있으며, 이를 통과한 부모 커밋이나 새 branch26ee 검증으로 섞지 않는다.
+- 실제 Edit0129는 manifest에서 before5237…12602B → after18e0…12641B다. artifact_refs 배열은 반대 순서이며 전후 방향의 계약이 아니다. 검사 스크립트가 배열 순서에 의존하던 오류를 수정하고 실제 파일·manifest 해시/길이와 잘못된 참조 거부를 확인했다. 이전 실패 기록은 유지한다.
+- PPTX workspace prerequisite는 PR #35565 head449743276f, Test34702828002 요청까지 완료했다. Python56통과/12native필요skip, OCaml7parse·독립리뷰 통과다. 실제 PPTX 검사기는 아직 없다. MP4 #35532 head60f948은 PR-check의 build·editedtests·release·typecheck가 통과했지만 부모lint/version 문제는 남는다. Board/Fusion #35536은 Directfixture 문제를206c447685로 수정하고 Test34702739701을 요청했다.
+- **시나리오의 현재 상태:** task004가15:23:06Z에Done이 됐고 세Goal 모두awaiting_confirmation이다. 하지만 승인 registry에서 PPTX·MP4 원본 Read가 모두failed였음도 확인했다. PDF/PNG 직접검사와 제작자manifest/decode/identity로그로 승인한 것이므로 독립PPTX파싱·MP4디코딩 완료로는 세지 않는다. 작업 상태와 실제 검증 범위는 별도로 유지한다. 새기능PR들은 아직 이 서버에 설치하지 않았다.
+
+현재파일·Task·선택된검증registry·Goalphase와 실제원본은 [task004-completion-aad94](task004-completion-aad94/README.md)에 보존했다. 다음은 CI산출물의 실제Chat수용과 독립PPTX검사기다. 전체18개 목표와 사람확인·장기runtime·IDE·기억품질 조건은 계속 미완료다.
+
+## 이전 구현 진척 (2026-09-13 00:18 KST)
 
 - Chat 실패의 구체적인 원인을 실제 API 원문에서 확인했다. 자율턴428의 raw activity는 Edit2건의 이름·시간·성공만 전달하고 canonical execution_id를 버렸다. 원장에는 실행 ID와 전후 원본이 보존돼 있었다. 단순 접힘 재시도를 중단하고 원천 projection을 수정했다.
 - 별도 main 기반 PR #35547, head `ae1290d076800ad02e12bd2f96926acfcc9ae0f7`를 제출했다. exact raw start sequence와 invocation turn/planned_index를 보존하고 TurnRecord가 선언한 실행 ID를 원장 전체에서 조회·검증해 Chat에 연결한다. 같은 provider ID의 병렬 호출·역순 완료·중복 시작·중복 원장 ID가 서로 다른 증거로 오귀속되지 않도록 수정했다. Raw reasoning·도구 입력/결과·provider ID는 이 Chat projection에 싣지 않는다.

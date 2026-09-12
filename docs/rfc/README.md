@@ -319,6 +319,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-outlive-process-adoption | 턴보다 오래 사는 프로세스가 머지됐는데도 죽는다 — 채택 갭을 먼저 진단한다 | Draft | - |
 | RFC-per-keeper-github-cli-identity | Keeper-specific GitHub CLI identity | Draft | - |
 | RFC-prompts-and-tool-definitions-outside-ocaml | 프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다 | Draft | - |
+| RFC-runtime-load-failure-reaches-the-operator | 설정을 못 읽은 이유가 화면까지 닿는다 | Draft | - |
 | RFC-runtime-note-field-and-dashboard-surfacing | Per-runtime note field & dashboard surfacing | Draft | - |
 | RFC-schedule-history-and-outcome | # RFC — A schedule's past and its result | Draft | - |
 | RFC-settings-typed-delivery | 설정은 env 이름이 아니라 typed 값으로 읽는 곳에 닿는다 | Draft | - |

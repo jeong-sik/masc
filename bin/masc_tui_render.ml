@@ -1379,7 +1379,13 @@ let render_approvals (state : state) =
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
             | Some mode -> gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
-     | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
+     (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
+        and the loader's message already opens "gate load failed:", so a third
+        "gate:" in front read as a stutter -- "(data unreliable: gate: gate
+        load failed: ...)". Same rule the schedule warning is written to. The
+        two rows below keep their prefixes because the detail there is the
+        server's own sentence about the store, which does not name itself. *)
+     | None, Some err -> data_unreliable_row ~cols err
      | None, None ->
          Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset);
   (* Standing always-allow rules, on the row under the lanes. A rule answers

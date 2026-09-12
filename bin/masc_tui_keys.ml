@@ -437,6 +437,8 @@ let for_surface = function
   | Config ->
       [ b Navigate "j/k" "select / scroll"
       ; b Navigate "PgUp/PgDn" "page"
+          ~help:"pages the runtime.toml and prompts panes; the other five \
+                 panes take the key and do nothing with it"
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"

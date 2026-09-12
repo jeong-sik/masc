@@ -86,11 +86,29 @@ let test_a_key_is_spelled_one_way_across_every_surface () =
    footer advertised the keys while the table did not -- so the help sheet,
    which projects from the table, could not answer what PgUp does here. *)
 let test_config_declares_the_page_keys_it_handles () =
-  Alcotest.(check bool) "Config names its page keys" true
-    (List.exists
-       (fun (b : Masc_tui_keys.binding) ->
-         String.equal b.Masc_tui_keys.key "PgUp/PgDn")
-       (Masc_tui_keys.for_surface Config))
+  (* [for_surface] takes a surface, not a pane, so the sheet cannot narrow this
+     to the two panes the dispatcher pages. The help text is where the sheet
+     says so -- without it the key reads as working on all seven. *)
+  match
+    List.find_opt
+      (fun (b : Masc_tui_keys.binding) ->
+        String.equal b.Masc_tui_keys.key "PgUp/PgDn")
+      (Masc_tui_keys.for_surface Config)
+  with
+  | None -> Alcotest.fail "Config does not name the page keys it handles"
+  | Some binding ->
+      let help = Option.value binding.Masc_tui_keys.help ~default:"" in
+      let names pane =
+        let n = String.length pane in
+        let rec seek i =
+          i + n <= String.length help
+          && (String.equal (String.sub help i n) pane || seek (i + 1))
+        in
+        seek 0
+      in
+      Alcotest.(check bool) "and says it pages the runtime.toml pane" true
+        (names "runtime.toml");
+      Alcotest.(check bool) "and the prompts pane" true (names "prompts")
 
 let test_chat_help_names_memory_cycle () =
   let bindings = Masc_tui_keys.for_surface (Keepers Keeper_message) in

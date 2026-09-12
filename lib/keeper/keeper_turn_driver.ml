@@ -52,6 +52,8 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
+type runtime_selection = Resolve_assignment | Exact_runtime
+
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
@@ -941,6 +943,7 @@ let official_client_dispatch ~provider_config_transform =
 
 let run_named
     ~runtime_id
+    ?(runtime_selection = Resolve_assignment)
     ?(keeper_name = "")
     ?pre_tool_rejects
     ~base_path
@@ -1010,7 +1013,10 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
-  if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
+  if runtime_selection = Exact_runtime && Option.is_some deferred_runtime_lane then
+    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      {field="runtime_selection";detail="an exact runtime cannot consume an ordinary deferred lane"}))
+  else if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
          (Agent_core.Error.InvalidConfig
@@ -1089,10 +1095,11 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match deferred_runtime_lane with
-    | Some hint ->
+    match runtime_selection, deferred_runtime_lane with
+    | Exact_runtime, _ -> Ok (None, [runtime_id])
+    | Resolve_assignment, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | None ->
+    | Resolve_assignment, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->
@@ -1156,6 +1163,9 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
+    match runtime_selection with
+    | Exact_runtime -> []
+    | Resolve_assignment ->
     modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
@@ -1231,10 +1241,17 @@ let run_named
      walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
      signature and its mutable state out of the delegation. *)
   let project_images =
-    Keeper_vision_ingest.fallback_projector
+    let project = Keeper_vision_ingest.fallback_projector
       ~exclude_runtime_ids:lane_candidate_ids
       ~keeper_name
-      ()
+      () in
+    fun ~mode blocks ->
+      (* Exact-lane admission also owns provider selection for image evidence:
+         retain unread artifacts, but never dispatch an out-of-lane vision call. *)
+      let mode = match runtime_selection with
+        | Resolve_assignment -> mode
+        | Exact_runtime -> Keeper_vision_ingest.Store_only in
+      project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return.

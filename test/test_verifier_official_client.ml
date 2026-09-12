@@ -57,6 +57,7 @@ for line in sys.stdin:
   path, capture
 
 let runtime_config ?(protocol = "claude-code") ?(tools_support = true)
+    ?(default = "official.verifier")
     ?(cli_slots = ["official.verifier"]) command = Printf.sprintf {|
 [providers.official]
 protocol = %S
@@ -70,11 +71,11 @@ tools-support = %b
 supports-image-input = true
 [official.verifier]
 [runtime]
-default = "official.verifier"
+default = %S
 [runtime.exact_output_lanes.verifier_exact]
 slots = []
 cli_slots = [%s]
-|} protocol command tools_support
+|} protocol command tools_support default
   (String.concat ", " (List.map (Printf.sprintf "%S") cli_slots))
 
 let records path = In_channel.with_open_bin path In_channel.input_lines
@@ -103,6 +104,14 @@ let test_review mode =
     { schemas = VAT.schemas lookup_tools; dispatch = VAT.dispatch lookup_tools
     ; root_layout = ["proof.txt"] } in
   let command, capture = fixture_script root ~mode in
+  let outside_command, outside_capture = fixture_script root ~mode:"outside-exact-lane" in
+  let outside_runtime = Printf.sprintf {|
+[providers.outside]
+protocol = "claude-code"
+command = %S
+is-non-interactive = true
+[outside.verifier]
+|} outside_command in
   let config_path = Filename.concat root "runtime.toml" in
   let runtime_text =
     match mode with
@@ -125,8 +134,10 @@ tools-support = true
 [official.disabled]
 enabled = false
 |}
-    | "mixed" ->
-      runtime_config ~cli_slots:["unconfined.verifier";"official.verifier"] command
+    | "mixed" | "exact-order" ->
+      runtime_config
+        ~default:(if mode = "exact-order" then "outside.verifier" else "official.verifier")
+        ~cli_slots:["unconfined.verifier";"official.verifier"] command
       ^ Printf.sprintf {|
 [providers.unconfined]
 protocol = "codex-app-server"
@@ -134,6 +145,12 @@ command = %S
 is-non-interactive = true
 [unconfined.verifier]
 |} command
+      ^ (if mode = "exact-order" then outside_runtime else "")
+    | "shadow" ->
+      runtime_config ~default:"outside.verifier" command ^ outside_runtime ^ {|
+[runtime.lanes."official.verifier"]
+candidates = ["outside.verifier"]
+|}
     | _ -> runtime_config command
   in
   write config_path runtime_text;
@@ -194,7 +211,7 @@ is-non-interactive = true
     check bool "unavailable verifier never spawns an official client" false (Sys.file_exists capture))
   else (
   (match mode, result.AR.verdict, result.gate with
-   | ("valid" | "mixed"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
+   | ("valid" | "mixed" | "exact-order" | "shadow"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
    | "duplicate", None, AR.Evaluator_unavailable -> ()
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
@@ -202,6 +219,8 @@ is-non-interactive = true
   let rows = records capture in
   check string "compatible official client owns the verdict" "official.verifier"
     result.evaluator_runtime;
+  check bool "ordinary default or same-name lane never dispatches outside exact slots" false
+    (Sys.file_exists outside_capture);
   let launches rows = List.filter (fun row -> member "kind" row = `String "launch") rows in
   let launch = List.hd (launches rows) in
   let argv = member "argv" launch |> Yojson.Safe.Util.to_list
@@ -256,4 +275,4 @@ let () =
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
-       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"]]
+       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"]]

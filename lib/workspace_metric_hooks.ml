@@ -396,6 +396,7 @@ let install () =
           Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
           Keeper_turn_driver_wrappers.run_named_with_masc_tools
             ~runtime_id:evaluator_runtime
+            ~runtime_selection:Keeper_turn_driver.Exact_runtime
             ~base_path:review_root
             ~goal:prompt
             ?goal_blocks

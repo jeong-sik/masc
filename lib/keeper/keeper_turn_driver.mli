@@ -44,6 +44,12 @@ type output_contract = Provider_default | Tool_verdict
     not suppress arbitrary provider transforms or validate tool arguments; the
     caller owns the typed verdict protocol. *)
 
+type runtime_selection = Resolve_assignment | Exact_runtime
+(** [Exact_runtime] dispatches only the named materialized runtime, without
+    ordinary lane/default expansion, sticky preference, or media rerouting and
+    vision delegation outside it. Its caller owns the frozen exact-lane walk.
+    It cannot be combined with a deferred ordinary lane. *)
+
 type deferred_runtime_lane = private
   { assignment_id : string
   ; failed_runtime_id : string
@@ -130,6 +136,7 @@ type attempt_input =
 
 val run_named :
   runtime_id:string ->
+  ?runtime_selection:runtime_selection ->
   ?keeper_name:string ->
   ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->

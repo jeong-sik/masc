@@ -2,6 +2,14 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
+## 최신 후속 진행 (2026-09-13, CLI 및 파일 맥락)
+
+- 설치본은4324764이며 실제자율Edit Chat수용은유지한다. LSP전체IDE에서실제source가보이는데didOpen은빈문자열인기존버그를직접재현했다. [설치baseline](../2026-09-13-installed-ide-lsp-baseline/README.md).
+- PR #35611은851f412a88로진행했다. 기존Chat/Fusion/Gate+원본검사+LSP통합에읽기전용inspect-file CLI가포함된다. 실제native실패를따라Dune fixture descriptor,Tool_result 직접의존성,fs-rooted CLI cwd,ReleaseFFmpeg준비를수정했다. 새Test/Release를요청했으며설치성공은아직아니다.
+- #16의가짜Codeanchor를별도main PR #35654/f1cde78d14로제출했다. 실제설치fixture는fileevents0인데3anchors였고,수정source브라우저는repoA1/repoB1/일치없음0을확인했다. 74tests/tsc/ESLint와직접·독립리뷰통과. 설치수용·Memo작성/갱신·Board오류표시·이력pagination·global이벤트의repo근거는별도로남는다.
+- 원본검사probe는PNG실제디코딩,전체argv및같은입력,rawstreamkind를대조하도록3개오판을수정했다.9개회귀검사통과는probe검증이며새CLI실행성공이아니다. statecapture는canonicaltasks/backlog.json을필수로포함하고부모symlink를거부한다. [probe준비와범위](../2026-09-13-installed-media-probe-preparation/README.md).
+- 전체18개목표,세Goal사람확인,장기다중runtime/기억연속성은계속미완료다.
+
 ## 현재 판단과 다음 방향 (2026-09-13, 설치 Chat 수용 후)
 
 목표는 계속 18개 문제와 첨부 계약 전체다. 아래가 최신 관측이며 이후 절은 당시 기록이다. 작업은 각각 별도 worktree에서 진행한다.

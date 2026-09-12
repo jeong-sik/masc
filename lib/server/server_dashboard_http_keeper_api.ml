@@ -25,23 +25,9 @@ let keeper_file_changes_cache_key ~masc_root ~keeper_name ~window_hours =
     (Keeper_tool_call_log.committed_revision ())
 ;;
 
-let tool_calls_fleet_cache_revision_mu = Stdlib.Mutex.create ()
-let tool_calls_fleet_cache_revisions : (string, int) Hashtbl.t = Hashtbl.create 4
-
-let tool_calls_fleet_cache_key ~masc_root =
-  let key = Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root in
-  let revision = Keeper_tool_call_log.committed_revision () in
-  Stdlib.Mutex.protect tool_calls_fleet_cache_revision_mu (fun () ->
-    match Hashtbl.find_opt tool_calls_fleet_cache_revisions masc_root with
-    | Some previous when previous = revision -> ()
-    | Some _ | None ->
-      (* Publish the observed revision only after the old value is gone.
-         Otherwise a concurrent reader can observe the new revision between
-         [replace] and [invalidate], treat the cache as current, and return the
-         stale rows for the full TTL. *)
-      Dashboard_cache.invalidate key;
-      Hashtbl.replace tool_calls_fleet_cache_revisions masc_root revision);
-  key
+let tool_call_entries ~keeper_name ~limit =
+  Keeper_tool_call_log.read_recent ~keeper_name ~n:limit ()
+  |> List.map Keeper_tool_definition_source.annotate_row
 ;;
 
 (* Maximum number of trajectory/trace entries returned per query. *)
@@ -69,8 +55,7 @@ let trajectory_max_limit = 500
 let file_changes_default_window_hours = 24.0
 let file_changes_max_window_hours = 72.0
 
-(* Maximum per-keeper entries for /tool-calls; also sizes the shared
-   fleet-row window that per-keeper responses derive from. *)
+(* Maximum per-keeper entries for /tool-calls. *)
 let tool_calls_limit_max = 200
 
 let keeper_tool_call_lookup_response ~config ~keeper_name req =
@@ -1203,49 +1188,14 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
-      (* The per-keeper read Yojson-parsed the newest [limit * 5] rows of
-         the fleet-wide dated store just to filter one keeper (~3.6 s
-         measured at limit=200), inline on the main Eio domain for every
-         keeper pane the dashboard hydrates — a 16-keeper cold hydration
-         ran 16 identical fleet parses. Parse the fleet window once per
-         TTL on the CPU pool lane (the cost is JSON parsing, not
-         blocking IO) and derive each keeper's slice from it. The window
-         is sized to reproduce [read_recent]'s coverage at this
-         endpoint's maximum limit; deriving smaller limits from the
-         wider window can only widen per-keeper coverage, never narrow
-         it. TTL-bounded staleness also freezes the [latest_age_s] /
-         [health] fields for up to the TTL, which is well inside the
-         freshness SLO this surface reports on. *)
-      let fleet_rows =
-        match
-          Dashboard_cache.get_or_compute
-            (tool_calls_fleet_cache_key ~masc_root)
-            ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
-              Domain_pool_ref.submit_cpu_or_inline (fun () ->
-                `List
-                  (Keeper_tool_call_log.read_recent_rows
-                     ~n:
-                       (tool_calls_limit_max
-                        * Keeper_tool_call_log.read_over_scan_factor)
-                     ())))
-        with
-        | `List rows -> rows
-        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
-        | `Assoc _ -> []
-      in
-      (* No per-keeper cache entry: the expensive part (the fleet parse)
-         is behind the single fleet-rows key above, and the per-request
-         remainder — filtering an in-memory window plus a bounded
-         coverage-gap tail read — is milliseconds off the main domain.
-         Skipping the per-(name, limit) entry keeps this route's cache
-         cardinality at exactly one key and never pins a per-keeper
-         response shape. *)
+      (* The durable index selects this Keeper before limiting rows. A fleet
+         tail cannot bound the requested Keeper's history when others are busy.
+         Keep ledger/index I/O off the request domain and preserve chronological
+         order and row annotation from the existing response contract. *)
       let json =
         Domain_pool_ref.submit_io_or_inline (fun () ->
               let entries =
-                Keeper_tool_call_log.filter_rows_for_keeper
-                  ~keeper_name:name ~n:limit fleet_rows
-                |> List.map Keeper_tool_definition_source.annotate_row
+                tool_call_entries ~keeper_name:name ~limit
               in
               let latest_ts =
                 List.fold_left

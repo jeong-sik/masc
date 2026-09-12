@@ -170,6 +170,52 @@ let handle_transcribe _state request reqd body =
         respond_json ~status:`Bad_request ~request reqd
           (`Assoc [ ("error", `String err) ]))
 
+
+let probe_report_json attempts =
+  `Assoc [ ("endpoints", `List (List.map Voice_bridge.probe_attempt_json attempts)) ]
+
+let probe_failed request reqd reason =
+  respond_json ~status:`Bad_request ~request reqd (`Assoc [ ("error", `String reason) ])
+
+(* Synthesize one sentence on every configured TTS endpoint and report each.
+   Unlike the chain behind agent_speak this does not stop at the first endpoint
+   that answers: a chain that works says nothing about the endpoints behind it,
+   and a dead fallback looks healthy until the one in front of it goes away. *)
+let handle_probe_tts request reqd body =
+  match Yojson.Safe.from_string body with
+  | exception _ -> probe_failed request reqd "the request body is not JSON"
+  | json ->
+    let message =
+      match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "message" fields with
+         | Some (`String text) when String.trim text <> "" -> Some text
+         | Some _ | None -> None)
+      | _ -> None
+    in
+    (match message with
+     | None ->
+       probe_failed request reqd
+         "a probe needs a non-empty \"message\" for the endpoints to synthesize"
+     | Some message ->
+       (match Voice_bridge.probe_tts ~message () with
+        | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
+        | Error reason -> probe_failed request reqd reason))
+
+(* The audio arrives in the raw body, the way /voice/transcribe takes it. *)
+let handle_probe_stt request reqd body =
+  if String.length body = 0 then probe_failed request reqd "empty audio body"
+  else
+    Eio.Switch.run (fun sw ->
+      let tmp = Filename.temp_file "masc_voice_probe_" (audio_temp_suffix request) in
+      Eio.Switch.on_release sw (fun () ->
+        try Sys.remove tmp with
+        | Sys_error _ -> ());
+      Fs_compat.save_file tmp body;
+      match Voice_bridge.probe_stt ~audio_file:tmp () with
+      | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
+      | Error reason -> probe_failed request reqd reason)
+
 let add_routes router =
   router
   |> Http.Router.prefix_get Masc_network_defaults.voice_audio_path_prefix
@@ -219,4 +265,19 @@ let add_routes router =
          (fun state _agent_name _req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_transcribe state request reqd body))
+         request reqd)
+  (* Probing a TTS endpoint spends a credit on a metered provider, the same
+     reason /voice/transcribe is admin-gated rather than carrying a public
+     capability. *)
+  |> Http.Router.post "/api/v1/voice/probe/tts" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_probe_tts request reqd body))
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/probe/stt" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_probe_stt request reqd body))
          request reqd)

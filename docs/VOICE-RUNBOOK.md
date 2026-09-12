@@ -351,6 +351,38 @@ its own.
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
 
+### The same probes over HTTP
+
+The wizard calls these rather than shelling out. Both are admin-gated, for the
+reason `/voice/transcribe` is: a TTS probe spends a credit on a metered
+provider.
+
+```sh
+TOKEN=$(cat "${MASC_BASE_PATH:?}/.masc/auth/admin.token")
+
+curl -sX POST "$MASC/api/v1/voice/probe/tts" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"message":"음성 연결을 확인합니다"}'
+
+curl -sX POST "$MASC/api/v1/voice/probe/stt" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: audio/wav' \
+  --data-binary @probe.wav
+```
+
+Both answer one shape:
+
+```json
+{"endpoints":[{"endpoint_id":"whisper-local","kind":"openai_compat",
+               "state":"answered","detail":"heard 음성 연결을 확인합니다."}]}
+```
+
+`state` is one of `answered`, `refused`, `skipped`. A reader that meets a fourth
+has a result this path did not write, and should say so rather than treating it
+as a success.
+
+The audio goes in the **raw body**, not as multipart — the same as
+`/voice/transcribe`, and the same trap that costs time to rediscover.
+
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.

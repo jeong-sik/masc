@@ -293,6 +293,10 @@ PORT="$(harness_pick_free_port)"
 harness_seed_server_config "$REPO_ROOT" "$BASE_PATH" >/dev/null 2>&1 || true
 # our runtime.toml (written above) takes precedence; seed only fills gaps.
 (
+  # Real autonomous keepers turn here: with the operator's connector tokens
+  # inherited, a board injection or webhook path would post to production
+  # Slack/Discord (#28807).
+  unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
   export MASC_BASE_PATH="$BASE_PATH"
   export MASC_BASE_PATH_INPUT="$BASE_PATH"
   export MASC_KEEPER_AUTONOMOUS_ENABLED="true"

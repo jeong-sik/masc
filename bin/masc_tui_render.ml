@@ -3024,13 +3024,19 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
    refused; without this the two are the same row. Idle is a blank rather than
    a glyph — most goals have never been asked, and a mark on all of them would
    carry no information. *)
-let planning_proof_mark = function
-  | Tui_decode.Proof_idle -> " "
-  | Tui_decode.Proof_pending -> (Theme.warn ()) ^ "\xe2\x80\xa6" ^ Ansi.reset
-  | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ "\xe2\x9c\x93" ^ Ansi.reset
-  | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ "\xe2\x9c\x97" ^ Ansi.reset
-  | Tui_decode.Proof_stale _ -> (Theme.warn ()) ^ "~" ^ Ansi.reset
-  | Tui_decode.Proof_unreadable _ -> (Theme.warn ()) ^ "!" ^ Ansi.reset
+(* Colour here, the glyph in {!Masc_tui_planning_proof_mark}, which the legend
+   under the column reads from the same function. The two used to be separate
+   literals and the legend was a state short. *)
+let planning_proof_mark proof =
+  let mark = Masc_tui_planning_proof_mark.glyph proof in
+  match proof with
+  | Tui_decode.Proof_idle -> mark
+  | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ mark ^ Ansi.reset
+  | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ mark ^ Ansi.reset
+  | Tui_decode.Proof_pending
+  | Tui_decode.Proof_stale _
+  | Tui_decode.Proof_unreadable _ ->
+      (Theme.warn ()) ^ mark ^ Ansi.reset
 ;;
 
 (* The line under the list, for the goal the cursor is on. A verdict without its
@@ -3237,16 +3243,29 @@ let render_planning_list (state : state) =
          ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
-          read straight off, and every one of them changes what to do next. *)
+          read straight off, and every one of them changes what to do next --
+          which is why the line says the marks this list draws and only those.
+          It used to be a literal that named four of the six states, missing
+          "criterion changed" entirely, and a fixed line with all five words
+          would not fit an eighty-column frame. *)
        (* Reserve the divider, a goal (or empty note), and the selected
           verdict before spending a row on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
        let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
-       if count_frame_lines buf + 1 + rows_after_legend <= rows then
+       let judge_legend =
+         Masc_tui_planning_proof_mark.legend_for
+           (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+       in
+       if
+         judge_legend <> []
+         && count_frame_lines buf + 1 + rows_after_legend <= rows
+       then
          box_line_styled buf cols ~style:Ansi.dim
-           ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
+           ("  JUDGE  "
+            ^ String.concat "  "
+                (List.map (fun (mark, word) -> mark ^ " " ^ word) judge_legend));
        box_divider buf cols;
 
        if count = 0 then begin

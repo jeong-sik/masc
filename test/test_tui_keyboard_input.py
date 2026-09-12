@@ -14423,11 +14423,13 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
-def run_browser_viewport_cadence_regression(executable: str) -> None:
+def run_browser_viewport_cadence_regression(executable: str, *, follow_navigation: bool = False) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     url = "https://example.org/"
     viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    observed_url = url + "next" if follow_navigation else url
+    observed_viewport = dict(viewport, documentId="next-document") if follow_navigation else viewport
     captures, actions, png = [], [], [""]
     stale_started, stale_release = threading.Event(), threading.Event()
     closing_started, closing_release = threading.Event(), threading.Event()
@@ -14439,6 +14441,7 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
 
     def read(body):
         request = json.loads(body)
+        current_url = observed_url if len(captures) >= 2 else url
         text = "cadence fixture"
         if closing_release.is_set():
             # Ordinary cadence is blocked by refresh_pending until the delayed
@@ -14446,8 +14449,8 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
             resumed_read.set()
             text = "CADENCE RESUMED AFTER DISMISSAL"
         return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
-            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
-            "page":{"tabId":2,"title":"owned","url":url,"text":text,"chars":len(text),"truncated":False}}}
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":current_url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":current_url,"text":text,"chars":len(text),"truncated":False}}}
 
     def screenshot(body):
         request = json.loads(body)
@@ -14463,13 +14466,13 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
             closing_started.set()
             if not closing_release.wait(timeout=10):
                 return 504, {"ok":False,"error":"closing fixture was not released"}
-        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url,
-            "mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
+        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url if number == 1 else observed_url,
+            "mimeType":"image/png","data":png[0],"viewport":viewport if number == 1 else observed_viewport,"elapsed_ms":0}}
 
     def act(body):
         request = json.loads(body)
-        assert request == {"lane":"automation","tabId":2,"expectedUrl":url,"action":"drag",
-            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":viewport}
+        assert request == {"lane":"automation","tabId":2,"expectedUrl":observed_url,"action":"drag",
+            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":observed_viewport}
         actions.append(request)
         return 200, {"ok":True,"data":{}}
 
@@ -14488,7 +14491,9 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
         start = len(output)
         os.write(master,b"\x0f")
         image_after(start,b"INITIAL FRAME")
-        # No refresh key: the normal cadence updates an open screenshot.
+        # No refresh key: cadence follows a same-tab navigation by another actor
+        # as well as an image change. The drag must use the displayed new URL
+        # and document, while its pending predecessor cannot replace the frame.
         image_after(start,b"AUTOMATIC FRAME")
         assert wait_for_fixture_event(process,master,output,stale_started,timeout=5)
         start = len(output)
@@ -14516,7 +14521,8 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
         os.write(master,b"q")
 
     try:
-        run_terminal_scenario(executable,description="Open browser viewport cadence yields to drag and dismissal",
+        run_terminal_scenario(executable,description=("Browser viewport follows same-tab navigation" if follow_navigation
+                else "Open browser viewport cadence yields to drag and dismissal"),
             interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,refresh=0.5,
             preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
     finally:
@@ -14526,6 +14532,7 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
 
 def run_browser_screenshot_regression(executable: str) -> None:
     run_browser_viewport_cadence_regression(executable)
+    run_browser_viewport_cadence_regression(executable, follow_navigation=True)
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)

@@ -2904,7 +2904,7 @@ module Browser_lane_view = struct
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
-    | Viewport_cadence of { tab_id : int; expected_url : string }
+    | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
@@ -3000,7 +3000,7 @@ module Browser_lane_view = struct
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t
           && t.selected_tab = Some shot.tab_id ->
-          Some (Viewport_cadence {tab_id = shot.tab_id; expected_url = shot.url})
+          Some (Viewport_cadence shot.tab_id)
       | Some _ -> None
       | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
@@ -3313,12 +3313,15 @@ module Browser_lane_view = struct
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
-  (* Settle the browser operation even when a later key cancelled opening the
-     image. The caller separately checks image intent before drawing. *)
+  (* A cadence observes the selected tab, including navigation by another
+     actor. Its self-contained PNG and document/URL/viewport are accepted
+     together; the next gesture uses that displayed snapshot. Explicit refresh
+     and scroll retain their expected URL checks. Settle even when a later key
+     cancelled opening the image; the caller separately checks image intent. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
     let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_cadence {tab_id=requested_tab;_} | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_cadence requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source
@@ -3326,7 +3329,7 @@ module Browser_lane_view = struct
                               && screenshot.tab_id = requested_tab
                               && t.selected_tab = Some requested_tab
                               && (match t.load with
-                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_cadence {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
+                                  | Loading (_, (Viewport_refresh {expected_url;_} | Viewport_pointer {expected_url;action=Browser_lane.Scroll_at _;_})) -> screenshot.url = expected_url
                                   | _ -> true) ->
              { t with load = Idle }, Some screenshot
          | Ok _ -> { t with load = Failed "screenshot source, client, tab or expected URL mismatch" }, None

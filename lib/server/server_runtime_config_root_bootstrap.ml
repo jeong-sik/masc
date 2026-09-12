@@ -266,47 +266,62 @@ let backfill_startup_required_from_embedded ~config_root =
   |> write_missing_embedded ~dst:config_root
 ;;
 
-(* SKILL.md and its resources form one package. Publish a complete staged
-   directory, never backfill individual resources into an operator's package. *)
-let seed_missing_builtin_skills ~base_path =
-  let root = Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills" in
-  let packages =
-    Embedded_skills.file_list
-    |> List.filter_map (fun path ->
-      match String.split_on_char '/' path with
-      | [ package; "SKILL.md" ] -> Some package
-      | [] | _ :: _ -> None)
-    |> List.sort_uniq String.compare
+let builtin_skills () =
+  Embedded_skills.file_list
+  |> List.filter_map (fun path ->
+    match String.split_on_char '/' path with
+    | [ package; "SKILL.md" ] -> Some package
+    | [] | _ :: _ -> None)
+  |> List.sort_uniq String.compare
+  |> List.map (fun name ->
+    let prefix = name ^ "/" in
+    let files = Embedded_skills.file_list
+      |> List.filter (String.starts_with ~prefix)
+      |> List.map (fun path ->
+        let content = match Embedded_skills.read path with
+          | Some value -> value
+          | None -> invalid_arg ("missing embedded Skill asset: " ^ path)
+        in
+        String.sub path (String.length prefix) (String.length path - String.length prefix), content)
+    in
+    match Builtin_skill_package.make ~name ~files with
+    | Ok package -> package
+    | Error reason -> invalid_arg reason)
+;;
+
+let install_builtin_skills ~base_path ~request =
+  let operation () =
+    List.fold_left (fun installed package ->
+      let name = Builtin_skill_package.name package in
+      match Builtin_skill_package.install ~base_path ~request package with
+      | Ok Builtin_skill_package.Installed -> installed + 1
+      | Ok (Builtin_skill_package.Updated { backup }) ->
+        Printf.printf "updated Skill %s (previous package: %s)\n" name backup;
+        installed + 1
+      | Ok (Builtin_skill_package.Current | Builtin_skill_package.Already_present) -> installed
+      | Ok (Builtin_skill_package.Preserved_uninspectable { reason }) ->
+        Printf.printf "preserved Skill %s (cannot inspect package: %s)\n" name reason;
+        installed
+      | Ok (Builtin_skill_package.Preserved inspection) ->
+        (match request, inspection with
+         | Builtin_skill_package.Automatic, Builtin_skill_package.Present { revision; _ } ->
+           Printf.printf "preserved Skill %s (revision=%s; inspect with masc skills-refresh %s --base-path BASE)\n"
+             name revision name
+         | (Builtin_skill_package.Seed_missing | Builtin_skill_package.Replace_if_revisions _), _
+         | Builtin_skill_package.Automatic, Builtin_skill_package.Missing -> ());
+        installed
+      | Error error -> raise (Sys_error (Builtin_skill_package.error_message error)))
+      0 (builtin_skills ())
   in
-  Fs_compat.mkdir_p root;
-  List.fold_left
-    (fun installed package ->
-       let target = Filename.concat root package in
-       if Sys.file_exists target then installed
-       else
-         let staging =
-           Filename.temp_dir ~temp_dir:(Filename.dirname root) ".skill-seed-" ""
-         in
-         Common.protect ~module_name:"builtin_skills" ~finally_label:"staging"
-           ~finally:(fun () -> Fs_compat.remove_tree staging)
-           (fun () ->
-              let prefix = package ^ "/" in
-              Embedded_skills.file_list
-              |> List.filter (String.starts_with ~prefix)
-              |> List.iter (fun path ->
-                match Embedded_skills.read path with
-                | None -> invalid_arg ("missing embedded Skill asset: " ^ path)
-                | Some content ->
-                  let rel = String.sub path (String.length prefix)
-                      (String.length path - String.length prefix) in
-                  let destination = Filename.concat staging rel in
-                  Fs_compat.mkdir_p (Filename.dirname destination);
-                  Fs_compat.save_file destination content);
-              if Sys.file_exists target then installed
-              else (
-                Fs_compat.rename staging target;
-                installed + 1)))
-    0 packages
+  Eio_guard.run_in_systhread ~label:"builtin-skill-install" operation
+;;
+
+let seed_missing_builtin_skills ~base_path =
+  install_builtin_skills ~base_path ~request:Builtin_skill_package.Seed_missing
+;;
+
+let refresh_builtin_skills ~base_path =
+  install_builtin_skills ~base_path ~request:Builtin_skill_package.Automatic
 ;;
 
 let bootstrap_base_path_config_root ~base_path =

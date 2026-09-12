@@ -1,0 +1,17 @@
+name = "keeper_constitution_remove"
+description = """
+Take one norm back out of this world's constitution. It stops reaching every \
+keeper's prompt next turn. Removing an article another keeper wrote costs what \
+writing one costs, and both stay in the ledger. An id this world does not hold \
+is a failure, not a quiet success.\
+"""
+additional_properties = false
+
+[[params]]
+name = "article_id"
+type = "string"
+required = true
+# Mirrors World_constitution_types.Article_id.json_schema_pattern.
+# test_enum_mirror_sync compares the two; edit both or neither.
+pattern = "^a-[0-9a-f]{32}$"
+description = "The id shown beside the norm in your system prompt."

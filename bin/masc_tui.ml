@@ -4377,7 +4377,7 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence {tab_id;_} -> Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);

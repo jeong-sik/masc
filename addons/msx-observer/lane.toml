@@ -5,6 +5,9 @@ contributions = ["observe"]
 image = "masc-lane-msx-observer:0.1.0"
 command = ["python3", "server.py"]
 
+[world.skills]
+directory = "skills"
+
 [resources]
 cpus = 0.5
 memory_bytes = 134217728

@@ -93,3 +93,37 @@ let error_to_string = function
   | Invalid_workspace error ->
     Config_dir_resolver.canonical_base_path_error_to_string error
 ;;
+
+let publish_lane_skills ~config exports =
+  let ( let* ) = Result.bind in
+  let* workspace = workspace config.Workspace.base_path |> Result.map_error error_to_string in
+  let sources, invalid = List.fold_left
+    (fun (sources, errors) (export : Lane_addon_runtime.skill_export) ->
+      match export.package.skills_directory with
+      | None -> sources, errors
+      | Some relative ->
+          let id = Lane_addon_runtime.skill_source_id export.owner in
+          let source =
+            let* id = Skill_source_config.source_id_of_string id in
+            let path = Skill_resource_path.append_to ~root:export.package.directory relative in
+            Skill_source_config.read_only_absolute_source ~id ~path
+            |> Result.map_error Skill_source_config.path_rejection_to_string in
+          match source with
+          | Ok source ->
+              {Skill_catalog_snapshot_service.source; ownership_root=export.package.directory} :: sources, errors
+          | Error message -> sources, (id ^ ": " ^ message) :: errors)
+    ([], []) exports in
+  if exports = [] && not (Skill_catalog_snapshot_service.has_additional_sources ~workspace)
+  then Ok ()
+  else
+  let* publication = Skill_catalog_snapshot_service.update_additional_sources
+      ~workspace ~sources:(List.rev sources) in
+  let errors = List.rev invalid @
+    (Skill_catalog_snapshot_service.additional_source_diagnostics ~workspace
+     |> List.map (fun (issue : Skill_catalog_snapshot_service.additional_source_diagnostic) ->
+       Skill_source_config.source_id_to_string issue.source_id ^ ": " ^ issue.message)) in
+  match publication, errors with
+  | Workspace_retired, _ -> Error "package Skill workspace publication was retired"
+  | (Published _ | Unchanged _), [] -> Ok ()
+  | (Published _ | Unchanged _), _ -> Error (String.concat "; " errors)
+;;

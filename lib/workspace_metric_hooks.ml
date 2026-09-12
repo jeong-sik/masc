@@ -394,8 +394,39 @@ let install () =
     | Ok system_prompt ->
     (* Each independent review owns a fresh official-client session. Sharing the
        empty Keeper name would resume another task's thread or contend for its
-       active client session. The owner remains in persisted runtime evidence. *)
+       active client session. The owner remains in persisted runtime evidence.
+
+       The name lives for the length of this call and nothing reads it again,
+       but the official-client runner writes durable state under it, so the
+       directory is removed on the way out -- otherwise every Task and Goal
+       review leaves another pseudo-Keeper behind, for the life of the
+       workspace. A failed review is cleaned too: the retry invents a new name
+       and would never come back for this one. A crash between the two still
+       leaves one directory; only a stable, recoverable review identity would
+       close that, and a fresh identity is what keeps two reviews from
+       resuming each other's thread. *)
     let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
+    let discard_review_identity () =
+      if Safe_identifier.is_portable_name keeper_name then begin
+        let directory =
+          Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
+        in
+        match Fs_compat.remove_tree directory with
+        | () -> ()
+        | exception exn ->
+          (* Handled here, never re-raised -- Cancelled included. This runs as a
+             [Fun.protect] finally, where anything raised comes back wrapped in
+             [Fun.Finally_raised] and replaces the review's own answer with a
+             cleanup error. A cancellation during cleanup therefore abandons the
+             cleanup rather than the review, and the path is logged so the
+             leftover can be found. *)
+          Log.Task.warn
+            "completion review state left behind at %s: %s"
+            directory
+            (Stdlib.Printexc.to_string exn)
+      end
+    in
+    Fun.protect ~finally:discard_review_identity (fun () ->
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
         Keeper_turn_driver_wrappers.run_named_with_masc_tools
@@ -422,7 +453,7 @@ let install () =
               ("task completion verdict protocol violation: " ^ detail))
        | None -> Ok !verdict_ref)
     | Error err ->
-      Error err);
+      Error err));
 
   Atomic.set Workspace_hooks.record_task_metric_fn (fun config ~agent_id ~task_id ~started_at ~completed_at ~success ~error_message ~collaborators ~handoff_from ~handoff_to ->
     let metric : Metrics_store_eio.task_metric = {

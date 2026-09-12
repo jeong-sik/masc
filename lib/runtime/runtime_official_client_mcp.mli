@@ -13,6 +13,7 @@ type error =
 type tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   }
 
 type dispatch =

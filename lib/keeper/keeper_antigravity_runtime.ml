@@ -248,6 +248,7 @@ let tool_spec (tool : Host.dynamic_tool) =
 let tool_result (result : Host.dynamic_tool_result) =
   { Runtime_official_client_mcp.success = result.success
   ; content = result.content
+  ; content_blocks = result.content_blocks
   }
 ;;
 
@@ -524,6 +525,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
+        ~content_transport:Runtime_official_client_tool.Mcp
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -629,6 +631,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* dynamic_tools =
       Host.dynamic_tools
+        ~content_transport:Runtime_official_client_tool.Mcp
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)

@@ -1,0 +1,74 @@
+[
+  {
+    "kind": "retained_browser_observation",
+    "keeper": "browser-handoff-proof-15958000",
+    "execution_id": "exec-1789228099847-000d",
+    "observed_at": 1789228099.854113,
+    "artifact": {
+      "_blob": {
+        "sha256": "1ebafb22d3f9e993f22a3a7ed12a0b13c89336c67150c7533d07b05a8964d061",
+        "bytes": 4681,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      }
+    },
+    "current": false,
+    "url": "http://127.0.0.1:63795/gamma.html",
+    "documentId": "917516686e410a50f8f936966ffd950e",
+    "truncated": false
+  },
+  {
+    "kind": "retained_browser_observation",
+    "keeper": "browser-handoff-proof-15958000",
+    "execution_id": "exec-1789228097043-000a",
+    "observed_at": 1789228097.049695,
+    "artifact": {
+      "_blob": {
+        "sha256": "a9bc048829d3f08df40cce0dbb058197aa004816c6a52210f3811ba814273dcf",
+        "bytes": 4688,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      }
+    },
+    "current": false,
+    "url": "http://127.0.0.1:63795/beta.html",
+    "documentId": "efde645c2fab17c2f2d6c834a998fdc0",
+    "truncated": false
+  },
+  {
+    "kind": "retained_browser_observation",
+    "keeper": "browser-handoff-proof-15958000",
+    "execution_id": "exec-1789228094791-0007",
+    "observed_at": 1789228094.799415,
+    "artifact": {
+      "_blob": {
+        "sha256": "69a2433e197011a2ba7fcd81e479302521b9525c404bce355f3204eb74f78bc3",
+        "bytes": 5831,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      }
+    },
+    "current": false,
+    "url": "http://127.0.0.1:63795/alpha.html",
+    "documentId": "1aef03afc9ac5e5a9718bd6cd569dceb",
+    "truncated": false
+  },
+  {
+    "kind": "retained_browser_observation",
+    "keeper": "browser-handoff-proof-15958000",
+    "execution_id": "exec-1789228092128-0005",
+    "observed_at": 1789228092.128249,
+    "artifact": {
+      "_blob": {
+        "sha256": "dcfc853c7dd8c1c0c3906c0c6addbfee63b4cf0fc8f6a8d58a775b23de5354f7",
+        "bytes": 1826,
+        "mime": "application/vnd.masc.browser-scene+json",
+        "preview": ""
+      }
+    },
+    "current": false,
+    "url": "http://127.0.0.1:63795/index.html",
+    "documentId": "fc7a8d7421fe7faec1ac4de0daede211",
+    "truncated": false
+  }
+]

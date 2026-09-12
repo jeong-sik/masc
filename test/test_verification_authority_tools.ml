@@ -959,9 +959,9 @@ let test_goal_and_task_inspect_real_pdf () =
            Digestif.SHA256.(digest_string png |> to_hex)
            (member "rendered_sha256" page |> to_string);
          Alcotest.(check bool) "A4 width from parsed PDF geometry" true
-           (abs_float (member "width_points" page |> to_float -. 595.2756) < 0.001);
+           (abs_float ((member "width_points" page |> to_float) -. 595.2756) < 0.001);
          Alcotest.(check bool) "A4 height from parsed PDF geometry" true
-           (abs_float (member "height_points" page |> to_float -. 841.8898) < 0.001))
+           (abs_float ((member "height_points" page |> to_float) -. 841.8898) < 0.001))
          (List.combine pages images);
        Alcotest.(check bool) "Korean text was extracted from original PDF" true
          (List.exists (fun page -> String_util.contains_substring

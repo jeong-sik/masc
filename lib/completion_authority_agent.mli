@@ -34,19 +34,118 @@ module For_testing : sig
     authority:Masc_domain.completion_authority ->
     string
 
-  (** How one review attempt ended. [Deferred] carries no payload: a review
-      that did not commit a verdict is reported to the Board and the producer
-      Keeper chooses what happens next. [Retryable_deferred] means the typed
-      evaluator error was retryable and the application-owned lane must
-      re-arm its maintenance scan while the Task stays awaiting verification. *)
+  (** What one review attempt asks of the retry scheduler. A request, not an
+      outcome: whether a retry is armed is known only once the scheduler
+      answers with a [retry_admission]. *)
+  type retry_request =
+    | Retry_requested
+    | No_retry_requested
+
+  (** The scheduler's answer to one request. [Armed_timer]: this request
+      forked the timer, which fires after the lane's full interval.
+      [Joined_running_timer]: the request added keys to a batch whose timer
+      was already running. [Already_pending]: the pending batch already
+      covered every key. *)
+  type retry_admission =
+    | Armed_timer
+    | Joined_running_timer
+    | Already_pending
+
+  (** What happened to the retry after the attempt was recorded; the Board
+      post is projected from this. *)
+  type retry_scheduling =
+    | Retry_not_requested
+    | Retry_admitted of retry_admission
+
+  (** Why a review stopped without a verdict. The registry row, the WARN
+      line and the Board notice are all read off this sum. Only
+      [Not_reviewed] carries a retry request: the evaluator's typed error is
+      the only automatic-retry authority, so no other stop can ask for one. *)
+  type stop_cause =
+    | Infrastructure_unavailable of
+        { stage : Verification_run_registry.infrastructure_stage
+        ; detail : string
+        }
+    | Commit_failed of { detail : string }
+    | Not_reviewed of
+        { gate : string
+        ; detail : string
+        ; evaluator_runtime : string
+        ; retry : retry_request
+        }
+    | Raised of { detail : string }
+
+  (** How one review attempt ended. [Stalled] names why no verdict was
+      committed: the run row is recorded, the caller schedules the retry the
+      cause asks for, and then writes the WARN and projects the stall to the
+      Board from the scheduler's answer. [Operator_routed] is a cancel claim
+      handed to the operator without a review (RFC-0417 §4.1). *)
   type process_outcome =
     | Committed
-    | Deferred
-    | Retryable_deferred
+    | Operator_routed
+    | Stalled of stop_cause
 
-  val process_outcome_of_evaluator_retryable : bool option -> process_outcome
+  val retry_request_of_evaluator_retryable : bool option -> retry_request
   (** [Some true] is the only automatic-retry authority. [Some false] and
-      [None] preserve the producer/operator action contract. *)
+      [None] request nothing, preserving the producer/operator contract. *)
+
+  val retry_request_of_stop_cause : stop_cause -> retry_request
+  (** The request a stop carries: [Not_reviewed]'s own, [No_retry_requested]
+      for every other constructor. *)
+
+  val stop_cause_label : stop_cause -> string
+  (** The constructor name with the payload an operator filters on, e.g.
+      [Infrastructure_unavailable{stage=review_preparation}] or
+      [Not_reviewed{gate=evaluator_unavailable,slot=ollama_cloud.deepseek}]. *)
+
+  val stalled_gate : stop_cause -> string
+  (** The [gate] the Board notice keys its repeat check on: the evaluator's
+      gate for [Not_reviewed], [stop_cause_label] for every other stop. *)
+
+  val stall_log_line
+    :  task_id:string
+    -> verification_id:string
+    -> cause:stop_cause
+    -> disposition:Verification_protocol.stall_disposition
+    -> string
+  (** The one WARN a review without a verdict writes, chosen by the same
+      disposition the Board sentence is rendered from. [Retry_scheduled]
+      says "will retry" and how soon ([in_sec=<seconds>] for a timer this
+      stall armed, [in=shared_timer] for one it joined); [No_retry_armed]
+      says "stopped: <label>; producer or operator must act". Neither says
+      "deferred" alone. *)
+
+  val announce_stall
+    :  notify:
+         (task_id:string
+          -> verification_id:string
+          -> gate:string
+          -> detail:string
+          -> disposition:Verification_protocol.stall_disposition
+          -> unit)
+    -> task_id:string
+    -> verification_id:string
+    -> cause:stop_cause
+    -> disposition:Verification_protocol.stall_disposition
+    -> unit
+  (** Writes [stall_log_line] at WARN, then calls [notify] with
+      [stalled_gate cause], the cause's detail and the same disposition. The
+      WARN is written before [notify] runs. An ordinary exception out of
+      [notify] is recorded as an ERROR line carrying the exception and does
+      not escape; [Eio.Cancel.Cancelled] is re-raised. Production passes
+      [Verification_protocol.notify_stalled_verification] with the lane's
+      authority applied. *)
+
+  val stall_disposition_of_scheduling
+    :  retry_interval_sec:float
+    -> retry_scheduling
+    -> Verification_protocol.stall_disposition
+  (** The Board disposition for one stall, from what the scheduler reported.
+      [Retry_not_requested] is [No_retry_armed]; [Armed_timer] is
+      [Retry_scheduled] after the full [retry_interval_sec];
+      [Joined_running_timer] and [Already_pending] are [Retry_scheduled] on
+      the [Shared_timer], since the delay that timer holds is not this
+      request's to name. *)
 
   type review_key =
     { task_id : string
@@ -77,11 +176,13 @@ module For_testing : sig
     -> wait:(unit -> unit)
     -> dispatch:(scan_scope -> unit)
     -> scan_scope
-    -> bool
+    -> retry_admission
   (** The production retry scheduler with a caller-controlled interval and
-      dispatch sink. [true] means new work entered the pending batch; repeated
-      keys return [false]. A whole-backlog request shares the batch and timer
-      with named retries. The switch owns the timer and its cancellation. *)
+      dispatch sink. [Armed_timer] means the request forked the timer;
+      [Joined_running_timer] means new keys entered a batch whose timer was
+      already running; [Already_pending] means the batch already covered every
+      key. A whole-backlog request shares the batch and timer with named
+      retries. The switch owns the timer and its cancellation. *)
 
   (** RFC-0417 §4.1: what the system lane does with one Task, read off its
       status. A completion claim is reviewed; a cancel claim is handed to the

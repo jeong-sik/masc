@@ -62,10 +62,13 @@ let test_composition_retains_observation ~reject_schema () =
         ~turn_context:(Masc.Keeper_tool_call_log_context.get_turn_context_record ~cell ()) in
       let produced = ref None in
       let dispatch ~tool_use_id:_ ~node:_ ~descriptor:_ ~schedule:_ ~input =
-        let result = match Masc.Tool_misc.dispatch
-          {config;agent_name=meta.name;help_schemas=[]} ~name:"masc_browser_read" ~args:input with
-          | Some result -> result | None -> fail "actual browser dispatcher missing" in
-        check bool "producer read succeeds before schema validation" true (Tool_result.is_success result);
+        let execution = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
+            ~config ~meta ~args:input in
+        let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
+            ?data:execution.data ?metadata:execution.metadata ()
+            |> Tool_result.with_retained_artifacts execution.retained_artifacts in
+        check bool "producer read succeeds before schema validation" true
+          (execution.disposition=Tool_result.Completed ());
         produced := Some result;
         Executor.dispatch_result result in
       let outcome = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () in

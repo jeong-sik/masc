@@ -4,7 +4,7 @@ A fast composition can read several pages between two TUI refreshes. The three-c
 
 ## Data and lifetime
 
-Scene and region reads validate their Browser_scene schema, observed tab, explicit source and resolved client identity. Both Keeper BrowserRead and generic MCP masc_browser_read use the same retention boundary. It writes the exact result data to the existing durable Tool_blob_store as application/vnd.masc.browser-scene+json before returning a reference.
+Scene and region reads validate their Browser_scene schema, observed tab, explicit source and resolved client identity. Direct Keeper BrowserRead and MCP reads bound to an actual registered Keeper use the same retention boundary. Unbound external MCP reads remain ordinary observations without hidden retained blobs. It writes the exact result data to the existing durable Tool_blob_store as application/vnd.masc.browser-scene+json before returning a reference.
 
 Tool_result.retained_artifacts carries observer roots outside model-facing data. Tool_result.to_json intentionally omits these roots: composition serializes node results into model data, and an embedded normalized artifact reference would force Tool_bridge to externalize an otherwise inline scene. Normal configured output-size projection still applies.
 
@@ -20,4 +20,6 @@ This change supplies retained records; the TUI history selection and rendering c
 
 ## Validation
 
-Tests exercise the actual Keeper and generic MCP read producers with synthetic browser transport; persisted bytes survive subsequent navigation and disconnection. They check inline model projection, composition serialization, truncated log roots and existing GC accounting. The actual composition executor and production node observer cover successful and schema-rejected reads. Production Keeper hook tests cover missing log storage, retry, synchronous commit and distinct invocations with blank provider IDs. The native MCP trace writer is checked separately. These are not full native provider or installed-extension proofs.
+Tests exercise the actual Keeper read producer and the owner-bound MCP retention boundary with synthetic browser transport; persisted bytes survive subsequent navigation and disconnection. They check inline model projection, composition serialization, truncated log roots and existing GC accounting. The actual composition executor and production node observer cover successful and schema-rejected reads. Production Keeper hook tests cover missing log storage, retry, synchronous commit and distinct invocations with blank provider IDs. The native MCP trace writer is checked separately. These are not full native provider or installed-extension proofs.
+
+A retained MCP receipt commits synchronously. Only append failure prevents publishing that retained result; subsequent trajectory and SSE notifications are best-effort.

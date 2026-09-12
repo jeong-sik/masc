@@ -88,6 +88,11 @@ val runtime_mcp_keeper_log_context_of_entry :
     [sandbox_roots] overrides; the entry's
     [meta.runtime] supplies the rest. *)
 
+val retain_runtime_mcp_observation :
+  keeper_entry:Keeper_registry.registry_entry option -> tool_name:string ->
+  arguments:Yojson.Safe.t -> start_time:float -> Tool_result.result -> Tool_result.result
+(** Retains only canonical browser reads owned by a resolved Keeper. *)
+
 val record_runtime_mcp_keeper_tool_trace :
   ?typed_result:Tool_result.result ->
   ?mcp_session_id:string ->
@@ -105,9 +110,8 @@ val record_runtime_mcp_keeper_tool_trace :
     appends to the runtime-MCP trajectory log, emits the
     exact-disposition SSE payload, and bumps the trajectory-coverage
     counter. Binary observation formats derive their [success]
-    projection only at this boundary. Errors during persistence are swallowed
-    with a [Log.Misc.warn] — telemetry must never abort
-    the tool call. *)
+    projection only at this boundary. Retained receipt append failures propagate; subsequent trajectory/SSE
+    telemetry failures are best-effort and cannot invalidate the committed receipt. *)
 
 (** {1 [tools/call] dispatcher} *)
 

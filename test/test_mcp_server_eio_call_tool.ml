@@ -866,6 +866,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       let reference = Tool_blob_store.put_durable
           (Tool_blob_store.create ~base_path) ~bytes:"retained native observation"
           ~mime:"application/vnd.masc.browser-scene+json" in
+      Masc.Sse.subscribe_external ~id:subscriber_id
+        ~callback:(fun _ -> failwith "post-commit subscriber unavailable") ();
       let observed = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
           ~data:(`Assoc ["url",`String "https://example.org/page"]) ()
           |> Tool_result.with_retained_artifacts [reference] in

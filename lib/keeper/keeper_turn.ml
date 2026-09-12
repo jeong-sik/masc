@@ -871,11 +871,11 @@ let run_keeper_invocation_turn_admitted_inner
                      | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
                   | Error _, _ | Ok _, None -> () in
                 let official_client = match run_result with
-                  | Ok {Keeper_agent_run.checkpoint=None; runtime_id; _} ->
+                  | Ok ({Keeper_agent_run.checkpoint=None; runtime_id; _}, _) ->
                     (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
                      | Ok frame -> Ok (Some (runtime_id, frame))
                      | Error error -> Error (Keeper_repetition_snapshot.error_to_string error))
-                  | Ok {Keeper_agent_run.checkpoint=Some _; _} | Error _ -> Ok None in
+                  | Ok ({Keeper_agent_run.checkpoint=Some _; _}, _) | Error _ -> Ok None in
                 let gate_wait = match official_client with
                   | Error detail -> Error detail
                   | Ok official_client -> Keeper_direct_gate_continuation.suspend

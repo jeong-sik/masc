@@ -2037,10 +2037,13 @@ let render_overview (state : state) =
     ((Theme.recede ()) ^ Ansi.box_v ^ Ansi.reset)
     events_title);
 
+  let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
   for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
       if i < List.length attention_items then
-        let a = List.nth attention_items i in
+        match Rows.at attention_items_window i with
+        | None -> ""
+        | Some a ->
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
         (* The age answers "why is this still here": a stamped item shows how
@@ -2375,11 +2378,12 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     min state.task_detail_scroll
       (Metrics_tail.maximum_scroll ~entry_count:total_lines ~content_height)
   in
+  let body_lines_window = Rows.of_list ~first:offset ~height:content_height body_lines in
   for i = 0 to content_height - 1 do
     let line_index = i + offset in
     let text =
       if line_index < total_lines then
-        List.nth body_lines line_index
+        Option.value (Rows.at body_lines_window line_index) ~default:""
       else ""
     in
     box_line buf cols
@@ -3239,12 +3243,14 @@ let render_approvals (state : state) =
         16 approvals
       |> min 26
     in
+    let approvals_window = Rows.of_list ~first:scroll_offset ~height:content_height approvals in
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
       if idx < count then begin
         let line =
-          match List.nth approvals idx with
-          | Operator_row a ->
+          match Rows.at approvals_window idx with
+          | None -> ""
+          | Some (Operator_row a) ->
               let target_id =
                 Terminal_text.single_line_or ~default:"-" a.ap_target_id
               in
@@ -3253,7 +3259,7 @@ let render_approvals (state : state) =
                 (fit_width (Terminal_text.single_line a.ap_action_type) 20)
                 (fit_width (Terminal_text.single_line a.ap_target_type) 16)
                 target_id
-          | Keeper_tool_row held ->
+          | Some (Keeper_tool_row held) ->
               (* The remaining wait, not the age: this row disappears on its
                  own when it runs out, and what an operator weighs is how
                  long they still have. *)
@@ -3272,7 +3278,7 @@ let render_approvals (state : state) =
                 (Terminal_text.single_line held.kta_question ^ " — "
                 ^ Terminal_text.single_line_or ~default:"(not provided)"
                     held.kta_because)
-          | Gate_row pending ->
+          | Some (Gate_row pending) ->
               (* The age is not worker duration. A durable row survives after
                  Auto Judge hands off to a human or fails, so pair age with
                  the canonical phase instead of calling every row waiting. *)
@@ -6348,6 +6354,8 @@ let render_keeper_list (state : state) =
       state.keeper_cursor - keeper_rows + 1
     else 0
   in
+  let keepers_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows state.keepers in
+  let readings_window = Rows.of_list ~first:scroll_offset ~height:keeper_rows readings in
   if keeper_count = 0 then begin
     if keeper_rows > 0 && Option.is_none keepers_error then
       box_line buf cols
@@ -6361,7 +6369,7 @@ let render_keeper_list (state : state) =
     for index = 0 to keeper_rows - 1 do
       let position = index + scroll_offset in
       match
-        (List.nth_opt state.keepers position, List.nth_opt readings position)
+        (Rows.at keepers_window position, Rows.at readings_window position)
       with
       | Some keeper, Some reading ->
           let runtime =
@@ -8368,11 +8376,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
             (selected_keeper_run state)
         else scroll
     in
+    let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
 
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
       if idx < total_lines then
-        box_line buf cols (List.nth all_lines idx)
+        box_line buf cols (Option.value (Rows.at all_lines_window idx) ~default:"")
       else
         box_empty buf cols
     done;

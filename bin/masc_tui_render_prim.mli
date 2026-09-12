@@ -1,17 +1,16 @@
 (** Rendering primitives shared across every surface.
 
-    The set is computed, not curated: each value here is reached by at least
-    ten of the ninety screen renderers in [Masc_tui_render], and the closure
-    refers to nothing that belongs to one surface. That is why this compiles
-    before them rather than beside them.
+    The set is computed, not curated. Most of it is what at least ten of the
+    screen renderers reach; the rest arrived when a surface was lifted out and
+    turned out to share a helper with its neighbours -- a value two screens
+    both need belongs below both of them, not inside one.
 
-    Twelve more values live in the implementation without appearing here --
-    they are the pieces the exported ones are built from, and no surface
-    names them. *)
-
+    12 values live in the implementation without appearing here. They are
+    the pieces the exported ones are built from, and no surface names them. *)
 
 module Frame_presenter = Masc_tui_frame_presenter
 module Markdown = Masc_tui_markdown
+module Status = Masc.Keeper_status_runtime
 
 val acting_pane_reserved_cols : int ref
 
@@ -105,3 +104,19 @@ val surface_chrome :
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val connection_badge : Masc_tui_types.state -> string
+
+val count_frame_lines : Buffer.t -> int
+
+val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
+
+val keeper_action_color : Status.keeper_next_action_path option -> string
+
+val keeper_state_glyph :
+  paused:bool ->
+  health:Masc_tui_types.Tui_decode.keeper_health option -> string
+
+val fit_runtime_id : int -> string -> string
+
+val keeper_roster_pane :
+  ?focused:bool ->
+  Masc_tui_types.state -> rows:int -> cols:int -> Buffer.t -> unit

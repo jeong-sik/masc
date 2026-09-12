@@ -1584,7 +1584,7 @@
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
-;; the TUI executable so every decision is testable without a process.
+;; the TUI executable so cache workflows can be tested with process fixtures.
 (library
  (name masc_tui_image_cache)
  (wrapped false)

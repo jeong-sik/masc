@@ -517,9 +517,10 @@
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
- ; masc_tui_keeper_mark owns the marks the roster draws, and the sheet this
- ; module builds is where a reader looks up what one means.
- (libraries masc_tui_types masc_tui_keeper_mark masc_tui_board_kind_mark))
+ ; masc_tui_keeper_mark owns the marks the roster draws and
+ ; masc_tui_planning_proof_mark the marks Planning's JUDGE column draws; the
+ ; sheet this module builds is where a reader looks up what one means.
+ (libraries masc_tui_types masc_tui_keeper_mark masc_tui_board_kind_mark masc_tui_planning_proof_mark))
 
 (library
  (name masc_tui_esc_interrupt)
@@ -832,6 +833,12 @@
  (wrapped false)
  (modules masc_tui_board_kind_mark)
  (libraries masc_tui_types))
+
+(library
+ (name masc_tui_planning_proof_mark)
+ (wrapped false)
+ (modules masc_tui_planning_proof_mark)
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_approval_detail)
@@ -1225,6 +1232,7 @@
  (wrapped false)
  (modules masc_tui_render_prim)
  (libraries
+  masc_tui_planning_proof_mark
   masc_tui_answering
   masc_tui_composer_projection
   masc_tui_roster_pane
@@ -1454,6 +1462,7 @@
   masc_tui_render_metrics
   masc_tui_render_memory
   masc_tui_board_kind_mark
+  masc_tui_planning_proof_mark
   masc_tui_context_bars
   masc_tui_chart
   masc_tui_tool_tree

@@ -162,7 +162,13 @@ open Alcotest
    world write the norms they agreed on into the one place every keeper there
    reads, instead of an operator pasting them into a prompt override from the
    dashboard -- the only path that existed (RFC-0442). *)
-let ceiling_bytes = 107_631
+(* Generic package action submission and receipt reading add two deferred
+   tools. CI 34698460831 measured 109,254 bytes / 126 tools at ff6f80564b.
+   Shortening the action summary by 18 ASCII bytes gives 109,236, with no
+   added headroom. These tools connect optional package environments through
+   one domain-independent path; package installation adds no per-domain tool.
+   CI verifies the production renderer; this is not a Keeper behavior gate. *)
+let ceiling_bytes = 109_236
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -318,6 +324,8 @@ let all_surface_golden_names =
   ; "masc_library_add"
   ; "masc_library_list"
   ; "masc_lane_attach"
+  ; "masc_lane_act"
+  ; "masc_lane_action_status"
   ; "masc_lane_detach"
   ; "masc_lane_evidence"
   ; "masc_lane_inspect"

@@ -11,6 +11,26 @@ include module type of Voice_bridge_core
 (** {1 Types} *)
 
 (** How one Voice MCP call failed. *)
+(** One voice as an endpoint names it. [voice_id] is what a configuration
+    stores. For [say] that id is the whole printed label, parentheses included:
+    say adds them to names that exist in several languages, and the bare name
+    then selects a different language without saying so. *)
+type catalogue_voice =
+  { voice_id : string
+  ; voice_name : string option
+  ; voice_language : string option
+  }
+
+val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
+
+(** Parse what [say -v ?] prints. Separate from the asking so a recorded answer
+    can be replayed on a machine that has no say. *)
+val say_catalogue_of_output : string -> catalogue_voice list
+
+(** Ask one endpoint which voices it has. [Error] carries why there is nothing
+    to show, in words meant for a reader who will type the name instead. *)
+val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
+
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string
@@ -38,6 +58,59 @@ type agent_speak_result =
   }
 
 (** {1 Public API} *)
+
+(** {1 Endpoint probes}
+
+    The fallback chains stop at the first endpoint that answers, which is right
+    for serving a request and wrong for answering "is this configuration
+    working". A chain that succeeds says nothing about the endpoints behind the
+    one that answered, so a dead fallback looks exactly like a healthy one until
+    the endpoint in front of it goes away. A probe asks every endpoint and
+    reports each separately. *)
+
+type probe_outcome =
+  | Answered of string  (** What came back, in one phrase. *)
+  | Refused of string  (** The endpoint's own reason, not a summary of it. *)
+  | Skipped of string
+      (** Why it was not asked: disabled, or a kind that does not do this. *)
+
+type probe_attempt =
+  { endpoint_id : string
+  ; kind : Voice_config.endpoint_kind
+  ; outcome : probe_outcome
+  }
+
+val probe_outcome_to_string : probe_outcome -> string
+val probe_attempt_json : probe_attempt -> Yojson.Safe.t
+
+val probe_tts
+  :  ?agent_id:string
+  -> message:string
+  -> unit
+  -> (probe_attempt list, string) result
+(** Ask every configured TTS endpoint to synthesize [message], and report what
+    each one did. The audio is discarded; what is being measured is whether the
+    endpoint answers at all, and with how many bytes.
+
+    The voice is resolved per endpoint rather than once for the list: a voice id
+    is provider vocabulary, so asking one endpoint for another's id probes a
+    voice that does not exist there (#24068).
+
+    [Error] when the voice configuration itself does not load, or has no [tts]
+    section -- the same two states {!Voice_config.load_detailed} separates, kept
+    apart here for the same reason. *)
+
+val probe_stt
+  :  audio_file:string
+  -> unit
+  -> (probe_attempt list, string) result
+(** Ask every configured STT endpoint to transcribe [audio_file], and report
+    what each one did.
+
+    An empty transcript is [Answered], not [Refused]: the endpoint was reached
+    and heard nothing in the audio. Saying which it was keeps a quiet recording
+    apart from an endpoint that is not there -- the distinction an empty draft
+    in the composer cannot make on its own. *)
 
 val public_config_json : unit -> (Yojson.Safe.t, Yojson.Safe.t) result
 

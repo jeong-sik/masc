@@ -17,6 +17,18 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+(* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
+   The terminal used to take this byte for flow control -- raw mode clears
+   IXON now, which is what makes it bindable at all. A letter would not do:
+   in the composer every letter is text.
+
+   The byte and the printed name sit together because the chat pane prints
+   the name on the folded line while masc_tui.ml matches the byte. Apart,
+   one of them drifts and the line names a key that does nothing. *)
+let expand_turn_key = "\019"
+let expand_turn_label = "^S"
+
+
 let keepers_jump =
   b Meta "2" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 2"
@@ -162,6 +174,10 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act expand_turn_label "turn detail"
+          ~help:
+            "unfold the running turn's status rows, or fold them back to the \
+             progress line"
       ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
@@ -820,7 +836,8 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
            list is a declaration directory that can hold more. *)
         b Navigate "arrows+enter" "connect"
       ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
-      ; b Act "A" "app" ~help:"open the app-registration form for it"
+      ; b Act "A" "app"
+          ~help:"open the app-registration form for it -- it asks for a Client ID"
       ; b Search "/" "filter"
       ; b Meta "R" "refresh"
       ]
@@ -891,7 +908,12 @@ let help_sections ?current () =
            read it. Its shape is already the sheet's: a mark, and what it
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
-        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend) ])
+        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* Planning's own legend says the marks its list is drawing, which
+             is what keeps that line inside a narrow frame -- so a mark no
+             goal carries right now has nowhere else to be explained. Here. *)
+          ; ("Judge marks", Masc_tui_planning_proof_mark.legend)
+          ])
 
 let footer_hints_browser_lane =
   hints_of_bindings

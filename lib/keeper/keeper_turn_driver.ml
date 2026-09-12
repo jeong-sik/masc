@@ -115,6 +115,18 @@ type deferred_runtime_lane =
 let deferred_runtime_ids hint =
   hint.next_runtime_id :: hint.later_runtime_ids
 
+(* The candidate error a runtime walk returns as the lane's error, together
+   with the candidate that produced it. The walk may return an error observed
+   on an earlier candidate than the one it ended on (a typed context overflow
+   outranks a later recoverable error on an exhausted lane), so the candidate
+   the walk ended on and the candidate whose error it returned are two
+   facts. *)
+type lane_terminal_error =
+  { origin_runtime_id : string
+  ; origin_attempt : int
+  ; lane_error : Agent_core.Error.t
+  }
+
 (* Quota demotion must never promote a candidate the runtime table cannot
    resolve (for example one removed by a runtime.toml reload while a deferred
    suffix was frozen): a missing id at the head fails the attempt with a
@@ -270,7 +282,8 @@ let attempt_runtime_candidates
       true)
     ?lane_id
     ?(on_retry_deferred = fun _ -> ())
-    ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ _error -> ())
+    ?(on_attempt_error = fun ~runtime_id:_ ~attempt:_ ~dispatch:_ _error -> ())
+    ?(on_lane_terminal_error = fun (_ : lane_terminal_error) -> ())
     ?quota_scope_of
     ?candidate_preference_of
     ?candidate_dispatchable
@@ -333,10 +346,16 @@ let attempt_runtime_candidates
       dispatchable
     @ undispatchable
   in
-  let rec loop ~observed_overflow idx = function
+  (* Every error the walk returns from a candidate passes through here, so
+     the caller learns which candidate produced the lane's error. *)
+  let lane_terminal (terminal : lane_terminal_error) =
+    on_lane_terminal_error terminal;
+    Error terminal.lane_error
+  in
+  let rec loop ~(observed_overflow : lane_terminal_error option) idx = function
     | [] ->
       (match observed_overflow with
-       | Some overflow_error -> Error overflow_error
+       | Some overflow -> lane_terminal overflow
        | None ->
          Error
            (Agent_core.Error.Internal
@@ -359,7 +378,7 @@ let attempt_runtime_candidates
       (match
          run_attempt ~idx ~runtime_id:attempt_runtime_id candidate
        with
-       | Ok value, _checkpoint_after, _effect_disposition ->
+       | Ok value, _checkpoint_after, _effect_disposition, _dispatch ->
          emit_runtime_manifest
            ~status:"completed"
            ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
@@ -394,7 +413,7 @@ let attempt_runtime_candidates
           | Some scope -> Runtime_quota_window.note_succeeded ~scope
           | None -> ());
          Ok value
-       | Error error, _checkpoint_after, effect_disposition ->
+       | Error error, _checkpoint_after, effect_disposition, dispatch ->
          emit_runtime_manifest
            ~status:"failed"
            ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
@@ -402,6 +421,7 @@ let attempt_runtime_candidates
          on_attempt_error
            ~runtime_id:attempt_runtime_id
            ~attempt:idx
+           ~dispatch
            error;
          (* HTTP 429 and coarse Provider.RateLimit do not identify the
             exhausted resource. Keep that unknown scope and the optional
@@ -492,11 +512,22 @@ let attempt_runtime_candidates
              if
                Keeper_turn_driver_try_runtime.context_overflow_should_try_next
                  error
-             then Some error
+             then
+               Some
+                 { origin_runtime_id = attempt_runtime_id
+                 ; origin_attempt = idx
+                 ; lane_error = error
+                 }
              else None
          in
+         let this_candidate lane_error =
+           { origin_runtime_id = attempt_runtime_id
+           ; origin_attempt = idx
+           ; lane_error
+           }
+         in
          if not effect_retry_admitted
-         then Error terminal_error
+         then lane_terminal (this_candidate terminal_error)
          else if retry_admitted && error_is_retryable
          then loop ~observed_overflow (idx + 1) rest
          else if is_last
@@ -506,8 +537,8 @@ let attempt_runtime_candidates
               blocker report the deterministic capacity bound. Cascade
               telemetry already published each candidate's own error. *)
            match observed_overflow with
-           | Some overflow_error -> Error overflow_error
-           | None -> Error error)
+           | Some overflow -> lane_terminal overflow
+           | None -> lane_terminal (this_candidate error))
          else (
            (match error_is_retryable, effect_retry_admitted, rest with
             | true, true, next :: later ->
@@ -519,7 +550,7 @@ let attempt_runtime_candidates
                 ; failure = error
                 }
             | false, _, _ | true, false, _ | true, true, [] -> ());
-           Error terminal_error))
+           lane_terminal (this_candidate terminal_error)))
   in
   loop ~observed_overflow:None 0 candidates
 
@@ -901,6 +932,13 @@ let attempt_inference_policy
   in
   { attempt_enable_thinking; attempt_preserve_thinking = runtime_seed.preserve_thinking }
 
+(* An official-client lane cannot apply a provider config transform, so a
+   transform on such a lane is refused before the client is invoked. *)
+let official_client_dispatch ~provider_config_transform =
+  match provider_config_transform with
+  | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
+  | None -> Keeper_attempt_dispatch.Dispatched
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -963,6 +1001,7 @@ let run_named
     ?on_runtime_attempt
     ?on_runtime_retry_deferred
     ?on_runtime_attempt_error
+    ?on_runtime_lane_terminal_error
     ?on_deferred_runtime_consumed
     ?(output_contract = Provider_default)
     ?provider_config_transform
@@ -1214,6 +1253,7 @@ let run_named
     ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred
     ?on_attempt_error:on_runtime_attempt_error
+    ?on_lane_terminal_error:on_runtime_lane_terminal_error
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
       let allowed =
         Keeper_turn_driver_try_provider.same_run_retry_allowed
@@ -1256,7 +1296,8 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         ( Error (runtime_candidate_missing_error runtime_id)
         , None
-        , Keeper_provider_attempt_effect.No_effect_observed )
+        , Keeper_provider_attempt_effect.No_effect_observed
+        , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Resolved_runtime runtime ->
       let agent_core_tools = match runtime.Runtime.execution, agent_ref with
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
@@ -1279,7 +1320,8 @@ let run_named
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
          Error failure, None,
-         Keeper_provider_attempt_effect.No_effect_observed
+         Keeper_provider_attempt_effect.No_effect_observed,
+         Keeper_attempt_dispatch.Rejected_before_dispatch
        | Ok () ->
       (* Native continuation already owns its input in the checkpoint. Official
          clients still need the explicit goal, including any media blocks. *)
@@ -1334,7 +1376,8 @@ let run_named
         (Error (Keeper_recovery_transmission.to_core_error
           (Keeper_recovery_transmission.Client_projection_not_integrated
             {runtime_id=attempt_runtime_id})), None,
-         Keeper_provider_attempt_effect.No_effect_observed)
+         Keeper_provider_attempt_effect.No_effect_observed,
+         Keeper_attempt_dispatch.Rejected_before_dispatch)
       | Runtime_execution.Codex_app_server config ->
         let run_codex ~initial_messages () =
           let on_transmitted_model_input transmitted =
@@ -1461,7 +1504,8 @@ let run_named
          | Error _ -> ());
         ( selected_runtime_result runtime ~lane_attempt_index:idx codex_result
         , None
-        , codex_attempt.effect_disposition )
+        , codex_attempt.effect_disposition
+        , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Antigravity_cli config ->
         let run_antigravity ~initial_messages () =
           let on_transmitted_model_input transmitted =
@@ -1566,7 +1610,8 @@ let run_named
          | Error _ -> ());
         ( selected_runtime_result runtime ~lane_attempt_index:idx antigravity_result
         , None
-        , antigravity_attempt.effect_disposition )
+        , antigravity_attempt.effect_disposition
+        , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Claude_code config ->
         let run_claude ~initial_messages () =
           let tools = if runtime.model.tools_support then tools else [] in
@@ -1677,7 +1722,8 @@ let run_named
          | Error _ -> ());
         ( selected_runtime_result runtime ~lane_attempt_index:idx claude_result
         , None
-        , claude_attempt.effect_disposition )
+        , claude_attempt.effect_disposition
+        , official_client_dispatch ~provider_config_transform )
       | Runtime_execution.Agent_core runtime_provider_config ->
        (match
           match provider_config_transform with
@@ -1686,7 +1732,8 @@ let run_named
         with
       | Error err ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-        Error err, None, Keeper_provider_attempt_effect.No_effect_observed
+        Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
+        Keeper_attempt_dispatch.Rejected_before_dispatch
       | Ok provider_config ->
         let provider_config =
           match output_contract with
@@ -1701,7 +1748,8 @@ let run_named
          | Error failure ->
            Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
            Error (Keeper_required_tools.to_core_error failure), None,
-           Keeper_provider_attempt_effect.No_effect_observed
+           Keeper_provider_attempt_effect.No_effect_observed,
+           Keeper_attempt_dispatch.Rejected_before_dispatch
          | Ok () ->
         (match
            Runtime.validate_dispatch_credential ~provider_config runtime
@@ -1711,7 +1759,8 @@ let run_named
            ( Error
                (Runtime.dispatch_credential_error_to_core_error credential_error)
            , None
-           , Keeper_provider_attempt_effect.No_effect_observed )
+           , Keeper_provider_attempt_effect.No_effect_observed
+           , Keeper_attempt_dispatch.Rejected_before_dispatch )
          | Ok () ->
           (match
              validate_provider_request_cap
@@ -1720,7 +1769,8 @@ let run_named
            with
            | Error err ->
              Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
-             Error err, None, Keeper_provider_attempt_effect.No_effect_observed
+             Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
+             Keeper_attempt_dispatch.Rejected_before_dispatch
            | Ok max_request_body_bytes ->
             let candidate = Runtime_candidate.of_provider_config provider_config in
             (* Cached provider health is observation only. Every eligible runtime
@@ -1856,7 +1906,8 @@ let run_named
           in
           ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , checkpoint_after
-          , Keeper_provider_attempt_effect.No_effect_observed ))))
+          , Keeper_provider_attempt_effect.No_effect_observed
+          , Keeper_attempt_dispatch.Dispatched ))))
        )))
     attempt_candidates
 

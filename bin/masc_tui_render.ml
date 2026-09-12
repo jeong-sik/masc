@@ -9664,7 +9664,7 @@ let render_memory_facts (state : state) =
   let open Masc.Tui_decode in
   (* "*" is how the fleet view is asked for, not how it should be read. The body
      used to spell it out in a row of its own -- [GLOBAL FLEET KNOWLEDGE BASE
-     â ALL KEEPERS CONSOLIDATED] -- which said nothing this word does not
+     — ALL KEEPERS CONSOLIDATED] -- which said nothing this word does not
      and cost a body row the compact terminals did not have. *)
   let keeper_name =
     match state.memory_facts_keeper with

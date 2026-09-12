@@ -13442,7 +13442,8 @@ let render_themes (state : state) =
          (Terminal_text.single_line name));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
   finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
 (* The model knobs sit in different tables -- [reasoning-effort] and
@@ -13761,7 +13762,7 @@ let render_config (state : state) =
             cells (78 of 150 at the time) but because nobody wrote Esc or q
             into it. It also named PgUp/PgDn, which the table did not have, so
             the two had drifted in both directions. *)
-         (Masc_tui_keys.footer_hints Config));
+         (Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =

@@ -17,6 +17,45 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+(* [None] is shared by all Config panes; [Some panes] belongs only to those
+   input handlers. Keep availability beside the binding, not in a second key
+   list inferred from the rendered label. *)
+let config_bindings =
+  [ b Navigate "j/k" "select / scroll", Some
+      [ Config_runtime; Config_models; Config_params; Config_prompts
+      ; Config_presets; Config_themes ]
+  ; b Navigate "p" "next pane"
+      ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
+  ; b Navigate "PgUp/PgDn" "page"
+      ~help:"page runtime.toml or prompts", Some [ Config_runtime; Config_prompts ]
+  ; b Navigate "v" "read status"
+      ~help:"runtime.toml: source revision, validation issues, and application/restart details",
+      Some [ Config_runtime ]
+  ; b Navigate "9" "Runtime"
+      ~help:"runtime status, lane routing, probes and connected clients", None
+  ; b Navigate "s" "resources"
+      ~help:"the MCP resource catalog, off the ring under Config", None
+  ; b Navigate "t" "tools"
+      ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
+  ; b Act "e" "edit"
+      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts ]
+  ; b Act "E" "advanced JSON"
+      ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
+  ; b Act "Enter" "edit / use"
+      ~help:"edit the selected param; on themes, use that colour scheme",
+      Some [ Config_params; Config_themes ]
+  ; b Act "x" "default / clear"
+      ~help:"params return to default; prompts clear override; themes follow terminal colours",
+      Some [ Config_params; Config_prompts; Config_themes ]
+  ; b Act "f" "filter"
+      ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+  ; b Act "Esc" "overview", None
+  ; b Meta "r" "reload", None
+  ; b Meta "Tab" "next", None
+  ; b Meta "q" "quit", None
+  ]
+
 let keepers_jump =
   b Meta "2" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 2"
@@ -94,6 +133,7 @@ let for_surface = function
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
       ; b Navigate "j/k" "select / scroll"
+      ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
@@ -103,7 +143,6 @@ let for_surface = function
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
-      ; b Act "f" "turns / actions / everything" ~help:"cycle the filter"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -419,45 +458,7 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Config ->
-      [ b Navigate "j/k" "select / scroll"
-        (* Config combines persisted files, typed live params, and the local
-           theme choice.  The pane strip says which meaning each key has. *)
-        (* The pane names are help, not a label. Spelled as the label they
-           cost 45 cells in one footer item -- more than most whole footers --
-           and being near the front of the row they pushed every key behind
-           them out before giving way themselves. The header already draws
-           "p:next" beside the pane strip, which is where the names belong. *)
-      ; b Navigate "p" "next pane"
-          ~help:"runtime.toml / models / params / prompts / themes"
-      ; b Navigate "PgUp/PgDn" "page"
-        (* "read status", not "runtime.toml read status": the pane strip one
-           row up already says which file is open, and the footer row is the
-           one place where a repeated filename costs another key its seat. The
-           hand-written literal this replaced had already made that call. *)
-      ; b Navigate "v" "read status"
-          ~help:"runtime.toml: source revision, validation issues, and application/restart details"
-      ; b Navigate "9" "Runtime"
-          ~help:"runtime status, lane routing, probes and connected clients"
-      ; b Navigate "s" "resources"
-          ~help:"the MCP resource catalog, off the ring under Config"
-      ; b Navigate "t" "tools"
-          ~help:"the tool catalog, receipts, and usage, off the ring under \
-                 Config"
-      ; b Act "e" "edit"
-          ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
-      ; b Act "E" "advanced JSON"
-          ~help:"on params only: edit the exact JSON value"
-      ; b Act "Enter" "edit / use"
-          ~help:"edit the selected param; on themes, use that colour scheme"
-      ; b Act "x" "default / clear"
-          ~help:"params return to default; prompts clear override; themes follow terminal colours"
-      ; b Act "f" "filter"
-          ~help:"on themes, cycle All / Dark / Light schemes"
-      ; b Act "Esc" "overview"
-      ; b Meta "r" "reload"
-      ; b Meta "Tab" "next"
-      ; b Meta "q" "quit"
-      ]
+      List.map fst config_bindings
   | Resources ->
       (* Two panes with two meanings, and the keys below say so once rather
          than per row: with the list focused the cursor moves and [/] lands
@@ -588,6 +589,14 @@ let hints_of_bindings bindings =
   |> String.concat "  "
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
+
+let footer_hints_config ~pane =
+  config_bindings
+  |> List.filter_map (fun (binding, panes) ->
+       match panes with
+       | None -> Some binding
+       | Some panes -> if List.mem pane panes then Some binding else None)
+  |> hints_of_bindings
 
 (* The Overview footer is the same table plus one runtime fact the renderer
    owns: whether j/k currently drives the task list (task_focus) or the

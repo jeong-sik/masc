@@ -848,6 +848,65 @@ let test_system_logs_owns_only_its_real_filter_keys () =
   Alcotest.(check bool) "g/G stays on Acting" true (List.mem "g / G" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
 
+let footer_has_key key row =
+  String.split_on_char ' ' row
+  |> List.exists (String.starts_with ~prefix:(key ^ ":"))
+
+let fitted_footer ~cols hints =
+  Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells:cols ~port:8935
+    ~hints ()
+  |> String.trim
+
+let test_config_pane_footer_actions () =
+  let panes =
+    [ Config_runtime; Config_models; Config_params; Config_prompts
+    ; Config_presets; Config_themes; Config_voice ]
+  in
+  List.iter (fun pane ->
+    let hints = Masc_tui_keys.footer_hints_config ~pane in
+    let enabled key expected =
+      Alcotest.(check bool) ("pane availability of " ^ key) expected
+        (footer_has_key key hints)
+    in
+    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts ]);
+    enabled "v" (pane = Config_runtime);
+    enabled "E" (pane = Config_params);
+    enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
+    enabled "f" (pane = Config_themes);
+    enabled "x" (List.mem pane [ Config_params; Config_prompts; Config_themes ]);
+    List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
+    panes;
+  List.iter (fun pane ->
+    List.iter (fun cols ->
+      let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in
+      Alcotest.(check bool) "fitted Config row stays within terminal" true
+        (Masc_tui_message_layout.display_width row <= cols);
+      List.iter (fun key ->
+        Alcotest.(check bool) ("Config retains " ^ key) true
+          (footer_has_key key row)) [ "Esc"; "q" ];
+      List.iter (fun key ->
+        Alcotest.(check bool) ("inactive action stays absent: " ^ key) false
+          (footer_has_key key row))
+        (match pane with
+         | Config_runtime -> [ "E"; "Enter"; "x"; "f" ]
+         | Config_themes -> [ "PgUp/PgDn"; "v"; "e"; "E" ]
+         | Config_models | Config_params | Config_prompts | Config_presets
+         | Config_voice -> []))
+      [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]
+
+let test_activity_footer_keeps_filter_before_evidence () =
+  let hints = Masc_tui_keys.footer_hints Acting in
+  for cols = 80 to 148 do
+    let row = fitted_footer ~cols hints in
+    Alcotest.(check bool) "Activity stays within terminal" true
+      (Masc_tui_message_layout.display_width row <= cols);
+    Alcotest.(check bool) "evidence never outlives its filter prerequisite" true
+      (not (footer_has_key "Enter" row) || footer_has_key "f" row);
+    if cols >= 120 then
+      Alcotest.(check bool) "filter remains visible at affected widths" true
+        (footer_has_key "f" row)
+  done
+
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
   | Some entries -> entries
@@ -1635,6 +1694,10 @@ let () =
             test_the_sheet_names_every_keeper_mark
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
+        ; Alcotest.test_case "Config footer follows active pane and width" `Quick
+            test_config_pane_footer_actions
+        ; Alcotest.test_case "Activity filter survives evidence hint" `Quick
+            test_activity_footer_keeps_filter_before_evidence
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Metrics is an Overview child" `Quick

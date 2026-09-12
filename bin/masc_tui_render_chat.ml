@@ -2880,7 +2880,14 @@ let render_keeper_message (state : state) =
        the grace window when Esc would leave. *)
     let escape_hint =
       match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_turn state) with
-      | Some _ -> "Esc:stop current turn"
+      | Some (started_at, _) ->
+          (match Option.bind state.msg_target_keeper_name
+            (fun name -> Masc_tui_types.keeper_observed_interrupt state name started_at) with
+           | None -> "Esc:stop current turn"
+           | Some item ->
+             if Int64.sub (Mtime_clock.elapsed_ns ()) item.oi_sent_ns
+               <= Masc_tui_esc_interrupt.grace_window_ns then "Esc:interrupt requested"
+             else return_hint ())
       | None -> match state.msg_live with
       | Some live ->
           (match

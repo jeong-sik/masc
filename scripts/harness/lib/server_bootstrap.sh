@@ -231,8 +231,6 @@ harness_start_server() {
     export MASC_KEEPER_AUTONOMOUS_ENABLED="${MASC_HARNESS_KEEPER_AUTONOMOUS_ENABLED:-0}"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_OTEL_ENABLED="0"
-    export GRAPHQL_API_KEY=""
-    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     exec "$server_exe" --port "$port" --base-path "$base_path"
   ) >"$log_file" 2>&1 &
   printf '%s\n' "$!"

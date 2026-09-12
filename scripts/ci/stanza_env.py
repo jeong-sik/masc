@@ -461,7 +461,6 @@ def self_test() -> int:
         [key for key, _ in directory_env_vars("test")],
         [
             "MASC_BASE_PATH",
-            "GRAPHQL_API_KEY",
             "ZAI_API_KEY",
             "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED",
             "MASC_KEEPER_DOCKER_PLAYGROUND",

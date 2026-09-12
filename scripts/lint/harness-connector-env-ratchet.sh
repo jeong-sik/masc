@@ -30,7 +30,14 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="${HARNESS_RATCHET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Same mis-root hazard as the wire gate: a wrong ROOT scans nothing and
+# reports "0 violations" from a tree that has no harness at all. Verify the
+# tree looks like the masc checkout, else fail loudly (exit 2).
+if [ ! -d "${ROOT}/scripts/harness" ] || [ ! -f "${ROOT}/scripts/lint/harness-connector-env-ratchet.sh" ]; then
+  echo "harness-connector-env-ratchet ERROR: ROOT '${ROOT}' is not the masc checkout (set HARNESS_RATCHET_ROOT explicitly)" >&2
+  exit 2
+fi
 
 if [[ "${1:-}" == "--self-test" ]]; then
   exec bash "${ROOT}/scripts/lint/harness-connector-env-ratchet-selftest.sh"

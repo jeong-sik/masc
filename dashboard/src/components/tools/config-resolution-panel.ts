@@ -305,6 +305,7 @@ function providerProbeTone(status: DashboardRuntimeProviderProbe['status']): str
     case 'reachable':
       return 'ok'
     case 'skipped_cli':
+    case 'skipped_native_auth':
       return 'neutral'
     case 'missing_auth':
     case 'auth_failed':
@@ -347,6 +348,8 @@ function providerProbeLabel(status: DashboardRuntimeProviderProbe['status']): st
       return 'not found'
     case 'skipped_cli':
       return 'cli skipped'
+    case 'skipped_native_auth':
+      return 'native auth skipped'
     case 'invalid_endpoint':
       return 'bad endpoint'
     case 'invalid_execution_transport':

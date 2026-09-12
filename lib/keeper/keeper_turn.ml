@@ -193,18 +193,26 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
         (Printf.sprintf "[Co-view context]\n%s"
            (Yojson.Safe.pretty_to_string json))
 
-module For_testing = struct
-  let direct_owner_conversation_context = direct_owner_conversation_context
-  let direct_turn_dynamic_context = direct_turn_dynamic_context
-  let surface_context_to_instructions = surface_context_to_instructions
-end
-
 let resolve_turn_runtime_id (meta : keeper_meta) =
   let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
   if runtime_id = "" then
     Error (Printf.sprintf "invalid runtime_id for keeper %s: empty" meta.name)
   else
     Ok runtime_id
+
+let resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume =
+  match Option.bind gate_resume Keeper_direct_gate_continuation.official_client with
+  | Some checkpoint -> Ok checkpoint.runtime_id
+  | None -> match resume_lane with
+    | None -> resolve_turn_runtime_id meta
+    | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id
+
+module For_testing = struct
+  let resolve_direct_turn_runtime_id = resolve_direct_turn_runtime_id
+  let direct_owner_conversation_context = direct_owner_conversation_context
+  let direct_turn_dynamic_context = direct_turn_dynamic_context
+  let surface_context_to_instructions = surface_context_to_instructions
+end
 
 type invocation_surface =
   | Direct_message
@@ -528,9 +536,7 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
-      let selected_runtime = match resume_lane with
-        | None -> resolve_turn_runtime_id meta
-        | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id in
+      let selected_runtime = resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume in
       match selected_runtime with
       | Error e ->
         Progress.stop_tracking turn_task_id;
@@ -814,7 +820,9 @@ let run_keeper_invocation_turn_admitted_inner
                                       ?on_gate_evidence_admitted:(Option.map (fun admission checkpoint ->
                                         Keeper_direct_gate_continuation.discharge ~config:ctx.config
                                           ~keeper_name:meta.name ~operation_id ~user_message:message
-                                          ~checkpoint admission) gate_resume)
+                                          ~checkpoint admission)
+                                        (Option.bind gate_resume (fun admission ->
+                                          Option.map (fun _ -> admission) (Keeper_direct_gate_continuation.checkpoint admission))))
                                       ?deferred_runtime_lane:resume_lane
                                       ~on_runtime_retry_deferred:(fun lane -> deferred_lane := Some lane)
 			                                ~config:ctx.config
@@ -847,6 +855,13 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
+                let run_result = match run_result, gate_resume with
+                  | Ok _, Some admission ->
+                    (match Keeper_direct_gate_continuation.complete_native ~config:ctx.config
+                       ~keeper_name:meta.name ~operation_id admission with
+                     | Ok () -> run_result
+                     | Error detail -> Error (Agent_core.Error.Internal detail))
+                  | Error _, _ | Ok _, None -> run_result in
                 let () = match run_result, gate_resume with
                   | Ok _, Some admission ->
                     (match Keeper_direct_gate_continuation.record_completed ~config:ctx.config ~keeper_name:meta.name admission with
@@ -855,7 +870,16 @@ let run_keeper_invocation_turn_admitted_inner
                        Log.Keeper.warn "completed direct Gate continuation has no settled replay authority"
                      | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
                   | Error _, _ | Ok _, None -> () in
-                let gate_wait = Keeper_direct_gate_continuation.suspend
+                let official_client = match run_result with
+                  | Ok {Keeper_agent_run.checkpoint=None; runtime_id; _} ->
+                    (match Keeper_repetition_scope.Execution.snapshot repetition_execution with
+                     | Ok frame -> Ok (Some (runtime_id, frame))
+                     | Error error -> Error (Keeper_repetition_snapshot.error_to_string error))
+                  | Ok {Keeper_agent_run.checkpoint=Some _; _} | Error _ -> Ok None in
+                let gate_wait = match official_client with
+                  | Error detail -> Error detail
+                  | Ok official_client -> Keeper_direct_gate_continuation.suspend
+                      ?official_client
                       ?runtime_lane:!deferred_lane
                       ~config:ctx.config ~keeper_name:meta.name ~operation_id
                       ~session_dir ~session_id ~approval_ids:!gate_ids () in

@@ -88,6 +88,19 @@ module Execution = struct
     in
     execution.current <- Some result
 
+  let snapshot execution = match execution.current with
+    | Some state -> state
+    | None -> Error (Snapshot.Invalid_snapshot "direct execution was not prepared")
+
+  let resume execution state =
+    match Snapshot.active state with
+    | Some scope when Id.equal scope execution.scope ->
+      (match execution.current with
+       | None -> execution.current <- Some (Ok state); Ok ()
+       | Some (Ok current) when Snapshot.active current = Some execution.scope -> Ok ()
+       | Some _ -> Error Snapshot.Restore_target_conflict)
+    | Some _ | None -> Error (Snapshot.Invalid_snapshot "native Gate frame belongs to another operation")
+
   let failure execution = match execution.current with
     | Some (Error error) -> Some error
     | None | Some (Ok _) -> None

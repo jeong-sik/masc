@@ -65,7 +65,7 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     let operation = match claim store with Some value -> value | None -> fail "exact resolution did not requeue original input" in
     check bool "same original request resumes" true (Operation.Operation_id.equal original operation.operation_id);
     let wrong_scope = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> require)
-      ~checkpoint:waiting.checkpoint ~obligations:[obligation] |> require in
+      ~checkpoint:(match waiting.checkpoint with Semantic.Agent_core value -> value | Semantic.Official_client _ -> fail "expected Agent Core") ~obligations:[obligation] |> require in
     rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:wrong_scope ~resolution);
     let changed = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> Result.get_ok) ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
     rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:changed ~resolution);

@@ -1116,7 +1116,37 @@ let test_a_continuation_is_admitted_only_for_the_turn_it_left () =
     in
     check bool "the turn it left resumes" true (admit "turn-1" = Ok ());
     check bool "the same session settled on a later turn does not" true
-      (Result.is_error (admit "turn-2")))
+      (Result.is_error (admit "turn-2"));
+    let captured = checkpoint "turn-1" in
+    let complete expected = validate_completed_continuation ~checkpoint:captured ~expected in
+    check bool "original settlement cannot prove delivery" true
+      (Result.is_error (complete (Some settled)));
+    let resumed = claim ~base_path ~keeper_name ~expected:(Some settled)
+      ~client_kind:Codex ~runtime_id:"codex.default" ~owner_epoch:next_owner_epoch
+      ~tool_surface_sha256:empty_surface ~updated_at:6.0 |> Result.get_ok in
+    let resumed = mark_active ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~updated_at:7.0 |> Result.get_ok in
+    let resumed = mark_turn_starting ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~updated_at:8.0 |> Result.get_ok in
+    let resumed = mark_turn_started ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~turn_id:"turn-2" ~turn_count:resumed.turn_count
+      ~updated_at:9.0 |> Result.get_ok in
+    check bool "inflight continuation cannot prove settlement" true
+      (Result.is_error (complete (Some resumed)));
+    let resumed = settle ~base_path ~keeper_name ~expected:resumed
+      ~session_id:"session-1" ~turn_id:"turn-2" ~updated_at:10.0 |> Result.get_ok in
+    check bool "later settled turn completes admitted continuation" true
+      (complete (Some resumed) = Ok ());
+    check bool "later settlement is not a fresh admission" true
+      (Result.is_error (validate_continuation ~checkpoint:captured ~expected:(Some resumed)
+        ~client_kind:Codex ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface));
+    List.iter (fun (label, changed) ->
+      check bool label true (Result.is_error (complete (Some changed))))
+      [ "changed session cannot complete", {resumed with phase=Settled {session_id="another-session"; turn_id="turn-2"}}
+      ; "changed runtime cannot complete", {resumed with runtime_id="another.runtime"}
+      ; "changed client cannot complete", {resumed with client_kind=Claude_code}
+      ; "changed tools cannot complete", {resumed with tool_surface_sha256=String.make 64 'f'} ];
+    check bool "missing binding cannot complete" true (Result.is_error (complete None)))
 ;;
 
 let test_tool_surface_fingerprint_is_canonical () =

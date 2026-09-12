@@ -167,7 +167,14 @@ val validate_continuation : checkpoint:Keeper_semantic_execution.official_client
   expected:t option -> client_kind:client_kind -> runtime_id:string -> tool_surface_sha256:string ->
   (unit, string) result
 (** Before model dispatch, bind a Gate resume to the original native session.
-    Later turns in that session are allowed; changing sessions or tools is not. *)
+    The captured turn must still be current; changing sessions or tools is not. *)
+
+val validate_completed_continuation :
+  checkpoint:Keeper_semantic_execution.official_client_checkpoint ->
+  expected:t option -> (unit, string) result
+(** After transmitted input settles, require a different turn in the captured
+    session with the same runtime and tool surface. Admission still requires
+    the original turn through [validate_continuation]. *)
 
 val claim :
   base_path:string ->

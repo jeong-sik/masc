@@ -21232,9 +21232,11 @@ and is loaded on demand through keeper_skill.
                      (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
                       | Ok () -> ()
                       | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
+                     (* The event row is read on the Overview, so it says the
+                        order rather than the token the request carries. *)
                      add_event state "system"
                        ("Board order: "
-                        ^ board_sort_label state.board_sort);
+                        ^ board_sort_explanation state.board_sort);
                      start_http_refresh state ~host:server_peer_host
                        ~port:state.port ~intent:Revalidate
                        ~refresh_inflight:http_refresh_inflight

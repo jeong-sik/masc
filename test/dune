@@ -2246,6 +2246,8 @@
 
 (include stanzas/test_msx_tools.inc)
 
+(include stanzas/test_dos_tools.inc)
+
 (include stanzas/test_msx_frame_route.inc)
 
 (include stanzas/test_discord_gateway_client.inc)
@@ -3515,6 +3517,11 @@
  (name test_tui_frame)
  (modules test_tui_frame)
  (libraries alcotest masc_tui_frame))
+
+(test
+ (name test_tui_help_banner)
+ (modules test_tui_help_banner)
+ (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_agenda)

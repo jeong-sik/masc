@@ -12,6 +12,9 @@ val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
       ask every configured endpoint and report each separately rather than
       serving from the first that answers. Admin-gated for the same reason
       transcribe is: a probe spends a credit on a metered provider.
+    - [POST /api/v1/voice/voices], which asks one endpoint kind for its voice
+      catalogue before any endpoint is written. Admin-gated: it reaches a
+      provider with the operator's credential.
 
     Plugged into the router assembly in {!Server_routes_http} alongside the
     artifacts route. *)

@@ -457,41 +457,169 @@ its own.
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
 
-### The same probes over HTTP
+### Setting voice up over HTTP, measured end to end
 
-The CLI and the routes ask the same two functions, so a dashboard or a wizard
-sees what `masc voice-verify` prints. Both are `CanAdmin`: a probe synthesizes
-for real, and on a metered provider that spends a credit — the same reason
-`/api/v1/voice/transcribe` carries no public capability.
+Run on this machine 2026-09-13 (macOS 26, M3 Max) against a scratch workspace,
+every line below copied from the terminal. The token is the workspace's own:
 
 ```sh
-curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/tts \
-  -H "authorization: Bearer $MASC_TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"message":"음성 연결을 확인합니다"}'
-
-curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/stt \
-  -H "authorization: Bearer $MASC_TOKEN" \
-  -H 'content-type: audio/wav' --data-binary @probe.wav
+MASC=http://127.0.0.1:8971
+TOKEN=$(cat "$MASC_BASE_PATH/.masc/auth/admin.token")
 ```
 
-Both answer the same object:
+**1 — what is configured now.** A fresh workspace has nothing:
+
+```
+GET /api/v1/voice/setup
+{"revision":"623b8dbc…","tts":null,"stt":null,"session":null,
+ "capture":null,"local_playback":null,"gate":null}
+```
+
+**2 — which voices this machine has**, asked before anything is written:
+
+```
+POST /api/v1/voice/voices   {"kind":"macos_say"}
+→ 184 rows, 9 of them ko_KR
+  {"id":"Eddy (한국어(한국))","name":"Eddy (한국어(한국))","language":"ko_KR"}
+```
+
+**3 — turn speaking on.** The revision from step 1 goes back as
+`expected_revision`, so a second writer cannot be overwritten:
 
 ```json
-{"endpoints":[{"endpoint_id":"macos-say","kind":"macos_say",
-               "state":"answered","detail":"113528 bytes of audio"}]}
+{"expected_revision":"623b8dbc…",
+ "changes":[{"change":"put_endpoint","section":"tts",
+             "endpoint":{"id":"macos-say","kind":"macos_say"}},
+            {"change":"set_tts_default_voice","voice":"Yuna"}]}
+```
+```
+POST /api/v1/voice/setup
+→ {"applied":true,"revision":"436a6857…"}
 ```
 
-`state` is one of `answered`, `refused`, `skipped`. A reader that meets a fourth
-has a result this path did not write, and should say so rather than treating it
-as a success.
+No `default_model` anywhere, and the section loads. Against a build without
+that narrowing the same request answered
+`the edit does not load as a voice configuration, so it was not written:
+runtime.toml [voice]: tts.default_model is required` — measured on both, an
+hour apart.
+
+**4 — make it speak, for real:**
+
+```
+POST /api/v1/voice/probe/tts   {"message":"음성 연결을 확인합니다"}
+→ {"endpoints":[{"endpoint_id":"macos-say","kind":"macos_say",
+                 "state":"answered","detail":"79758 bytes of audio"}]}
+   2.4s wall
+```
+
+**5 — turn listening on and make it hear:**
+
+```json
+{"changes":[{"change":"put_endpoint","section":"stt",
+             "endpoint":{"id":"whisper-local","kind":"whisper_cli"}},
+            {"change":"set_default_model","section":"stt",
+             "model":"~/models/whisper/ggml-large-v3-turbo.bin"}]}
+```
+```
+POST /api/v1/voice/probe/stt   (raw wav body)
+→ {"endpoints":[{"endpoint_id":"whisper-local","kind":"whisper_cli",
+                 "state":"answered","detail":"heard 오늘 음성 설정을 마쳤습니다."}]}
+   3.1s wall
+```
+
+The transcript is the sentence that was spoken, word for word.
+
+**What the public config then says.** `GET /api/v1/voice/config` needs no
+token and carries no model where none was named:
+
+```json
+{"status":"ok",
+ "tts":{"default_model":null,"default_voice":"Yuna",
+        "available_voices":["Yuna"],"available_models":[], …},
+ "stt":{"default_model":"…/ggml-large-v3-turbo.bin", …}}
+```
+
+`null` and `[]`, not `""` and `[""]` — a model named `""` would read as a
+model that exists.
+
+### The clip is served as whatever it is
+
+`GET /api/v1/voice/audio/<token>` needs no bearer token — the 128-bit
+filename is the capability, because a browser's `<audio>` element cannot put
+a header on its request. What it answers is the format that is on disk, not a
+fixed one. Both clips planted by hand and fetched, 2026-09-13:
+
+| On disk | Answer |
+|---|---|
+| `<token>.wav` (a real `say` clip) | `200`, `content-type: audio/wav`, `content-length: 77580` |
+| `<token>.mp3` | `200`, `content-type: audio/mpeg` |
+| a token nobody wrote | `404` |
+| `not-a-token` | `400` |
+
+This is the reading half of the container fix: for a while every clip was
+named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
+of silence) or would have been announced as MP3. A player told the wrong
+type either refuses or plays nothing, and neither says why.
+
+### Speaking to a keeper, not just probing it
+
+The probe and the turn are different code paths, and for a while only the
+probe worked. `POST /api/v1/voice/transcribe` — the route a browser capture
+goes through — reached for HTTP whatever the endpoint kind was, so the one a
+fresh mac has answered:
+
+```
+{"error":"all enabled STT endpoints failed:
+          whisper-local: voice config endpoint whisper-local missing base_url"}
+```
+
+while `voice-verify --audio` on the same configuration transcribed it fine.
+That is the shape worth naming: **a check that passes about a path that does
+not exist.** Fixed in #35627; measured on that build, same workspace, same
+`probe.wav`:
+
+```
+POST /api/v1/voice/transcribe   (raw wav body)
+→ {"status":"transcribed","text":"오늘 음성 설정을 마쳤습니다.",
+   "language_code":"unknown","endpoint_id":"whisper-local"}
+   6.9s wall (first call — the 1.6GB model is loaded per invocation)
+```
+
+`language_code` is `unknown` because the command answers with its transcript
+and no such field. whisper-cli was asked to detect the language (`-l auto`)
+and it does, but on its own stderr rather than on the wire. A caller that
+names a language is answered with that name.
+
+### What each route refuses, measured
+
+| Request | Answer |
+|---|---|
+| `voices` with no bearer token | `401` |
+| `voices` with `{"kind":"kokoro"}` | `400` — the kind is quoted back with the five that exist |
+| `probe/tts` with `{}` | `400 a probe needs a non-empty "message" …` |
+| `probe/stt` with an empty body | `400` |
+
+Every one of them is a sentence rather than a shape, and none of them is an
+empty success: a probe of the empty sentence and a transcript of silence are
+both answers a reader would believe.
 
 The audio goes in the **raw body**, not as multipart — the same as
 `/voice/transcribe`, and the same trap that costs time to rediscover.
 
-A TTS probe with no `"message"` is a 400 that says so rather than a probe of
-an empty sentence, and an empty STT body is a 400 rather than a transcript of
-silence: those two are different answers and the report keeps them apart.
+`state` is one of `answered`, `refused`, `skipped`. A reader that meets a
+fourth has a result this path did not write, and should say so rather than
+treating it as a success.
+
+Both probe routes and the catalogue are `CanAdmin`, for the reason
+`/voice/transcribe` is: a TTS probe synthesizes for real, and on a metered
+provider that spends a credit. The catalogue reaches a provider with the
+operator's credential. Only `GET /api/v1/voice/config` and the clip URL are
+open, and the clip URL is a 128-bit unguessable token.
+
+A catalogue request carries the kind and, at most, the **name** of the
+variable holding the provider's key — never a value, because `runtime.toml`
+is committed. It carries no address and no command path: a route cannot check
+where one points, so the read uses the kind's own destination.
 
 ## Setting voice up from the TUI
 

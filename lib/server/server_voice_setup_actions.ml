@@ -369,7 +369,13 @@ let observe ~base_path =
            section_json
              ~endpoints:(List.map endpoint_json tts.Voice_config.endpoints)
              ~extra:
-               [ "default_model", `String tts.Voice_config.default_model
+               [ (* Null rather than "" when the section names none: a
+                    speaking section whose endpoints all take no model has
+                    none, and a blank here reads as a model named "". *)
+                 ( "default_model"
+                 , match tts.Voice_config.default_model with
+                   | Some model -> `String model
+                   | None -> `Null )
                ; "default_voice", `String tts.Voice_config.default_voice
                ; "default_voice_settings", tuning_json tts.Voice_config.default_voice_settings
                ; ( "agent_voices"
@@ -485,3 +491,34 @@ let apply ~base_path json =
      again afterwards: a second read can see someone else's commit and hand
      the caller a revision its own change is not in. *)
   | Ok revision -> Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ])
+
+(* The endpoint a catalogue read is taken against. It is not an endpoint anyone
+   configured: it is built for one request and thrown away, so it carries only
+   what asking needs -- the kind, and the name of the variable holding that
+   provider's key.
+
+   The request chooses neither an address nor a command path. A catalogue read
+   uses the kind's own default destination, because a path this route cannot
+   check is not one to take from a caller. *)
+let catalogue_endpoint_of_json json =
+  let* fields = fields json in
+  let* kind_text = string_field ~what:"a listing" fields "kind" in
+  let* kind = kind_of_string kind_text in
+  let api_key_env =
+    match List.assoc_opt "api_key_env" fields with
+    | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+    | Some _ | None -> None
+  in
+  Ok
+    { Voice_config.id = "voice-catalogue-read"
+    ; kind
+    ; base_url = None
+    ; mcp_url = None
+    ; health_url = None
+    ; api_key_env
+    ; enabled = true
+    ; timeout_seconds = None
+    ; default_voice = None
+    ; command = None
+    }
+;;

@@ -7278,24 +7278,60 @@ let ensure_img_cache_dir () =
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   dir
 
+(* Removes a cached body the cache will not stand behind. A file already gone
+   is the wanted state; the caller's error names why the body was refused. *)
+let discard_cached_image path = try Sys.remove path with Sys_error _ -> ()
+
+(* The cached file for a remote image URL, or why there is none. A hit is
+   decided by the bytes (Masc_tui_image_cache.verdict_of_bytes), never by the
+   file being non-empty: an empty body is removed on sight, a known signature
+   is a hit, and a signature the table does not name is handed to the decoder,
+   which reads formats the table does not (BMP, AVIF, SVG). curl runs with
+   --fail so an HTTP error status writes no body in the first place, and its
+   exit status is kept as the typed reason. *)
 let download_remote_image url =
   let cache_dir = ensure_img_cache_dir () in
   let hash = Digest.to_hex (Digest.string url) in
   let target_file = Filename.concat cache_dir ("img_" ^ hash) in
-  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
-    Ok target_file
-  else
+  let verdict_of_cached () =
+    match read_file_bytes target_file with
+    | Error detail ->
+        discard_cached_image target_file;
+        Error (Masc_tui_image_cache.Cache_unreadable { detail })
+    | Ok bytes -> (
+        match Masc_tui_image_cache.verdict_of_bytes bytes with
+        | Masc_tui_image_cache.Known_image _ | Masc_tui_image_cache.Unknown_signature ->
+            Ok target_file
+        | Masc_tui_image_cache.Empty ->
+            discard_cached_image target_file;
+            Error Masc_tui_image_cache.Empty_body)
+  in
+  let fetch () =
     let cmd =
-      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+      Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
         (Filename.quote target_file)
         (Filename.quote url)
     in
-    match Unix.system cmd with
-    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
-        Ok target_file
-    | _ ->
-        (try Sys.remove target_file with _ -> ())  (* @observe-allowed: removing a partial download on the failure path; the caller's error is the download failure, not this *);
-        Error "could not download remote image"
+    let status = Unix.system cmd in
+    match
+      Masc_tui_image_cache.fetch_failure_of_status status
+        ~body_present:(Sys.file_exists target_file)
+    with
+    | None -> verdict_of_cached ()
+    | Some failure ->
+        discard_cached_image target_file;
+        Error (Masc_tui_image_cache.Fetch_failed failure)
+  in
+  if Sys.file_exists target_file then
+    match verdict_of_cached () with
+    | Ok path -> Ok path
+    | Error
+        ( Masc_tui_image_cache.Fetch_failed _ | Masc_tui_image_cache.Empty_body
+        | Masc_tui_image_cache.Cache_unreadable _ ) ->
+        (* A body cached before this check existed: it is gone now, so ask the
+           URL again rather than report the stale answer. *)
+        fetch ()
+  else fetch ()
 
 let convert_to_png input_path =
   let cache_dir = ensure_img_cache_dir () in
@@ -7335,12 +7371,21 @@ let convert_to_png input_path =
    a narrow terminal skips it rather than wrapping. Decode/draw stay a few ms. *)
 let mosaic_cols = 120
 
-(* Download a preview image and decode it into half-block mosaic lines, or None.
-   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
-   render loop inside run_in_systhread. *)
-let image_url_to_mosaic ~cols url =
+(* Download a preview image and decode it into half-block mosaic lines, or say
+   why not. Every answer is durable for the session: the caller records it so
+   the URL is not fetched or decoded again on every preview parse. A body the
+   decoder rejected is removed from the cache, so a later session downloads
+   afresh instead of decoding the same bytes. Blocking (curl + ffmpeg through
+   Unix.system): the caller runs it off the render loop inside
+   run_in_systhread. *)
+let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
   match download_remote_image url with
-  | Error _ -> None
+  | Error (Masc_tui_image_cache.Fetch_failed failure) ->
+      Masc_tui_link_preview.(
+        Refused (Fetch_failed { detail = Masc_tui_image_cache.fetch_failure_text failure }))
+  | Error Masc_tui_image_cache.Empty_body -> Masc_tui_link_preview.(Refused Empty_body)
+  | Error (Masc_tui_image_cache.Cache_unreadable { detail }) ->
+      Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
   | Ok local_path -> (
       let raw =
         Filename.concat
@@ -7358,28 +7403,39 @@ let image_url_to_mosaic ~cols url =
            rgb24 %s"
           (Filename.quote local_path) cols (Filename.quote raw)
       in
-      match Unix.system cmd with
-      | Unix.WEXITED 0 when Sys.file_exists raw -> (
-          try
-            let ic = open_in_bin raw in
-            let data = really_input_string ic (in_channel_length ic) in
-            close_in ic;
-            let rows = String.length data / (cols * 3) in
-            match Masc_tui_image_mosaic.render ~cols ~rows data with
-            | [] -> None
-            | lines -> Some lines
-          with _ -> None)
-      | _ -> None)
+      let status = Unix.system cmd in
+      let refuse failure =
+        if Masc_tui_image_cache.decode_failure_discards_body failure then
+          discard_cached_image local_path;
+        Masc_tui_link_preview.(
+          Refused (Decode_failed { detail = Masc_tui_image_cache.decode_failure_text failure }))
+      in
+      match
+        Masc_tui_image_cache.decode_failure_of_status status
+          ~output_present:(Sys.file_exists raw)
+      with
+      | Some failure -> refuse failure
+      | None -> (
+          match read_file_bytes raw with
+          | Error detail -> refuse (Masc_tui_image_cache.Frame_unreadable { detail })
+          | Ok data -> (
+              let rows = String.length data / (cols * 3) in
+              match Masc_tui_image_mosaic.render ~cols ~rows data with
+              | [] -> refuse Masc_tui_image_cache.No_frame_written
+              | lines -> Masc_tui_link_preview.Mosaic lines)))
 
 let () =
   compute_and_store_mosaic :=
     fun img ->
-      match
-        Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
-            image_url_to_mosaic ~cols:mosaic_cols img)
-      with
-      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
-      | None -> ()
+      match Masc_tui_link_preview.mosaic_lookup img with
+      | Some (Masc_tui_link_preview.Mosaic _ | Masc_tui_link_preview.Refused _) ->
+          (* Already decided this session; neither a mosaic nor a refusal is
+             fetched again. *)
+          ()
+      | None ->
+          Masc_tui_link_preview.mosaic_store img
+            (Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
+                 image_url_to_mosaic ~cols:mosaic_cols img))
 
 let open_image state ~notice path =
   let refuse reason =
@@ -7407,7 +7463,7 @@ let open_image state ~notice path =
              notice ~role:Message_local
                (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
          | Error _ ->
-             refuse dl_err)
+             refuse (Masc_tui_image_cache.download_error_text dl_err))
     | Ok local_path -> (
         match !terminal_draws_images with
         | Some false -> refuse terminal_draws_no_images
@@ -7447,7 +7503,7 @@ let open_image state ~notice path =
    so it is safe to run on a systhread. *)
 let prepare_remote_image_bytes url =
   match download_remote_image url with
-  | Error e -> Error e
+  | Error e -> Error (Masc_tui_image_cache.download_error_text e)
   | Ok local_path -> (
       match read_file_bytes local_path with
       | Error detail -> Error detail
@@ -7460,6 +7516,9 @@ let prepare_remote_image_bytes url =
               match convert_to_png local_path with
               | Ok png_path -> read_file_bytes png_path
               | Error _ ->
+                  (* No converter read the body, so the cache does not keep
+                     it; the next [v] downloads afresh. *)
+                  discard_cached_image local_path;
                   Error "could not convert the image to a format the terminal draws")))
 
 (* [v] on a link preview: download and convert the image OFF the render loop,

@@ -1,6 +1,50 @@
 # Changelog
 
 
+## [0.35.13] - 2026-09-12
+
+### Added
+
+- TUI: the open question reaches its own ends (#35332).
+- TUI: the Fusion runs and the Changes list answer `/` (#35324).
+- TUI: jump to the first and last row, and page keys move a full page (#35317).
+- One registry type for durable event-queue store generations (#35308).
+- The resolved runtime list carries each runtime's quota life state (#35312).
+- G1 matrix harness execution mode and its checker CLI (#35297).
+- Terminal-Bench harness with MASC arms, a Claude Code model lane, and arm K that offers the keeper fleet as MCP tools (#35311).
+- CI gates wire field and variant removals that arrive without a compatibility story (#35285).
+
+### Fixed
+
+- The TUI chat view stated four things that did not match the run (#35326).
+- Exact preflights are no longer rejected over the injected default header (#35279).
+- `verifier_exact` is excluded from `cli_slots`, and CLI runtimes are rejected at completion authority (#35300).
+- A finished-but-broken structured reply advances the candidate walk instead of ending it (#35301).
+- Named routing lanes accept a `runtime_ids` array body (#35298).
+- The dashboard probes with the provider's own auth header and states the Vertex skip (#35296).
+- The setup journey names each invalid check with its own reason instead of restarting the questions, and a save that died in validation no longer reports a saved workspace (#35336).
+
+### Performance
+
+- TUI list windowing slices once: 170ms to 4ms per second of scrolling at 21k rows (#35331).
+- TUI row search: 297ms to 5ms per key at 21k rows (#35320).
+
+### Changed
+
+- Dead dependencies purged across activity_graph, ag_ui, backend, model_inference_metrics, operator, autonomous, exec, local_runtime_pool, task, tool_surface, dashboard_utils, board_types, keeper_contract, keeper_metrics, ide, pulse, exec_policy, benchmark, discovery_cache, and agent_core (#35318, #35316, #35313, #35310, #35302).
+- Dead runtime store methods, serializations, unused exports, and legacy graphql environment variables removed, 338 lines (#35294).
+- Dummy `Relation_materializer`, dead callbacks, and a fake portal spec removed (#35299).
+- Phantom graphql route removed and spec typos fixed (#35329).
+- Stale fictions purged from keeper specs, snapshot defaults, and invariants (#35328).
+- gRPC default-off truth aligned and the obsolete workspace pause spec retired (#35323).
+- Rubric taxonomy and spec inventory drift reconciled (#35330).
+- Rejection constructors named in the llm_provider preflight inline tests (#35284).
+
+### Docs
+
+- RFC: TOML as the declarative system and the wire vocabulary authority (#35314).
+- RFC: a runtime load failure keeps its shape until the screen (#35339).
+
 ## [0.35.12] - 2026-09-12
 
 ### Added

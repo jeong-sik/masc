@@ -1022,20 +1022,6 @@ let approval_outcome_to_string = function
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
 
-(* The oldest call still open. Two calls in flight are rare and the older one
-   is the one a watcher is waiting on. *)
-let oldest_open_call t =
-  t.reversed_tool_calls
-  |> List.filter (fun (call : live_tool_call) ->
-       (not call.ended) && call.attempt = t.attempt)
-  |> List.fold_left
-       (fun acc (call : live_tool_call) ->
-         match acc with
-         | Some (older : live_tool_call) when older.started_at <= call.started_at -> acc
-         | Some _ | None -> Some call)
-       None
-;;
-
 let phase_text ~now t =
   match t.phase with
   | Waiting -> (
@@ -1054,10 +1040,6 @@ let phase_text ~now t =
           (* The server had already run this operation and replayed its
              outcome. Nothing is waiting on a run that finished. *)
           "accepted; replaying an operation that already ran")
-  | Working when Option.is_some t.awaiting ->
-      (* The turn is not working, it is waiting on a person. Saying "working"
-         here would read as a slow tool rather than a question on screen. *)
-      "held at a tool call, waiting for your answer"
   | Working ->
       let activities = tool_calls t in
       let calls = List.length activities in
@@ -1069,60 +1051,69 @@ let phase_text ~now t =
          Named rather than counted, and placed before the mix: the question is
          which call is still out, the names are few -- a round holds a handful
          -- and a long tool mix is what a narrow row loses first. *)
-      (* What is open *now*, which is not the same list as what this turn has
-         called. A call the failover walked away from keeps its place in the
-         trail as evidence, and reporting it here said the new attempt was
-         waiting on a runtime it had already left (observed 2026-09-12, where
-         one screen called the same tool "never returned" and "still running"
-         at once). The count and the mix below stay on the whole turn: those
-         answer "what has this turn done", and that does include the
-         abandoned attempts.
-
-         The trail's own glyphs are deliberately not narrowed. An abandoned
-         call keeps the running mark inside its superseded block, and that
-         block says which attempt and which runtime it belonged to -- read
-         there, the mark is "this was open when we left", not a claim about
-         now. What is left unanswered is one step up: [compact_outcome]
-         promotes a whole block to [Started] on a single open call, so a block
-         holding nothing but abandoned calls still summarises as running.
-         Fixing that needs [tool_activity] to carry the attempt, which it does
-         not, so it is not in this change. *)
-      let still_running =
+      (* Preparation, a pending result and an approval are different facts.
+         Only the current attempt contributes to current activity; earlier
+         attempts remain in the transcript and in the total tool mix. *)
+      let current_calls =
         t.reversed_tool_calls
-        |> List.filter (fun (call : live_tool_call) ->
-             call.attempt = t.attempt)
+        |> List.filter (fun (call : live_tool_call) -> call.attempt = t.attempt)
         |> List.rev
+      in
+      let awaiting_call =
+        match t.awaiting with
+        | None -> None
+        | Some awaiting ->
+            (* Provider ids need not be unique. Exclude a held call only when
+               the current attempt identifies exactly one pending occurrence.
+               A completed earlier use of the same provider id cannot be held. *)
+            (match List.filter
+               (fun (call : live_tool_call) ->
+                 Option.exists (String.equal awaiting.call_id) call.call_id
+                 && (match (activity_of_live_call call).outcome with
+                     | Started | Awaiting_result -> true
+                     | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
+               current_calls with
+             | [call] -> Some call.local_id
+             | _ -> None)
+      in
+      let activities_now =
+        current_calls
+        |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> awaiting_call)
         |> List.map activity_of_live_call
-        |> List.filter (fun activity ->
-             match activity.outcome with
-             | Started | Awaiting_result -> true
-             | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
+      in
+      let describe_pending label outcome =
+        match List.filter (fun activity -> activity.outcome = outcome) activities_now with
+        | [] -> ""
+        | pending -> " · " ^ label ^ ": " ^ String.concat ", " (compact_tool_parts pending)
       in
       let running =
-        match still_running with
-        | [] -> ""
-        | running ->
-            Printf.sprintf " · still running: %s"
-              (String.concat ", " (compact_tool_parts running))
+        describe_pending "preparing" Started
+        ^ describe_pending "awaiting results" Awaiting_result
       in
-      (* The turn age alone cannot tell a slow tool from a stall. This says how
-         long the call it is sitting in has been open, which is the number that
-         stops moving when something is stuck.
-
-         Beside the names rather than after the mix (#32955 put it there before
-         the names existed): the two describe nearly the same calls, and the
-         mix is long enough to push whatever follows it off a narrow row.
-
-         Nearly, not exactly. [still_running] takes [Started | Awaiting_result]
-         and [oldest_open_call] takes [not ended], so a call whose request has
-         ended while its result has not arrived is named here without an age.
-         [Tool_ended] sets [ended] without setting [result_ready], so that
-         window is real. Both now also require the current attempt, which
-         makes them look more alike than they are. *)
+      (* No pending tool does not prove that the model has stopped. Report the
+         outstanding approval as its own fact while preserving turn activity. *)
+      let has_pending_activity = List.exists
+        (fun activity -> match activity.outcome with
+          | Started | Awaiting_result -> true
+          | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
+        activities_now in
+      let approval_pending = match t.awaiting, has_pending_activity with
+        | Some awaiting, false -> "approval pending: " ^ awaiting.tool_name ^ " · "
+        | Some _, true | None, _ -> "" in
+      (* Keep the age beside the current pending calls. A held approval's
+         age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
-        match oldest_open_call t with
-        | None -> ""
-        | Some call -> (
+        match List.filter
+          (fun (call : live_tool_call) ->
+            Some call.local_id <> awaiting_call
+            && (match (activity_of_live_call call).outcome with
+                | Started | Awaiting_result -> true
+                | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
+          current_calls
+          |> List.sort (fun (a : live_tool_call) b -> Float.compare a.started_at b.started_at)
+        with
+        | [] -> ""
+        | call :: _ -> (
           match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
           | None -> ""
           | Some age -> Printf.sprintf " · in this call %s" age)
@@ -1172,6 +1163,7 @@ let phase_text ~now t =
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
          the difference between that and a stall. *)
+      let work = approval_pending ^ work in
       if t.checkpoints = 0 then work
       else
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work
@@ -1231,7 +1223,8 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      let base = Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question in
+      let base = Printf.sprintf "[y] allow  [n] deny · approval for %s: %s"
+        awaiting.tool_name awaiting.question in
       match awaiting.because with
       | "" -> base
       | because -> Printf.sprintf "%s\n  because %s" base because)

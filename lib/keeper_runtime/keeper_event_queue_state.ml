@@ -134,7 +134,7 @@ type transfer_projection_result =
   | Transfer_projected
   | Transfer_already_projected
 
-let schema = "keeper.event_queue.state.v18"
+let schema = Keeper_event_queue_schema.state
 
 let empty =
   { revision = 0L

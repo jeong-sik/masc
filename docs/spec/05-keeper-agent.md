@@ -79,9 +79,9 @@ graph LR
 
 ### 3.1 keeper_meta
 
-Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`에 정의되며, 약 100개 필드를 가진다.
+Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_meta_contract.ml`에 정의되며, 약 100개 필드를 가진다.
 
-**소스**: `keeper_types.ml` (lines 9-106)
+**소스**: `keeper_meta_contract.ml` (lines 246+)
 
 주요 필드 군:
 
@@ -100,44 +100,29 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`�
 Generation semantics are operational, not genealogical: a successful rollover keeps the same keeper identity but commits a new `trace_id`, increments `generation`, and appends the old trace to `trace_history`.
 
 ### 3.2 working_context
-
-**소스**: `keeper_context_core.ml` (working_context type는 이 모듈에 inline됨; 구 `keeper_working_context.ml`은 #4393에서 제거)
-
+ 
+**소스**: `lib/keeper_types/keeper_types.ml`
+ 
 ```ocaml
 type working_context = {
-  system_prompt : string;
-  messages : Agent_core.Types.message list;
-  token_count : int;
-  max_tokens : int;
-  importance_scores : (int * float) list;
-  agent_core_context : Agent_core.Context.t;
+  checkpoint : Agent_core.Checkpoint.t;
 }
 ```
-
-Keeper의 실행 중 대화 컨텍스트. `agent_core_context`는 agent core Context 모듈과 동기화된다(`sync_agent_core_context`).
-
-토큰 추정: `msg_tokens = (String.length text / 4) + 4` (문자 기반 근사치).
-
-### 3.3 checkpoint / session_context
-
+ 
+Keeper의 실행 중 컨텍스트는 `Agent_core.Checkpoint.t`로 native화되어 관리된다.
+ 
+### 3.3 session_context / checkpoint history
+ 
+**소스**: `lib/keeper_types/keeper_types.ml`, `lib/keeper/keeper_checkpoint_store.ml`
+ 
 ```ocaml
-type checkpoint = {
-  checkpoint_id : string;
-  timestamp : float;
-  generation : int;
-  message_count : int;
-  token_count : int;
-  serialized : string;      (* JSON-serialized working_context *)
-}
-
 type session_context = {
   session_id : string;
   session_dir : string;
-  mutable checkpoints : checkpoint list;
 }
 ```
-
-세션당 최대 3개 체크포인트가 유지된다(`max_checkpoints_retained = 3`). 세션 메시지는 `history.jsonl`에 영속화.
+ 
+세션 디렉토리 내에 `Agent_core.Checkpoint.t` 스냅샷이 유지되며, 최대 12개가 보존된다 (`max_agent_core_history_retained = 12`). 초과 스냅샷은 `prune_agent_core_history`에 의해 정리된다.
 
 ### 3.4 Workspace Boundary
 
@@ -451,7 +436,6 @@ Canonical file model:
 
 ```text
 <basepath>/.masc/config/keepers/{name}.toml
-<basepath>/.masc/config/keepers/{name}.toml
 <basepath>/.masc/keepers/{name}.json
 <basepath>/.masc/keepers/{name}/...
 ```
@@ -461,7 +445,7 @@ Canonical file model:
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
 
-keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `keeper_down` 또는 durable tombstone으로 표현한다 (`paused`는 RFC-0323에 의해 은퇴한 계약).
 
 ---
 
@@ -481,9 +465,9 @@ Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
 
 `generate_trace_id`는 `trace-{ms_timestamp}-{5hex_hash}` 형식으로 생성된다. 동일 밀리초 내에서도 `gettimeofday` hash가 달라 충돌 가능성이 낮다.
 
-### INV-KEEPER-003: checkpoint 최대 3개
+### INV-KEEPER-003: checkpoint history 보존 (최대 12개)
 
-`max_checkpoints_retained = 3`. `save` 후 `prune`이 호출되어 초과분을 삭제한다.
+`max_agent_core_history_retained = 12`. `prune_agent_core_history`가 호출되어 세션 내 이전 스냅샷 초과분을 삭제한다.
 
 ### INV-KEEPER-006: proactive judgment boundary
 
@@ -530,9 +514,9 @@ Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가�
 
 `keeper_meta` 레코드가 약 100개 필드를 가지며 `meta_to_json`/`meta_of_json`이 각각 ~200줄이다. 필드 군(group)별 sub-record 분할이 필요하다.
 
-### 15.2 keeper_types.ml include chain
+### 15.2 keeper_types.ml include chain (해결됨)
 
-`keeper_types.ml`이 `include Keeper_types_profile`과 `include Keeper_types_support`를 연쇄적으로 포함하여, 실제 타입 정의가 3개 파일에 분산된다. 공개 `keeper_types.mli`는 JSONL/history-source/metrics/API-key/alert-path/rotation/delete-action/trace-path/memory/decision-log support helper를 `Keeper_types_support` 소유로 돌렸지만, 구현 include chain 자체는 남아 있어 가독성이 낮다.
+RFC-0205를 통해 `keeper_types.ml`의 레거시 include facade(`Keeper_meta_contract`, `Keeper_types_profile`, `Keeper_meta_json`, `Keeper_meta_store` 등)가 완전히 제거되었으며, 각 소비자는 해당 모듈을 직접 참조하도록 분리 완료되었다.
 
 ### 15.3 keeper_memory 계층의 include chain
 
@@ -556,6 +540,7 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 
 | 문서 | 경로 |
 |------|------|
+| Keeper Meta Contract | `lib/keeper/keeper_meta_contract.ml` |
 | Keeper Types | `lib/keeper_types/keeper_types.ml` |
 | Context Core | `lib/keeper/keeper_context_core.ml` (구 `keeper_working_context.ml` 흡수) |
 | Execution Context | `lib/keeper/keeper_context_runtime.ml` |

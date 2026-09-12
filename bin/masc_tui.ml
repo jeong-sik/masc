@@ -17025,7 +17025,8 @@ and is loaded on demand through keeper_skill.
        | Some key
          when (match browser_lane_on_screen state with
            | Some view -> Option.is_some view.client_picker | None -> false)
-              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+              && Option.is_none (browser_history_on_screen state)
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"; "h"]) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -17121,7 +17122,7 @@ and is loaded on demand through keeper_skill.
                      state.browser_history <- Some {history with scroll=max 0 (min limit (min limit history.scroll+delta))}
                  | _ -> ()))
        | Some "h" when (match browser_lane_on_screen state with
-           | Some {url_draft=None;client_picker=None;_} -> true | _ -> false) ->
+           | Some {url_draft=None;_} -> true | _ -> false) ->
            (match selected_keeper state with
             | None -> add_event state "system" "Choose a Keeper to read its retained observations"
             | Some keeper ->

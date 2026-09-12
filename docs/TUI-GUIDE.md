@@ -49,8 +49,8 @@ To revisit what a Keeper read, select that Keeper, open Browser Lane, and press
 `h`. The observation list comes from that Keeper's 100 most recent tool calls.
 `[` / `]` choose a saved page, `j` / `k` scroll it, and `y` copies its receipt
 and artifact reference. `h` or `Esc` returns to the browser. Saved pages remain
-readable after the browser closes; dismiss the browser picker with `Esc` first
-if it is open. The MASC server must be running to fetch these records.
+readable after the browser closes; `h` also works from the browser picker.
+The MASC server must be running to fetch these records.
 
 ## MSX
 

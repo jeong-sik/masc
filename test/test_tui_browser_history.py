@@ -9,7 +9,7 @@ import threading
 import test_tui_keyboard_input as h
 
 
-def run(binary, *, quit_from_history=False):
+def run(binary, *, quit_from_history=False, disconnected=False):
     fixtures = h.keeper_runtime_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     current = "https://example.org/current"
@@ -52,7 +52,7 @@ def run(binary, *, quit_from_history=False):
     fixtures["/api/v1/keepers/alpha/tool-calls?limit=100"] = (200, {
         "keeper": "alpha", "count": 2, "health": "ok", "entries": rows})
     fixtures["/api/v1/dashboard/browser-lane/clients"] = (200, {"ok": True,
-        "data": {"clients": [{"clientId": client, "browser": "firefox"}]}})
+        "data": {"clients": [] if disconnected else [{"clientId": client, "browser": "firefox"}]}})
 
     def read(body):
         request = json.loads(body)
@@ -74,7 +74,8 @@ def run(binary, *, quit_from_history=False):
     def interact(process, fd, _slave, output, _base):
         try:
             h.palette_go(process, fd, output, b"go Keepers", b"alpha")
-            h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
+            h.palette_go(process, fd, output, b"go Browser Lane",
+                         b"No active native browser connections" if disconnected else b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"h", b"retained observations")
             assert h.wait_for_fixture_event(process, fd, output, beta_entered, timeout=5), \
                 "newest observation was never requested"
@@ -97,7 +98,10 @@ def run(binary, *, quit_from_history=False):
             h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"a", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"ghttps://example.org/history", b"https://example.org/history")
-            h.send_and_wait(process, fd, output, b"\x1b", b"CURRENT PAGE CONTENT")
+            h.write_all(fd, output, b"\x1b")
+            frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
+                needle=b"CURRENT PAGE CONTENT", controls=(h.FULL_REDRAW,))
+            assert b"URL>" not in h.screen_text(frame), "Escape did not close the URL editor"
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             # Global navigation must release the hidden history's key ownership.
             h.send_and_wait(process, fd, output, b"\x1b[<0;5;1M\x1b[<0;5;1m", b"MASC Overview")
@@ -111,5 +115,5 @@ def run(binary, *, quit_from_history=False):
 
 if __name__ == "__main__":
     run(str(Path(sys.argv[1]).resolve()))
-    run(str(Path(sys.argv[1]).resolve()), quit_from_history=True)
+    run(str(Path(sys.argv[1]).resolve()), quit_from_history=True, disconnected=True)
     print("Browser observation history: PASS")

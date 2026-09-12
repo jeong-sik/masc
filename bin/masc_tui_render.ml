@@ -9127,7 +9127,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
+      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  h:observations  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene ->

@@ -23,7 +23,7 @@ let of_json json =
     Ok {scene;source;client_id;tab_id}
   | _ -> Error "observation must be an object"
 
-let retain ~base_path ~view result =
+let retain ~base_path ~view (result : Tool_result.result) =
   match result with
   | Tool_result.Failed _ | Tool_result.Deferred _ -> Ok result
   | Tool_result.Completed payload ->

@@ -109,6 +109,16 @@ val load :
     loading alone is not evidence that a game reaches an interactive screen. *)
 
 val eject : unit -> (unit, error) result
+
+type medium =
+  | Cartridge of string  (** file name in the slot *)
+  | Disk of string  (** file name in drive A *)
+
+val medium : unit -> medium option
+(** What the workspace machine currently runs, as {!load} recorded it: the
+    disk when one is in the drive (the slot is empty then), else the
+    cartridge. [None] with no machine or a BIOS-only boot. *)
+
 val screen : unit -> (observation, error) result
 
 val step : frames:int -> (observation, error) result

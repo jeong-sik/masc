@@ -377,6 +377,23 @@ let eject () =
       Ok ())
 ;;
 
+type medium =
+  | Cartridge of string
+  | Disk of string
+
+(* [load] empties the slot when a disk is in the drive, so the drive is asked
+   first and the two never both answer. *)
+let medium () =
+  locked (fun () ->
+    match !state with
+    | None -> None
+    | Some st ->
+      (match st.disk, st.cart with
+       | Some name, _ -> Some (Disk name)
+       | None, Some name -> Some (Cartridge name)
+       | None, None -> None))
+;;
+
 let screen () = with_machine (fun st -> Ok (observe st))
 
 let check_frames ~what n =

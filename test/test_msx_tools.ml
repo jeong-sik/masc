@@ -349,6 +349,60 @@ let test_inventory () =
      has "hero.rom" && has "big")
 ;;
 
+(* The arcade relay announces a change of medium, not a load. Reloading the
+   cartridge already in the slot is silent; a different one, or the first
+   load after an eject, is announced (audit-adversarial-20260912 R10). The
+   decision is the pure [arcade_announcement] over what the lane records
+   before and after each load, so the board itself is not needed here. *)
+let test_arcade_relay_only_on_medium_change () =
+  with_workspace @@ fun base_path ->
+  let carts = Filename.concat (Filename.concat (Filename.concat base_path ".masc") "msx") "carts" in
+  List.iter (fun d -> if not (Sys.file_exists d) then Sys.mkdir d 0o755)
+    [ Filename.concat base_path ".masc"; Filename.dirname carts; carts ];
+  List.iter
+    (fun name ->
+      Out_channel.with_open_bin (Filename.concat carts name) (fun oc ->
+        output_string oc (String.make 0x4000 '\000')))
+    [ "hero.rom"; "big" ];
+  let announce ~before ~after =
+    Tool_misc_msx_lane.arcade_announcement ~agent_name:"msx-test" ~before ~after
+  in
+  let medium = testable (fun fmt m ->
+      Format.pp_print_string fmt
+        (match m with
+         | Msx_lane.Cartridge n -> "cartridge:" ^ n
+         | Msx_lane.Disk n -> "disk:" ^ n))
+      ( = )
+  in
+  ignore (Msx_lane.eject () : (unit, Msx_lane.error) result);
+  let m0 = Msx_lane.medium () in
+  check (option medium) "no machine records no medium" None m0;
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "hero") ] in
+  check bool "first load completes" true (is_completed r);
+  let m1 = Msx_lane.medium () in
+  check (option medium) "the lane records the cartridge" (Some (Msx_lane.Cartridge "hero.rom")) m1;
+  check (option string) "the first load is announced"
+    (Some "msx-test 님이 hero.rom (카트리지) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요")
+    (announce ~before:m0 ~after:m1);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "hero") ] in
+  check bool "reloading the same cartridge completes" true (is_completed r);
+  let m2 = Msx_lane.medium () in
+  check (option medium) "the medium is unchanged" m1 m2;
+  check (option string) "the same medium again is not announced" None
+    (announce ~before:m1 ~after:m2);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String ""); ("cart", `String "big") ] in
+  check bool "loading another cartridge completes" true (is_completed r);
+  let m3 = Msx_lane.medium () in
+  check (option string) "a different medium is announced again"
+    (Some "msx-test 님이 big (카트리지) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요")
+    (announce ~before:m2 ~after:m3);
+  let r = dispatch ~base_path "masc_msx_load" [ ("roms_dir", `String "") ] in
+  check bool "a BIOS-only load completes" true (is_completed r);
+  check (option medium) "BIOS only records no medium" None (Msx_lane.medium ());
+  check (option string) "BIOS only is not announced" None
+    (announce ~before:m3 ~after:(Msx_lane.medium ()))
+;;
+
 (* A .dsk image resolves in the same inventory and lands in the drive: the
    observation names it under "disk" with no cartridge (the interface ROM the
    core rides in the slot takes it), and a ROM-less load still completes —
@@ -808,6 +862,8 @@ let () =
         ; test_case "press sequence taps keys in turn" `Quick test_press_sequence
         ; test_case "cartridge inventory" `Quick test_inventory
         ; test_case "rendered snapshot reuse and invalidation" `Quick test_rendered_pixel_snapshot
+        ; test_case "arcade relay only on medium change" `Quick
+            test_arcade_relay_only_on_medium_change
         ; test_case "disk image loads into the drive" `Quick test_disk_load
         ; test_case "checkpoint survives eject and rejects corruption" `Quick test_checkpoint_roundtrip
         ; test_case "disk swaps retain guest writes across checkpoint restore" `Quick test_disk_swap_retains_guest_writes_and_checkpoint

@@ -161,7 +161,35 @@ let relay_to_board ~author content =
       (Printexc.to_string e)
 ;;
 
+(* The board hears about a change of medium, not about a load: a keeper that
+   reloads the same disk each cycle otherwise posts the same sentence each
+   cycle, and every post is a board_signal to the whole fleet
+   (audit-adversarial-20260912 R10: 90 'MSX 아케이드' posts with 5 distinct
+   bodies). [before] is what the lane ran when the load was asked for,
+   [after] what it runs once the load succeeded; a BIOS-only boot announces
+   nothing. *)
+let arcade_announcement ~agent_name ~(before : Msx_lane.medium option)
+    ~(after : Msx_lane.medium option) =
+  if before = after then None
+  else
+    match after with
+    | None -> None
+    | Some medium ->
+      let name, kind =
+        match medium with
+        | Msx_lane.Disk name -> (name, "디스크")
+        | Msx_lane.Cartridge name -> (name, "카트리지")
+      in
+      Some
+        (Printf.sprintf
+           "%s 님이 %s (%s) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요"
+           agent_name name kind)
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
+  (* Read before the load so a rejected boot, which keeps the previous
+     machine, compares equal and stays silent. *)
+  let before = Msx_lane.medium () in
   let roms_dir = resolve_roms_dir ~base_path args in
   let media =
     match get_string_opt args "cart" with
@@ -190,14 +218,9 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
            ~cart_path:None ~disk_path:None)
   in
-  (match (media, Tool_result.is_success result) with
-   | Some (Ok path), true ->
-     let medium = if is_dsk_path path then "디스크" else "카트리지" in
-     relay_to_board ~author:agent_name
-       (Printf.sprintf
-          "%s 님이 %s (%s) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요"
-          agent_name (Filename.basename path) medium)
-   | _ -> ());
+  if Tool_result.is_success result then
+    Option.iter (relay_to_board ~author:agent_name)
+      (arcade_announcement ~agent_name ~before ~after:(Msx_lane.medium ()));
   result
 ;;
 

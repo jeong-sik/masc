@@ -91,10 +91,11 @@ val notify_stalled_verification :
   detail:string ->
   disposition:stall_disposition ->
   unit
-(** Board projection for every review that completed [Not_reviewed]: no
-    verdict was committed, so without this post the only surface is the
-    bounded run registry and the task waits invisibly. The post names the
-    task, the verification id, the gate, and what happens next. Under
+(** Board projection for every review that stopped without a verdict —
+    [Not_reviewed], [Infrastructure_unavailable], [Commit_failed], [Raised] —
+    whether or not a retry is armed: without this post the only surface is
+    the bounded run registry and the task waits invisibly. The post names
+    the task, the verification id, the gate, and what happens next. Under
     [Retry_scheduled] it says a retry is armed and how soon; under
     [No_retry_armed] it names the two forward paths that exist today — the
     assignee resubmitting through [submit_for_verification] (a legal
@@ -109,7 +110,9 @@ val notify_stalled_verification :
     (chronological by [created_at]) and posts only when that differs or no
     post decodes. [detail] travels as evidence and is not part of the
     comparison. Visibility only: the post schedules nothing. A board write
-    failure is logged and does not affect the review outcome. *)
+    that returns an error is logged here and does not affect the review
+    outcome; an exception out of the Board is the caller's to contain
+    ([Completion_authority_agent] does, after its WARN is written). *)
 
 module For_testing : sig
   val verdict_event_json :

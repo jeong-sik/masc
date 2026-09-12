@@ -658,6 +658,221 @@ let test_system_llm_retry_disposition_is_typed () =
        | VP.No_retry_armed -> Alcotest.fail "a joined timer is still an armed retry")
     [ For_testing.Joined_running_timer; For_testing.Already_pending ]
 
+(* audit-adversarial-20260912 L1: one WARN template ("deferred") covered a
+   Task nobody would judge again and a Task retried every minute alike, and
+   the only line telling them apart was written at a level the file did not
+   keep. The line is now chosen by the disposition the scheduler answered
+   with, so it says which of the two things happens next, and a stop names
+   its constructor. *)
+let root_unreadable_stop =
+  CA.For_testing.Infrastructure_unavailable
+    { stage = Masc.Verification_run_registry.Review_preparation
+    ; detail = "verification root unreadable: Not_found"
+    }
+;;
+
+let commit_failed_stop = CA.For_testing.Commit_failed { detail = "cas mismatch" }
+
+let not_reviewed_stop ~retry =
+  CA.For_testing.Not_reviewed
+    { gate = "evaluator_unavailable"
+    ; detail = "Payment required"
+    ; evaluator_runtime = "ollama_cloud.deepseek"
+    ; retry
+    }
+;;
+
+let raised_stop = CA.For_testing.Raised { detail = "Failure(\"boom\")" }
+let retryable_stop = not_reviewed_stop ~retry:CA.For_testing.Retry_requested
+
+(* Every constructor once, each with the label its line must carry. *)
+let stop_causes_with_labels =
+  [ root_unreadable_stop, "Infrastructure_unavailable{stage=review_preparation}"
+  ; commit_failed_stop, "Commit_failed"
+  ; ( not_reviewed_stop ~retry:CA.For_testing.No_retry_requested
+    , "Not_reviewed{gate=evaluator_unavailable,slot=ollama_cloud.deepseek}" )
+  ; raised_stop, "Raised"
+  ]
+;;
+
+let full_interval = VP.Retry_scheduled { delay = VP.Full_interval { seconds = 60.0 } }
+let shared_timer = VP.Retry_scheduled { delay = VP.Shared_timer }
+
+let test_system_llm_stop_and_retry_lines_name_the_next_move () =
+  let line ~cause ~disposition =
+    CA.For_testing.stall_log_line
+      ~task_id:"task-1479" ~verification_id:"vrf-1" ~cause ~disposition
+  in
+  let retry = line ~cause:retryable_stop ~disposition:full_interval in
+  check_names retry
+    [ "will retry"
+    ; "in_sec=60.0"
+    ; "slot=ollama_cloud.deepseek"
+    ; "gate=evaluator_unavailable"
+    ; "reason=Payment required"
+    ];
+  check_omits retry [ "authority deferred"; "stopped:" ];
+  let joined = line ~cause:retryable_stop ~disposition:shared_timer in
+  check_names joined [ "will retry"; "in=shared_timer" ];
+  check_omits joined [ "in_sec="; "60.0"; "authority deferred"; "stopped:" ];
+  List.iter
+    (fun (cause, label) ->
+       Alcotest.(check string) "label is the constructor" label
+         (CA.For_testing.stop_cause_label cause);
+       let stop = line ~cause ~disposition:VP.No_retry_armed in
+       check_names stop [ "stopped: " ^ label; "producer or operator must act"; "reason=" ];
+       check_omits stop [ "authority deferred"; "will retry" ];
+       Alcotest.(check bool) "stop and retry lines differ" false (String.equal stop retry))
+    stop_causes_with_labels
+;;
+
+(* Only the evaluator's typed error can ask for a retry; every other stop
+   requests nothing, by the shape of the sum rather than by a check. The
+   Board keys its repeat check on the evaluator's gate for a reviewed stop
+   and on the constructor label for every other one. *)
+let test_only_a_reviewed_stop_can_request_a_retry () =
+  (match CA.For_testing.retry_request_of_stop_cause retryable_stop with
+   | CA.For_testing.Retry_requested -> ()
+   | CA.For_testing.No_retry_requested ->
+     Alcotest.fail "a retryable reviewed stop must carry its request");
+  Alcotest.(check string) "a reviewed stop is keyed by its gate" "evaluator_unavailable"
+    (CA.For_testing.stalled_gate retryable_stop);
+  List.iter
+    (fun (cause, label) ->
+       (match CA.For_testing.retry_request_of_stop_cause cause with
+        | CA.For_testing.No_retry_requested -> ()
+        | CA.For_testing.Retry_requested -> Alcotest.failf "%s must not request a retry" label);
+       let expected_gate =
+         match cause with
+         | CA.For_testing.Not_reviewed { gate; _ } -> gate
+         | CA.For_testing.Infrastructure_unavailable _
+         | CA.For_testing.Commit_failed _
+         | CA.For_testing.Raised _ -> label
+       in
+       Alcotest.(check string) ("board key of " ^ label) expected_gate
+         (CA.For_testing.stalled_gate cause))
+    stop_causes_with_labels
+;;
+
+(* [since_seq] is exclusive and the ring's first entry carries seq 0, so an
+   empty ring has to sit below it rather than at it. *)
+let ring_cursor () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The Misc entries one call appends, oldest first, with what it returned. *)
+let misc_entries_of run =
+  let cursor = ring_cursor () in
+  let value = run () in
+  value, Log.Ring.recent ~since_seq:cursor ~module_filter:"Misc" ~order:`Oldest_first ()
+;;
+
+(* A Board sink that records what it was told instead of posting. *)
+let recording_notify calls ~task_id ~verification_id ~gate ~detail ~disposition =
+  calls := (task_id, verification_id, gate, detail, disposition) :: !calls
+;;
+
+let at_level expected (entry : Log.Ring.entry) =
+  Alcotest.(check string) "severity"
+    (Log.level_to_string expected) (Log.level_to_string entry.Log.Ring.level)
+;;
+
+(* Codex review of #35354: the production contract, not the formatter. Every
+   stop cause reaches the ring as one WARN naming its constructor, the retry
+   case reaches it as one WARN saying so, and the Board sink is told the
+   same key and the same disposition the line was chosen by. *)
+let test_announce_stall_logs_one_warn_per_stop_cause_and_for_the_retry () =
+  let announce ~cause ~disposition =
+    let calls = ref [] in
+    let (), entries =
+      misc_entries_of (fun () ->
+        CA.For_testing.announce_stall ~notify:(recording_notify calls)
+          ~task_id:"task-1480" ~verification_id:"vrf-2" ~cause ~disposition)
+    in
+    entries, List.rev !calls
+  in
+  let one_warn ~needle entries =
+    match entries with
+    | [ entry ] ->
+      at_level Log.Warn entry;
+      check_names entry.Log.Ring.message [ needle; "task-1480"; "vrf-2" ]
+    | other -> Alcotest.failf "expected one line, got %d" (List.length other)
+  in
+  let told_once ~gate ~disposition calls =
+    match calls with
+    | [ (task_id, verification_id, told_gate, _detail, told) ] ->
+      Alcotest.(check string) "task" "task-1480" task_id;
+      Alcotest.(check string) "verification" "vrf-2" verification_id;
+      Alcotest.(check string) "board key" gate told_gate;
+      Alcotest.(check bool) "board told the same disposition" true (told = disposition)
+    | other -> Alcotest.failf "the Board is told once, got %d" (List.length other)
+  in
+  List.iter
+    (fun (cause, label) ->
+       let entries, calls = announce ~cause ~disposition:VP.No_retry_armed in
+       one_warn ~needle:("stopped: " ^ label) entries;
+       told_once ~gate:(CA.For_testing.stalled_gate cause) ~disposition:VP.No_retry_armed calls)
+    stop_causes_with_labels;
+  List.iter
+    (fun (disposition, needle) ->
+       let entries, calls = announce ~cause:retryable_stop ~disposition in
+       one_warn ~needle entries;
+       told_once ~gate:"evaluator_unavailable" ~disposition calls)
+    [ full_interval, "will retry"; shared_timer, "in=shared_timer" ]
+;;
+
+(* Codex review of #35354: the WARN is the lane's own record and no Board
+   effect can keep it from being written. A Board sink that raises leaves
+   the WARN in place, adds an ERROR line carrying the exception as evidence,
+   and lets nothing escape. *)
+let test_announce_stall_keeps_its_warn_when_the_board_sink_raises () =
+  let raising ~task_id:_ ~verification_id:_ ~gate:_ ~detail:_ ~disposition:_ =
+    failwith "board down"
+  in
+  let (), entries =
+    misc_entries_of (fun () ->
+      CA.For_testing.announce_stall ~notify:raising
+        ~task_id:"task-1481" ~verification_id:"vrf-3"
+        ~cause:retryable_stop ~disposition:full_interval)
+  in
+  match entries with
+  | [ warn; failure ] ->
+    at_level Log.Warn warn;
+    check_names warn.Log.Ring.message [ "will retry"; "in_sec=60.0"; "task-1481" ];
+    at_level Log.Error failure;
+    check_names failure.Log.Ring.message
+      [ "did not reach the Board"; "board down"; "task-1481"; "vrf-3" ]
+  | other ->
+    Alcotest.failf "expected the WARN then the failure line, got %d" (List.length other)
+;;
+
+(* Cancellation is not a Board failure and is not contained: the WARN is
+   already written, and the cancellation continues to the fiber's owner. *)
+let test_announce_stall_does_not_absorb_cancellation () =
+  let cancelling ~task_id:_ ~verification_id:_ ~gate:_ ~detail:_ ~disposition:_ =
+    raise (Eio.Cancel.Cancelled (Failure "shutdown"))
+  in
+  let escaped, entries =
+    misc_entries_of (fun () ->
+      match
+        CA.For_testing.announce_stall ~notify:cancelling
+          ~task_id:"task-1482" ~verification_id:"vrf-4"
+          ~cause:root_unreadable_stop ~disposition:VP.No_retry_armed
+      with
+      | () -> false
+      | exception Eio.Cancel.Cancelled _ -> true)
+  in
+  Alcotest.(check bool) "cancellation escapes" true escaped;
+  match entries with
+  | [ warn ] ->
+    at_level Log.Warn warn;
+    check_names warn.Log.Ring.message
+      [ "stopped: Infrastructure_unavailable{stage=review_preparation}"; "task-1482" ]
+  | other -> Alcotest.failf "expected the WARN alone, got %d" (List.length other)
+;;
+
 (* One submission must review that submission. The backlog read stays whole —
    the daemon still needs fresh task state — but the scope decides which awaiting
    entries it acts on, so an unrelated submit no longer re-reviews every other
@@ -3999,6 +4214,16 @@ let () =
         test_system_llm_authority_helpers_are_typed;
       Alcotest.test_case "system LLM retry disposition is typed" `Quick
         test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "system LLM stop and retry lines name the next move" `Quick
+        test_system_llm_stop_and_retry_lines_name_the_next_move;
+      Alcotest.test_case "only a reviewed stop can request a retry" `Quick
+        test_only_a_reviewed_stop_can_request_a_retry;
+      Alcotest.test_case "announce_stall logs one WARN per stop cause and for the retry" `Quick
+        test_announce_stall_logs_one_warn_per_stop_cause_and_for_the_retry;
+      Alcotest.test_case "announce_stall keeps its WARN when the Board sink raises" `Quick
+        test_announce_stall_keeps_its_warn_when_the_board_sink_raises;
+      Alcotest.test_case "announce_stall does not absorb cancellation" `Quick
+        test_announce_stall_does_not_absorb_cancellation;
       Alcotest.test_case "joining a running retry timer posts no interval" `Quick
         test_joining_a_running_retry_timer_posts_no_interval;
       Alcotest.test_case "concurrent verification retries share one timer without losing keys" `Quick

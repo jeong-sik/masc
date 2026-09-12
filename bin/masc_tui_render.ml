@@ -9673,7 +9673,6 @@ let render_memory_facts (state : state) =
   let filter_label =
     Masc_tui_types.memory_category_filter_label state.memory_facts_category
   in
-  let sort_label = Masc_tui_types.memory_sort_order_label state.memory_facts_sort in
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
@@ -9691,8 +9690,11 @@ let render_memory_facts (state : state) =
           (screen_title " MASC Memory") keeper_name timestamp
           (connection_badge state)
     | Some _ ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s · sort: %s%s)  %s  %s"
-          (screen_title " MASC Memory") keeper_name total filter_label sort_label query_label
+        (* The sort is named in the row under this one, beside the breakdown it
+           belongs with. Spelled in both places the title ran past the column
+           and took the clock and the connection badge with it. *)
+        Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s%s)  %s  %s"
+          (screen_title " MASC Memory") keeper_name total filter_label query_label
           timestamp (connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"

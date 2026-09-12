@@ -15,6 +15,18 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
+(* The row under the facts title. The title says the total and the filter; this
+   says how that total breaks down and which sort produced the order, so each
+   fact is written in one place. It used to repeat "N facts" from the title and
+   the title used to repeat the sort from here -- and the title is the one that
+   runs out of room: at 140 columns it was cut mid-timestamp.
+
+   [grand_total] is not passed in because it is not drawn here. *)
+let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
+  Printf.sprintf "  %s(%d ord \xc2\xb7 %d src \xc2\xb7 %d drop)%s \xc2\xb7 %sSort [s]:%s %s"
+    (Theme.recede ()) ordinary source dropped Ansi.reset
+    (Theme.recede ()) Ansi.reset sort_label
+
 let memory_fact_age_label ts =
   keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
 
@@ -503,11 +515,8 @@ let render_memory_facts_body ~cols ~budget (state : state)
         in
         let grand_total = ord_count + src_count + dropped_count in
         let stats =
-          Printf.sprintf
-            "  %sTotal:%s %d facts  %s(%d ord · %d src · %d drop)%s · %sSort [s]:%s %s"
-            Ansi.bold Ansi.reset grand_total
-            (Theme.recede ()) ord_count src_count dropped_count Ansi.reset
-            (Theme.recede ()) Ansi.reset sort_label
+          facts_stats_row ~ordinary:ord_count ~source:src_count
+            ~dropped:dropped_count ~sort_label
         in
         let all_categories = memory_fact_categories state in
         let pill_of_filter filt count is_active =

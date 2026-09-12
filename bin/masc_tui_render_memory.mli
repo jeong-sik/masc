@@ -17,6 +17,12 @@ type memory_state = Masc_tui_types.memory_state =
   | Memory_starving
   | Memory_read_error
 
+val facts_stats_row :
+  ordinary:int -> source:int -> dropped:int -> sort_label:string -> string
+(** The row under the facts title: how the total breaks down, and the sort that
+    produced the order. The total itself and the category filter belong to the
+    title, which is the row that runs out of width first. *)
+
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list

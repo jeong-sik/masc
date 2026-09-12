@@ -20,6 +20,7 @@ The key distinction is:
 | --- | --- |
 | `boot_static` | requires process restart |
 | `sweep_dynamic` | applied on next supervisor sweep or explicit keeper reconfigure |
+| `maintenance_dynamic` | reconciled by independent configuration maintenance at startup, cadence, and owned cleanup |
 | `request_dynamic` | applied on next request/turn/model resolve |
 
 ## Matrix
@@ -28,6 +29,7 @@ The key distinction is:
 | --- | --- | --- | --- | --- | --- |
 | `<base_path>/.masc/config/runtime.toml` | startup env seeding for `MASC_KEEPER_*` and WebSearch knobs | server bootstrap before env-backed consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
+| `<resolved-config-root>/lane-addons/*.toml` | declarative observer installations | independent Lane configuration Pulse | startup, existing maintenance cadence, and owned worker cleanup | `maintenance_dynamic` | malformed declarations preserve their applied installations; complete removal detaches the owned worker and preserves history |
 | `<resolved-config-root>/runtime.toml` | runtime catalog source + optional `[fusion]` policy | model resolve path in agent core/MASC; `masc_fusion` handler reloads `[fusion]` per request | next resolve / next turn / next `masc_fusion` request | `request_dynamic` | invalid TOML blocks runtime or fusion policy load; `runtime.json` is retired |
 
 ## Current Behavior by File
@@ -62,6 +64,22 @@ Operational meaning:
 - Declarative fields are not instant.
 - They are applied on the next sweep for running keepers, or on the next
   `keeper_up`/create path for inactive keepers.
+
+### `lane-addons/*.toml`
+
+- Resolved through `Config_dir_resolver.resolve_for_base_path`, with the existing
+  `MASC_CONFIG_DIR` override, and read by
+  [`Lane_addon_config`](../lib/lane_addon/lane_addon_config.mli).
+- [`Lane_addon_runtime.start_configuration_service`](../lib/lane_addon/lane_addon_runtime.mli)
+  uses the existing maintenance cadence on an independent Pulse. It does not
+  join a Keeper turn or supervisor sweep.
+- Package manifest paths and snapshot-file paths resolve from the installation
+  declaration's directory. Desired and applied revisions remain separate from
+  observation phase and source coverage.
+- Read errors do not authorize deletion. A readable but malformed file remains
+  an explicit issue; absence from a complete inventory removes its installation.
+- See the [installation guide and supported example](guides/lane-addon-toml.md)
+  for updates, removal, and the boundary with subsequent composition features.
 
 ### `runtime.toml`
 

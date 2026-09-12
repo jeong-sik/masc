@@ -267,7 +267,8 @@ val thinking_lines : t -> string list
     durable transcript does not keep, so the pane is the one place it can
     be read. *)
 val tool_calls : t -> tool_activity list
-(** In the order the stream opened them. *)
+(** In the order the stream opened them. Unresolved calls in a terminal or
+    superseded attempt are [Never_returned]; recorded results are preserved. *)
 val unreadable : t -> unreadable option
 
 (** One stretch of the turn, in arrival order. A tool-call round interleaves
@@ -305,6 +306,11 @@ val attempt : t -> int
 
 val current_runtime_id : t -> string option
 (** Current resolved-runtime identity, if observed. *)
+
+val runtime_identity_text :
+  keeper_name:string -> configured_runtime:string -> t option -> string
+(** Labels the configured runtime separately from the matching turn's observed
+    runtime. Another keeper's transcript cannot supply the turn identity. *)
 
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)
@@ -402,11 +408,26 @@ val approval_outcome_to_string : approval_outcome -> string
 
 type status_kind =
   | Progress  (** How the turn is going. *)
+  | Answer_needed
+      (** The turn is held and the operator's key is what releases it. Kept
+          apart from [Attention] because it is the one row that cannot be
+          folded away: see [status_row_survives_folding]. *)
   | Attention  (** Something an operator has to know about. *)
   | Approval of approval_outcome
       (** How a held tool decision settled. This is deliberately not a tool
           success/failure: approval answers whether execution was allowed,
           while the tool row separately says whether execution returned. *)
+
+val status_row_survives_folding : status_kind -> bool
+(** Whether the row is still drawn when the turn dashboard is folded.
+
+    The pane folds to its progress line and a count. The progress row is that
+    summary, and a row asking the operator for something cannot go behind a
+    key they have no reason to press -- the turn would sit held with nothing
+    on screen saying so. The rest is history the operator can ask for.
+
+    Exhaustive over [status_kind] on purpose: a new kind has to say which
+    side it is on rather than inherit an answer. *)
 
 val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach

@@ -96,9 +96,16 @@ they run in the existing browser-screenshot CI test alias. No local Dune build w
 ## Gecko scene view
 
 After reading a connected Firefox or Zen tab, press `s` to observe its viewport
-as real text and numbered elements. `n`/`p` select an element; `Enter` clicks that
-observed element when it is clickable and reads a fresh scene. The selected control number also appears
-in the body. `j`/`k` scroll the terminal text, and `r` observes the browser again.
+as real text and numbered elements. `Tab`/`Shift-Tab` move directly between enabled
+clickable controls and readable regions. `n`/`p` select any observed element,
+including text and images for copying context. Selection reveals the element's
+first wrapped row without making a browser request. `Enter` clicks an enabled
+control and reads a fresh scene, or reads the selected region. The footer names
+the selected action. `v` lists page regions; the context row distinguishes page
+content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
+the same page or region again.
+`y` copies the selected element together with its observed region, viewport,
+and truncation flag, so a Keeper can preserve the same reading scope.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 
@@ -166,3 +173,8 @@ browser window or changing/reloading its URL. This is a tool action; reads do no
 automatically activate tabs and no TUI shortcut is added. A successful receipt
 includes active=true, but callers must read again to verify rendered content.
 Automation rejects activation before selecting a tab.
+
+Action traversal follows [w3m's hyperlink navigation](https://w3m.sourceforge.net/eng/MANUAL.html)
+and the [agent-browser interactive snapshot pattern](https://agent-browser.dev/snapshots):
+select from observed actionable elements, then operate on their references. The
+full scene remains available for reading and copying context.

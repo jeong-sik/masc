@@ -88,6 +88,8 @@ let writes_files (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_memory_search
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_remove
   | Keeper_tool_descriptor.Tool_library_search
   | Keeper_tool_descriptor.Tool_library_read
   | Keeper_tool_descriptor.Tool_surface_read
@@ -279,6 +281,8 @@ let kind_of_input ~(handler : Keeper_tool_descriptor.runtime_handler) ~keeper in
   | Keeper_tool_descriptor.Tool_memory_search
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_remove
   | Keeper_tool_descriptor.Tool_library_search
   | Keeper_tool_descriptor.Tool_library_read
   | Keeper_tool_descriptor.Tool_surface_read

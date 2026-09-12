@@ -431,9 +431,11 @@ let media_result t tool ~name ~args ~start_time =
             | Ok probe ->
               (match is_pdf path probe, Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                    ~config:t.config ~meta ~path ?cwd
-                   ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()))
+                   ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with

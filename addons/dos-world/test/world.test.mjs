@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setTimeout } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PNG } from 'pngjs';
@@ -79,16 +78,9 @@ test('real DOS input, receipts, read-only observation, incarnation and independe
   }
   const observe = () => call('lane_observe', { context, binding: { sources: [] }, sources: [] });
   const act = request_id => call('lane_act', { context, request_id, action: { kind: 'increment' } });
-  let initial;
-  do {
-    initial = await observe();
-    if (initial.rows.length === 0) {
-      assert.equal(initial.coverage[0].complete, false);
-      // Sampling cadence for this bounded CI proof, never a production wait or
-      // readiness assumption. Only actual state + pixels ends this loop.
-      await setTimeout(25, undefined, { signal: t.signal });
-    }
-  } while (initial.rows.length === 0);
+  // One initial observation must publish verified data on an otherwise idle
+  // world. No timer/polling or unrelated activity is used to finish startup.
+  const initial = await observe();
   const measurements = [await verifyOutput(initial, 0, 'before')];
   await verifyOutput(await observe(), 0, 'observe-only');
   const [first, crossed] = await Promise.all([act('increment-once'), observe()]);

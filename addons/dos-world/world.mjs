@@ -216,7 +216,7 @@ export class DosWorld {
       { id: 'build', mime_type: 'text/plain', data_base64: Buffer.from(this.buildHashes).toString('base64') }] };
   }
 
-  observe(args) {
+  async observe(args) {
     exactObject(args, ['context', 'binding', 'sources'], 'observe arguments');
     exactObject(args.binding, ['sources'], 'binding');
     if (!Array.isArray(args.sources) || args.sources.length !== 0
@@ -224,6 +224,10 @@ export class DosWorld {
       throw new Error('This package owns its DOS environment and takes no external observation sources');
     }
     this.bind(args.context);
+    // Complete the attach-triggered observation without relying on unrelated
+    // world activity to wake the host after our own machine boots. This wait is
+    // local to this optional worker and ends on actual state/pixels or failure.
+    if (this.snapshot === null) await this.untilSnapshot(() => true);
     return this.output();
   }
 

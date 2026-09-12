@@ -19,7 +19,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   try {
     let output;
     switch (request.params.name) {
-      case 'lane_observe': output = world.observe(request.params.arguments); break;
+      case 'lane_observe': output = await world.observe(request.params.arguments); break;
       case 'lane_act': output = await world.act(request.params.arguments); break;
       default: throw new Error('Unknown tool');
     }

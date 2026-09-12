@@ -44,8 +44,10 @@ replacement starts a new DOS machine; prior evidence is preserved by the host.
 ## Observe and act
 
 `lane_observe` accepts the host-provided `{instance_id, incarnation}` context plus
-the empty source binding. Its initial reply may contain no rows and incomplete
-coverage while the program boots. Subsequent replies return the latest verified
+the empty source binding. Its first call waits inside this optional worker until
+the guest file and matching screen are ready, or returns a boot error. Thus an
+idle host's initial observation produces data without a second wake or polling.
+Subsequent replies return the latest verified
 screen and guest state without sending input, pausing the machine, or waiting for
 an outstanding action. Intermediate frame callbacks are coalesced. The clock is
 explicitly a **capture sequence**, not an emulated frame or game turn.
@@ -88,8 +90,9 @@ observations, including concurrent action and observation requests. Either the
 before or after capture is valid; the proof does not assume which response wins.
 Held-action independence belongs to the host's explicit barrier tests.
 It validates full image geometry and the raw guest file, rather than
-accepting a success label or merely comparing screenshot hashes. The sampling
-interval and outer test timeout are CI controls, not production readiness rules.
+accepting a success label or merely comparing screenshot hashes. One initial
+observation must return verified data without polling. The outer test timeout is
+a CI control, not a production readiness rule.
 
 The next host-level proof must install this package after fixing the host revision,
 call the generic action through existing Keeper authority, verify the retained

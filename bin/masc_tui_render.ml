@@ -6314,7 +6314,7 @@ let render_keeper_detail (state : state) =
       keeper_action_hints state (Some (keeper_reading state k))
     in
     let footer =
-      if keeper_roster_pane_shown state ~cols then "  h/l pane" ^ footer
+      if keeper_roster_pane_shown state ~cols then "  h/l:pane  " ^ footer
       else footer
     in
     (* Cut to the terminal, the way every other footer is: [footer_line] takes

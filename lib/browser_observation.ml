@@ -6,7 +6,32 @@ type t = {
   client_id : Browser_lane.client_id option;
   tab_id : int;
 }
+module Field_names = Set.Make (String)
+
+(* Durable bytes are also read by non-OCaml consumers. Reject ambiguous JSON
+   throughout the observation instead of depending on their duplicate-key
+   selection policy (including nested node and geometry fields). *)
+let rec unambiguous_json = function
+  | `Assoc fields ->
+    let rec loop seen = function
+      | [] -> Ok ()
+      | (key, value) :: rest ->
+        if Field_names.mem key seen then
+          Error ("retained observation contains duplicate object field: " ^ key)
+        else
+          let* () = unambiguous_json value in
+          loop (Field_names.add key seen) rest
+    in
+    loop Field_names.empty fields
+  | `List values ->
+    let rec loop = function
+      | [] -> Ok ()
+      | value :: rest -> let* () = unambiguous_json value in loop rest
+    in loop values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+
 let of_json json =
+  let* () = unambiguous_json json in
   let* scene = Browser_scene.of_json json in
   match json with
   | `Assoc fields ->

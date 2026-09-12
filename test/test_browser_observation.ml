@@ -31,7 +31,14 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
   Eio_main.run (fun env ->
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
-      let current = ref (data "alpha" (String.make 8000 'a' ^ "한글🙂")) in
+      let current = ref (match data "alpha" (String.make 8000 'a' ^ "한글🙂") with
+        | `Assoc fields -> `Assoc (fields @ [
+            "source", `String "live";
+            "clientId", `String "ed6c30dd-565d-4f3a-af0e-f7d7f0725421";
+            "source", `String "backend-conflict";
+            "clientId", `Null;
+            "elapsed_ms", `Float (-1.); "elapsed_ms", `Float (-2.)])
+        | _ -> assert false) in
       Browser_lane.install_automation_executor (Some (function
         | Browser_lane.Page_scene {tab_id=7;view;scope=None;_} ->
           let fields = match !current with `Assoc fields -> fields | _ -> fail "scene object required" in
@@ -52,6 +59,20 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       check string "typed scene MIME" Observation.mime reference.mime;
       let original = fetch base reference in
       check string "stored bytes exactly match model data" original (Tool_result.message result);
+      let fields = match Yojson.Safe.from_string original with
+        | `Assoc fields -> fields | _ -> fail "retained scene must be an object" in
+      List.iter (fun key -> check int (key ^ " has exactly one authoritative value") 1
+        (List.length (List.filter (fun (name, _) -> name = key) fields)))
+        ["source"; "clientId"; "elapsed_ms"];
+      check bool "backend cannot override actual automation source" true
+        (List.assoc "source" fields = `String "automation");
+      check bool "backend cannot attach a live client to automation" true
+        (List.assoc "clientId" fields = `Null);
+      check bool "elapsed time belongs to the local read" true
+        (match List.assoc "elapsed_ms" fields with `Float value -> value >= 0. | _ -> false);
+      let canonical = Observation.of_json (Yojson.Safe.from_string original) |> ok in
+      check bool "durable decoder sees the actual read route" true
+        (canonical.source = Masc.Browser_surface.Automation && canonical.client_id = None);
       let provider = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:base
           ~model_projection:(Tool_output.Inline_up_to {maximum_bytes=100000}) result with
         | Ok value -> value | Error error -> fail error.message in
@@ -78,7 +99,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       check int "unknown tool remains ordinary" 0
         (List.length (Tool_result.retained_artifacts (retain "unknown" "scene" generic_scene)));
       let bound_scene = retain "masc_browser_read" "scene" generic_scene in
-      check string "bound MCP and Keeper retain identical bytes" original
+      check string "bound MCP retains its own exact model bytes" (Tool_result.message generic_scene)
         (fetch base (retained_reference bound_scene));
       let generic_regions = generic_read "regions" |> retain "masc_browser_read" "regions" in
       let regions = Observation.of_json
@@ -97,6 +118,9 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       Log.log_call ~keeper_name:"regions-reader" ~tool_name:"masc_browser_read" ~input:args
         ~output_text:(Tool_result.message generic_regions) ~success:true ~duration_ms:1.
         ~typed_result:generic_regions ();
+      Log.log_call ~keeper_name:"mcp-reader" ~tool_name:"masc_browser_read" ~input:args
+        ~output_text:(Tool_result.message bound_scene) ~success:true ~duration_ms:1.
+        ~typed_result:bound_scene ();
       let row = List.hd (Log.read_recent ~keeper_name:"reader" ()) in
       let open Yojson.Safe.Util in
       check string "receipt joins original execution" (Ids.Execution_id.to_string execution_id)
@@ -106,7 +130,10 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       check bool "long preview is truncated" true (String.length (row |> member "output" |> to_string) < String.length original);
       let sweep = match Tool_blob_maintenance.run ~base_path:base ~mode:Observe_only with
         | Ok report -> report | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
-      check int "existing tool-call registry retains the scene" 2 sweep.live_references;
+      let distinct_roots = [result; bound_scene; generic_regions]
+        |> List.map (fun result -> (retained_reference result).Tool_output.sha256)
+        |> List.sort_uniq String.compare in
+      check int "existing tool-call registry retains every read" (List.length distinct_roots) sweep.live_references;
       check int "referenced scene is not a deletion candidate" 0 sweep.candidates_recorded)))
 
 let test_invalid_or_unpersisted_scene_has_no_reference () = with_base (fun base ->
@@ -121,6 +148,26 @@ let test_invalid_or_unpersisted_scene_has_no_reference () = with_base (fun base 
   check bool "failed persistence cannot return a retained reference" true
     (Result.is_error (Observation.retain ~base_path:base ~view:Content result));
   check int "input result remains unmodified" 0 (List.length (Tool_result.retained_artifacts result)))
+
+let test_duplicate_fields_never_enter_blobstore () = with_base (fun base ->
+  let scene = routed (data "alpha" "visible") in
+  let fields = match scene with `Assoc fields -> fields | _ -> assert false in
+  let ambiguous = List.map (fun (key, value) -> `Assoc ((key, value) :: fields))
+    ["source", `String "live"; "clientId", `Null; "tabId", `Int 8;
+     "documentId", `String "other-document"] in
+  let nested = `Assoc (("viewport", `Assoc ["width", `Int 800; "width", `Int 1;
+      "height", `Int 600; "scrollX", `Int 0; "scrollY", `Int 0])
+      :: List.remove_assoc "viewport" fields) in
+  List.iter (fun json ->
+    let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0. ~data:json () in
+    check bool "ambiguous durable identity is rejected" true
+      (Result.is_error (Observation.of_json json));
+    check bool "ambiguity cannot publish a retained reference" true
+      (Result.is_error (Observation.retain ~base_path:base ~view:Content result)))
+    (nested :: ambiguous);
+  let blobs = Tool_blob_store.list_all_result (Tool_blob_store.create ~base_path:base)
+    |> Result.map_error (fun _ -> "blob listing failed") |> ok in
+  check int "ambiguous data creates no blob" 0 (List.length blobs))
 
 let test_generic_retention_failure_preserves_read_receipt () = with_base (fun base ->
   Eio_main.run (fun env ->
@@ -179,6 +226,7 @@ let test_external_read_creates_no_hidden_blob () = with_base (fun base ->
       check int "external read creates no unrooted blob" 0 (List.length blobs))))
 
 let () = run "browser observation retention" ["shared scene",[
+  test_case "duplicate fields are rejected before durable storage" `Quick test_duplicate_fields_never_enter_blobstore;
   test_case "external read creates no hidden blob" `Quick test_external_read_creates_no_hidden_blob;
   test_case "actual Keeper read stays inline and survives through the log" `Quick test_runtime_retains_inline_scene_and_log_roots;
   test_case "generic retention failure preserves read receipt" `Quick test_generic_retention_failure_preserves_read_receipt;

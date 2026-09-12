@@ -99,3 +99,15 @@ val step_prompt : step -> string
 
 val step_gap : step -> gap option
 (** The gap a step fills, when it fills one. [Review] fills none. *)
+
+val save_request
+  :  draft
+  -> revision:string
+  -> (Yojson.Safe.t, gap list) result
+(** The body for [POST /api/v1/voice/setup]: the revision this draft was written
+    against, and the changes it describes.
+
+    The wire shape is the server's to read -- it parses back into the closed sum
+    type before it means anything. Producing it here keeps one spelling of it on
+    the sending side: a TUI and a dashboard that each wrote their own would
+    drift, and the drift would show only as a request the server refuses. *)

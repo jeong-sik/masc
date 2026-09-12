@@ -4176,6 +4176,7 @@ type state = {
   mutable tools_async_observation: Tui_decode.async_request_observation option;
   mutable tools_async_observation_error: string option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
+  mutable lane_addons_cached: Masc_tui_lane_addons.t;
   mutable lane_addons_generation: int;
   mutable browser_lane: Browser_lane_view.t option;
   mutable browser_history: Browser_history.t option;
@@ -5558,6 +5559,7 @@ let create_state
   tools_async_observation = None;
   tools_async_observation_error = None;
   lane_addons = None;
+  lane_addons_cached = Masc_tui_lane_addons.initial;
   lane_addons_generation = 0;
   browser_lane = None;
   browser_history = None;

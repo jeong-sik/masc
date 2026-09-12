@@ -18,6 +18,7 @@ type error =
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
+  | Poppler_budget_spent of { program : string; budget_sec : float }
   | Storage_failed of string
 
 let error_to_string = function
@@ -33,6 +34,10 @@ let error_to_string = function
   | Invalid_output detail -> "pdf_inspection_invalid_output: " ^ detail
   | Image_policy_rejected {page;bytes;limit} ->
     Printf.sprintf "PDF page %d image has %d bytes, exceeding configured image limit %d" page bytes limit
+  | Poppler_budget_spent {program;budget_sec} ->
+    Printf.sprintf
+      "pdf_inspection_budget_spent: %s did not finish within the %.0fs this inspection gets for every Poppler call together"
+      program budget_sec
   | Storage_failed detail -> "pdf_inspection_storage_failed: " ^ detail
 
 let ( let* ) = Result.bind
@@ -64,6 +69,12 @@ let parsed_pages xml =
       Ok ((width_points,height_points,text) :: pages)) (Ok []) pages
     |> Result.map List.rev
 
+(* Wall clock for every Poppler call of one inspection together. A page of a
+   well-formed document renders in well under a second; this is the ceiling for
+   the whole document, so a review that hits it fails instead of holding its
+   slot. *)
+let poppler_budget_sec = 60.0
+
 let inspect ~base_path ~max_image_bytes ~bytes =
   let missing = Pdf_runtime_dependencies.missing () in
   if missing <> [] then Error (Dependency_unavailable missing)
@@ -79,8 +90,20 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       Auth.save_private_text_file source bytes;
       Unix.chmod source 0o400;
       let diagnostics = ref [] in
+      (* One budget for the whole inspection, not one per call. A corrupt or
+         adversarial document can hang either Poppler tool, and the page count
+         comes from the document, so a per-call budget multiplied by the pages
+         would bound nothing. A completion review holds one of the four global
+         review slots while this runs, so an unbounded child starves the other
+         three. *)
+      let deadline = Monotonic_deadline.after ~seconds:poppler_budget_sec in
       let run program arguments =
+        let remaining = Monotonic_deadline.remaining_seconds deadline in
+        if remaining <= 0.0 then
+          Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
+        else
         let status, _stdout, stderr = Process_eio.run_argv_with_status_split
+            ~timeout_sec:remaining
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
             ~cwd:root (program :: arguments) in
         let detail = String.trim stderr in
@@ -88,6 +111,11 @@ let inspect ~base_path ~max_image_bytes ~bytes =
         | Unix.WEXITED 0 ->
           if detail <> "" then diagnostics := (program ^ ": " ^ detail) :: !diagnostics;
           Ok ()
+        (* The runner synthesizes 124 for its own timeout, the way timeout(1)
+           does. Poppler's tools do not use that code, so 124 under a budget is
+           read as the budget rather than as the program's own answer. *)
+        | Unix.WEXITED 124 ->
+          Error (Poppler_budget_spent {program;budget_sec=poppler_budget_sec})
         | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
           Error (Command_failed {program;status;detail}) in
       let xml_path = Filename.concat root "pages.xhtml" in

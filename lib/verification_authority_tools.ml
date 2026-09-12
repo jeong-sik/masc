@@ -380,7 +380,10 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
     ~base_path:t.config.base_path ~max_image_bytes ~bytes with
   | Error error ->
     let failure_class = match error with
-      | Verification_pdf_inspection.Image_policy_rejected _ -> Tool_result.Policy_rejection
+      (* Both are the lane's own limits answering, not the run failing: a
+         document that spends the Poppler budget spends it again on a retry. *)
+      | Verification_pdf_inspection.Image_policy_rejected _
+      | Verification_pdf_inspection.Poppler_budget_spent _ -> Tool_result.Policy_rejection
       | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time

@@ -21,6 +21,11 @@ type error =
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
+  | Poppler_budget_spent of { program : string; budget_sec : float }
+      (** Every Poppler call of one inspection shares one wall-clock budget. A
+          document that hangs a tool, or that declares enough pages to spend
+          the budget across them, fails here rather than holding one of the
+          four global review slots. *)
   | Storage_failed of string
 
 val error_to_string : error -> string

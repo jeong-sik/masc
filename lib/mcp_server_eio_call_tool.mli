@@ -130,6 +130,7 @@ val handle_call_tool_eio :
      ?invocation_ref:Tool_invocation_ref.t ->
      ?auth_token:'auth ->
      ?internal_keeper_runtime:bool ->
+     ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
      Mcp_server.server_state ->
      name:string ->
      arguments:Yojson.Safe.t ->

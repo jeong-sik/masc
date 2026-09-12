@@ -3127,6 +3127,47 @@ let render_planning_list (state : state) =
     (Printf.sprintf "  Sort [s]: %s · Filter [f]: %s"
        (planning_sort_label state.planning_sort)
        (planning_filter_label state.planning_filter));
+  (* The list below can only show goals the store still holds. A goal that
+     completed and left goals.json left every planning surface with it, so
+     "what did we finish" had no answer here at all. These two lines are what
+     the event log remembers; they sit above the divider because they are not
+     rows the cursor walks. *)
+  (match state.planning with
+   | None -> ()
+   | Some planning -> (
+     match planning.pl_goal_history with
+     | [] -> ()
+     | history ->
+       let closed =
+         List.length
+           (List.filter
+              (fun (row : planning_goal_history) -> Option.is_some row.pgh_closed_at)
+              history)
+       in
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (Printf.sprintf "  No longer listed: %d · reached an end: %d"
+            (List.length history) closed);
+       let lifetime_label hours =
+         if hours >= 48. then Printf.sprintf "%.1fd" (hours /. 24.)
+         else Printf.sprintf "%.1fh" hours
+       in
+       let named =
+         List.map
+           (fun (row : planning_goal_history) ->
+             (* No title means the goal was opened before the server recorded
+                openings, so the id is all there is to call it. *)
+             let name =
+               match row.pgh_title with
+               | Some title -> title
+               | None -> row.pgh_goal_id
+             in
+             match row.pgh_lifetime_hours with
+             | Some hours -> name ^ " " ^ lifetime_label hours
+             | None -> name)
+           history
+       in
+       box_line_styled buf cols ~style:(Theme.recede ())
+         ("  " ^ String.concat " · " named)));
   box_divider buf cols;
 
   let goals =

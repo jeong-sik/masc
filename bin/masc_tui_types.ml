@@ -1663,11 +1663,22 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_completion_authority_pending_count: int;
 }
 
+type planning_goal_history = Tui_decode.planning_goal_history
+  = {
+  pgh_goal_id: string;
+  pgh_title: string option;
+  pgh_opened_at: string option;
+  pgh_closed_at: string option;
+  pgh_final_phase: string option;
+  pgh_lifetime_hours: float option;
+}
+
 type planning_snapshot = Tui_decode.planning_snapshot
   = {
   pl_goals: planning_goal list;
   pl_rollup: planning_rollup;
   pl_backlog: planning_backlog;
+  pl_goal_history: planning_goal_history list;
   pl_generated_at: string;
 }
 

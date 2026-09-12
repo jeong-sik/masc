@@ -22,10 +22,11 @@ type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Bound_official_clie
 val pending : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (pending option, string) result
 
-(** Called only after the resumed direct model turn completed successfully.
-    The existing spent-wake intake then retires its correlation stimulus. *)
+(** Record exact replay evidence only after the client transmitted its current input. *)
 val observe_native_input : ?blocks:Agent_core.Types.content_block list -> config:Workspace.config -> user_message:string -> admission -> transmitted:string -> (unit, string) result
+(** Discharge only after transmitted input and a later native turn settled in the original session. *)
 val complete_native : config:Workspace.config -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result
+(** After successful continuation, record completion for the existing spent-wake intake. *)
 val record_completed : config:Workspace.config -> keeper_name:string -> admission ->
   (Keeper_approval_queue.continuation_projection_result, string) result

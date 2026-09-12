@@ -153,7 +153,9 @@ let relay_to_board ~author content =
       Log.MsxLog.warn
         "arcade relay: board post refused, the load itself is unaffected: %s"
         (Tool_result.message result)
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | e ->
     Log.MsxLog.warn
       "arcade relay: board post raised, the load itself is unaffected: %s"
       (Printexc.to_string e)

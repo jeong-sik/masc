@@ -195,18 +195,45 @@ let transcribe_audio ~audio_file ?language_code () =
              "all enabled STT endpoints failed: %s"
              (String.concat " | " (List.rev attempted)))
       | endpoint :: rest ->
-        (match transcribe_via_http_stt endpoint ~audio_file ~model with
-         | Ok json ->
-           let text =
-             Option.value
-               (Json_util.get_string json "text")
-               ~default:(Yojson.Safe.to_string json)
-           in
+        (* Asked the way this endpoint answers. The command kinds were wired
+           into the probe and not into this loop, so a configured whisper_cli
+           endpoint -- the only kind that transcribes without a server -- was
+           sent an HTTP request it has no address for and reported as failed,
+           while [voice-verify --audio] on the same configuration worked.
+           [transcriber_of_kind] is the same closed answer the probe reads, so
+           a kind added later stops this compiling until it has one. *)
+        let heard =
+          match transcriber_of_kind endpoint.Voice_config.kind with
+          | Does_not_transcribe ->
+            (* Named rather than attempted. An endpoint that speaks, listed
+               under [voice.stt], is a configuration to correct; an HTTP
+               attempt reported it as a network failure instead. *)
+            Error "this endpoint kind speaks and does not transcribe"
+          | By_command ->
+            (* The command answers with its own output and knows no language
+               field; [language_code] is then the caller's or unknown. *)
+            Result.map
+              (fun transcript -> transcript, None)
+              (transcribe_via_command endpoint ~audio_file ~model)
+          | Over_http ->
+            (match transcribe_via_http_stt endpoint ~audio_file ~model with
+             | Ok json ->
+               Result.map
+                 (fun text -> text, Json_util.get_string json "language_code")
+                 (transcript_of_stt_json json)
+             | Error error -> Error error)
+        in
+        (match heard with
+         | Ok (text, reported_language) ->
            let lang =
              match language_code with
              | Some lc -> lc
              | None ->
-               (match Json_util.get_string json "language_code" with
+               (* The endpoint says which language it heard, or does not. A
+                  command answers with its transcript and no such field, so
+                  "unknown" here is the endpoint having been silent about it
+                  -- the same word this loop has always used. *)
+               (match reported_language with
                 | Some lc -> lc
                 | None -> "unknown")
            in
@@ -242,6 +269,12 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
 let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
+  (* The dashboard's own attempt, which only knows the HTTP endpoints. A
+     section that names no model has none of those to try, so there is nothing
+     to attempt rather than something to attempt with a blank name. *)
+  match model with
+  | None -> None
+  | Some model ->
   let endpoints = available_tts_endpoints tts in
   let rec try_endpoint = function
     | [] -> None
@@ -334,10 +367,16 @@ let probe_tts ?(agent_id = "probe") ~message () =
                 if not endpoint.Voice_config.enabled
                 then Skipped "disabled in the configuration"
                 else if
-                  not
-                    (Voice_runtime_overlay.transport_supports_http_tts
-                       (Voice_runtime_overlay.adapter_for_endpoint endpoint))
-                then Skipped "this endpoint kind does not synthesize over HTTP"
+                  (* say synthesizes without HTTP, so the question is whether
+                     this kind speaks at all, not whether it speaks over a
+                     wire. Asking the second one reported the kind a fresh mac
+                     actually has as not asked. *)
+                  match endpoint.Voice_config.kind with
+                  | Voice_config.Voice_mcp | Voice_config.Whisper_cli -> true
+                  | Voice_config.Openai_compat
+                  | Voice_config.Elevenlabs_direct
+                  | Voice_config.Macos_say -> false
+                then Skipped "this endpoint kind does not synthesize"
                 else (
                   let output_file =
                     make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
@@ -348,14 +387,26 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   let voice =
                     Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
                   in
+                  (* The probe produces the audio the same two ways the speak
+                     path does, so that what it reports is what a turn would
+                     get rather than a second opinion. *)
                   let result =
-                    speak_via_http_tts_to_file
-                      endpoint
-                      ~agent_id
-                      ~message
-                      ~voice
-                      ~model:tts.Voice_config.default_model
-                      ~output_file
+                    match endpoint.Voice_config.kind with
+                    | Voice_config.Macos_say ->
+                      Voice_bridge_transport.speak_via_command_to_file
+                        endpoint ~message ~voice ~output_file
+                    | Voice_config.Openai_compat
+                    | Voice_config.Elevenlabs_direct
+                    | Voice_config.Voice_mcp
+                    | Voice_config.Whisper_cli ->
+                      (match tts.Voice_config.default_model with
+                       | None ->
+                         Error
+                           "this endpoint is asked for a model by name and [voice.tts] \
+                            names none"
+                       | Some model ->
+                         speak_via_http_tts_to_file
+                           endpoint ~agent_id ~message ~voice ~model ~output_file)
                   in
                   remove_quietly output_file;
                   match result with
@@ -684,13 +735,25 @@ let attempt_tts_endpoint
         | Voice_runtime_overlay.Elevenlabs_direct
         | Voice_runtime_overlay.Voice_mcp
         | Voice_runtime_overlay.Whisper_cli ->
-          speak_via_http_tts_to_file
-            endpoint
-            ~message
-            ~voice
-            ~model
-            ~agent_id
-            ~output_file:audio_file)
+          (* These are asked for the section's model by name. A section that
+             names none is one whose endpoints all take none, so an endpoint
+             here means the two disagree -- said rather than sent as
+             [model_id ""]. *)
+          (match model with
+           | None ->
+             Error
+               (Printf.sprintf
+                  "voice config endpoint %s is asked for a model by name and \
+                   [voice.tts] names none"
+                  endpoint.Voice_config.id)
+           | Some model ->
+             speak_via_http_tts_to_file
+               endpoint
+               ~message
+               ~voice
+               ~model
+               ~agent_id
+               ~output_file:audio_file))
      with
      | Ok file_size ->
        (* run_local_playback now owns the dedup record inside its mutex to
@@ -839,6 +902,12 @@ let try_http_tts_for_browser_audio
       ?audio_device
       endpoints
   =
+  (* Same reason as the dashboard chain above: these are the HTTP endpoints,
+     every one of them asked for the model by name, so a section that names
+     none has nothing here to try. *)
+  match model with
+  | None -> None
+  | Some model ->
   let http_endpoints =
     List.filter Voice_runtime_overlay.endpoint_supports_http_tts endpoints
   in

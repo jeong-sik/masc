@@ -6427,15 +6427,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        answer. *)
     (* A pending read says how long it has been pending. Five to sixteen
        seconds is what the Sandbox tab's status took against a live server,
-       and a bare "(loading...)" through that window reads as a stall. *)
-    let loading_row what =
+       and a bare "(loading...)" through that window reads as a stall.
+
+       The stamp is the read's own: the tab read and the container-log read are
+       two reads and the operator starts the second long after the first has
+       landed. One reading of the clock for the frame, so two rows drawn in the
+       same frame cannot disagree about what time it is. *)
+    let now_ns = Mtime_clock.elapsed_ns () in
+    let loading_row ?started_ns what =
       Ansi.dim ^ "  "
       ^ Masc_tui_types.loading_notice
-          ?elapsed_s:
-            (Masc_tui_types.detail_read_elapsed ~now:(Unix.gettimeofday ())
-               state)
+          ?elapsed_s:(Masc_tui_types.pending_elapsed_s ~now_ns started_ns)
           what
       ^ Ansi.reset
+    in
+    let tab_loading_row what =
+      loading_row ?started_ns:state.detail_read_started_at what
     in
     let stamped_or view error =
       match error with
@@ -6444,7 +6451,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           match view with
           | Some (stamp, lines) when String.equal stamp k.k_name ->
               List.map (fun line -> "  " ^ line) lines
-          | Some _ | None -> [ loading_row "loading" ])
+          | Some _ | None -> [ tab_loading_row "loading" ])
     in
     let channel_lines =
       match state.connectors_error, state.connectors with
@@ -6779,8 +6786,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           in
           let logs =
             match state.keeper_sandbox_logs_inflight with
-            | Some (keeper_name, _) when String.equal keeper_name k.k_name ->
-              [ loading_row "loading actual container logs" ]
+            | Some request when String.equal request.slr_keeper k.k_name ->
+              [ loading_row ~started_ns:request.slr_started_ns
+                  "loading actual container logs" ]
             | Some _ | None ->
               match state.keeper_sandbox_logs_error with
               | Some (stamp, detail) when String.equal stamp k.k_name ->

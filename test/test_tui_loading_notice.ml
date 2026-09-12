@@ -29,16 +29,40 @@ let test_a_slow_read_says_how_long () =
     ("(loading actual container logs" ^ cut ^ " 7s)")
     (Types.loading_notice ~elapsed_s:7 "loading actual container logs")
 
+let second = 1_000_000_000L
+let ns seconds = Int64.mul (Int64.of_int seconds) second
+
 let test_the_elapsed_needs_a_start () =
+  check (option int) "a read nobody asked for measures nothing" None
+    (Types.pending_elapsed_s ~now_ns:(ns 100) None);
+  check (option int) "ten seconds since this read began" (Some 10)
+    (Types.pending_elapsed_s ~now_ns:(ns 100) (Some (ns 90)));
+  check (option int) "whole seconds, so a part of one is none of one" (Some 0)
+    (Types.pending_elapsed_s ~now_ns:(Int64.add (ns 90) 999_999_999L)
+       (Some (ns 90)))
+
+let test_two_reads_are_timed_apart () =
+  (* The Sandbox tab's status and its container logs are two reads, and the
+     operator presses o/l long after the status landed. Sharing one stamp made
+     a log read that had just started claim the status read's minutes. *)
   let state = fresh () in
-  check (option int) "a screen that has asked for nothing measures nothing" None
-    (Types.detail_read_elapsed ~now:100. state);
-  state.detail_read_started_at <- Some 90.;
-  check (option int) "ten seconds since the read began" (Some 10)
-    (Types.detail_read_elapsed ~now:100. state);
-  (* A clock that moved backwards must not count up from the future. *)
-  check (option int) "a backwards clock counts zero" (Some 0)
-    (Types.detail_read_elapsed ~now:80. state)
+  state.detail_read_started_at <- Some (ns 10);
+  state.keeper_sandbox_logs_inflight <-
+    Some
+      { Types.slr_keeper = "analyst"
+      ; slr_generation = 3
+      ; slr_started_ns = ns 98
+      };
+  let now_ns = ns 100 in
+  check (option int) "the tab read has been waiting ninety seconds" (Some 90)
+    (Types.pending_elapsed_s ~now_ns state.detail_read_started_at);
+  let logs_started =
+    Option.map
+      (fun (request : Types.sandbox_logs_request) -> request.slr_started_ns)
+      state.keeper_sandbox_logs_inflight
+  in
+  check (option int) "and the log read, two" (Some 2)
+    (Types.pending_elapsed_s ~now_ns logs_started)
 
 let () =
   run "tui loading notice"
@@ -49,5 +73,7 @@ let () =
             test_a_slow_read_says_how_long
         ; test_case "the elapsed needs a start" `Quick
             test_the_elapsed_needs_a_start
+        ; test_case "two reads are timed apart" `Quick
+            test_two_reads_are_timed_apart
         ] )
     ]

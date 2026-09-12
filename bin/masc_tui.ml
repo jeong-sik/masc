@@ -3922,9 +3922,12 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
 (* Each detail read stamps its own start, so the pane can say how long it has
    been waiting. Here rather than at the key that triggered it: the same read
    is started by entering the screen, by walking the tabs, and by R, and a
-   stamp written at one of those three is missing at the other two. *)
+   stamp written at one of those three is missing at the other two.
+
+   Monotonic, because the only question asked of the stamp is how long the read
+   has been pending. *)
 let mark_detail_read_started state =
-  state.detail_read_started_at <- Some (Unix.gettimeofday ())
+  state.detail_read_started_at <- Some (Mtime_clock.elapsed_ns ())
 
 let launch_keeper_config_view state ~mailbox keeper_name =
   mark_detail_read_started state;
@@ -3975,7 +3978,12 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   let port = state.port in
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
   let generation = state.keeper_sandbox_logs_generation in
-  state.keeper_sandbox_logs_inflight <- Some (keeper_name, generation);
+  state.keeper_sandbox_logs_inflight <-
+    Some
+      { slr_keeper = keeper_name
+      ; slr_generation = generation
+      ; slr_started_ns = Mtime_clock.elapsed_ns ()
+      };
   let run () =
     let result =
       try
@@ -11398,7 +11406,11 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error detail -> state.keeper_sandbox_view_error <- Some detail)
   | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
       let is_current =
-        state.keeper_sandbox_logs_inflight = Some (keeper_name, generation)
+        match state.keeper_sandbox_logs_inflight with
+        | Some request ->
+            String.equal request.slr_keeper keeper_name
+            && request.slr_generation = generation
+        | None -> false
       in
       if is_current then begin
         state.keeper_sandbox_logs_inflight <- None;

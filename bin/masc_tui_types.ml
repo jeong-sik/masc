@@ -3286,6 +3286,15 @@ type msx_frame = {
   msx_players : string list;  (* who pressed within the server's window, newest first *)
 }
 
+(* A container-log read that has been asked for and not answered. The keeper and
+   the generation identify it; the stamp says when it was asked, in monotonic
+   nanoseconds. *)
+type sandbox_logs_request = {
+  slr_keeper: string;
+  slr_generation: int;
+  slr_started_ns: int64;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3554,14 +3563,26 @@ type state = {
   mutable keeper_run_cursor: int;
   (* When the detail screen last asked for the tab it is on. The tabs that
      read over HTTP draw "(loading...)" until their answer lands, and without
-     a start there is no way to say how long that has been. *)
-  mutable detail_read_started_at: float option;
+     a start there is no way to say how long that has been.
+
+     Monotonic nanoseconds from [Mtime_clock.elapsed_ns], not a wall clock: the
+     only question asked of this stamp is how long a read has been pending, and
+     NTP or an operator moving the system clock makes a wall clock answer that
+     wrongly -- backwards it suppresses the count, forwards it reports an
+     arbitrary wait. The clock is the caller's because this module does not
+     depend on one. *)
+  mutable detail_read_started_at: int64 option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
-  mutable keeper_sandbox_logs_inflight: (string * int) option;
+  (* The container-log read, which is its own read: the operator opens the
+     Sandbox tab, waits for its status, and presses o/l later. Its start lives
+     with the request rather than beside it, so an in-flight log read cannot
+     exist without the stamp that times it, and status and logs pending at once
+     are timed apart. *)
+  mutable keeper_sandbox_logs_inflight: sandbox_logs_request option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -4804,13 +4825,20 @@ let loading_notice ?elapsed_s what =
       Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
   | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
 
-(* [now] is an argument so the answer is the same every time it is asked with
-   the same clock. Clamped at zero: a clock that moved backwards must not count
-   up from the future. *)
-let detail_read_elapsed ~now (state : state) =
+let nanoseconds_per_second = 1_000_000_000L
+
+(* How long a read has been pending, in whole seconds. [now_ns] is an argument
+   so the answer is the same every time it is asked with the same reading, and
+   the stamp is the read's own rather than the state's: the Sandbox tab's status
+   and its container logs are two reads and can be pending at once.
+
+   No clamp, because a monotonic reading cannot go backwards. A wall clock can,
+   and the clamp that used to be here turned that into a silent zero. *)
+let pending_elapsed_s ~now_ns started_ns =
   Option.map
-    (fun started -> int_of_float (Float.max 0. (now -. started)))
-    state.detail_read_started_at
+    (fun since ->
+      Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
+    started_ns
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor

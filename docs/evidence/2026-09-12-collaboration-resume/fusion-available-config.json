@@ -1,0 +1,129 @@
+{
+  "observed_at": "2026-09-12T12:53:45.262528+00:00",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "intent": {
+    "before_revision": "f85a43d464d5422c86cdd58e0cc5cc369b95bde1b635adbd52443333bf66b99f",
+    "before_sha256": "40e88329d37a70862d538246781b4e44677a3d112b7f60aa2a0b6a14d48e6f1b",
+    "after_sha256": "fc7c16155081a323aa6f4310b2622df74827558c03cbd33eeb2e0d834293b039",
+    "changed_fields": [
+      "fusion.presets.collaboration.panel",
+      "fusion.presets.collaboration.judge"
+    ],
+    "before": {
+      "enabled": true,
+      "default_preset": "collaboration",
+      "presets": {
+        "collaboration": {
+          "panel": [
+            "kimi_coding.kimi-for-coding",
+            "glm-coding.glm-5.3"
+          ],
+          "judge": "kimi_coding.kimi-for-coding",
+          "web_tools": false,
+          "panel_system_prompt": "Evaluate the supplied decision using its actual evidence and work criteria. State uncertainty and alternatives.",
+          "judge_system_prompt": "Compare the panel reasoning against the original goal. Recommend an action without inventing evidence."
+        }
+      }
+    },
+    "after": {
+      "enabled": true,
+      "default_preset": "collaboration",
+      "presets": {
+        "collaboration": {
+          "panel": [
+            "glm-coding.glm-5.3",
+            "codex_subscription.gpt-5.6-sol"
+          ],
+          "judge": "glm-coding.glm-5.3",
+          "web_tools": false,
+          "panel_system_prompt": "Evaluate the supplied decision using its actual evidence and work criteria. State uncertainty and alternatives.",
+          "judge_system_prompt": "Compare the panel reasoning against the original goal. Recommend an action without inventing evidence."
+        }
+      }
+    },
+    "only_expected_changes": true,
+    "scope": "Manual operating configuration selecting current GLM and Codex; not automatic failover or model availability proof."
+  },
+  "preview": {
+    "ok": true,
+    "can_save": true,
+    "validation": {
+      "valid": true,
+      "schema_version": 1,
+      "current_schema_version": 1,
+      "forward_schema": false,
+      "issues": []
+    }
+  },
+  "commit": {
+    "ok": true,
+    "state": "committed",
+    "commit": {
+      "source_revision": "86e72f6e1a82c7bc61a99ea6f3d72c32fbad3929bbf30d56463e9df76cb454f4",
+      "order": "1",
+      "durability": "durable",
+      "warnings": []
+    },
+    "application": {
+      "operation": "raw_save",
+      "routing": {
+        "status": "applied",
+        "requires_restart": false,
+        "applied_at": "2026-09-12T12:52:00Z"
+      },
+      "keeper_overlay": {
+        "status": "not_configured",
+        "configured_count": 0,
+        "requires_restart": false,
+        "pending_keys": [],
+        "applied_keys": [],
+        "preempted_keys": [],
+        "applied_at": null
+      },
+      "skills": {
+        "state": "unchanged",
+        "input_source_revision": "86e72f6e1a82c7bc61a99ea6f3d72c32fbad3929bbf30d56463e9df76cb454f4",
+        "snapshot_revision": "8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2",
+        "catalog_revision": "fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d",
+        "config_state": "configured"
+      }
+    }
+  },
+  "readback": {
+    "generated_at": "2026-09-12T12:52:13Z",
+    "config": {
+      "enabled": true,
+      "default_preset": "collaboration",
+      "staged_judge_group_size": 3,
+      "presets": [
+        {
+          "name": "collaboration",
+          "panels": [
+            {
+              "models": [
+                "glm-coding.glm-5.3",
+                "codex_subscription.gpt-5.6-sol"
+              ],
+              "label": "",
+              "system_prompt": "Evaluate the supplied decision using its actual evidence and work criteria. State uncertainty and alternatives.",
+              "web_tools": false,
+              "max_output_tokens": null,
+              "timeout_s": null
+            }
+          ],
+          "judge": "glm-coding.glm-5.3",
+          "judge_system_prompt": "Compare the panel reasoning against the original goal. Recommend an action without inventing evidence.",
+          "judge_max_output_tokens": null,
+          "judge_timeout_s": null,
+          "judges": [],
+          "min_answered": 1
+        }
+      ]
+    }
+  },
+  "actual_toml_sha256": "fc7c16155081a323aa6f4310b2622df74827558c03cbd33eeb2e0d834293b039",
+  "parsed_toml_matches_candidate": true,
+  "model_call_performed": false,
+  "natural_failover_proven": false,
+  "scope": "Only collaboration panel and judge changed through preview/save. Prompts and all other parsed TOML values preserved. min_answered remains its existing default1; actual two-panel acceptance requires inspecting both outcomes, not only aggregate completion."
+}

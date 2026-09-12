@@ -68,3 +68,11 @@
 최신 추가 증거: `serial-autonomy-2578/`의 원문·동료 비평·Task 승인·Goal proof, `operator-cancel-op071.json`, `reassessment-health-2130.json`, `ci-verified-slices.json`. 과거 `task-completion.json`의 Goal executing은 당시 관측이며, 이후 `goal-proof.json`의 확인 대기 전이가 최신이다.
 
 통합 Test 첫 요청 #34694052046은 하위 디렉터리의 두 suite를 bare name으로 지정한 운영 실수를 확인해 대기 중 취소 요청했다. 실제 `keeper_chat_operations/` 경로로 교정해 같은 head의 #34694177184를 요청했다. Release #34694053454는 그대로 유지한다.
+
+## 21:57 KST 후속 진행
+
+- Fusion collaboration 설정을 실제 preview/save API로 변경했다. panel은 GLM·Codex, judge는 GLM이며 commit/routing applied와 전체 TOML 의미 일치, GET readback을 확인했다. 기존 prompt와 다른 설정을 보존했다. 두 panel 실제 응답과 자연 failover는 아직 증거가 없다(`fusion-available-config.json`).
+- 실제 설치 Chat probe를 추가했고 실행 ID·provider tool id·자율 턴·입력·출력·artifact 참조와 화면 원문/patch를 함께 검증하도록 독립 리뷰를 반영했다. Node 구문과 실제 보존 파일의 diff/patch 왕복만 검사했고, 설치된 후보의 브라우저 성공은 아직 아니다(`CHAT-ACCEPTANCE.md`).
+- 다음 Goal `memory-garden-participatory-adaptation`과 `task-004`를 생성했다. 독자 선택권과 접근성의 표현 방식을 비교·논의한 뒤 실제 PPTX·MP4를 만든다. 개별 착수 또는 Fusion 도구 호출 지시는 보내지 않았다. 현재 생성/연결만 확인했으며 자발적 수행 증거는 추후 검사한다.
+- native Gate 후보의 Release는 새 상태 분기의 warning4로 실패했다. `d2dbe6d297`에서 명시적 패턴으로 정정해 통합했고, 별도 native fixture runtime 초기화 수정 `da66b0a64d`도 통합했다. 최초 replay 기록과 재조회 기록의 문구 차이, setup의 입력 보정 보존에 관한 source 수정/리뷰가 진행 중이므로 새 배포 성공을 주장하지 않는다.
+- 9월10일 디자이너의 다른 두 operation에도 original authority 없는 Gate binding이 남아 있음을 새로 확인했다. 이들은 이번에 취소하거나 복구하지 않았다. `remaining-original-gate-bindings.json`에 기록했으며 server health ok와 전체 queue 완결은 구별한다.

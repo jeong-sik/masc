@@ -150,7 +150,11 @@ let test_the_other_kinds_say_there_is_nothing_to_ask () =
     (String.length openai > 0);
   let mcp = refused Voice_config.Voice_mcp (Some "http://127.0.0.1:9000") in
   Alcotest.(check bool) "the tool refusal names the endpoint" true
-    (String.length mcp > 0)
+    (String.length mcp > 0);
+  Alcotest.(check string) "OpenAI refuses by capability even without a URL"
+    openai (refused Voice_config.Openai_compat None);
+  Alcotest.(check string) "MCP refuses by capability even without a URL"
+    mcp (refused Voice_config.Voice_mcp None)
 
 let test_command_catalogues_are_not_http_requests () =
   List.iter
@@ -216,7 +220,7 @@ let with_catalogue_processes f =
         {|#!/bin/sh
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/argv"
 /bin/cat > "$MASC_TEST_CATALOGUE_DIR/stdin"
-printf '%s\n' '{"voices":[{"voice_id":"http-voice"}]}'
+printf '%s\n' '{"voices":[{"voice_id":"http-voice"}],"has_more":false}'
 |};
       write "say"
         {|#!/bin/sh
@@ -259,9 +263,13 @@ let test_catalogue_credentials_reach_stdin_and_never_argv () =
     in
     ignore (listed_id endpoint);
     let argv = String.split_on_char '\n' (read "argv") in
+    let timeout = List.nth argv 3 in
+    Alcotest.(check bool) "the remaining scan deadline is positive and not renewed" true
+      (float_of_string timeout > 0.
+       && float_of_string timeout <= Env_config_runtime.Voice.http_request_timeout_sec);
     Alcotest.(check (list string)) "curl receives only a header source and configured timeout"
       [ "-sS"; "--fail-with-body"; "--max-time"
-      ; string_of_float Env_config_runtime.Voice.http_request_timeout_sec
+      ; timeout
       ; "--header"; "@-"; "https://api.elevenlabs.io/v2/voices"; ""
       ] argv;
     Alcotest.(check string) "only stdin carries the fixture credential"
@@ -296,6 +304,132 @@ let test_catalogue_requests_dispatch_every_endpoint_kind () =
       ; "whisper_cli", None
       ])
 
+let test_catalogue_credentials_are_typed () =
+  let decode credential =
+    Server_voice_setup_actions.catalogue_endpoint_of_json
+      (`Assoc ([ "kind", `String "elevenlabs_direct" ] @ credential))
+  in
+  List.iter
+    (fun value ->
+      match decode [ "api_key_env", value ] with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a malformed credential variable must not become absence")
+    [ `Int 7; `Bool false; `List []; `String "" ];
+  List.iter
+    (fun (fields, expected) ->
+      match decode fields with
+      | Error error -> Alcotest.fail (Server_voice_setup_actions.error_message error)
+      | Ok endpoint ->
+        Alcotest.(check (option string)) "absence and the supplied name retain their meaning"
+          expected endpoint.Voice_config.api_key_env)
+    [ [], None; [ "api_key_env", `Null ], None
+    ; [ "api_key_env", `String "  FIXTURE_VOICE_KEY  " ], Some "FIXTURE_VOICE_KEY" ]
+
+let catalogue_request : Voice_runtime_overlay.voice_listing_request =
+  { listing_url = "https://fixture.invalid/v2/voices?scope=mine"
+  ; listing_headers = [ "xi-api-key", "fixture-only-secret" ]
+  }
+
+let page ids continuation =
+  `Assoc
+    ([ "voices", `List (List.map (fun id -> `Assoc [ "voice_id", `String id ]) ids)
+     ; "has_more", `Bool (Option.is_some continuation)
+     ; "total_count", `Int 0 (* A live snapshot is not a pagination boundary. *)
+     ] @ match continuation with
+     | None -> [ "next_page_token", `Null ]
+     | Some token -> [ "next_page_token", `String token ])
+
+let test_all_catalogue_pages_share_one_deadline () =
+  let responses = ref [ page [ "first" ] (Some "next &/?=+")
+                      ; page [ "second" ] (Some "last")
+                      ; page [ "third" ] None ] in
+  let remaining = ref 7. in
+  let time_left () = remaining := !remaining -. 1.; !remaining in
+  let calls = ref [] in
+  let fetch_page ~timeout_sec request =
+    calls := (timeout_sec, request) :: !calls;
+    match !responses with
+    | [] -> Alcotest.fail "the completed catalogue must not request another page"
+    | response :: rest -> responses := rest; Ok response
+  in
+  let collected =
+    Voice_bridge_transport.collect_voice_catalogue ~remaining_seconds:time_left
+      ~fetch_page catalogue_request
+  in
+  (match Result.bind collected Voice.catalogue_voices_of_json with
+   | Error message -> Alcotest.fail message
+   | Ok voices ->
+     Alcotest.(check (list string)) "all pages reach the caller in provider order"
+       [ "first"; "second"; "third" ] (List.map (fun v -> v.Voice.voice_id) voices));
+  let calls = List.rev !calls in
+  Alcotest.(check (list (float 0.))) "later requests receive the original deadline's remainder"
+    [ 6.; 4.; 2. ] (List.map fst calls);
+  Alcotest.(check (list (option string))) "opaque cursors survive URL encoding"
+    [ None; Some "next &/?=+"; Some "last" ]
+    (List.map (fun (_, request) ->
+       Uri.get_query_param (Uri.of_string request.Voice_runtime_overlay.listing_url)
+         "next_page_token") calls);
+  List.iter
+    (fun (_, request) ->
+      Alcotest.(check (option string)) "existing query parameters survive"
+        (Some "mine")
+        (Uri.get_query_param (Uri.of_string request.Voice_runtime_overlay.listing_url) "scope");
+      Alcotest.(check (list (pair string string))) "every page uses the same header source"
+        catalogue_request.listing_headers request.Voice_runtime_overlay.listing_headers)
+    calls
+
+let test_bad_pagination_never_returns_a_partial_catalogue () =
+  let malformed =
+    [ `Assoc [ "voices", `List []; "has_more", `Bool true ]
+    ; `Assoc [ "voices", `List []; "has_more", `Bool true; "next_page_token", `Null ]
+    ; `Assoc [ "voices", `List []; "has_more", `String "false" ]
+    ; `Assoc [ "voices", `List []; "has_more", `Bool true; "next_page_token", `String "" ]
+    ; `Assoc [ "voices", `List []; "has_more", `Bool false; "next_page_token", `Int 1 ]
+    ; `Assoc [ "voices", `List []; "has_more", `Bool false; "has_more", `Bool true ]
+    ; `Assoc [ "voices", `List [] ]
+    ; `Assoc [ "has_more", `Bool false ]
+    ]
+  in
+  List.iter
+    (fun failure ->
+      let responses = ref [ Ok (page [ "must-not-leak" ] (Some "next")); failure ] in
+      let fetch_page ~timeout_sec:_ _ =
+        match !responses with
+        | response :: rest -> responses := rest; response
+        | [] -> Alcotest.fail "malformed pagination must stop immediately"
+      in
+      match Voice_bridge_transport.collect_voice_catalogue
+              ~remaining_seconds:(fun () -> 1.) ~fetch_page catalogue_request with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "partial catalogues must not be reported as complete")
+    (Error "second page refused" :: List.map (fun json -> Ok json) malformed);
+  let calls = ref 0 in
+  let fetch_page ~timeout_sec:_ _ =
+    incr calls;
+    Ok (page [ "duplicate" ] (Some "same"))
+  in
+  (match Voice_bridge_transport.collect_voice_catalogue
+           ~remaining_seconds:(fun () -> 1.) ~fetch_page catalogue_request with
+   | Error _ -> Alcotest.(check int) "a repeated cursor is stopped before another request" 2 !calls
+   | Ok _ -> Alcotest.fail "a cursor cycle is not a complete catalogue")
+
+let test_catalogue_deadline_stops_the_whole_scan () =
+  let remaining = ref 1. in
+  let calls = ref 0 in
+  let fetch_page ~timeout_sec:_ _ =
+    incr calls;
+    remaining := 0.;
+    Ok (page [ "late" ] (Some "never-fetch"))
+  in
+  (match Voice_bridge_transport.collect_voice_catalogue
+           ~remaining_seconds:(fun () -> !remaining) ~fetch_page catalogue_request with
+   | Error _ -> Alcotest.(check int) "expiry never starts another page" 1 !calls
+   | Ok _ -> Alcotest.fail "an expired scan must not return a partial catalogue");
+  (match Voice_bridge_transport.collect_voice_catalogue
+           ~remaining_seconds:(fun () -> 0.) ~fetch_page catalogue_request with
+   | Error _ -> Alcotest.(check int) "an expired deadline dispatches nothing" 1 !calls
+   | Ok _ -> Alcotest.fail "an expired deadline must not dispatch")
+
 let () =
   Alcotest.run
     "voice_catalog"
@@ -306,6 +440,14 @@ let () =
             test_catalogue_credentials_reach_stdin_and_never_argv
         ; Alcotest.test_case "catalogue requests dispatch every endpoint kind" `Quick
             test_catalogue_requests_dispatch_every_endpoint_kind
+        ; Alcotest.test_case "catalogue credentials are typed" `Quick
+            test_catalogue_credentials_are_typed
+        ; Alcotest.test_case "all catalogue pages share one deadline" `Quick
+            test_all_catalogue_pages_share_one_deadline
+        ; Alcotest.test_case "bad pagination never returns a partial catalogue" `Quick
+            test_bad_pagination_never_returns_a_partial_catalogue
+        ; Alcotest.test_case "the deadline stops the whole catalogue scan" `Quick
+            test_catalogue_deadline_stops_the_whole_scan
         ] )
     ; ( "what the endpoint answered"
       , [ Alcotest.test_case "the answer becomes pickable rows" `Quick

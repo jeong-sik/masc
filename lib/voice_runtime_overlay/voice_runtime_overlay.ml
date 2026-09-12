@@ -436,31 +436,32 @@ let elevenlabs_catalogue_url base_url =
 
 let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
   let adapter = adapter_for_endpoint endpoint in
-  match endpoint_base_url endpoint, adapter.transport with
-  | _, (Macos_say | Whisper_cli) ->
+  match adapter.transport with
+  | Macos_say | Whisper_cli ->
     Error
       (Printf.sprintf
          "voice config endpoint %s runs a command and has no HTTP voice catalogue"
          endpoint.id)
-  | None, _ ->
-    Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
-  | Some _, Openai_compat ->
+  | Openai_compat ->
     Error
       (Printf.sprintf
          "voice config endpoint %s speaks the OpenAI shape, which has no voice list \
           to ask for: type the voice name the server expects"
          endpoint.id)
-  | Some _, Voice_mcp ->
+  | Voice_mcp ->
     Error
       (Printf.sprintf
          "voice config endpoint %s is reached through a tool, which is asked to \
           speak rather than asked what it can speak with"
          endpoint.id)
-  | Some base_url, Elevenlabs_direct ->
-    Ok
-      { listing_url = elevenlabs_catalogue_url base_url
-      ; listing_headers = [ "xi-api-key", api_key ]
-      }
+  | Elevenlabs_direct ->
+    (match endpoint_base_url endpoint with
+     | None -> Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+     | Some base_url ->
+       Ok
+         { listing_url = elevenlabs_catalogue_url base_url
+         ; listing_headers = [ "xi-api-key", api_key ]
+         })
 ;;
 
 (* The two kinds that are a command rather than an address.

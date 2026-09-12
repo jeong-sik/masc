@@ -4,4 +4,4 @@
 (test
  (name test_voice_catalog)
  (libraries alcotest yojson masc masc.server masc.config masc.voice_config
-  masc.voice_runtime_overlay eio_main unix))
+  masc.voice_runtime_overlay masc.voice_bridge_core eio_main unix uri))

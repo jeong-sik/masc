@@ -7,6 +7,7 @@ type observation = {
   height : int;
   cs : int;
   ip : int;
+  psp : int;
   exited : bool;
   exit_code : int;
   halted : bool;
@@ -92,6 +93,7 @@ let observe st =
     width;
     height;
     cs = Cpu86.seg cpu 1;
+    psp = Dos_machine.psp_seg_of m;
     ip = Cpu86.dump_ip cpu;
     exited = Dos_machine.exited m;
     exit_code = Dos_machine.exit_code m;
@@ -111,15 +113,19 @@ let entry_json e : Yojson.Safe.t =
     [ ("step", `Int e.at_step); ("who", `String e.who); ("key", `String e.key_name) ]
 ;;
 
+(* The file first, then the list. A failed append -- a full disk, a mode
+   changed under the process -- raises out of here before the key reaches the
+   ring, so recording it first would leave a key in [ledger ()] that the guest
+   never got and no file remembers. *)
 let append_entry st e =
-  st.entries <- e :: st.entries;
   Out_channel.with_open_gen
     [ Open_append; Open_creat; Open_wronly ]
     0o644
     st.ledger_path
     (fun oc ->
       output_string oc (Yojson.Safe.to_string (entry_json e));
-      output_char oc '\n')
+      output_char oc '\n');
+  st.entries <- e :: st.entries
 ;;
 
 let rec mkdir_p dir =
@@ -195,41 +201,67 @@ let advance st ~budget ~until_ready =
 
 (* ---------- lifecycle ---------- *)
 
+(* DOS folds filenames to upper case, so DATA.DAT and data.dat are one name to
+   the guest: mounting both leaves one shadowing the other while the
+   observation still lists two, and the program reads bytes the inventory does
+   not appear to hold. A host that keeps them apart is not a reason to guess
+   which one the program meant. *)
+let dos_name_collision files =
+  let rec go seen = function
+    | [] -> None
+    | (name, _) :: rest ->
+      let folded = String.uppercase_ascii name in
+      (match List.assoc_opt folded seen with
+       | Some earlier -> Some (earlier, name)
+       | None -> go ((folded, name) :: seen) rest)
+  in
+  go [] files
+;;
+
 let is_mz image =
   String.length image >= 2 && Char.equal image.[0] 'M' && Char.equal image.[1] 'Z'
 ;;
 
-let load ~ledger_dir ~program_name ~program_bytes ~files =
+let load ~ledger_dir ~program_name ~program_bytes ~files ~announce =
   locked (fun () ->
     if String.length program_bytes = 0 then
       Error (Invalid_request (Printf.sprintf "%s is empty" program_name))
-    else begin
-      let m = Dos_machine.create () in
-      List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
-      (* The image's own bytes choose the loader, not its name: an MZ header is
-         a relocatable EXE, anything else is a flat COM at 0x100. A misnamed
-         file still boots the way DOS would boot it. *)
-      if is_mz program_bytes then Dos_machine.load_exe m program_bytes
-      else Dos_machine.load_com m program_bytes;
-      mkdir_p ledger_dir;
-      let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
-      (* A new machine starts a new ledger. *)
-      Out_channel.with_open_bin ledger_path (fun _ -> ());
-      let st =
-        { m; steps = 0; program = program_name; ledger_path; entries = [] }
-      in
-      state := Some st;
-      let ran = advance st ~budget:boot_steps ~until_ready:true in
-      Ok (observe st, ran)
-    end)
+    else
+      match dos_name_collision files with
+      | Some (earlier, later) ->
+        Error
+          (Invalid_request
+             (Printf.sprintf "%s and %s are one name to DOS; the guest can only see one"
+                earlier later))
+      | None -> begin
+        let m = Dos_machine.create () in
+        List.iter (fun (name, contents) -> Dos_machine.mount_file m name contents) files;
+        (* The image's own bytes choose the loader, not its name: an MZ header is
+           a relocatable EXE, anything else is a flat COM at 0x100. A misnamed
+           file still boots the way DOS would boot it. *)
+        if is_mz program_bytes then Dos_machine.load_exe m program_bytes
+        else Dos_machine.load_com m program_bytes;
+        mkdir_p ledger_dir;
+        let ledger_path = Filename.concat ledger_dir "ledger.jsonl" in
+        (* A new machine starts a new ledger. *)
+        Out_channel.with_open_bin ledger_path (fun _ -> ());
+        let st =
+          { m; steps = 0; program = program_name; ledger_path; entries = [] }
+        in
+        state := Some st;
+        announce ();
+        let ran = advance st ~budget:boot_steps ~until_ready:true in
+        Ok (observe st, ran)
+      end)
 ;;
 
-let eject () =
+let eject ~announce () =
   locked (fun () ->
     match !state with
     | None -> Error No_machine
     | Some _ ->
       state := None;
+      announce ();
       Ok ())
 ;;
 

@@ -26,7 +26,7 @@ let with_workspace f =
     ~finally:(fun () ->
       (* The machine is process-global: a test that leaves one loaded would
          hand it to the next one. *)
-      ignore (Dos_lane.eject () : (unit, Dos_lane.error) result);
+      ignore (Dos_lane.eject ~announce:(fun () -> ()) () : (unit, Dos_lane.error) result);
       Fs_compat.remove_tree base_path)
     (fun () -> f base_path)
 ;;
@@ -237,6 +237,25 @@ let test_a_sequence_has_a_length () =
             [ ("text", `String (String.make 257 'a')) ])))
 ;;
 
+(* DOS folds filenames, so two entries that differ only in case are one name
+   to the guest: one would shadow the other while the observation still listed
+   both. Called on the lane rather than through the inventory on purpose --
+   this machine's filesystem folds case too, so the two files cannot both
+   exist here to be found. *)
+let test_two_names_that_differ_only_in_case_are_refused () =
+  with_workspace (fun base_path ->
+    let announced = ref 0 in
+    let result =
+      Dos_lane.load
+        ~ledger_dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos")
+        ~program_name:"game.com" ~program_bytes:hello_com
+        ~files:[ ("GAME.COM", hello_com); ("DATA.DAT", "upper"); ("data.dat", "lower") ]
+        ~announce:(fun () -> incr announced)
+    in
+    check bool "the load is refused" true (Result.is_error result);
+    check int "and nothing was announced" 0 !announced)
+;;
+
 let test_unknown_key_is_refused () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -322,6 +341,7 @@ let () =
         ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
         ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
         ; test_case "sequence length" `Quick test_a_sequence_has_a_length
+        ; test_case "case collision" `Quick test_two_names_that_differ_only_in_case_are_refused
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

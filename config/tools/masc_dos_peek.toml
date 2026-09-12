@@ -4,7 +4,7 @@ Read the DOS machine's memory.
 
 Physical addresses, 0x00000-0xFFFFF: the text page is at 0xB8000 (two bytes a \
 cell, character then attribute), the BIOS data area at 0x00400, a loaded \
-program's PSP in the observation's CS. Returns hex pairs. Read-only."""
+program's PSP in the observation's psp. Returns hex pairs. Read-only."""
 additional_properties = false
 
 defer_loading = true

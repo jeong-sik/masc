@@ -35,6 +35,10 @@ type observation = {
   height : int;  (** the frame this mode would draw *)
   cs : int;
   ip : int;
+  psp : int;
+      (** the program's PSP segment. Only a COM image starts with [cs] equal
+          to it; an EXE begins in its own code segment, so a caller reading
+          the PSP through {!peek} has to be told where it is. *)
   exited : bool;  (** the program called INT 21h AH=4Ch or fell into INT 20h *)
   exit_code : int;
   halted : bool;  (** HLT — waiting for an interrupt, not finished *)
@@ -96,6 +100,7 @@ val load :
   program_name:string ->
   program_bytes:string ->
   files:(string * string) list ->
+  announce:(unit -> unit) ->
   (observation * ran, error) result
 (** Creates the workspace machine, replacing any previous one. The loader is
     chosen by the image's own bytes — an MZ signature is an EXE, anything
@@ -105,9 +110,19 @@ val load :
     [files] are (name, contents) the guest can open by name, case-insensitively.
     The ledger is [ledger_dir/ledger.jsonl], truncated: a new machine starts a
     new ledger. Loading is not evidence that the program reaches a screen —
-    read the observation. *)
+    read the observation.
 
-val eject : unit -> (unit, error) result
+    Two names that differ only in case are refused: DOS folds filenames, so
+    the guest would see one of them and the observation would list both.
+
+    [announce] runs while the machine's lock is still held, right after this
+    machine becomes the workspace's. Announcements therefore reach whoever
+    reads them in the order the machines actually changed. It must not call
+    back into this module — the lock is not reentrant. *)
+
+val eject : announce:(unit -> unit) -> unit -> (unit, error) result
+(** Drops the workspace machine. [announce] runs under the same lock as
+    {!load}'s, with the same restriction. *)
 val screen : unit -> (observation, error) result
 
 val step : steps:int -> until_ready:bool -> (observation * ran, error) result

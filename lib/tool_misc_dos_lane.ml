@@ -25,6 +25,7 @@ let observation_fields (o : Dos_lane.observation) =
   ; ("video_mode", `String (Printf.sprintf "%02xh" o.video_mode))
   ; ("frame", `String (Printf.sprintf "%dx%d" o.width o.height))
   ; ("cs_ip", `String (Printf.sprintf "%04x:%04x" o.cs o.ip))
+  ; ("psp", `String (Printf.sprintf "%04x" o.psp))
   ; ("exited", `Bool o.exited)
   ; ("exit_code", `Int o.exit_code)
   ; ("halted", `Bool o.halted)
@@ -210,7 +211,11 @@ let resolve_program ~base_path name =
 
 (* The board hears what happens on the shared machine, the way the MSX lane
    announces its arcade. A refused post does not fail the tool — the machine
-   moved either way. *)
+   moved either way.
+
+   This runs as Dos_lane's [announce], under the machine's lock. Posting after
+   the lock was released let a second load or eject finish and post first, so
+   the board told the arcade's history in the wrong order. *)
 let relay_to_board ~author content =
   try
     let result =
@@ -251,20 +256,22 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
        let loaded =
          Dos_lane.load ~ledger_dir:(dos_dir ~base_path) ~program_name ~program_bytes
            ~files
+           ~announce:(fun () ->
+             relay_to_board ~author:agent_name
+               (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name))
        in
-       (match loaded with
-        | Ok _ ->
-          relay_to_board ~author:agent_name
-            (Printf.sprintf "%s 님이 %s 을(를) 띄웠습니다" agent_name program_name)
-        | Error _ -> ());
        of_lane_run ~tool_name ~start_time loaded)
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =
-  match Dos_lane.eject () with
+  match
+    Dos_lane.eject
+      ~announce:(fun () ->
+        relay_to_board ~author:agent_name
+          (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name))
+      ()
+  with
   | Ok () ->
-    relay_to_board ~author:agent_name
-      (Printf.sprintf "%s 님이 기계를 껐습니다" agent_name);
     Tool_result.make_ok ~tool_name ~start_time
       ~data:(`Assoc [ ("ejected", `Bool true) ]) ()
   | Error e -> reject ~tool_name ~start_time (Dos_lane.error_to_string e)

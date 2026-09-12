@@ -14318,7 +14318,7 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
             closing_started.set()
             if not closing_release.wait(timeout=10):
                 return 504, {"ok":False,"error":"closing fixture was not released"}
-        return 200, {"ok":True,"data":{"source":"automation","tabId":2,"title":title,"url":url,
+        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url,
             "mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
 
     def act(body):

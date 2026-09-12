@@ -1769,6 +1769,30 @@ let dashboard_runtime_defaults_snapshot () =
    completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
    lane cannot judge (registry not published, lane unconfigured, or no admitted
    slots); there is no fallback to another route. *)
+let verifier_runtime_admission (runtime : t) =
+  match runtime.execution with
+  | Runtime_execution.Agent_core _ -> Ok ()
+  | Runtime_execution.Claude_code _ when runtime.model.tools_support -> Ok ()
+  | Runtime_execution.Claude_code _ ->
+    Error (runtime.id ^ ": completion verifier requires model tools-support")
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ ->
+    Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
+;;
+
+let verifier_cli_slot_admission ~runtime_id =
+  let state = runtime_state () in
+  if List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes
+  then Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
+  else match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
+  | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
+  | Some runtime ->
+    (match runtime.execution with
+     | Runtime_execution.Agent_core _ ->
+       Error (runtime_id ^ ": verifier CLI slot must name an official client")
+     | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
+;;
+
 let verifier_exact_lane_slot_ids () =
   match Runtime_exact_output_registry.current () with
   | Error error ->
@@ -1780,11 +1804,16 @@ let verifier_exact_lane_slot_ids () =
          ~lane_id:verifier_exact_lane_id
      with
      | Ok { selected_slots; cli_slots } ->
-       Ok
-         (List.map
+       let rec admit = function
+         | [] -> Ok ()
+         | runtime_id :: rest ->
+           Result.bind (verifier_cli_slot_admission ~runtime_id) (fun () -> admit rest)
+       in
+       Result.map (fun () ->
+         List.map
             (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
             selected_slots
-          @ cli_slots)
+          @ cli_slots) (admit cli_slots)
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;

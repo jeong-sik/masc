@@ -26,6 +26,7 @@ let run_named_with_masc_tools
     ~base_path
     ~system_prompt
     ?(native_tools = [])
+    ?tool_requirement
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
@@ -64,6 +65,7 @@ let run_named_with_masc_tools
       ~system_prompt
       ~tools:bridged_tools
       ~agent_core_tools:bridged_tools
+      ?tool_requirement
       ?temperature
       ?stream_idle_timeout_s
       ?hooks

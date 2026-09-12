@@ -43,9 +43,14 @@ while IFS= read -r file; do
     # This replaced five cancel-guard-ok markers. An exempt line is exempt
     # whatever it does; these are safe *because* of what they do, so deleting
     # the raise now fails the guard instead of passing on an old promise.
-    if echo "$line" | grep -qE 'with[[:space:]]+exn[[:space:]]+->' \
+    #
+    # The binder is whatever name the handler chose. The guard used to read
+    # only `exn`, so `with e ->` (lib/tool_misc_msx_lane.ml, 2026-09-08) sat
+    # outside it for four days while the budget read zero.
+    binder=$(printf '%s\n' "$line" | grep -oE 'with[[:space:]]+[a-z_][a-z0-9_]*[[:space:]]+->' | head -1 | awk '{print $2}' || true)
+    if [ -n "$binder" ] && [ "$binder" != "_" ] \
       && sed -n "${lineno},$((lineno + 8))p" "$file" \
-        | grep -qE '\braise[[:space:]]+exn\b|raise_with_backtrace[[:space:]]+exn\b'; then
+        | grep -qE "\braise[[:space:]]+${binder}\b|raise_with_backtrace[[:space:]]+${binder}\b"; then
       continue
     fi
     if sed -n "${lineno}p" "$file" | grep -q 'cancel-guard-ok'; then
@@ -63,7 +68,7 @@ while IFS= read -r file; do
       echo "VIOLATION: $file:$lineno: $line"
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
-  done < <(grep -n -E '(with\s+(_|exn)\s+->|\|\s*exception\s+_\s+->)' "$file" 2>/dev/null || true)
+  done < <(grep -n -E '(with\s+(_|[a-z][a-z0-9_]*)\s+->|\|\s*exception\s+_\s+->)' "$file" 2>/dev/null || true)
 done < <(find "$REPO_ROOT/lib" -name '*.ml' -type f)
 echo "cancel-guard exemptions: $EXEMPTIONS (budget $EXEMPTION_BUDGET)"
 if [ $VIOLATIONS -gt 0 ]; then

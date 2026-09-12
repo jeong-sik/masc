@@ -72,18 +72,18 @@ let create ~config ~producer =
     match producer_scope with
     | Keeper_producer producer_meta ->
       Ok (Keeper_sandbox.host_root_abs_of_meta ~config producer_meta)
-    (* A workspace agent is not a Keeper and declares no sandbox profile, so
-       the Keeper resolver is the wrong question to ask about it: since #32078
-       made the profile mandatory, [host_root_abs_of_agent] raises for every
-       producer that has no keeper TOML -- which is every producer that
-       reaches this arm. The playground root is what this producer has, and
-       [bundle_root] is the same path the resolver returned for it before the
-       profile became mandatory. *)
+    (* A workspace agent is not a Keeper and declares no sandbox profile. Its
+       root comes from the resolver the submit-time snapshot used for it
+       ([Workspace_verification_store.snapshot_submitted_evidence_json]), so
+       the judge reads where the submitter's artifacts were captured. *)
     | Workspace_producer ->
       let project_root =
         Workspace_verification_store.project_root_of_base_path config.base_path
       in
-      Ok (Filename.concat project_root (Playground_paths.bundle_root producer))
+      Ok
+        (Keeper_sandbox_config.host_root_abs_of_producer
+           ~base_path:project_root
+           ~agent_name:producer)
   in
   let ownership_root =
     Env_config_core.strip_trailing_slashes ownership_root
@@ -183,11 +183,49 @@ let entry_lines_of root ~cap =
      else lines @ [ Printf.sprintf "  ... and %d more" omitted ])
 ;;
 
+let root_kind root =
+  try Ok (Fs_compat.exact_path_kind ~follow:false root) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Sys_error detail -> Error detail
+  | Unix.Unix_error (code, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message code))
+;;
+
+let absent_root_layout root =
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.verification_lookup_root_layout_absent
+      [ "root", root ]
+  with
+  | Ok text -> Ok [ String.trim text ]
+  | Error detail ->
+    Error
+      (Printf.sprintf
+         "prompt %s: %s"
+         Prompt_names.verification_lookup_root_layout_absent
+         detail)
+;;
+
+(* Nothing creates a workspace producer's playground: no boot, no sandbox.
+   So its absence is a fact about the producer, not an unavailable surface,
+   and the judge receives it as the layout and rules on the evidence that is
+   there (the snapshot's notes, URLs, and typed unreadable artifacts).
+   Treating it as unavailable deferred the review on every sweep and left
+   every Task submitted over MCP in AwaitingVerification with nobody told:
+   nine Tasks, 131 identical warning lines on 2026-09-11. A Keeper's root is
+   different -- the sandbox creates it at boot, so its absence is
+   infrastructure and stays a deferral. *)
 let root_layout t =
   let open Result.Syntax in
-  let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
-  let* checkout_lines = checkout_lines t.ownership_root in
-  Ok (entry_lines @ checkout_lines)
+  match t.producer_scope, root_kind t.ownership_root with
+  | Workspace_producer, Ok Fs_compat.Exact_missing ->
+    absent_root_layout t.ownership_root
+  | ( Workspace_producer
+    , (Ok (Fs_compat.Exact_unknown | Fs_compat.Exact_kind _) | Error _) )
+  | Keeper_producer _, _ ->
+    let* entry_lines = entry_lines_of t.ownership_root ~cap:root_entry_cap in
+    let* checkout_lines = checkout_lines t.ownership_root in
+    Ok (entry_lines @ checkout_lines)
 ;;
 
 (* The Goal proof root holds every producer, so the checkout scan that maps one

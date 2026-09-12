@@ -11,8 +11,6 @@
   yojson
   otoml
   base64
-  graphql
-  graphql_parser
   bigstringaf
   sqlite3
   unix

@@ -9,7 +9,7 @@ import {
   toolsData,
   toolsLoading,
   toolsError,
-  loadTools,
+  subscribeToolsAutoRefresh,
   KEEPER_WAITING_INVENTORY_REFRESH_MS,
 } from './tool-state'
 import { FullInventoryView } from './tool-full-inventory'
@@ -61,7 +61,13 @@ export function Tools() {
   const loading = toolsLoading.value
   const error = toolsError.value
   const inventory = data?.tool_inventory.tools ?? []
-  const usage = data?.tool_usage ?? null
+  // The warming envelope carries a tool_usage of placeholder zeroes --
+  // total_calls, distinct_tools_called and never_called_count all 0
+  // (server_dashboard_http_runtime_info.ml). Passing it on drew those zeroes
+  // as measured observations, which reads as "nothing has ever been called".
+  // Absent is the truthful shape until the projection is built.
+  const warmingEnvelope = data?.is_warming === true || data?.status === 'warming'
+  const usage = warmingEnvelope ? null : (data?.tool_usage ?? null)
   const callLog = usage?.non_public_call_log
   const configResolution = data?.config_resolution
   const runtimeResolution = data?.runtime_resolution
@@ -77,12 +83,19 @@ export function Tools() {
   const [keeperReceiptError, setKeeperReceiptError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) {
-      void loadTools()
-    }
+    // subscribeToolsAutoRefresh performs the first load itself and shares one
+    // visibility-aware poller across the surfaces that read this resource.
+    // Loading once by hand left a cold read's warming envelope on screen for
+    // the whole visit: nothing fetched the finished projection until the
+    // operator refreshed the inventory by hand.
+    const stopTools = subscribeToolsAutoRefresh()
     // The FSM panel below renders the schedule projection, which is no longer
     // part of the tools response.
-    return subscribeScheduledAutomationRefresh()
+    const stopSchedule = subscribeScheduledAutomationRefresh()
+    return () => {
+      stopTools()
+      stopSchedule()
+    }
   }, [])
 
   useEffect(() => {

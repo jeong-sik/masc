@@ -124,7 +124,10 @@ readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
 # d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and
 # "enter" from a keeper instead of BIOS words in hex. It sits on #9 (the
 # real-chip CPU repair and the BIOS/DOS surface) and #10 (graphics modes).
-readonly OCAML_DOS_SHA="d887e45c69fa1634790d63835b303a771a22d005"
+# 648b628 adds screen_digest and input_requests (ocaml-dos #12): the lane's
+# ready signal needs both, because a game in its own loop asks for the next
+# key 631 instructions after taking one, mid-repaint.
+readonly OCAML_DOS_SHA="648b62810824d0a0c4dcb88f3ec0714a9a410fa0"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first

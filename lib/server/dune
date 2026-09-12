@@ -124,6 +124,7 @@
   masc.types_boundary
   masc.trajectory
   masc.keeper_tooling
+  masc.keeper_tool_call_index
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed

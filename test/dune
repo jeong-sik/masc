@@ -181,6 +181,7 @@
   test_keeper_memory_os_events
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
+  test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_running_reconcile_attempt
@@ -531,6 +532,7 @@
   test_keeper_memory_os_events
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
+  test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_running_reconcile_attempt
@@ -2226,6 +2228,8 @@
 
 (include stanzas/test_msx_tools.inc)
 
+(include stanzas/test_dos_tools.inc)
+
 (include stanzas/test_msx_frame_route.inc)
 
 (include stanzas/test_discord_gateway_client.inc)
@@ -3488,6 +3492,11 @@
  (name test_tui_frame)
  (modules test_tui_frame)
  (libraries alcotest masc_tui_frame))
+
+(test
+ (name test_tui_help_banner)
+ (modules test_tui_help_banner)
+ (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
 
 (test
  (name test_tui_agenda)

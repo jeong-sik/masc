@@ -15789,7 +15789,7 @@ and is loaded on demand through keeper_skill.
        | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some key when Option.is_some (browser_history_on_screen state) ->
+       | Some key when key <> "q" && Option.is_some (browser_history_on_screen state) ->
            (match state.browser_history with
             | None -> ()
             | Some history ->

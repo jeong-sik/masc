@@ -17,6 +17,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Test package protocols
+        run: python3 -m unittest discover -s addons/tests -p 'test_*.py' -v
       - id: discover
         run: |
           python3 - <<'PY'

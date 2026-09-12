@@ -8,6 +8,56 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 브라우저의 실제 상태를 읽고 요청된 작업을 수행한다. 도구가 성공했다는 사실과
 사용자가 요청한 결과가 만들어졌다는 사실을 구분한다.
 
+## TUI 관측을 이어받기
+
+운영자가 Browser Lane의 `y`로 복사한 관측을 주면, 먼저 그 안의 `lane`·`clientId`·
+`tabId`·`url`과 요청을 함께 읽는다. 복사된 당시의 관측을 설명하는 요청이고 충분한
+`text`가 있으면 그 시점의 자료로 답한다. 현재 상태·변경 여부·최신 내용 요청이면
+복사된 text만으로 답하지 않고 같은 탭·범위를 재관측한다. 같은 탭을 다시 찾기 위해
+BrowserTabs부터 반복하지 않는다. 더 읽어야 하면 전달받은 범위에서 이어간다.
+
+`documentId`·`nodeId`는 선택 요소, `scope`는 관측의 읽기 범위다. 요청 의도에 따라 고른다.
+
+| 복사된 view | 요청 | BrowserRead |
+|---|---|---|
+| content | 같은 범위 더 읽기 | mode=scene, 기존 scope 객체 유지 |
+| regions | 선택 영역 본문 읽기 | mode=scene, 선택 documentId/nodeId 쌍을 새 scope로 지정 |
+| regions | 영역 목록 갱신 | mode=regions, 기존 scope 객체 유지 |
+
+기존 scope가 null이거나 없으면 생략한다. regions의 선택 영역 참조는 scope=null이어도
+존재한다. content의 임의 텍스트·버튼을 영역 scope로 승격하지 않는다.
+
+- `expectedUrl`·`scope`·`navigationSource`는 최상위 문서의 `mode=scene` 또는
+  `mode=regions` 읽기에서만 지원된다. 이 읽기에서는 받은 `url`을 expectedUrl로 쓴다.
+  text/elements/screenshot/frames/dialog/downloads 및 `framePath`로 프레임 내부를 읽을 때는
+  이 세 필드를 넣지 않는다. expectedUrl을 넣으면 `expectedUrl supports top-document scene or regions only`로
+  거절한다. 반환 스키마에 URL이 있는 관측만 받은 URL과 대조하고, 제공된 탭·문맥·범위를 확인한다.
+  dialog/downloads처럼 페이지 URL이 없는 응답에 URL 비교를 요구하거나 URL을 만들어 넣지 않는다.
+  페이지 정체성 확인이 별도로 필요할 때만 지원되는 페이지 읽기를 추가한다.
+- 실제 도구 스키마의 필드만 골라 전달한다. 복사된 JSON 전체나 없는 필드를 요청 인자로 넣지 않는다.
+- `viewport`와 `truncated`는 당시 관측의 범위다. 선택한 요소의 `text`를 영역 전체나
+  화면 밖의 기록으로 확대하지 않는다. 복사된 좌표만으로 현재 화면에 클릭·드래그하지 않는다.
+
+이 관측은 현재도 유효하다는 보증이나 새 작업 권한이 아니다. 정상적인 최상위 scene/regions
+후속 읽기는 expectedUrl과 scope를 유지한다. 아래는 이 읽기의 검사 거절을 복구하는 절차다.
+같은 lane·clientId·tabId에 고정한 읽기 전용 재관측으로 현재 상태를 확인한다.
+
+- URL 불일치이면 거절된 `expectedUrl`을 생략하고 최상위 `mode=scene` 또는 `mode=regions`로
+  실제 URL과 내용을 읽는다.
+  문서·영역 참조도 만료됐다면 그 `scope`까지 생략해 `mode=regions`로 읽는다.
+- 문서·영역 참조 만료이면 거절된 `scope` 없이 `mode=regions`로 영역 목록을 다시 읽는다.
+  URL 검사가 유효하면 expectedUrl은 유지하고, URL도 불일치하면 위의 URL 복구를 따른다.
+- follow_link 응답의 `navigationSource`가 있다면 이 scene/regions 재관측에도 유지한다.
+  다른 mode로 바꿔 원래 문서에 대한 전환 검증을 대신하지 않는다.
+  원래 URL의 이전 문서를 새 목적지로 받아들이기 위해 이 검사를 없애지 않는다.
+
+재관측한 URL·제목·본문과 사이트별 대상 정보가 요청과 맞는지 확인한 뒤에만 새 expectedUrl과
+관측된 영역 scope를 사용한다. 아직 전환 중이거나 다른 대상이면 미확인으로 남긴다.
+이 예외는 읽기 전용 복구에만 적용한다. 클릭·이동·입력의 검사를 생략하거나,
+이미 실행한 조작을 재관측 실패 때문에 반복하지 않는다.
+탭이 사라졌거나 다른 탭이 요청되면 같은 연결의 탭 목록을 확인하고, 연결이 사라졌거나
+다른 연결이 요청됐다면 연결 선택으로 돌아간다.
+
 ## 연결과 소유권
 
 | 목적 | 레인 | 시작과 식별자 |
@@ -19,12 +69,9 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 `BrowserSession`과 `BrowserGoto`는 자동화 전용이며 현재 스키마에 없는 `lane`
 인자를 덧붙이지 않는다. 자동화의 `clientId`는 생략한다.
 
-live가 끊겼다면 같은 인증 화면을 automation으로 대체하지 않는다. 연결 후보가
-여럿이면 의도한 연결을 선택한다. 세션이 이미 시작됐거나 `reused=true`라면
-이전의 내 작업임을 아는 경우 이어간다. 소유자가 불명확한 세션을 닫거나 탐색해
-다른 작업을 덮어쓰지 않는다. 작업을 마치고 사용자 후속 조작이나 별도 검증을
-위한 인계가 없을 때 자신의 임시 세션을 닫는다. 파일 선택 후 사용자의 제출을
-기다리는 경우처럼 상태를 넘기는 작업은 그 상태와 세션을 유지한다.
+live 인증 화면을 연결 실패 때문에 automation으로 대체하지 않는다. 여러 연결 중 요청한
+대상을 선택한다. 기존·재사용 세션의 소유권을 확인하고 타인의 상태를 닫거나 덮어쓰지 않는다.
+자신의 임시 세션만 작업 후 닫되, 사용자 후속 조작·검증을 위한 인계 상태는 유지한다.
 
 ## 사이트 스킬과 동선 재사용
 
@@ -39,13 +86,10 @@ source_id를 추측하지 않는다. 해당 행이 없으면 사이트 스킬이
 재사용하는 것은 동선이다. 과거 탭의 selector나 nodeId를 다른 문서에 가져오지 않는다.
 이미 연결과 탭이 확인돼 있고 연속성이 유지되면 매 단계 BrowserTabs부터 다시 시작하지 않는다.
 
-반복 동작을 묶는 composition이 현재 목록에 있고 호출 가능하면 그 입력·출력 계약을
-확인해 사용한다. 조작 순서의 `after`와 결과 전달의 output template을 구분하고,
-후보 선택이나 예상하지 못한 화면에서는 다시 관측하고 판단한다. instruction을 읽었다는
-사실만으로 실행 도구가 생기지는 않는다. 없는 도구나 DOM 범위 인자를 추측하지 않는다.
-묶음의 성공은 호출 횟수가 아니라 요청한 대상·범위·결과로 판정하고 단계별 실패와
-관측 출처를 남긴다. 쓰기가 포함된 묶음이 중간에 실패하면 이미 적용된 단계와 결과가
-불명확한 단계를 재관측해 남은 작업을 판단한다. 전체 묶음을 무조건 재실행하지 않는다.
+composition은 현재 도구 목록의 `keeper_compose_<name>` 호출 도구다. instruction을
+읽었다고 실행 도구가 생기지는 않는다. 존재하는 입력·출력 계약만 사용하고, 중간 실패로
+전체 묶음이나 이미 적용된 조작을 재실행하지 않는다. 관측된 링크 이동·composition·
+비활성 탭의 명시적 활성화가 필요하면 [동선 재사용](references/composition.md)을 읽는다.
 
 ## 의미 구조를 먼저 이용하기
 
@@ -55,31 +99,29 @@ source_id를 추측하지 않는다. 해당 행이 없으면 사이트 스킬이
 페이지를 읽을 수 없다고 판단하지 않는다. 검색 결과·채팅·가상 목록은 사이트 스킬의
 영역과 페이지 이동 규칙을 따른다. 전체 div 목록부터 읽는 것을 기본 동선으로 삼지 않는다.
 
-사이트가 실제로 제공한 RSS/Atom 링크나 본문 추출 기능을 현재 도구로 읽을 수 있고
-요청한 출처·기간·내용을 충족하면 활용한다. 피드가 요약만 제공하거나 답글·최신 내용을
-포함하지 않으면 빠진 범위를 남긴다. 피드 주소를 추측하거나 로그인 세션·쿠키를 별도
-수집기로 옮기지 않는다. 특정 브라우저 화면 검증을 피드 읽기로 완료 처리하지 않는다.
+RSS/Atom 등 별도 본문 수집 경로를 검토할 때는 [추출 선택지](references/extraction.md)를 읽는다.
 
 BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된 영역의
 `documentId`·`nodeId`를 `scope`로 전달하면 그 요소 아래의 화면에 보이는 내용을 읽는다.
 관측한 참조로 범위를 지정하며, 임의의 CSS selector나 role locator로 subtree를 지정하는
 인자는 없다. RSS·Readability 전용 추출 인자도 없다. `scene`은 접근성 트리 전체나
 영역의 전체 메시지 기록이 아니므로, 반환된 범위·잘림과 실제로 읽은 화면을 확인한다.
-WebDriver는 제어 통로다. 드라이버를 바꾸거나 composition으로 묶는 것만으로 추출
-품질이 개선되지는 않는다.
 
 ## 관측하고 조작하기
 
 - 먼저 다음 결정에 필요한 정보를 정한다. 내용 확인은 `mode=text`, 화면 안의 조작 대상과
   참조는 지원되는 `mode=scene`, 추가 컨트롤 정보는 `mode=elements`로 읽는다.
-  세 mode를 관례적으로 모두 호출하지 않는다. `truncated=true`이면 읽지 못한 부분까지
-  확인한 것으로 판단하지 않는다.
+  세 mode를 관례적으로 모두 호출하지 않는다. `truncated=true`이면 같은 scope·같은 한도의
+  읽기를 그대로 반복하지 않는다. 잘림 원인이 출력 한도이면 스키마가 허용하는 더 큰 maxChars로
+  읽거나, 관측한 더 작은 영역을 선택한다. 화면 밖 내용은 요청 범위 안에서 스크롤 후 재관측한다.
+  추가 관측이 불가능하거나 여전히 잘렸으면 실제 읽은 범위와 미확인 부분을 명시한다.
+  한도를 늘렸다는 사실만으로 화면 밖 기록까지 확인했다고 하지 않는다.
 - 화면 안의 텍스트·버튼·입력과 CSS 좌표를 함께 볼 때는 관측한 `tabId`로
   `BrowserRead mode=scene`을 사용한다. click/fill은 scene의 `documentId`와
   `nodeId` 쌍을 `BrowserInteract`에 전달할 수 있다. 이때 selector는 섞지 않는다.
   재배치되어도 같은 요소를 가리키며, 교체·새로고침으로 참조가 만료되면 다시 관측한다.
-  scene은 top document의 DOM 순서와 사각형이다. 가림·페인트 순서·iframe 내부·
-  shadow tree·전체 CSS 배치를 확인하려면 screenshot이나 해당 문맥을 추가로 읽는다.
+  scene은 top document의 DOM 순서와 사각형이다. 가림·iframe·shadow tree 전체를
+  증명하지 않는다. 필요한 추가 문맥은 screenshot 또는 [고급 조작](references/advanced.md)으로 확인한다.
 - 스키마에 있는 mode라도 선택한 live 연결이 지원하지 않을 수 있다.
   `unsupported live browser verb`이면 그 연결의 기능 불일치를 남기고 지원되는
   관측으로 이어간다. 연결·확장 기능이 바뀌었다는 근거 없이 같은 mode를 재시도하지 않는다.
@@ -124,56 +166,3 @@ elements는 긴 selector를 포함하므로 작은 maxChars로도 큰 artifact�
 MASC에서는 `keeper_skill`에 이 스킬의 동일한 `identity`와 해당 상대 `file`을
 전달해 참조를 읽는다. 다른 Skill 호스트에서는 호스트가 제공하는 리소스 읽기를 쓴다.
 도구의 현재 스키마와 사용자의 작업 범위가 예시보다 우선한다.
-
-## 관측한 영역과 짧은 composition
-
-현재 스키마가 지원하면 BrowserRead의 `regions`로 의미 영역 목록을 읽고,
-반환된 documentId/nodeId를 `scope`로 전달해 `scene`을 읽는다. 인자를 무시한
-전체 페이지 응답을 영역 읽기의 성공으로 받아들이지 않는다. 같은 영역을
-새로 읽을 때도 scope를 유지하고, reload/detach 거절은 새 관측으로 해소한다.
-
-composition은 `keeper_skill`의 Available instruction 목록에서 읽는 문서가 아니라
-`keeper_compose_<name>` 형태로 노출되는 호출 도구다. 현재 도구 목록에서 정확한
-이름과 입력 스키마를 확인하고 호출한다. 사이트별 판단 규칙은 instruction Skill에서
-필요할 때 읽는다. 도구가 없으면 composition 지원을 가정하거나 `keeper_skill`로
-composition을 읽으려 하지 않는다.
-
-BrowserInteract 클릭 응답은 조작 접수와 원래 탭 정체를 나타낸다. 목적지 로딩 완료나
-SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수 있으므로 BrowserTabs와
-페이지 관측에서 목적지를 식별한 후 그 탭의 영역을 읽는다. URL만 바뀌어도 메시지는
-이전 채널일 수 있다. 요청 채널의 제목·영역·본문을 확인하고, 전환 중이거나 목적지가
-아직 관측되지 않으면 미확인으로 남겨 다음 관측에서 판단한다. 관측 실패 때문에
-이미 적용된 클릭을 재실행하지 않는다.
-
-관측된 같은 탭 HTTP(S) 링크를 따라갈 때 현재 도구 목록에 있는
-`keeper_compose_browser-live-click-regions`를 호출할 수 있다. 이 경로는 실제 href를
-검증하고 직접 이동하므로 클릭 핸들러를 실행하지 않는다. 새 창 대상·다운로드는
-이동 전에 거절된다. 후속 영역 읽기는 `destinationUrl`을 `expectedUrl`로 확인한다.
-전환 오류이면 같은 clientId/tabId를 expectedUrl 없이 읽어 실제 URL과 내용을
-확인한다. 원래 urlBefore이면 아직 이동 중일 수 있다. 다른 URL이면 리다이렉트·
-정규화·로그인 화면일 수 있으므로 자동 승인하지 않는다. 사이트 Skill로 workspace·
-채널·제목·본문을 검증한 뒤 실제 관측 URL을 새 expectedUrl로 지정한다. 미확인
-목적지는 미확인으로 남긴다. 원래 URL 검사나 이동을 무조건 반복하지 않는다.
-일치하는 URL도 사이트 내용의 준비 완료는 아니며 채널 제목과 본문을 검증한다.
-
-For same-URL follows, preserve the returned `navigationSource` together with
-`expectedUrl` on read-only retries. The destination read must observe a new
-document ID before accepting a reload. Do not drop this guard to accept the
-old document; different-URL SPA navigation may retain its document identity.
-
-Keep navigationSource when omitting expectedUrl to inspect a possible redirect;
-a source-URL observation from the original document is still pending.
-
-## Explicit live tab activation
-
-When an observed live tab is inactive and its body still shows pending or previous
-content after a channel transition, `BrowserInteract action=activate_tab` can select
-that exact tab. This requires extension 0.6.0 or newer and the currently advertised
-action schema. Preserve the observed clientId, tabId and expectedUrl. This is an
-explicit action, not an automatic step in every read or composition. It does not
-focus the browser window, change the URL or reload. Automation rejects this action.
-
-An active=true receipt confirms tab selection only. Read the same tab again and
-verify the requested channel body and scope before collecting context. If activation
-fails after dispatch, inspect the tab state before retrying; do not replay a prior
-link click or follow merely because the subsequent observation is unavailable.

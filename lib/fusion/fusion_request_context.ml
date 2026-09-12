@@ -1,4 +1,4 @@
-(** Exact caller-selected work context observed before a Fusion request starts. *)
+(** Exact work context observed before a Fusion request starts. *)
 let ( let* ) = Result.bind
 type task = { id:string; title:string; description:string; status:string; contract:Masc_domain.task_contract option }
 type goal = { id:string; criterion:Goal_store.criterion }
@@ -60,7 +60,7 @@ let render value =
 type error = Invalid_context of string | Source_unavailable of string
 let error_to_string = function Invalid_context detail | Source_unavailable detail -> detail
 let failure_class = function Invalid_context _ -> Tool_result.Workflow_rejection | Source_unavailable _ -> Tool_result.Runtime_failure
-let capture ~config ~keeper ~turn_ref ~args =
+let capture ~current_task ~config ~keeper ~turn_ref ~args =
   let read key = match Json_util.assoc_member_opt key args with
     | None -> Ok None
     | Some (`String value) when String.trim value <> "" -> Ok (Some value)
@@ -70,6 +70,11 @@ let capture ~config ~keeper ~turn_ref ~args =
   let* task_id = read "task_id" in let* selected_goal = read "goal_id" in
   let* decision_context = read "decision_context" in
   let source result = Result.map_error (fun detail -> Source_unavailable detail) result in
+  let* task_id = match task_id, selected_goal, current_task with
+    | None, None, Some resolve ->
+      source (resolve ()) |> Result.map (Option.map Keeper_id.Task_id.to_string)
+    | (Some _ as selected), _, _ -> Ok selected
+    | None, Some _, _ | None, None, None -> Ok None in
   if task_id = None && selected_goal = None then
     Ok {keeper; turn_ref; task=None; goals=[]; question; decision_context}
   else try Workspace_utils.with_file_lock config (Goal_store.goals_path config) (fun () ->

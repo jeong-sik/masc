@@ -68,16 +68,9 @@ let gate_obligation ~approval_id ~tool_name ~input_hash =
   else if not (canonical_sha input_hash) then Error "Gate input hash is invalid"
   else Ok {approval_id; tool_name; input_hash}
 type runtime_suffix = { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
-type gate_binding = { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option }
 let runtime_suffix ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
   if List.exists (fun value -> String.trim value = "") (assignment_id :: failed_runtime_id :: next_runtime_id :: later_runtime_ids)
   then Error "runtime suffix identities are blank" else Ok {assignment_id; failed_runtime_id; next_runtime_id; later_runtime_ids}
-let gate_binding ~approval_ids ~obligations ~runtime_suffix =
-  if approval_ids = [] || List.exists (fun id -> String.trim id = "") approval_ids
-     || List.sort_uniq String.compare approval_ids <> List.sort String.compare approval_ids
-     || not (List.for_all (fun (row : gate_obligation) -> List.mem row.approval_id approval_ids) obligations)
-  then Error "invalid unresolved Gate identities"
-  else Ok {approval_ids; obligations; runtime_suffix}
 type session_scope = Session_scope of string list
 let session_scope components =
   if List.exists (fun component -> component = "" || component = "." || component = ".."
@@ -126,12 +119,32 @@ let gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~(runti
     if Keeper_checkpoint_ref.equal checkpoint runtime_retry.checkpoint
     then Ok {waiting with runtime_retry=Some runtime_retry}
     else Error "Gate and runtime continuation must share their exact checkpoint"
+type gate_binding = { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option; unconfirmed_wait:gate_wait option }
+let gate_binding ~approval_ids ~obligations ~runtime_suffix =
+  if approval_ids = [] || List.exists (fun id -> String.trim id = "") approval_ids
+     || List.sort_uniq String.compare approval_ids <> List.sort String.compare approval_ids
+     || not (List.for_all (fun (row : gate_obligation) -> List.mem row.approval_id approval_ids) obligations)
+  then Error "invalid unresolved Gate identities"
+  else Ok {approval_ids; obligations; runtime_suffix; unconfirmed_wait=None}
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
 let equal_gate_wait left right = equal_gate_checkpoint left.checkpoint right.checkpoint
   && left.session_scope = right.session_scope && left.obligations = right.obligations
   && Option.equal equal_runtime_retry left.runtime_retry right.runtime_retry
+let gate_binding_with_wait ~binding ~(waiting : gate_wait) =
+  let ids = List.map (fun (row : gate_obligation) -> row.approval_id) waiting.obligations |> List.sort String.compare in
+  let same_runtime = match binding.runtime_suffix, waiting.runtime_retry with
+    | None, None -> true
+    | Some suffix, Some retry -> suffix.assignment_id = retry.assignment_id
+      && suffix.failed_runtime_id = retry.failed_runtime_id && suffix.next_runtime_id = retry.next_runtime_id
+      && suffix.later_runtime_ids = retry.later_runtime_ids
+    | Some _, None | None, Some _ -> false in
+  if not same_runtime || ids <> List.sort String.compare binding.approval_ids
+     || not (List.for_all (fun prior -> List.mem prior waiting.obligations) binding.obligations)
+  then Error "unconfirmed Gate source does not preserve original obligations"
+  else Ok {binding with unconfirmed_wait=Some waiting}
+
 type terminal = Completed | Cancelled | Failed of string
 type recovery_origin =
   | Unconfirmed_sources
@@ -178,6 +191,7 @@ type action =
   | Resume_runtime_retry of runtime_retry
   | Suspend_gate_reconciliation of gate_binding * string
   | Suspend_gate of gate_wait
+  | Reconcile_gate_binding of gate_binding * gate_wait
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
   | Discharge_gate of gate_obligation
@@ -318,10 +332,20 @@ let apply ~now action current =
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
              if String.trim diagnostic <> ""
+                && Option.fold ~none:true
+                     ~some:(fun waiting -> gate_checkpoint_owns waiting.checkpoint (scope current)) binding.unconfirmed_wait
                 && List.for_all (fun prior -> List.mem prior binding.obligations) current.gate_obligations
              then unchanged (Recovering {origin=Gate_binding binding; diagnostic})
              else reject ()
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
+      | Reconcile_gate_binding (binding, waiting) ->
+          (match current.phase, binding.unconfirmed_wait with
+           | Recovering {origin=Gate_binding expected; _}, Some candidate
+               when expected = binding && equal_gate_wait waiting candidate
+                 && gate_checkpoint_owns waiting.checkpoint (scope current) ->
+             unchanged (Recovering {origin=Gate_wait {waiting; resolution=None};
+               diagnostic="original exact Gate source is durably retained"})
+           | _ -> reject ())
       | Suspend_gate waiting ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
@@ -382,7 +406,7 @@ let apply ~now action current =
                  | Settled _ -> reject ())) in
     let gate_obligations = match action with
       | Suspend_gate_reconciliation (binding, _) -> binding.obligations
-      | Suspend_gate waiting -> waiting.obligations
+      | Suspend_gate waiting | Reconcile_gate_binding (_, waiting) -> waiting.obligations
       | Discharge_gate obligation -> List.filter (fun current -> current <> obligation) current.gate_obligations
       | Settle _ -> []
       | Confirm_sources | Begin_execution | Recheck_sources _ | Resume_checkpoint _
@@ -425,10 +449,6 @@ let runtime_suffix_json (suffix : runtime_suffix) = `Assoc [
   "assignment_id", `String suffix.assignment_id; "failed_runtime_id", `String suffix.failed_runtime_id;
   "next_runtime_id", `String suffix.next_runtime_id;
   "later_runtime_ids", `List (List.map (fun id -> `String id) suffix.later_runtime_ids)]
-let gate_binding_json binding = `Assoc [
-  "approval_ids", `List (List.map (fun id -> `String id) binding.approval_ids);
-  "obligations", `List (List.map gate_obligation_json binding.obligations);
-  "runtime_suffix", Option.fold ~none:`Null ~some:runtime_suffix_json binding.runtime_suffix]
 let official_client_checkpoint_json value = `Assoc [
   "client_kind", `String (match value.client_kind with Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity");
   "runtime_id", `String value.runtime_id; "session_id", `String value.session_id;
@@ -440,6 +460,11 @@ let gate_wait_json value = `Assoc ([(match value.checkpoint with
   "session_scope", `List (List.map (fun value -> `String value) (session_scope_components value.session_scope));
   "obligations", `List (List.map gate_obligation_json value.obligations)] @
   (match value.runtime_retry with None -> [] | Some retry -> ["runtime_retry", runtime_retry_json retry]))
+let gate_binding_json binding = `Assoc ([
+  "approval_ids", `List (List.map (fun id -> `String id) binding.approval_ids);
+  "obligations", `List (List.map gate_obligation_json binding.obligations);
+  "runtime_suffix", Option.fold ~none:`Null ~some:runtime_suffix_json binding.runtime_suffix] @
+  (match binding.unconfirmed_wait with None -> [] | Some waiting -> ["unconfirmed_wait", gate_wait_json waiting]))
 let gate_resolution_json value = `Assoc ["obligation", gate_obligation_json value.obligation;
   "decision", (match value.decision with Gate_approved -> `Assoc ["kind", `String "approved"]
     | Gate_denied detail -> `Assoc ["kind", `String "denied"; "detail", `String detail])]
@@ -628,7 +653,10 @@ let runtime_suffix_of_json json =
     | _ -> Error "runtime suffix must be a list" in
   runtime_suffix ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
 let gate_binding_of_json json =
-  let* fields = exact ["approval_ids";"obligations";"runtime_suffix"] json in
+  let names = match json with `Assoc fields when List.mem_assoc "unconfirmed_wait" fields ->
+    ["approval_ids";"obligations";"runtime_suffix";"unconfirmed_wait"]
+    | _ -> ["approval_ids";"obligations";"runtime_suffix"] in
+  let* fields = exact names json in
   let* approval_ids = match field "approval_ids" fields with
     | `List rows -> decode_list (function `String value -> Ok value | _ -> Error "approval id must be a string") rows
     | _ -> Error "approval ids must be a list" in
@@ -636,7 +664,10 @@ let gate_binding_of_json json =
     | `List rows -> decode_list gate_obligation_of_json rows | _ -> Error "obligations must be a list" in
   let* runtime_suffix = match field "runtime_suffix" fields with
     | `Null -> Ok None | json -> runtime_suffix_of_json json |> Result.map Option.some in
-  gate_binding ~approval_ids ~obligations ~runtime_suffix
+  let* binding = gate_binding ~approval_ids ~obligations ~runtime_suffix in
+  match List.assoc_opt "unconfirmed_wait" fields with
+  | None -> Ok binding
+  | Some json -> let* waiting = gate_wait_of_json json in gate_binding_with_wait ~binding ~waiting
 let recovery_origin_of_json json =
   let* kind = kind_of_json json in
   match kind with
@@ -733,7 +764,9 @@ let of_json json =
     let* phase = phase_of_json (field "phase" fields) in
     let* () = match phase with
       | Recovering {origin=Gate_binding binding; _} ->
-        if gate_obligations = binding.obligations then Ok () else Error "Gate binding lost prior obligations"
+        if gate_obligations = binding.obligations
+           && Option.fold ~none:true ~some:(fun waiting -> gate_checkpoint_owns waiting.checkpoint expected) binding.unconfirmed_wait
+        then Ok () else Error "Gate binding lost prior obligations or source ownership"
       | Recovering {origin=Gate_wait state; _} ->
         if gate_checkpoint_owns state.waiting.checkpoint expected && gate_obligations = state.waiting.obligations then Ok ()
         else Error "Gate wait lost its owned obligations"

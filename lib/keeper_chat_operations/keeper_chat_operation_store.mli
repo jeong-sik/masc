@@ -188,3 +188,7 @@ val defer_direct_gate_reconciliation : t -> now:float -> operation_id:Operation.
   binding:Semantic.gate_binding -> diagnostic:string -> (Operation.t, error) result
 
 val direct_gate_binding : t -> operation_id:Operation.Operation_id.t -> (Semantic.gate_binding option, error) result
+
+val direct_gate_bindings : t -> ((Operation.Operation_id.t * Semantic.gate_binding) list, error) result
+val reconcile_direct_gate_binding : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  binding:Semantic.gate_binding -> waiting:Semantic.gate_wait -> (unit, error) result

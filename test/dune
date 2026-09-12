@@ -5837,3 +5837,8 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_lane_package_pty)))
+
+(test
+ (name test_verification_pdf_inspection_budgets)
+ (modules test_verification_pdf_inspection_budgets)
+ (libraries masc_test_deps))

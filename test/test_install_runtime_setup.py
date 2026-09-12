@@ -950,12 +950,14 @@ class CompiledRuntimeSetup(unittest.TestCase):
 
 
 
-class BrokenWorkspaceJourney(unittest.TestCase):
-    """A workspace setup cannot repair must not restart the journey.
+class InvalidWorkspaceDiagnostic(unittest.TestCase):
+    """An invalid check is named on screen, and every exit stays open.
 
-    Saving a selection appends to the existing runtime.toml, so a stale
-    declaration that makes the file unreadable outlives every pass. Restarting
-    the questions here produced an interview that could never finish.
+    `invalid` is not one condition. Saving a selection repairs some of them —
+    runtime-default-set rewrites the staged file and that rewrite is what
+    publishes — while a declaration the parser cannot resolve survives. Both
+    reach this journey as the same string, so blocking on it would strand the
+    repairable ones and close the only way to leave a broken workspace.
     """
 
     def check(self, identifier, condition, message=''):
@@ -964,52 +966,52 @@ class BrokenWorkspaceJourney(unittest.TestCase):
     def state(self, *checks):
         return {'base_path': '/workspace', 'checks': list(checks)}
 
-    def test_invalid_check_reports_the_reason_and_stops(self):
-        state = self.state(
+    def broken_state(self):
+        return self.state(
             self.check('workspace', 'satisfied', 'Workspace found.'),
             self.check('model_connection', 'invalid', 'The workspace runtime.toml is unreadable.'),
             self.check('keeper_persistence', 'satisfied', 'imp has persisted history.'))
+
+    def test_invalid_check_is_named_with_its_reason(self):
         errors = io.StringIO()
-        with patch.object(SETUP, 'onboarding_status', return_value=state), \
-                patch.object(SETUP, 'pick') as pick, \
-                patch.object(SETUP, 'open_workspace') as open_workspace, \
+        with patch.object(SETUP, 'onboarding_status', return_value=self.broken_state()), \
+                patch.object(SETUP, 'pick', return_value=[2]), \
                 contextlib.redirect_stderr(errors):
-            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
-        self.assertEqual(code, 1)
-        pick.assert_not_called()
-        open_workspace.assert_not_called()
+            SETUP.journey('masc', '/workspace', None, 30, resume=True)
         self.assertIn('model_connection', errors.getvalue())
         self.assertIn('unreadable', errors.getvalue())
 
-    def test_explicit_setup_stops_on_the_same_state(self):
-        # `masc setup` reaches the same append-only save, so rerunning the
-        # interview cannot clear the declaration either.
-        state = self.state(
-            self.check('workspace', 'satisfied'),
-            self.check('keeper_persistence', 'invalid', 'imp metadata is not current.'))
-        with patch.object(SETUP, 'onboarding_status', return_value=state), \
-                patch.object(SETUP, 'pick') as pick, \
+    def test_invalid_check_still_offers_another_workspace(self):
+        # The workspace question is the only way to leave a broken workspace
+        # behind, and test_onboarding_journey pins it for the invalid-port path.
+        with patch.object(SETUP, 'onboarding_status', return_value=self.broken_state()), \
+                patch.object(SETUP, 'pick', return_value=[2]) as pick, \
+                patch.object(SETUP, 'open_workspace') as open_workspace, \
                 contextlib.redirect_stderr(io.StringIO()):
-            code = SETUP.journey('masc', '/workspace', None, 30, resume=False)
-        self.assertEqual(code, 1)
-        pick.assert_not_called()
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertEqual(code, 0)
+        open_workspace.assert_not_called()
+        self.assertEqual(pick.call_args[0][0], '1 \u00b7 Your workspace')
+        self.assertIn('Choose another directory', pick.call_args[0][1])
 
-    def test_readable_workspace_still_resumes_into_the_tui(self):
+    def test_readable_workspace_resumes_without_a_diagnostic(self):
         state = self.state(
             self.check('workspace', 'satisfied'),
             self.check('model_connection', 'needs_verification'),
             self.check('sandbox', 'needs_verification'),
             self.check('keeper_persistence', 'satisfied'))
+        errors = io.StringIO()
         with patch.object(SETUP, 'onboarding_status', return_value=state), \
                 patch.object(SETUP, 'workspace_port', return_value=8935), \
                 patch.object(SETUP, 'select_setup_server', return_value=8935), \
                 patch.object(SETUP, 'open_workspace', return_value=0) as open_workspace, \
                 patch.object(SETUP, 'pick') as pick, \
-                contextlib.redirect_stderr(io.StringIO()):
+                contextlib.redirect_stderr(errors):
             code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
         self.assertEqual(code, 0)
         open_workspace.assert_called_once()
         pick.assert_not_called()
+        self.assertEqual(errors.getvalue(), '')
 
     def test_fresh_workspace_still_opens_the_wizard(self):
         state = {'base_path': None, 'checks': [

@@ -32,6 +32,32 @@ const openTurn = (view: { container: Element }) => fireEvent.click(view.containe
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
 describe('historical autonomous tool outputs', () => {
+  it.each(['Read', 'Shell'].flatMap(tool => ['tail', 'historical'].map(source => ({ tool, source }))))(
+    'withholds $tool raw results from $source while retaining execution provenance', async ({ tool, source }) => {
+      const secret = `private-${tool}-result-must-not-render`
+      const payload = response()
+      const entry = { ...payload.entry, tool, input: {}, output: secret,
+        route_evidence: { descriptor_id: tool === 'Read' ? 'agent.read_file' : 'agent.shell' } }
+      vi.mocked(get).mockResolvedValue({ ...payload, entry })
+      if (source === 'tail') recordToolCallOutputs([entry])
+      const activity = chatHistoryEntriesFromRest('writer', [{
+        id: 'autonomous:trace-writer#429', role: 'assistant', ts: 1789223400, content: null,
+        autonomous_turn: { turn_id: 'trace-writer#429' },
+        blocks: [{ t: 'trace', trace: [{ kind: 'tool', name: tool, status: 'ok', execution_id: id }] }],
+      }])
+      const view = render(html`<${ChatTranscript} keeperName="writer" entries=${activity} emptyText="empty" />`)
+      openTurn(view)
+      await waitFor(() => expect(lookupToolCallOutput(id)?.output).toBe(secret))
+      const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+      expect(step.getAttribute('data-chat-trace-execution-id')).toBe(id)
+      expect(step.getAttribute('data-chat-trace-provenance')).toBe('execution_id')
+      fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+      expect(step.querySelector('.chat-block-tool-body')).toBeNull()
+      expect(view.container.textContent).not.toContain(secret)
+      expect(view.queryByLabelText('편집 변경 기록')).toBeNull()
+      expect(get).toHaveBeenCalledTimes(source === 'historical' ? 1 : 0)
+    },
+  )
   it('opens a retained Edit outside the recent tail and resolves its verified manifest', async () => {
     const before = { _blob: { sha256: 'a'.repeat(64), bytes: 9, mime: 'application/octet-stream', preview: '' } }
     const after = { _blob: { sha256: 'b'.repeat(64), bytes: 12, mime: 'application/octet-stream', preview: '' } }
@@ -50,6 +76,11 @@ describe('historical autonomous tool outputs', () => {
     expect(requested.searchParams.has('limit')).toBe(false)
     expect(fetchToolBlob).toHaveBeenCalledWith(manifest.sha256, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(view.getByText('old-story.md · 1곳 편집')).toBeTruthy()
+    const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
+    expect(step.getAttribute('data-chat-trace-provenance')).toBe('execution_id')
+    fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(step.querySelector('.chat-block-tool-body')).toBeNull()
+    expect(view.container.textContent).not.toContain('masc.tool-result-artifact-manifest.v1')
     expect(lookupToolCallOutput(id)?.keeper).toBe('writer'); expect(get).toHaveBeenCalledTimes(1)
   })
   it.each([[404, '저장된 실행 기록을 찾지 못했습니다.'], [409, '실행 기록이 중복되어'], [503, '저장된 실행 기록을 불러오지 못했습니다.']])('shows HTTP %i and retries only on operator action', async (status, message) => {

@@ -3493,12 +3493,12 @@ function ToolTraceStep({
   const output = lookup.output
   const name = traceStep?.name || entry?.label || 'tool'
   const callId = toolTraceCallId(entry, traceStep)
-  const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
+  const displayArgs = structuralSummary ? '' : prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
   const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep, canMarkMissing)
-  const sourceBadge = structuralSummary
+  const sourceBadge = structuralSummary && !(entry?.executionId ?? traceStep?.executionId)
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
     : toolTraceSourceBadge(entry, traceStep)
   let status: ToolTraceDisplayStatus
@@ -3521,7 +3521,11 @@ function ToolTraceStep({
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
       : traceStep?.dur ?? ''
-  const resultView = output ? toolOutputDisplay(output.output) : (traceStep?.result ? { text: traceStep.result, truncated: false } : null)
+  // RFC-0358 keeps autonomous arguments/results off the transcript even when
+  // its canonical execution hydrates. Edit evidence below is an independent,
+  // typed receipt projection, not permission to expose the raw tool body.
+  const resultView = structuralSummary ? null
+    : output ? toolOutputDisplay(output.output) : (traceStep?.result ? { text: traceStep.result, truncated: false } : null)
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").
@@ -3914,7 +3918,7 @@ function ToolTraceCard({
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
                           orderIndex=${index}
-                          structuralSummary=${structuralSummary && !item.step.executionId}
+                          structuralSummary=${structuralSummary}
                           orderKind="tool"
                         />`
                       })()
@@ -3928,6 +3932,7 @@ function ToolTraceCard({
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           orderIndex=${index}
                           orderKind="tool-entry"
+                          structuralSummary=${structuralSummary}
                         />`
                     : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} orderIndex=${index} />`)}
             </div>

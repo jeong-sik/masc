@@ -131,9 +131,5 @@ val peek : address:int -> length:int -> (string, error) result
 
 val peek_max_bytes : int
 
-val read_guest_file : name:string -> (string, error) result
-(** The current contents of a file the guest can see, including one it wrote —
-    a saved game comes back out this way. *)
-
 val ledger : unit -> entry list
 (** Oldest first. Empty when no machine is loaded. *)

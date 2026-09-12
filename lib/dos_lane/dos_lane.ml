@@ -310,14 +310,6 @@ let peek ~address ~length =
     end)
 ;;
 
-let read_guest_file ~name =
-  with_machine (fun st ->
-    match Dos_machine.read_mounted st.m name with
-    | Some contents -> Ok contents
-    | None ->
-      Error (Invalid_request (Printf.sprintf "the guest has no file named %S" name)))
-;;
-
 let ledger () =
   locked (fun () ->
     match !state with

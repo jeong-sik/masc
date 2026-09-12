@@ -13,6 +13,10 @@ type keeper_wake_result_delivery_policy =
   | Keeper_wake_result_delivery_none
   | Keeper_wake_result_delivery_reply_to_origin
 
+(** Why a durably enqueued wake did not also signal a live owner. A name
+    the metadata store does not hold is not a deferral: [consumer] rejects
+    that occurrence terminally before anything is enqueued and the schedule
+    fails with the reason. *)
 type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_lifecycle_denied of string
   | Keeper_wake_activation_autoboot_disabled
@@ -21,13 +25,11 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_owner_unknown of string
       (** The owner could not be read: the metadata store or the owner
           registry did not answer. The string is that failure. *)
-  | Keeper_wake_activation_owner_absent
-      (** The metadata store answered with nothing it can read under this
-          name: no file, or a file this binary cannot decode (which boot
-          re-materialises from the Keeper's TOML). Wire reason
-          [owner_absent], no detail. The durable stimulus is kept and the
-          queue drain cancels it as owner-absent; a deleted Keeper stays
-          absent until an operator registers the name again. *)
+  | Keeper_wake_activation_owner_not_current of string
+      (** The metadata store holds a file under this name that this binary
+          does not decode as current. Boot re-materialises the Keeper from
+          its declaration and it consumes the retained stimulus then. Wire
+          reason [owner_not_current]; the string is the decode detail. *)
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 

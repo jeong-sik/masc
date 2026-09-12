@@ -190,8 +190,8 @@ let validate_known_payload_request ~payload =
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be
-   settled: dispatch defers activation with owner_absent and no Keeper turn
-   ever closes the occurrence (#26092). Reject at creation unless the caller
+   settled: dispatch rejects the due occurrence terminally as owner-absent
+   and the schedule fails (#26092). Reject at creation unless the caller
    explicitly schedules for a keeper that will be registered later. The
    registry lookup arrives via [Workspace_hooks] so this tool module keeps no
    static keeper dependency (RFC-0194). *)

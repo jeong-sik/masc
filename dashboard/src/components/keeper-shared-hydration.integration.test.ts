@@ -47,7 +47,11 @@ vi.mock('../api/dashboard', () => ({
   fetchKeeperWaitingInventory,
 }))
 vi.mock('../api/mcp', () => ({ callMcpTool: vi.fn() }))
-vi.mock('../api/core', () => ({ runOperatorAction: vi.fn() }))
+vi.mock('../api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('../api/core')>(),
+  runOperatorAction: vi.fn(),
+  get: vi.fn(async () => { throw new Error('Historical output not provided by this fixture') }),
+}))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
   return {
@@ -255,7 +259,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     await waitFor(() => {
       expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
       expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
-      expect(lookupToolCallOutput('exec-api-success')?.output).toBe(
+      expect(lookupToolCallOutput('sangsu', 'exec-api-success')?.output).toBe(
         'context status joined from tool_calls_endpoint',
       )
       expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_211_000)
@@ -413,10 +417,10 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(toolCallOutputHydrationFailureReason('alpha')).toBeNull()
       expect(toolCallOutputHydrationStatus('beta')).toBe('failed')
       expect(toolCallOutputHydrationFailureReason('beta')).toBe('HTTP 503 beta')
-      expect(lookupToolCallOutput('exec-alpha-scope')?.output).toBe(
+      expect(lookupToolCallOutput('alpha', 'exec-alpha-scope')?.output).toBe(
         'alpha output joined from tool_calls_endpoint',
       )
-      expect(lookupToolCallOutput('exec-beta-scope')).toBeNull()
+      expect(lookupToolCallOutput('beta', 'exec-beta-scope')).toBeNull()
     })
 
     const alphaPanel = container.querySelector('[data-testid="alpha-panel"]') as HTMLElement
@@ -559,7 +563,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(2)
       expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
       expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
-      expect(lookupToolCallOutput('exec-refresh-recovery')?.output).toBe(
+      expect(lookupToolCallOutput('sangsu', 'exec-refresh-recovery')?.output).toBe(
         'recovered output joined from forced refresh',
       )
       expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_241_000)
@@ -681,7 +685,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(2)
       expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
       expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
-      expect(lookupToolCallOutput('exec-reconnect-recovery')?.output).toBe(
+      expect(lookupToolCallOutput('sangsu', 'exec-reconnect-recovery')?.output).toBe(
         'recovered output joined from active reconnect refresh',
       )
       expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_251_000)

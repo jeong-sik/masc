@@ -1,7 +1,17 @@
 (** Transport helpers for {!Voice_bridge}. *)
 
 val safe_agent_id : string -> string
-val make_audio_file : unit -> string
+
+val command_failure_reason : string -> string
+(** A failed command's output, trimmed to the end. The reason a command
+    failed is its last line, not its first: whisper-cli prints nine lines of
+    backend loading before it says which model file it could not open, so a
+    head-first trim reported which Metal library loaded and never the
+    missing file. *)
+val make_audio_file : format:Voice_bridge_core.clip_format -> string
+(** A fresh clip path under {!Voice_bridge_core.audio_dir}, named
+    [<token><extension>] for the format the caller is about to write. The
+    128-bit token is also the HTTP capability the dashboard fetches it by. *)
 
 val run_voice_status
   :  ?timeout_sec:float

@@ -1928,15 +1928,24 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let header = Printf.sprintf "%s (%d)  sort:%s%s  %s  %s"
+  (* No sort here. The row under this one says it in the words that answer
+     what the order is -- "latest changed first" rather than "updated" -- and
+     it is the row with space for them. "updated" is the token the board list
+     is asked for (the request's sort_by) and the token the workspace config
+     keeps, so a title that spelled it showed the operator a protocol value. *)
+  let header = Printf.sprintf "%s (%d)%s  %s  %s"
     (screen_title " MASC Board")
-    count (board_sort_label state.board_sort) hearth timestamp
+    count hearth timestamp
     (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  H:choose hearth · Sort [s]: %s"
+    (* The sort first. It has no other home on this surface now, and this row
+       is cut to the frame's inner width: at 34 columns the key hint alone
+       spent all 30 cells, so the order the rows are in was invisible while
+       the key to change it was not. H is in the sheet under [?]. *)
+    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -5147,7 +5156,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
-        | Some _ -> Ansi.dim, "  (load failed; nothing here is a reading)"
+        | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
       for _ = 2 to content_height do
@@ -8263,7 +8272,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-         | None, Some _ -> [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+         | None, Some _ -> [ Ansi.dim, page_failed_note ]
          | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (cols - 8)) detail)
   in
   let total = List.length lines in

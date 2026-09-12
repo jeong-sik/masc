@@ -369,7 +369,13 @@ let observe ~base_path =
            section_json
              ~endpoints:(List.map endpoint_json tts.Voice_config.endpoints)
              ~extra:
-               [ "default_model", `String tts.Voice_config.default_model
+               [ (* Null rather than "" when the section names none: a
+                    speaking section whose endpoints all take no model has
+                    none, and a blank here reads as a model named "". *)
+                 ( "default_model"
+                 , match tts.Voice_config.default_model with
+                   | Some model -> `String model
+                   | None -> `Null )
                ; "default_voice", `String tts.Voice_config.default_voice
                ; "default_voice_settings", tuning_json tts.Voice_config.default_voice_settings
                ; ( "agent_voices"

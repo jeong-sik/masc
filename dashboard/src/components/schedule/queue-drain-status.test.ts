@@ -30,26 +30,6 @@ function req(
   }
 }
 
-// A recognized receipt whose activation the consumer deferred because the
-// Keeper store holds no Keeper under the name.
-const OWNER_ABSENT_RECEIPT: DashboardScheduledAutomationRequest['dispatch_receipt'] = {
-  projection_status: 'recognized',
-  kind: 'masc.keeper_wake.enqueued',
-  queue: 'keeper_event_queue',
-  stimulus: 'schedule_due',
-  stimulus_id: 'occ-1',
-  reaction_ledger_status: 'recorded',
-  reaction_ledger_error: null,
-  keeper_name: 'taskmaster',
-  schedule_id: 'sched-1',
-  urgency: 'normal',
-  post_id: 'occ-1',
-  occurrence_status: 'awaiting_ack',
-  activation_status: 'deferred',
-  activation_reason: 'owner_absent',
-  activation_detail: null,
-}
-
 describe('queueDrainStatusOf', () => {
   it('returns null when the request carries no keeper-wake queue evidence', () => {
     expect(queueDrainStatusOf(req(null))).toBeNull()
@@ -81,24 +61,6 @@ describe('queueDrainStatusOf', () => {
     expect(status && isCalendarVisible(status)).toBe(true)
   })
 
-  it('names the absent Keeper when the receipt says the store had no such name', () => {
-    const status = queueDrainStatusOf(
-      req('not_found', 'matched_terminal_cancelled', OWNER_ABSENT_RECEIPT),
-    )
-    expect(status?.state).toBe('cancelled')
-    expect(status?.label).toBe('취소됨 · keeper 없음')
-  })
-
-  it('does not read a cancellation whose receipt was deferred for another reason as an absent Keeper', () => {
-    const status = queueDrainStatusOf(
-      req('not_found', 'matched_terminal_cancelled', {
-        ...OWNER_ABSENT_RECEIPT,
-        activation_reason: 'unregistered',
-      }),
-    )
-    expect(status?.label).toBe('취소됨')
-  })
-
   it('reports ack and cancellation on one occurrence as invalid evidence, not as either outcome', () => {
     expect(queueDrainStatusOf(req('not_found', 'conflicting_terminal_evidence'))?.state).toBe('evidence_invalid')
   })
@@ -106,7 +68,7 @@ describe('queueDrainStatusOf', () => {
   it('counts cancelled last executions separately from misses', () => {
     const requests = [
       req('not_found', 'matched_terminal_cancelled'),
-      req('not_found', 'matched_terminal_cancelled', OWNER_ABSENT_RECEIPT),
+      req('not_found', 'matched_terminal_cancelled'),
       req('not_found', 'not_found'),
       req('not_found', 'matched_consumed_ack'),
     ]

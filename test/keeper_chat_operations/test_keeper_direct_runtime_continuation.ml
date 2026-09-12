@@ -172,7 +172,7 @@ let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun pat
      | Error (Store.Invalid_input _) -> ()
      | _ -> fail "run-next bypassed provider retry readiness");
     check bool "refused priority leaves queued continuation intact" true
-      (Store.get store operation_id |> ok = before_priority);
+      ((Store.get store operation_id |> ok) = before_priority);
     check bool "cooling retry is not claimable" false (Store.has_claimable_queued store ~now:12. |> ok);
     check bool "claim skips the cooling retry" true ((Store.claim_next store ~now:12. |> ok) = None);
     let independent = Operation.Operation_id.of_string "independent-work" |> string_ok in

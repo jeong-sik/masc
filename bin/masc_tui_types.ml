@@ -3337,7 +3337,7 @@ module Browser_history = struct
   let owns_key = function
     | "esc" | "left" | "h" | "[" | "]" | "r" | "y" | "j" | "k" | "up" | "down"
     | "pageup" | "pagedown" | "home" | "s" | "v" | "g" | "o" | "x" | "a" | "l" | "b"
-    | "B" | "n" | "p" | "\r" | "\n" | "enter" | "\015" -> true
+    | "n" | "p" | "\r" | "\n" | "enter" | "\015" -> true
     | _ -> false
   type entry = {
     at : float; execution_id : string; artifact : Tool_output.artifact_ref;

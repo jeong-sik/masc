@@ -129,7 +129,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
                 os.write(fd, b"Q")
                 return
             count = len(requests)
-            h.write_all(fd, output, b"\rsvgo\x0fR")
+            h.write_all(fd, output, b"\rsvgo\x0fRu")
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
                 needle=b"SAVED ALPHA CONTENT", controls=(h.FULL_REDRAW,))
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=100,
@@ -142,6 +142,8 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             reopen_reads = sum(kind == "read" for kind, _ in requests)
             read_and_wait(b":go Browser Lane\r", expected_lane="live")
             assert sum(kind == "read" for kind, _ in requests) > reopen_reads
+            h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
+            read_and_wait(b"B", expected_lane="live")
             read_and_wait(b"a", expected_lane="automation")
             h.send_and_wait(process, fd, output, b"ghttps://example.org/history", b"https://example.org/history")
             h.send_and_wait(process, fd, output, b"\x1b", b"g:URL")

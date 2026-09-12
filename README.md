@@ -78,7 +78,7 @@ Check [GitHub Releases](https://github.com/jeong-sik/masc/releases) for binary a
 
 ### Published binaries
 
-Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.5).
+Download the installer attached to [GitHub Releases](https://github.com/jeong-sik/masc/releases/tag/v0.35.14).
 It verifies and installs the assets for the selected release.
 
 > Installation target: v0.35.14 (check tag availability on GitHub Releases).

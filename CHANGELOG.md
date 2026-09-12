@@ -7,7 +7,7 @@
 
 - HTTP pool: preserve DNS/TCP failures under one connection deadline, reclaim failed or cancelled client sockets, and connect through the address that passed the TCP probe without pinning later DNS reconnects (#35381, #35389, #35394).
 - HTTP pool: propagate internal client-scope failures to buffered and streaming request waits instead of leaving callers waiting for an optional timeout (#35423).
-- Installation: keep the selected workspace across working-directory changes, record it only after a successful start, and preserve unrelated defaults during purge (#35376).
+- Installation: keep the selected workspace across working-directory changes, preserve the existing default when server startup fails, and leave unrelated defaults intact during purge (#35376).
 - Keeper: constitution tools return the standard `ok` response envelope used by other tools (#35451).
 - Keeper: time spent running tools or delegated image analysis is no longer attributed to a silent parent provider; inference monitoring resumes when the provider lease is reacquired (#35454).
 - TUI: terminal and superseded tool calls no longer remain waiting for a result. The header distinguishes the observed turn runtime from configuration and clears stale runtime identity at a new attempt (#35455).

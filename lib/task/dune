@@ -23,9 +23,6 @@
  (libraries
   yojson
   unix
-  re
-  re.str
-  re.pcre
   eio
   time_compat
   fs_compat
@@ -35,8 +32,6 @@
   masc_core
   masc_log
   masc_workspace
-  masc_bounded_event_dedupe
-  masc_eio_context
   masc.masc_tool_dispatch
   ; tool_task_schemas_toml reads config/tools/masc_*.toml from the
   ; binary-embedded config tree.

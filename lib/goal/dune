@@ -15,10 +15,8 @@
   masc_types
   masc_core
   masc.masc_random_id
-  masc_config
   masc_log
   masc_workspace
-  shared_audit
   time_compat
   fs_compat
   yojson

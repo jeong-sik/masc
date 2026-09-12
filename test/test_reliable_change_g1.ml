@@ -382,6 +382,173 @@ let test_checker_rejects_duplicated_usage () =
   check bool "overall failed on duplicated usage" false summary.overall_passed
 ;;
 
+let test_checker_rejects_missing_matrix_mode () =
+  let manifest =
+    make_manifest
+      ~contract_sha256:"contract-sha"
+      ~source_commit:"commit-sha"
+      ~binary_sha256:"bin-sha"
+      ~runtime_config_sha256:"cfg-sha"
+      ~model_identity:"claude"
+      ~workload_revision:"rev-1"
+      ~execution_mode:"matrix"
+  in
+  let raw_obs = generate_compliant_observations () in
+  (* Change all matrix observations to execution_mode = "live" *)
+  let all_live =
+    List.map
+      (fun (o : run_observation) -> { o with execution_mode = "live" })
+      raw_obs
+  in
+  let summary = check_observations ~manifest ~observations:all_live in
+  check int "matrix observed is 0" 0 summary.matrix_observed;
+  check int "matrix expected is 18" 18 summary.matrix_expected;
+  check bool "overall failed when matrix not observed" false summary.overall_passed;
+  check bool "missing manifest case finding reported" true
+    (List.exists (fun f -> contains_sub "manifest_case_missing" f.rule_id) summary.findings)
+;;
+
+let test_checker_deep_manifest_validation () =
+  let manifest =
+    make_manifest
+      ~contract_sha256:"contract-sha"
+      ~source_commit:"commit-sha"
+      ~binary_sha256:"bin-sha"
+      ~runtime_config_sha256:"cfg-sha"
+      ~model_identity:"claude"
+      ~workload_revision:"rev-1"
+      ~execution_mode:"matrix"
+  in
+  let raw_obs = generate_compliant_observations () in
+
+  (* 1. Missing required phase boundary (e.g. cleanup_ended_at is None) *)
+  let missing_boundary =
+    List.map
+      (fun (o : run_observation) ->
+         if o.case_id = "success" && o.repeat_index = 1 then
+           { o with phase_timestamps = { o.phase_timestamps with cleanup_ended_at = None } }
+         else o)
+      raw_obs
+  in
+  let summary_boundary = check_observations ~manifest ~observations:missing_boundary in
+  check bool "rejected on missing phase boundary" false summary_boundary.overall_passed;
+  check bool "finding for missing phase boundary recorded" true
+    (List.exists (fun f -> contains_sub "missing_phase_boundary" f.rule_id) summary_boundary.findings);
+
+  (* 2. Manifest expected outcome mismatch (e.g. exit-nonzero actually verified) *)
+  let outcome_mismatch =
+    List.map
+      (fun (o : run_observation) ->
+         if o.case_id = "exit-nonzero" && o.repeat_index = 1 then
+           { o with external_verified = true; verdict_passed = true; command_exit_code = Some 0 }
+         else o)
+      raw_obs
+  in
+  let summary_outcome = check_observations ~manifest ~observations:outcome_mismatch in
+  check bool "rejected on expected outcome mismatch" false summary_outcome.overall_passed;
+  check bool "finding for outcome mismatch recorded" true
+    (List.exists (fun f -> contains_sub "manifest_expected_outcome_mismatch" f.rule_id) summary_outcome.findings);
+
+  (* 3. Manifest missing required_entities_by_case entry *)
+  let manifest_without_req =
+    { manifest with
+      required_entities_by_case =
+        List.filter (fun (k, _) -> k <> "success") manifest.required_entities_by_case
+    }
+  in
+  let summary_req = check_observations ~manifest:manifest_without_req ~observations:raw_obs in
+  check bool "rejected when required_entities missing from manifest" false summary_req.overall_passed;
+  check bool "finding for missing required entities declaration recorded" true
+    (List.exists (fun f -> contains_sub "missing_required_entities_declaration" f.rule_id) summary_req.findings);
+
+  (* 4. Manifest missing phase_boundaries_by_case entry *)
+  let manifest_without_pb =
+    { manifest with
+      phase_boundaries_by_case =
+        List.filter (fun (k, _) -> k <> "success") manifest.phase_boundaries_by_case
+    }
+  in
+  let summary_pb = check_observations ~manifest:manifest_without_pb ~observations:raw_obs in
+  check bool "rejected when phase_boundaries missing from manifest" false summary_pb.overall_passed;
+  check bool "finding for missing phase boundaries declaration recorded" true
+    (List.exists (fun f -> contains_sub "missing_phase_boundaries_declaration" f.rule_id) summary_pb.findings);
+
+  (* 5. Manifest missing expected_outcomes entry *)
+  let manifest_without_eo =
+    { manifest with
+      expected_outcomes =
+        List.filter (fun (k, _) -> k <> "success") manifest.expected_outcomes
+    }
+  in
+  let summary_eo = check_observations ~manifest:manifest_without_eo ~observations:raw_obs in
+  check bool "rejected when expected_outcomes missing from manifest" false summary_eo.overall_passed;
+  check bool "finding for missing expected outcome declaration recorded" true
+    (List.exists (fun f -> contains_sub "missing_expected_outcome_declaration" f.rule_id) summary_eo.findings)
+;;
+
+let test_manifest_and_observations_file_io () =
+  let manifest_file = Filename.temp_file "g1-manifest" ".json" in
+  let runs_file = Filename.temp_file "g1-runs" ".jsonl" in
+  let checker_file = Filename.temp_file "g1-checker" ".json" in
+  let summary_file = Filename.temp_file "g1-summary" ".json" in
+
+  let manifest =
+    make_manifest
+      ~contract_sha256:"contract-sha-io"
+      ~source_commit:"commit-sha-io"
+      ~binary_sha256:"bin-sha-io"
+      ~runtime_config_sha256:"cfg-sha-io"
+      ~model_identity:"claude-io"
+      ~workload_revision:"rev-io"
+      ~execution_mode:"matrix"
+  in
+  let manifest_json_str = Yojson.Safe.pretty_to_string (manifest_to_json manifest) in
+  let oc_m = open_out manifest_file in
+  output_string oc_m manifest_json_str;
+  close_out oc_m;
+
+  let raw_obs = generate_compliant_observations () in
+  let oc_r = open_out runs_file in
+  List.iter
+    (fun o ->
+       output_string oc_r (Yojson.Safe.to_string (run_observation_to_json o) ^ "\n"))
+    raw_obs;
+  close_out oc_r;
+
+  (match load_manifest_file manifest_file with
+   | Error err -> fail ("load_manifest_file failed: " ^ err)
+   | Ok loaded_manifest ->
+     check string "manifest contract sha parity" manifest.contract_sha256 loaded_manifest.contract_sha256;
+     check int "manifest case ids count" 6 (List.length loaded_manifest.case_ids);
+     match load_observations_file runs_file with
+     | Error err -> fail ("load_observations_file failed: " ^ err)
+     | Ok loaded_obs ->
+       check int "observations count matches" 31 (List.length loaded_obs);
+       let summary = check_observations ~manifest:loaded_manifest ~observations:loaded_obs in
+       check bool "overall passed from loaded files" true summary.overall_passed;
+       (match write_checker_file checker_file summary with
+        | Error err -> fail ("write_checker_file failed: " ^ err)
+        | Ok () ->
+          check bool "checker.json exists" true (Sys.file_exists checker_file);
+          match write_summary_file summary_file summary with
+          | Error err -> fail ("write_summary_file failed: " ^ err)
+          | Ok () ->
+            check bool "summary.json exists" true (Sys.file_exists summary_file);
+            let checker_json = Yojson.Safe.from_file checker_file in
+            (match checker_summary_of_json checker_json with
+             | Error err -> fail ("decode checker.json failed: " ^ err)
+             | Ok decoded_summary ->
+               check bool "decoded checker overall passed" true decoded_summary.overall_passed;
+               check int "decoded matrix observed" 18 decoded_summary.matrix_observed;
+               check int "decoded live observed" 3 decoded_summary.live_observed)));
+
+  (* Clean up temporary files *)
+  (try Sys.remove checker_file with Sys_error _ -> ());
+  (try Sys.remove summary_file with Sys_error _ -> ());
+  (try Sys.remove runs_file with Sys_error _ -> ());
+  (try Sys.remove manifest_file with Sys_error _ -> ())
+;;
+
 let test_strict_parsing_rejects_unknown_scope () =
   let json =
     `Assoc
@@ -549,6 +716,9 @@ let () =
       , [ test_case "accepts compliant records" `Quick test_checker_accepts_compliant_records
         ; test_case "rejects verification failure in success" `Quick test_checker_rejects_verification_failure_in_success
         ; test_case "rejects duplicated usage" `Quick test_checker_rejects_duplicated_usage
+        ; test_case "rejects missing matrix mode" `Quick test_checker_rejects_missing_matrix_mode
+        ; test_case "deep manifest validation" `Quick test_checker_deep_manifest_validation
+        ; test_case "manifest and observations file IO" `Quick test_manifest_and_observations_file_io
         ]
       )
     ; ( "strict_parsing"

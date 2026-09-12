@@ -10492,10 +10492,17 @@ let render_metrics (state : state) =
       (screen_title " MASC Metrics & Performance Telemetry")
       sec_label timestamp (connection_badge state)
   in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"metrics"
+  (* The section's lines are formatted by the drawing, so the row it could
+     start at is known only once it has. The body writes it here and the
+     contract reads it back out. *)
+  let drawn_metrics_scroll = ref state.metrics_scroll in
+  surface_chrome
+    ~clamped:(fun () -> Some (Metrics_scroll !drawn_metrics_scroll))
+    state ~terminal_rows ~cols ~surface_key:"metrics"
     ~title ~hints:(Masc_tui_keys.footer_hints state.view)
     ~body:(fun ~budget c ->
       Render_metrics.render_metrics_body ~cols ~budget state
+        ~report_scroll:(fun scroll -> drawn_metrics_scroll := scroll)
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 

@@ -1775,8 +1775,15 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
        "Claude Code turn stopped by host: %s"
        (error_to_string stop)
    | Error error ->
+     (* The sibling branches above pass [error_to_string]; this one passed only
+        the kind, so every failure that does not stop at a host boundary landed
+        in the log as a bare "kind=turn_failed". [Turn_failed] carries its
+        detail, so the reason existed and was dropped at the call rather than
+        never produced -- a turn that ran 184s before failing on 2026-09-12
+        17:08:06 KST could not be told from an instant one afterwards. *)
      Log.Runtime_agent.warn
-       "Claude Code turn failed (kind=%s)"
-       (error_kind error));
+       "Claude Code turn failed (kind=%s): %s"
+       (error_kind error)
+       (error_to_string error));
   result
 ;;

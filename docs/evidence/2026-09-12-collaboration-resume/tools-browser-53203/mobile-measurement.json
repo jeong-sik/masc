@@ -1,0 +1,19 @@
+{
+  "geometry": {
+    "x": 29.5,
+    "right": 360.5,
+    "width": 331,
+    "height": 261.1875,
+    "viewportWidth": 390
+  },
+  "overflow": {
+    "scroll": 74,
+    "client": 73,
+    "height": 73.28125,
+    "overflowY": "visible",
+    "lineClamp": "none",
+    "whiteSpace": "pre-wrap",
+    "text": "List MASC internal board posts and return post_id values for follow-up masc_board_post_get, masc_board_comment, or masc_board_vote calls. Use this when you need recent board state or a post_id and do not already have one."
+  },
+  "expanded": "true"
+}

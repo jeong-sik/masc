@@ -77,15 +77,20 @@ try {
   await expanded.focus(); await page.keyboard.press('Space')
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
   await page.setViewportSize({ width: 390, height: 844 })
-  await toggle.click(); await card.scrollIntoViewIfNeeded()
+  await toggle.click(); await expanded.waitFor({ state: 'visible' }); await card.scrollIntoViewIfNeeded()
   const geometry = await card.evaluate(element => {
     const bounds = element.getBoundingClientRect()
     return { x: bounds.x, right: bounds.right, width: bounds.width, height: bounds.height, viewportWidth: innerWidth }
   })
   assert.ok(geometry.x >= 0 && geometry.right <= geometry.viewportWidth, 'Card must fit mobile width')
-  const overflow = await description.evaluate(element => ({ scroll: element.scrollHeight, client: element.clientHeight }))
-  assert.ok(overflow.scroll <= overflow.client, 'Full text must not be vertically clipped')
+  const overflow = await description.evaluate(element => {
+    const style = getComputedStyle(element), rect = element.getBoundingClientRect()
+    return { scroll: element.scrollHeight, client: element.clientHeight, height: rect.height, overflowY: style.overflowY, lineClamp: style.webkitLineClamp, whiteSpace: style.whiteSpace, text: element.textContent }
+  })
   await page.screenshot({ path: resolve(output, 'tools-mobile.png') })
+  await writeFile(resolve(output, 'mobile-measurement.json'), JSON.stringify({ geometry, overflow, expanded: await expanded.getAttribute('aria-expanded') }, null, 2) + '\n')
+  assert.equal(overflow.lineClamp, 'none', 'Expanded description must not be line-clamped')
+  assert.ok(overflow.overflowY === 'visible' || overflow.scroll <= overflow.client, 'Full text must not be vertically clipped')
   assert.deepEqual(errors, [])
   await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ observed_at: new Date().toISOString(), manifest, backend_build: health.build, actual_tool: actualTool, runtime_paths: toolsResponse.runtime_resolution, checks: ['actual_backend_full_canonical_description', 'null_repo_path_no_copy', 'exact_data_root_clipboard', 'keyboard_expand_collapse', 'mobile_click_and_card_bounds', 'full_text_no_vertical_clip'], geometry, overflow, errors, blocked, scope: 'Real authenticated API responses through a CI preview, no fixture responses and no production UI deployment' }, null, 2) + '\n')
   console.log(JSON.stringify({ output, tool: actualTool.name, errors }))

@@ -1,0 +1,278 @@
+{
+  "observed_at": "2026-09-12T10:56:15.322629+00:00",
+  "reviewed_requests": [
+    {
+      "id": "appr_01a08d0f-da6f-7000-bc66-49d434485700",
+      "keeper_name": "exhibit-editor",
+      "tool_name": "tool_execute",
+      "input_hash": "e5bc2bf24646f274d4ecb203ebd118b56e6dd4701c1f8a21016e669fb5cc6ae4",
+      "sequence": 41,
+      "requested_at": 1789073021.55197,
+      "waiting_s": 136787.2544488907,
+      "turn_id": 96,
+      "task_id": null,
+      "goal_id": null,
+      "input": {
+        "schema": "masc.keeper_gate.request.v1",
+        "input": {
+          "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+          "argv": [
+            "python3",
+            "-m",
+            "py_compile",
+            "verify_evidence.py"
+          ]
+        },
+        "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+        "sandbox_profile": "docker",
+        "sandbox_target": "docker:masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64"
+      },
+      "input_preview": "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.\",\"argv\":[\"python3\",\"-m\",\"py_compile\",\"ve...(truncated)",
+      "summary_status": {
+        "status": "failed",
+        "reason": "Auto Judge exact attempt quarantined: flow_execution_failed"
+      },
+      "exact_attempt": {
+        "state": "bound",
+        "approval_id": "appr_01a08d0f-da6f-7000-bc66-49d434485700",
+        "input_hash": "e5bc2bf24646f274d4ecb203ebd118b56e6dd4701c1f8a21016e669fb5cc6ae4",
+        "sequence": 41,
+        "slot_id": "kimi_coding.kimi-for-coding",
+        "call_id": "f8c4e4b7145383c86052e95ed7548ec5",
+        "plan_fingerprint": "087362f38a800e676c1cbdb34c8f244e853c456a03ffddb4c07cb9d56ba796e3",
+        "request_body_sha256": "51a69da50ba1feed42bdc307a446ed20ac0679eb024f7ebc4372d6f71e8f87cc",
+        "status": "quarantined",
+        "quarantine_cause": "flow_execution_failed"
+      },
+      "summary_attempt_disposition": {
+        "code": "settled"
+      }
+    },
+    {
+      "id": "appr_01a08ded-ffa6-7000-8585-715b621f665a",
+      "keeper_name": "exhibit-editor",
+      "tool_name": "tool_execute",
+      "input_hash": "a18ecee14cbb1b29396a0d35d9f451f4fd4ad3d1403f289564e5bc4bf66f8b9f",
+      "sequence": 42,
+      "requested_at": 1789087580.070315,
+      "waiting_s": 122228.73614001274,
+      "turn_id": 142,
+      "task_id": null,
+      "goal_id": null,
+      "input": {
+        "schema": "masc.keeper_gate.request.v1",
+        "input": {
+          "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+          "argv": [
+            "sh",
+            "-c",
+            "which tesseract; tesseract --list-langs 2>&1 | head -8"
+          ]
+        },
+        "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+        "sandbox_profile": "docker",
+        "sandbox_target": "docker:masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64"
+      },
+      "input_preview": "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.\",\"argv\":[\"sh\",\"-c\",\"which tesseract; tes...(truncated)",
+      "summary_status": {
+        "status": "failed",
+        "reason": "Auto Judge exact attempt quarantined: flow_execution_failed"
+      },
+      "exact_attempt": {
+        "state": "bound",
+        "approval_id": "appr_01a08ded-ffa6-7000-8585-715b621f665a",
+        "input_hash": "a18ecee14cbb1b29396a0d35d9f451f4fd4ad3d1403f289564e5bc4bf66f8b9f",
+        "sequence": 42,
+        "slot_id": "kimi_coding.kimi-for-coding",
+        "call_id": "ea0b9f4b03f77ed84342763dca371201",
+        "plan_fingerprint": "90026777eb753381016e9a13c401ace3ff7fb5154dacda3fdf23da4205b876e8",
+        "request_body_sha256": "a02e0e1b005c98fadf8a7a85bf4264febbdfb61b7d15f5e8c48e4ed8cea1aa04",
+        "status": "quarantined",
+        "quarantine_cause": "flow_execution_failed"
+      },
+      "summary_attempt_disposition": {
+        "code": "settled"
+      }
+    },
+    {
+      "id": "appr_01a08e89-91cb-7000-a145-f3b05c26e365",
+      "keeper_name": "exhibit-editor",
+      "tool_name": "tool_execute",
+      "input_hash": "7da1e038cb51e0915e03ac1fd56c9f2a96ecb471e54c4b2212d4e1233c31b514",
+      "sequence": 43,
+      "requested_at": 1789097775.563217,
+      "waiting_s": 112033.24325203896,
+      "turn_id": 172,
+      "task_id": null,
+      "goal_id": null,
+      "input": {
+        "schema": "masc.keeper_gate.request.v1",
+        "input": {
+          "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+          "argv": [
+            "sh",
+            "-c",
+            "pdftotext booklet.pdf - | head -60"
+          ]
+        },
+        "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+        "sandbox_profile": "docker",
+        "sandbox_target": "docker:masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64"
+      },
+      "input_preview": "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.\",\"argv\":[\"sh\",\"-c\",\"pdftotext booklet.pd...(truncated)",
+      "summary_status": {
+        "status": "failed",
+        "reason": "Auto Judge exact attempt quarantined: flow_execution_failed"
+      },
+      "exact_attempt": {
+        "state": "bound",
+        "approval_id": "appr_01a08e89-91cb-7000-a145-f3b05c26e365",
+        "input_hash": "7da1e038cb51e0915e03ac1fd56c9f2a96ecb471e54c4b2212d4e1233c31b514",
+        "sequence": 43,
+        "slot_id": "kimi_coding.kimi-for-coding",
+        "call_id": "ad19347328e973e1a2981f43ab675b9d",
+        "plan_fingerprint": "9a85cf4d36d845c23f543768e7a29c593f608d3032b2180203c326bc0d36c713",
+        "request_body_sha256": "22c9278f6f5694ffb424b5ceede5b833e9eb5955769b3eec3f5fc7d255c2e298",
+        "status": "quarantined",
+        "quarantine_cause": "flow_execution_failed"
+      },
+      "summary_attempt_disposition": {
+        "code": "settled"
+      }
+    },
+    {
+      "id": "appr_01a09502-9d7b-7000-b4e9-b0ae630aaa79",
+      "keeper_name": "exhibit-editor",
+      "tool_name": "tool_execute",
+      "input_hash": "18899363347f2ab16ffa26283e4ef373149f4491f48fe4228745b991b07d01af",
+      "sequence": 44,
+      "requested_at": 1789206371.707582,
+      "waiting_s": 3437.0989179611206,
+      "turn_id": 373,
+      "task_id": null,
+      "goal_id": null,
+      "input": {
+        "schema": "masc.keeper_gate.request.v1",
+        "input": {
+          "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+          "argv": [
+            "sh",
+            "-c",
+            "which tesseract && tesseract --list-langs 2>&1 | head -8; python3 -c \"from PIL import Image; im=Image.open('received/designer-poster.png'); print(im.size, im.mode)\""
+          ]
+        },
+        "cwd": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.",
+        "sandbox_profile": "docker",
+        "sandbox_target": "docker:masc-sandbox:ci-de1d81f9662cecad3117e22a17df9bbaff3a86b1-arm64"
+      },
+      "input_preview": "{\"schema\":\"masc.keeper_gate.request.v1\",\"input\":{\"cwd\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/.\",\"argv\":[\"sh\",\"-c\",\"which tesseract && t...(truncated)",
+      "summary_status": {
+        "status": "failed",
+        "reason": "Auto Judge exact attempt quarantined: flow_execution_failed"
+      },
+      "exact_attempt": {
+        "state": "bound",
+        "approval_id": "appr_01a09502-9d7b-7000-b4e9-b0ae630aaa79",
+        "input_hash": "18899363347f2ab16ffa26283e4ef373149f4491f48fe4228745b991b07d01af",
+        "sequence": 44,
+        "slot_id": "kimi_coding.kimi-for-coding",
+        "call_id": "72c0467ef74a394ad9f8587f4b62c728",
+        "plan_fingerprint": "5a712ffcc1abaa7e9595061ed5854a045b7b3e848869b1638d2a737f69e972c3",
+        "request_body_sha256": "c4d39e214528a8b47bdfda64fc111026a458931e3ebe4990e93d955ae7caedab",
+        "status": "quarantined",
+        "quarantine_cause": "flow_execution_failed"
+      },
+      "summary_attempt_disposition": {
+        "code": "settled"
+      }
+    }
+  ],
+  "resolution_receipts": [
+    {
+      "ok": true,
+      "id": "appr_01a08d0f-da6f-7000-bc66-49d434485700",
+      "decision": "approve",
+      "rule_id": null,
+      "audit_receipts": [
+        {
+          "recorded": true,
+          "event": "resolved"
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "id": "appr_01a08ded-ffa6-7000-8585-715b621f665a",
+      "decision": "approve",
+      "rule_id": null,
+      "audit_receipts": [
+        {
+          "recorded": true,
+          "event": "resolved"
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "id": "appr_01a08e89-91cb-7000-a145-f3b05c26e365",
+      "decision": "approve",
+      "rule_id": null,
+      "audit_receipts": [
+        {
+          "recorded": true,
+          "event": "resolved"
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "id": "appr_01a09502-9d7b-7000-b4e9-b0ae630aaa79",
+      "decision": "approve",
+      "rule_id": null,
+      "audit_receipts": [
+        {
+          "recorded": true,
+          "event": "resolved"
+        }
+      ]
+    }
+  ],
+  "pending_count_after_resolve": 0,
+  "requested_by": "authorized assistant acting through admin route; API labels this human_operator",
+  "remember_rule": false,
+  "replay_execution_proven": "one of four: py_compile exited0; other three not yet observed",
+  "note": "Approval and execution are separate. The tool-approvals endpoint is a different registry and was not evidence that these Host Gate requests were absent.",
+  "observed_replay": {
+    "approval_id": "appr_01a08d0f-da6f-7000-bc66-49d434485700",
+    "effect": "python3 -m py_compile verify_evidence.py",
+    "result_blob_sha256": "4115a21d073740368a6c8efb3819c46740b26f9bb2eec7f2141e80fb70bb31dc",
+    "result": {
+      "ok": true,
+      "status": {
+        "kind": "exit",
+        "code": 0
+      },
+      "shim_execution_evidence": {
+        "status": "not_observed",
+        "receipts": []
+      },
+      "cwd": "/home/keeper/playground/exhibit-editor",
+      "execution_location": {
+        "cwd": "/home/keeper/playground/exhibit-editor",
+        "cwd_source": "explicit_cwd",
+        "scope": "playground_root",
+        "playground_root": "/home/keeper/playground/exhibit-editor",
+        "relative_cwd": ".",
+        "repo_name": null,
+        "repo_root": null
+      },
+      "output_completeness": "complete",
+      "output": "",
+      "typed": true,
+      "execution_time_ms": 406,
+      "requested_sandbox": "docker",
+      "via": "docker",
+      "sandbox_profile": "docker"
+    }
+  }
+}

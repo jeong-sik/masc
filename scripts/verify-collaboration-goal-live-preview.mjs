@@ -53,11 +53,20 @@ try {
   })
   await page.goto(new URL('/dashboard/#workspace?section=planning&goal=exhibition-publication-baseline', baseUrl).href)
   await page.getByText('가상 전시 출판물 완성', { exact: true }).first().waitFor({ timeout: 45000 })
-  const verdict = page.getByText('검증 · 반증됨', { exact: true })
+  const awaitingConfirmation = process.argv[7] === 'awaiting_confirmation'
+  const verdict = awaitingConfirmation
+    ? page.getByRole('button', { name: '이 증명으로 목표 완료 확인', exact: true })
+    : page.getByText('검증 · 반증됨', { exact: true })
   await verdict.waitFor({ timeout: 45000 })
   await verdict.scrollIntoViewIfNeeded()
-  assert.ok((await page.locator('body').innerText()).includes('lookup_output_invalid_utf8'))
-  assert.equal(await page.getByRole('button', { name: '이 증명으로 목표 완료 확인', exact: true }).count(), 0)
+  if (awaitingConfirmation) {
+    const panel = page.getByTestId('goal-confirmation-panel')
+    assert.ok((await panel.innerText()).includes('5/5'))
+    assert.ok((await panel.innerText()).includes('c36f5a9061458b3efbeb8cbb2cacfc6b'))
+  } else {
+    assert.ok((await page.locator('body').innerText()).includes('lookup_output_invalid_utf8'))
+    assert.equal(await page.getByRole('button', { name: '이 증명으로 목표 완료 확인', exact: true }).count(), 0)
+  }
   await page.screenshot({ path: resolve(output, 'goal-desktop.png'), fullPage: true })
   await writeFile(resolve(output, 'page-text.txt'), await page.locator('body').innerText())
   await page.setViewportSize({ width: 390, height: 844 })

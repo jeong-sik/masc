@@ -1,0 +1,69 @@
+{
+  "observed_at": 1789209973.172417,
+  "observed_pid": 24885,
+  "operations": {
+    "exhibit-editor": [
+      {
+        "operation_id": "kmsg-39825b6f9ece6b32ec403230b2531748",
+        "sequence": 9,
+        "state": "running",
+        "created_at": 1789208950.259119,
+        "started_at": 1789209249.02315,
+        "completed_at": null,
+        "outcome_ref": null,
+        "failure_kind": null,
+        "failure_detail": null
+      },
+      {
+        "operation_id": "kmsg-290f18125241cc7094ae744f136c574a",
+        "sequence": 10,
+        "state": "queued",
+        "created_at": 1789209232.586452,
+        "started_at": null,
+        "completed_at": null,
+        "outcome_ref": null,
+        "failure_kind": null,
+        "failure_detail": null
+      }
+    ],
+    "exhibit-designer": [
+      {
+        "operation_id": "kmsg-2d7f67ad14e7f37ac96b82d53dfaef4b",
+        "sequence": 9,
+        "state": "succeeded",
+        "created_at": 1789209136.873236,
+        "started_at": 1789209136.891844,
+        "completed_at": 1789209321.142659,
+        "outcome_ref": "trace-1789042574909-00000#29",
+        "failure_kind": null,
+        "failure_detail": null
+      }
+    ]
+  },
+  "terminal_log": [
+    "[2026-09-12 19:32:37] [INFO] [Keeper] keeper_stream: request terminal keeper=exhibit-editor request_id=kmsg-39825b6f9ece6b32ec403230b2531748 status=done",
+    "[2026-09-12 19:34:09] [WARN] [Keeper] keeper_stream: request terminal keeper=exhibit-editor request_id=kmsg-39825b6f9ece6b32ec403230b2531748 status=error message=checkpoint does not own this direct operation's active execution scope"
+  ],
+  "live_turn_projection": {
+    "live_turn_in_progress": true,
+    "live_turn_started_at_unix": 1789209920.665587,
+    "live_turn_last_progress_at_unix": 1789209920.892242,
+    "latest_ts_unix": 1789209920.409377,
+    "health": "live",
+    "stale_reason": null
+  },
+  "diagnosis_receipt_sha256": "9b9929710c88568bae92dc065500272cda1c36d3cd4c5be21a6420c9ac836107",
+  "sqlite_snapshot_sha256": "5f08ea44d73a81a1f3eb5ff9081bfedf1c4d1e7082c089f5d3505ef86eb65d26",
+  "after_upgrade_new_editor_request_error": {
+    "error": "store_unavailable",
+    "message": "keeper owner store unavailable: Keeper chat operation integrity failure: deferred operation is not queued"
+  },
+  "source_repair": {
+    "pr": 35419,
+    "head": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "test_run": 34689988053,
+    "binary_run": 34690056205,
+    "live_applied": false
+  },
+  "scope": "The operation remained running after a direct checkpoint admission error. New editor direct work was then rejected. Original checkpoint loss must not be described as recovered memory; source repair is under CI, not yet accepted live."
+}

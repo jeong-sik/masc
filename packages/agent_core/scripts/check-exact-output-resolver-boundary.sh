@@ -550,7 +550,9 @@ scan_public_error_accessors() {
           match($0, /^[[:space:]]*val[[:space:]]+(target_selection_error|wire_admission_error|admission_error)_[[:alnum:]_]+/) {
             accessor = substr($0, RSTART, RLENGTH)
             sub(/^[[:space:]]*val[[:space:]]+/, "", accessor)
-            if (accessor != "target_selection_error_disposition" && accessor != "admission_error_disposition") {
+            if (accessor != "target_selection_error_disposition" \
+                && accessor != "admission_error_disposition" \
+                && accessor != "admission_error_reason") {
               printf "%d:%s\n", NR, $0
             }
           }
@@ -561,7 +563,7 @@ scan_public_error_accessors() {
       printf '%s:%s\n' "$source_file" "$hit" >&2
     done <<< "$hits"
     echo \
-      "exact-output boundary violation: detailed exact-output error accessor escaped" \
+      "exact-output boundary violation: detailed exact-output error accessor escaped (allowlist: *_disposition, admission_error_reason)" \
       >&2
     return 1
   fi

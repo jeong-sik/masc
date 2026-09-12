@@ -245,13 +245,15 @@ let make_manifest
       ~execution_mode
   =
   let cases = default_case_manifests () in
-  let case_ids = List.map (fun c -> c.case_id) cases in
-  let expected_outcomes = List.map (fun c -> c.case_id, c.expected_outcome) cases in
+  let case_ids = List.map (fun (c : case_manifest) -> c.case_id) cases in
+  let expected_outcomes =
+    List.map (fun (c : case_manifest) -> c.case_id, c.expected_outcome) cases
+  in
   let required_entities_by_case =
-    List.map (fun c -> c.case_id, c.required_entities) cases
+    List.map (fun (c : case_manifest) -> c.case_id, c.required_entities) cases
   in
   let phase_boundaries_by_case =
-    List.map (fun c -> c.case_id, c.phase_boundaries) cases
+    List.map (fun (c : case_manifest) -> c.case_id, c.phase_boundaries) cases
   in
   { contract_sha256
   ; source_commit
@@ -281,7 +283,9 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
     List.filter (fun (o : run_observation) -> o.usage_scope = Some Per_request) observations
   in
   let cumulative_obs =
-    List.filter (fun (o : run_observation) -> o.usage_scope = Some Cumulative_request_snapshot) observations
+    List.filter
+      (fun (o : run_observation) -> o.usage_scope = Some Cumulative_request_snapshot)
+      observations
   in
   let distinct_per_request =
     List.fold_left
@@ -321,7 +325,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
          in
          let sorted =
            List.sort
-             (fun (a : run_observation) (b : run_observation) ->
+             (fun a b ->
                 match Int.compare a.attempt_sequence b.attempt_sequence with
                 | 0 ->
                   let a_cost =
@@ -436,8 +440,12 @@ let check_observations
   let matrix_expected = 18 in
   let live_expected = 3 in
 
-  let matrix_obs = List.filter (fun (o : run_observation) -> o.execution_mode = "matrix") observations in
-  let live_obs = List.filter (fun (o : run_observation) -> o.execution_mode = "live") observations in
+  let matrix_obs =
+    List.filter (fun (o : run_observation) -> o.execution_mode = "matrix")
+      observations in
+  let live_obs =
+    List.filter (fun (o : run_observation) -> o.execution_mode = "live")
+      observations in
 
   (* Group observations by run key: (case_id, repeat_index) *)
   let run_keys_matrix =
@@ -446,7 +454,8 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index) matrix_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index)
+         matrix_obs)
   in
   let matrix_observed = List.length run_keys_matrix in
 
@@ -456,7 +465,8 @@ let check_observations
          match String.compare c1 c2 with
          | 0 -> Int.compare r1 r2
          | c -> c)
-      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index) live_obs)
+      (List.map (fun (o : run_observation) -> o.case_id, o.repeat_index)
+         live_obs)
   in
   let live_observed = List.length run_keys_live in
 
@@ -481,11 +491,12 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun (o : run_observation) -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) ->
+              o.case_id = case_id && o.repeat_index = repeat_index)
            matrix_obs
        in
        let sorted_attempts =
-         List.sort (fun (a : run_observation) (b : run_observation) -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
        in
        let final_attempt = List.hd (List.rev sorted_attempts) in
        let first_attempt = List.hd sorted_attempts in
@@ -496,7 +507,9 @@ let check_observations
          List.filter (fun (o : run_observation) -> o.usage_scope = Some Per_request) run_obs
        in
        let per_req_ids =
-         List.filter_map (fun (o : run_observation) -> o.run_turn_attempt_identity) per_req_attempts
+         List.filter_map
+           (fun (o : run_observation) -> o.run_turn_attempt_identity)
+           per_req_attempts
        in
        let unique_per_req_ids = List.sort_uniq String.compare per_req_ids in
        if List.length per_req_ids <> List.length unique_per_req_ids then (
@@ -508,13 +521,25 @@ let check_observations
            (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
        );
        let cumulative_attempts =
-         List.filter (fun (o : run_observation) -> o.usage_scope = Some Cumulative_request_snapshot) run_obs
+         List.filter
+           (fun (o : run_observation) ->
+              o.usage_scope = Some Cumulative_request_snapshot)
+           run_obs
        in
+       (* Key on the snapshot's own identity: the contract's canonical
+          cumulative shape records several progressive snapshots of one
+          attempt (attempt-2-snap-1 / -snap-2) under the same
+          request_or_task_identity and attempt_sequence, and the totals rule
+          below requires exactly that aggregate. What counts as duplicated is
+          the same snapshot recorded twice, not a later snapshot of the same
+          attempt. *)
        let cumulative_keys =
          List.map
            (fun (o : run_observation) ->
-              ( (match o.request_or_task_identity with Some r -> r | None -> o.run_id)
-              , o.attempt_sequence ))
+              ( match o.run_turn_attempt_identity with
+                | Some id -> id
+                | None -> o.run_id )
+              , o.attempt_sequence )
            cumulative_attempts
        in
        let unique_cumulative_keys =
@@ -718,11 +743,12 @@ let check_observations
     (fun (case_id, repeat_index) ->
        let run_obs =
          List.filter
-           (fun (o : run_observation) -> o.case_id = case_id && o.repeat_index = repeat_index)
+           (fun (o : run_observation) ->
+              o.case_id = case_id && o.repeat_index = repeat_index)
            live_obs
        in
        let sorted_attempts =
-         List.sort (fun (a : run_observation) (b : run_observation) -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
+         List.sort (fun a b -> Int.compare a.attempt_sequence b.attempt_sequence) run_obs
        in
        let final_attempt = List.hd (List.rev sorted_attempts) in
        let first_attempt = List.hd sorted_attempts in
@@ -940,8 +966,18 @@ let run_observation_to_json (o : run_observation) : Yojson.Safe.t =
     ]
 ;;
 
-let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) result =
+let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) result =
   try
+    (* Harness and roadmap rows are flat: they have no nested "usage",
+       "phase_timestamps" or similar objects. [member] on `Null raises
+       "Can't get member ... of non-object type null", so normalize the root
+       (and treat any absent nested object the same way below) instead of
+       making every member lookup null-safe by hand. *)
+    let json =
+      match json0 with
+      | `Null -> `Assoc []
+      | other -> other
+    in
     let case_id = json |> member "case_id" |> to_string in
     let repeat_index =
       match json |> member "repeat_index" |> to_int_option with
@@ -989,10 +1025,10 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
       | None -> target_revision
     in
     let artifact_references =
-      match json |> member "artifact_references" |> to_list_option with
+      match json |> member "artifact_references" |> to_option to_list with
       | Some list -> List.map to_string list
       | None ->
-        (match json |> member "edited_target_files" |> to_list_option with
+        (match json |> member "edited_target_files" |> to_option to_list with
          | Some list -> List.map to_string list
          | None -> [])
     in
@@ -1031,7 +1067,11 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
       | None -> None
     in
     let usage =
-      let u = json |> member "usage" in
+      let u =
+        match json |> member "usage" with
+        | `Null -> `Assoc []
+        | other -> other
+      in
       let reported =
         match u |> member "reported" |> to_bool_option with
         | Some b -> b
@@ -1106,7 +1146,11 @@ let run_observation_of_json (json : Yojson.Safe.t) : (run_observation, string) r
         in
         Usage_missing reason
     in
-    let pt = json |> member "phase_timestamps" in
+    let pt =
+      match json |> member "phase_timestamps" with
+      | `Null -> `Assoc []
+      | other -> other
+    in
     let phase_timestamps =
       { queue_started_at = pt |> member "queue_started_at" |> to_float_option
       ; model_started_at = pt |> member "model_started_at" |> to_float_option

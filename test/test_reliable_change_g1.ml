@@ -254,11 +254,15 @@ let generate_compliant_observations () =
         with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot }
     in
     let r3 =
+      let snap2_identity = Printf.sprintf "att-retry-success-%d-2-snap2" rep in
+      (* Second progressive snapshot of the same attempt: distinct snapshot
+         identity (mirroring the canonical fixture's attempt-2-snap-1/-snap-2),
+         same request identity and attempt_sequence. *)
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-3")
            ~mode:"matrix" ~verified:true ~exit_code:(Some 0)
            ~usage:(Usage_reported { input_tokens = 25; output_tokens = 5; cache_read_input_tokens = 4; cost_usd = Some 0.05; cost_usd_exact = Some "0.05" })
            ~attempt_seq:2)
-        with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot }
+        with request_or_task_identity = Some "successful-attempt"; usage_scope = Some Cumulative_request_snapshot; run_turn_attempt_identity = Some snap2_identity }
     in
     let r4 =
       { (make_dummy_observation ~case_id:"retry-success" ~repeat_index:rep ~run_id:(retry_run_id_prefix ^ "-4")

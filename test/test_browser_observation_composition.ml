@@ -89,9 +89,9 @@ let test_composition_retains_observation ~reject_schema () =
        | Ok nodes ->
          let payload = `List (List.map (fun (node : Executor.node_result) -> Tool_result.to_json node.result) nodes) in
          let aggregate = Tool_result.make_ok ~tool_name:"keeper_compose_observed-page" ~start_time:0. ~data:payload () in
-         let projected = Masc.Tool_bridge.to_agent_core_typed_result ~base_path:base
-           ~model_projection:(Tool_output.Inline_up_to {maximum_bytes=100000}) aggregate
-           |> Result.map_error (fun error -> error.Masc.Tool_bridge.message) |> expect in
+         let projected = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:base
+           ~model_projection:(Tool_output.Inline_up_to {maximum_bytes=100000}) aggregate with
+           | Ok projected -> projected | Error error -> fail error.message in
          check string "successful composition payload stays inline" (Yojson.Safe.to_string payload) projected.content);
       let gc = Tool_blob_maintenance.run ~base_path:base ~mode:Observe_only
         |> Result.map_error Tool_blob_maintenance.error_to_string |> expect in

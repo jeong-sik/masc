@@ -193,14 +193,16 @@ let test_friendly_runtime_param_editing () =
     (advanced.rpe_mode = Advanced_json)
 ;;
 
-(* A file that has landed, which is the state these names are read from. *)
+(* A file that has landed, which is the state these names are read from.
+   Written as a list of rows and stored as an array, the way the load does. *)
 let landed ~path rows =
   match
     Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path
   with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "the fixture did not start"
   | Masc_tui_fetched.Started (t, request) ->
-    Masc_tui_fetched.complete ~equal:String.equal t request (Ok rows)
+    Masc_tui_fetched.complete ~equal:String.equal t request
+      (Ok (Array.of_list rows))
 ;;
 
 let check_names = Alcotest.(check (list string))

@@ -8,8 +8,8 @@
 
     What it produces is a {!Voice_setup.change} list, which is what actually
     reaches runtime.toml. It does not decide whether an endpoint works: that is
-    {!Voice_bridge.probe_tts} and {!Voice_bridge.probe_stt}, measured against
-    the endpoint itself. A wizard that judged an address by looking at it would
+    what the endpoint probes answer ([masc voice-verify]), measured
+    against the endpoint itself. A wizard that judged an address by looking at it would
     be guessing. *)
 
 type provider =

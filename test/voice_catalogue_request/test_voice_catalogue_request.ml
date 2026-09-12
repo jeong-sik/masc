@@ -44,19 +44,39 @@ let test_an_explicit_invalid_credential_name_is_refused () =
       in
       Alcotest.(check bool) "invalid credential names its field" true
         (Astring.String.is_infix ~affix:"api_key_env" (refusal_of body)))
-    [ `String "  "; `Bool false; `Int 42 ]
+    [ `String "  "; `Bool false; `Int 42; `Assoc []; `List [] ]
 
 (* Neither is taken from the request. A route cannot check where an address
    points or what a command path runs, so it does not accept either. *)
 let test_no_destination_comes_from_the_caller () =
-  let endpoint =
-    endpoint_of
-      {|{"kind": "macos_say", "base_url": "http://127.0.0.1:9/v1",
-         "mcp_url": "http://127.0.0.1:9", "command": "/tmp/say"}|}
-  in
-  Alcotest.(check (option string)) "no address" None endpoint.Voice_config.base_url;
-  Alcotest.(check (option string)) "no MCP address" None endpoint.Voice_config.mcp_url;
-  Alcotest.(check (option string)) "no command path" None endpoint.Voice_config.command
+  List.iter (fun field ->
+    let body = Yojson.Safe.to_string
+      (`Assoc [ "kind", `String "macos_say"; field, `String "caller-supplied" ]) in
+    Alcotest.(check bool) "destination override is explicitly refused" true
+      (Astring.String.is_infix ~affix:field (refusal_of body)))
+    [ "base_url"; "mcp_url"; "command"; "health_url" ]
+
+let test_unknown_fields_cannot_select_the_default_account () =
+  List.iter (fun kind ->
+    List.iter (fun (field, value) ->
+      let body = Yojson.Safe.to_string
+        (`Assoc [ "kind", `String kind; field, value ]) in
+      let refusal = refusal_of body in
+      Alcotest.(check bool) "unknown field is named in the refusal" true
+        (Astring.String.is_infix ~affix:field refusal);
+      Alcotest.(check bool) "refusal never echoes a credential value" false
+        (Astring.String.is_infix ~affix:"credential-value-must-not-be-used" refusal))
+      [ "api_key_en", `String "ANOTHER_ACCOUNT_KEY"
+      ; "api_key", `String "credential-value-must-not-be-used"
+      ; "extra", `Null ])
+    [ "elevenlabs_direct"; "macos_say" ]
+
+let test_duplicate_fields_are_refused () =
+  List.iter (fun body ->
+    Alcotest.(check bool) "duplicate field is refused" true
+      (Astring.String.is_infix ~affix:"repeats" (refusal_of body)))
+    [ {|{"kind":"macos_say","kind":"elevenlabs_direct"}|}
+    ; {|{"kind":"elevenlabs_direct","api_key_env":"FIRST","api_key_env":"SECOND"}|} ]
 
 let test_an_unknown_kind_is_refused_by_name () =
   Alcotest.(check bool) "the kind is quoted back" true
@@ -80,6 +100,10 @@ let () =
     ; ( "what it refuses"
       , [ Alcotest.test_case "an explicit invalid credential name" `Quick
             test_an_explicit_invalid_credential_name_is_refused
+        ; Alcotest.test_case "unknown fields cannot select the default account" `Quick
+            test_unknown_fields_cannot_select_the_default_account
+        ; Alcotest.test_case "duplicate fields are refused" `Quick
+            test_duplicate_fields_are_refused
         ; Alcotest.test_case "an unknown kind, by name" `Quick
             test_an_unknown_kind_is_refused_by_name
         ; Alcotest.test_case "a listing without a kind" `Quick

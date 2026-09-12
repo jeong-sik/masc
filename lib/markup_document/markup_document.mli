@@ -12,6 +12,10 @@ type t =
 val parse_html : string -> t list
 (** Parse an HTML5 document or fragment with Markup.ml error recovery. *)
 
+val parse_xml : string -> (t list, string) result
+(** Strict XML parsing: any parser recovery is an error, never authoritative
+    document metadata. External entities are not resolved. *)
+
 val text_content : t -> string
 val attribute : string -> t -> string option
 val elements_named : string -> t list -> t list

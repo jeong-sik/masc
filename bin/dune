@@ -1049,6 +1049,7 @@
  (libraries
   masc.voice_wizard
   masc.voice_setup
+  masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc.browser_lane
   masc.sse_wire

@@ -26,11 +26,12 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 기존 scope가 null이거나 없으면 생략한다. regions의 선택 영역 참조는 scope=null이어도
 존재한다. content의 임의 텍스트·버튼을 영역 scope로 승격하지 않는다.
 
-- 최상위 문서의 `mode=scene|regions` 읽기에만 `url`을 `expectedUrl`로 사용한다.
-  `scope`·`navigationSource`도 이 두 mode에서 framePath 없이만 지원된다.
-  text/elements/screenshot/frames/dialog/downloads 및 프레임 내부 읽기에는 이 세 필드를
-  넣지 않는다. 해당 mode의 유효한 인자만 전달하고 반환된 탭·URL·문맥·범위를 확인한다.
-  복사된 JSON 전체를 요청 인자로 넣지 않는다.
+- `expectedUrl`·`scope`·`navigationSource`는 최상위 문서의 `mode=scene` 또는
+  `mode=regions` 읽기에서만 지원된다. 이 읽기에서는 받은 `url`을 expectedUrl로 쓴다.
+  text/elements/screenshot/frames/dialog/downloads 및 `framePath`로 프레임 내부를 읽을 때는
+  이 세 필드를 넣지 않는다. expectedUrl을 넣으면 `expectedUrl supports top-document scene or regions only`로
+  거절한다. 그런 읽기에는 받은 URL을 반환 결과와 대조하는 데 쓰고 탭·문맥·범위도 확인한다.
+- 실제 도구 스키마의 필드만 골라 전달한다. 복사된 JSON 전체나 없는 필드를 요청 인자로 넣지 않는다.
 - `viewport`와 `truncated`는 당시 관측의 범위다. 선택한 요소의 `text`를 영역 전체나
   화면 밖의 기록으로 확대하지 않는다. 복사된 좌표만으로 현재 화면에 클릭·드래그하지 않는다.
 
@@ -38,7 +39,7 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 후속 읽기는 expectedUrl과 scope를 유지한다. 아래는 이 읽기의 검사 거절을 복구하는 절차다.
 같은 lane·clientId·tabId에 고정한 읽기 전용 재관측으로 현재 상태를 확인한다.
 
-- URL 불일치이면 거절된 `expectedUrl`을 생략하고 최상위 `mode=scene|regions`로
+- URL 불일치이면 거절된 `expectedUrl`을 생략하고 최상위 `mode=scene` 또는 `mode=regions`로
   실제 URL과 내용을 읽는다.
   문서·영역 참조도 만료됐다면 그 `scope`까지 생략해 `mode=regions`로 읽는다.
 - 문서·영역 참조 만료이면 거절된 `scope` 없이 `mode=regions`로 영역 목록을 다시 읽는다.

@@ -14286,6 +14286,7 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
     captures, actions, png = [], [], [""]
     stale_started, stale_release = threading.Event(), threading.Event()
     closing_started, closing_release = threading.Event(), threading.Event()
+    resumed_read = threading.Event()
 
     def prepare(base):
         seed_image_workspace(base)
@@ -14293,9 +14294,15 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
 
     def read(body):
         request = json.loads(body)
+        text = "cadence fixture"
+        if closing_release.is_set():
+            # Ordinary cadence is blocked by refresh_pending until the delayed
+            # screenshot completion is consumed by the UI mailbox.
+            resumed_read.set()
+            text = "CADENCE RESUMED AFTER DISMISSAL"
         return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
             "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
-            "page":{"tabId":2,"title":"owned","url":url,"text":"cadence fixture","chars":15,"truncated":False}}}
+            "page":{"tabId":2,"title":"owned","url":url,"text":text,"chars":len(text),"truncated":False}}}
 
     def screenshot(body):
         request = json.loads(body)
@@ -14351,9 +14358,16 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
         send_and_wait(process,master,output,b"\x1b",b"cadence fixture")
         start = len(output)
         closing_release.set()
-        send_and_wait(process,master,output,b"\x1b",b"MASC Overview")
+        assert wait_for_fixture_event(process,master,output,resumed_read,timeout=5), \
+            "ordinary cadence did not resume after consuming the delayed screenshot"
+        wait_for_output(process,master,output,b"CADENCE RESUMED AFTER DISMISSAL",start=start,timeout=5)
+        wait_for_output(process,master,output,FRAME_END,
+            start=end_of_needle(output,b"CADENCE RESUMED AFTER DISMISSAL",start),timeout=3)
+        # Stay on Browser Lane until the post-completion read is rendered:
+        # leaving the surface would independently suppress a stale overlay.
         assert b"CLOSED FRAME" not in output[start:], "late cadence reopened the overlay"
         assert len(actions)==1 and len(captures)==5
+        send_and_wait(process,master,output,b"\x1b",b"MASC Overview")
         os.write(master,b"q")
 
     try:

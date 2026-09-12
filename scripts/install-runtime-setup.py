@@ -6,6 +6,7 @@ The wizard requires real response/tool verification; --spec stays offline unless
 --verify is supplied. Offline configuration validation is not inference proof.
 """
 import argparse
+from dataclasses import dataclass
 import getpass
 import json
 import math
@@ -740,9 +741,34 @@ def docker_account_action(binary, base_path, port, action):
     return True
 
 
+# The wire spells PDF tool readiness with exactly these two words. Naming them
+# once is what keeps five call sites from each carrying their own copy of the
+# literal, where a renamed or added word would change what the installer does
+# without anything here failing.
+PDF_TOOLS_AVAILABLE = 'tools_available'
+PDF_TOOLS_UNAVAILABLE = 'unavailable'
+
+
+# slots=True is absent on purpose: this script targets Python 3.8 (see the
+# module docstring) and slots arrived in 3.10.
+@dataclass(frozen=True)
+class PdfToolCheck:
+    """One command MASC probed, and what it found."""
+    command: str
+    status: str
+
+
+@dataclass(frozen=True)
+class PdfToolsReadiness:
+    """MASC's answer about PDF inspection, already read. Callers ask
+    [available] instead of re-reading the wire word themselves."""
+    available: bool
+    checks: tuple
+
+
 def decode_pdf_tools_readiness(value):
     if (not isinstance(value, dict) or value.get('schema') != 'masc.pdf_tools_readiness.v1'
-            or value.get('status') not in ('tools_available', 'unavailable')
+            or value.get('status') not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE)
             or value.get('pdf_inspection') != 'not_run'
             or value.get('scope') != 'current_process_environment'):
         raise SetupError('MASC returned unreadable PDF tool readiness')
@@ -753,14 +779,27 @@ def decode_pdf_tools_readiness(value):
             or {row.get('command') for row in checks} != {'pdftotext', 'pdftoppm'}):
         raise SetupError('MASC did not check both PDF inspection tools')
     started = all(row['status'] == 'started' for row in checks)
-    if started != (value['status'] == 'tools_available'):
+    if started != (value['status'] == PDF_TOOLS_AVAILABLE):
         raise SetupError('MASC returned inconsistent PDF tool readiness')
-    return value
+    return PdfToolsReadiness(
+        available=started,
+        checks=tuple(PdfToolCheck(command=row['command'], status=row['status']) for row in checks))
+
+
+# The sandbox menu asks this before every draw, so an answer that never comes
+# holds the whole setup screen. A readiness probe either answers at once or is
+# no use, and a probe that ran out of time is the same to the operator as tools
+# that are not there.
+PDF_TOOLS_PROBE_TIMEOUT_SECONDS = 20
 
 
 def pdf_tools_status(binary):
-    result = subprocess.run([str(binary), 'prerequisite-actions', 'pdf-tools'],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        result = subprocess.run([str(binary), 'prerequisite-actions', 'pdf-tools'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise SetupError('MASC did not answer about PDF tool availability in time')
     try:
         catalog = json.loads(result.stdout)
         if result.returncode or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.prerequisite_actions.v1':
@@ -831,13 +870,13 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     actions = catalog['actions']
     if dependency == 'pdf-tools':
         pdf = decode_pdf_tools_readiness(catalog.get('dependency_readiness'))
-        if pdf['status'] == 'tools_available':
+        if pdf.available:
             print('PDF inspection tools are available. Original PDF inspection runs when a document is read.', file=sys.stderr)
         else:
             print('PDF inspection is unavailable. Install the tools below, then refresh detection.', file=sys.stderr)
-        for row in pdf['checks']:
-            print(terminal_text(row['command']) + ': ' + terminal_text(row['status']), file=sys.stderr)
-        if pdf['status'] == 'tools_available':
+        for row in pdf.checks:
+            print(terminal_text(row.command) + ': ' + terminal_text(row.status), file=sys.stderr)
+        if pdf.available:
             return True
         if not actions:
             print('No automatic installation action is available on this host. Install Poppler through your operating system, then refresh detection.', file=sys.stderr)
@@ -873,21 +912,22 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
         if receipt.get('schema') != 'masc.prerequisite_action_result.v1':
             raise ValueError('invalid result')
         state = receipt['status']
-        if dependency == 'pdf-tools' and receipt.get('readiness') in ('tools_available', 'unavailable'):
+        readiness = receipt.get('readiness')
+        if dependency == 'pdf-tools' and readiness in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE):
             pdf = decode_pdf_tools_readiness(receipt.get('dependency_readiness'))
-            if receipt['readiness'] != pdf['status']:
+            if (readiness == PDF_TOOLS_AVAILABLE) != pdf.available:
                 raise ValueError('inconsistent PDF recheck')
-            if state == 'commands_completed' and pdf['status'] != 'tools_available':
+            if state == 'commands_completed' and not pdf.available:
                 raise ValueError('PDF tools were not available after installation')
         elif dependency == 'presentation-tools':
             presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
-            if receipt.get('readiness') != presentation['status']:
+            if readiness != presentation['status']:
                 raise ValueError('inconsistent presentation recheck')
             if state == 'commands_completed' and presentation['status'] != 'tools_available':
                 raise ValueError('presentation installation was not ready')
-        elif receipt.get('readiness') != 'not_checked':
+        elif readiness != 'not_checked':
             raise ValueError('invalid readiness')
-        if dependency == 'pdf-tools' and state == 'commands_completed' and receipt.get('readiness') != 'tools_available':
+        if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != PDF_TOOLS_AVAILABLE:
             raise ValueError('PDF installation was not rechecked')
     except (KeyError, TypeError, ValueError):
         raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
@@ -1631,7 +1671,7 @@ def select_sandbox(binary, base_path, port=8945):
                   for row in rows]
         try:
             pdf = pdf_tools_status(binary)
-            pdf_label = ('PDF document inspection · tools available' if pdf['status'] == 'tools_available'
+            pdf_label = ('PDF document inspection · tools available' if pdf.available
                          else 'PDF document inspection · install missing tools')
         except SetupError:
             pdf_label = 'PDF document inspection · could not check tools'

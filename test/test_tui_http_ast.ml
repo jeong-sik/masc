@@ -1037,7 +1037,7 @@ let test_planning_phase_uses_goal_ssot () =
      rather than for the call that no longer exists. *)
   check int "renderer labels every goal phase" 5
     (Ast_grep.count_constructors_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"planning_phase_label"
        ~constructors:
          [ "Goal_phase.Executing"
@@ -2326,8 +2326,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
-  check_identifiers ~module_path:render_path ~binding:"write_list_sidebar"
-    ~callees:sanitizer_calls [ "label" ];
+  (* The list sidebar is drawn beside more than one surface, so it sits with
+     the shared primitives. *)
+  check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
+    ~binding:"write_list_sidebar" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   (* The drawing moved into [planning_detail_pane] when the goal list came to

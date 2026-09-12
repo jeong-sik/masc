@@ -26,6 +26,7 @@
  (libraries
   masc.workspace_connection
   masc.voice_config
+  masc.voice_setup
   masc
   masc.masc_goal
   masc.keeper_toml

@@ -1,0 +1,1080 @@
+{
+  "source_runtime_commit": "53203f998a2df9f6149e1c033d5602836a8d7066",
+  "source_response_sha256": "a587e0a0746b414819b6c474b879e6766b2232cb8961545c7cba9fd466bfa0cc",
+  "original_inventory_count": 171,
+  "inventory": [
+    {
+      "name": "BrowserAct",
+      "visibility": "hidden"
+    },
+    {
+      "name": "BrowserGoto",
+      "visibility": "hidden"
+    },
+    {
+      "name": "BrowserInteract",
+      "visibility": "hidden"
+    },
+    {
+      "name": "BrowserRead",
+      "visibility": "hidden"
+    },
+    {
+      "name": "BrowserSession",
+      "visibility": "hidden"
+    },
+    {
+      "name": "BrowserTabs",
+      "visibility": "hidden"
+    },
+    {
+      "name": "Edit",
+      "visibility": "hidden"
+    },
+    {
+      "name": "Execute",
+      "visibility": "hidden"
+    },
+    {
+      "name": "Grep",
+      "visibility": "hidden"
+    },
+    {
+      "name": "Read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "WebFetch",
+      "visibility": "hidden"
+    },
+    {
+      "name": "WebSearch",
+      "visibility": "hidden"
+    },
+    {
+      "name": "Write",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_analyze_image",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_artifact_read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_artifact_transfer",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_broadcast",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_capability_search",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_code_query",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_context_status",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_ide_annotate",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_lane_status",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_library_read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_library_search",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_memory_retract",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_memory_search",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_memory_write",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_person_note_set",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_spawn",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_spawn_read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_spawn_stop",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_spawn_wait",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_surface_post",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_surface_read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_task_cancel",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_task_claim",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_task_create",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_task_done",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_task_release",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_tasks_audit",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_tasks_list",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_time_now",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_tools_list",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_voice_agent",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_voice_listen",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_voice_session_end",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_voice_session_start",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_voice_sessions",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_voice_speak",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_webmcp_call",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_webmcp_list",
+      "visibility": "hidden"
+    },
+    {
+      "name": "keeper_workspace_memory_read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_add_task",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_agent_card",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_agent_fitness",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_agent_timeline",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_ask",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_ask_status",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_ask_withdraw",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_batch_add_tasks",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_cleanup",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_comment",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_comment_vote",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_curation_read",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_curation_submit",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_delete",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_hearths",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_post",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_post_get",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_post_update",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_profile",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_reaction",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_search",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_stats",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_sub_board_create",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_sub_board_delete",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_sub_board_get",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_sub_board_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_sub_board_update",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_board_vote",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_broadcast",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_browser_act",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_browser_goto",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_browser_interact",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_browser_read",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_browser_session",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_browser_tabs",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_check",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_config",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_dashboard",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_file_delete",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_file_list",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_file_upload",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_fusion",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_fusion_decision",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_fusion_status",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_gc",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_get_metrics",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_goal_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_goal_transition",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_goal_upsert",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_heartbeat",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_audit",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_clear",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_delegate",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_delegate_cancel",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_delegate_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_delegate_status",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_down",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_msg",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_reset",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_sandbox_start",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_sandbox_stop",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_status",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_up",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_keeper_waiting_inventory",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_lane_attach",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_lane_detach",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_lane_evidence",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_lane_inspect",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_lane_observe",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_lane_slice",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_library_add",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_library_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_library_read",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_library_search",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_messages",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_change_disk",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_eject",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_load",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_peek",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_press",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_ram_diff",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_restore",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_save",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_screen",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_step",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_msx_step_until_change",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_plan_clear_task",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_plan_get_task",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_plan_set_task",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_run_get",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_run_init",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_run_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_run_plan",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_runtime_ollama_probe",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_runtime_verify",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_cancel",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_create",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_get",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_note_add",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_notes_list",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_schedule_update",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_start",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_status",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_task_history",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_task_set_goal",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_tasks",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_tool_help",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_transition",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_update_priority",
+      "visibility": "default"
+    },
+    {
+      "name": "masc_web_fetch",
+      "visibility": "hidden"
+    },
+    {
+      "name": "masc_web_search",
+      "visibility": "hidden"
+    },
+    {
+      "name": "tool_edit_file",
+      "visibility": "hidden"
+    },
+    {
+      "name": "tool_execute",
+      "visibility": "hidden"
+    },
+    {
+      "name": "tool_read_file",
+      "visibility": "hidden"
+    },
+    {
+      "name": "tool_search_files",
+      "visibility": "hidden"
+    },
+    {
+      "name": "tool_write_file",
+      "visibility": "hidden"
+    }
+  ],
+  "original_metrics": {
+    "total_calls": 775,
+    "distinct_tools_called": 50,
+    "top_20": [
+      {
+        "name": "keeper_artifact_read",
+        "call_count": 87
+      },
+      {
+        "name": "keeper_memory_write",
+        "call_count": 86
+      },
+      {
+        "name": "tool_edit_file",
+        "call_count": 83
+      },
+      {
+        "name": "tool_read_file",
+        "call_count": 65
+      },
+      {
+        "name": "keeper_memory_search",
+        "call_count": 64
+      },
+      {
+        "name": "tool_execute",
+        "call_count": 61
+      },
+      {
+        "name": "masc_keeper_delegate_status",
+        "call_count": 24
+      },
+      {
+        "name": "masc_board_post_get",
+        "call_count": 24
+      },
+      {
+        "name": "keeper_analyze_image",
+        "call_count": 24
+      },
+      {
+        "name": "tool_write_file",
+        "call_count": 22
+      },
+      {
+        "name": "tool_search_files",
+        "call_count": 22
+      },
+      {
+        "name": "keeper_memory_retract",
+        "call_count": 18
+      },
+      {
+        "name": "masc_keeper_delegate",
+        "call_count": 14
+      },
+      {
+        "name": "keeper_tasks_list",
+        "call_count": 14
+      },
+      {
+        "name": "masc_board_comment",
+        "call_count": 13
+      },
+      {
+        "name": "masc_ask",
+        "call_count": 13
+      },
+      {
+        "name": "masc_board_list",
+        "call_count": 12
+      },
+      {
+        "name": "masc_keeper_msg",
+        "call_count": 10
+      },
+      {
+        "name": "masc_goal_list",
+        "call_count": 9
+      },
+      {
+        "name": "keeper_capability_search",
+        "call_count": 9
+      }
+    ],
+    "by_tool": [
+      {
+        "name": "keeper_artifact_read",
+        "call_count": 87
+      },
+      {
+        "name": "keeper_memory_write",
+        "call_count": 86
+      },
+      {
+        "name": "tool_edit_file",
+        "call_count": 83
+      },
+      {
+        "name": "tool_read_file",
+        "call_count": 65
+      },
+      {
+        "name": "keeper_memory_search",
+        "call_count": 64
+      },
+      {
+        "name": "tool_execute",
+        "call_count": 61
+      },
+      {
+        "name": "masc_keeper_delegate_status",
+        "call_count": 24
+      },
+      {
+        "name": "masc_board_post_get",
+        "call_count": 24
+      },
+      {
+        "name": "keeper_analyze_image",
+        "call_count": 24
+      },
+      {
+        "name": "tool_write_file",
+        "call_count": 22
+      },
+      {
+        "name": "tool_search_files",
+        "call_count": 22
+      },
+      {
+        "name": "keeper_memory_retract",
+        "call_count": 18
+      },
+      {
+        "name": "masc_keeper_delegate",
+        "call_count": 14
+      },
+      {
+        "name": "keeper_tasks_list",
+        "call_count": 14
+      },
+      {
+        "name": "masc_board_comment",
+        "call_count": 13
+      },
+      {
+        "name": "masc_ask",
+        "call_count": 13
+      },
+      {
+        "name": "masc_board_list",
+        "call_count": 12
+      },
+      {
+        "name": "masc_keeper_msg",
+        "call_count": 10
+      },
+      {
+        "name": "masc_goal_list",
+        "call_count": 9
+      },
+      {
+        "name": "keeper_capability_search",
+        "call_count": 9
+      },
+      {
+        "name": "keeper_artifact_transfer",
+        "call_count": 9
+      },
+      {
+        "name": "masc_board_post",
+        "call_count": 8
+      },
+      {
+        "name": "masc_ask_status",
+        "call_count": 7
+      },
+      {
+        "name": "keeper_surface_read",
+        "call_count": 6
+      },
+      {
+        "name": "masc_schedule_list",
+        "call_count": 5
+      },
+      {
+        "name": "masc_library_add",
+        "call_count": 5
+      },
+      {
+        "name": "masc_keeper_up",
+        "call_count": 5
+      },
+      {
+        "name": "masc_keeper_status",
+        "call_count": 5
+      },
+      {
+        "name": "masc_board_post_update",
+        "call_count": 5
+      },
+      {
+        "name": "masc_schedule_create",
+        "call_count": 4
+      },
+      {
+        "name": "masc_goal_transition",
+        "call_count": 4
+      },
+      {
+        "name": "keeper_spawn_wait",
+        "call_count": 4
+      },
+      {
+        "name": "keeper_spawn",
+        "call_count": 4
+      },
+      {
+        "name": "masc_board_search",
+        "call_count": 3
+      },
+      {
+        "name": "keeper_workspace_memory_read",
+        "call_count": 3
+      },
+      {
+        "name": "keeper_surface_post",
+        "call_count": 3
+      },
+      {
+        "name": "masc_library_list",
+        "call_count": 2
+      },
+      {
+        "name": "masc_add_task",
+        "call_count": 2
+      },
+      {
+        "name": "keeper_tools_list",
+        "call_count": 2
+      },
+      {
+        "name": "keeper_task_done",
+        "call_count": 2
+      },
+      {
+        "name": "keeper_task_claim",
+        "call_count": 2
+      },
+      {
+        "name": "keeper_library_search",
+        "call_count": 2
+      },
+      {
+        "name": "keeper_context_status",
+        "call_count": 2
+      },
+      {
+        "name": "masc_schedule_cancel",
+        "call_count": 1
+      },
+      {
+        "name": "masc_keeper_delegate_cancel",
+        "call_count": 1
+      },
+      {
+        "name": "masc_goal_upsert",
+        "call_count": 1
+      },
+      {
+        "name": "masc_dashboard",
+        "call_count": 1
+      },
+      {
+        "name": "masc_browser_session",
+        "call_count": 1
+      },
+      {
+        "name": "masc_ask_withdraw",
+        "call_count": 1
+      },
+      {
+        "name": "masc_agent_fitness",
+        "call_count": 1
+      }
+    ],
+    "never_called_count": 77,
+    "never_called": [
+      "masc_fusion",
+      "masc_fusion_decision",
+      "masc_fusion_status",
+      "masc_status",
+      "masc_check",
+      "masc_heartbeat",
+      "masc_agent_card",
+      "masc_get_metrics",
+      "masc_run_init",
+      "masc_run_plan",
+      "masc_run_get",
+      "masc_run_list",
+      "masc_schedule_update",
+      "masc_schedule_get",
+      "masc_schedule_note_add",
+      "masc_schedule_notes_list",
+      "masc_batch_add_tasks",
+      "masc_task_history",
+      "masc_task_set_goal",
+      "masc_tasks",
+      "masc_transition",
+      "masc_update_priority",
+      "masc_library_read",
+      "masc_library_search",
+      "masc_lane_attach",
+      "masc_lane_inspect",
+      "masc_lane_observe",
+      "masc_lane_slice",
+      "masc_lane_detach",
+      "masc_lane_evidence",
+      "masc_msx_load",
+      "masc_msx_eject",
+      "masc_msx_save",
+      "masc_msx_restore",
+      "masc_msx_change_disk",
+      "masc_msx_screen",
+      "masc_msx_press",
+      "masc_msx_step",
+      "masc_msx_step_until_change",
+      "masc_msx_peek",
+      "masc_msx_ram_diff",
+      "masc_broadcast",
+      "masc_config",
+      "masc_gc",
+      "masc_keeper_waiting_inventory",
+      "masc_messages",
+      "masc_plan_clear_task",
+      "masc_plan_get_task",
+      "masc_plan_set_task",
+      "masc_start",
+      "masc_tool_help",
+      "masc_board_vote",
+      "masc_board_stats",
+      "masc_board_comment_vote",
+      "masc_board_reaction",
+      "masc_board_profile",
+      "masc_board_hearths",
+      "masc_board_curation_read",
+      "masc_board_curation_submit",
+      "masc_board_delete",
+      "masc_board_cleanup",
+      "masc_board_sub_board_create",
+      "masc_board_sub_board_list",
+      "masc_board_sub_board_get",
+      "masc_board_sub_board_update",
+      "masc_board_sub_board_delete",
+      "masc_keeper_audit",
+      "masc_keeper_clear",
+      "masc_keeper_delegate_list",
+      "masc_keeper_down",
+      "masc_keeper_list",
+      "masc_keeper_reset",
+      "masc_keeper_sandbox_start",
+      "masc_keeper_sandbox_stop",
+      "masc_runtime_verify",
+      "masc_runtime_ollama_probe",
+      "masc_agent_timeline"
+    ],
+    "tool_distribution": {
+      "total": 158,
+      "public": 48,
+      "visible": 103,
+      "hidden": 55
+    },
+    "registered_count": 21
+  },
+  "original_non_public_call_log": {
+    "source": "tool_usage",
+    "health": "ok",
+    "entry_count": 645,
+    "latest_age_s": 4.665812015533447,
+    "stale_reason": null
+  },
+  "expected_catalog_usage": {
+    "visible_total": 103,
+    "visible_called": 26,
+    "visible_without_observed_call": 77,
+    "hidden_called": 24,
+    "outside_catalog_called": 0
+  }
+}

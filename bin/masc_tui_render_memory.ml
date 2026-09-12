@@ -15,6 +15,57 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
+(* How the facts title reads its own keeper. "*" is how the fleet view is asked
+   for, not how it should be read, so the title reads it as a phrase. The title
+   is drawn at every terminal size; a body row is not. *)
+let facts_keeper_label = function
+  | Some "*" -> "all keepers"
+  | Some name -> name
+  | None -> ""
+
+(* What the title carries while the read is in flight and once it has landed.
+   Typed so the two spellings cannot drift into each other's shape. The unread
+   word arrives rendered, like [screen] and [badge]: whether a read is still in
+   flight or came back failed is the caller's reading, and
+   [Masc_tui_render_prim.title_missing_reading] is the one place that words it. *)
+type facts_reading =
+  | Facts_unread of { reading : string }
+  | Facts_loaded of
+      { total : int
+      ; filter_label : string
+      ; query_label : string
+      }
+
+(* The facts title. Here beside the row under it so the two cannot disagree
+   about which fact each one carries: the title says the total and the filters,
+   the row says the breakdown and the sort. The title is the narrow line and the
+   clock and the connection badge sit at its end, so a fact spelled here and
+   there goes off the right edge.
+
+   [screen] and [badge] arrive rendered because colour and the connection
+   reading belong to the caller. *)
+let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
+  match reading with
+  | Facts_unread { reading } ->
+    Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s" screen keeper reading
+      timestamp badge
+  | Facts_loaded { total; filter_label; query_label } ->
+    Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts \xc2\xb7 %s%s)  %s  %s" screen
+      keeper total filter_label query_label timestamp badge
+
+(* The row under the facts title. The title says the total and the filter; this
+   says how that total breaks down and which sort produced the order, so each
+   fact is written in one place. The split runs in this direction because the
+   title is the line with no room to spare: at 140 columns the Activity pane
+   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
+   the keeper, the total, both filters, the clock and the badge.
+
+   [grand_total] is not passed in because it is not drawn here. *)
+let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
+  Printf.sprintf "  %s(%d ord \xc2\xb7 %d src \xc2\xb7 %d drop)%s \xc2\xb7 %sSort [s]:%s %s"
+    (Theme.recede ()) ordinary source dropped Ansi.reset
+    (Theme.recede ()) Ansi.reset sort_label
+
 let memory_fact_age_label ts =
   keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
 
@@ -478,36 +529,40 @@ let render_memory_facts_body ~cols ~budget (state : state)
   let total = List.length rows in
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
   let sort_label = memory_sort_order_label state.memory_facts_sort in
-  let fleet_banner =
-    if is_fleet then
-      Printf.sprintf "  %s%s[GLOBAL FLEET KNOWLEDGE BASE — ALL KEEPERS CONSOLIDATED]%s"
-        Ansi.bold (Theme.info ()) Ansi.reset
-    else ""
+  (* The parts of the total the title draws, counted from the rows this screen
+     is about to list, so the title's total and this breakdown count the same
+     set. Counting the store instead gives a filtered title saying "2 facts"
+     above a breakdown that sums to 285. The store's own totals are the category
+     pills' job, and the All pill carries the grand total. *)
+  let ordinary_count, source_count, dropped_count =
+    List.fold_left
+      (fun (ordinary, source, dropped) row ->
+        match row with
+        | Memory_row_fact _ -> (ordinary + 1, source, dropped)
+        | Memory_row_source_fact _ -> (ordinary, source + 1, dropped)
+        | Memory_row_invalidation _ -> (ordinary, source, dropped + 1))
+      (0, 0, 0) rows
   in
-  if fleet_banner <> "" then push fleet_banner;
   let stats_line, pills_line =
     match state.memory_facts with
     | None -> ("  (loading facts\xe2\x80\xa6)", "")
     | Some snapshot ->
-        let ord_count, ord_facts =
+        let store_ordinary, store_ordinary_facts =
           match snapshot.mfs_ordinary with
           | Memory_store_present store ->
               (List.length store.mos_facts, store.mos_facts)
           | _ -> (0, [])
         in
-        let src_count, dropped_count =
+        let store_source, store_dropped =
           match snapshot.mfs_source with
           | Memory_store_present store ->
               (List.length store.mss_facts, List.length store.mss_invalidations)
           | _ -> (0, 0)
         in
-        let grand_total = ord_count + src_count + dropped_count in
+        let grand_total = store_ordinary + store_source + store_dropped in
         let stats =
-          Printf.sprintf
-            "  %sTotal:%s %d facts  %s(%d ord · %d src · %d drop)%s · %sSort [s]:%s %s"
-            Ansi.bold Ansi.reset grand_total
-            (Theme.recede ()) ord_count src_count dropped_count Ansi.reset
-            (Theme.recede ()) Ansi.reset sort_label
+          facts_stats_row ~ordinary:ordinary_count ~source:source_count
+            ~dropped:dropped_count ~sort_label
         in
         let all_categories = memory_fact_categories state in
         let pill_of_filter filt count is_active =
@@ -526,13 +581,13 @@ let render_memory_facts_body ~cols ~budget (state : state)
               let count =
                 match filt with
                 | Category_all -> grand_total
-                | Category_source -> src_count
-                | Category_dropped -> dropped_count
+                | Category_source -> store_source
+                | Category_dropped -> store_dropped
                 | Category_ordinary cat ->
                     List.length
                       (List.filter
                          (fun (f : memory_fact) -> f.mf_category = cat)
-                         ord_facts)
+                         store_ordinary_facts)
               in
               let is_active = state.memory_facts_category = filt in
               pill_of_filter filt count is_active)
@@ -600,7 +655,6 @@ let render_memory_facts_body ~cols ~budget (state : state)
   in
   let top_fixed =
     1
-    + (if fleet_banner <> "" then 1 else 0)
     + (if pills_line <> "" then 1 else 0)
     + (if search_banner <> "" then 1 else 0)
     + 1

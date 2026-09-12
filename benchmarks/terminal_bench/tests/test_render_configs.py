@@ -114,3 +114,46 @@ def test_tools_deny_maps_spawn_to_parallel_and_delegate_to_keepers():
         assert f'"{name}"' in keeper_e, f"arm e denies {name}"
     for arm in ("f", "g", "h"):
         assert "tools.deny" not in keeper_toml(arm, 1), f"arm {arm} denies nothing"
+
+
+def test_claude_code_lane_renders_official_client_provider():
+    # masc protocol "claude-code" (runtime_adapter.claude_code_execution): the
+    # provider is a CLI command with is-non-interactive = true, no endpoint
+    # and no credentials table — the CLI owns the login. Effort lands on the
+    # model row (CLI --effort), and no overlay deployment row is written.
+    out = render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="high")
+    rt = (out / "runtime.toml").read_text()
+    assert 'default = "claude_code.claude-sonnet-5"' in rt
+    assert 'protocol = "claude-code"' in rt
+    assert 'command = "claude"' in rt
+    assert "is-non-interactive = true" in rt
+    # [exec.ssh.endpoints.local] stays, so match the provider keys themselves.
+    assert 'endpoint = "' not in rt
+    assert "[providers.claude_code.credentials]" not in rt
+    assert 'api-name = "claude-sonnet-5"' in rt
+    assert 'reasoning-effort = "high"' in rt
+    assert "turn-timeout-s = 900.0" in rt
+    assert '[claude_code."claude-sonnet-5"]' in rt
+    assert "max-concurrent = 1" in rt
+    assert "[exec.ssh.endpoints.local]" in rt
+    overlay = (out / "agent-core-models-overlay.toml").read_text()
+    assert "[[providers]]" not in overlay and "[[models]]" not in overlay
+    keeper = (out / "keepers" / "bench-1.toml").read_text()
+    assert 'sandbox_profile = "remote_ssh"' in keeper
+
+
+def test_claude_code_lane_keeps_arm_knobs():
+    out_e = render_arm("e", runtime_id="claude_code.claude-opus-5", effort="max")
+    rt_e = (out_e / "runtime.toml").read_text()
+    assert "max-concurrent = 4" in rt_e
+    assert "[[skills.sources]]" in rt_e
+    assert (out_e / "skills").is_dir()
+    out_h = render_arm("h", runtime_id="claude_code.claude-opus-5", effort="max")
+    assert "enabled = true" in (out_h / "runtime.toml").read_text()
+    assert len(sorted((out_h / "keepers").glob("bench-*.toml"))) == 8
+
+
+def test_claude_code_lane_rejects_minimal_effort():
+    import pytest
+    with pytest.raises(ValueError, match="minimal"):
+        render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="minimal")

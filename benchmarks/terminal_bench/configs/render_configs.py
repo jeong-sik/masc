@@ -138,6 +138,69 @@ identity_file = "/opt/masc-bench/ssh/id_ed25519"
 enabled = {fusion}
 """
 
+# Official Claude Code client as the keeper's model runtime (masc protocol
+# "claude-code", lib/runtime/runtime_adapter.ml claude_code_execution). The CLI
+# owns the wire, the session (--session-id / --resume per turn) and the login,
+# so the provider carries no endpoint and must not declare credentials; the
+# subscription token reaches the CLI through CLAUDE_CODE_OAUTH_TOKEN, which
+# runtime_claude_code.client_environment forwards. Effort is a model-level
+# reasoning-effort (the CLI's --effort); Claude Code rejects "minimal".
+OFFICIAL_CLIENT_RUNTIME_TOML = """\
+[runtime]
+default = "{runtime_id}"
+
+[providers.{provider}]
+display-name = "Bench official client"
+protocol = "{protocol}"
+command = "{command}"
+is-non-interactive = true
+
+[models."{model_alias}"]
+api-name = "{model_alias}"
+max-context = 1000000
+max-prompt-bytes = 524288
+tools-support = true
+streaming = true
+reasoning-effort = "{effort}"
+turn-timeout-s = {turn_timeout_s}
+
+[{provider}."{model_alias}"]
+max-concurrent = {max_concurrent}
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = []
+cli_slots = ["{runtime_id}"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = []
+cli_slots = ["{runtime_id}"]
+
+[exec.ssh.endpoints.local]
+host = "127.0.0.1"
+user = "root"
+remote_root = "/root"
+port = 22
+identity_file = "/opt/masc-bench/ssh/id_ed25519"
+
+[fusion]
+enabled = {fusion}
+"""
+
+# The catalog gate (runtime.ml decide_capability_gate) resolves official-client
+# models by api-name against the embedded catalog, which already carries bare
+# claude-sonnet-5 / claude-opus-5 rows and the claude_code prefix row. No
+# deployment row is needed; production runs the same shape with none.
+OFFICIAL_CLIENT_OVERLAY_TOML = """\
+# No deployment rows: the claude-code lane resolves capabilities from the
+# embedded AGENT_CORE catalog by api-name (see render_configs.py).
+"""
+
+# Per-turn bound for the official client. Production binds opus-5 at max
+# effort with 900s; the bench episode cap (EPISODE_TIMEOUT_SEC=2400) stays the
+# outer bound.
+OFFICIAL_CLIENT_TURN_TIMEOUT_S = 900.0
+CLAUDE_CODE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
 OVERLAY_TOML = """\
 # messages-http bindings are materialized only when the provider id has an
 # AGENT_CORE provider registry entry (runtime_adapter.ml: "messages-http
@@ -202,7 +265,21 @@ PROVIDERS = {
                         kind="openai_compat",
                         request_path="/chat/completions",
                         capabilities_base="kimi"),
+    # Claude Code subscription lane: `--model claude_code/claude-sonnet-5`
+    # gives runtime_id claude_code.claude-sonnet-5; the alias doubles as the
+    # CLI api-name. bootstrap.sh installs the unmodified CLI (native
+    # installer, no node) when BENCH_RUNTIME_ID starts with "claude_code." and
+    # refuses to start the server unless `claude auth status --json` reports
+    # the token. Token: `claude setup-token` on the host.
+    "claude_code": dict(protocol="claude-code",
+                        command="claude",
+                        api_key_env="CLAUDE_CODE_OAUTH_TOKEN",
+                        official_client=True),
 }
+
+
+def is_official_client(provider: str) -> bool:
+    return bool(PROVIDERS[provider].get("official_client"))
 
 # reasoning-effort / thinking-support in [models.X] seed the keeper turn's
 # reasoning controls (Runtime_inference.thinking_support_of_runtime_id ->
@@ -278,6 +355,10 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     if not provider or not model_alias:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
     pcfg = PROVIDERS[provider]
+    if is_official_client(provider) and effort not in CLAUDE_CODE_EFFORTS:
+        raise ValueError(
+            f"effort {effort!r} is not admitted by Claude Code; "
+            f"expected one of {CLAUDE_CODE_EFFORTS}")
 
     root = (out_root or OUT_ROOT) / arm
     if root.exists():
@@ -285,6 +366,26 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     shutil.copytree(REPO_ROOT / "config", root, ignore=shutil.ignore_patterns(
         "keepers", "keepers-default", "runtime.toml", "*.env",
         "agent-core-models-overlay.toml"))
+
+    if is_official_client(provider):
+        runtime_toml = OFFICIAL_CLIENT_RUNTIME_TOML.format(
+            runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+            protocol=pcfg["protocol"], command=pcfg["command"], effort=effort,
+            turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
+            fusion=str(spec["fusion"]).lower(),
+            max_concurrent=4 if spec["parallel"] else 1)
+        if spec["skills"]:
+            runtime_toml += "\n" + seed_skills_block()
+        (root / "runtime.toml").write_text(runtime_toml)
+        (root / "agent-core-models-overlay.toml").write_text(
+            OFFICIAL_CLIENT_OVERLAY_TOML)
+        if spec["skills"]:
+            shutil.copytree(REPO_ROOT / "skills", root / "skills")
+        keepers = root / "keepers"
+        keepers.mkdir(exist_ok=True)
+        for i in range(1, spec["keepers"] + 1):
+            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, i))
+        return root
 
     runtime_toml = RUNTIME_TOML.format(
         runtime_id=runtime_id, provider=provider, model_alias=model_alias,

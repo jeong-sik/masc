@@ -57,3 +57,24 @@ MASC 하네스 자체를 벤치마크한다. 스펙: docs/superpowers/specs/2026
   multiplier 를 키운다.
 - 비교 닻(Anthropic 공식, 4.0): Fable 5 42.0% / Opus 5 52.3% /
   Fable 5.1 55.8% / Mythos 5.1 60.9%. 2.0 서브셋 숫자와 직접 비교하지 않는다.
+
+## Claude Code 구독 레인 (`claude_code/<model>`)
+
+keeper 의 모델 런타임을 unmodified Claude Code CLI 로 쓴다 (masc protocol
+`claude-code`, 프로덕션 `~/me/.masc/config/runtime.toml` 의 `[providers.claude_code]`
+와 같은 구성). 도구는 masc 가 MCP 로 넣고 CLI 내장 도구는 끄므로 측정 대상은
+masc 루프이고, 세션·컴팩션·로그인만 CLI 가 맡는다.
+
+    claude setup-token                      # 호스트에서 1회, 토큰을 복사
+    export CLAUDE_CODE_OAUTH_TOKEN=...
+    BENCH_MODEL=claude_code/claude-sonnet-5 ./run_matrix.sh b 1
+    BENCH_MODEL=claude_code/claude-opus-5   ./run_matrix.sh b 1
+
+- effort 는 `--ak effort=high|max` 로 준다 (CLI 의 --effort; minimal 은 거부).
+- bootstrap.sh 가 native 설치본을 깔고 `claude auth status --json` 이
+  `oauth_token` 을 보고할 때만 서버를 띄운다. `ANTHROPIC_API_KEY` 는 필요 없다.
+- 구독 5시간 창을 쓰므로 `CONCURRENCY=1` 또는 2. 한도 도달은 masc 가 CLI 의
+  rate_limit 이벤트로 받아 verify 실패와 섞이지 않는다.
+- 정책: OAuth 는 "ordinary use of Claude Code" 용도다
+  (code.claude.com/docs/en/legal-and-compliance). 매트릭스 규모로 돌릴지는
+  운영자 판단이고, 제출 런은 API 키 레인으로 남긴다.

@@ -87,3 +87,21 @@ def test_run_populates_context(tmp_path):
     assert ctx.metadata["masc_state"] == "Succeeded"
     assert ctx.metadata["tool_calls"] == 17
     assert ctx.metadata["duplicate_tool_calls"] == 2
+
+
+def test_claude_code_lane_env_uses_oauth_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    a = MascAgent(logs_dir=tmp_path, model_name="claude_code/claude-sonnet-5", arm="b")
+    assert a.runtime_id == "claude_code.claude-sonnet-5"
+    env = a._container_env()
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-test"
+    assert env["BENCH_RUNTIME_ID"] == "claude_code.claude-sonnet-5"
+    assert "ANTHROPIC_API_KEY" not in env
+
+
+def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    a = MascAgent(logs_dir=tmp_path, model_name="claude_code/claude-sonnet-5", arm="b")
+    with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN"):
+        a._container_env()

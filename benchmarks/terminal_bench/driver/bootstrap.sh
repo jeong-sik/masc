@@ -39,6 +39,28 @@ apt-get install -y -qq --no-install-recommends \
   openssh-server jq curl ca-certificates git gh ripgrep \
   libffi8 libgmp10 libsqlite3-0 libssl3t64 libzstd1 zlib1g >/dev/null
 
+# --- Claude Code subscription lane (runtime_id claude_code.<model>) ---
+# The keeper's model runtime is the unmodified Claude Code CLI (masc protocol
+# "claude-code"). Install it the way harbor's own claude-code agent does
+# (native installer, no node) and refuse to start the server unless the CLI
+# already sees the subscription token: masc probes `claude auth status --json`
+# before the first turn and a missing login would surface as a turn failure
+# minutes later instead of here.
+if [[ "${BENCH_RUNTIME_ID:-}" == claude_code.* ]]; then
+  : "${CLAUDE_CODE_OAUTH_TOKEN:?claude_code lane requires CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)}"
+  if ! command -v claude >/dev/null 2>&1; then
+    curl -fsSL https://downloads.claude.ai/claude-code-releases/bootstrap.sh | bash -s --
+    ln -sf /root/.local/bin/claude /usr/local/bin/claude
+  fi
+  claude --version
+  if ! claude auth status --json \
+      | jq -e '.loggedIn == true and .authMethod == "oauth_token"' >/dev/null; then
+    echo "claude auth status does not report the oauth_token login:" >&2
+    claude auth status --json >&2 || true
+    exit 1
+  fi
+fi
+
 # The remote_ssh exec lane runs `masc-exec-shim` on the remote PATH; the
 # "remote" here is this same container, so install the static binary system-wide.
 install -m 0755 "$BENCH/bin/masc-exec-shim" /usr/local/bin/masc-exec-shim

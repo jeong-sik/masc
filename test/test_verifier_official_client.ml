@@ -45,7 +45,7 @@ for line in sys.stdin:
         emit({'id':ident,'result':{'thread':{'id':'thread-1'},'model':'verifier-fixture'}})
     elif method == 'turn/start':
         emit({'id':ident,'result':{'turn':{'id':'turn-1'}}})
-        pending = [('Read',{'file_path':'proof.txt'},0)]
+        pending = [('tool_read_file',{'file_path':'proof.txt'},0)]
         if mode != 'missing':
             pending.append(('report_review_verdict',{'verdict':'APPROVE','reason':'read-only fixture receipt'},1))
         if mode == 'duplicate':

@@ -224,6 +224,10 @@ harness_start_server() {
     unset MCP_AUTH_TOKEN
     unset MASC_ADMIN_TOKEN
     unset MASC_TOKEN
+    # Connector credentials stay out too: a harness server joining the real
+    # Slack/Discord workspaces is an isolation hole, not a feature (#28807).
+    # Base-path isolation does not cover these unprefixed env reads.
+    unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
     export MASC_KEEPER_AUTONOMOUS_ENABLED="${MASC_HARNESS_KEEPER_AUTONOMOUS_ENABLED:-0}"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_OTEL_ENABLED="0"

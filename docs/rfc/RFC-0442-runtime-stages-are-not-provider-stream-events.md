@@ -42,7 +42,7 @@ What is missing is one hop: those callbacks reach `Session_store` and the transm
 
 ## 2. Measurement
 
-From `~/me/.masc/logs/system_log_2026-09-12.jsonl`, keeper `msx-retro-mania`, KST:
+From `<base-path>/.masc/logs/system_log_2026-09-12.jsonl`, keeper `msx-retro-mania`, KST:
 
 | time | event |
 |---|---|

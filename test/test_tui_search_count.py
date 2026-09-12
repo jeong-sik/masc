@@ -10,6 +10,7 @@ which is why opening a post drops both and closing it brings them back: the
 same surface, a different row source.
 """
 import os
+import re
 import sys
 import test_tui_keyboard_input as h
 
@@ -40,6 +41,17 @@ def run(executable: str) -> None:
 
         # Enter settles it. The query used to vanish here.
         h.send_and_wait(process, fd, output, b"\r", b"/Alpha (2) n/N")
+
+        # "n/N" names two keys, so the setting that takes the key text off the
+        # footer takes it too; the query and its count are status and stay.
+        # "?:help" directly after the marker is the footer with its hints off --
+        # with them on, the surface's own keys sit between the two.
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        os.write(fd, b"h")
+        h.send_and_wait(process, fd, output, b"\x1b", b"/Alpha (2)  ?:help")
+        h.send_and_wait(process, fd, output, b"?", b"MASC Cheat Sheet")
+        os.write(fd, b"h")
+        h.send_and_wait(process, fd, output, b"\x1b", b"/Alpha (2) n/N")
 
         # A query nothing carries says so rather than going quiet.
         h.send_and_wait(process, fd, output, b"/", b"/")
@@ -101,6 +113,67 @@ def run(executable: str) -> None:
         http_fixtures=h.memory_facts_http_fixtures())
 
 
+def run_git_changes_overlay(executable: str) -> None:
+    """The Git changes overlay is what the search reaches, wherever it is drawn.
+
+    [d] on the Keepers roster opens the overlay without leaving the Keepers
+    surface, and the frame draws it there. The search asked the surface for its
+    rows and got the roster back: the count described keeper names, and the key
+    that steps to the next match moved the keeper cursor under the overlay.
+    """
+    fixtures = h.keeper_runtime_http_fixtures()
+    # quokka first, so the cursor starts somewhere the query does not name and
+    # a landing is a move rather than where it already was. Neither path
+    # carries "alpha" or "beta", the two keeper names behind the overlay.
+    fixtures["/api/v1/git/status"] = (
+        200,
+        {
+            "scope": {"kind": "project"},
+            "changes": [
+                {"path": "bin/quokka.ml", "staged": True, "unstaged": False,
+                 "untracked": False, "conflicted": False},
+                {"path": "lib/zebra.ml", "staged": False, "unstaged": True,
+                 "untracked": False, "conflicted": False},
+            ],
+            "total": 2,
+        },
+    )
+
+    def interact(process, fd, _slave, output, _base):
+        h.wait_for_output(process, fd, output, b"cluster-a", start=0, timeout=15)
+        h.send_and_wait(process, fd, output, b"2", b"MASC Keepers")
+        h.wait_for_output(process, fd, output, b"alpha", start=0, timeout=5)
+        h.send_and_wait(process, fd, output, b"d", b"MASC Git Changes")
+        h.wait_for_output(process, fd, output, b"lib/zebra.ml", start=0, timeout=5)
+
+        # One path carries it and neither keeper name does, so a count of one
+        # is the overlay's rows being counted and not the roster's.
+        h.send_and_wait(process, fd, output, b"/", b"/")
+        frame = h.send_and_wait(process, fd, output, b"zebra", b"/zebra (1)")
+
+        # And the row the search landed on is the overlay's, not the keeper
+        # cursor under it. The selected row is the one drawn in reverse video;
+        # the bytes between that and the path must carry no escape of their
+        # own, or the pattern spans the rows after it -- the frame separates
+        # rows by cursor moves and not by newlines, so a [^\r\n]* reach here
+        # matched the selected row above and a path drawn below it.
+        selected = re.compile(rb"\x1b\[7m[^\x1b]*zebra\.ml")
+        if not selected.search(frame):
+            raise AssertionError(
+                "the overlay does not draw the landed row as selected")
+
+        h.send_and_wait(process, fd, output, b"\r", b"/zebra (1) n/N")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="the Git changes overlay is what the search counts",
+        interact=interact,
+        http_fixtures=fixtures)
+
+
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))
     print("search count on the footer: PASS")
+    run_git_changes_overlay(os.path.abspath(sys.argv[1]))
+    print("the overlay is what the search counts: PASS")

@@ -112,8 +112,9 @@ val search_marker : Masc_tui_types.state -> string option
 
     The count is taken here, over the rows the surface offers right now, so
     it cannot describe a list the surface has since left. The "n/N" suffix
-    appears only where those keys have rows to step. Plain text -- the footer
-    dims its whole line, so it styles its own. *)
+    appears only where those keys have rows to step, and only while footers
+    spell their hints. Plain text -- the footer dims its whole line, so it
+    styles its own. *)
 
 val search_marker_styled : Masc_tui_types.state -> string
 (** {!search_marker} in the colour the two headings share -- accented while

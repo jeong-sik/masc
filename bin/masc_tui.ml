@@ -5364,6 +5364,23 @@ let row_list (state : state) : row_list option =
       }
   in
   let of_counted f = Option.bind (counted ()) f in
+  (* The Git changes overlay before the surface it is drawn over, the way
+     [surface_row_texts] answers it: it draws over Keepers as well as
+     Repositories and Code, and an arm per surface left the Keepers host
+     naming the roster cursor while the overlay was the list on screen. A key
+     that landed there moved a cursor nobody could see. The diff replaces the
+     list, and what it draws follows [repository_changes_diff_scroll] rather
+     than a row. *)
+  if state.repository_changes_open then
+    (match state.repository_changes_diff_path with
+     | Some _ -> None
+     | None ->
+         of_counted (fun count ->
+             scrolling ~count ~cursor:state.repository_changes_cursor
+               ~scroll:state.repository_changes_scroll
+               ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
+               ~set_scroll:(fun s -> state.repository_changes_scroll <- s)))
+  else
   match state.view with
   | Keepers Keeper_list ->
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
@@ -5420,16 +5437,10 @@ let row_list (state : state) : row_list option =
               ~set_scroll:(fun s -> state.memory_health_scroll <- s))
   | Repositories ->
       of_counted (fun count ->
-          if state.repository_changes_open then
-            scrolling ~count ~cursor:state.repository_changes_cursor
-              ~scroll:state.repository_changes_scroll
-              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
-              ~set_scroll:(fun s -> state.repository_changes_scroll <- s)
-          else
-            scrolling ~count ~cursor:state.repositories_cursor
-              ~scroll:state.repositories_scroll
-              ~set_cursor:(fun i -> state.repositories_cursor <- i)
-              ~set_scroll:(fun s -> state.repositories_scroll <- s))
+          scrolling ~count ~cursor:state.repositories_cursor
+            ~scroll:state.repositories_scroll
+            ~set_cursor:(fun i -> state.repositories_cursor <- i)
+            ~set_scroll:(fun s -> state.repositories_scroll <- s))
   | Connectors ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.connectors_cursor
@@ -5455,17 +5466,10 @@ let row_list (state : state) : row_list option =
             ~set_cursor:(fun i -> state.changes_cursor <- i)
             ~set_scroll:(fun s -> state.changes_scroll <- s))
   | Code ->
-      (* Three panes under one surface: the Git changes overlay, the open
-         file, and the tree everything else hangs off. The overlay is the
-         counted one; the file carries its own pane height, and the tree
-         windows itself around the cursor. *)
-      if state.repository_changes_open then
-        of_counted (fun count ->
-            scrolling ~count ~cursor:state.repository_changes_cursor
-              ~scroll:state.repository_changes_scroll
-              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
-              ~set_scroll:(fun s -> state.repository_changes_scroll <- s))
-      else if
+      (* Two panes left once the overlay is answered above: the open file,
+         which carries its own pane height, and the tree everything else hangs
+         off, which windows itself around the cursor. *)
+      if
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then

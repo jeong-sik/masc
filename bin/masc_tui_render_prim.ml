@@ -337,7 +337,8 @@ let awaiting_approval_notice (state : state) =
    "n/N" appears only where those keys do something. They ask
    [surface_row_texts] the same question and return without moving when it
    answers [None], so a detail pane or a cursorless surface that printed the
-   suffix would be naming keys that are not there.
+   suffix would be naming keys that are not there. It is also a key hint, so
+   hints off drops it and keeps the query and its count.
 
    One spelling, because three surfaces draw this: the footer every surface
    carries, the Keepers heading, and the context inspector's own title. They
@@ -354,6 +355,13 @@ let search_marker (state : state) =
     in
     let tail =
       if not settled then "\xe2\x96\x8c"
+      else if not state.hints_visible then
+        (* "n/N" names keys, and hints off is the reader saying they know the
+           keys -- the setting leaves "?:help" as the only one and takes the
+           room back for status. The query and its count are status, so they
+           stay; naming two more keys next to them contradicted both halves of
+           that setting. *)
+        ""
       else match reached with None -> "" | Some _ -> " n/N"
     in
     Printf.sprintf "/%s%s%s" (Terminal_text.single_line query) found tail

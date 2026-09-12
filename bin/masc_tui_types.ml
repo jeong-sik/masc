@@ -6785,7 +6785,27 @@ let code_file_search_focused (state : state) =
   && state.code_focus_file = Right_pane
   && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
 
-let surface_row_texts (state : state) : surface -> string list option = function
+(* The Git changes overlay before the surface it is drawn over. It draws over
+   three surfaces -- [scrolled_surface_rows] names them -- and an arm per
+   surface answered for two of them: over the Keepers roster the rows here
+   were keeper names, so a settled query counted the hidden roster and [n]
+   stepped the keeper cursor instead of landing on a matching path.
+   [goto_surface] closes the overlay on any move to another surface, which is
+   what makes the flag alone enough to say it is on screen. Its diff replaces
+   the list with text, and text has no row for a cursor to name. *)
+let surface_row_texts (state : state) : surface -> string list option =
+ fun surface ->
+  if state.repository_changes_open then
+    (match state.repository_changes_diff_path with
+     | Some _ -> None
+     | None ->
+         Option.map
+           (fun s ->
+             List.map (fun row -> row.Tui_decode.rc_path)
+               s.Tui_decode.rcs_changes)
+           state.repository_changes)
+  else
+  match surface with
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
   | Keepers Keeper_detail when state.context_inspector_open ->
@@ -6850,11 +6870,11 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.hs_verdicts)
         state.harness
   | Repositories ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
+      (* Workspace Activity replaces the repository list with one repository's
+         own rows and its own cursor, and its handler takes every key the
+         surface has, "/" and n and N among them. The rows here are the list
+         behind it, which a settled query would then count and report. *)
+      if Option.is_some state.workspace_activity_repo then None
       else
         Option.map
           (fun s ->
@@ -6936,15 +6956,9 @@ let surface_row_texts (state : state) : surface -> string list option = function
               ^ " " ^ e.Tui_decode.sl_message))
         state.system_logs
   | Code ->
-      if state.repository_changes_open then
-        Option.map
-          (fun s ->
-            List.map (fun row -> row.Tui_decode.rc_path) s.Tui_decode.rcs_changes)
-          state.repository_changes
-      else
-      (* The Git changes overlay is a row list of its own. Otherwise, with a
-         file focused (and no file overlay over it), "/" searches the file's
-         lines; the tree remains the default search list. *)
+      (* With a file focused (and no file overlay over it), "/" searches the
+         file's lines; the tree remains the default search list. The Git
+         changes overlay is answered above, before any surface. *)
       if code_file_search_focused state then
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->

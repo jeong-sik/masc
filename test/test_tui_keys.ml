@@ -1483,6 +1483,28 @@ let test_detail_search_counts_follow_the_active_pane () =
   check_pane "System logs" System_logs
     (fun detail -> state.system_logs_detail_seq <- if detail then Some 1 else None)
 
+let test_workspace_activity_offers_no_row_search () =
+  (* [h] on a repository row replaces the list with that repository's own
+     activity rows and its own cursor, and the handler there takes every key
+     the surface has, "/" and n and N among them. What sits behind it is the
+     repository list, so a settled query counted rows that no key on this
+     screen could reach and the footer reported the number. *)
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let repository : Tui_decode.repository =
+    { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
+    ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
+    ; rp_default_branch = "main"; rp_status = "ready"; rp_keepers = []
+    ; rp_auto_sync = false }
+  in
+  state.view <- Repositories;
+  state.repositories <-
+    Some { Tui_decode.rs_repositories = [ repository ]; rs_total = 1 };
+  Alcotest.(check (option int)) "the repository list answers the search"
+    (Some 1) (surface_search_count state Repositories ~query:"masc");
+  state.workspace_activity_repo <- Some "masc";
+  Alcotest.(check (option int)) "Workspace Activity answers no search"
+    None (surface_search_count state Repositories ~query:"masc")
+
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
      that does nothing, pointing the other way. Eight of these ten answered
@@ -1670,10 +1692,12 @@ let () =
             `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
-        ; test_case "Code search counts follow immutable fetched rows"
+        ; Alcotest.test_case "Code search counts follow immutable fetched rows"
             `Quick test_code_search_count_tracks_fetched_source
-        ; test_case "detail search counts follow the active pane"
+        ; Alcotest.test_case "detail search counts follow the active pane"
             `Quick test_detail_search_counts_follow_the_active_pane
+        ; Alcotest.test_case "Workspace Activity offers no row search"
+            `Quick test_workspace_activity_offers_no_row_search
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
         ] )

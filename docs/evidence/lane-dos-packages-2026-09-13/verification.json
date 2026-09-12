@@ -9,5 +9,10 @@
     "0->1"
   ],
   "full_pixel_checks": 6,
-  "fresh_runtime_execution": false
+  "fresh_runtime_execution": false,
+  "capture_api_blob_joins": 12,
+  "normal_cleanup_instances": 4,
+  "all_attempts_absence_records": 10,
+  "statistics_identity_stages": 4,
+  "companion_after_dos_detach_verified": true
 }

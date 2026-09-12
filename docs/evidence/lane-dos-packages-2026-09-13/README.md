@@ -53,13 +53,32 @@ With Python 3 and Pillow available, run from this directory:
 
 ```sh
 python3 verify.py
+python3 negative_controls.py
 ```
 
 [verify.py](verify.py) reads the archive without extracting paths or accessing the
 network. It checks the manifest, all response and blob hashes, action/request/
-executor linkage, raw guest layout, all pixels of six 320×200 VGA captures,
-statistics rows against original API snapshots, and recorded cleanup. It
+executor linkage, raw guest layout, and all pixels of six 320×200 VGA captures.
+Each capture export is joined to its measured API row, original retained
+observation, and content-addressed guest/PNG blobs; the post-detach Slice must
+retain the same measured row. Statistics checks compare the exact producer,
+installation, run, consumer, and upstream DOS row across all four stages,
+including distinct consumer observations of the same producer cursor.
+Cleanup requires an explicit zero exit for the owned server, normal absence
+for every final instance, and matching entries in the all-attempts absence
+ledger. The original `dos-host/evidence/0026.raw` must show the same companion
+still attached while that DOS owner is detached. It
 recomputes facts from bytes rather than accepting only the producer's success
 label. [verification.json](verification.json) is the recorded output of that
 check. It is an export integrity and recorded-outcome check, not evidence of a
 new live run, model reasoning, performance acceptance or broad DOS compatibility.
+
+[negative_controls.py](negative_controls.py) first verifies the untouched
+archive, then changes copies of selected records in memory to exercise these
+cross-record checks independently of manifest hash failures. All 22 controls
+must be rejected, including disconnected capture blobs, missing cleanup fields
+or entries, changed producer/run/installation/consumer identities, incorrect
+upstream rows, and a detached or replaced companion.
+[audit-negative-controls.json](audit-negative-controls.json) records the results.
+These deliberately corrupted test inputs are not new runtime observations and
+are never written into the original archive or manifest.

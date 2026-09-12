@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.35.15] - 2026-09-12
+
+### Fixed
+
+- Keeper: time spent running tools or delegated image analysis is no longer attributed to a silent parent provider; inference monitoring resumes when the provider lease is reacquired (#35454).
+- TUI: terminal and superseded tool calls no longer remain waiting for a result. The header distinguishes the observed turn runtime from configuration and clears stale runtime identity at a new attempt (#35455).
+- Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).
+- TUI: preserve critical Attention text, avoid empty source hints, clarify schedule failures, and use consistent footer/help key labels (#35411, #35421, #35430, #35436, #35439).
+
+### Added
+
+- TUI: Resources search and navigation to the beginning/end of either pane (#35370).
+
 ## [0.35.14] - 2026-09-12
 
 ### Added

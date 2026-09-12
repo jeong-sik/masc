@@ -17,9 +17,13 @@ let test_every_eager_outcome_reason_is_declared () =
     [ KVT.Vo_empty
     ; KVT.Vo_truncated
     ; KVT.Vo_timeout
-    ; KVT.Vo_no_runtime "no schema-capable image runtime configured"
+    ; KVT.Vo_no_runtime "no image-capable runtime configured"
     ; KVT.Vo_invalid_request "bad request"
     ; KVT.Vo_invalid_structured_response "{}"
+    ; KVT.Vo_official_failure
+        { runtime_id = "official.vision"
+        ; failure = Masc.Fusion_official_client.Codex_failure Runtime_codex_app_server.Turn_interrupted
+        }
     ; KVT.Vo_provider
         { failure_class = Tool_result.Runtime_failure
         ; detail = "provider said no"

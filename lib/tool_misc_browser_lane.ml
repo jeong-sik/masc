@@ -228,10 +228,8 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
            (Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec |> add_client target))
 ;;
 
-(* Both Keeper and generic MCP readers retain the same typed observation before
-   provider projection. The reference remains outside the model-facing data. *)
-let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time args =
-  let result = handle_read ?keeper_name ~tool_name ~start_time args in
+(* Retention requires an owner that will commit the observation receipt. *)
+let retain_read_result ~base_path ~tool_name ~start_time args result =
   let retained = match args with
     | `Assoc fields ->
       (match List.assoc_opt "mode" fields with
@@ -250,6 +248,11 @@ let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time ar
       ~data:(Tool_result.data result)
       ("Browser observation received but could not be retained: " ^ detail
        ^ "; retry only the read, not preceding navigation or interaction.")
+;;
+
+let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time args =
+  handle_read ?keeper_name ~tool_name ~start_time args
+  |> retain_read_result ~base_path ~tool_name ~start_time args
 ;;
 
 let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =

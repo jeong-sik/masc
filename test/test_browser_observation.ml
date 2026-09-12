@@ -65,14 +65,25 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
           ~name:"masc_browser_read" ~args with
         | Some result -> result | None -> fail "generic MCP dispatch did not resolve browser read" in
       let generic_scene = generic_read "scene" in
-      check bool "generic MCP scene producer completes" true (Tool_result.is_success generic_scene);
-      check string "generic and Keeper retain identical scene bytes" original
-        (fetch base (retained_reference generic_scene));
-      let generic_regions = generic_read "regions" in
-      check bool "generic MCP regions producer completes" true (Tool_result.is_success generic_regions);
+      check bool "external MCP scene stays successful" true (Tool_result.is_success generic_scene);
+      check int "external MCP has no ownerless reference" 0
+        (List.length (Tool_result.retained_artifacts generic_scene));
+      ignore (Masc.Keeper_registry.register_offline ~base_path:base meta.name meta);
+      Eio.Switch.on_release sw (fun () -> Masc.Keeper_registry.For_testing.unregister ~base_path:base meta.name);
+      let entry = match Masc.Keeper_registry.get ~base_path:base meta.name with
+        | Some entry -> entry | None -> fail "registered Keeper missing" in
+      let retain tool_name mode result = Masc.Mcp_server_eio_call_tool.retain_runtime_mcp_observation
+          ~keeper_entry:(Some entry) ~tool_name ~arguments:(`Assoc ["mode",`String mode])
+          ~start_time:0. result in
+      check int "unknown tool remains ordinary" 0
+        (List.length (Tool_result.retained_artifacts (retain "unknown" "scene" generic_scene)));
+      let bound_scene = retain "masc_browser_read" "scene" generic_scene in
+      check string "bound MCP and Keeper retain identical bytes" original
+        (fetch base (retained_reference bound_scene));
+      let generic_regions = generic_read "regions" |> retain "masc_browser_read" "regions" in
       let regions = Observation.of_json
         (Yojson.Safe.from_string (fetch base (retained_reference generic_regions))) |> ok in
-      check bool "generic dispatch retains regions view" true (regions.scene.view=Browser_lane.Regions);
+      check bool "bound MCP retains regions view" true (regions.scene.view=Browser_lane.Regions);
       current := data "gamma" "Later page";
       Browser_lane.install_automation_executor None;
       let historical = Observation.of_json (Yojson.Safe.from_string (fetch base reference)) |> ok in
@@ -129,6 +140,10 @@ let test_generic_retention_failure_preserves_read_receipt () = with_base (fun ba
         ~name:"masc_browser_read"
         ~args:(`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"]) with
         | Some result -> result | None -> fail "generic dispatch missing" in
+      check bool "external read needs no blob storage" true (Tool_result.is_success result);
+      let result = Masc.Tool_misc_browser_lane.retain_read_result ~base_path:base
+          ~tool_name:"masc_browser_read" ~start_time:0.
+          (`Assoc ["mode",`String "scene"]) result in
       (match result with
        | Tool_result.Failed failure ->
          check bool "storage failure is typed runtime failure" true
@@ -142,7 +157,29 @@ let test_generic_retention_failure_preserves_read_receipt () = with_base (fun ba
         (List.length (Tool_result.retained_artifacts result));
       check int "exactly one browser read with no replay" 1 !reads)))
 
+let test_external_read_creates_no_hidden_blob () = with_base (fun base ->
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Browser_lane.install_automation_executor (Some (function
+      | Browser_lane.Page_scene _ ->
+          Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data "external" "visible"])
+      | _ -> fail "unexpected external action"));
+    Fun.protect ~finally:(fun () -> Browser_lane.install_automation_executor None) (fun () ->
+      let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"] in
+      let result = match Masc.Tool_misc.dispatch
+          {config=Masc.Workspace.default_config base;agent_name="reader";help_schemas=[]}
+          ~name:"masc_browser_read" ~args with
+        | Some result -> result | None -> fail "browser read not dispatched" in
+      let result = Masc.Mcp_server_eio_call_tool.retain_runtime_mcp_observation
+          ~keeper_entry:None ~tool_name:"masc_browser_read" ~arguments:args ~start_time:0. result in
+      check bool "external observation succeeds" true (Tool_result.is_success result);
+      check int "no hidden reference" 0 (List.length (Tool_result.retained_artifacts result));
+      let blobs = Tool_blob_store.list_all_result (Tool_blob_store.create ~base_path:base)
+          |> Result.map_error (fun _ -> "blob listing failed") |> ok in
+      check int "external read creates no unrooted blob" 0 (List.length blobs))))
+
 let () = run "browser observation retention" ["shared scene",[
+  test_case "external read creates no hidden blob" `Quick test_external_read_creates_no_hidden_blob;
   test_case "actual Keeper read stays inline and survives through the log" `Quick test_runtime_retains_inline_scene_and_log_roots;
   test_case "generic retention failure preserves read receipt" `Quick test_generic_retention_failure_preserves_read_receipt;
   test_case "invalid identity and storage failure publish no reference" `Quick test_invalid_or_unpersisted_scene_has_no_reference]]

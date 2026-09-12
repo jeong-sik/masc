@@ -14,8 +14,8 @@ let every_surface =
   ; Keepers Keeper_logs; Keepers Keeper_calls; Keepers Keeper_message
   ; Keepers Keeper_runtime_pick; Lanes; Board; Approvals; Planning
   ; Schedules; Verification; Harness; Fusion; Repositories; Code; Changes
-  ; Connectors; Runtime; Config; Resources; Tools; System_logs
-  ; Metrics; Memory
+  ; Connectors; Runtime; Clients; Config; Resources; Tools; System_logs
+  ; Memory
   ]
 
 let test_every_surface_answers () =
@@ -54,6 +54,43 @@ let test_one_spelling_per_key () =
             (List.mem k [ "esc"; "enter"; "tab"; "ESC"; "Return" ]))
         (Masc_tui_keys.for_surface surface))
     every_surface
+
+(* The blacklist above catches the three spellings that were already in the
+   footers; it cannot catch a spelling nobody has written yet. This is the
+   invariant it stands for: one key, one spelling, wherever it appears. The
+   operator reads footers across surfaces, so "PgUp/PgDn" here and
+   "PgUp / PgDn" one screen over is a key they have to recognise twice. *)
+let test_a_key_is_spelled_one_way_across_every_surface () =
+  let spellings = Hashtbl.create 64 in
+  List.iter
+    (fun surface ->
+      List.iter
+        (fun (b : Masc_tui_keys.binding) ->
+          let k = b.Masc_tui_keys.key in
+          let bare = String.concat "" (String.split_on_char ' ' k) in
+          let seen = try Hashtbl.find spellings bare with Not_found -> [] in
+          if not (List.mem k seen) then
+            Hashtbl.replace spellings bare (k :: seen))
+        (Masc_tui_keys.for_surface surface))
+    every_surface;
+  Hashtbl.iter
+    (fun bare seen ->
+      Alcotest.(check int)
+        (Printf.sprintf "%S is spelled one way (found: %s)" bare
+           (String.concat " | " seen))
+        1 (List.length seen))
+    spellings
+
+(* The handler pages the Config body in both panes (masc_tui.ml walks
+   [Config when config_pane = Config_prompts] and [= Config_runtime]), and the
+   footer advertised the keys while the table did not -- so the help sheet,
+   which projects from the table, could not answer what PgUp does here. *)
+let test_config_declares_the_page_keys_it_handles () =
+  Alcotest.(check bool) "Config names its page keys" true
+    (List.exists
+       (fun (b : Masc_tui_keys.binding) ->
+         String.equal b.Masc_tui_keys.key "PgUp/PgDn")
+       (Masc_tui_keys.for_surface Config))
 
 let test_chat_help_names_memory_cycle () =
   let bindings = Masc_tui_keys.for_surface (Keepers Keeper_message) in
@@ -233,12 +270,12 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [/]:Keeper  c/C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  [ / ]:Keeper  c / C:new Skill  e:edit Skill  Esc:config  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_resources_footer_steps_through_detail () =
   let tail =
-    "  h/l:pane  Ctrl-W:focus  J / K:scroll text  [ / ]:previous / next"
+    "  h/l:pane  Ctrl-W:focus  J/K:scroll text  [ / ]:previous / next"
     ^ "  PgUp/PgDn:page  Home/End:top/bottom  Enter:read  Esc:back"
   in
   let meta = "  r:reload  Tab:next  q:quit" in
@@ -811,7 +848,7 @@ let test_fleet_total_cost () =
 
 let test_config_footer_names_child_hops () =
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
+    "j/k:select / scroll  PgUp/PgDn:page  p:runtime.toml / models / params / prompts / themes  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =
@@ -1526,6 +1563,10 @@ let () =
             test_no_surface_repeats_a_key
         ; Alcotest.test_case "one spelling per key" `Quick
             test_one_spelling_per_key
+        ; Alcotest.test_case "a key is spelled one way across every surface"
+            `Quick test_a_key_is_spelled_one_way_across_every_surface
+        ; Alcotest.test_case "Config declares the page keys it handles" `Quick
+            test_config_declares_the_page_keys_it_handles
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick

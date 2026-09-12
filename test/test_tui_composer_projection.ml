@@ -145,6 +145,16 @@ let test_state_projection_has_one_structural_owner () =
          (Ast_grep.count_calls_in_value_binding
             ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name
             ~callee:"Composer_projection.of_state"))
+    [ "composer_line"; "composer_cursor" ];
+  (* And nowhere else. These rows sat in the godfile until the primitives
+     moved out of it; a copy left behind, or a surface growing its own, is a
+     second reading of the same state, which is what this suite exists to
+     stop. *)
+  List.iter
+    (fun binding_name ->
+       check int (binding_name ^ " is not drawn a second time") 0
+         (Ast_grep.count_value_bindings
+            ~module_path:"bin/masc_tui_render.ml" ~name:binding_name))
     [ "composer_line"; "composer_cursor" ]
 
 let () =

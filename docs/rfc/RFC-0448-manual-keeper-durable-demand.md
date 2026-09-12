@@ -25,7 +25,7 @@ implementation_prs: []
 
 ## 1. 배경 (실측)
 
-창은 `~/.masc/logs/system_log_*.jsonl` 2026-09-08..09-12 UTC, main `e763050689` 기준. 상세 근거는 §6.
+창은 `<base-path>/.masc/logs/system_log_*.jsonl` 2026-09-08..09-12 UTC, main `e763050689` 기준. 상세 근거는 §6.
 
 - sangsu 는 09-08T08:50Z 이전에 manual 로 바뀌었고, 그 뒤 약 17시간을 durable demand wake 로 돌았다. #34633 (09-09T01:56Z 머지) 이 그 wake 를 지웠다. 02:07Z 재부팅 뒤 sangsu 턴 0. 09-12T04:11Z 큐 pending 192 (schedule_due 151, connector_attention 40, hitl_resolved 1), 가장 오래된 행 97.8h.
 - 스케줄러는 매 occurrence 를 큐에 커밋한 뒤 activation 을 `unregistered` 로 적고 `dispatch=succeeded` 로 끝낸다. `schedule stimulus retained without owner activation … keeper=sangsu` 151줄. `dispatch=succeeded` 2,105줄 (창 전체).

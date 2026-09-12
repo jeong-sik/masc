@@ -83,7 +83,7 @@ let () =
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
       failwith "scene line plus indentation exceeds the framed content width") lines;
   (match lines with
-   | "[>1 p]" :: content_lines when String.concat "" content_lines = node.text -> ()
+   | "[>1]" :: content_lines when String.concat "" content_lines = node.text -> ()
    | _ -> failwith "scene wrapping lost Unicode/ASCII text or the selected target prefix");
   let pending = {view with load=Loading (42,Scene_read 1)} in
   assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
@@ -151,6 +151,9 @@ let () =
   if List.length (Lane.scene_targets view) <> 3 then
     failwith "repeated node ids must collapse to one target each";
   let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view)) in
-  if lines <> ["[1 p] first"; "[2 p] second"; "[1 p] first again"; "[>3 p] third"] then
-    failwith "each node must carry the number of its id's first appearance, and the cursor its marker";
+  if lines <> ["first"; "second"; "first again"; "[>3] third"] then
+    failwith "text stays readable and the selected node retains its deduplicated number";
+  let repeated, selected = Masc_tui_types.browser_lane_page_layout ~cols:100 {view with scene_cursor=0} in
+  if repeated <> ["[>1] first"; "second"; "[>1] first again"; "third"] || selected <> Some 0 then
+    failwith "repeated selected text must retain its identity and first row";
   print_endline "PASS repeated scene node ids keep one number each"

@@ -16,8 +16,8 @@ URL = "https://example.org/scene"
 NODE_COUNT = 200
 # browser_scene_script.ml's nodeLimit. Each text is short enough to wrap to one
 # row at the scenario's width, so a row's number is its node's number.
-FIRST_ROW = b"[>1 p] BROWSER SCENE ROW 000"
-LAST_ROW = b"[200 p] BROWSER SCENE ROW 199"
+FIRST_ROW = b"[>1] BROWSER SCENE ROW 000"
+LAST_ROW = b"BROWSER SCENE ROW 199"
 
 
 def run(executable: str) -> None:

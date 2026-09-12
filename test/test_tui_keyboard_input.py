@@ -11150,7 +11150,12 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    # The palette footer is [key:label] items now, not a dotted row: #35585
+    # rewrote it so Masc_tui_footer could shed whole keys and keep Esc at
+    # narrow widths, and the action label came down to lower case with it
+    # ("[Enter] Ask" -> "Enter:ask", masc_tui_render.ml). The old needle
+    # matched no row, so this read as "D opened nothing".
+    choices = send_and_wait(process, master_fd, output, b"D", b"Enter:ask")
     choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
     if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
             or "▸ y" not in choices_plain

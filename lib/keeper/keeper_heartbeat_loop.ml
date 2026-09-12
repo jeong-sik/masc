@@ -139,6 +139,35 @@ let decide_keepalive_cycle_action = function
   | Turn_cycle_busy block -> Defer_autonomous_work block
 ;;
 
+(* Which cycle status an Owner-registry rejection of the autonomous turn
+   records. The Owner stopping and its inventory stopping are the same
+   shutdown boundary: the turn was never admitted, so the cycle completes
+   without a turn and nothing is a crash. Every other rejection is a crash of
+   the cycle. Both sums are closed and matched in full, so a new constructor
+   is named here at compile time instead of falling into the crash arm
+   (audit S9: [Inventory_stopping] was logged at ERROR and counted as a
+   crash once per Keeper per shutdown, 39 times in five days). *)
+let owner_turn_rejection_cycle_status
+    (error : Keeper_owner_registry.command_error)
+  : keepalive_cycle_status
+  =
+  match error with
+  | Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping
+  | Keeper_owner_registry.Command_lookup_failed
+      Keeper_owner_registry.Inventory_stopping -> Turn_cycle_completed
+  | Keeper_owner_registry.Command_lookup_failed
+      ( Keeper_owner_registry.Inventory_not_installed _
+      | Keeper_owner_registry.Owner_not_found _
+      | Keeper_owner_registry.Owner_unavailable _
+      | Keeper_owner_registry.Owner_initialization_failed _ )
+  | Keeper_owner_registry.Command_lifecycle_reserved _
+  | Keeper_owner_registry.Command_rejected
+      ( Keeper_owner.Reducer_rejected _
+      | Keeper_owner.Operation_rejected _
+      | Keeper_owner.Store_unavailable _
+      | Keeper_owner.Owner_closed ) -> Turn_cycle_crashed
+;;
+
 (* What a provider retry route asks of the next sleep: how long, and whether
    a stimulus may cut it short. A rate limit or exhausted quota is the
    provider's state and waking sooner only re-runs the same failing call, so
@@ -1090,20 +1119,17 @@ let run_keepalive_unified_turn
     ; stimuli_acked = false
     ; provider_backoff = None
     }
-  | Error
-      (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
-    { meta = meta_after_triage
-    ; cycle_status = Turn_cycle_completed
-    ; stimuli_acked = false
-    ; provider_backoff = None
-    }
   | Error error ->
-    Log.Keeper.error
-      ~keeper_name:meta_after_triage.name
-      "keeper owner rejected autonomous turn: %s"
-      (Keeper_owner_registry.command_error_to_string error);
+    let cycle_status = owner_turn_rejection_cycle_status error in
+    (match cycle_status with
+     | Turn_cycle_crashed ->
+       Log.Keeper.error
+         ~keeper_name:meta_after_triage.name
+         "keeper owner rejected autonomous turn: %s"
+         (Keeper_owner_registry.command_error_to_string error)
+     | Turn_cycle_completed | Turn_cycle_interrupted | Turn_cycle_busy _ -> ());
     { meta = meta_after_triage
-    ; cycle_status = Turn_cycle_crashed
+    ; cycle_status
     ; stimuli_acked = false
     ; provider_backoff = None
     }

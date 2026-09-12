@@ -664,12 +664,12 @@ let run_new_turn
       ?raw_trace_run
       ?on_provider_failure
       ?before_tool_execution
+      ~turn
       agent
   =
-  (* One immutable zero-based identity owns the complete provider turn.  The
-     collect stage advances mutable agent state before output/tool dispatch,
-     so reading [state.turn_count] again downstream would name the next turn. *)
-  let turn = agent.state.turn_count in
+  (* [turn] is the identity [Pipeline_execution_resume.resolve] produced; it
+     owns the complete provider turn. The collect stage advances mutable agent
+     state before output/tool dispatch, so no stage reads [state.turn_count]. *)
   (* Stage 1: Input *)
   let* () =
     Tracing.with_span
@@ -815,10 +815,16 @@ let run_new_turn
        Pipeline_execution_scope.close_success execution |> Result.map (fun () -> value))
 ;;
 
+type turn_frontier = Pipeline_execution_resume.frontier
+
+let resolve_turn_frontier = Pipeline_execution_resume.resolve
+let turn_frontier_ordinal = Pipeline_execution_resume.frontier_ordinal
+
 (* Resume-vs-fresh dispatch (including settled-boundary replay and terminal
    reconstruction) lives in [Pipeline_execution_resume]; this driver supplies the
-   fresh-turn continuation and the turn_outcome constructors as pure values, so
-   the resume flag is consumed inside [dispatch] in the same order as before. *)
+   fresh-turn continuation and the turn_outcome constructors as pure values.
+   [frontier] is the identity the caller resolved before opening its span, so
+   every continuation runs under the same ordinal. *)
 let run_turn
       ~sw
       ?clock
@@ -826,16 +832,15 @@ let run_turn
       ?raw_trace_run
       ?on_provider_failure
       ?before_tool_execution
+      ~frontier
       agent
   =
   Pipeline_execution_resume.dispatch
     agent
+    frontier
     (* Thread [before_tool_execution] (the provider-lease [on_yield] release) as
          the fresh path threads it below; dropping it disabled [yield_on_tool]'s
-         release on the resume turn (lease advanced but never released). The turn
-         identity is the durable turn ordinal supplied by [dispatch]
-         ([turn_ordinal]), not [agent.state.turn_count], so the resumed turn is
-         traced under the exact ordinal the crashed run used (#2709). *)
+         release on the resume turn (lease advanced but never released). *)
     ~execute:(fun ~turn ~response tool_uses ->
       (* Empty, and not because a resumed turn refused nothing. The checkpoint
          this path replays holds the ADMITTED response -- the dropped blocks
@@ -856,7 +861,7 @@ let run_turn
     ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome
     ~terminal:(fun response -> Complete response)
-    ~fresh:(fun () ->
+    ~fresh:(fun ~turn ->
       run_new_turn
         ~sw
         ?clock
@@ -864,6 +869,7 @@ let run_turn
         ?raw_trace_run
         ?on_provider_failure
         ?before_tool_execution
+        ~turn
         agent)
 ;;
 

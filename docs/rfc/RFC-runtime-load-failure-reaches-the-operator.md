@@ -117,8 +117,29 @@ validation on purpose" 라고 적어 둔 그 자리). 저장 경로가 스테이
 그 줄을 덮어써서 통과한다. 실측에서 없는 런타임을 가리키던 `"imp"` 가 실제
 id 로 바뀌고 검사가 `needs_verification` 으로 돌아왔다.
 
-그래서 수리 가능성은 갈래마다 정해져 있고 추측할 필요가 없다. `load_failure`
-가 그 갈래를 이름으로 들고 있으면 `onboarding_status` 가 곧바로 판정한다.
+수리 가능성이 갈래마다 정해져 있으면 `load_failure` 를 든 `onboarding_status`
+가 곧바로 판정할 수 있다. 다만 3단계를 구현해 보니 그 전제가 갈래 단위로는
+성립하지 않았다.
+
+### 갈래만으로는 수리 가능성이 갈리지 않는다 (2026-09-12 실측)
+
+`Reference_unresolved` 하나가 두 상황을 담는다. `[runtime.assignments]` 의
+`imp` 가 없는 id 를 가리키는 경우는 저장이 고치고(실측), assignment 가 lane 을
+가리켜 도메인이 거부하는 경우는 재지 않았다. `--setup-lanes` 가 기존 lane
+선언을 고치는지 새 lane 만 더하는지도 아직 모른다.
+
+`test_onboarding_status` 는 그 세 상황을 모두 `Invalid` 로 고정하고 있다. 그
+판단을 뒤집으려면 갈래 하나에 대한 실측이 아니라 상황별 실측이 있어야 한다.
+그래서 3단계는 메시지만 옮기고 조건은 그대로 두었다.
+
+조건을 나누기 전에 잴 것:
+
+- `runtime-default-set --setup-lanes` 가 기존 lane 선언을 고치는가, 더하기만 하는가
+- assignment 가 lane 을 가리켜 거부된 상태를 저장이 고치는가
+- `[runtime].default` 가 없는 상태를 저장이 고치는가
+
+셋의 답이 갈래보다 세밀하면 `load_failure` 를 더 쪼개거나, 판정을 갈래가 아닌
+축(예: 실패한 site)에 둔다.
 
 ### 처방은 이미 자리에 있는데, 한 갈래에서는 틀렸다
 
@@ -244,8 +265,8 @@ type load_failure =
 2. `materialize_config` 와 `load_list_internal` 이 문자열 대신 variant 를 만든다.
    각 검증 함수의 반환 타입도 같이 바뀐다.
 3. 소비자 40곳을 `to_diagnostic_text` 로 옮긴다. 기계적 치환이고 동작은 같다.
-4. `onboarding_status` 만 typed 로 갈라 `to_operator_text` 를 쓰고, 마법사가
-   고치는 갈래를 `Invalid` 가 아니라 `Needs_setup` 으로 판정한다.
+4. `onboarding_status` 가 `to_operator_text` 로 사유를 화면에 올린다. 조건은
+   그대로 `Invalid` 다 — 위 실측 셋이 끝난 뒤에 별도로 나눈다.
 5. 갈래별로 맞는 `actions` 를 붙이고, 그 문장을 OCaml 에서 만들어 내보낸다.
    마법사와 대시보드가 그 문장을 쓰고, 대시보드의 라벨 사본을 지운다.
 6. `runtime-setup-inventory` 가 떨어뜨린 바인딩을 결과에 싣는다. 같은 파일에

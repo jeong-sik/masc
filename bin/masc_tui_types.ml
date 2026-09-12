@@ -2870,18 +2870,24 @@ module Browser_lane_view = struct
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
+    | Read_refresh
     | Scene_read of int
     | Scene_regions of int
+    | Scene_refresh of { tab_id : int; scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
+  type read_view = Text_view | Scene_view of {
+    scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
   type t = {
     clients : client list; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int;
+    read_view : read_view;
+    refresh_pending : int option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
@@ -2898,9 +2904,9 @@ module Browser_lane_view = struct
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0 }
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None }
   let switch_source source _t = { (create ()) with source }
-  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0 }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; read_view = Text_view }
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url
@@ -2916,8 +2922,8 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _)), _ -> Reading
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   let read_status_label = function
     | Unread -> "HTTP unread"
@@ -2935,9 +2941,30 @@ module Browser_lane_view = struct
     | Automation, _ -> true
     | Live, None -> false
     | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+  let cadence_operation t =
+    if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
+       || not (selected_client_available t) then None
+    else match t.selected_tab, t.read_view with
+      | None, _ -> None
+      | Some tab_id, Scene_view {scene_view;scope} ->
+          Some (Scene_refresh {tab_id;scene_view;scope})
+      | Some _, Text_view -> Some Read_refresh
+  let yield_refresh_to_input t =
+    match t.load with
+    | Loading (_, (Read_refresh | Scene_refresh _)) -> {t with load = Idle}
+    | Loading _ | Idle | No_browser | Failed _ -> t
+  let read_view_for_operation operation previous =
+    match operation with
+    | Read | Read_refresh | Open_session | Close_session | Goto _ -> Text_view
+    | Scene_read _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
+    | Scene_regions _ -> Scene_view {scene_view = Browser_lane.Regions; scope = None}
+    | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
+    | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
+    | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
+    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None }
+      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
@@ -3072,23 +3099,6 @@ module Browser_lane_view = struct
       let* content = Masc.Browser_scene.of_json data in
       Ok {source;client_id;tab_id;content;elapsed_ms}
 
-  let accept_scene ~generation (result : (scene, string) result) t =
-    match t.load with
-    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
-        let expected_view, expected_scope = match operation with
-          | Scene_regions _ -> Browser_lane.Regions, None
-          | Scene_focus {target;_} -> Browser_lane.Content, Some target
-          | Scene_click {scope;_} -> Browser_lane.Content, scope
-          | _ -> Browser_lane.Content, None in
-        (match result with
-         | Ok scene when scene.source = t.source && scene.client_id = client_id t
-                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
-                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
-             {t with scene = Some scene; load = Idle; scene_cursor = 0; scroll = 0}
-         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
-         | Error detail -> {t with scene = None; load = Failed detail})
-    | _ -> t
-
   (* Deduplicate through a table rather than [List.mem] over what has been
      seen. A scene carries up to 200 nodes (browser_scene_script.ml's
      nodeLimit), and the membership walk made this quadratic in a function
@@ -3104,6 +3114,75 @@ module Browser_lane_view = struct
           scene.content.nodes
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
+
+
+  let region_observed (target : Browser_lane.node_ref) (scene : scene) =
+    scene.content.document_id = target.document_id
+    && List.exists (fun (node : Masc.Browser_scene.node) ->
+      node.node_id = target.node_id && match node.kind with Region _ -> true | _ -> false)
+      scene.content.nodes
+
+  let publish_scene (scene : scene) t =
+    let same_observation = match t.scene with
+      | Some previous -> previous.source = scene.source
+        && previous.client_id = scene.client_id && previous.tab_id = scene.tab_id
+        && previous.content.document_id = scene.content.document_id
+        && previous.content.url = scene.content.url
+        && previous.content.view = scene.content.view && previous.content.scope = scene.content.scope
+      | None -> false in
+    let selected_id = if same_observation then
+      Option.map (fun (node : Masc.Browser_scene.node) -> node.node_id)
+        (selected_scene_target t)
+      else None in
+    let selected_index = match selected_id with
+      | None -> None
+      | Some selected ->
+        let rec find index = function
+          | [] -> None
+          | (node : Masc.Browser_scene.node) :: _ when node.node_id = selected -> Some index
+          | _ :: rest -> find (index + 1) rest in
+        find 0 (scene_targets {t with scene = Some scene}) in
+    let reading = Option.map (fun (reading : reading) ->
+      { reading with page = None; tabs = List.map (fun (tab : tab) ->
+          if tab.id = scene.tab_id then
+            {tab with title = scene.content.title; url = scene.content.url}
+          else tab) reading.tabs }) t.reading in
+    {t with scene = Some scene; reading; load = Idle;
+      read_view = Scene_view {scene_view = scene.content.view; scope = scene.content.scope};
+      scene_cursor = Option.value ~default:0 selected_index;
+      scroll = if Option.is_some selected_index then t.scroll else 0}
+
+  let accept_scene ~generation (result : (scene, string) result) t =
+    (* Operator input can supersede a cadence result, but the actual request
+       remains in flight until this completion. Do not start another cadence
+       read merely because its foreground load label was withdrawn. *)
+    let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
+    match t.load with
+    | Loading (current, Scene_refresh {tab_id;scene_view;scope}) when current = generation ->
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && ((scene.content.view = scene_view && scene.content.scope = scope)
+                             || (scene.content.view = Browser_lane.Regions && scene.content.scope = None
+                                 && match scope with Some target -> not (region_observed target scene) | None -> false)) ->
+             publish_scene scene t
+         | Ok _ -> {t with scene = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; load = Failed detail})
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
+        let expected_view, expected_scope = match operation with
+          | Scene_regions _ -> Browser_lane.Regions, None
+          | Scene_focus {target;_} -> Browser_lane.Content, Some target
+          | Scene_click {scope;_} -> Browser_lane.Content, scope
+          | _ -> Browser_lane.Content, None in
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
+             publish_scene scene t
+         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
+         | Error detail -> {t with scene = None; load = Failed detail})
+    | _ -> t
+
 
   type scene_action = Read_region | Click_control
 
@@ -3178,11 +3257,12 @@ module Browser_lane_view = struct
     | Loading _ | Idle | No_browser | Failed _ -> t, None
 
   let accept ~generation (result : (reading, string) result) t =
+    let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, Read) when current = generation ->
+    | Loading (current, (Read | Read_refresh)) when current = generation ->
         (match result with
          | Ok reading when reading.source = t.source && reading.client_id = client_id t ->
-             { t with reading = Some reading; load = Idle;
+             { t with reading = Some reading; load = Idle; read_view = Text_view;
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
@@ -3203,7 +3283,7 @@ module Browser_lane_view = struct
         let index = (current + direction + count) mod count in
         match List.nth_opt reading.tabs index with
         | None -> t
-        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle }
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle; read_view = Text_view }
 end
 
 let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =

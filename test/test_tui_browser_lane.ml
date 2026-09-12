@@ -230,9 +230,55 @@ let test_visual_pointer_navigation () =
   let _,image = accept_screenshot ~generation:52 (Ok wrong) pending in
   expect "pointer completion never switches target tab" (image=None)
 
+let test_scoped_refresh_failure_retains_read_intent () =
+  let target : Browser_lane.node_ref = {document_id="observed-document";node_id="region"} in
+  let scene_json ~document_id ~view ~scope =
+    `Assoc ["ok",`Bool true;"data",`Assoc [
+      "source",`String "live";"clientId",`String firefox.client_id;
+      "tabId",`Int 2;"elapsed_ms",`Float 1.;"schema",`String "masc.browser.scene.v1";
+      "documentId",`String document_id;"url",`String "https://example.org/";
+      "title",`String "Observed region";"view",`String view;"scope",scope;
+      "truncated",`Bool false;
+      "viewport",`Assoc ["width",`Float 800.;"height",`Float 600.;"scrollX",`Float 0.;"scrollY",`Float 0.];
+      "nodes",`List [`Assoc ["nodeId",`String "region";"kind",`String "region";
+        "role",`String "main";"tag",`String "main";"text",`String "Region";
+        "rects",`List [`Assoc ["x",`Float 0.;"y",`Float 0.;"width",`Float 100.;"height",`Float 20.]];
+        "color",`String "black";"fontSize",`Float 16.;"fontWeight",`String "400";
+        "whiteSpace",`String "normal"]]]] in
+  let scoped = success (decode_scene (scene_json ~document_id:target.document_id ~view:"content"
+    ~scope:(`Assoc ["documentId",`String target.document_id;"nodeId",`String target.node_id]))) in
+  let focus = Scene_focus {tab_id=2;target} in
+  let initial = loaded () in
+  let focused = accept_scene ~generation:80 (Ok scoped)
+    {initial with load=Loading (80,focus);read_view=read_view_for_operation focus initial.read_view} in
+  expect "focused decoded scene accepted" (focused.scene=Some scoped);
+  let refresh = Scene_refresh {tab_id=2;scene_view=Browser_lane.Content;scope=Some target} in
+  expect "focused cadence retains exact region" (cadence_operation focused=Some refresh);
+  let pending = {focused with load=Loading (81,refresh);
+    read_view=read_view_for_operation refresh focused.read_view;refresh_pending=Some 81} in
+  expect "busy refresh cannot launch another cadence" (cadence_operation pending=None);
+  let operator_owned = yield_refresh_to_input pending in
+  expect "operator input can proceed while the read is pending" (not (busy operator_owned));
+  expect "superseding a result does not stack periodic reads" (cadence_operation operator_owned=None);
+  let superseded = accept_scene ~generation:81 (Error "late background failure") operator_owned in
+  expect "late result keeps the operator observation" (superseded.scene=focused.scene && superseded.load=Idle);
+  expect "actual completion releases cadence slot" (superseded.refresh_pending=None && cadence_operation superseded=Some refresh);
+  let failed = accept_scene ~generation:81 (Error "transport unavailable") pending in
+  expect "failed refresh withdraws stale action references" (failed.scene=None && selected_scene_target failed=None);
+  expect "retry retains original scoped scene intent" (cadence_operation failed=Some refresh);
+  expect "picker owns cadence" (cadence_operation {failed with client_picker=Some 0}=None);
+  expect "URL draft owns cadence" (cadence_operation {failed with url_draft=Some "https://example.org/new"}=None);
+  let new_map = success (decode_scene (scene_json ~document_id:"replacement-document" ~view:"regions" ~scope:`Null)) in
+  let retry = {failed with load=Loading (82,refresh)} in
+  let resolved = accept_scene ~generation:82 (Ok new_map) retry in
+  expect "replacement document returns an observed region map" (resolved.scene=Some new_map);
+  expect "next cadence follows resolved map instead of expired scope"
+    (cadence_operation resolved=Some (Scene_refresh {tab_id=2;scene_view=Browser_lane.Regions;scope=None}))
+
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["visual pointer navigation", test_visual_pointer_navigation;
+    ["scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;
+     "visual pointer navigation", test_visual_pointer_navigation;
      "visual scroll ownership", test_visual_scroll_ownership;
      "client connection ownership", test_client_connection_ownership;
      "client inventory contract", test_clients_decode;

@@ -1532,7 +1532,7 @@ let question_hints (state : state) =
     match state.ask_answer_mode with
     | Ask_browsing ->
         Printf.sprintf
-          "j/k:move  y/n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
+          "j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
            r:refresh  Tab:next"
           walk_asks
     | Ask_answering { aam_ask_id } -> (
@@ -1571,8 +1571,6 @@ let question_hints (state : state) =
                    walk_asks
                    (if has_choices then "1-9:pick  " else "")
                    (if takes_text then "t:write  " else "")))
-
-
 let question_asks (state : state) =
   match state.asks_snapshot with
   | None -> []

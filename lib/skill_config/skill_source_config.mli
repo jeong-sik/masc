@@ -118,6 +118,12 @@ type resolved_source =
 
 val parse_text : string -> (t, diagnostic list) result
 val validate_text : string -> (unit, diagnostic list) result
+val read_only_absolute_source :
+  id:source_id -> path:string -> (source, path_rejection) result
+(** Typed source for an explicitly declared package export. *)
+val append_sources : t -> source list -> (t, diagnostic list) result
+(** Preserve source order and the existing resource-read bound. Missing bounds
+    and duplicate IDs are errors; no default or override is introduced. *)
 val to_yojson : t -> Yojson.Safe.t
 (** Canonical Skill-only projection used for configuration revisions and
     observation. Source order is preserved. *)

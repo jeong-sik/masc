@@ -457,6 +457,33 @@ let test_visible_navigation_glyphs_are_not_mojibake () =
        ]
 )
 
+(* The Attention panel's badge. Critical and bad share a colour, so the word
+   is the only thing that tells those two rows apart -- and the badge fitted
+   that word to five fixed cells, which cut "critical" to [crit~] and padded
+   the shorter levels inside their own brackets as [bad  ].
+
+   Asserted at the source because nothing links the TUI executable, and
+   because both failures typecheck: a label one cell too long and a column one
+   cell too narrow are the same well-typed program. Two facts carry it -- the
+   vocabulary fits, and nothing cuts it. *)
+let test_the_attention_badge_cannot_cut_its_own_level () =
+  let literals binding names =
+    Ast_grep.count_string_literals_in_value_binding ~module_path:render
+      ~binding_name:binding ~literals:names
+  in
+  Alcotest.(check int) "every level is named and every name is short" 4
+    (literals "attention_severity_label" [ "crit"; "bad"; "warn"; "info" ]);
+  Alcotest.(check int) "the level that did not fit its column is gone" 0
+    (literals "attention_severity_label" [ "critical" ]);
+  let calls binding callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:render
+      ~binding_name:binding ~callee
+  in
+  Alcotest.(check int) "the column measures the names" 1
+    (calls "attention_severity_badge_cells" "Message_layout.display_width");
+  Alcotest.(check int) "and the badge cuts nothing" 0
+    (calls "attention_severity_badge" "fit_width")
+
 (* Three facts about a surface's row list -- how many rows, which one the
    cursor is on, how to put the cursor elsewhere -- used to live in three
    separate matches over [surface], each naming every variant so a new one
@@ -588,6 +615,8 @@ let () =
             test_a_lane_that_cannot_admit_says_why
         ; Alcotest.test_case "visible navigation glyphs are not mojibake"
             `Quick test_visible_navigation_glyphs_are_not_mojibake
+        ; Alcotest.test_case "the attention badge cannot cut its own level"
+            `Quick test_the_attention_badge_cannot_cut_its_own_level
         ; Alcotest.test_case "the row cursor has one source" `Quick
             test_the_row_cursor_has_one_source
         ; Alcotest.test_case "the window is measured where the cursor lands"

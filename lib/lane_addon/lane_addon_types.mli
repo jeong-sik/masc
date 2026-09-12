@@ -39,6 +39,7 @@ type package = {
   image : string;
   command : string list;
   directory : string;
+  skills_directory : Skill_resource_path.t option;
   resources : resources;
 }
 type phase = Attached | Observing | Failed of string | Detaching | Detached

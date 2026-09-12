@@ -151,8 +151,12 @@ let workspace_health_color = function
   | Workspace_health_unknown -> (Theme.warn ())
   | Workspace_health_ok -> (Theme.ok ())
 
+(* Syslog's own names for these levels, which is why "crit" is the word and
+   not a short spelling of one. The level used to read "critical" and the
+   badge fitted it to five cells, so the row that most needed reading was the
+   only one drawn cut: [crit~]. *)
 let attention_severity_label = function
-  | Attention_critical -> "critical"
+  | Attention_critical -> "crit"
   | Attention_bad -> "bad"
   | Attention_warning -> "warn"
   | Attention_info -> "info"
@@ -161,6 +165,36 @@ let attention_severity_color = function
   | Attention_critical | Attention_bad -> (Theme.bad ())
   | Attention_warning -> (Theme.warn ())
   | Attention_info -> (Theme.info ())
+
+(* The badge column, measured from the vocabulary rather than chosen for it.
+   Fitting the label to a fixed five cells did two things: it cut the longest
+   level, and it padded the shorter ones inside their own brackets, which drew
+   [bad  ] and [warn ] -- a gap before a closing bracket reads as a typo, not
+   as a column. Taking the width from the labels means a level added or
+   renamed later widens the column instead of being cut by it.
+
+   Critical and bad share a colour (see above), so the word is the only thing
+   that tells those two rows apart. That is the reason the word may not be
+   cut, and the reason this is measured instead of assumed. *)
+let attention_severity_badge_cells =
+  let bracket_cells = 2 in
+  bracket_cells
+  + List.fold_left
+      (fun widest severity ->
+        max widest
+          (Message_layout.display_width (attention_severity_label severity)))
+      0
+      [ Attention_critical; Attention_bad; Attention_warning; Attention_info ]
+
+(* [level] in its colour, padded to the column outside the colour so a theme
+   that paints a background does not paint the gap. *)
+let attention_severity_badge severity =
+  let drawn = "[" ^ attention_severity_label severity ^ "]" in
+  attention_severity_color severity
+  ^ drawn ^ Ansi.reset
+  ^ String.make
+      (max 0 (attention_severity_badge_cells - Message_layout.display_width drawn))
+      ' '
 
 (* Blame reaches further back than the two surfaces [keeper_lane_idle_text]
    serves. A line untouched since a repository's first year is ordinary, and
@@ -499,8 +533,7 @@ let render_overview (state : state) =
       match Rows.at attention_items_window i with
       | None -> ""
       | Some a ->
-        let sev_color = attention_severity_color a.ai_severity in
-        let severity_label = attention_severity_label a.ai_severity in
+        let severity_badge = attention_severity_badge a.ai_severity in
         (* The age answers "why is this still here": a stamped item shows how
            long ago its evidence happened, an unstamped one (a paused keeper,
            a waiting confirmation) shows an em dash because its producer put
@@ -519,10 +552,10 @@ let render_overview (state : state) =
              spends, and the events column beside this one guessed one too
              many: every event row came out a cell over its budget and was
              marked truncated whether or not anything was cut. The severity
-             label keeps its own fit -- that one is a fixed column, not a
-             guess at the rest of the row. *)
-          Printf.sprintf "%s[%s]%s %s%s%s %s"
-            sev_color (fit_width severity_label 5) Ansi.reset
+             badge pads itself to its own column, which is measured from the
+             level names rather than guessed at -- so it is the one part of
+             the row that is finished before it gets here. *)
+          Printf.sprintf "%s %s%s%s %s" severity_badge
             Ansi.dim (fit_width age_label 3) Ansi.reset
             (Terminal_text.single_line a.ai_summary)
     in
@@ -868,7 +901,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:"j/k:scroll  x:cancel  left/esc:back  r:refresh");
+       ~hints:"j/k:scroll  x:cancel  Left / Esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
@@ -3108,12 +3141,16 @@ let schedule_delivery_summary (row : schedule_row) =
       row.sch_status
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
+(* Both readers draw this through [data_unreliable_row], which already opens
+   "(data unreliable: ". So each branch says only what that frame cannot:
+   nothing, when there is no snapshot and the error is the whole story; and
+   that the rows on screen are the previous read, when there is one. *)
 let schedule_source_warning (state : state) =
   Terminal_text.optional_single_line state.schedules_error
   |> Option.map (fun err ->
          match state.schedules with
-         | None -> "조회 실패: " ^ err
-         | Some _ -> "이전 조회 유지 · 갱신 실패: " ^ err)
+         | None -> err
+         | Some _ -> "이전 조회 유지 · " ^ err)
 
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
@@ -4175,9 +4212,10 @@ let render_keeper_list (state : state) =
     done;
 
   box_line buf cols (keeper_operations_preview state);
-  Buffer.add_string buf
-    (Printf.sprintf "%s%s%s%s%s\n" (Theme.recede ()) Ansi.box_bl (draw_hline (cols - 2))
-       Ansi.box_br Ansi.reset);
+  (* A section rule, drawn by the helper the rest of this surface uses, so it
+     reads as the two rules above it do. No corners: the Keepers frame holds
+     no box_tl, box_tr or edge bar for a corner to point at. *)
+  box_divider buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:(keeper_action_hints ~offers_back:false state selected_reading));
@@ -8741,7 +8779,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
   finish_surface state ~clamped:(Changes_diff_scroll scroll)
     ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
@@ -8942,7 +8980,7 @@ let render_changes_tree_diff (state : state)
     ; ds_scroll = state.changes_diff_scroll
     ; ds_unchanged = "  (this file matches its last commit)"
     ; ds_esc_hint = "esc closes"
-    ; ds_footer_hints = "j/k:scroll  left/esc:back  o:open in editor  q:quit"
+    ; ds_footer_hints = "j/k:scroll  Left / Esc:back  o:open in editor  q:quit"
     ; ds_surface_key = "changes"
     ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)
     }
@@ -8973,9 +9011,23 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
+let browser_lane_source_hint view =
+  match Browser_lane_view.selected_scene_target view with
+  | None -> None
+  | Some node ->
+      (match node.Masc.Browser_scene.source_context with
+       | Masc.Browser_source_context.Unmapped -> None
+       | (Located _ | Invalid _) as source ->
+           Some (Masc.Browser_source_context.label source))
+
+let browser_lane_fixed_rows view =
+  (* Status, selection, tab, URL, divider and text position are always drawn.
+     A source hint contributes a row only when the selected node has one. *)
+  6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
+
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6))
+  max 0 (max 1 (body_rows - 5) - browser_lane_fixed_rows view)
 
 let browser_lane_scroll_limit state ~terminal_rows ~cols view =
   let room = browser_lane_visible_rows state ~terminal_rows view in
@@ -9022,12 +9074,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
         | Loading (_, Read) -> "Reading " ^ browser_label view ^ "…", Theme.info ()
+        | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
         | Loading (_, Open_session) -> "Opening automation browser…", Theme.info ()
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
+        | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, Viewport_refresh _) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
@@ -9112,16 +9166,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
-      (match view.scene with
+      (match browser_lane_source_hint view with
        | None -> ()
-       | Some _ -> c.push_styled ~style:(Theme.recede ())
-           (match selected_scene_target view with
-            | None -> "  Source unavailable"
-            | Some node -> "  " ^ Terminal_text.single_line (Masc.Browser_source_context.label node.source_context)));
+       | Some hint -> c.push_styled ~style:(Theme.recede ())
+           ("  " ^ Terminal_text.single_line hint));
       c.push_divider ();
       let lines = browser_lane_rows ~cols view in
       let total = Browser_lane_layout.count lines in
-      let room = max 0 (budget - (if Option.is_some view.scene then 7 else 6)) in
+      let room = max 0 (budget - browser_lane_fixed_rows view) in
       let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
       (* Read the window out of the retained array. [List.filteri] walked every
@@ -11164,11 +11216,6 @@ let render_code (state : state) =
        ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
-let resource_display_name (resource : Masc_tui_mcp.resource) =
-  match resource.title with
-  | Some title when String.trim title <> "" -> title
-  | Some _ | None -> resource.name
-
 let resource_mime_essence mime =
   match String.split_on_char ';' (String.lowercase_ascii (String.trim mime)) with
   | essence :: _ -> String.trim essence
@@ -11303,7 +11350,7 @@ let render_resources (state : state) =
       match Rows.at rows_list_window (first + i) with
       | Some resource ->
           let selected = first + i = cursor in
-          let name = resource_display_name resource in
+          let name = Masc_tui_mcp.display_name resource in
           let line =
             if selected then
               Theme.selection ^ " " ^ name
@@ -11339,7 +11386,7 @@ let render_resources (state : state) =
     in
     let title =
       match shown_resource with
-      | Some resource -> "Resource · " ^ resource_display_name resource
+      | Some resource -> "Resource · " ^ Masc_tui_mcp.display_name resource
       | None -> "Resource detail"
     in
     box_top pane_buf pane_cols;
@@ -13201,7 +13248,7 @@ let render_answering (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"[j/k] Move · [Enter] Open Chat · [Esc] Close");
+       ~hints:"j/k:move  Enter:open chat  Esc:close");
   finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -13241,7 +13288,7 @@ let render_agenda (state : state) =
   |> List.iter (fun line -> framed_line buf cols (paint line));
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"[j/k] Scroll · [Esc] Close");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
   finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
 ;;
 

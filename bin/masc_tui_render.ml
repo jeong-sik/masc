@@ -13491,7 +13491,7 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~body:(fun ~budget c ->
       Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)
-      |> List.iter (fun line -> c.push (Terminal_text.single_line line)))
+      |> List.iter c.push)
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw

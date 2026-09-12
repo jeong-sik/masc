@@ -127,7 +127,7 @@ let configuration_and_ports () =
   let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
   check (option string) "retained historical source does not authorize a new owner edit" None
     (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
-  let lines = UI.lines view in
+  let lines = UI.lines ~width:100 view in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
   check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" lines);
@@ -146,7 +146,7 @@ let action_identity_and_uncertainty () =
     request_id=request.request_id;requester="operator";executor=None;input_sha256=Action.input_digest input;
     action=request.action;state=Action.Outcome_unknown;result=None;detail=Some "worker disconnected after dispatch"} in
   let received = UI.action_receipt request (Action.to_json receipt) |> ok in
-  let lines = UI.lines {UI.initial with last_action=Some request;action_receipt=Some received} in
+  let lines = UI.lines ~width:100 {UI.initial with last_action=Some request;action_receipt=Some received} in
   check bool "unknown outcome is never displayed as a confirmed effect" true (List.mem "  state outcome_unknown" lines);
   check bool "missing executor stays unknown" true (List.mem "  requester operator · executor unknown" lines);
   check bool "different request cannot satisfy status read" true
@@ -154,9 +154,42 @@ let action_identity_and_uncertainty () =
   check bool "duplicate identity in command is rejected" true
     (Result.is_error (UI.parse_request {|act {"instance_id":"a","instance_id":"b","expected_incarnation":"a","request_id":"r","action":{}}|}))
 
+let metric_fields_and_receipts_remain_readable () =
+  let module Row = Masc.Lane_addon_types in
+  let digest = String.make 192 'a' in
+  let note = String.concat "" (List.init 48 (fun _ -> "지표")) in
+  let row : Row.row = {
+    id="metric/2/statistics";lane_id="metric/statistics";kind=Row.Value;
+    title="Supplied \027[31m row statistics";observed_at=1.;subject_id="guest";
+    clock=None;actor=None;
+    fields=["source_id",`String digest;"incarnation",`String digest;
+      "observed_row_count",`Int 1;"input_complete",`Bool true;
+      "note",`String note];
+    evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
+  let snapshot : UI.snapshot = {instances=[];configuration=None;
+    output={rows=[row];coverage=[]};complete=Some true} in
+  let view = {UI.initial with snapshot=Some snapshot;
+    receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
+  List.iter (fun width ->
+    let lines = UI.lines ~width view in
+    check bool "every printable row fits the actual terminal width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
+    check bool "external terminal controls are escaped before measuring" true
+      (List.for_all (fun line -> not (String.contains line '\027')) lines);
+    let visible = String.concat "" lines in
+    let contains text =
+      let n = String.length text in
+      let rec at i = i+n <= String.length visible
+        && (String.sub visible i n=text || at (i+1)) in
+      at 0 in
+    List.iter (fun text -> check bool "scrollable rows retain complete field and receipt text" true (contains text))
+      ["\"observed_row_count\": 1";digest;note;"lane-evidence:" ^ digest;"last receipt value"])
+    [40;80;200]
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
-  test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty]]
+  test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
+  test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable]]

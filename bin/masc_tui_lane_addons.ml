@@ -243,7 +243,7 @@ let instance_lines view instances =
     @ (match item.action_schema with None -> [] | Some schema ->
         ["   action schema · incarnation " ^ item.incarnation]
         @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string schema)))) instances)
-let lines ?(width = 100) view =
+let lines ~width view =
   let header = ["Optional cross-lane observations; Keeper and existing machine owners continue independently.";
     " n:new TOML  E:edit selected TOML  r:inspect  Tab:installations/instances/rows  :advanced command";
     ("Focus: " ^ match view.focus with Configurations -> "TOML installations" | Instances -> "Instances" | Rows -> "Observation rows");
@@ -267,10 +267,13 @@ let lines ?(width = 100) view =
             row.observed_at row.lane_id row.id row.title;
            Printf.sprintf "   subject %s · actor %s%s" row.subject_id (Option.value ~default:"unknown" row.actor)
              (match row.clock with None -> "" | Some clock -> " · " ^ clock.domain ^ " " ^ clock.value);
-           "   fields " ^ Yojson.Safe.to_string (`Assoc row.fields)] @
+           "   fields"] @
+           List.map (fun line -> "     " ^ line)
+             (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))) @
            List.map (fun (e : Row.evidence) -> "   evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256) row.evidence @
            (if row.related_ids = [] then [] else ["   related " ^ String.concat ", " row.related_ids])) snapshot.output.rows) in
-  let receipt = match view.receipt with None -> [] | Some json -> ["Last receipt: " ^ Yojson.Safe.to_string json] in
+  let receipt = match view.receipt with None -> [] | Some json ->
+    "Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json) in
   let draft = match view.draft with None -> [] | Some draft -> [(if view.naming then "New TOML filename: " else ":") ^ draft] in
   let documents = match selected_document view with None -> [] | Some document -> Document.summary document in
   let action = match view.last_action with
@@ -286,3 +289,6 @@ let lines ?(width = 100) view =
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result))) in
   header @ error @ draft @ action @ documents @ content @ receipt
+  |> List.concat_map (fun line ->
+    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+      (Masc.Tui_decode.sanitize_terminal_text line))

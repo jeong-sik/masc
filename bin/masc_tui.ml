@@ -16056,7 +16056,11 @@ and is loaded on demand through keeper_skill.
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
                      | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
-                     | "J" | "K" -> update { view with scroll = max 0 (min (List.length (Addons.lines view) - 1) (view.scroll + (if key = "J" then 1 else -1))) }
+                     | "J" | "K" ->
+                         let _, cols = get_terminal_size () in
+                         let width = framed_inner_width cols in
+                         let last = List.length (Addons.lines ~width view) - 1 in
+                         update { view with scroll = max 0 (min last (view.scroll + (if key = "J" then 1 else -1))) }
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
                          (match view.snapshot, view.focus with

@@ -5826,7 +5826,7 @@
 (test
  (name test_tui_lane_addons)
  (modules test_tui_lane_addons)
- (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_lane_declaration))
+ (libraries alcotest yojson unix masc masc.fs_compat masc_tui_lane_addons masc_tui_lane_declaration masc_tui_message_layout))
 
 (rule
  (alias runtest-test_tui_lane_package_pty)

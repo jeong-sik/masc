@@ -1,0 +1,30 @@
+ Overview  Activity  Keepers  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+   MASC Browser Lane  live · Zen  [HTTP read ok]                                                    
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    coordinator HTTP [connected]  Read 1.0 ms • 1 tabs                                              
+    Live Zen • b:choose browser • a:automation                                                      
+    [1/1] Gamma (active)  [ / ]:select tab                                                          
+    https://example.org/gamma • 1447 chars                                                          
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    GAMMA TEXT READY                                                                                
+    GAMMA RAW LINE 1                                                                                
+    GAMMA RAW LINE 2                                                                                
+    GAMMA RAW LINE 3                                                                                
+    GAMMA RAW LINE 4                                                                                
+    GAMMA RAW LINE 5                                                                                
+    GAMMA RAW LINE 6                                                                                
+    GAMMA RAW LINE 7                                                                                
+    GAMMA RAW LINE 8                                                                                
+    GAMMA RAW LINE 9                                                                                
+    GAMMA RAW LINE 10                                                                               
+    GAMMA RAW LINE 11                                                                               
+    GAMMA RAW LINE 12                                                                               
+    GAMMA RAW LINE 13                                                                               
+    GAMMA RAW LINE 14                                                                               
+    GAMMA RAW LINE 15                                                                               
+    GAMMA RAW LINE 16                                                                               
+    Text 1/81 • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane                                     
+
+  b:browser  l / a:live / automation  [ / ]:tab  j/k:text  Ctrl-^ / Esc:hide lane  …?
+Browser Lane · live · Zen page reader                                                               

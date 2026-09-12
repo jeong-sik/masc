@@ -1007,9 +1007,13 @@ let load_keeper_turns ~(host : string) ~(port : int) :
 (** Load the durable Gate: pending approvals and both lane modes. *)
 let load_dashboard_gate ~(host : string) ~(port : int) :
     (Tui_decode.gate_snapshot, string) result =
-  match fetch_dashboard_gate ~host ~port with
-  | Error err -> Error ("gate load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_gate_snapshot json
+  (* Both ways this read can fail carry the label. Only the transport half did,
+     so a payload this build cannot decode reached the screen as "approval_queue
+     is neither a list nor null" with nothing saying which read said it. 29 of
+     the 47 reads in this file share that asymmetry -- #35573. *)
+  Result.map_error
+    (fun detail -> "gate load failed: " ^ detail)
+    (Result.bind (fetch_dashboard_gate ~host ~port) Tui_decode.decode_gate_snapshot)
 
 (** Load the durable per-keeper Gate settings. *)
 let load_keeper_gate_settings ~(host : string) ~(port : int) :

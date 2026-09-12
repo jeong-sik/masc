@@ -1,0 +1,16 @@
+{
+  "columns": 130,
+  "rows": 35,
+  "navigation_inputs_after_copy": [],
+  "refresh_interval": "unmodified product default",
+  "pid": 15662,
+  "started_monotonic": 960989.15823175,
+  "binary_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
+  "copied_monotonic": 960991.238517458,
+  "copy_offset": 20001,
+  "alive_at_copy": true,
+  "keeper_observation_finished_monotonic": 961123.540091416,
+  "alive_after_keeper_observation": true,
+  "exit": 0,
+  "stopped_monotonic": 961123.550716625
+}

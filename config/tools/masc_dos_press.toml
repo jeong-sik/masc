@@ -1,0 +1,32 @@
+name = "masc_dos_press"
+description = """
+Press keys on the shared DOS machine.
+
+DOS reads the keyboard through a BIOS ring buffer, so there is no hold time \
+— a key goes in the ring and the program takes it out. Each key is put in, \
+then the machine runs until the program has taken it and asks for the next \
+one, or the step budget for that key runs out. So ["down", "down", "return"] \
+walks a menu in one call. Keys: up down left right home end pgup pgdn insert \
+delete enter return esc space tab backtab backspace f1-f10, or one \
+character. A name the machine has no key for is refused before anything is \
+pressed. Every key is recorded in the ledger with your name and the step \
+count."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "keys"
+type = "array"
+required = true
+items = { type = "string" }
+min_items = 1
+description = "Keys in order, e.g. [\"down\", \"return\"] or [\"y\"]."
+
+[[params]]
+name = "steps"
+type = "integer"
+description = "Instruction budget per key. Default 1000000."
+minimum = 1
+maximum = 4000000
+default = 1000000

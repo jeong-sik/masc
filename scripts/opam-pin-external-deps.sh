@@ -119,6 +119,12 @@ readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 # the replay landed on that polluted state (Sangokushi II cold-boot stall
 # pc=e1dc); boot_disk now mounts the ROM at replay time (ocaml-msx #37).
 readonly OCAML_MSX_SHA="870e61063e08ca4a0b15b939cb72a1c11aade1d3"
+# DOS emulator core (8086 + BIOS/DOS interrupt surface + CGA/EGA/VGA video).
+# Path-pinned locally for core development; SHA-pinned here for CI.
+# d887e45 = ocaml-dos #11: keys have names, so lib/dos_lane can take "up" and
+# "enter" from a keeper instead of BIOS words in hex. It sits on #9 (the
+# real-chip CPU repair and the BIOS/DOS surface) and #10 (graphics modes).
+readonly OCAML_DOS_SHA="d887e45c69fa1634790d63835b303a771a22d005"
 # cohttp-eio 6.2.1 + one line: Reader_flow.single_read continues a partial body
 # delivery from the position already delivered instead of offset 0. Without it
 # a chunk handed over in three or more single_read calls repeats its first
@@ -288,6 +294,8 @@ opam_pin_add ws-direct-eio "https://github.com/jeong-sik/ws-direct.git#${WS_DIRE
 pinned_pkgs+=("ws-direct-eio")
 opam_pin_add ocaml-msx "https://github.com/jeong-sik/ocaml-msx.git#${OCAML_MSX_SHA}" -n -y
 pinned_pkgs+=("ocaml-msx")
+opam_pin_add ocaml-dos "https://github.com/jeong-sik/ocaml-dos.git#${OCAML_DOS_SHA}" -n -y
+pinned_pkgs+=("ocaml-dos")
 opam_pin_add cohttp-eio.6.2.1 "https://github.com/jeong-sik/ocaml-cohttp.git#${COHTTP_EIO_SHA}" -n -y
 pinned_pkgs+=("cohttp-eio")
 

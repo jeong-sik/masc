@@ -1,0 +1,126 @@
+(** Dos_lane — the one DOS machine the workspace plays on.
+
+    Follows RFC-0439 (the MSX machine lives in the server) for a second
+    machine: the DOS core lives here, in the server process, so every keeper
+    tool puts keys into the same {!Dos_machine.t}. The core is turn-based —
+    only {!step}, {!press} and {!type_text} move time — and each call is
+    capped at {!max_steps_per_call}.
+
+    {b Time is instructions, not frames.} A DOS program has no frame clock;
+    it runs until it asks for something. The unit here is one 8086
+    instruction, and the useful stopping point is not a count but
+    {!observation.waiting_for_key}: the machine asked the BIOS for a key and
+    found none. A keeper steps until that, looks, and presses. The MSX lane
+    has to guess when a screen has settled ([step_until_change]); here the
+    machine says so.
+
+    {b Keys are a queue, not a matrix.} DOS reads the keyboard through a
+    BIOS ring buffer, so there is no hold or release — a key is put in the
+    ring and the guest takes it out. {!press} therefore names no hold time.
+
+    Every key is appended to a ledger as (step, who, key). The same program
+    and the same ledger reproduce the same run: the core reads no clock and
+    no randomness — its date, timer ticks and video retrace all come from
+    the instruction counter. *)
+
+type observation = {
+  steps : int;  (** instructions executed since load *)
+  video_mode : int;  (** BIOS mode number: 3 is 80x25 text, 0x13 is VGA *)
+  width : int;
+  height : int;  (** the frame this mode would draw *)
+  cs : int;
+  ip : int;
+  exited : bool;  (** the program called INT 21h AH=4Ch or fell into INT 20h *)
+  exit_code : int;
+  halted : bool;  (** HLT — waiting for an interrupt, not finished *)
+  waiting_for_key : bool;
+      (** the guest asked for a key and the ring was empty. On real hardware
+          it would be blocked here. This is the signal to press something. *)
+  ticks : int;  (** BIOS timer ticks, 18.2/s by default *)
+  screen_text : string;
+      (** the 80x25 (or 40x25) text page as UTF-8, code page 437 kept — box
+          drawing and game glyphs survive. Rows are newline-separated. Text
+          modes only; a graphics mode leaves whatever the text page held. *)
+  program : string option;  (** the loaded program's name *)
+  files : string list;  (** file names the guest can open, sorted *)
+}
+
+type entry = { at_step : int; who : string; key_name : string }
+
+type error =
+  | No_machine  (** nothing loaded — [masc_dos_load] first *)
+  | Invalid_request of string  (** the caller's arguments *)
+  | Unreadable of string
+      (** a file that is there and will not read. A path that does not exist
+          is [Invalid_request] — the caller named it. *)
+
+val error_to_string : error -> string
+
+val max_steps_per_call : int
+(** 4,000,000 instructions. The core runs about 24 million a second on this
+    hardware (measured booting ZZT), so a call is roughly 170 ms — the same
+    order as the MSX lane's 300-frame cap. *)
+
+val boot_steps : int
+(** Instructions run at {!load} before the first observation, stopping early
+    if the program asks for a key. A DOS program reaches its title screen in
+    its own time; this is the budget for getting there. *)
+
+type ran = {
+  steps_run : int;  (** instructions actually advanced *)
+  reached_input : bool;
+      (** stopped because the guest asked for a key; false means the budget
+          ran out, or the program exited *)
+}
+
+val load :
+  ledger_dir:string ->
+  program_name:string ->
+  program_bytes:string ->
+  files:(string * string) list ->
+  (observation * ran, error) result
+(** Creates the workspace machine, replacing any previous one. The loader is
+    chosen by the image's own bytes — an MZ signature is an EXE, anything
+    else is a COM — not by the file name, so a misnamed image still boots the
+    way DOS would boot it.
+
+    [files] are (name, contents) the guest can open by name, case-insensitively.
+    The ledger is [ledger_dir/ledger.jsonl], truncated: a new machine starts a
+    new ledger. Loading is not evidence that the program reaches a screen —
+    read the observation. *)
+
+val eject : unit -> (unit, error) result
+val screen : unit -> (observation, error) result
+
+val step : steps:int -> until_input:bool -> (observation * ran, error) result
+(** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.
+    With [until_input], stops as soon as the guest asks for a key — the
+    normal way to hand a turn back. *)
+
+val press :
+  who:string -> keys:string list -> steps:int -> (observation * ran, error) result
+(** Puts each key in the BIOS ring in turn and runs until the guest has taken
+    it and asks for the next one, or [steps] runs out for that key. Key names
+    are {!Dos_machine.key_of_string}'s: the arrows, home and page keys,
+    insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
+    character. A name the machine has no key for is refused before anything
+    is pressed. *)
+
+val type_text :
+  who:string -> text:string -> steps:int -> (observation * ran, error) result
+(** Types the characters of [text] in turn, as {!press} does with one-character
+    keys. For a name a program is asking for, not for menu navigation. *)
+
+val peek : address:int -> length:int -> (string, error) result
+(** Reads [length] (1..{!peek_max_bytes}) bytes at a physical address
+    (0x00000-0xFFFFF) as hex pairs. Read-only: writing is the cheat the lane
+    refuses. *)
+
+val peek_max_bytes : int
+
+val read_guest_file : name:string -> (string, error) result
+(** The current contents of a file the guest can see, including one it wrote —
+    a saved game comes back out this way. *)
+
+val ledger : unit -> entry list
+(** Oldest first. Empty when no machine is loaded. *)

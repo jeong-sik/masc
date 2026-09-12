@@ -1,0 +1,18 @@
+name = "masc_dos_load"
+description = """
+Boot a DOS program on the shared machine.
+
+Call with no program to list what is available. A name may be one file or a \
+directory holding a game: the directory's executable boots and every file \
+beside it is mounted where the program opens files. Returns the observation \
+(see masc_dos_screen) after running the program far enough to reach its \
+first screen, stopping early when it asks for a key. Loading is not proof it \
+got somewhere — read waiting_for_key and screen_text."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "program"
+type = "string"
+description = "Name in the programs inventory, or a path. Omit to list what is there."

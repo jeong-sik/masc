@@ -5640,3 +5640,8 @@
  (name test_world_constitution_types)
  (modules test_world_constitution_types)
  (libraries alcotest masc yojson))
+
+(test
+ (name test_world_constitution_store)
+ (modules test_world_constitution_store)
+ (libraries alcotest masc yojson unix fs_compat))

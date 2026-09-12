@@ -9,7 +9,9 @@ let dependency ~base_path = function
   | "claude-code" -> Some Prerequisites.Claude_cli
   | "antigravity" -> Some Prerequisites.Antigravity_cli
   | "pdf-tools" -> Some Prerequisites.Pdf_tools
-  | "presentation-tools" -> Some (Prerequisites.Presentation_tools {base_path})
+  | "presentation-tools" ->
+    Some (Prerequisites.Presentation_tools
+            { base_path = Env_config.normalize_masc_base_path_input (base_path ()) })
   | "whisper" -> Some Prerequisites.Whisper_cli
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 
@@ -116,7 +118,6 @@ let execute host = function
      | Error error -> Prerequisites.Failed {step=1; reason=Docker.error_message error}
      | Ok _ -> Prerequisites.External_step_pending)
 let run ~base_path ~dependency:name ~action =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
   match dependency ~base_path name with
   | None -> prerr_endline "Unknown prerequisite. Choose a dependency from the setup catalog."; 1
   | Some dependency ->

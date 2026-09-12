@@ -3193,7 +3193,15 @@ let prerequisite_actions_cmd =
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
   Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, or presentation-tools.")
-    Term.(const (fun base_path dependency action -> Masc_cli_prerequisites.run ~base_path ~dependency ~action) $ base_path $ dependency $ action)
+    (* Resolved on demand: only presentation-tools is scoped to a workspace, and
+       an operator installing Codex or Docker has not made one yet. Taking the
+       resolving [base_path] term here refused every dependency with "MASC_BASE_PATH
+       is not set" -- advice that does not install anything. *)
+    Term.(const (fun base_path dependency action ->
+      Masc_cli_prerequisites.run
+        ~base_path:(fun () -> match base_path with Some raw -> raw | None -> default_base_path ())
+        ~dependency ~action)
+      $ run_base_path $ dependency $ action)
 
 let cmd =
   let doc =

@@ -61,15 +61,21 @@ let protect action =
 let stat path =
   try Some (Unix.lstat path) with Unix.Unix_error (Unix.ENOENT, _, _) -> None
 
-let ensure_dir path =
+let sync_dir path =
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+
+let ensure_dir_with_sync ~sync_parent path =
   (match stat path with
    | None ->
-     (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) ->
+     (try Unix.mkdir path 0o700; sync_parent (Filename.dirname path) with Unix.Unix_error (Unix.EEXIST, _, _) ->
        match stat path with
        | Some info when info.Unix.st_kind = Unix.S_DIR -> ()
        | None | Some _ -> raise (Rejected (Invalid_path path)))
    | Some info when info.Unix.st_kind = Unix.S_DIR -> ()
    | Some _ -> raise (Rejected (Invalid_path path)))
+
+let ensure_dir = ensure_dir_with_sync ~sync_parent:sync_dir
 
 let require_chain ~root path =
   match Fs_compat.inspect_owned_directory_chain ~ownership_root:root path with
@@ -124,6 +130,9 @@ let tree_revision ~root directory =
         ("directory", rel, info.st_perm, "") :: List.concat_map (fun child ->
           visit (if rel = "" then child else rel ^ "/" ^ child)) children
       | Unix.S_REG ->
+        (* A byte-identical hard link still carries operator-owned sharing
+           semantics that a distribution replacement cannot preserve. *)
+        if info.st_nlink <> 1 then raise (Rejected (Invalid_path path));
         (match Fs_compat.sha256_owned_regular_file ~ownership_root:root path with
          | Ok (Some digest) -> [ "file", rel, info.st_perm, digest ]
          | Ok None | Error _ -> raise (Rejected (Invalid_path path)))
@@ -172,10 +181,6 @@ let observe paths package =
 let inspect ~base_path package =
   protect (fun () -> observe (locations ~base_path package) package)
 
-let sync_dir path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
-
 let write_file path content =
   let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ] 0o600 in
   let channel = Unix.out_channel_of_descr fd in
@@ -219,6 +224,8 @@ let export = export_with_sync ~sync_parent:sync_dir
 
 module For_testing = struct
   let export = export_with_sync
+  let ensure_directory ~sync_parent path =
+    protect (fun () -> ensure_dir_with_sync ~sync_parent path)
 end
 
 (* lockf is process-owned. This mutex also excludes another synchronous

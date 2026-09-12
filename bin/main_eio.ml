@@ -1271,9 +1271,15 @@ let init_record_default =
   in
   Arg.(value & flag & info [ "record-default" ] ~doc)
 
-let init_skills_only =
-  let doc = "Install or update unmodified builtin Skills without changing runtime config files" in
-  Arg.(value & flag & info ["skills-only"] ~doc)
+type init_scope = All | Config_only | Skills_only
+
+let init_scope =
+  Arg.(value & vflag All [
+    Skills_only, info ["skills-only"]
+      ~doc:"Install or update unmodified builtin Skills without changing runtime config files";
+    Config_only, info ["config-only"]
+      ~doc:"Seed runtime config without publishing builtin Skill packages";
+  ])
 
 type init_tally = { written : int; skipped : int; failed : int }
 
@@ -1300,7 +1306,7 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force skills_only record_default =
+let init_cmd_exit base_path force scope record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1310,7 +1316,7 @@ let init_cmd_exit base_path force skills_only record_default =
       base_path
   in
   let result =
-    if skills_only then { written = 0; skipped = 0; failed = 0 }
+    if scope = Skills_only then { written = 0; skipped = 0; failed = 0 }
     else (
       Fs_compat.mkdir_p target_root;
       Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
@@ -1326,7 +1332,9 @@ let init_cmd_exit base_path force skills_only record_default =
                |> Option.map (fun dest_rel -> rel, dest_rel))
            Embedded_config.file_list))
   in
-  let skills = Server_runtime_config_root_bootstrap.refresh_builtin_skills ~base_path in
+  let skills = match scope with
+    | Config_only -> 0
+    | All | Skills_only -> Server_runtime_config_root_bootstrap.refresh_builtin_skills ~base_path in
   Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed or updated (root=%s)\n"
     result.written result.skipped result.failed skills target_root;
   (* A seeded workspace is the one thing a later bare `masc` needs to know
@@ -1374,7 +1382,7 @@ let init_cmd =
   let info = Cmd.info "init" ~doc in
   Cmd.v info
     Term.(
-      const init_cmd_exit $ base_path $ init_force $ init_skills_only
+      const init_cmd_exit $ base_path $ init_force $ init_scope
       $ init_record_default)
 
 let skills_refresh_exit base_path name apply expected_revision expected_bundle_revision export_to =
@@ -2782,7 +2790,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     ~sandbox_profile ~microvm_backend
     (* setup is an operator command: the workspace it prepares becomes the
        default for later ones. *)
-    ~initialize:(fun () -> init_cmd_exit base_path false false true)
+    ~initialize:(fun () -> init_cmd_exit base_path false All true)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in

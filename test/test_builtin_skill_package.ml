@@ -57,6 +57,46 @@ let test_preserve_operator_changes () =
     check string label before (revision (inspect base second));
     check bool "new resource was not backfilled" false (Sys.file_exists (file base "references/lazy.md")))) edits
 
+let test_created_directory_parent_sync () = with_base (fun base ->
+  let directory = Filename.concat base "new-state" in
+  let synced = ref [] in
+  let sync_parent path =
+    check bool "entry exists before parent sync" true (Sys.is_directory directory);
+    synced := path :: !synced in
+  get (Package.For_testing.ensure_directory ~sync_parent directory);
+  check (list string) "new entry syncs containing directory" [base] !synced;
+  get (Package.For_testing.ensure_directory ~sync_parent directory);
+  check (list string) "existing directory does not invent a new entry" [base] !synced;
+  let unsynced = Filename.concat base "unsynced-state" in
+  (match Package.For_testing.ensure_directory
+     ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))) unsynced with
+   | Error (Package.Io_error _) -> ()
+   | _ -> fail "parent sync failure must not report success");
+  check bool "failed sync leaves real created entry visible" true (Sys.is_directory unsynced))
+
+let test_hard_link_preserved () = with_base (fun base ->
+  ignore (install base Package.Automatic first);
+  let request = reviewed_request (inspect base second) in
+  let original_receipt = read (receipt base) in
+  let resource = file base "references/old.md" in
+  let linked_target = Filename.concat base "operator-linked-resource" in
+  Fs_compat.save_file linked_target (read resource);
+  Unix.chmod linked_target (Unix.stat resource).st_perm;
+  Unix.unlink resource;
+  Unix.link linked_target resource;
+  (match Package.inspect ~base_path:base second with
+   | Error (Package.Invalid_path path) -> check string "linked resource rejected" resource path
+   | _ -> fail "inspection must not assign a normal revision to linked resource");
+  (match install base Package.Automatic second with
+   | Package.Preserved_uninspectable _ -> ()
+   | _ -> fail "automatic refresh must preserve hard links");
+  (match Package.install ~base_path:base ~request second with
+   | Error (Package.Invalid_path _) -> ()
+   | _ -> fail "reviewed replacement must reject new linking semantics");
+  check int "operator link retained" (Unix.stat linked_target).st_ino (Unix.stat resource).st_ino;
+  check string "old instruction retained" "old instruction" (read (file base "SKILL.md"));
+  check string "receipt unchanged" original_receipt (read (receipt base)))
+
 let test_untracked_reviewed_update () = with_base (fun base ->
   ignore (install base Package.Automatic first);
   Unix.unlink (receipt base);
@@ -285,7 +325,7 @@ let test_parallel_installers () = with_base (fun base ->
   | _ -> fail "receipt must describe the final complete package")
 
 let () = run "Builtin Skill package updates"
-  [ "installation", [ test_case "whole package update and backup" `Quick test_update_complete_package
+  [ "installation", [ test_case "created directory parent sync" `Quick test_created_directory_parent_sync; test_case "hard link preservation" `Quick test_hard_link_preserved; test_case "whole package update and backup" `Quick test_update_complete_package
                     ; test_case "operator edits remain active" `Quick test_preserve_operator_changes
                     ; test_case "untracked package review and explicit update" `Quick test_untracked_reviewed_update
                     ; test_case "streamed large operator resource" `Quick test_streamed_resource_revision

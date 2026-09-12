@@ -2,9 +2,14 @@
 
 `masc init --skills-only --base-path BASE` installs missing builtin packages
 and updates packages whose complete directory still matches the installation
-receipt. The installer uses this command on an ordinary upgrade. Body edits,
+receipt. The installer runs this command after committing the binary/dashboard
+transaction. Before commit, `init --config-only` prepares config for the wizard
+without publishing packages. A subsequent package error keeps the committed
+binary and reports the failure; it does not restore an older executable. Body edits,
 resource edits, additions, deletions, empty directories and permission changes
-preserve the operator's complete active package. Server startup only seeds
+preserve the operator's complete active package. Multiply linked resources are
+uninspectable: automatic refresh preserves them, and explicit replacement
+refuses them until the operator resolves the shared-file relationship. Server startup only seeds
 missing packages; it does not update an existing package.
 
 An installation receipt is a digest of the whole package, kept outside the

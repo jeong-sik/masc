@@ -52,6 +52,8 @@ val install : base_path:string -> request:request -> package -> (outcome, error)
 val error_message : error -> string
 
 module For_testing : sig
+  val ensure_directory : sync_parent:(string -> unit) -> string -> (unit, error) result
+  (** Observe or fail parent sync after actual directory creation. *)
   val export : sync_parent:(string -> unit) -> destination:string -> package -> (unit, error) result
   (** Inject a parent sync failure after real no-replace publication. *)
 end

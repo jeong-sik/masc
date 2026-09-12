@@ -1226,7 +1226,8 @@ let move_queued_to_front store ~now ~operation_id =
     let* target = operation_or_unknown store.db operation_id in
     let* () = match target.state with
       | Operation.Queued -> Ok ()
-      | _ -> Error (Not_queued operation_id) in
+      | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
+      | Operation.Cancelled _ -> Error (Not_queued operation_id) in
     let* blocked = blocked_queued_scopes store.db ~now in
     let* () = if List.exists (Keeper_execution_scope_id.equal
         (Keeper_execution_scope_id.direct_operation operation_id)) blocked then
@@ -1235,10 +1236,12 @@ let move_queued_to_front store ~now ~operation_id =
     let* queued = with_statement store.db ~operation:"read queue order"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
       (fun stmt ->
-        let rec read rows = match Sqlite3.step stmt with
-          | Sqlite3.Rc.DONE -> Ok (List.rev rows)
-          | ROW -> let* row = decode_operation stmt in read (row :: rows)
-          | rc -> Error (Store_unavailable (sqlite_error store.db "read queue order" rc)) in
+        let rec read rows =
+          let rc = Sqlite3.step stmt in
+          if rc = Sqlite3.Rc.DONE then Ok (List.rev rows)
+          else if rc = Sqlite3.Rc.ROW then
+            let* row = decode_operation stmt in read (row :: rows)
+          else Error (Store_unavailable (sqlite_error store.db "read queue order" rc)) in
         read []) in
     match queued with
     | first :: _ when Id.equal first.operation_id operation_id -> Ok ()

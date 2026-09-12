@@ -1363,7 +1363,9 @@ let interrupt_observed_turn ~base_path name ~interrupt_token =
      | Some turn when String.equal turn.interrupt_token interrupt_token ->
        if Atomic.compare_and_set entry.current_turn_switch observed None then
          (try Eio.Switch.fail turn.switch Operator_interrupt; Observed_turn_signalled
-          with exn -> Observed_turn_signal_failed (Printexc.to_string exn))
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Observed_turn_signal_failed (Printexc.to_string exn))
        else Observed_turn_changed
      | Some _ | None -> Observed_turn_changed)
 ;;

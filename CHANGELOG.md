@@ -1,6 +1,42 @@
 # Changelog
 
 
+## [0.35.15] - 2026-09-12
+
+### Fixed
+
+- HTTP pool: preserve DNS/TCP failures under one connection deadline, reclaim failed or cancelled client sockets, and connect through the address that passed the TCP probe without pinning later DNS reconnects (#35381, #35389, #35394).
+- HTTP pool: propagate internal client-scope failures to buffered and streaming request waits instead of leaving callers waiting for an optional timeout (#35423).
+- Installation: keep the selected workspace across working-directory changes, preserve the existing default when server startup fails, and leave unrelated defaults intact during purge (#35376).
+- Keeper: constitution tools return the standard `ok` response envelope used by other tools (#35451).
+- Keeper: time spent running tools or delegated image analysis is no longer attributed to a silent parent provider; inference monitoring resumes when the provider lease is reacquired (#35454).
+- TUI: terminal and superseded tool calls no longer remain waiting for a result. The header distinguishes the observed turn runtime from configuration and clears stale runtime identity at a new attempt (#35455).
+- Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).
+- TUI: preserve critical Attention text, avoid empty source hints, clarify schedule failures, and use consistent footer/help key labels (#35411, #35421, #35430, #35436, #35439).
+- TUI: replace the Keepers screen's orphaned bottom box corners with a section divider (#35414).
+
+### Added
+
+- Voice: two endpoint kinds that speak and listen without a server, a setup wizard that asks only the questions it needs, a listing that asks every endpoint whether it answers and reports what each one said, and a writer that edits the voice section instead of regenerating it (#35507, #35427, #35425, #35382).
+- Lanes: observation packages install from TOML, expose their Skills through the existing Keeper catalog, connect package outputs through TOML world inputs, and carry optional world actions with retained artifact bytes. A self-contained DOS world package ships as one of them (#35465, #35482, #35497, #35521, #35522).
+- TUI: the turn dashboard folds to one line, which returns Ctrl-S to the surface (#35458).
+- TUI: chat holds one timeline, with promoted and NEXT rows inside the flow rather than beside it (#35492).
+- TUI: the keeper detail screen shows its tabs and stops saying its hints twice (#35490).
+- TUI: the judge legend names the marks the list actually draws (#35467).
+- TUI: Resources search and navigation to the beginning/end of either pane (#35370).
+- TUI: Planning shows the name of a goal that has left (#35408).
+- TUI: task throughput and lead time are counted per assignee (#35357).
+- TUI: an open Browser Lane follows the current page, and browser text renders without repeating DOM labels (#35470, #35533).
+- Browser: navigation composes with landing-page regions (#35513).
+- Goals: a goal records when it was opened, and one that goals.json no longer holds is read back rather than treated as gone (#35375, #35388).
+- Skills: builtin packages refresh as complete packages (#35442).
+- TOML line editor: array-of-tables entries are addressed by an identifying key rather than by position (#35365).
+- Voice: setup runs over HTTP and refuses unknown input by name, every endpoint is probed over HTTP rather than only from the CLI, and an endpoint can be asked which voices it has (#35431, #35609, #35629).
+- Lanes: a DOS machine lives on the server behind seven masc_dos_* tools, MSX observations reach frame progress through TOML, and named package outputs connect the same way (#35548, #35562, #35572).
+- Browser: the navigate-content composition ships, and tool receipts retain the scenes a TUI review reads (#35620, #35546).
+- TUI: the Board column's marks carry names, and the help sheet holds the same words (#35528).
+- Benchmarks: arm K also runs on opencode, without Anthropic credentials (#35406).
+
 ## [0.35.14] - 2026-09-12
 
 ### Added

@@ -201,11 +201,18 @@ let test_peek_reads_the_text_page () =
     check string "the first two cells" "48074907" (string_field "hex" result))
 ;;
 
+(* Ask the catalog, not the facade. The gate that decides whether a tool call
+   counts as a read looks the flag up in Tool_catalog, and Tool_misc writes it
+   there when it registers each name -- so a classification that never reaches
+   the catalog fails here instead of passing against an internal function. *)
 let test_read_only_classification () =
   let read_only name =
-    match Tool_schemas_misc.misc_operation_of_tool_name name with
-    | Some op -> Tool_misc.is_read_only op
-    | None -> fail (name ^ " is not a misc operation")
+    match Tool_catalog.registered_metadata name with
+    | None -> fail (name ^ " registered no runtime metadata")
+    | Some metadata ->
+      (match metadata.Tool_catalog.readonly with
+       | Some flag -> flag
+       | None -> fail (name ^ " declares no readonly flag"))
   in
   check bool "screen reads" true (read_only "masc_dos_screen");
   check bool "peek reads" true (read_only "masc_dos_peek");

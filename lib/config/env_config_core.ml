@@ -488,7 +488,7 @@ let persisted_default_base_path () =
          | None -> No_record
          | Some recorded ->
            let normalized = normalize_masc_base_path_input recorded in
-           if normalized <> ""
+           if normalized <> "" && not (Filename.is_relative normalized)
               && existing_dir (Filename.concat normalized Common.masc_dirname)
            then Usable { record; base_path = normalized }
            else Stale { record; recorded_path = recorded }))
@@ -603,8 +603,8 @@ let base_path_not_set_message () =
     match persisted_default_base_path () with
     | Stale { record; recorded_path } ->
       Printf.sprintf
-        " The recorded default %s in %s no longer holds a %s directory, so it was \
-         ignored."
+        " The recorded default %s in %s does not name an existing absolute \
+         workspace containing a %s directory, so it was ignored."
         recorded_path record Common.masc_dirname
     | Unread_under_test { record } ->
       (* Without this the developer reads "not set" while their shell resolves
@@ -649,6 +649,9 @@ let record_default_base_path path =
     then Record_failed { record; reason = "the workspace path normalized to nothing" }
     else (
       try
+        (* A later process can run from any directory. Persist the workspace
+           identity now, while the path still has the caller's meaning. *)
+        let canonical = Unix.realpath normalized in
         (* ~/.config need not exist yet on a machine that has only just been
            set up, and a single mkdir does not create the parent. *)
         let rec make_dir dir =
@@ -659,12 +662,19 @@ let record_default_base_path path =
             | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
         in
         make_dir (Filename.dirname record);
-        let temp = record ^ ".partial" in
-        Out_channel.with_open_gen
-          [ Open_wronly; Open_creat; Open_trunc ] 0o600 temp
-          (fun channel -> Out_channel.output_string channel (normalized ^ "\n"));
-        Sys.rename temp record;
-        Recorded normalized
+        let temp, channel =
+          Filename.open_temp_file ~temp_dir:(Filename.dirname record)
+            ~mode:[Open_binary] "default-base-path-" ".partial"
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            close_out_noerr channel;
+            try Sys.remove temp with Sys_error _ -> ())
+          (fun () ->
+            Out_channel.output_string channel (canonical ^ "\n");
+            close_out channel;
+            Sys.rename temp record);
+        Recorded canonical
       with
       | Unix.Unix_error (error, _, _) ->
         Record_failed { record; reason = Unix.error_message error }

@@ -31,7 +31,30 @@ All owned processes exited, and Keeper shutdown reached its finalized state.
 
 ## Candidate
 
-The automatic-follow implementation is PR #35470. Candidate compiled/native
-verification and the corresponding persistent browser experiment are pending.
-The baseline is not evidence that the candidate works or that channel collection
-is faster. This is synthetic data; Slack remains outside this experiment.
+`after/run.json` records source `a3ebdbc879d994349bd0a5d35f351c9fead33b4e`
+from PR #35470, native TUI SHA256
+`1861debe1a6249453c7e2b57efeff44c5f37475b78280a88b7583ec2cb97e778`.
+The exact source passed the four PR checks and macOS native build. Its isolated
+native PTY scenario also passed same-page selection/scope retention, repeated
+input during a held read, replacement-document regions, and fresh text reads.
+
+During the real Firefox/Keeper experiment, the same TUI process stayed open and
+rendered all three current URL plus channel heading pairs. `tui-alpha.png`,
+`tui-beta.png` and `tui-gamma.png` replay those measured frames. The TUI remained
+in the region-map view selected by the operator; it did **not** mirror the
+message-body scope that the Keeper read. Four input events were recorded, all
+before or during the initial OSC52 copy. None followed the copy. Capture reported
+no errors, and all owned processes exited after the Keeper completed.
+
+| Observation | Before | Candidate |
+| --- | --- | --- |
+| Current channel URL + heading pairs rendered | 0/3 | 3/3 |
+| Complete native PTY frames | 136 | 108 |
+| Keeper tool calls / errors | 12 / 0 | 12 / 0 |
+| Observed completion time | 131.065 s | 100.509 s |
+
+Completion time includes model work, the 5-second polling cadence and
+status-request latency. One run per candidate, with the same tool count, does
+not establish faster collection or attribute timing differences to TUI changes.
+The later raw-text navigation scroll fix and main merges are outside this
+binary's evidence. This is synthetic data; Slack remains outside the experiment.

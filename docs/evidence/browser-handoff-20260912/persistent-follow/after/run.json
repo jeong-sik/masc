@@ -1,64 +1,82 @@
 {
-  "scope": "Persistent TUI baseline: Keeper reads three synthetic channels while TUI remains at index; lazy instruction composition",
+  "scope": "Persistent TUI candidate: current channel URL and region map follow Keeper navigation with no post-copy input",
   "instruction_file_sha256": "dff25891c9c85f49cc37caf3f0e9ac7732f4056cf43e1fde172172827f3467ef",
   "instruction_source_commit": "fa93323a14c32eb8c56ceca4871b01ed519f53e8",
   "site_instruction_file_sha256": "bfc580e2aac29117abc961239120630b6657b138ab1031801b56394c6681aca7",
   "server": {
     "release_version": "0.35.14",
     "binary_version": "0.35.14",
-    "commit": "4e9eafa7b6cdc64d5b5e5a6d311e202b121ba386",
+    "commit": "d0e1263562d8a636d12b02a02d335e59d041280f",
     "commit_source": "embedded",
-    "binary_commit": "4e9eafa7b6cdc64d5b5e5a6d311e202b121ba386",
+    "binary_commit": "d0e1263562d8a636d12b02a02d335e59d041280f",
     "binary_commit_source": "embedded",
     "provenance_source": "self_observed",
-    "executable_sha256": "624e492c150b23b5368581aa029a6975667065db0f7dda04115d3820fe4b89c9",
-    "binary_commit_unix_ts": 1789215568.0,
-    "binary_commit_age_seconds": 1966,
+    "executable_sha256": "5dcbeb574ccc619f9be55e5fcbb1054bff3ca2c1cb9ef15e30e0c19e9513c41c",
+    "binary_commit_unix_ts": 1789217895.0,
+    "binary_commit_age_seconds": 968,
     "executable_path": "/Users/dancer/.local/bin/masc",
     "executable_dir": "/Users/dancer/.local/bin",
-    "runtime_instance_id": "01a095ac-eed9-7000-a90a-1ce9bcf790bb",
-    "started_at": "2026-09-12T12:52:13Z",
+    "runtime_instance_id": "01a095c1-38b4-7000-9c97-cd9ac728e0c2",
+    "started_at": "2026-09-12T13:14:23Z",
     "uptime_seconds": 0
   },
   "runtime_id": "glm-coding.glm-5.3-flash",
   "tui": {
-    "tui_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
+    "tui_sha256": "1861debe1a6249453c7e2b57efeff44c5f37475b78280a88b7583ec2cb97e778",
     "clipboard_bytes": 526,
-    "clipboard_sha256": "f22c2f235733e774e862337a686d16c8e7e3e8aeaf4571bb4df84f85f567165a",
+    "clipboard_sha256": "849948d1b2c463e734356ca1ee344fedf6cae138e4bfc8f38f3a846183af2199",
     "columns": 130,
     "rows": 35,
     "selected_region_index": 0,
     "lifetime": {
       "columns": 130,
       "rows": 35,
-      "navigation_inputs_after_copy": [],
+      "input_events": [
+        {
+          "monotonic": 962317.854097083,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 962317.870067833,
+          "keys_hex": "61"
+        },
+        {
+          "monotonic": 962317.886274208,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 962317.902646666,
+          "keys_hex": "79"
+        }
+      ],
       "refresh_interval": "unmodified product default",
-      "pid": 15662,
-      "started_monotonic": 960989.15823175,
-      "binary_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
-      "copied_monotonic": 960991.238517458,
-      "copy_offset": 20001,
+      "pid": 29233,
+      "started_monotonic": 962317.450238666,
+      "binary_sha256": "1861debe1a6249453c7e2b57efeff44c5f37475b78280a88b7583ec2cb97e778",
+      "copied_monotonic": 962317.903616583,
+      "copy_offset": 19125,
       "alive_at_copy": true,
-      "keeper_observation_finished_monotonic": 961123.540091416,
+      "keeper_observation_finished_monotonic": 962418.929677541,
       "alive_after_keeper_observation": true,
       "exit": 0,
-      "stopped_monotonic": 961123.550716625
+      "stopped_monotonic": 962418.955324041,
+      "capture_errors": []
     },
-    "source_commit": "39ab9c606f9120d3439ea4792d73f589558e9661",
-    "ci_run": 34692738628
+    "source_commit": "a3ebdbc879d994349bd0a5d35f351c9fead33b4e",
+    "ci_run": 34695047644
   },
-  "keeper": "browser-handoff-proof-34673000",
-  "trace_id": "trace-1789217540975-00000",
-  "operation_id": "kmsg-6fafde4ca84e1c58c302f03237e92a04",
+  "keeper": "browser-handoff-proof-18577000",
+  "trace_id": "trace-1789218866995-00000",
+  "operation_id": "kmsg-7f184fc2fed395e5f8b6608d92e5d501",
   "operation_state": "Succeeded",
-  "user_message": "Team Channels의 Alpha, Beta, Gamma 세 채널에서 현재 결정, 담당자, Mina에게 온 멘션 요청, 세 채널의 공통 작업을 간단히 정리해줘. 근거가 되는 메시지 링크와 읽은 범위도 알려줘. 현재 Browser Lane 관측은 아래와 같아.\n{\n  \"context\": \"Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.\",\n  \"lane\": \"automation\",\n  \"clientId\": null,\n  \"tabId\": 1,\n  \"url\": \"http://127.0.0.1:64697/index.html\",\n  \"documentId\": \"e9f1dfbc2356a5eb412fd6829177ef00\",\n  \"nodeId\": \"n1\",\n  \"view\": \"regions\",\n  \"scope\": null,\n  \"viewport\": {\n    \"width\": 1366.0,\n    \"height\": 683.0,\n    \"scrollX\": 0.0,\n    \"scrollY\": 0.0\n  },\n  \"truncated\": false,\n  \"tag\": \"nav\",\n  \"text\": \"Channels\",\n  \"source\": null\n}",
+  "user_message": "Team Channels의 Alpha, Beta, Gamma 세 채널에서 현재 결정, 담당자, Mina에게 온 멘션 요청, 세 채널의 공통 작업을 간단히 정리해줘. 근거가 되는 메시지 링크와 읽은 범위도 알려줘. 현재 Browser Lane 관측은 아래와 같아.\n{\n  \"context\": \"Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.\",\n  \"lane\": \"automation\",\n  \"clientId\": null,\n  \"tabId\": 1,\n  \"url\": \"http://127.0.0.1:49902/index.html\",\n  \"documentId\": \"a76def1b866756abd5ec085f02181ec3\",\n  \"nodeId\": \"n1\",\n  \"view\": \"regions\",\n  \"scope\": null,\n  \"viewport\": {\n    \"width\": 1366.0,\n    \"height\": 683.0,\n    \"scrollX\": 0.0,\n    \"scrollY\": 0.0\n  },\n  \"truncated\": false,\n  \"tag\": \"nav\",\n  \"text\": \"Channels\",\n  \"source\": null\n}",
   "clipboard": {
     "context": "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.",
     "lane": "automation",
     "clientId": null,
     "tabId": 1,
-    "url": "http://127.0.0.1:64697/index.html",
-    "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+    "url": "http://127.0.0.1:49902/index.html",
+    "documentId": "a76def1b866756abd5ec085f02181ec3",
     "nodeId": "n1",
     "view": "regions",
     "scope": null,
@@ -73,10 +91,10 @@
     "text": "Channels",
     "source": null
   },
-  "clipboard_base64": "ewogICJjb250ZXh0IjogIkJyb3dzZXIgZWxlbWVudCBvYnNlcnZhdGlvbjsgcGFnZS1wcm92aWRlZCBzb3VyY2UgaGludC4gVmVyaWZ5IHRoZSBjaG9zZW4gY2hlY2tvdXQgYW5kIGZpbGUgU0hBLTI1NiBiZWZvcmUgZWRpdGluZy4iLAogICJsYW5lIjogImF1dG9tYXRpb24iLAogICJjbGllbnRJZCI6IG51bGwsCiAgInRhYklkIjogMSwKICAidXJsIjogImh0dHA6Ly8xMjcuMC4wLjE6NjQ2OTcvaW5kZXguaHRtbCIsCiAgImRvY3VtZW50SWQiOiAiZTlmMWRmYmMyMzU2YTVlYjQxMmZkNjgyOTE3N2VmMDAiLAogICJub2RlSWQiOiAibjEiLAogICJ2aWV3IjogInJlZ2lvbnMiLAogICJzY29wZSI6IG51bGwsCiAgInZpZXdwb3J0IjogewogICAgIndpZHRoIjogMTM2Ni4wLAogICAgImhlaWdodCI6IDY4My4wLAogICAgInNjcm9sbFgiOiAwLjAsCiAgICAic2Nyb2xsWSI6IDAuMAogIH0sCiAgInRydW5jYXRlZCI6IGZhbHNlLAogICJ0YWciOiAibmF2IiwKICAidGV4dCI6ICJDaGFubmVscyIsCiAgInNvdXJjZSI6IG51bGwKfQ==",
+  "clipboard_base64": "ewogICJjb250ZXh0IjogIkJyb3dzZXIgZWxlbWVudCBvYnNlcnZhdGlvbjsgcGFnZS1wcm92aWRlZCBzb3VyY2UgaGludC4gVmVyaWZ5IHRoZSBjaG9zZW4gY2hlY2tvdXQgYW5kIGZpbGUgU0hBLTI1NiBiZWZvcmUgZWRpdGluZy4iLAogICJsYW5lIjogImF1dG9tYXRpb24iLAogICJjbGllbnRJZCI6IG51bGwsCiAgInRhYklkIjogMSwKICAidXJsIjogImh0dHA6Ly8xMjcuMC4wLjE6NDk5MDIvaW5kZXguaHRtbCIsCiAgImRvY3VtZW50SWQiOiAiYTc2ZGVmMWI4NjY3NTZhYmQ1ZWMwODVmMDIxODFlYzMiLAogICJub2RlSWQiOiAibjEiLAogICJ2aWV3IjogInJlZ2lvbnMiLAogICJzY29wZSI6IG51bGwsCiAgInZpZXdwb3J0IjogewogICAgIndpZHRoIjogMTM2Ni4wLAogICAgImhlaWdodCI6IDY4My4wLAogICAgInNjcm9sbFgiOiAwLjAsCiAgICAic2Nyb2xsWSI6IDAuMAogIH0sCiAgInRydW5jYXRlZCI6IGZhbHNlLAogICJ0YWciOiAibmF2IiwKICAidGV4dCI6ICJDaGFubmVscyIsCiAgInNvdXJjZSI6IG51bGwKfQ==",
   "calls": [
     {
-      "id": "call_0a8c9ef075434dc7aba3678c",
+      "id": "call_4f3498e33a764eec99022b81",
       "tool": "keeper_skill",
       "input": {
         "identity": {
@@ -90,7 +108,7 @@
       "is_error": false
     },
     {
-      "id": "call_2d910542dbce419584b5b8fc",
+      "id": "call_e34cf90c5d9841e99d2800d9",
       "tool": "keeper_skill",
       "input": {
         "identity": {
@@ -104,26 +122,26 @@
       "is_error": false
     },
     {
-      "id": "call_a52753cb347143e6a819ed09",
+      "id": "call_f5e70ad5c2bb44238ac2b7e4",
       "tool": "BrowserRead",
       "input": {
-        "expectedUrl": "http://127.0.0.1:64697/index.html",
+        "expectedUrl": "http://127.0.0.1:49902/index.html",
         "lane": "automation",
         "mode": "scene",
         "scope": {
-          "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+          "documentId": "a76def1b866756abd5ec085f02181ec3",
           "nodeId": "n1"
         },
         "tabId": 1
       },
       "output_bytes": 1827,
-      "output_sha256": "806458387fc7f3f4db21743d154d72d9f9d34c86ade67a530bc8ee72fbf7efaf",
+      "output_sha256": "baa090b0de2c933672c8bf43bcfa97ac821bf7439a5d4839cd5e6a44c4ffb890",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 22,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+        "documentId": "a76def1b866756abd5ec085f02181ec3",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -152,7 +170,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/alpha.html",
+            "href": "http://127.0.0.1:49902/alpha.html",
             "kind": "control",
             "nodeId": "n5",
             "rects": [
@@ -176,7 +194,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/beta.html",
+            "href": "http://127.0.0.1:49902/beta.html",
             "kind": "control",
             "nodeId": "n6",
             "rects": [
@@ -200,7 +218,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/gamma.html",
+            "href": "http://127.0.0.1:49902/gamma.html",
             "kind": "control",
             "nodeId": "n7",
             "rects": [
@@ -219,12 +237,12 @@
         ],
         "schema": "masc.browser.scene.v1",
         "scope": {
-          "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+          "documentId": "a76def1b866756abd5ec085f02181ec3",
           "nodeId": "n1"
         },
         "title": "Overview · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/index.html",
+        "url": "http://127.0.0.1:49902/index.html",
         "view": "content",
         "viewport": {
           "height": 683,
@@ -234,40 +252,41 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 11.791917
+        "elapsed_ms": 18.608334
       }
     },
     {
-      "id": "call_090d4bc958564525ab76187f",
+      "id": "call_c4527aba441f4e9b94bd578a",
       "tool": "BrowserGoto",
       "input": {
         "tabId": 1,
-        "url": "http://127.0.0.1:64697/alpha.html"
+        "url": "http://127.0.0.1:49902/alpha.html"
       },
       "output_bytes": 76,
-      "output_sha256": "b29c512f271f098dfe786ab51597d9095ae5a72c5d7bf247233a41d424d98800",
+      "output_sha256": "46facfbd27e39d330ba3a81796fedb681d4798c8b0756a767e992f0683324ab3",
       "is_error": false,
       "output": {
         "title": "Alpha · Team Channels",
-        "url": "http://127.0.0.1:64697/alpha.html"
+        "url": "http://127.0.0.1:49902/alpha.html"
       }
     },
     {
-      "id": "call_1b0b06f5400d479fab90fedb",
+      "id": "call_60596cbe4d6341c7a3969d3a",
       "tool": "BrowserRead",
       "input": {
+        "expectedUrl": "http://127.0.0.1:49902/alpha.html",
         "lane": "automation",
         "mode": "regions",
         "tabId": 1
       },
-      "output_bytes": 2490,
-      "output_sha256": "6645b0abbbd7439b49bda03a565b3e971ed25193ffe2c8573e71db22fcf140d9",
+      "output_bytes": 2489,
+      "output_sha256": "dd5069d13a9c31948082c2e3340465ec29a9fe898bb0ed27ea38604f3c8ac801",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 87,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "8e5a4b853039b7ad52474749adab1beb",
+        "documentId": "cdbe24bc2eae3501c012e1e121822fcd",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -434,7 +453,7 @@
         "scope": null,
         "title": "Alpha · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/alpha.html",
+        "url": "http://127.0.0.1:49902/alpha.html",
         "view": "regions",
         "viewport": {
           "height": 683,
@@ -444,30 +463,30 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 10.727167
+        "elapsed_ms": 6.803958
       }
     },
     {
-      "id": "call_4074a076a2094ae68dde158f",
+      "id": "call_980eb8ffc6094be280a85dae",
       "tool": "BrowserRead",
       "input": {
-        "expectedUrl": "http://127.0.0.1:64697/alpha.html",
+        "expectedUrl": "http://127.0.0.1:49902/alpha.html",
         "lane": "automation",
         "mode": "scene",
         "scope": {
-          "documentId": "8e5a4b853039b7ad52474749adab1beb",
+          "documentId": "cdbe24bc2eae3501c012e1e121822fcd",
           "nodeId": "n3"
         },
         "tabId": 1
       },
-      "output_bytes": 2980,
-      "output_sha256": "275db8fc0ee9f43bf2cc72bae339805ea80287dc96a47bb0b9b567d5db4c23f6",
+      "output_bytes": 2979,
+      "output_sha256": "b8de64ff45c7620220b5efa523f3381926d530a4a6495bd0a6501a0e4c56ed9c",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 255,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "8e5a4b853039b7ad52474749adab1beb",
+        "documentId": "cdbe24bc2eae3501c012e1e121822fcd",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -534,7 +553,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/alpha.html#a1",
+            "href": "http://127.0.0.1:49902/alpha.html#a1",
             "kind": "control",
             "nodeId": "n12",
             "rects": [
@@ -621,7 +640,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/alpha.html#a2",
+            "href": "http://127.0.0.1:49902/alpha.html#a2",
             "kind": "control",
             "nodeId": "n16",
             "rects": [
@@ -640,12 +659,12 @@
         ],
         "schema": "masc.browser.scene.v1",
         "scope": {
-          "documentId": "8e5a4b853039b7ad52474749adab1beb",
+          "documentId": "cdbe24bc2eae3501c012e1e121822fcd",
           "nodeId": "n3"
         },
         "title": "Alpha · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/alpha.html",
+        "url": "http://127.0.0.1:49902/alpha.html",
         "view": "content",
         "viewport": {
           "height": 683,
@@ -655,40 +674,41 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 29.589792
+        "elapsed_ms": 7.159875
       }
     },
     {
-      "id": "call_bc352acbbd76423bbae0abe2",
+      "id": "call_bb02decb3be4452590754de1",
       "tool": "BrowserGoto",
       "input": {
         "tabId": 1,
-        "url": "http://127.0.0.1:64697/beta.html"
+        "url": "http://127.0.0.1:49902/beta.html"
       },
       "output_bytes": 74,
-      "output_sha256": "6edfbd68587f3c531dcf0afa8c5ea1fe4990f8b8cc5c7fce6689459bc5bb52b4",
+      "output_sha256": "3ed949c5daa3073732dca620f85118a2fd612ac44e4645c32e98e57f36af829a",
       "is_error": false,
       "output": {
         "title": "Beta · Team Channels",
-        "url": "http://127.0.0.1:64697/beta.html"
+        "url": "http://127.0.0.1:49902/beta.html"
       }
     },
     {
-      "id": "call_99a8a6017bee4baaad2ef0df",
+      "id": "call_93655bff16ca43cfa2b00fbc",
       "tool": "BrowserRead",
       "input": {
+        "expectedUrl": "http://127.0.0.1:49902/beta.html",
         "lane": "automation",
         "mode": "regions",
         "tabId": 1
       },
-      "output_bytes": 1980,
-      "output_sha256": "e348adbb6012667520f3fa17052d619569c46349dca6fd30952a1e21dbde37c6",
+      "output_bytes": 1984,
+      "output_sha256": "7472fdfc1d2711916760e8d9d25f7792a5dbcd202232a51e1b170245ff2012d9",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 70,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+        "documentId": "1a600f03dd261b5266f7702f33ed8317",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -815,7 +835,7 @@
         "scope": null,
         "title": "Beta · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/beta.html",
+        "url": "http://127.0.0.1:49902/beta.html",
         "view": "regions",
         "viewport": {
           "height": 683,
@@ -825,30 +845,30 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 12.45
+        "elapsed_ms": 27.741958
       }
     },
     {
-      "id": "call_bd56eaa6ce7b43fc91b01171",
+      "id": "call_287f675de09e4aa0be3761ae",
       "tool": "BrowserRead",
       "input": {
-        "expectedUrl": "http://127.0.0.1:64697/beta.html",
+        "expectedUrl": "http://127.0.0.1:49902/beta.html",
         "lane": "automation",
         "mode": "scene",
         "scope": {
-          "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+          "documentId": "1a600f03dd261b5266f7702f33ed8317",
           "nodeId": "n3"
         },
         "tabId": 1
       },
-      "output_bytes": 1836,
-      "output_sha256": "4abecb41a6dafecb218297b7b018ff56279949c9a7114bfd1d772059a6b679ec",
+      "output_bytes": 1835,
+      "output_sha256": "bea7734f0a4a5aed770b10f56928b98b9b01e1d5c23be5ca43b42032f25be473",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 172,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+        "documentId": "1a600f03dd261b5266f7702f33ed8317",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -921,7 +941,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/beta.html#b1",
+            "href": "http://127.0.0.1:49902/beta.html#b1",
             "kind": "control",
             "nodeId": "n10",
             "rects": [
@@ -940,12 +960,12 @@
         ],
         "schema": "masc.browser.scene.v1",
         "scope": {
-          "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+          "documentId": "1a600f03dd261b5266f7702f33ed8317",
           "nodeId": "n3"
         },
         "title": "Beta · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/beta.html",
+        "url": "http://127.0.0.1:49902/beta.html",
         "view": "content",
         "viewport": {
           "height": 683,
@@ -955,40 +975,41 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 21.901958
+        "elapsed_ms": 4.795875
       }
     },
     {
-      "id": "call_b3a9a7818618430db89d4f12",
+      "id": "call_7fcd921e73aa49f6ab0e171f",
       "tool": "BrowserGoto",
       "input": {
         "tabId": 1,
-        "url": "http://127.0.0.1:64697/gamma.html"
+        "url": "http://127.0.0.1:49902/gamma.html"
       },
       "output_bytes": 76,
-      "output_sha256": "54221a336914fe97a1e2d75349a4d1b09e1fb81d5fee2e6845fb84fa3f157ff1",
+      "output_sha256": "d1ede4f5767cadb2c3d6c10ec8f256e224727dfdf934b91b365991d70d0cbe57",
       "is_error": false,
       "output": {
         "title": "Gamma · Team Channels",
-        "url": "http://127.0.0.1:64697/gamma.html"
+        "url": "http://127.0.0.1:49902/gamma.html"
       }
     },
     {
-      "id": "call_82dbeff362d44595a80ef3f6",
+      "id": "call_86a5744738da423da8a101ea",
       "tool": "BrowserRead",
       "input": {
+        "expectedUrl": "http://127.0.0.1:49902/gamma.html",
         "lane": "automation",
         "mode": "regions",
         "tabId": 1
       },
-      "output_bytes": 1987,
-      "output_sha256": "aff6968f71c9c14f99b077a956b83279660e082e630fe563ea043ddf637c0a0c",
+      "output_bytes": 1986,
+      "output_sha256": "67c33cae75c1c5572bedf771b33a58570b8dafe6c758d6562526b04fac813b58",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 71,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+        "documentId": "f94ea6c203267a12154a4f5f4b2b7777",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -1115,7 +1136,7 @@
         "scope": null,
         "title": "Gamma · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/gamma.html",
+        "url": "http://127.0.0.1:49902/gamma.html",
         "view": "regions",
         "viewport": {
           "height": 683,
@@ -1125,30 +1146,30 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 60.317042
+        "elapsed_ms": 3.716209
       }
     },
     {
-      "id": "call_02e7d18a0e46456d9e48b879",
+      "id": "call_52b4b1b041e041858cbeacf6",
       "tool": "BrowserRead",
       "input": {
-        "expectedUrl": "http://127.0.0.1:64697/gamma.html",
+        "expectedUrl": "http://127.0.0.1:49902/gamma.html",
         "lane": "automation",
         "mode": "scene",
         "scope": {
-          "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+          "documentId": "f94ea6c203267a12154a4f5f4b2b7777",
           "nodeId": "n3"
         },
         "tabId": 1
       },
-      "output_bytes": 1830,
-      "output_sha256": "46e4493d2f0bd6f2fd4a38d17876865b3a37e6fba0a21616381fe7b7e107594b",
+      "output_bytes": 1826,
+      "output_sha256": "37b78710e660cdc787f527c458fc8e66ba313886372659d7fd1275c06b705fcb",
       "is_error": false,
       "output": {
         "tabId": 1,
         "chars": 163,
         "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
-        "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+        "documentId": "f94ea6c203267a12154a4f5f4b2b7777",
         "nodes": [
           {
             "color": "rgb(21, 32, 43)",
@@ -1221,7 +1242,7 @@
             "editable": false,
             "fontSize": 18,
             "fontWeight": "400",
-            "href": "http://127.0.0.1:64697/gamma.html#g1",
+            "href": "http://127.0.0.1:49902/gamma.html#g1",
             "kind": "control",
             "nodeId": "n10",
             "rects": [
@@ -1240,12 +1261,12 @@
         ],
         "schema": "masc.browser.scene.v1",
         "scope": {
-          "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+          "documentId": "f94ea6c203267a12154a4f5f4b2b7777",
           "nodeId": "n3"
         },
         "title": "Gamma · Team Channels",
         "truncated": false,
-        "url": "http://127.0.0.1:64697/gamma.html",
+        "url": "http://127.0.0.1:49902/gamma.html",
         "view": "content",
         "viewport": {
           "height": 683,
@@ -1255,59 +1276,12 @@
         },
         "source": "automation",
         "clientId": null,
-        "elapsed_ms": 36.630708
+        "elapsed_ms": 4.651
       }
     }
   ],
-  "answer": "세 채널의 메시지 목록을 모두 직접 읽었습니다. 요약은 아래와 같습니다.\n\n## 채널별 정리\n\n| 채널 | 현재 결정 | 담당자 | 근거 링크 |\n|---|---|---|---|\n| Alpha | Cedar를 화요일에 출시 (접근성 승인 완료 후) | 메시지에 소유자 명시 없음 (작성자 Hana) | http://127.0.0.1:64697/alpha.html#a2 |\n| Beta | Cedar용 schema v4 마이그레이션을 월요일까지 완료 | Joon | http://127.0.0.1:64697/beta.html#b1 |\n| Gamma | schema v4 기준으로 Cedar 전체 QA를 수요일에 실행 | Sora | http://127.0.0.1:64697/gamma.html#g1 |\n\n- Alpha에는 대체된 이전 결정도 있습니다: a1(Mina, 09:00) \"Superseded plan: ship Cedar on Friday\" — 현재 결정(a2)이 우선하므로 제외했습니다 (http://127.0.0.1:64697/alpha.html#a1).\n\n## Mina에게 온 멘션 요청 (2건)\n\n1. **Alpha a2** (Hana, 2026-09-12 10:00): \"accessibility checklist를 월요일까지 승인해 달라\" — http://127.0.0.1:64697/alpha.html#a2\n2. **Beta b1** (Joon, 2026-09-12 09:30): \"마이그레이션 시작 전에 client payload를 확인해 달라\" — http://127.0.0.1:64697/beta.html#b1\n3. Gamma에는 Mina 멘션이 없습니다. g1 메시지에 \"No additional request for Mina in this channel\"이라고 명시돼 있습니다.\n\n## 세 채널 공통 작업\n\n**schema v4**가 공통 의존작업입니다. Alpha a2가 \"Shared dependency: schema v4\"로 명시하고, Beta b1(월요일 마이그레이션, 담당 Joon)이 선행되며, Gamma g1(수요일 QA, 담당 Sora)이 그 위에서 실행됩니다. Cedar 출시라는 같은 일정 축(Alpha 화요일 출시 → Gamma 수요일 QA)도 세 채널에 걸쳐 있습니다.\n\n## 읽은 범위와 방법\n\n- 전달받은 관측(automation lane, tabId 1, overview index)에서 nav 링크 대상(alpha/beta/gamma.html)을 관측해 그대로 이동했고, 각 채널에서 제목(Alpha·Beta·Gamma · Team Channels)과 URL을 확인했습니다.\n- 각 채널에서 메시지 목록 역할의 `article`(label \"Visible messages\")을 scope로 지정해 읽었고, 네 번의 본문 읽기 모두 `truncated=false`로 잘림 없이 읽었습니다.\n- 각 채널의 aside \"Navigation summary\"는 메시지 근거가 아니므로 읽지 않았고, overview index도 nav 영역만 읽었습니다.\n- 관측된 메시지는 총 4건(Alpha 2, Beta 1, Gamma 1), 기간 2026-09-12 09:00~10:15입니다. 표시된 메시지 기준이며 숨겨진 이력 여부는 이 화면에서 확인할 수 없습니다.",
+  "answer": "세 채널의 메시지를 모두 확인했습니다. 요약은 아래와 같습니다.\n\n## 채널별 정리\n\n| 채널 | 현재 결정 | 담당자 | Mina 멘션 | 근거 링크 |\n|---|---|---|---|---|\n| **Alpha** | Cedar를 **화요일**에 출시 (접근성 승인 조건) | Hana (게시), 접근성 체크리스트 승인은 Mina 몫 | 있음 — 접근성 체크리스트 **월요일 승인** 요청 | [alpha.html#a2](http://127.0.0.1:49902/alpha.html#a2) |\n| **Beta** | **월요일**까지 schema v4 마이그레이션 완료 (Cedar 전) | Joon | 있음 — 마이그레이션 시작 전 **클라이언트 페이로드 확인** 요청 | [beta.html#b1](http://127.0.0.1:49902/beta.html#b1) |\n| **Gamma** | **수요일** schema v4 기준 Cedar E2E QA 실행 | Sora | 없음 (메시지에 명시) | [gamma.html#g1](http://127.0.0.1:49902/gamma.html#g1) |\n\n참고: Alpha의 a1(\"Cedar를 금요일 출시\", Mina, 09:00)은 **대체된 이전 결정**이라 현재 결정에서 제외했습니다.\n\n## 세 채널 공통 작업\n\n**Cedar 출시 준비**, 공유 의존성은 **schema v4**입니다. Beta가 월요일에 마이그레이션을 끝내고 → 화요일에 접근성 승인과 함께 Cedar 출시(Alpha) → 수요일에 schema v4 기준 E2E QA(Gamma) 순서로 이어집니다.\n\n**Mina에게 온 요청 2건**: ① 월요일 접근성 체크리스트 승인(Alpha, Hana), ② 마이그레이션 시작 전 클라이언트 페이로드 확인(Beta, Joon).\n\n## 읽은 범위\n\n- automation lane tabId=1, 받은 관측(nav, index.html)에서 `alpha/beta/gamma.html` 링크를 확인한 뒤 각 채널로 이동했습니다.\n- 각 채널에서 라벨이 채널명과 일치하는 `main`의 `article`(Visible messages) 영역을 `mode=scene`으로 **전체 읽음(truncated=false)**: Alpha a1–a2, Beta b1, Gamma g1.\n- 각 채널의 `aside`(Navigation summary)는 메시지 근거가 아니므로 읽지 않았고, 페이지 하단에 더 이른 메시지나 다른 영역은 없었습니다. 누락된 채널 없음.",
   "activations": [
-    {
-      "identity": {
-        "source_id": "project-masc",
-        "package_id": "browser-lanes",
-        "name": "browser-lanes"
-      },
-      "content_revision": "c49d5e8c50caebf781170d0dbf2b051dfb422530c1db56bca251f7fe80712ab8",
-      "snapshot_revision": "b7c871ccb94ec13b36bc7db459d7f1bde19d8c0ce3c57ee7d8d28303d3f6ea34",
-      "turn_ref": "trace-1789217540975-00000#1",
-      "runtime_id": "glm-coding.glm-5.3-flash",
-      "skill_tool_use_id": "call_0a8c9ef075434dc7aba3678c",
-      "agent_core_turn": 0,
-      "invocation": {
-        "kind": "instruction",
-        "origin": {
-          "kind": "session_instruction"
-        },
-        "served_content": {
-          "kind": "skill_body",
-          "bytes": 12380,
-          "sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
-        }
-      },
-      "delivery": {
-        "boundary": {
-          "kind": "model_response",
-          "agent_core_turn": 1
-        },
-        "runtime_id": "glm-coding.glm-5.3-flash",
-        "delivered_at": "2026-09-12T12:52:49Z",
-        "content_bytes": 12380,
-        "content_sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
-      },
-      "actions": [
-        {
-          "identity": {
-            "kind": "call_id",
-            "call_id": "call_a52753cb347143e6a819ed09"
-          },
-          "tool_name": "BrowserRead",
-          "runtime_id": "glm-coding.glm-5.3-flash",
-          "agent_core_turn": 1,
-          "observed_at": "2026-09-12T12:52:49Z"
-        }
-      ],
-      "activated_at": "2026-09-12T12:52:29Z"
-    },
     {
       "identity": {
         "source_id": "project-masc",
@@ -1316,9 +1290,9 @@
       },
       "content_revision": "296f7a7375cfa869777995591eb15bbeaf4e09e3069f9e2e007f22452c887e28",
       "snapshot_revision": "b7c871ccb94ec13b36bc7db459d7f1bde19d8c0ce3c57ee7d8d28303d3f6ea34",
-      "turn_ref": "trace-1789217540975-00000#1",
+      "turn_ref": "trace-1789218866995-00000#1",
       "runtime_id": "glm-coding.glm-5.3-flash",
-      "skill_tool_use_id": "call_2d910542dbce419584b5b8fc",
+      "skill_tool_use_id": "call_e34cf90c5d9841e99d2800d9",
       "agent_core_turn": 0,
       "invocation": {
         "kind": "instruction",
@@ -1337,7 +1311,7 @@
           "agent_core_turn": 1
         },
         "runtime_id": "glm-coding.glm-5.3-flash",
-        "delivered_at": "2026-09-12T12:52:49Z",
+        "delivered_at": "2026-09-12T13:14:57Z",
         "content_bytes": 1067,
         "content_sha256": "b8e3f36342cd814c09652ab9f6bfdbeaddc6a2f8c674391e7a6a50ee96433a9a"
       },
@@ -1345,15 +1319,62 @@
         {
           "identity": {
             "kind": "call_id",
-            "call_id": "call_a52753cb347143e6a819ed09"
+            "call_id": "call_f5e70ad5c2bb44238ac2b7e4"
           },
           "tool_name": "BrowserRead",
           "runtime_id": "glm-coding.glm-5.3-flash",
           "agent_core_turn": 1,
-          "observed_at": "2026-09-12T12:52:49Z"
+          "observed_at": "2026-09-12T13:14:57Z"
         }
       ],
-      "activated_at": "2026-09-12T12:52:29Z"
+      "activated_at": "2026-09-12T13:14:36Z"
+    },
+    {
+      "identity": {
+        "source_id": "project-masc",
+        "package_id": "browser-lanes",
+        "name": "browser-lanes"
+      },
+      "content_revision": "c49d5e8c50caebf781170d0dbf2b051dfb422530c1db56bca251f7fe80712ab8",
+      "snapshot_revision": "b7c871ccb94ec13b36bc7db459d7f1bde19d8c0ce3c57ee7d8d28303d3f6ea34",
+      "turn_ref": "trace-1789218866995-00000#1",
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "skill_tool_use_id": "call_4f3498e33a764eec99022b81",
+      "agent_core_turn": 0,
+      "invocation": {
+        "kind": "instruction",
+        "origin": {
+          "kind": "session_instruction"
+        },
+        "served_content": {
+          "kind": "skill_body",
+          "bytes": 12380,
+          "sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+        }
+      },
+      "delivery": {
+        "boundary": {
+          "kind": "model_response",
+          "agent_core_turn": 1
+        },
+        "runtime_id": "glm-coding.glm-5.3-flash",
+        "delivered_at": "2026-09-12T13:14:57Z",
+        "content_bytes": 12380,
+        "content_sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+      },
+      "actions": [
+        {
+          "identity": {
+            "kind": "call_id",
+            "call_id": "call_f5e70ad5c2bb44238ac2b7e4"
+          },
+          "tool_name": "BrowserRead",
+          "runtime_id": "glm-coding.glm-5.3-flash",
+          "agent_core_turn": 1,
+          "observed_at": "2026-09-12T13:14:57Z"
+        }
+      ],
+      "activated_at": "2026-09-12T13:14:36Z"
     }
   ],
   "measurements": {
@@ -1364,16 +1385,16 @@
     "regions_reads": 3,
     "scoped_scene_reads": 4,
     "tool_errors": 0,
-    "browser_output_bytes": 15156,
-    "observed_turn_seconds": 131.065,
+    "browser_output_bytes": 15152,
+    "observed_turn_seconds": 100.509,
     "observation_interval_seconds": 5,
     "usage": {
-      "total_input_tokens": 274950,
-      "total_output_tokens": 4184,
+      "total_input_tokens": 274868,
+      "total_output_tokens": 3188,
       "total_cache_creation_input_tokens": 0,
-      "total_cache_read_input_tokens": 244288,
+      "total_cache_read_input_tokens": 244160,
       "api_calls": 12,
-      "estimated_cost_usd": 0.09290840000000003,
+      "estimated_cost_usd": 0.0897416,
       "pricing_gap": null
     }
   },
@@ -1382,16 +1403,16 @@
     "clientId": null,
     "tabId": 1,
     "title": "Gamma · Team Channels",
-    "url": "http://127.0.0.1:64697/gamma.html",
+    "url": "http://127.0.0.1:49902/gamma.html",
     "mimeType": "image/png",
     "viewport": {
-      "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+      "documentId": "f94ea6c203267a12154a4f5f4b2b7777",
       "width": 1366.0,
       "height": 683.0,
       "scrollX": 0.0,
       "scrollY": 0.0
     },
-    "elapsed_ms": 28.96875
+    "elapsed_ms": 25.635917
   },
   "cleanup": {
     "keeper_shutdown": {
@@ -1400,7 +1421,7 @@
         "cleanup": {
           "settled_task_ids": [],
           "pending_confirms_removed": 0,
-          "meta_snapshot_digest": "c42675c6d3dec05b828d8a99daefa89027a43caef97e95f93ca17a6a0d216f7f"
+          "meta_snapshot_digest": "256f8efcec652ef1e47057386691036b6bba0370b9375d6e30d65f7c9a64dcbc"
         },
         "meta_removed": false,
         "session_removed": false,
@@ -1414,28 +1435,46 @@
     "tui": {
       "columns": 130,
       "rows": 35,
-      "navigation_inputs_after_copy": [],
+      "input_events": [
+        {
+          "monotonic": 962317.854097083,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 962317.870067833,
+          "keys_hex": "61"
+        },
+        {
+          "monotonic": 962317.886274208,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 962317.902646666,
+          "keys_hex": "79"
+        }
+      ],
       "refresh_interval": "unmodified product default",
-      "pid": 15662,
-      "started_monotonic": 960989.15823175,
-      "binary_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
-      "copied_monotonic": 960991.238517458,
-      "copy_offset": 20001,
+      "pid": 29233,
+      "started_monotonic": 962317.450238666,
+      "binary_sha256": "1861debe1a6249453c7e2b57efeff44c5f37475b78280a88b7583ec2cb97e778",
+      "copied_monotonic": 962317.903616583,
+      "copy_offset": 19125,
       "alive_at_copy": true,
-      "keeper_observation_finished_monotonic": 961123.540091416,
+      "keeper_observation_finished_monotonic": 962418.929677541,
       "alive_after_keeper_observation": true,
       "exit": 0,
-      "stopped_monotonic": 961123.550716625
+      "stopped_monotonic": 962418.955324041,
+      "capture_errors": []
     },
     "owned_processes": [
       {
         "name": "server",
-        "pid": 15301,
+        "pid": 28962,
         "exit": 0
       },
       {
         "name": "driver",
-        "pid": 15285,
+        "pid": 28957,
         "exit": 0
       }
     ]
@@ -1444,23 +1483,32 @@
     "One synthetic fixture; browser speed or general fastest-path superiority is not established",
     "Elapsed time includes model work, the five-second polling cadence and status-request latency",
     "No real target-channel or Slack data",
-    "TUI remains alive through the turn but shows none of the three current URL plus channel heading pairs across 136 complete replayed frames",
-    "Baseline capture predates explicit input-event/error logging; no post-copy navigation input is supported by harness source inspection, not a write-event ledger",
+    "TUI remains alive through the turn and shows all three current URL plus channel heading pairs across 108 complete replayed frames; it stays in regions view, not the message body read by Keeper",
+    "Every sent input is recorded; none occurred after OSC52 copy, and the capture reported no thread errors",
     "Replay timestamps are terminal byte arrival, not browser navigation timestamps",
-    "Answer distinguishes Alpha author from unspecified owner; its causal migration ordering is an inference",
+    "See recorded answer and visible fixture messages; observation success is separate from all conclusions in the answer",
     "Instruction composition was observed; a keeper_compose workflow tool was not invoked"
   ],
   "artifacts": {
-    "tui-follow.pty": "83fb64637ea18b407dd3d7dfad47f4f6136a1b59c1db8db30c79031b8e374c55",
-    "tui-follow-audit.json": "b1bf1e99d0414b1c8474135e5f7c3acc9781c3aaeb17b4bd66ad5b454921ba36",
-    "clipboard-osc52.bin": "6ee6826e7e49f5f75ef5bb639f4939f947db80a446fafa595bf69b1b1630fd7d",
+    "tui-gamma.png": "e7f59fb362f3f471906cc51a4681961ba85ddf4a438aaa3d191cac9ade6c59c6",
+    "tui-beta.png": "ff7f7ff5bbf49568f034da38e6b9b2fb4944b82265869b9382eb94bc8a20017d",
+    "tui-follow.pty": "4370c8113545a56abb9d298920fdc5e4e076da2a77877d9d8d4062413ec5d2e4",
+    "tui-gamma.pty": "a2ea076a946b3e9d3fac9db258544706f5a7367f1e18dd86173f4f0bba8890f1",
+    "tui-beta.txt": "509ca8206893dece59e16702c88f4539ecae6b16fbf9f10d0dd74f81897949aa",
+    "tui-follow-audit.json": "dcdd6ee14b7ce8412c4158aea848afd66f59a9673bf6e9f19da1e377716c41cf",
+    "tui-gamma.txt": "cd23466051b078e78d0d17bb1477f4f29bca5a2056b820bf058f5b20fd4ece74",
+    "tui-beta.pty": "3a932ba3bebcceef8e9ad05f1011bff0f8e8fe5f82296b69942c37321458d82f",
+    "clipboard-osc52.bin": "3808f2535d8c70eb1da56c39f0f7cd5ffa2161d9f4c11b3951f66f6386ddba12",
     "site-skill.md": "bfc580e2aac29117abc961239120630b6657b138ab1031801b56394c6681aca7",
     "firefox-gamma.png": "30305149495ee4b91aa6d3691c3127680994c0b915868fca5bbc5a4a00d53abd",
-    "tui-timeline.json": "c030de3f612517fa53c774dd5cf0de5eb0043aa5de26cacdaa3d28da78f6932d",
-    "clipboard-context.json": "f22c2f235733e774e862337a686d16c8e7e3e8aeaf4571bb4df84f85f567165a",
+    "tui-timeline.json": "8eb8822b9cca970d5b796b9be83a97b59765faef18459d3c91855e62b607f4d8",
+    "clipboard-context.json": "849948d1b2c463e734356ca1ee344fedf6cae138e4bfc8f38f3a846183af2199",
+    "tui-alpha.png": "582e6b541a6f50f45c5050789ac31438eb03b5ee998e1849c813495f79cfc5d9",
     "firefox-index.png": "a0571f75d69c86f58bd9eec6b0c7ee4c9ae756aa86008f925d91e8b709922322",
-    "tui-lifetime.json": "af812556362ea2232bb53e5c42df166aceb37ace1cdfca8fc28e8b1d93890ff7",
-    "tui-final.png": "5ca1f921c49b461cd5c1abd16dff5d544a158eee5852cd39a2b29929d67e59aa",
+    "tui-lifetime.json": "c37e7ae66e97825b27eb947c27b25d4b34ade467aa82ebbb477025e557bef55f",
+    "tui-alpha.pty": "e810fa61cf575da82aebdeed283d79570ff77e95762312d5ffc325d24a4f2e1e",
+    "tui-alpha.txt": "bd8acb60427bf0a7b5fd01092318b639264db73acc7e68f8583d66c1ca496818",
+    "tui-final.png": "09c4035be70e9da4a7280f8ba10cef2b3dad02c40d12630a5e138858c522ee0d",
     "fixture/index.html": "4ce016c955f439d8fb2d6cf64df3eae679fada7d39afd8a0913510a22dd0c008",
     "fixture/alpha.html": "df29145d43372a19322edbf72dc779cd5729cf9ae4ba9f81c21a6d84f01c6f88",
     "fixture/gamma.html": "29ec65723377d9e7cdd72f20492452d7168a0d900f587a29535b0f831c466b98",

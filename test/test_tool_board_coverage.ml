@@ -1450,11 +1450,19 @@ let test_post_get_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_post_get"
-    (make_args [("post_id", `String "nonexistent-id")]) in
-  Alcotest.(check bool) "not found is idempotent success" true ok;
-  Alcotest.(check bool) "body mentions gone" true
-    (String_util.contains_substring_ci body "no longer exists")
+  let post_id = create_post_with_comments ~count:0 in
+  let last = String.length post_id - 1 in
+  let wrong_id = String.sub post_id 0 last ^ (if post_id.[last] = '0' then "1" else "0") in
+  let result = dispatch_result "masc_board_post_get"
+    (make_args [("post_id", `String wrong_id)]) in
+  Alcotest.(check bool) "lookup miss is not a successful read" false
+    (Tool_result.is_success result);
+  check_failure_class "wrong reference needs correction" (Some "workflow_rejection") result;
+  Alcotest.(check string) "lookup miss does not invent deletion or expiry"
+    ("Post not found: " ^ wrong_id) (Tool_result.message result);
+  let ok, _ = dispatch "masc_board_post_get"
+    (make_args [("post_id", `String post_id)]) in
+  Alcotest.(check bool) "correct source remains readable" true ok
 
 (** {2 Group 4: Voting} *)
 

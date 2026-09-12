@@ -3582,19 +3582,6 @@ type state = {
      {!surface_row_texts} searches through the same pair. *)
   mutable search: string option;
   mutable search_last: string;
-  (* Rows the current query matches, as the last scan counted them, or [None]
-     when there is no query or the surface has no searchable rows.
-
-     The scan already visits every row to find the next match, so the count
-     costs a fold over the array it already built. Kept rather than recounted
-     while drawing: the renderer writes no state, and a count taken per frame
-     would rebuild every row's text on a surface that is only being looked
-     at.
-
-     Written where the query changes and where n/N step, so it describes the
-     query on screen. A list that changes underneath leaves it one keypress
-     stale, which is the same staleness the cursor position already has. *)
-  mutable search_matches: int option;
   (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
      read is stamped with the keeper it answers for, so a cursor move cannot
      show one keeper's instructions under another's name. *)
@@ -5215,7 +5202,6 @@ let create_state
   palette_mode = Palette_jump;
   search = None;
   search_last = "";
-  search_matches = None;
   voice_config = None;
   voice_config_error = None;
   voice_input_device = None;
@@ -6878,10 +6864,16 @@ let surface_row_texts (state : state) : surface -> string list option = function
          | rows ->
              Some
                (List.map
+                  (* The same fields [memory_fact_rows] filters on. A row the
+                     filter kept for a field this projection left out is on
+                     screen and unreachable: the count reports one number
+                     while a different number of rows is drawn, and n cannot
+                     land on the rows it does not see. *)
                   (function
                     | Memory_row_fact fact ->
                         fact.Tui_decode.mf_category ^ " "
-                        ^ fact.Tui_decode.mf_claim
+                        ^ fact.Tui_decode.mf_claim ^ " "
+                        ^ fact.Tui_decode.mf_origin
                     | Memory_row_source_fact fact ->
                         fact.Tui_decode.msf_path ^ " "
                         ^ fact.Tui_decode.msf_claim
@@ -6891,8 +6883,15 @@ let surface_row_texts (state : state) : surface -> string list option = function
                   rows))
       else
         Option.map
+          (* Keeper id and the state label, which is the pair
+             [visible_memory_keepers] keeps a row for. Leaving the label out
+             kept rows on screen that the search could neither count nor
+             reach. *)
           (fun _ ->
-            List.map (fun k -> k.Tui_decode.mkh_keeper_id)
+            List.map
+              (fun k ->
+                k.Tui_decode.mkh_keeper_id ^ " "
+                ^ memory_state_label (memory_state k))
               (visible_memory_keepers state))
           state.memory_health
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None

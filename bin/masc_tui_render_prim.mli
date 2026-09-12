@@ -108,9 +108,17 @@ val page_failed_note : string
 val search_marker : Masc_tui_types.state -> string option
 (** The "/" query on screen and how many rows it reaches, or [None] when no
     query is on screen. One spelling for the three places that draw it: the
-    footer, the Keepers heading, and the context inspector's title. Plain
-    text -- the caller styles it, because the footer dims what a heading
-    accents. *)
+    footer, the Keepers heading, and the context inspector's title.
+
+    The count is taken here, over the rows the surface offers right now, so
+    it cannot describe a list the surface has since left. The "n/N" suffix
+    appears only where those keys have rows to step. Plain text -- the footer
+    dims its whole line, so it styles its own. *)
+
+val search_marker_styled : Masc_tui_types.state -> string
+(** {!search_marker} in the colour the two headings share -- accented while
+    the query is being typed, dim once settled -- or [""] when there is no
+    query. *)
 
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->

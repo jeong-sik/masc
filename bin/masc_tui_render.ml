@@ -4098,16 +4098,11 @@ let render_keeper_list (state : state) =
   let heading =
     screen_title
       (Printf.sprintf " MASC Keepers (%d)" (List.length state.keepers))
-    ^ (match state.search with
-       | Some query ->
-           Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (Terminal_text.single_line query) Ansi.reset Ansi.reset
-       | None ->
-           if state.search_last = "" then ""
-           else
-             Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
-               (Terminal_text.single_line state.search_last)
-               Ansi.reset)
+    (* The same marker the footer draws. These two said different things
+       about the same pair of fields: the heading kept its own spelling and
+       so reported no count, and named n/N on surfaces where those keys do
+       nothing. *)
+    ^ search_marker_styled state
     ^ (match keeper_roster_summary readings with
        | [] -> ""
        | parts ->
@@ -12809,16 +12804,7 @@ let render_context_inspector state =
   in
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)
-  let search_marker =
-    match search_marker state with
-    | None -> ""
-    | Some marker ->
-        Printf.sprintf "  %s%s%s"
-          (match state.search with
-           | Some _ -> Masc_tui_theme.tone Masc_tui_theme.Accent
-           | None -> Ansi.dim)
-          marker Ansi.reset
-  in
+  let search_marker = search_marker_styled state in
   framed_top buf cols;
   framed_line buf cols
     (Printf.sprintf "%s Context  %s%s  %s  %s"

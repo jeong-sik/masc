@@ -313,28 +313,66 @@ let awaiting_approval_notice (state : state) =
 
    The count is what tells a query that matches nothing from a query whose
    only match is already under the cursor -- both move no cursor and, without
-   a number, look the same. Absent on a surface with no searchable rows,
-   where a number would answer a question nobody asked.
+   a number, look the same.
+
+   Counted here rather than carried in the state. A carried count outlives
+   the rows it was taken over: Enter on a Board post changes which rows the
+   surface offers without changing which surface it is, and every other
+   list/detail pair does the same. Keeping it would mean clearing it at every
+   one of those transitions, and the one that gets forgotten shows the list's
+   number beside a detail. Counting costs one walk over the rows, and only
+   while a query is on screen -- a surface nobody is searching pays nothing.
+
+   "n/N" appears only where those keys do something. They ask
+   [surface_row_texts] the same question and return without moving when it
+   answers [None], so a detail pane or a cursorless surface that printed the
+   suffix would be naming keys that are not there.
 
    One spelling, because three surfaces draw this: the footer every surface
    carries, the Keepers heading, and the context inspector's own title. They
    said three different things about the same pair of fields. *)
 let search_marker (state : state) =
-  let found =
-    match state.search_matches with
-    | None -> ""
-    | Some 0 -> " (none)"
-    | Some n -> Printf.sprintf " (%d)" n
+  let marker query ~settled =
+    let rows = Masc_tui_types.surface_row_texts state state.view in
+    let found =
+      match rows with
+      | None -> ""
+      | Some _ when String.length query = 0 -> ""
+      | Some texts ->
+          let reached =
+            List.fold_left
+              (fun reached text ->
+                if Masc_tui_types.palette_contains ~needle:query text then
+                  reached + 1
+                else reached)
+              0 texts
+          in
+          if reached = 0 then " (none)" else Printf.sprintf " (%d)" reached
+    in
+    let tail =
+      if not settled then "\xe2\x96\x8c"
+      else match rows with None -> "" | Some _ -> " n/N"
+    in
+    Printf.sprintf "/%s%s%s" (Terminal_text.single_line query) found tail
   in
   match state.search with
-  | Some query ->
-      Some (Printf.sprintf "/%s%s\xe2\x96\x8c" (Terminal_text.single_line query) found)
+  | Some query -> Some (marker query ~settled:false)
   | None ->
       if state.search_last = "" then None
-      else
-        Some
-          (Printf.sprintf "/%s%s n/N"
-             (Terminal_text.single_line state.search_last) found)
+      else Some (marker state.search_last ~settled:true)
+
+(* The marker with the colour the two headings give it: accented while the
+   query is being typed, dim once it is settled. Empty when there is no
+   query. The footer takes the plain one because it dims its whole line. *)
+let search_marker_styled (state : state) =
+  match search_marker state with
+  | None -> ""
+  | Some marker ->
+      Printf.sprintf "  %s%s%s"
+        (match state.search with
+         | Some _ -> Masc_tui_theme.tone Masc_tui_theme.Accent
+         | None -> Ansi.dim)
+        marker Ansi.reset
 
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the

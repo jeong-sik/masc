@@ -5366,43 +5366,38 @@ let test_cached_surface_success_clears_the_previous_error () =
     (Yojson.Safe.to_string succeeded.Cache.json)
 ;;
 
-let test_tool_call_fleet_cache_tracks_durable_revision () =
+let test_tool_calls_select_keeper_before_limiting () =
   let base_path = test_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Dashboard_cache.invalidate_all ();
       Masc.Keeper_tool_call_log.reset_for_testing ();
       cleanup_dir base_path)
     (fun () ->
-       Masc.Keeper_tool_call_log.reset_for_testing ();
-       Masc.Keeper_tool_call_log.init ~base_path ();
-       let masc_root =
-         match Masc.Keeper_tool_call_log.configured_masc_root () with
-         | Some value -> value
-         | None -> fail "tool-call log did not retain its MASC root"
-       in
-       let key =
-         Server_dashboard_http_keeper_api.tool_calls_fleet_cache_key ~masc_root
-       in
-       ignore
-         (Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () -> `List []));
-       check bool "fleet cache is seeded" true (Option.is_some (Dashboard_cache.peek key));
-       Masc.Keeper_tool_call_log.log_call
-         ~keeper_name:"delta"
-         ~tool_name:"keeper_time_now"
-         ~input:(`Assoc [])
-         ~output_text:"ok"
-         ~success:true
-         ~duration_ms:1.0
-         ();
-       check int "durable append advances revision" 1
-         (Masc.Keeper_tool_call_log.committed_revision ());
-       let same_key =
-         Server_dashboard_http_keeper_api.tool_calls_fleet_cache_key ~masc_root
-       in
-       check string "cache identity remains bounded" key same_key;
-       check bool "revision change invalidates stale fleet rows" true
-         (Option.is_none (Dashboard_cache.peek key)))
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let append keeper index =
+        Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
+          ~tool_name:"keeper_time_now" ~input:(`Assoc ["index", `Int index])
+          ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
+      for index = 1 to 100 do append "target" index done;
+      for index = 1 to 1001 do append "busy-neighbor" index done;
+      let entries = Server_dashboard_http_keeper_api.tool_call_entries
+        ~keeper_name:"target" ~limit:100 in
+      check int "other Keepers cannot truncate the requested 100 calls" 100 (List.length entries);
+      check bool "every returned row belongs to the requested Keeper" true
+        (List.for_all (fun row -> Safe_ops.json_string_opt "keeper" row=Some "target") entries);
+      let outputs rows = List.map (fun row -> Safe_ops.json_string_opt "output" row) rows in
+      check (list (option string)) "chronological order is retained"
+        (List.init 100 (fun index -> Some (string_of_int (index+1)))) (outputs entries);
+      let tail = Server_dashboard_http_keeper_api.tool_call_entries
+        ~keeper_name:"target" ~limit:3 in
+      check (list (option string)) "limit applies after Keeper selection"
+        [Some "98";Some "99";Some "100"] (outputs tail);
+      append "target" 101;
+      let latest = Server_dashboard_http_keeper_api.tool_call_entries
+        ~keeper_name:"target" ~limit:3 in
+      check (list (option string)) "next request sees the committed indexed tail"
+        [Some "99";Some "100";Some "101"] (outputs latest))
 ;;
 
 let test_skill_evidence_joins_activation_and_composition () =
@@ -5589,8 +5584,8 @@ let () =
             test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming;
           test_case "operator snapshot hydrates on first default request" `Quick
             test_operator_snapshot_default_route_hydrates_first_success;
-          test_case "tool-call fleet cache follows durable revision" `Quick
-            test_tool_call_fleet_cache_tracks_durable_revision;
+          test_case "tool-call limit applies to selected Keeper" `Slow
+            test_tool_calls_select_keeper_before_limiting;
           test_case "dashboard query cache segment normalizes missing values" `Quick
             test_dashboard_query_cache_segment_normalizes_missing_values;
           test_case "dashboard query cache key partitions route params" `Quick

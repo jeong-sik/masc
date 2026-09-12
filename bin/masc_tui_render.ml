@@ -2434,7 +2434,7 @@ let board_read_layout = Board_read_layout.create ()
 let browser_lane_layout = Browser_lane_layout.create ()
 
 let browser_lane_rows ~cols (view : Browser_lane_view.t) =
-  (* The same three branches browser_lane_page_lines takes, so the key holds
+  (* The same three branches browser_lane_page_layout takes, so the key holds
      every input that decides a row. *)
   let content =
     match view.Browser_lane_view.scene with
@@ -2451,7 +2451,7 @@ let browser_lane_rows ~cols (view : Browser_lane_view.t) =
     }
   in
   Browser_lane_layout.get browser_lane_layout ~source ~render:(fun () ->
-    browser_lane_page_lines ~cols view)
+    browser_lane_page_layout ~cols view)
 ;;
 
 (** Render the Board surface (read view). *)
@@ -10053,10 +10053,25 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
-let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
+let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let room = max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6)) in
+  max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6))
+
+let browser_lane_scroll_limit state ~terminal_rows ~cols view =
+  let room = browser_lane_visible_rows state ~terminal_rows view in
   max 0 (Browser_lane_layout.count (browser_lane_rows ~cols view) - room)
+
+let browser_lane_selection_scroll state ~terminal_rows ~cols view =
+  let rows = browser_lane_rows ~cols view in
+  let room = browser_lane_visible_rows state ~terminal_rows view in
+  let limit = max 0 (Browser_lane_layout.count rows - room) in
+  let scroll = min limit view.Browser_lane_view.scroll in
+  match Browser_lane_layout.selected_row rows with
+  | None -> scroll
+  | Some _ when room = 0 -> scroll
+  | Some row when row < scroll -> row
+  | Some row when row >= scroll + room -> min limit (row - room + 1)
+  | Some _ -> scroll
 
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
@@ -10076,7 +10091,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None, None when Option.is_some view.scene -> "s:text  n/p:element  y:copy context  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
+      | None, None when Option.is_some view.scene ->
+          let action = match Option.bind (selected_scene_target view) scene_target_action with
+            | Some Read_region -> "Enter:read region  "
+            | Some Click_control -> "Enter:click  "
+            | None -> "" in
+          action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -10133,8 +10153,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some draft -> browser_lane_url_line ~cols draft
          | None when Option.is_some view.scene ->
              (match List.nth_opt (scene_targets view) view.scene_cursor with
-              | Some node -> Printf.sprintf "  Element %d/%d: %s • n/p:select • y:copy context"
-                  (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
+              | Some node ->
+                  let label = match node.kind with Region _ -> "Region" | _ -> "Element" in
+                  Printf.sprintf "  %s %d/%d: %s • n/p:select • y:copy context"
+                    label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
@@ -10159,7 +10181,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())
         (match view.scene, page with
-         | Some scene, _ -> "  " ^ Terminal_text.single_line scene.content.url ^ " • DOM order · viewport only · Ctrl-O:painted image"
+         | Some scene, _ ->
+             let scope = match scene.content.view, scene.content.scope with
+               | Browser_lane.Regions, _ -> "Page regions"
+               | Content, Some _ -> "Selected region"
+               | Content, None -> "Page content" in
+             "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
          | None, Some page -> Printf.sprintf "  %s • %d chars%s%s"
              (Terminal_text.single_line page.url) page.chars

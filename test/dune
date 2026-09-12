@@ -5720,6 +5720,7 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
+ (deps ../addons/protocol.py ../addons/output-statistics/server.py)
  (libraries masc_test_deps eio eio_main yojson unix))
 
 (test

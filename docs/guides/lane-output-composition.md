@@ -4,6 +4,10 @@ An installation can read the latest completed output of another installation in
 the same run. The connection is generic: neither the source adapter nor the
 consumer needs an MSX, Browser, DOS, or metrics dispatcher in MASC.
 
+A package may also publish [named output ports](lane-output-ports.md). A source
+with `output_id` selects that applied port's exact Lane IDs; a source without
+it requests the whole completed output shown below.
+
 ```toml
 [[binding.sources]]
 source_id = "game"

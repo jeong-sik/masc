@@ -25,6 +25,9 @@ type coverage = {
   detail : string option;
 }
 type output = { rows : row list; coverage : coverage list }
+type output_selection = All_lanes | Selected_lanes of string list
+(** Package-local lane IDs, matched exactly after instance namespacing. *)
+type output_ports = (string * output_selection) list
 type resources = {
   cpus : float;
   memory_bytes : int64;
@@ -40,6 +43,7 @@ type package = {
   command : string list;
   directory : string;
   action_tool : string option;
+  outputs : output_ports;
   skills_directory : Skill_resource_path.t option;
   resources : resources;
 }
@@ -52,3 +56,5 @@ val coverage_to_json : coverage -> Yojson.Safe.t
 val phase_to_json : phase -> Yojson.Safe.t
 val phase_of_json : Yojson.Safe.t -> (phase, string) result
 val package_to_json : package -> Yojson.Safe.t
+val output_selection_to_json : output_selection -> Yojson.Safe.t
+val output_ports_to_json : output_ports -> Yojson.Safe.t

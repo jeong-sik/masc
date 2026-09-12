@@ -168,7 +168,15 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
-let ceiling_bytes = 109_236
+(* 2026-09-13: 109,398 across 126 tools (CI 34705880512 at 09c8510e). The
+   whole +162 is masc_fusion's task_id parameter description; no tool is
+   added. What it bought: the parameter now says what happens when neither
+   task_id nor goal_id is given -- the runtime picks the caller's active Task
+   from authoritative ownership -- and that the captured contract and Goal
+   criteria are separate from the caller's own summary. Without that a Keeper
+   omits the argument expecting no Task, or restates the contract into the
+   summary. Set to the measurement with no added headroom. *)
+let ceiling_bytes = 109_398
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

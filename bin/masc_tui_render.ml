@@ -10058,9 +10058,23 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
+let browser_lane_source_hint view =
+  match Browser_lane_view.selected_scene_target view with
+  | None -> None
+  | Some node ->
+      (match node.Masc.Browser_scene.source_context with
+       | Masc.Browser_source_context.Unmapped -> None
+       | (Located _ | Invalid _) as source ->
+           Some (Masc.Browser_source_context.label source))
+
+let browser_lane_fixed_rows view =
+  (* Status, selection, tab, URL, divider and text position are always drawn.
+     A source hint contributes a row only when the selected node has one. *)
+  6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
+
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6))
+  max 0 (max 1 (body_rows - 5) - browser_lane_fixed_rows view)
 
 let browser_lane_scroll_limit state ~terminal_rows ~cols view =
   let room = browser_lane_visible_rows state ~terminal_rows view in
@@ -10197,16 +10211,14 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
-      (match view.scene with
+      (match browser_lane_source_hint view with
        | None -> ()
-       | Some _ -> c.push_styled ~style:(Theme.recede ())
-           (match selected_scene_target view with
-            | None -> "  Source unavailable"
-            | Some node -> "  " ^ Terminal_text.single_line (Masc.Browser_source_context.label node.source_context)));
+       | Some hint -> c.push_styled ~style:(Theme.recede ())
+           ("  " ^ Terminal_text.single_line hint));
       c.push_divider ();
       let lines = browser_lane_rows ~cols view in
       let total = Browser_lane_layout.count lines in
-      let room = max 0 (budget - (if Option.is_some view.scene then 7 else 6)) in
+      let room = max 0 (budget - browser_lane_fixed_rows view) in
       let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
       (* Read the window out of the retained array. [List.filteri] walked every

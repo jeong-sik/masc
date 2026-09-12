@@ -3,6 +3,16 @@ open Alcotest
 module Decode = Masc.Tui_decode
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Tail = Masc_tui_metrics_tail
+module Frame = Masc_tui_frame
+module Message_layout = Masc_tui_message_layout
+
+let contains needle haystack =
+  let n = String.length needle in
+  let rec seek i =
+    i + n <= String.length haystack
+    && (String.equal (String.sub haystack i n) needle || seek (i + 1))
+  in
+  seek 0
 
 let counter = ref 0
 
@@ -142,27 +152,101 @@ let test_diagnostic_controls_are_terminal_safe () =
   check bool "diagnostic removes escape" false (String.contains safe '\027');
   check bool "diagnostic removes bell" false (String.contains safe '\007')
 
-let test_selected_keeper_rejects_misfiled_current_row () =
+(* A row in this Keeper's own store that names a different Keeper is counted --
+   it consumes the physical window, which is what explains a short list -- and
+   counted apart from rows that could not be read: one names who misfiled it,
+   the other names nobody. Folded together, one unreadable row hid inside
+   seventy-five misfiled ones on a live screen. *)
+let test_a_misfiled_row_is_counted_apart () =
   let snapshot =
     Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:1
       ~read_recent:(fun _ -> Ok [ Dated_jsonl.Parsed (heartbeat ~name:"keeper-other" 1) ])
   in
-  check int "misfiled row is not rendered" 0 (List.length snapshot.entries);
-  match snapshot.error with
-  | Some
+  check int "a row naming another Keeper is not rendered" 0
+    (List.length snapshot.entries);
+  (match snapshot.error with
+   | Some
+       (Tail.Row_errors
+         { physical_rows = 1;
+           errors =
+             [ Tail.Misfiled_row { physical_index = 1; names_keeper } ];
+         }) ->
+       check string "and it names the Keeper the row claims" "keeper-other"
+         names_keeper
+   | Some (Tail.Row_errors { physical_rows; errors }) ->
+       failf "unexpected summary: rows=%d errors=%d" physical_rows
+         (List.length errors)
+   | Some (Tail.Storage_error _) | None ->
+       fail "the misfiled row was not counted");
+  check string "the notice says which fault it was"
+    "metrics tail read 1 physical row \xc2\xb7 1 misfiled into this store"
+    (match snapshot.error with
+     | Some error -> Tail.error_to_string error
+     | None -> "(no error)")
+
+(* The notice is one row, and the frame cuts the row to its inner width, so a
+   reason that starts past the cut is a reason nobody reads. What sits in front
+   of the reason is a budget: the read count, the unreadable count and the row
+   number spend 62 cells, which leaves 34 of a 100-column terminal's 96 and 74
+   of a 140-column terminal's 136. The decoder's shortest usage refusal --
+   "usage unset=[total_tokens]" -- is 26. *)
+let test_a_rejected_row_puts_its_reason_on_the_drawn_row () =
+  let reason = "usage unset=[total_tokens]" in
+  let notice =
+    Tail.error_to_string
       (Tail.Row_errors
-        { physical_rows = 1;
-          errors = [ Tail.Invalid_metrics_row { physical_index = 1; detail } ];
-        }) ->
-      check bool "mismatch names selected Keeper" true
-        (String.starts_with
-           ~prefix:
-             "metrics Keeper name \"keeper-other\" does not match selected Keeper \"keeper-main\""
-           detail)
-  | Some (Tail.Row_errors { physical_rows; errors }) ->
-      failf "unexpected mismatch summary: rows=%d errors=%d" physical_rows
-        (List.length errors)
-  | Some (Tail.Storage_error _) | None -> fail "misfiled row was not rejected"
+         { physical_rows = 200;
+           errors =
+             [ Tail.Invalid_metrics_row { physical_index = 75; detail = reason }
+             ];
+         })
+  in
+  let drawn cols =
+    Message_layout.fit_width ("  " ^ notice) (Frame.inner_width ~cols)
+  in
+  check bool "the reason is on the row at 100 columns" true
+    (contains reason (drawn 100));
+  check bool "and still at 140" true (contains reason (drawn 140))
+
+(* The count that matters is the one that can hide. *)
+let test_an_unreadable_row_is_not_hidden_by_misfiled_ones () =
+  let snapshot =
+    Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:3
+      ~read_recent:(fun _ ->
+        Ok
+          [ Dated_jsonl.Parsed (heartbeat ~name:"keeper-other" 1)
+          ; Dated_jsonl.Parsed (heartbeat ~name:"keeper-other" 2)
+          ; Dated_jsonl.Malformed_json
+              { path = "/tmp/metrics/2026-09-12.jsonl"
+              ; line_number = Some 4
+              ; detail = "unexpected end of input"
+              }
+          ])
+  in
+  check bool "both counts are on the row" true
+    (match snapshot.error with
+     | Some error ->
+         let text = Tail.error_to_string error in
+         let has needle =
+           let n = String.length needle in
+           let rec seek i =
+             i + n <= String.length text
+             && (String.equal (String.sub text i n) needle || seek (i + 1))
+           in
+           seek 0
+         in
+         has "2 misfiled into this store" && has "1 unreadable"
+     | None -> false)
+
+(* Nothing to report is a sentence too: the window was read and all of it was
+   this keeper's. *)
+let test_a_window_of_only_our_rows_says_so () =
+  let snapshot =
+    Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:1
+      ~read_recent:(fun _ -> Ok [ Dated_jsonl.Parsed (heartbeat ~name:"keeper-main" 1) ])
+  in
+  check int "the row is rendered" 1 (List.length snapshot.entries);
+  check bool "and no notice is drawn" true (snapshot.error = None)
 
 let test_scroll_and_empty_copy_follow_viewport_state () =
   let normal_height = Tail.content_height ~terminal_rows:24 ~error:None in
@@ -411,8 +495,14 @@ let () =
             test_storage_error_and_empty_selection_are_explicit
         ; test_case "diagnostic control safety" `Quick
             test_diagnostic_controls_are_terminal_safe
-        ; test_case "selected Keeper rejects misfiled row" `Quick
-            test_selected_keeper_rejects_misfiled_current_row
+        ; test_case "a misfiled row is counted apart" `Quick
+            test_a_misfiled_row_is_counted_apart
+        ; test_case "an unreadable row is not hidden by misfiled ones" `Quick
+            test_an_unreadable_row_is_not_hidden_by_misfiled_ones
+        ; test_case "a rejected row puts its reason on the drawn row" `Quick
+            test_a_rejected_row_puts_its_reason_on_the_drawn_row
+        ; test_case "a window of only our rows draws no notice" `Quick
+            test_a_window_of_only_our_rows_says_so
         ; test_case "viewport scroll and empty copy" `Quick
             test_scroll_and_empty_copy_follow_viewport_state
         ; test_case "rejected rows are not backfilled" `Quick

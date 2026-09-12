@@ -112,7 +112,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
   }
 ;;
 
-let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
+let write_turn_record ?(execution_ids = []) config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
   Keeper_turn_record_writer.write
     ~model_input_window:None
     ~config
@@ -144,7 +144,7 @@ let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
       ; cache_read_input_tokens = None
       ; scope = Runtime_usage_scope.Usage_scope_unavailable
       }
-    ~execution_ids:[]
+    ~execution_ids
     ~blocks:[]
     ~input_components:None
     ~tool_surface_ref:None
@@ -192,7 +192,7 @@ let test_projects_exact_run_outcome_and_activity () =
          thinking.content_withheld;
        Alcotest.(check string) "thinking content is not public" "" thinking.text;
        Alcotest.(check string) "tool name" "Read" tool.name;
-       Alcotest.(check (option string)) "tool id is not public" None tool.tool_call_id;
+       Alcotest.(check (option string)) "provider correlation identity is not public" None tool.tool_call_id;
        Alcotest.(check (option string)) "tool duration" (Some "1000ms") tool.dur;
        Alcotest.(check bool) "tool input is not public" true (tool.args = None);
        Alcotest.(check bool) "tool result is not public" true (tool.result = None)
@@ -200,6 +200,61 @@ let test_projects_exact_run_outcome_and_activity () =
        Alcotest.failf "expected think + tool trace, got %d step(s)"
          (List.length trace))
   | turns -> Alcotest.failf "expected one exact turn, got %d" (List.length turns)
+;;
+
+let test_execution_identity_joins_exact_occurrence () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "execution" in
+  let worker_run_id = "run-selected" in
+  let original = run_lines ~worker_run_id ~start_seq:1 ~base_ts:2000.
+      ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text:"edited twice" in
+  let replace fields = function
+    | `Assoc old -> `Assoc (fields @ List.filter (fun (key, _) -> not (List.mem_assoc key fields)) old)
+    | _ -> Alcotest.fail "raw fixture must be an object"
+  in
+  let start = List.nth original 2 and finish = List.nth original 3 in
+  let second_start = replace [ "seq", `Int 5; "ts", `Float 2004.; "tool_turn", `Int 2 ] start in
+  let second_finish = replace [ "seq", `Int 6; "ts", `Float 2005.; "tool_turn", `Int 2 ] finish in
+  write_lines path [ List.nth original 0; List.nth original 1; start; finish;
+    second_start; second_finish; replace [ "seq", `Int 7; "ts", `Float 2006. ] (List.nth original 4) ];
+  let execution_ids = List.map Ids.Execution_id.of_string [ "exec-first"; "exec-second"; "exec-foreign" ] in
+  let selected_run = { (run_ref ~path ~worker_run_id ~start_seq:1) with end_seq = 7 } in
+  write_turn_record ~execution_ids config ~absolute_turn:428 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some selected_run);
+  let ledger = Dated_jsonl.create
+    ~base_dir:(Filename.concat (Workspace.masc_root_dir config) "tool_calls") () in
+  let row ~id ~invocation_turn ~keeper_turn =
+    `Assoc [ "record_kind", `String "tool_call"; "ts", `Float 2005.;
+      "keeper", `String keeper_name; "execution_id", `String id;
+      "trace_id", `String trace_id; "session_id", `String trace_id;
+      "turn_kind", `String "autonomous"; "keeper_turn_id", `Int keeper_turn;
+      "turn", `Int invocation_turn; "planned_index", `Int 0;
+      "tool_use_id", `String "tool-run-selected"; "tool", `String "Read" ]
+  in
+  List.iter (Dated_jsonl.append ledger)
+    [ row ~id:"exec-first" ~invocation_turn:1 ~keeper_turn:428;
+      row ~id:"exec-second" ~invocation_turn:2 ~keeper_turn:428;
+      row ~id:"exec-foreign" ~invocation_turn:1 ~keeper_turn:429 ];
+  let ids () =
+    match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
+    | [ turn ] -> List.filter_map (function
+        | Keeper_chat_blocks.Trace_tool tool -> Some (Option.map Ids.Execution_id.to_string tool.execution_id)
+        | _ -> None) turn.trace
+    | _ -> Alcotest.fail "expected selected autonomous turn"
+  in
+  Alcotest.(check (list (option string))) "repeated provider id joins its exact invocation"
+    [ Some "exec-first"; Some "exec-second" ] (ids ());
+  Dated_jsonl.append ledger (row ~id:"exec-first" ~invocation_turn:1 ~keeper_turn:428);
+  Alcotest.(check (list (option string))) "ambiguous canonical id remains unlinked"
+    [ None; Some "exec-second" ] (ids ());
+  (* A different raw sequence cannot make a duplicated invocation unique. *)
+  write_lines path [ List.nth original 0; List.nth original 1;
+    replace [ "tool_turn", `Int 2 ] start;
+    replace [ "seq", `Int 4; "ts", `Float 2002.5; "tool_turn", `Int 2 ] start;
+    replace [ "seq", `Int 5; "tool_turn", `Int 2 ] finish;
+    replace [ "seq", `Int 7; "ts", `Float 2006. ] (List.nth original 4) ];
+  Alcotest.(check (list (option string))) "duplicate raw starts cannot share unique exec-second"
+    [ None; None; None ] (ids ())
 ;;
 
 let test_direct_marker_spoof_is_excluded () =
@@ -555,6 +610,8 @@ let () =
     [ ( "load_recent"
       , [ Alcotest.test_case "projects exact run outcome and activity" `Quick
             test_projects_exact_run_outcome_and_activity
+        ; Alcotest.test_case "exact execution occurrence survives repeated provider ids" `Quick
+            test_execution_identity_joins_exact_occurrence
         ; Alcotest.test_case "typed direct kind defeats marker spoof" `Quick
             test_direct_marker_spoof_is_excluded
         ; Alcotest.test_case "rejects trace paths outside keeper store" `Quick

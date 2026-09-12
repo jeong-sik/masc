@@ -249,7 +249,12 @@ export function LaneAddonsPanel() {
         onChange=${() => { setInstance(item.instance_id); setSelected([]) }} /> ${item.title}</label><div>${item.instance_id} · ${item.addon_id}</div>
         ${item.configuration === null ? html`<p>Not managed by TOML</p>` : html`<div class="break-all" aria-label=${`Configuration for ${item.instance_id}`}>
           <p>TOML: ${item.configuration.id}</p><p>${item.configuration.source_path}</p><p>Installed configuration: ${item.configuration.revision}</p>
-        </div>`}</td>
+        </div>`}
+        <div aria-label=${`Output ports for ${item.instance_id}`}>
+          ${Object.entries(item.package.outputs).map(([id, selection]) => html`<p key=${id}>
+            Output ${id}: ${selection.all_lanes === true ? 'all package lanes' : selection.lanes.join(', ')}
+          </p>`)}
+        </div></td>
       <td>${item.run_id}<div>${item.revision}</div></td>
       <td>${item.phase.kind}${(item.phase.message || item.error) && html`<p role="status">${item.phase.message ?? item.error}</p>`}</td>
       <td>${item.observation_seq} / ${item.rows_count}</td>

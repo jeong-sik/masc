@@ -20,6 +20,78 @@ BINARY = None
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
 class Setup(unittest.TestCase):
+    def test_recorded_workspace_survives_a_different_working_directory(self):
+        assert BINARY is not None
+        for spelling in ('.', 'workspace', 'workspace-link'):
+            with self.subTest(spelling=spelling), tempfile.TemporaryDirectory(prefix='masc-default-cwd-') as tmp:
+                root = Path(tmp)
+                source = root / 'source'
+                other = root / 'other'
+                source.mkdir()
+                (other / '.masc').mkdir(parents=True)
+                if spelling == 'workspace-link':
+                    (source / 'workspace').mkdir()
+                    (source / spelling).symlink_to(source / 'workspace', target_is_directory=True)
+                env = {'PATH': '/usr/bin:/bin', 'HOME': tmp,
+                       'XDG_CONFIG_HOME': str(root / 'config')}
+                initialized = subprocess.run(
+                    [BINARY, 'init', '--base-path', spelling, '--record-default'],
+                    cwd=source, env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(initialized.returncode, 0, initialized.stderr)
+                expected = (source / spelling).resolve()
+                record = root / 'config/masc/default-base-path'
+                self.assertEqual(record.read_text(), str(expected) + '\n')
+                resolved = subprocess.run(
+                    [BINARY, 'setup-preflight'], cwd=other, env=env,
+                    capture_output=True, text=True, timeout=30)
+                self.assertEqual(resolved.returncode, 0, resolved.stderr)
+                self.assertEqual(json.loads(resolved.stdout)['base_path'], str(expected))
+
+    def test_recording_does_not_overwrite_a_preexisting_partial_file(self):
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-default-partial-') as tmp:
+            root = Path(tmp)
+            config = root / 'config/masc'
+            config.mkdir(parents=True)
+            sentinel = root / 'operator-file'
+            sentinel.write_text('preserve me\n')
+            partial = config / 'default-base-path.partial'
+            partial.symlink_to(sentinel)
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp,
+                   'XDG_CONFIG_HOME': str(root / 'config')}
+            workspace = root / 'workspace'
+            initialized = subprocess.run(
+                [BINARY, 'init', '--base-path', str(workspace), '--record-default'],
+                env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            self.assertEqual(sentinel.read_text(), 'preserve me\n')
+            self.assertTrue(partial.is_symlink())
+            record = config / 'default-base-path'
+            self.assertFalse(record.is_symlink())
+            self.assertEqual(record.read_text(), str(workspace.resolve()) + '\n')
+            self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(sorted(path.name for path in config.iterdir()),
+                             ['default-base-path', 'default-base-path.partial'])
+
+    def test_failed_record_publication_cleans_only_its_own_temporary_file(self):
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-default-publish-') as tmp:
+            root = Path(tmp)
+            config = root / 'config/masc'
+            record = config / 'default-base-path'
+            record.mkdir(parents=True)
+            sentinel = record / 'operator-file'
+            sentinel.write_text('preserve me\n')
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp,
+                   'XDG_CONFIG_HOME': str(root / 'config')}
+            initialized = subprocess.run(
+                [BINARY, 'init', '--base-path', str(root / 'workspace'), '--record-default'],
+                env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            self.assertIn('default workspace not recorded: could not write', initialized.stdout)
+            self.assertEqual(sentinel.read_text(), 'preserve me\n')
+            self.assertEqual([path.name for path in config.iterdir()], ['default-base-path'])
+
     def test_old_state_is_reported_before_any_setup_changes(self):
         old_goal = {'id':'old-goal','title':'Old goal','phase':'executing','priority':3,
                     'created_at':'2020-01-01T00:00:00Z','updated_at':'2020-01-01T00:00:00Z'}
@@ -95,6 +167,8 @@ class Setup(unittest.TestCase):
             docker.chmod(0o755)
             env = {key: value for key, value in os.environ.items()
                    if key in ('PATH', 'HOME', 'LANG', 'TMPDIR')}
+            env['HOME'] = tmp
+            env['XDG_CONFIG_HOME'] = str(base / 'user-config')
             env['PATH'] = str(commands) + os.pathsep + env['PATH']
             def run(*args):
                 return subprocess.run([BINARY, *args, '--base-path', str(base)],

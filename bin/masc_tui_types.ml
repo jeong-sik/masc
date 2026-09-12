@@ -2022,7 +2022,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint. *)
+   the hint.
+
+   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
+   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
+   dropped on that ground, until a 150-column frame showed the hint row does
+   not reach the screen at all: the row spends 79 cells on nine tab labels
+   before the hint starts, so the title is cut inside "Automation" and the
+   keys are never drawn. Until that row is fixed this sentence is the only
+   place an operator can read them -- #35539. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
@@ -5903,6 +5911,14 @@ type clamped_scroll =
      climbing, so coming back up took one keypress per step taken past the
      end. Same report the diff already makes. *)
   | Resource_scroll of int
+  (* The telemetry sections are lines the drawing formats out of the readings
+     it holds, so their count is not knowable at the keypress either. This
+     surface was the last one clamping for display without reporting: its
+     page key climbed without a ceiling, and coming back from past the end
+     took one press per step taken beyond it. Named here so End can reach the
+     bottom of a section at all -- without a report there is nothing to
+     correct the row it names. *)
+  | Metrics_scroll of int
   | Approval_detail_scroll of int
   (* Both modals draw over a surface rather than being one, and both counted
      their rows the same way the diff does: the patch modal out of the recorded
@@ -5962,6 +5978,7 @@ let apply_clamped_scroll (state : state) = function
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
+  | Metrics_scroll value -> state.metrics_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value

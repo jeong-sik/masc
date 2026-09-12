@@ -25,6 +25,7 @@ class KeeperSelection(TestCase):
         *,
         arriving: bytes = b"",
         waited: tuple[bytes, ...] = (),
+        name: bytes = b"alpha",
     ) -> list[bytes]:
         pending = [arriving]
         frames = iter(waited)
@@ -39,12 +40,21 @@ class KeeperSelection(TestCase):
             except StopIteration:
                 self.fail("selector waited for a frame without a state transition")
 
+        def poll(*_args: object, **_kwargs: object) -> bool:
+            try:
+                arriving = next(frames)
+            except StopIteration:
+                return False
+            output.extend(arriving)
+            return h.FRAME_END in arriving
+
         with (
             patch.object(h, "read_available", side_effect=drain),
             patch.object(h, "wait_for_output", side_effect=wait),
+            patch.object(h, "poll_for_output", side_effect=poll),
             patch.object(h.os, "write") as write,
         ):
-            h.select_keeper_row(Mock(), 1, output, b"alpha")
+            h.select_keeper_row(Mock(), 1, output, name)
         return [call.args[1] for call in write.call_args_list]
 
     def test_roster_arrives_during_drain_without_down_overshoot(self) -> None:
@@ -74,6 +84,64 @@ class KeeperSelection(TestCase):
             + h.FRAME_END
         )
         self.assertEqual(self.select(output), [])
+
+    def test_selected_last_row_needs_no_new_frame(self) -> None:
+        output = bytearray(frame(b"beta", clear=True))
+        self.assertEqual(self.select(output, name=b"beta"), [])
+
+    def test_target_below_current_selection_moves_down(self) -> None:
+        output = bytearray(frame(b"alpha", clear=True))
+        self.assertEqual(
+            self.select(output, name=b"beta", waited=(frame(b"beta"),)),
+            [b"\x1b[B"],
+        )
+
+    def test_arrow_without_a_redraw_can_retry(self) -> None:
+        output = bytearray(frame(b"beta", clear=True))
+        self.assertEqual(
+            self.select(output, waited=(b"", frame(b"alpha"))),
+            [b"\x1b[A", b"\x1b[A"],
+        )
+
+    def test_intermediate_target_band_is_not_current_selection(self) -> None:
+        output = bytearray(frame(b"beta", clear=True))
+        self.assertEqual(
+            self.select(
+                output,
+                waited=(frame(b"alpha") + frame(b"beta"), frame(b"alpha")),
+            ),
+            [b"\x1b[A", b"\x1b[A"],
+        )
+
+    def test_polled_partial_target_frame_must_finish(self) -> None:
+        output = bytearray(frame(b"beta", clear=True))
+        self.assertEqual(
+            self.select(
+                output, waited=(frame(b"alpha")[:-len(h.FRAME_END)], h.FRAME_END)
+            ),
+            [b"\x1b[A"],
+        )
+
+    def test_missing_target_at_last_row_exhausts_scan_not_frame_wait(self) -> None:
+        output = bytearray(frame(b"beta", clear=True))
+        with (
+            patch.object(h, "read_available"),
+            patch.object(h, "wait_for_output") as wait,
+            patch.object(h, "poll_for_output", return_value=False) as poll,
+            patch.object(h.os, "write") as write,
+        ):
+            with self.assertRaisesRegex(AssertionError, "gamma.*never became selected"):
+                h.select_keeper_row(Mock(), 1, output, b"gamma")
+        wait.assert_not_called()
+        self.assertEqual(write.call_count, h.KEEPER_ROW_SCAN_BOUND)
+        self.assertEqual(
+            [call.args[1] for call in write.call_args_list],
+            [b"\x1b[B"] * h.KEEPER_ROW_SCAN_BOUND,
+        )
+        self.assertTrue(all(
+            call.kwargs["timeout"] == h.KEEPER_ROW_STEP_TIMEOUT_S
+            for call in poll.call_args_list
+        ))
 
 
 if __name__ == "__main__":

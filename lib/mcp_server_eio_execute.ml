@@ -28,6 +28,7 @@ let execute_tool_eio
       ?invocation_ref
       ?auth_token
       ?(internal_keeper_runtime = false)
+      ?on_caller_resolved
       state
       ~name
       ~arguments
@@ -76,6 +77,7 @@ let execute_tool_eio
       ~direct_call_authority ~workspace_initialized:(fun () -> workspace_init_cached)
       ~log_mcp_exn
   in
+  Option.iter (fun observe -> observe caller_identity) on_caller_resolved;
   let agent_name = caller_identity.agent_name in
   let token = caller_identity.token in
   let owner_keeper_identity = caller_identity.owner_keeper_identity in

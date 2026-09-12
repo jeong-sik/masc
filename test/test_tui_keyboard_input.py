@@ -391,6 +391,11 @@ def read_available(master_fd: int, output: bytearray) -> None:
 # mutates a fixture and then presses a key races that refresh: the earlier
 # draw lands before send_and_wait takes its offset, and the wait that follows
 # looks for bytes that are already behind it.
+#
+# This reads the first draw, so it only separates the two for a needle the
+# surface draws once. For one it draws every frame the offset is the opening
+# paint and says nothing about why this wait came up empty, which is why the
+# note states what it found rather than a cause.
 def _needle_before_start(
     output: bytearray, needle: Needle, start: int
 ) -> str:
@@ -400,9 +405,36 @@ def _needle_before_start(
     if earlier < 0 or earlier >= start:
         return ""
     return (
-        f" (drawn at offset {earlier}, before this wait started at {start}:"
-        " a refresh got there first)"
+        f" (first drawn at offset {earlier}, none after this wait began at"
+        f" {start})"
     )
+
+
+def poll_for_output(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    needle: Needle,
+    *,
+    start: int,
+    timeout: float,
+) -> bool:
+    """True once ``needle`` lands at or after ``start``, False once ``timeout`` passes.
+
+    A caller that has something to do when it does not arrive -- press the key
+    again, say -- needs the answer rather than the exception. An exited TUI
+    still raises: no amount of waiting brings it back.
+    """
+    deadline = time.monotonic() + timeout
+    while find_needle(output, needle, start) < 0:
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return False
+        select.select([master_fd], [], [], min(0.1, remaining))
+    return True
 
 
 def wait_for_output(
@@ -414,18 +446,14 @@ def wait_for_output(
     start: int,
     timeout: float,
 ) -> None:
-    deadline = time.monotonic() + timeout
-    while find_needle(output, needle, start) < 0:
-        read_available(master_fd, output)
-        if process.poll() is not None:
-            raise AssertionError(f"TUI exited before {needle!r}: {bytes(output)!r}")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0.0:
-            raise AssertionError(
-                f"timed out waiting for {needle!r}"
-                f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
-            )
-        select.select([master_fd], [], [], min(0.1, remaining))
+    if poll_for_output(
+        process, master_fd, output, needle, start=start, timeout=timeout
+    ):
+        return
+    raise AssertionError(
+        f"timed out waiting for {needle!r}"
+        f"{_needle_before_start(output, needle, start)}: {bytes(output)!r}"
+    )
 
 
 def wait_for_fixture_event(
@@ -861,6 +889,12 @@ def stable_termios(attributes: list[Any]) -> list[Any]:
 # the bound exists so a keeper that never reports itself selected fails here
 # instead of looping.
 KEEPER_ROW_SCAN_BOUND = 24
+
+# How long one arrow press has to land the selection band. The surface redraws
+# on a 16ms interval, so a step that moves the cursor shows within a few frames;
+# a step that cannot move it shows nothing however long it is given. The bound
+# above times this is what a run spends before it reports the row unreachable.
+KEEPER_ROW_STEP_TIMEOUT_S = 1.0
 
 
 def keeper_row_selected(name: bytes) -> re.Pattern[bytes]:
@@ -1916,7 +1950,7 @@ def keeper_runtime_phase_and_identity_interaction(
         process,
         master_fd,
         output,
-        b"paused anthropic.claude-sonnet-4",
+        b"paused configured: anthropic.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -2275,6 +2309,10 @@ def select_keeper_row(
     nothing promises. Read the current completed screen after draining pending
     bytes: a roster refresh may have selected the target during that drain.
     Historical highlights do not prove which row is selected now.
+
+    A boundary arrow can produce no frame. Poll without throwing in that case,
+    then reconstruct the current screen again before deciding on another key.
+    A band in an intermediate frame is not proof of the final selection.
     """
     needle = keeper_row_selected(name)
     for _ in range(KEEPER_ROW_SCAN_BOUND):
@@ -2299,7 +2337,10 @@ def select_keeper_row(
         key = b"\x1b[A" if 0 <= target < min(selected) else b"\x1b[B"
         start = len(output)
         os.write(master_fd, key)
-        wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+        poll_for_output(
+            process, master_fd, output, FRAME_END,
+            start=start, timeout=KEEPER_ROW_STEP_TIMEOUT_S,
+        )
     raise AssertionError(
         f"keeper row {name!r} never became selected: {bytes(output[-2000:])!r}"
     )
@@ -11141,7 +11182,7 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices = send_and_wait(process, master_fd, output, b"D", b"Enter:ask")
     choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
     if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
             or "▸ y" not in choices_plain

@@ -214,6 +214,8 @@ type keeper_call = {
       (** what the call answered, as served and already bounded by the server.
           [None] means the row carried no result, which is not the same as a
           call that returned an empty one. *)
+  kc_artifact_refs : Tool_output.artifact_ref list;
+      (** Validated durable references, independent of the output preview. *)
   kc_success : bool;
   kc_duration_ms : float option;
   kc_turn : int option;

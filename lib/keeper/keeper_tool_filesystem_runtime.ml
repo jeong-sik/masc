@@ -624,6 +624,14 @@ let read_owned_bytes ~ownership_root ~path ?cwd ~max_bytes () =
   | Ok (Some prefix) -> Ok prefix.content
 ;;
 
+let read_complete_owned_bytes ~ownership_root ~path ?cwd () =
+  let* target = resolve_owned_read_target ~ownership_root ~path ~cwd in
+  match Fs_compat.load_owned_regular_file ~ownership_root target with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None -> Error "owned file is missing"
+  | Ok (Some bytes) -> Ok bytes
+;;
+
 let handle_owned_read_file_with_outcome
       ~ownership_root
       ~(args : Yojson.Safe.t)

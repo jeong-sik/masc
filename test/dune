@@ -1,4 +1,14 @@
 (test
+ (name test_keeper_vision_official_client)
+ (modules test_keeper_vision_official_client)
+ (libraries masc_test_deps))
+
+(test
+ (name test_verifier_official_client)
+ (modules test_verifier_official_client)
+ (libraries masc_test_deps))
+
+(test
  (name test_completion_repair_delivery)
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))
@@ -3494,6 +3504,16 @@
  (libraries alcotest masc_tui_frame))
 
 (test
+ (name test_tui_keeper_legend)
+ (modules test_tui_keeper_legend)
+ (libraries
+  alcotest
+  masc_tui_footer
+  masc_tui_render_prim
+  masc_tui_theme
+  masc_tui_types))
+
+(test
  (name test_tui_help_banner)
  (modules test_tui_help_banner)
  (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
@@ -3799,6 +3819,7 @@
  (libraries
   alcotest
   masc
+  masc_tui_acting_pane
   masc_tui_frame
   masc_tui_scroll
   masc_tui_message_layout
@@ -5371,6 +5392,16 @@
  (deps (alias runtest-test_tui_board_scroll)))
 
 (rule
+ (alias runtest-test_tui_reading_ends)
+ (deps test_tui_reading_ends.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_reading_ends.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_reading_ends)))
+
+(rule
  (alias runtest-test_tui_browser_lane_scroll)
  (deps test_tui_browser_lane_scroll.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -5772,6 +5803,20 @@
 
 (include stanzas/test_browser_observation.inc)
 (include stanzas/test_browser_observation_composition.inc)
+
+(rule
+ (alias runtest-test_tui_browser_history)
+ (deps test_tui_browser_history.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_browser_history.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_browser_history)))
+
+(test
+ (name test_tui_browser_history_model)
+ (modules test_tui_browser_history_model)
+ (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
 
 (test
  (name test_lane_addon_actions)

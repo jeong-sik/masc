@@ -260,7 +260,11 @@ let image_delivery_note =
    and every rendered page as visual input. PPTX files are inspected whole with \
    python-pptx and LibreOffice: ordered slide text, speaker notes, and every \
    rendered slide are returned with the original source identity. Animations \
-   and embedded audio/video playback are not inspected."
+   and embedded audio/video playback are not inspected. \
+   MP4 files are inspected whole with \
+   FFprobe and FFmpeg: original source SHA-256/bytes, stream metadata and direct \
+   complete audio/video decode results are returned. That decode is not a visual \
+   frame inspection or an accessibility verdict."
 
 let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.tool_schema =
   { Types_core.name = tool_name tool
@@ -378,6 +382,16 @@ let is_pdf path bytes =
   String.equal (String.lowercase_ascii (Filename.extension path)) ".pdf"
   || String.starts_with ~prefix:"%PDF-" bytes
 
+let is_mp4 path = String.equal (String.lowercase_ascii (Filename.extension path)) ".mp4"
+
+let video_result t ~name ~path ~bytes ~start_time =
+  match Verification_video_inspection.inspect ~base_path:t.config.base_path ~bytes with
+  | Error error -> Tool_result.error ~failure_class:Tool_result.Runtime_failure
+      ~tool_name:name ~start_time (Verification_video_inspection.error_to_string error)
+  | Ok inspection ->
+    let data = `Assoc ["path",`String path; "inspection",Verification_video_inspection.to_yojson inspection] in
+    Tool_result.make_ok ~tool_name:name ~start_time ~data ()
+
 let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
   match Verification_pdf_inspection.inspect
     ~base_path:t.config.base_path ~max_image_bytes ~bytes with
@@ -472,20 +486,20 @@ let media_result t tool ~name ~args ~start_time =
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
-              (match (is_pdf path probe || is_presentation path), Keeper_vision_tool.sniff_image_media_type probe with
+              (match (is_pdf path probe || is_presentation path || is_mp4 path), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
                | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
                    ~config:t.config ~meta ~path ?cwd ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
-            | Ok probe when is_pdf path probe || is_presentation path ->
+            | Ok probe when is_pdf path probe || is_presentation path || is_mp4 path ->
               Keeper_tool_filesystem_runtime.read_complete_owned_bytes
                 ~ownership_root:t.ownership_root ~path ?cwd ()
             | result -> result)
        in
        (match bytes with
-        | Error detail when is_pdf path "" || is_presentation path ->
+        | Error detail when is_pdf path "" || is_presentation path || is_mp4 path ->
           Some (Tool_result.error ~failure_class:Tool_result.Runtime_failure
             ~tool_name:name ~start_time detail)
         | Error _ -> None (* The ordinary Read preserves its own error contract. *)
@@ -494,6 +508,11 @@ let media_result t tool ~name ~args ~start_time =
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
               ~tool_name:name ~start_time "PPTX files are inspected whole; omit line offset and limit")
           else Some (presentation_result t ~name ~path ~bytes ~start_time ~max_image_bytes:limit)
+        | Ok bytes when is_mp4 path ->
+          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+            Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+              ~tool_name:name ~start_time "MP4 files are inspected whole; omit line offset and limit")
+          else Some (video_result t ~name ~path ~bytes ~start_time)
         | Ok bytes when is_pdf path bytes ->
           if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection

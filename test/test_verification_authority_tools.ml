@@ -988,6 +988,75 @@ let test_goal_and_task_inspect_real_pdf () =
     (In_channel.with_open_bin source In_channel.input_all)
 ;;
 
+let test_goal_and_task_inspect_real_mp4 () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "video-test"));
+  let producer_name = "video-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "test/fixtures/verifier-video.mp4" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let source = Filename.concat root "clip.mp4" in
+  Out_channel.with_open_bin source (fun out -> output_string out bytes);
+  Out_channel.with_open_bin (Filename.concat root "broken.mp4")
+    (fun out -> output_string out (String.sub bytes 0 (String.length bytes / 2)));
+  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let read surface path = VAT.dispatch surface ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String path]) in
+  List.iter (fun (surface,prefix) ->
+    let result = read surface (prefix ^ "clip.mp4") in
+    (match result with
+     | Tool_result.Completed {data;_} ->
+       let open Yojson.Safe.Util in
+       let data = member "inspection" data in
+       Alcotest.(check int) "exact video bytes" (String.length bytes) (member "bytes" data |> to_int);
+       Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
+       Alcotest.(check bool) "video and audio independently observed" true
+         (member "video_present" data = `Bool true && member "audio_present" data = `Bool true);
+       Alcotest.(check bool) "all audio/video streams decoded" true
+         (member "decoded_stream_indices" data = `List [`Int 0;`Int 1]);
+       Alcotest.(check bool) "no visual inspection invented" true
+         (member "visual_input" data = `Bool false);
+       Alcotest.(check int) "direct decoder exit" 0
+         (member "full_decode" data |> member "exit_code" |> to_int);
+       Alcotest.(check (float 0.001)) "observed duration" 1.
+         (member "duration_seconds" data |> to_float);
+       let video = member "streams" data |> to_list |> List.hd in
+       Alcotest.(check int) "decoded video width" 64 (member "width" video |> to_int);
+       Alcotest.(check int) "decoded video height" 48 (member "height" video |> to_int)
+     | _ -> Alcotest.fail (Tool_result.message result));
+    Alcotest.(check bool) "truncated video is not a complete successful decode" true
+      (Tool_result.is_failed (read surface (prefix ^ "broken.mp4")));
+    let partial = VAT.dispatch surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path",`String (prefix ^ "clip.mp4");"limit",`Int 1]) in
+    Alcotest.(check bool) "line window refused" true
+      (Tool_result.failure_class partial = Some Tool_result.Workflow_rejection))
+    [task,"";goal,producer_name ^ "/"];
+  let outside = Filename.concat dir "outside.mp4" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.mp4");
+  List.iter (fun (surface,path) ->
+    Alcotest.(check bool) "video keeps producer containment" true
+      (Tool_result.is_failed (read surface path)))
+    [task,outside;goal,outside;task,"escape.mp4";goal,producer_name ^ "/escape.mp4"];
+  with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
+    let result = read task "clip.mp4" in
+    Alcotest.(check bool) "missing decoder is stated" true
+      (Tool_result.is_failed result && String_util.contains_substring
+        (Tool_result.message result) "video_dependency_unavailable"));
+  Alcotest.(check string) "inspection preserves source" bytes
+    (In_channel.with_open_bin source In_channel.input_all)
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -1009,7 +1078,9 @@ let () =
             test_keeper_surface_uses_the_effective_sandbox_root
         ] )
     ; ( "dispatch"
-      , [ Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
+      , [ Alcotest.test_case "Goal and Task inspect original MP4 metadata and all audio/video streams" `Quick
+            test_goal_and_task_inspect_real_mp4
+        ; Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
             test_goal_and_task_inspect_real_pdf
         ; Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
             test_goal_and_task_read_deliver_full_png

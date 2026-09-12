@@ -87,21 +87,45 @@ model that is not declared, so the runtime they define does not exist:
 
 `lib/operator/onboarding_status.ml` 에서 `Invalid` 를 만드는 자리는 넷이다.
 
-| 줄 | 검사 | 무슨 상태인가 | 마법사가 고치는가 |
-|---|---|---|---|
-| `:49` | `model_connection` | `load_list` 가 실패했다 | 갈래에 따라 다르다 |
-| `:59` | `model_connection` | imp 에 배정된 런타임을 못 찾는다 | **고친다** |
-| `:80` | `keeper_persistence` | imp 메타데이터를 못 읽는다 | 아니다 |
-| `:93` | `keeper_declaration` | imp 선언에 수리가 필요하다 | 아니다 |
+`:49` 는 그 자체로 여러 갈래다. 격리 워크스페이스 실측 결과를 갈래까지 펼치면
+여섯 줄이 된다.
 
-`:49` 와 `:59` 는 검사 이름까지 같다. 밖에서 보면 넷 다 `"invalid"` 한 글자다.
+| 줄 | 상태 | 마법사가 고치는가 |
+|---|---|---|
+| `:49` | TOML 을 못 읽는다 | 아니다 — `configure_locked:130-131` 이 `Invalid_configuration` 으로 막는다 |
+| `:49` | 배정이 없는 런타임을 가리킨다 (TOML 은 유효) | **고친다** |
+| `:49` | 바인딩의 짝 `[models.X]` 가 없다 | 아니다 |
+| `:59` | imp 에 배정된 런타임을 못 찾는다 | **고친다** |
+| `:80` | imp 메타데이터를 못 읽는다 | 아니다 — journey 에 쓰기 경로가 없다 |
+| `:93` | imp 선언에 수리가 필요하다 | 아니다 — `masc init` 은 `--force` 없이 기존 파일을 건너뛴다 |
 
-`:59` 를 마법사가 고친다는 것은 실측으로 확인했다. 격리 워크스페이스에
-`[runtime.assignments]` 의 `"imp"` 를 없는 런타임으로 바꿔 두면 `doctor` 가
-`invalid` 를 말하는데, 저장 경로가 스테이지에서 돌리는
-`runtime-default-set <id> --setup-lanes --setup-imp` 가 그 줄을 제자리에서
-바꾼다(`lib/runtime/runtime.ml:2109-2133`). 검사는 `needs_verification` 으로
-돌아온다.
+`:49` 와 `:59` 는 검사 이름까지 같다. 밖에서 보면 여섯 다 `"invalid"` 한 글자다.
+
+### 무엇이 두 갈래를 가르는가 — 검증 순서
+
+고쳐지는 쪽과 아닌 쪽을 가르는 것은 실패의 심각도가 아니라
+`materialize_config` 안에서의 **검증 순서**다.
+
+`validate_no_dangling_bindings` 는 그 함수의 **첫** 검증이다
+(`lib/runtime/runtime.ml:1333`, 주석이 "Ahead of default / assignment / route
+validation on purpose" 라고 적어 둔 그 자리). 저장 경로가 스테이지에서 돌리는
+`runtime-default-set <id> --setup-lanes --setup-imp` 는 default 와 배정을
+제자리에서 고쳐 쓰지만(`lib/runtime/runtime.ml:2109-2133`), 짝 없는 바인딩은
+그 재작성이 시작되기 전에 이미 막힌다.
+
+배정이 깨진 경우는 반대다. 그 검증은 재작성보다 뒤에 있으므로, 재작성이 바로
+그 줄을 덮어써서 통과한다. 실측에서 없는 런타임을 가리키던 `"imp"` 가 실제
+id 로 바뀌고 검사가 `needs_verification` 으로 돌아왔다.
+
+그래서 수리 가능성은 갈래마다 정해져 있고 추측할 필요가 없다. `load_failure`
+가 그 갈래를 이름으로 들고 있으면 `onboarding_status` 가 곧바로 판정한다.
+
+### 처방은 이미 자리에 있다
+
+각 check 는 `actions` 필드를 이미 들고 다닌다. `:51` 과 `:60` 은
+`[Inspect_configuration; Configure_models]` 다. 즉 "설정을 살펴보고 모델을 다시
+고르라" 는 처방이 구조로 존재하는데, 화면에는 조건 한 글자만 나간다. 갈래를
+알게 되면 이 필드도 같이 쓸 수 있다.
 
 이 구분이 없어서 치른 값이 있다. PR #35336 의 첫 시도는 `invalid` 이면 마법사를
 멈추게 했다. 고칠 수 있는 `:59` 까지 막았고, 깨진 워크스페이스를 두고 다른

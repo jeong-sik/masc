@@ -5752,3 +5752,8 @@
  (name test_tui_browser_history_model)
  (modules test_tui_browser_history_model)
  (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
+
+(test
+ (name test_lane_addon_actions)
+ (modules test_lane_addon_actions)
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix))

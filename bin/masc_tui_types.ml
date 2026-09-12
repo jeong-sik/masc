@@ -2022,7 +2022,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint. *)
+   the hint.
+
+   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
+   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
+   dropped on that ground, until a 150-column frame showed the hint row does
+   not reach the screen at all: the row spends 79 cells on nine tab labels
+   before the hint starts, so the title is cut inside "Automation" and the
+   keys are never drawn. Until that row is fixed this sentence is the only
+   place an operator can read them -- #35539. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
@@ -5977,6 +5985,14 @@ type clamped_scroll =
      climbing, so coming back up took one keypress per step taken past the
      end. Same report the diff already makes. *)
   | Resource_scroll of int
+  (* The telemetry sections are lines the drawing formats out of the readings
+     it holds, so their count is not knowable at the keypress either. This
+     surface was the last one clamping for display without reporting: its
+     page key climbed without a ceiling, and coming back from past the end
+     took one press per step taken beyond it. Named here so End can reach the
+     bottom of a section at all -- without a report there is nothing to
+     correct the row it names. *)
+  | Metrics_scroll of int
   | Approval_detail_scroll of int
   (* Both modals draw over a surface rather than being one, and both counted
      their rows the same way the diff does: the patch modal out of the recorded
@@ -6036,6 +6052,7 @@ let apply_clamped_scroll (state : state) = function
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
+  | Metrics_scroll value -> state.metrics_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
@@ -7196,17 +7213,10 @@ let keeper_message_status_rows (state : state) =
          List.length
            (keeper_message_visible_status_rows state live.tl_transcript
               ~now:(Unix.gettimeofday ())))
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name
-       when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->
-         2
-     | Some _ | None -> 0)
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name ->
-         Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-           ~keeper_name
-         |> keeper_message_pending_status_rows
-     | None -> 0)
+  (* The promoted line and the queued ones are entries in the history now --
+     the chat pane appends them to the same stream it scrolls, so the
+     conversation holds one time axis. Nothing is reserved for them here:
+     rows the history owns are the history's to budget. *)
   (* Pending input owns one USER-shaped header/body slot below the causal
      transcript. When its turn starts those two rows are handed to the active
      USER one-for-one, so the text does not jump through an older turn's

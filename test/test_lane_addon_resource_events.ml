@@ -47,6 +47,8 @@ let make_backend () =
       Hashtbl.add state.modes instance_id package.id;
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
+        action_schema = (fun () -> None);
+        act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding:_ ~sources:_ ->
           Hashtbl.replace state.calls instance_id
             (1 + Option.value ~default:0 (Hashtbl.find_opt state.calls instance_id));

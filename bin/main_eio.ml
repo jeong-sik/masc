@@ -1734,6 +1734,122 @@ let runtime_verify_cmd =
   Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
     Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 
+
+let voice_probe_lines attempts =
+  List.map
+    (fun (attempt : Masc.Voice_bridge.probe_attempt) ->
+      Printf.sprintf
+        "  %-22s %-18s %s"
+        attempt.Masc.Voice_bridge.endpoint_id
+        (Voice_config.string_of_endpoint_kind attempt.Masc.Voice_bridge.kind)
+        (Masc.Voice_bridge.probe_outcome_to_string attempt.Masc.Voice_bridge.outcome))
+    attempts
+
+let voice_probe_answered attempts =
+  List.exists
+    (fun (attempt : Masc.Voice_bridge.probe_attempt) ->
+      match attempt.Masc.Voice_bridge.outcome with
+      | Masc.Voice_bridge.Answered _ -> true
+      | Masc.Voice_bridge.Refused _ | Masc.Voice_bridge.Skipped _ -> false)
+    attempts
+
+let voice_verify_show heading = function
+  | Ok [] ->
+    print_endline heading;
+    print_endline "  no endpoints are configured in this section"
+  | Ok attempts ->
+    print_endline heading;
+    List.iter print_endline (voice_probe_lines attempts)
+  | Error reason ->
+    print_endline heading;
+    print_endline ("  " ^ reason)
+
+let voice_verify_cmd_exit message audio as_json =
+  let tts = Masc.Voice_bridge.probe_tts ~message () in
+  let stt =
+    Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
+  in
+  let section name = function
+    | Ok attempts -> name, `List (List.map Masc.Voice_bridge.probe_attempt_json attempts)
+    | Error reason -> name, `Assoc [ "error", `String reason ]
+  in
+  if as_json
+  then
+    print_endline
+      (Yojson.Safe.to_string
+         (`Assoc
+           (section "tts" tts
+            :: (match stt with
+                | Some (_, result) -> [ section "stt" result ]
+                | None -> []))))
+  else (
+    voice_verify_show "tts" tts;
+    match stt with
+    | None ->
+      print_newline ();
+      print_endline "stt";
+      print_endline "  not probed. Pass --audio FILE to have each endpoint transcribe one."
+    | Some (audio_file, result) ->
+      print_newline ();
+      voice_verify_show (Printf.sprintf "stt  (%s)" audio_file) result);
+  let answered = function
+    | Ok attempts -> voice_probe_answered attempts
+    | Error _ -> false
+  in
+  let anything_answered =
+    answered tts
+    ||
+    match stt with
+    | Some (_, result) -> answered result
+    | None -> false
+  in
+  if anything_answered then 0 else 1
+
+let voice_verify_cmd =
+  let message =
+    Arg.(
+      value
+      & opt string "음성 연결을 확인합니다"
+      & info
+          [ "message" ]
+          ~docv:"TEXT"
+          ~doc:
+            "Sentence each TTS endpoint is asked to synthesize. Say it in the language \
+             you actually use: an endpoint can answer for one language and not another.")
+  in
+  let audio =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "audio" ]
+          ~docv:"FILE"
+          ~doc:
+            "Audio file each STT endpoint is asked to transcribe. Without it, only TTS \
+             is probed.")
+  in
+  let as_json =
+    Arg.(
+      value
+      & flag
+      & info [ "json" ] ~doc:"Emit one JSON object instead of the readable report.")
+  in
+  Cmd.v
+    (Cmd.info
+       "voice-verify"
+       ~doc:"Ask every configured voice endpoint to answer, and report each separately."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "The fallback chain stops at the first endpoint that answers, so a chain \
+              that works says nothing about the endpoints behind it: a dead fallback \
+              looks healthy until the one in front of it goes away. This asks every \
+              endpoint and reports each."
+         ; `P
+             "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
+              configuration that does not load is reported as the loader's own sentence."
+         ])
+    Term.(const voice_verify_cmd_exit $ message $ audio $ as_json)
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -3098,6 +3214,7 @@ let cmd =
     ; runtime_probe_cmd
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
+    ; voice_verify_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_setup_render_cmd

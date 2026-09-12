@@ -1450,6 +1450,9 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_fusion_status"
     ; "masc_get_metrics"
     ; "masc_goal_list"
+    (* Receipt reads use the owner-domain action serializer, including orphan
+       recovery. They do not wait for package execution or submit new input. *)
+    ; "masc_lane_action_status"
     ; "masc_lane_inspect"
     ; "masc_lane_slice"
     ; "masc_plan_get_task"

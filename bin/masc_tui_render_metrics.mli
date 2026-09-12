@@ -26,9 +26,15 @@ val render_metrics_body :
   cols:int ->
   budget:int ->
   state ->
+  report_scroll:(int -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
   push_selected:(string -> unit) ->
   push_divider:(unit -> unit) ->
   push_empty:(unit -> unit) ->
   unit
+(** [report_scroll] is handed the row the section actually started at. Only
+    the drawing knows how many lines a section came to -- it formats them out
+    of the readings -- so the keypress steps an unbounded value and this says
+    where it landed. Without it the stored scroll climbed past the end and
+    coming back took one press per step taken beyond it. *)

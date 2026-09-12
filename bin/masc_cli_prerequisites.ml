@@ -8,7 +8,17 @@ let dependency = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
   | "antigravity" -> Some Prerequisites.Antigravity_cli
+  | "whisper" -> Some Prerequisites.Whisper_cli
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
+
+(* Where a downloaded model lands. A cache directory rather than anywhere under
+   masc: the file is whisper's, masc only names its path in the configuration,
+   and nothing here deletes or refreshes it. Absent HOME, the catalog opens the
+   downloads page instead of offering a command with nowhere to write. *)
+let model_dir () =
+  Option.map
+    (fun home -> Filename.concat (Filename.concat home ".cache") "whisper")
+    (Sys.getenv_opt "HOME")
 let rec wait pid =
   match Unix.waitpid [] pid with
   | _, Unix.WEXITED 0 -> Ok ()
@@ -32,7 +42,10 @@ let actions host dependency =
     In_channel.with_open_text "/etc/os-release" In_channel.input_all
     |> Prerequisites.distribution_of_os_release
     with Sys_error _ -> Prerequisites.Other in
-  let standard = Prerequisites.catalog ~host ~distribution dependency |> List.map (fun action -> Standard action) in
+  let standard =
+    Prerequisites.catalog ?model_dir:(model_dir ()) ~host ~distribution dependency
+    |> List.map (fun action -> Standard action)
+  in
   match host, dependency with
   | Sandbox.Macos {architecture=Arm64; major}, Prerequisites.Sandbox Apple_container when major >= 26 ->
     Verified_apple_install :: standard

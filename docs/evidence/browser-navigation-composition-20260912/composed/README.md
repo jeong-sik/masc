@@ -20,7 +20,7 @@ The original harness's `report.json` has empty `model_tool_calls` and zero
 `composition_invocations`: it looked only at standard chat message envelopes,
 which omit native app-server tool invocations. Those fields are not authoritative
 for this run. The durable execution-ID join supplies the actual counts. The
-21,904 outer result bytes are durable logged payload bytes, not a provider wire
+21,905 outer result bytes are UTF-8 bytes of complete raw tool result strings, not a provider wire
 input measurement. The observed 55.832 seconds includes status polling/query
 latency and uses a different provider from earlier runs; it proves no speedup.
 
@@ -48,3 +48,13 @@ experiment directory. This publishable subset omits full runtime prompts and
 private service state, so those scripts require the original API envelope files
 when rerun. The retained execution receipts, IDs and scene/PTY data make the
 reported route and display claims independently inspectable.
+
+Byte audit correction: every outer output, including untruncated previews, is
+joined to its raw `tool_execution_finished` event by exact `tool_use_id`.
+Durable previews can normalize trailing newlines. `raw_result_bytes` records
+the UTF-8 raw string length; `declared_result_bytes` preserves the producer
+receipt value or null when absent. Comparisons and any mismatches are retained
+in the audit. The first two runs each have a failed result whose raw string is
+257 bytes while its producer receipt declares 55 bytes; the raw failure includes
+a bridge-added failure-class explanation. This is not provider wire input size.
+Original durable receipts are unchanged.

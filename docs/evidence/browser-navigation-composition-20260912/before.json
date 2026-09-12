@@ -1,0 +1,322 @@
+{
+  "scope": "Pre-contract isolated Firefox/Keeper/TUI run; composition absent, ordinary calls recovered. Not a successful composition or speed proof.",
+  "operation_id": "kmsg-d786f4787ddc25865bf9782f16e6af5f",
+  "operation_state": "Succeeded",
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "d0e1263562d8a636d12b02a02d335e59d041280f",
+    "commit_source": "embedded",
+    "binary_commit": "d0e1263562d8a636d12b02a02d335e59d041280f",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "5dcbeb574ccc619f9be55e5fcbb1054bff3ca2c1cb9ef15e30e0c19e9513c41c",
+    "binary_commit_unix_ts": 1789217895.0,
+    "binary_commit_age_seconds": 2607,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "runtime_instance_id": "01a095da-3b27-7000-8d0e-d7622378881b",
+    "started_at": "2026-09-12T13:41:42Z",
+    "uptime_seconds": 0
+  },
+  "tui_sha256": "1861debe1a6249453c7e2b57efeff44c5f37475b78280a88b7583ec2cb97e778",
+  "composition_file_sha256": "4172cebfce4b6ba704ab5e2f3fd7aaca350a77ce58db8219dac0eafa8d6f8352",
+  "model_tool_calls": 15,
+  "failures": 1,
+  "calls": [
+    {
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "name": "browser-lanes",
+          "package_id": "browser-lanes",
+          "source_id": "project-masc"
+        }
+      },
+      "success": true,
+      "tool_use_id": "call_27f8f10a52e3499b9d71dd91",
+      "execution_id": "exec-1789220516721-0001",
+      "error": null
+    },
+    {
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "name": "team-channels-fixture",
+          "package_id": "team-channels-fixture",
+          "source_id": "project-masc"
+        }
+      },
+      "success": true,
+      "tool_use_id": "call_90c3af3d939844b8aba71f06",
+      "execution_id": "exec-1789220516727-0002",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/index.html",
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_3e605e708b2f4476a7b27adb",
+      "execution_id": "exec-1789220538428-0003",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/index.html",
+        "lane": "automation",
+        "mode": "scene",
+        "tabId": 1,
+        "scope": {
+          "documentId": "1f532b79c1e15eb99dcbb26be4a0b47f",
+          "nodeId": "n1"
+        }
+      },
+      "success": true,
+      "tool_use_id": "call_44b4c658fb184d2890d38aa2",
+      "execution_id": "exec-1789220560796-0004",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/index.html",
+        "lane": "automation",
+        "mode": "scene",
+        "tabId": 1,
+        "scope": {
+          "documentId": "1f532b79c1e15eb99dcbb26be4a0b47f",
+          "nodeId": "n2"
+        }
+      },
+      "success": true,
+      "tool_use_id": "call_d12d3f5b6ab54179bbeba802",
+      "execution_id": "exec-1789220560799-0005",
+      "error": null
+    },
+    {
+      "tool": "keeper_tool_search",
+      "input": {
+        "names": [
+          "keeper_compose_browser-navigate-regions"
+        ]
+      },
+      "success": false,
+      "tool_use_id": "call_053f4fefdbd742d984356c17",
+      "execution_id": "exec-1789220564973-0006",
+      "error": "not in the list: keeper_compose_browser-navigate-regions"
+    },
+    {
+      "tool": "BrowserGoto",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:53659/alpha.html"
+      },
+      "success": true,
+      "tool_use_id": "call_e195ddd7190a45c084e4f372",
+      "execution_id": "exec-1789220572788-0007",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/alpha.html",
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_8947fcc6c96443379fde57b6",
+      "execution_id": "exec-1789220579296-0008",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/alpha.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "65bfd2be32f1887624453f8bc0ecc809",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_5d6445a1827241d79b0d4fde",
+      "execution_id": "exec-1789220585486-0009",
+      "error": null
+    },
+    {
+      "tool": "BrowserGoto",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:53659/beta.html"
+      },
+      "success": true,
+      "tool_use_id": "call_3f62a960096345058412249f",
+      "execution_id": "exec-1789220592321-000a",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/beta.html",
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_709535e5301c48eba3597e04",
+      "execution_id": "exec-1789220594321-000b",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/beta.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "fc35f6997e61bb284ca8a1fa0685f582",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_692df767e9f84e08a84b1dce",
+      "execution_id": "exec-1789220600084-000c",
+      "error": null
+    },
+    {
+      "tool": "BrowserGoto",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:53659/gamma.html"
+      },
+      "success": true,
+      "tool_use_id": "call_4b2413d47011489e80a506f9",
+      "execution_id": "exec-1789220605963-000d",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/gamma.html",
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_6e5fe8d0b29941e8933e26e2",
+      "execution_id": "exec-1789220610932-000e",
+      "error": null
+    },
+    {
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:53659/gamma.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "f4411ffc602ea2edf89530d161e000b4",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "success": true,
+      "tool_use_id": "call_03f5bbf886144208b41eefcc",
+      "execution_id": "exec-1789220616002-000f",
+      "error": null
+    }
+  ],
+  "observed_elapsed_seconds": 140.593,
+  "timing_limit": "Includes operation polling and status-query latency; one run does not establish speed.",
+  "cleanup": [
+    {
+      "keeper_shutdown_admission": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-f4fcf7e1-ca31-4da5-ab74-ccb2888f1951",
+        "keeper_name": "browser-handoff-proof-93400000",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-06667ba1-d9b7-4aef-9590-7c3222a99174"
+        },
+        "trace_id": "trace-1789220505989-00000",
+        "actor": "browser-handoff-proof",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 1,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-09-12T13:44:06Z",
+        "updated_at": "2026-09-12T13:44:06Z"
+      }
+    },
+    {
+      "keeper_shutdown_finalized": true
+    },
+    "owned browser session closed",
+    {
+      "name": "server",
+      "pid": 91446,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 91445,
+      "exit": 0
+    }
+  ],
+  "tui_lifetime": {
+    "columns": 130,
+    "rows": 35,
+    "input_events": [
+      {
+        "monotonic": 963956.282622458,
+        "keys_hex": "3a676f2042726f77736572204c616e650d"
+      },
+      {
+        "monotonic": 963956.302323958,
+        "keys_hex": "61"
+      },
+      {
+        "monotonic": 963956.446731791,
+        "keys_hex": "76"
+      },
+      {
+        "monotonic": 963956.568613625,
+        "keys_hex": "79"
+      }
+    ],
+    "refresh_interval": "unmodified product default",
+    "pid": 91679,
+    "started_monotonic": 963955.771700125,
+    "binary_sha256": "1861debe1a6249453c7e2b57efeff44c5f37475b78280a88b7583ec2cb97e778",
+    "copied_monotonic": 963956.569478166,
+    "copy_offset": 21716,
+    "alive_at_copy": true,
+    "keeper_observation_finished_monotonic": 964097.971626458,
+    "alive_after_keeper_observation": true,
+    "exit": 0,
+    "stopped_monotonic": 964098.013056041,
+    "capture_errors": []
+  }
+}

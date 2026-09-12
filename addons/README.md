@@ -11,6 +11,13 @@ deployment receipts, captured browser documents, and document feature probes.
 clock and incarnation. Both only read arguments; neither fetches a URL, opens a
 screen artifact, issues game input, or modifies its source.
 
+The MSX manifest also declares `[world.skills] directory = "skills"`. Its bundled
+`msx-observe` instruction Skill and script/reference resources join the existing
+workspace Skill catalog as a read-only source. `keeper_skill` reads the selected
+bytes and reports their SHA-256; it does not execute the script or add game
+controls. The source uses the existing configured Skill resource-read bound and
+selection rules. See the [installation and Skill guide](../docs/guides/lane-addon-toml.md).
+
 Build from the repository root (image construction belongs in CI):
 
 ```sh
@@ -26,12 +33,14 @@ defaults do not constitute measured performance acceptance.
 
 The worker publishes its exact container ID before inspection and MCP
 initialization, so those operations can be interrupted by explicit detach.
-Cleanup is verified only after the exact container is absent. If the Docker
-daemon never returns the create result, startup and detach remain incomplete;
-this implementation does not claim verified cleanup or restart reconciliation
-for a container whose creation was never acknowledged. Package lifecycle tests
-cover blocked inspection, initialization and observation, independently of
-Docker daemon availability.
+Cleanup is verified only after a successful Docker query confirms that the exact
+container is absent. After a host restart, recovery verifies the retained
+container ID and ownership label before removal. If the create receipt has no
+container ID, recovery finds this instance's deterministic container name,
+verifies the exact name and ownership label, and removes the resolved ID.
+An unavailable Docker daemon or mismatched ownership leaves cleanup incomplete.
+Package lifecycle tests cover blocked inspection, initialization, observation,
+and lost-receipt recovery; CI and live qualification establish the actual result.
 
 The MCP worker exposes `lane_observe`, taking `{binding, sources}` and returning
 `{rows, coverage}` in both `structuredContent` and a JSON text content block.

@@ -146,9 +146,26 @@ let test_a_notice_pushes_the_list_down () =
 let test_no_notice_reserves_no_room () =
   (* Nothing is held back for a message there is none of. A blank line kept
      "just in case" is a row the list is pushed down by on every screen that
-     has nothing to report. *)
+     has nothing to report.
+
+     The sentence above it stays because the tab's hint row does not reach the
+     screen: at 150 columns the title is cut inside "Automation", 79 cells of
+     tab labels before the hint begins. Measured 2026-09-12. *)
   check Alcotest.int "the hint and one blank, and that is all" 2
-    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]))
+    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]));
+  check Alcotest.bool "and the keys are named there" true
+    (List.exists
+       (fun line ->
+         List.exists
+           (fun word ->
+             let n = String.length word in
+             let rec seek i =
+               i + n <= String.length line
+               && (String.equal (String.sub line i n) word || seek (i + 1))
+             in
+             seek 0)
+           [ "arrows"; "filter"; "refresh"; "toggle" ])
+       (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]))
 
 (* ── typing to narrow the list ──────────────────────────────────────── *)
 

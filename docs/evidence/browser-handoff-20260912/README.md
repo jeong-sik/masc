@@ -61,6 +61,12 @@ alone is not presented as shutdown proof.
 
 ## Repetition and limits
 
+The subsequent [three-channel experiment](three-channels/README.md) exercises
+two lazily loaded instruction Skills and collection across three separate pages.
+It records 12 tool calls, 125.647 seconds to observed completion, and the limits
+of both the answer and simultaneous TUI following. It is a separate observation,
+not a matched performance comparison with the single-page runs above.
+
 Use a separate initialized scratch workspace, a configured model, a fresh
 Firefox session serving the fixture, and the candidate instruction package.
 Select Alpha in the TUI region view and capture its actual `y` output. Send

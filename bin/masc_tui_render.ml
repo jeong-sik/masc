@@ -3473,7 +3473,9 @@ let render_question_reader (state : state) =
            (List.length row.ar_questions) answered Ansi.reset);
   box_line buf cols
     (if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
-     else "  Left/Right: previous/next question · [/]: previous/next ask · Esc: approvals");
+     else
+       "  Left/Right: previous/next question · [/]: previous/next ask · "
+       ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: approvals");
   box_divider buf cols;
   let lines, room = ask_question_viewport state in
   let limit = max 0 (List.length lines - room) in

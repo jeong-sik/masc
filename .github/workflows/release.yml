@@ -156,10 +156,13 @@ jobs:
           if [ "${{ matrix.arch }}" = "linux-x64" ]; then
             contract_test="--run-contract-test"
           fi
-          scripts/build-linux-release.sh --out "$PWD/artifacts/linux-bin" $contract_test
-          # Absolute: several release scripts cd to the repo root or to a
-          # scratch directory before using the path they were handed.
-          echo "MASC_BIN_DIR=$PWD/artifacts/linux-bin" >> "$GITHUB_ENV"
+          # Exported where a source checkout keeps its build, so MASC_BIN_DIR
+          # stays one value on both operating systems. The onboarding smoke
+          # below runs quickstart.sh, which starts start-masc.sh, and both name
+          # _build/default/bin/main_eio.exe directly; this runner has no OCaml
+          # toolchain, so anywhere else leaves start-masc.sh trying to build
+          # from source and exiting "dune not found".
+          scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" $contract_test
 
       # Manual branch runs also serve isolated runtime/TUI experiments. Keep
       # their compiled bytes even when a later unrelated release check fails.
@@ -309,7 +312,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           chmod +x scripts/check-glibc-floor.sh
-          scripts/check-glibc-floor.sh 2.35 \
+          # Asked of the build script rather than repeated here. Two literals
+          # drift one at a time, and raising only this one checks the shipped
+          # assets against a floor nothing was built at, while raising only the
+          # other ships below the floor this asserts -- both pass quietly.
+          floor="$(bash scripts/build-linux-release.sh --print-floor)"
+          scripts/check-glibc-floor.sh "$floor" \
             dist/masc-${{ matrix.arch }} \
             dist/masc-tui-${{ matrix.arch }} \
             dist/masc-browser-host-${{ matrix.arch }} \

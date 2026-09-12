@@ -472,7 +472,7 @@ let test_gate_history_drops_orphan_tool_result () =
 let huge_tool_result index =
   (* Mirrors the live 623,999 B [result] that refused the prompt. *)
   Tool_result.Completed
-    { content_blocks = None; Tool_result.data =
+    { retained_artifacts = []; content_blocks = None; Tool_result.data =
         `Assoc
           [ "index", `Int index
           ; "body", `String (String.make 620_000 'y')
@@ -685,6 +685,67 @@ let test_failed_tool_observer_releases_next_completion () =
    keeper's own history showed nothing, so it repeated the same malformed call
    every turn. An executed failure must still be written once, not twice:
    [post_tool_use] already records that one. *)
+let test_retained_observation_commits_through_production_hook () =
+  with_temp_base_path @@ fun base_path ->
+  let module Log = Masc.Keeper_tool_call_log in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Log.reset_for_testing ())
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Time_compat.set_clock (Eio.Stdenv.clock env);
+      Log.reset_for_testing ();
+      let reference = Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path) ~bytes:"complete observed page"
+          ~mime:"application/vnd.masc.browser-scene+json" in
+      let invocation planned_index =
+        Agent_core.Tool_contract.Invocation.create ~tool_use_id:"" ~turn:1
+          ~completion:Agent_core.Tool_contract.Continue_after_success
+          ~schedule:{ planned_index; batch_index=0; batch_size=2;
+                      execution_mode=Agent_core.Tool_contract.Concurrent } in
+      let first = invocation 0 and second = invocation 1 in
+      Log.set_retained_artifacts ~invocation:first [reference];
+      Log.set_retained_artifacts ~invocation:second [reference];
+      let hooks = Masc.Keeper_hooks_agent_core.make_hooks
+          ~config:(Masc.Workspace.default_config base_path)
+          ~meta_ref:(ref (make_meta "observation-reader"))
+          ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
+          ~trace_id:"observation-trace" ~keeper_turn_id:1
+          ~tool_result_commit_required:(fun () -> true)
+          ~on_after_turn_ordinal:ignore () in
+      let post = match hooks.Agent_core.Hooks.post_tool_use with
+        | Some hook -> hook | None -> fail "post tool hook missing" in
+      let event invocation = Agent_core.Hooks.PostToolUse {
+        invocation; tool_name="BrowserRead"; input=`Assoc [];
+        output=Ok { Agent_core.Types.content="inline scene";
+                    content_blocks=None; _meta=None };
+        result_bytes=12; duration_ms=1. } in
+      let rejected = try ignore (post (event first)); false with
+        | Eio.Cancel.Cancelled _ as error -> raise error
+        | _ -> true in
+      check bool "missing log store rejects required commit" true rejected;
+      check int "failed log keeps the observation for its invocation" 1
+        (List.length (Log.peek_retained_artifacts ~invocation:first ()));
+      Log.init ~base_path ();
+      ignore (post (event first));
+      check int "committed invocation releases only its carrier" 0
+        (List.length (Log.peek_retained_artifacts ~invocation:first ()));
+      check int "blank provider id does not consume sibling observation" 1
+        (List.length (Log.peek_retained_artifacts ~invocation:second ()));
+      let rows = Log.read_recent ~keeper_name:"observation-reader" () in
+      let row = match rows with [row] -> row | _ -> fail "exactly one durable receipt required" in
+      let open Yojson.Safe.Util in
+      let root = match Tool_output.normalized_artifact_refs_in_json
+          (row |> member "artifact_refs") with
+        | [root] -> root | _ -> fail "production hook lost retained artifact" in
+      check string "durable row retains exact bytes" reference.sha256
+        root.sha256;
+      check int "receipt joins the original scheduled occurrence" 0
+        (row |> member "planned_index" |> to_int))
+;;
+
 let rejected_rows_for ?on_tool_result_ready ~stage () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
@@ -1421,6 +1482,9 @@ let () =
             `Quick
             test_production_post_tool_hook_cancellation_releases_next_completion
         ] )
+    ; ( "retained browser observation"
+      , [ test_case "production hook retains roots until durable commit" `Quick
+            test_retained_observation_commits_through_production_hook ] )
     ; ( "rejected_tool_calls"
       , [ test_case
             "a call refused before execution leaves a row"

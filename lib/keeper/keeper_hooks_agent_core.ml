@@ -621,20 +621,22 @@ let make_hooks
         Keeper_execution_join.record ~invocation
           ~execution_id:(Ids.Execution_id.to_string execution_id);
         let log_committed = ref false in
+        let retained_artifacts = Keeper_tool_call_log.peek_retained_artifacts ~invocation () in
         let file_change_evidence =
           Keeper_tool_call_log.peek_file_change_evidence ~invocation ()
         in
-        (* A completed mutation's producer evidence cannot be recoverably
-           reconstructed. Supplying [on_committed] forces this row through the
+        (* Producer evidence and prior page observations cannot be reconstructed
+           from current state. Supplying [on_committed] forces this row through the
            synchronous append boundary; only that acknowledgement removes the
            invocation-scoped carrier. *)
         let on_log_committed =
-          match file_change_evidence, on_tool_result_ready with
-          | None, None -> None
+          match file_change_evidence, on_tool_result_ready, retained_artifacts with
+          | None, None, [] -> None
           | _ ->
             Some
               (fun () ->
                  log_committed := true;
+                 Keeper_tool_call_log.clear_retained_artifacts ~invocation ();
                  (match file_change_evidence with
                   | Some _ ->
                     ignore
@@ -664,7 +666,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
-             ~artifact_refs:(Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
+             ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?agent_name:tctx.agent_name

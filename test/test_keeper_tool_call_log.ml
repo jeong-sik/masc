@@ -685,7 +685,7 @@ let test_composition_action_context_persisted () =
     in
     let typed_result =
       Tool_result.Completed
-        { content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
+        { retained_artifacts = []; content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
         ; data = `Assoc [ "content", `String "typed output" ]
         ; metadata = None
         ; duration_ms = 12.5

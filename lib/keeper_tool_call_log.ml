@@ -143,6 +143,23 @@ let peek_file_change_artifact_refs ~invocation () =
     | None -> [])
 ;;
 
+(* Complete observation artifacts must outlive their truncated log preview.
+   Keep this carrier until the owning hook commits the exact invocation row. *)
+let pending_retained_artifacts : Tool_output.artifact_ref list Invocation_table.t =
+  Invocation_table.create 8
+let retained_artifacts_mu = Stdlib.Mutex.create ()
+let with_retained_artifacts_lock f =
+  Stdlib.Mutex.lock retained_artifacts_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock retained_artifacts_mu) f
+let set_retained_artifacts ~invocation references =
+  with_retained_artifacts_lock (fun () ->
+    Invocation_table.replace pending_retained_artifacts invocation references)
+let peek_retained_artifacts ~invocation () =
+  with_retained_artifacts_lock (fun () ->
+    Option.value ~default:[] (Invocation_table.find_opt pending_retained_artifacts invocation))
+let clear_retained_artifacts ~invocation () =
+  with_retained_artifacts_lock (fun () -> Invocation_table.remove pending_retained_artifacts invocation)
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 
 let create_turn_ctx_cell = Keeper_tool_call_log_context.create_cell
@@ -353,7 +370,8 @@ let reset_for_testing () =
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
   with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation);
   with_pending_file_change_evidence_lock (fun () ->
-    Invocation_table.reset pending_file_change_evidence)
+    Invocation_table.reset pending_file_change_evidence);
+  with_retained_artifacts_lock (fun () -> Invocation_table.reset pending_retained_artifacts)
 ;;
 
 let pending_truncation_count_for_testing () =
@@ -808,7 +826,8 @@ let log_call
       let artifact_ref_fields =
         let typed_refs =
           match typed_result with
-          | Some result -> Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
+          | Some result -> Tool_result.retained_artifacts result
+              @ Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
           | None -> []
         in
         let refs =

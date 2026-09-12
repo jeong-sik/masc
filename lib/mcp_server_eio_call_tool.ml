@@ -389,6 +389,7 @@ let record_runtime_mcp_keeper_trajectory
         exn
 
 let record_runtime_mcp_keeper_tool_trace
+    ?typed_result
     ?mcp_session_id
     (entry : Keeper_registry.registry_entry)
     ~(tool_name : string)
@@ -409,6 +410,12 @@ let record_runtime_mcp_keeper_tool_trace
     | Tool_result.Failed _ -> false
   in
   Keeper_tool_call_log.log_call
+    ?typed_result
+    ?on_committed:
+      (Option.bind typed_result (fun result ->
+         match Tool_result.retained_artifacts result with
+         | [] -> None
+         | _ -> Some (fun () -> ())))
     ~keeper_name:ctx.keeper_name
     ~tool_name
     ~input:arguments
@@ -783,6 +790,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
    | Some entry, Some execution_id ->
        (try
           record_runtime_mcp_keeper_tool_trace
+            ~typed_result:result
             ?mcp_session_id
             entry
             ~tool_name:name

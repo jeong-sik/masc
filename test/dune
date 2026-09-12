@@ -5724,3 +5724,6 @@
   (source_tree ../addons/msx-observer/skills))
  (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
   masc.skill_snapshot masc.skill_snapshot_service))
+
+(include stanzas/test_browser_observation.inc)
+(include stanzas/test_browser_observation_composition.inc)

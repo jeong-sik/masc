@@ -545,7 +545,7 @@ let test_failure_observation_uses_typed_failed_payload () =
   in
   let completed : Tool_result.result =
     Tool_result.Completed
-      { content_blocks = None; data = `Null
+      { retained_artifacts = []; content_blocks = None; data = `Null
       ; metadata = None
       ; tool_name = "completed-tool"
       ; duration_ms = 0.0
@@ -576,7 +576,7 @@ let test_records_mcp_server_operation_duration_metric () =
   in
   let result : Tool_result.result =
     Tool_result.Completed
-      { content_blocks = None; Tool_result.data = `String "ok"
+      { retained_artifacts = []; content_blocks = None; Tool_result.data = `String "ok"
       ; metadata = None
       ; tool_name = "get-weather"
       ; duration_ms = 123.0
@@ -862,7 +862,28 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
         (sse_payload |> U.member "tool_args_preview" |> U.to_string);
       check string "sse output preview includes result" "command exited 1"
-        (sse_payload |> U.member "tool_output_preview" |> U.to_string))
+        (sse_payload |> U.member "tool_output_preview" |> U.to_string);
+      let reference = Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path) ~bytes:"retained native observation"
+          ~mime:"application/vnd.masc.browser-scene+json" in
+      let observed = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
+          ~data:(`Assoc ["url",`String "https://example.org/page"]) ()
+          |> Tool_result.with_retained_artifacts [reference] in
+      Eio.Switch.run (fun sw ->
+      Masc.Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+        ~typed_result:observed entry ~tool_name:"BrowserRead"
+        ~arguments:(`Assoc ["mode",`String "scene"])
+        ~message:(Tool_result.message observed) ~disposition:(Tool_result.Completed ())
+        ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
+      check int "native observation root bypasses the lossy async queue" 0
+        (Masc.Keeper_tool_call_log.queued_count_for_testing ());
+      let observed_row = Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 () |> List.hd in
+      let roots = Tool_output.normalized_artifact_refs_in_json (observed_row |> U.member "artifact_refs") in
+      check bool "native MCP logger retains the producer observation" true
+        (List.exists (fun (root : Tool_output.artifact_ref) -> root.sha256=reference.sha256) roots);
+      check string "native row keeps inline body" (Tool_result.message observed)
+        (observed_row |> U.member "output" |> U.to_string)))
 
 let () =
   run "mcp_server_eio_call_tool"

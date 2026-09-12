@@ -89,6 +89,7 @@ val runtime_mcp_keeper_log_context_of_entry :
     [meta.runtime] supplies the rest. *)
 
 val record_runtime_mcp_keeper_tool_trace :
+  ?typed_result:Tool_result.result ->
   ?mcp_session_id:string ->
   Keeper_registry.registry_entry ->
   tool_name:string ->

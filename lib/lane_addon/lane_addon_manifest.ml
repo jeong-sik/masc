@@ -15,7 +15,7 @@ let output_ports world =
           let* lanes = read [] values in
           if lanes = [] || List.length lanes <> List.length (List.sort_uniq String.compare lanes)
           then Error ("world.outputs." ^ id ^ ".lanes requires a non-empty list of unique lane IDs")
-          else Ok (Selected_lanes lanes)
+          else Ok (Selected_lanes (List.sort String.compare lanes))
       | _ -> Error ("world.outputs." ^ id ^ " requires only lanes or all_lanes = true") in
     Ok (id, selection) in
   match List.assoc_opt "outputs" world with

@@ -26,6 +26,9 @@ The host matches `instance_id + "/" + local_lane_id` exactly. Similar names,
 longer paths and rows from other instances are not part of that selection. Port
 and Lane names must be non-blank; duplicate ports, duplicate Lane IDs, empty
 Lane lists, unknown port settings and conflicting selections are rejected.
+The `lanes` list describes membership, so its order is canonicalized: reordering
+the same Lane IDs does not replace the producer. This differs from ordered
+package settings such as command arguments and ordinary binding arrays.
 
 Packages whose output Lane IDs depend on their inputs can publish a whole-output
 port explicitly. The generic statistics package uses this form:

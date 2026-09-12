@@ -200,21 +200,21 @@ let output_ports_are_typed_and_revisioned () = with_directory (fun _root package
   let install ports = write manifest (package () ^ ports); Config.load_file ~path in
   let initial = unwrap (install {|
 [world.outputs.frames]
-lanes = ["msx/frame"]
+lanes = ["msx/frame", "msx/state"]
 [world.outputs.statistics]
 all_lanes = true
 |}) in
   let open Lane_addon_types in
   check bool "manifest has exact typed port selections" true
-    (initial.package.outputs = ["frames", Selected_lanes ["msx/frame"]; "statistics", All_lanes]);
+    (initial.package.outputs = ["frames", Selected_lanes ["msx/frame"; "msx/state"]; "statistics", All_lanes]);
   let reordered = unwrap (install {|
-# Table order is not port identity.
+# Table order and membership order are not port identity.
 [world.outputs.statistics]
 all_lanes = true
 [world.outputs.frames]
-lanes = ["msx/frame"]
+lanes = ["msx/state", "msx/frame"]
 |}) in
-  check string "output table order preserves semantic revision" initial.revision reordered.revision;
+  check string "port and selected-lane ordering preserve semantic revision" initial.revision reordered.revision;
   let changed = unwrap (install "\n[world.outputs.frames]\nlanes=[\"msx/state\"]\n") in
   check bool "mapping change alters the resolved configuration revision" true
     (initial.revision <> changed.revision);

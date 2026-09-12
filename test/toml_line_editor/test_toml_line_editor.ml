@@ -271,7 +271,11 @@ let index_of content target =
   | Some index -> index
   | None -> Alcotest.failf "line not found: %s" target
 
-let upsert = Toml_line_editor.upsert_table_array_entry
+let upsert content ~path ~id_key ~id ~fields =
+  match Toml_line_editor.upsert_table_array_entry content ~path ~id_key ~id ~fields with
+  | Ok updated -> updated
+  | Error error ->
+    Alcotest.failf "upsert refused: %s" (Toml_line_editor.entry_error_message error)
 let endpoints = "voice.stt.endpoints"
 
 let test_entry_ids_read_in_file_order () =
@@ -497,6 +501,188 @@ let test_dropping_a_field_the_entry_lacks_changes_nothing () =
   in
   Alcotest.(check string) "the file is untouched" endpoints_fixture out
 
+(* ── what a line editor must not get wrong ─────────────────────────────── *)
+
+(* Every case below was measured against this module by an adversarial review
+   while the suite above was green. The verdict is the loader's, not a line
+   count: a line editor that produces text TOML refuses has failed, and one that
+   produces text TOML accepts but that means something else has failed worse. *)
+
+let check_loads what content =
+  match Otoml.Parser.from_string_result content with
+  | Ok _ -> ()
+  | Error message -> Alcotest.failf "%s: the result does not load: %s" what message
+
+let ids content = Toml_line_editor.table_array_entry_ids content ~path:endpoints ~id_key:"id"
+
+let sub_table_fixture =
+  {|[[voice.stt.endpoints]]
+id = "whisper-local"
+kind = "openai_compat"
+
+[voice.stt.endpoints.headers]
+X-Trace = "on"
+
+[[voice.stt.endpoints]]
+id = "elevenlabs-stt"
+|}
+
+(* A table named under an entry's path belongs to that entry. Left behind, it
+   becomes the first thing after the removal and the loader gives up on the
+   whole file. *)
+let test_removing_an_entry_takes_its_sub_table () =
+  let out =
+    Toml_line_editor.remove_table_array_entry sub_table_fixture ~path:endpoints ~id_key:"id"
+      ~id:"whisper-local"
+  in
+  check_loads "removing an entry that owns a sub-table" out;
+  Alcotest.(check bool) "the sub-table went with the entry that owned it" false
+    (has_line out "[voice.stt.endpoints.headers]");
+  Alcotest.(check (list string)) "the sibling entry survives" [ "elevenlabs-stt" ] (ids out)
+
+(* This one loads cleanly either way, which is what makes it dangerous: slotted
+   above the sub-table, the new entry owns headers that were written for its
+   predecessor, and nothing reports it. *)
+let test_a_new_entry_does_not_adopt_the_previous_sub_table () =
+  let out =
+    upsert sub_table_fixture ~path:endpoints ~id_key:"id" ~id:"added"
+      ~fields:[ "kind", Some (Toml_line_editor.String "openai_compat") ]
+  in
+  check_loads "appending beside an entry that owns a sub-table" out;
+  Alcotest.(check bool) "the sub-table stays under the entry it belongs to" true
+    (index_of out "[voice.stt.endpoints.headers]" < index_of out {|id = "elevenlabs-stt"|});
+  Alcotest.(check bool) "and the new entry lands after every existing one" true
+    (index_of out {|id = "elevenlabs-stt"|} < index_of out {|id = "added"|})
+
+let multiline_fixture =
+  {|[[voice.stt.endpoints]]
+id = "whisper-local"
+notes = """
+tuned against
+[voice.stt.fallback]
+enabled = true
+"""
+enabled = true
+|}
+
+(* An assignment inside a multi-line string is text, not a field. Writing there
+   produces a file that parses, so nothing reports it, and the loader keeps
+   reading the real field: the setting reads as saved and does not take. *)
+let test_an_assignment_inside_a_multiline_string_is_not_a_field () =
+  let out =
+    upsert multiline_fixture ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "enabled", Some (Toml_line_editor.Bool false) ]
+  in
+  check_loads "editing a field beside a multi-line string" out;
+  Alcotest.(check int) "the line inside the string is left alone" 1
+    (count_line out "enabled = true");
+  Alcotest.(check int) "the real field is rewritten, once" 1 (count_line out "enabled = false")
+
+let test_removing_beside_a_multiline_string_leaves_it_closed () =
+  let trailing = "\n[[voice.stt.endpoints]]\nid = \"other\"\n" in
+  let out =
+    Toml_line_editor.remove_table_array_entry (multiline_fixture ^ trailing) ~path:endpoints
+      ~id_key:"id" ~id:"other"
+  in
+  check_loads "removing an entry that follows a multi-line string" out;
+  Alcotest.(check (list string)) "the entry carrying the string survives"
+    [ "whisper-local" ] (ids out)
+
+(* A value that runs past its own line has to be replaced whole. Overwriting
+   only the opening line leaves the rest of the old array as loose text. *)
+let test_replacing_a_multiline_array_field_closes_it () =
+  let source =
+    {|[[voice.stt.endpoints]]
+id = "whisper-local"
+models = [
+  "one",
+  "two",
+]
+enabled = true
+|}
+  in
+  let out =
+    upsert source ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "models", Some (Toml_line_editor.String "solo") ]
+  in
+  check_loads "replacing a multi-line array with a scalar" out;
+  Alcotest.(check bool) "the old elements are gone" false (has_line out {|  "one",|});
+  Alcotest.(check bool) "the field that followed the array survives" true
+    (has_line out "enabled = true")
+
+let test_dropping_a_multiline_array_field_closes_it () =
+  let source =
+    {|[[voice.stt.endpoints]]
+id = "whisper-local"
+models = [
+  "one",
+]
+enabled = true
+|}
+  in
+  let out =
+    upsert source ~path:endpoints ~id_key:"id" ~id:"whisper-local" ~fields:[ "models", None ]
+  in
+  check_loads "dropping a multi-line array field" out;
+  Alcotest.(check bool) "no element is left behind" false (has_line out {|  "one",|})
+
+(* An empty endpoint list is spelled as a key today, and an array-of-tables
+   beside a key of the same path is a file the loader refuses outright. A line
+   editor cannot merge the two shapes, so it says so rather than writing it. *)
+let test_an_inline_key_at_the_path_is_refused () =
+  match
+    Toml_line_editor.upsert_table_array_entry "[voice.session]\nendpoints = []\n"
+      ~path:"voice.session.endpoints" ~id_key:"id" ~id:"loopback"
+      ~fields:[ "kind", Some (Toml_line_editor.String "voice_mcp") ]
+  with
+  | Error (Toml_line_editor.Inline_key_at_path path) ->
+    Alcotest.(check string) "the refusal names the path" "voice.session.endpoints" path
+  | Error other ->
+    Alcotest.failf "wrong refusal: %s" (Toml_line_editor.entry_error_message other)
+  | Ok produced -> Alcotest.failf "must be refused, but produced:\n%s" produced
+
+let test_a_standard_table_at_the_path_is_refused () =
+  match
+    Toml_line_editor.upsert_table_array_entry "[voice.tts.endpoints]\nid = \"only-one\"\n"
+      ~path:"voice.tts.endpoints" ~id_key:"id" ~id:"another" ~fields:[]
+  with
+  | Error (Toml_line_editor.Standard_table_at_path _) -> ()
+  | Error other ->
+    Alcotest.failf "wrong refusal: %s" (Toml_line_editor.entry_error_message other)
+  | Ok produced -> Alcotest.failf "must be refused, but produced:\n%s" produced
+
+(* On a CRLF file every line carries a trailing carriage return, and a header
+   test that does not account for it answers no to every header. The editor then
+   sees no entries at all and appends a duplicate of one already there. *)
+let test_a_crlf_file_still_finds_its_entries () =
+  let eol = Printf.sprintf "%c\n" (Char.chr 13) in
+  let source =
+    String.concat eol [ "[[voice.stt.endpoints]]"; {|id = "whisper-local"|}; "port = 1"; "" ]
+  in
+  Alcotest.(check (list string)) "the entry is found" [ "whisper-local" ] (ids source);
+  let out =
+    upsert source ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "port", Some (Toml_line_editor.Int 2) ]
+  in
+  Alcotest.(check (list string)) "it was updated, not duplicated" [ "whisper-local" ] (ids out)
+
+(* TOML refuses a raw control character inside a basic string, so a value that
+   carries one has to be escaped or it kills the line it lands on. The check is
+   a round trip rather than a spelling: what matters is that the loader reads
+   back the value that was written. *)
+let test_a_control_character_is_escaped () =
+  let value = Printf.sprintf "a%cb" (Char.chr 7) in
+  let line = Toml_line_editor.value_line ~key:"n" ~value:(Toml_line_editor.String value) in
+  check_loads "a control character in a value" line;
+  Alcotest.(check bool) "no raw control byte is emitted" false
+    (String.exists (fun character -> Char.code character < 0x20) line);
+  match Otoml.Parser.from_string_result line with
+  | Error message -> Alcotest.fail message
+  | Ok toml ->
+    (match Otoml.find_opt toml Otoml.get_string [ "n" ] with
+     | Some read -> Alcotest.(check string) "the value reads back as written" value read
+     | None -> Alcotest.fail "the key did not survive the round trip")
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
@@ -561,5 +747,27 @@ let () =
             test_a_new_entry_skips_its_none_fields
         ; Alcotest.test_case "dropping an absent field changes nothing" `Quick
             test_dropping_a_field_the_entry_lacks_changes_nothing
+        ] )
+    ; ( "what a line editor must not get wrong"
+      , [ Alcotest.test_case "removing an entry takes its sub-table" `Quick
+            test_removing_an_entry_takes_its_sub_table
+        ; Alcotest.test_case "a new entry does not adopt the previous sub-table" `Quick
+            test_a_new_entry_does_not_adopt_the_previous_sub_table
+        ; Alcotest.test_case "an assignment inside a multi-line string is not a field" `Quick
+            test_an_assignment_inside_a_multiline_string_is_not_a_field
+        ; Alcotest.test_case "removing beside a multi-line string leaves it closed" `Quick
+            test_removing_beside_a_multiline_string_leaves_it_closed
+        ; Alcotest.test_case "replacing a multi-line array field closes it" `Quick
+            test_replacing_a_multiline_array_field_closes_it
+        ; Alcotest.test_case "dropping a multi-line array field closes it" `Quick
+            test_dropping_a_multiline_array_field_closes_it
+        ; Alcotest.test_case "an inline key at the path is refused" `Quick
+            test_an_inline_key_at_the_path_is_refused
+        ; Alcotest.test_case "a standard table at the path is refused" `Quick
+            test_a_standard_table_at_the_path_is_refused
+        ; Alcotest.test_case "a CRLF file still finds its entries" `Quick
+            test_a_crlf_file_still_finds_its_entries
+        ; Alcotest.test_case "a control character is escaped" `Quick
+            test_a_control_character_is_escaped
         ] )
     ]

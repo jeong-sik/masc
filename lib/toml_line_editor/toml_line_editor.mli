@@ -73,6 +73,18 @@ val value_line : key:string -> value:value -> string
 (** Render [key = value] in TOML's spelling for the type. A [Float] always keeps
     a point or an exponent, so it does not read back as an integer. *)
 
+type entry_error =
+  | Inline_key_at_path of string
+      (** The parent table already assigns this path as a key. An empty endpoint
+          list is spelled [endpoints = []] today, and opening
+          [[[...endpoints]]] beside it makes the file refuse to load: a table
+          duplicated by an array of tables. *)
+  | Standard_table_at_path of string
+      (** The path already exists as a standard table [[a.b]]. One path cannot
+          be both spellings, and a line editor cannot merge them. *)
+
+val entry_error_message : entry_error -> string
+
 val is_table_array : path:string -> string -> bool
 (** Return [true] when [line] opens the array-of-tables [\[\[path\]\]], compared
     by the key path the grammar reads from each. The array-of-tables counterpart
@@ -89,7 +101,7 @@ val upsert_table_array_entry
   -> id_key:string
   -> id:string
   -> fields:(string * value option) list
-  -> string
+  -> (string, entry_error) result
 (** Set [fields] on the [\[\[path\]\]] entry whose [id_key] is [id], appending a
     new entry after the last existing one when no entry carries that id.
 
@@ -105,7 +117,12 @@ val upsert_table_array_entry
 
     [id_key] is skipped if it also appears in [fields]: [id] is the one source of
     the entry's identity, and writing a second spelling of it from the field list
-    would let the two disagree. *)
+    would let the two disagree.
+
+    Refused, writing nothing, when the path already exists in another shape --
+    see {!entry_error}. A line editor can add an entry beside other entries; it
+    cannot reconcile an array-of-tables with a key or a standard table of the
+    same path, and producing a file the loader rejects is worse than saying so. *)
 
 val remove_table_array_entry
   :  string

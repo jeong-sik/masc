@@ -1,5 +1,5 @@
 ---
-rfc: "0442"
+rfc: "0443"
 title: "Runtime lifecycle is not a provider stream event — a turn before its first token must say where it is"
 status: Draft
 created: 2026-09-12
@@ -8,7 +8,7 @@ author: claude
 related: ["0441", "0345", "0012", "0341"]
 ---
 
-# RFC-0442 — Runtime lifecycle is not a provider stream event (#35344)
+# RFC-0443 — Runtime lifecycle is not a provider stream event (#35344)
 
 - Status: Draft
 - Author: claude

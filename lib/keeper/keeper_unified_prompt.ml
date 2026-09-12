@@ -1293,6 +1293,11 @@ let active_goal_summaries_for_task
       ) (Goal_store.list_goals_result config ())
 ;;
 
+let constitution_unreadable_reported : (string, unit) Hashtbl.t =
+  Hashtbl.create 1
+
+let constitution_unreadable_mutex = Stdlib.Mutex.create ()
+
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
@@ -1307,9 +1312,22 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     match World_constitution_store.load ~base_path:config.Workspace.base_path with
     | Ok ledger -> World_constitution_render.articles ledger.articles
     | Error error ->
-      Log.Misc.error
-        "world constitution ledger unreadable, rendering no articles: %s"
-        (World_constitution_store.read_error_to_string error);
+      (* build_system_prompt runs on every turn of every keeper, and an
+         unreadable ledger does not heal itself, so an unguarded line here is
+         one error per keeper per cycle forever. The condition is worth saying
+         once; repeating it buries everything else. *)
+      let detail = World_constitution_store.read_error_to_string error in
+      let fresh =
+        Stdlib.Mutex.protect constitution_unreadable_mutex (fun () ->
+          if Hashtbl.mem constitution_unreadable_reported detail then false
+          else (
+            Hashtbl.add constitution_unreadable_reported detail ();
+            true))
+      in
+      if fresh then
+        Log.Misc.error
+          "world constitution ledger unreadable, rendering no articles: %s"
+          detail;
       ""
   in
   let base_system_prompt =

@@ -639,7 +639,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let execution_id =
     Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
   in
-  (* Commit retained roots before audit or any other fallible observer. *)
+  (* Commit retained roots before the following request audit and telemetry. *)
   (match keeper_entry, execution_id with
    | Some entry, Some execution_id ->
        (try

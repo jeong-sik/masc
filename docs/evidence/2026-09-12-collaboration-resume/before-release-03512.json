@@ -1,0 +1,73 @@
+{
+  "observed_at": 1789204268.2610219,
+  "files": {
+    "tasks/backlog.json": {
+      "bytes": 8309,
+      "sha256": "b70a56a358f5ff5416834db4d8bd94f81fef0307b39c483d271e32b63f6c45cd"
+    },
+    "tasks/goal_task_links.json": {
+      "bytes": 175,
+      "sha256": "ace0a271672e832a68741f3d6726f37df6b357ca4cfe59f7cc612d9c3e3f2ef3"
+    },
+    "goals.json": {
+      "bytes": 2311,
+      "sha256": "07a06cf9f3978632c41676ac05f03db1decd9e0a76aeb2644df810cc341750e1"
+    },
+    "goal_verifications.json": {
+      "bytes": 3484,
+      "sha256": "b749142d82c57e9288a00407ff5b398a46b5cc06b7068cf2a6b9f1973f5ee225"
+    },
+    "config/runtime.toml": {
+      "bytes": 3320,
+      "sha256": "659b11c9632621b855d1e37cdae60f11283f710383fd84631eae8b2abae89ef3"
+    },
+    "config/keepers/exhibit-editor.toml": {
+      "bytes": 612,
+      "sha256": "38c22672c50e3fa982f12cd0b97163985363412a106c88ee6f98ee2512003d24"
+    },
+    "config/keepers/exhibit-designer.toml": {
+      "bytes": 631,
+      "sha256": "30501da7c16f29e7fa5f5f4f0abb91c26ffb0375a7c02237d004299a3bf987c8"
+    },
+    "playground/docker/exhibit-editor/booklet.pdf": {
+      "bytes": 102608,
+      "sha256": "ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb"
+    },
+    "playground/docker/exhibit-editor/poster.png": {
+      "bytes": 86709,
+      "sha256": "2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386"
+    },
+    "playground/docker/exhibit-editor/evidence.json": {
+      "bytes": 1637,
+      "sha256": "ca3daad86842e741fde60a67312abb12ca8220cf16fe2c6611cbb2a4df8a9fae"
+    },
+    "playground/docker/exhibit-editor/renders/page1.png": {
+      "bytes": 64091,
+      "sha256": "3db665442ed4dbcef2eafc5a769868ce9772814f9ecc7edd7acf2ba726e1b34c"
+    },
+    "playground/docker/exhibit-editor/renders/page2.png": {
+      "bytes": 81051,
+      "sha256": "c85b181149d6bfd3fec00ad3fbd3e51eb75d2bb48d0a562c1e90cd6620eed731"
+    },
+    "playground/docker/exhibit-editor/renders/page3.png": {
+      "bytes": 80753,
+      "sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62"
+    },
+    "playground/docker/exhibit-designer/poster.png": {
+      "bytes": 484694,
+      "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16"
+    },
+    "playground/docker/exhibit-designer/multimedia/garden.gif": {
+      "bytes": 588811,
+      "sha256": "da21aa4e6c7f80e88481f49c0c77e864b64e5f7f0ebe7536256b699b35396307"
+    },
+    "playground/docker/exhibit-designer/multimedia/garden.wav": {
+      "bytes": 2116844,
+      "sha256": "2471dc1e9805570267b668e05e05b7138a1e1cac489cebd6f4a2252dad8e96e0"
+    },
+    "playground/docker/exhibit-designer/multimedia/garden.mp3": {
+      "bytes": 289689,
+      "sha256": "1c2eaa4f20e51fdba0534a6fe71c1558c94d6a6dafc50194ab5bc88e397c6f7d"
+    }
+  }
+}

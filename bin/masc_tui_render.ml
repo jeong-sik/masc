@@ -1849,7 +1849,12 @@ let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
       Ansi.dim
-      ^ "  H:choose hearth · f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
+      (* The row above this one always names H, so the empty census says
+         only what is its own to say: that nothing is counted yet, and
+         that f walks hearths once something is. It used to open with
+         "H:choose hearth" too, which put that key on two adjacent rows
+         whenever the board had no counted hearth. *)
+      ^ "  f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -1913,7 +1918,7 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let header = Printf.sprintf "%s (%d)  order:%s%s  %s  %s"
+  let header = Printf.sprintf "%s (%d)  sort:%s%s  %s  %s"
     (screen_title " MASC Board")
     count (board_sort_label state.board_sort) hearth timestamp
     (connection_badge state) in
@@ -1921,7 +1926,7 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
+    (Printf.sprintf "  H:choose hearth · Sort [s]: %s"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -2538,19 +2543,23 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
-    (planning_workspace_title state ~tab:Planning_goals ~window:"")
+  let title = planning_workspace_title state ~tab:Planning_goals ~window:"" in
+  let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
-    (planning_filter_label state.planning_filter)
-    timestamp
-    (connection_badge state) in
+    (planning_filter_label state.planning_filter) in
+  let modes_fit_header =
+    (* The timestamp can overflow and require a truncation cell after modes. *)
+    Message_layout.display_width (title ^ "  " ^ modes) < framed_inner_width cols
+  in
+  let header = Printf.sprintf "%s%s  %s  %s" title
+    (if modes_fit_header then "  " ^ modes else "")
+    timestamp (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  Sort [s]: %s · Filter [f]: %s"
-       (planning_sort_label state.planning_sort)
-       (planning_filter_label state.planning_filter));
+  (* Show the modes once, but do not hide them behind a clipped title. *)
+  if not modes_fit_header then
+    box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ modes);
   (* The list below can only show goals the store still holds. A goal that
      completed and left goals.json left every planning surface with it, so
      "what did we finish" had no answer here at all. These two lines are what
@@ -7160,7 +7169,7 @@ let render_harness_list (state : state) =
      by whom, and where a fallback answered instead of the evaluator the Gate
      names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Task Verdicts = automatic Gate rulings on Tasks (old Harness); not Goal proof.";
+    "  Task Verdicts = automatic Gate rulings on Tasks; not Goal proof.";
   List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows

@@ -459,9 +459,19 @@ says.
 
 ### The same probes over HTTP
 
-The wizard calls these rather than shelling out. Both are admin-gated, for the
-reason `/voice/transcribe` is: a TTS probe spends a credit on a metered
-provider.
+`masc voice-verify` runs these probes from a shell. The two routes below run
+the same ones over HTTP, so a caller that already holds an admin token does
+not have to spawn a process. Nothing in the repo calls them yet: the wizard
+(`Voice_wizard`) only asks questions and opens no sockets, so `masc
+voice-verify` is still how an operator checks an endpoint.
+
+Both are admin-gated, for the reason `/voice/transcribe` is: a TTS probe
+spends a credit on a metered provider.
+
+Both are registered on the HTTP/1.1 router only, so a client that selects
+h2c gets 404. That holds for every `/api/v1/voice` route except
+`/voice/config`, and #35592 tracks it. `curl` speaks HTTP/1.1 unless told
+otherwise, so the commands below reach them.
 
 ```sh
 TOKEN=$(cat "${MASC_BASE_PATH:?}/.masc/auth/admin.token")

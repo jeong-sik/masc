@@ -30,7 +30,11 @@ val run_named_with_masc_tools :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?on_runtime_attempt_error:
-    (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
+    (runtime_id:string ->
+    attempt:int ->
+    dispatch:Keeper_attempt_dispatch.t ->
+    Agent_core.Error.t ->
+    unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?context:Agent_core.Context.t ->

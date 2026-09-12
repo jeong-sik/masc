@@ -1,8 +1,19 @@
 let ( let* ) = Result.bind
 type browser_selection = Live of Browser_lane.client_id | Automation
+type lane_output = {
+  installation_id : string;
+  instance_id : string;
+  run_id : string;
+  configuration_revision : string;
+  package_revision : string;
+  observation_seq : int;
+  output : Lane_addon_types.output;
+  status : Lane_addon_types.coverage;
+}
 type source =
   | Snapshot_file of { id : string; path : string }
   | Msx_capture of { id : string }
+  | Lane_output of { id : string; installation_id : string }
   | Browser_document of { id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
 let text fields key = match List.assoc_opt key fields with
@@ -16,6 +27,11 @@ let parse_source = function
            if Filename.is_relative path then Error "snapshot_file path must be absolute"
            else Ok (Snapshot_file {id;path})
        | Some (`String "msx_capture") -> Ok (Msx_capture {id})
+       | Some (`String "lane_output") ->
+           let* installation_id = text fields "installation_id" in
+           (match List.assoc_opt "selection" fields with
+            | Some (`String "latest_completed") -> Ok (Lane_output {id;installation_id})
+            | _ -> Error "lane_output selection must be latest_completed")
        | Some (`String "browser_document") ->
            let* client_id = match List.assoc_opt "client_id" fields with
              | None | Some `Null -> Ok None
@@ -47,7 +63,12 @@ let parse = function
            loop [] values
        | _ -> Error "binding.sources requires an array of observation sources")
   | _ -> Error "binding requires an object"
-let source_id = function Snapshot_file {id;_} | Msx_capture {id} | Browser_document {id;_} -> id
+let source_id = function Snapshot_file {id;_} | Msx_capture {id}
+  | Lane_output {id;_} | Browser_document {id;_} -> id
+let dependencies binding =
+  let* sources = parse binding in
+  Ok (List.filter_map (function Lane_output {installation_id;_} -> Some installation_id
+    | _ -> None) sources |> List.sort_uniq String.compare)
 let validate binding =
   let* sources = parse binding in
   let ids = List.map source_id sources in
@@ -183,13 +204,39 @@ let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~enviro
   Ok (envelope ~id ~incarnation:(client ^ "/" ^ document_id)
     ~cursor:(`String evidence.uri) ~complete
     ~detail [observation])
-let acquire ~store ~(package : Lane_addon_types.package) ~binding =
+let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id =
+  let* captured = resolve_lane_output ~installation_id in
+  let producer = `Assoc ["installation_id", `String captured.installation_id;
+    "instance_id", `String captured.instance_id; "run_id", `String captured.run_id;
+    "configuration_revision", `String captured.configuration_revision;
+    "package_revision", `String captured.package_revision;
+    "observation_seq", `Int captured.observation_seq] in
+  let output = Lane_addon_types.output_to_json captured.output in
+  let bytes = Yojson.Safe.to_string (`Assoc ["producer", producer; "output", output]) in
+  if String.length bytes > max_bytes then Error "upstream output exceeds the remaining ingress envelope"
+  else
+    let* reference = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
+    let complete = captured.status.complete
+      && List.for_all (fun (c : Lane_addon_types.coverage) -> c.complete) captured.output.coverage in
+    let detail = if complete then None else Some "latest completed output has incomplete source or worker coverage" in
+    let observation = `Assoc ["id", `String (captured.instance_id ^ "/output/" ^ string_of_int captured.observation_seq);
+      "kind", `String "lane_output"; "observed_at", `Float (Time_compat.now ());
+      "actor", `Null; "producer", producer; "output", output;
+      "producer_status", Lane_addon_types.coverage_to_json captured.status;
+      "evidence", `List [evidence_json reference]] in
+    Ok (envelope ~id ~incarnation:captured.instance_id
+      ~cursor:(`String (string_of_int captured.observation_seq)) ~complete
+      ~detail:(Option.fold ~none:`Null ~some:(fun value -> `String value) detail) [observation])
+
+let acquire ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~binding =
   let* () = validate binding in
   let* sources = parse binding in
   let capture ~max_bytes source =
     let result = match source with
       | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
       | Msx_capture {id} -> msx_capture ~store ~id
+      | Lane_output {id;installation_id} ->
+          lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id
       | Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
           browser_document ~store ~max_bytes ~id ~selection
             ~tab_id ~target_id ~environment ~request_id in

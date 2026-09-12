@@ -113,6 +113,8 @@ type runtime_handler =
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
   | Tool_surface_read
@@ -244,6 +246,8 @@ let runtime_handler_to_string = function
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
+  | Tool_constitution_write -> "tool_constitution_write"
+  | Tool_constitution_remove -> "tool_constitution_remove"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
   | Tool_surface_read -> "tool_surface_read"
@@ -448,7 +452,13 @@ let descriptor
     match runtime_handler with
     | Tool_surface_post -> Terminal
     | Tool_memory_write | Tool_memory_retract -> Direct_terminal
+    (* The constitution tools are the memory writes' peers in layer (both are
+       durable self-writes on base_tools) but not on this axis. A memory write
+       is the conclusion of a turn; recording a decision the board already made
+       is not, so these stay Ordinary and the keeper keeps working. *)
     | ( Tool_execute
+      | Tool_constitution_write
+      | Tool_constitution_remove
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
       | Tool_search_files
@@ -643,9 +653,23 @@ let execute_output_schema =
 ;;
 
 (* Browser reads have mode-specific payloads. Compositions can retain the whole
-   object; only the invariant interaction receipt exposes typed data edges. *)
+   object; navigation and interaction receipts expose typed data edges. *)
 let browser_read_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc [];"required",`List [];"additionalProperties",`Bool true]
+
+(* Browser_webdriver.page_summary observes the landing document after Page_goto.
+   Its URL can differ from the requested URL after a redirect. *)
+let browser_goto_output_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc
+        [ "url", `Assoc [ "type", `String "string" ]
+        ; "title", `Assoc [ "type", `String "string" ]
+        ]
+    ; "required", `List [ `String "url"; `String "title" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
 
 let browser_interact_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc ["tabId",`Assoc ["type",`String "integer"];
@@ -1070,6 +1094,7 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.browser_goto_schema.name
       ~description:Tool_schemas_misc.browser_goto_schema.description
       ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
+      ~composable_output:(Json_output { schema = browser_goto_output_schema })
       (* A navigation reaches the web from the automation profile; the live
          lane refuses navigation verbs at the state layer. Serial: the
          automation lane is one browser, and Concurrent here demands a
@@ -1281,6 +1306,14 @@ let memory_retract_schema_source, memory_retract_schema =
 
 let memory_write_schema_source, memory_write_schema =
   base_schema_declared "keeper_memory_write"
+;;
+
+let constitution_write_schema_source, constitution_write_schema =
+  base_schema_declared "keeper_constitution_write"
+;;
+
+let constitution_remove_schema_source, constitution_remove_schema =
+  base_schema_declared "keeper_constitution_remove"
 ;;
 
 let ide_annotate_schema_source, ide_annotate_schema =
@@ -2450,6 +2483,28 @@ let internal_descriptors : t list =
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
       ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_write_schema_source
+      ~id:"keeper.constitution.write"
+      ~name:"keeper_constitution_write"
+      ~description:constitution_write_schema.description
+      ~input_schema:constitution_write_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_constitution_write
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_remove_schema_source
+      ~id:"keeper.constitution.remove"
+      ~name:"keeper_constitution_remove"
+      ~description:constitution_remove_schema.description
+      ~input_schema:constitution_remove_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_constitution_remove
+      ()
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -2815,6 +2870,8 @@ let internal_descriptors : t list =
        ~readonly:true
   (* Optional layers contribute observations; their replies do not gate
      existing Keeper work or replace the machine/browser owners. *)
+  ; masc_misc_descriptor "lane_act" "masc_lane_act" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_action_status" "masc_lane_action_status" ~readonly:true
   ; masc_misc_descriptor "lane_attach" "masc_lane_attach" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_inspect" "masc_lane_inspect" ~readonly:true
   ; masc_misc_descriptor "lane_observe" "masc_lane_observe" ~readonly:false

@@ -71,6 +71,28 @@ let test_a_window_deep_in_a_long_list () =
   check str_opt "is the last one" (Some "row-21157")
     (Masc_tui_rows.at last 21_157)
 
+(* A surface that already holds its rows in an array reads them through the
+   same [at], so the whole array is the window. The Code diff pane is the
+   caller: it resolves a drawn row's colouring by that row's line number in
+   the file, which is scattered rather than a run.
+
+   The line number arrives off the wire as an optional integer with no lower
+   bound, so [index - 1] can be negative -- and [List.nth_opt], which this
+   replaced, raises [Invalid_argument] on a negative index rather than
+   answering [None]. That was a crash inside the drawing loop. *)
+let test_the_whole_array_is_a_window () =
+  let w = Masc_tui_rows.of_array [| "row-0"; "row-1"; "row-2" |] in
+  check int "every row" 3 (Masc_tui_rows.length w);
+  check str_opt "the first" (Some "row-0") (Masc_tui_rows.at w 0);
+  check str_opt "the last" (Some "row-2") (Masc_tui_rows.at w 2);
+  check str_opt "past the end is a blank row" None (Masc_tui_rows.at w 3);
+  check str_opt "and a negative index answers rather than raising" None
+    (Masc_tui_rows.at w (-1));
+  check int "an empty array holds nothing" 0
+    (Masc_tui_rows.length (Masc_tui_rows.of_array [||]));
+  check str_opt "and reads as blank" None
+    (Masc_tui_rows.at (Masc_tui_rows.of_array [||]) 0)
+
 let () =
   Alcotest.run "tui_rows"
     [ ( "window"
@@ -84,6 +106,10 @@ let () =
     ; ( "arguments"
       , [ Alcotest.test_case "the edges of the arguments" `Quick
             test_the_edges_of_the_arguments
+        ] )
+    ; ( "array"
+      , [ Alcotest.test_case "the whole array is a window" `Quick
+            test_the_whole_array_is_a_window
         ] )
     ; ( "depth"
       , [ Alcotest.test_case "a window deep in a long list" `Quick

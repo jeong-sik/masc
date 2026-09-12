@@ -156,6 +156,7 @@ let test_scheduler_sample_availability () =
       let lines = ref [] in
       let push line = lines := line :: !lines in
       Render_metrics.render_metrics_body ~cols:200 ~budget:40 state
+        ~report_scroll:(fun _ -> ())
         ~push ~push_styled:(fun ~style:_ line -> push line)
         ~push_selected:push ~push_divider:(fun () -> ())
         ~push_empty:(fun () -> ());
@@ -219,6 +220,92 @@ let test_retained_task_outcomes () =
   check bool "source warning does not erase known counts" true (contains output "New tasks 3 · Done 1 · Cancelled 1");
   check bool "source warning is visible" true (contains output "goal links unavailable");
   check bool "old glow cache is not presented as history" false (contains output "Heatmap")
+;;
+
+let test_assignee_work_and_daily_flow () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let tasks =
+    [ (* Two completions two and four hours wide: an even sample count has to
+         average the middle pair rather than pick a side. *)
+      task "r1" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T02:00:00Z");
+      task "r2" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T04:00:00Z");
+      (* The agent spelling of the same keeper. RFC-0393 removed the suffix
+         strip, so this must stay its own row. *)
+      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-rondo-agent" "2026-09-11T06:00:00Z");
+      task "o1" "2026-09-11T00:00:00Z"
+        (Claimed { assignee = "rondo"; claimed_at = "2026-09-11T01:00:00Z" });
+      (* Todo carries no assignee and must not invent one. *)
+      task "t1" "2026-09-11T00:00:00Z" Todo;
+      (* [cancelled_by] answers who cancelled, not who held the task. *)
+      task "c1" "2026-09-11T00:00:00Z"
+        (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
+          reason = None }) ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let rows = flow.by_assignee in
+  check int "only states that carry an assignee open a row" 2 (List.length rows);
+  let row name =
+    List.find (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = name) rows
+  in
+  check bool "a cancelled task does not attribute work to the canceller" false
+    (List.exists (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = "polisher") rows);
+  let rondo = row "rondo" in
+  check int "completed tasks counted" 2 rondo.af_done;
+  check int "claimed work counted as open" 1 rondo.af_open;
+  check (option (float 0.001)) "even sample count averages the middle pair"
+    (Some 3.0) rondo.af_median_lead_hours;
+  let agent = row "keeper-rondo-agent" in
+  check int "the agent spelling keeps its own completions" 1 agent.af_done;
+  check (option (float 0.001)) "a single sample is its own median"
+    (Some 6.0) agent.af_median_lead_hours;
+  check string "the longer queue sorts first" "rondo"
+    (List.hd rows).af_assignee;
+  let days = flow.daily in
+  check int "the span is the declared number of days" Masc_tui_task_flow.daily_days
+    (List.length days);
+  let day_from_end back = List.nth days (Masc_tui_task_flow.daily_days - back) in
+  let today = day_from_end 1 in
+  check int "the span ends on the observation day" 0 today.d_created;
+  let yesterday = day_from_end 2 in
+  check int "creations land on their own day" 4 yesterday.d_created;
+  check int "completions land on their own day" 1 yesterday.d_completed;
+  check int "cancellations stay separate from completions" 1 yesterday.d_cancelled;
+  let before = day_from_end 3 in
+  check int "an earlier day keeps its own creations" 2 before.d_created;
+  check int "an earlier day keeps its own completions" 2 before.d_completed;
+  let quiet = day_from_end Masc_tui_task_flow.daily_days in
+  check int "a day with no activity is present as zero" 0 quiet.d_created;
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "the per-assignee table is drawn" true (contains output "median lead");
+  check bool "the keeper spelling is listed" true (contains output "rondo");
+  check bool "the agent spelling is listed beside it" true
+    (contains output "keeper-rondo-agent");
+  check bool "the span names its last day" true (contains output "09-12");
+  check bool "creations are a row of their own" true (contains output "created");
+  check bool "cancellations are a row of their own" true (contains output "cancelled");
+  check bool "lead time is not presented as work time" false (contains output "work time")
+;;
+
+let test_assignee_rows_capped () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let tasks =
+    List.init 13 (fun index ->
+      let who = Printf.sprintf "holder-%02d" index in
+      task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
+        (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "the tail is reported rather than dropped" true
+    (contains output "3 further assignees not listed")
 ;;
 
 let test_overview_pulse_line () =
@@ -365,6 +452,7 @@ let test_render_metrics_body_budget () =
     ~cols:80
     ~budget:15
     state
+    ~report_scroll:(fun _ -> ())
     ~push:(fun _ -> incr count)
     ~push_styled:(fun ~style:_ _ -> incr count)
     ~push_selected:(fun _ -> incr count)
@@ -373,6 +461,42 @@ let test_render_metrics_body_budget () =
   check bool "lines within budget" true (!count <= 15)
 ;;
 
+(* The section's lines are formatted here, so the keypress cannot bound the
+   scroll and steps an unbounded value. Before the frame reported back, the
+   stored value kept climbing past the end and coming home took one press per
+   step taken beyond it -- and End had nothing to correct the row it named.
+   What the drawing could actually start at is what it hands back. *)
+let test_metrics_reports_the_row_it_could_draw () =
+  let render ~budget ~scroll =
+    let state = make_state () in
+    state.metrics_section <- Types.Section_fleet;
+    state.metrics_scroll <- scroll;
+    let reported = ref (-1) in
+    let drawn = ref 0 in
+    Render_metrics.render_metrics_body
+      ~cols:85
+      ~budget
+      ~report_scroll:(fun s -> reported := s)
+      state
+      ~push:(fun _ -> incr drawn)
+      ~push_styled:(fun ~style:_ _ -> incr drawn)
+      ~push_selected:(fun _ -> incr drawn)
+      ~push_divider:(fun () -> incr drawn)
+      ~push_empty:(fun () -> incr drawn);
+    !reported
+  in
+  let settled = render ~budget:20 ~scroll:max_int in
+  check bool "a row past the end comes back as a row that exists" true
+    (settled >= 0 && settled < max_int);
+  check int "and asking for that row again is already there" settled
+    (render ~budget:20 ~scroll:settled);
+  check int "the top is the top" 0 (render ~budget:20 ~scroll:0);
+  check int "and a negative scroll is the top too" 0
+    (render ~budget:20 ~scroll:(-5));
+  (* A budget with room for every line has no scroll to report. *)
+  check int "nothing to scroll reports the top" 0
+    (render ~budget:400 ~scroll:max_int)
+
 let test_compact_metrics_preserve_source_labels () =
   List.iter (fun cols ->
     let state = make_state () in
@@ -380,6 +504,7 @@ let test_compact_metrics_preserve_source_labels () =
     let lines = ref [] in
     let push line = lines := line :: !lines in
     Render_metrics.render_metrics_body ~cols ~budget:40 state
+      ~report_scroll:(fun _ -> ())
       ~push ~push_styled:(fun ~style:_ line -> push line)
       ~push_selected:push ~push_divider:(fun () -> ())
       ~push_empty:(fun () -> ());
@@ -405,6 +530,7 @@ let test_render_metrics_body_all_sections () =
       Render_metrics.render_metrics_body
         ~cols:85
         ~budget:20
+        ~report_scroll:(fun _ -> ())
         state
         ~push:(fun _ -> incr count)
         ~push_styled:(fun ~style:_ _ -> incr count)
@@ -421,6 +547,8 @@ let () =
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
+        ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
+        ; test_case "assignee rows capped" `Quick test_assignee_rows_capped
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line ] )
@@ -440,6 +568,8 @@ let () =
       , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )
     ; ( "render_body"
       , [ test_case "budget" `Quick test_render_metrics_body_budget
+        ; test_case "reports the row it could draw" `Quick
+            test_metrics_reports_the_row_it_could_draw
         ; test_case "compact metrics preserve source labels" `Quick test_compact_metrics_preserve_source_labels
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )

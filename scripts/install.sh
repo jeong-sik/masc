@@ -1044,7 +1044,7 @@ uninstall_masc() {
   if [ "$PURGE_DATA" -eq 1 ] && [ "$BASE_PATH_EXPLICIT" -ne 1 ]; then
     die "--purge-data requires an explicit --base-path"
   fi
-  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name record
+  local uninstall_prefix="$PREFIX" uninstall_base="$BASE_PATH" target name record recorded_base
   case "$uninstall_prefix" in '~') uninstall_prefix="$HOME" ;; '~/'*) uninstall_prefix="$HOME/${uninstall_prefix#\~/}" ;; esac
   case "$uninstall_base" in '~') uninstall_base="$HOME" ;; '~/'*) uninstall_base="$HOME/${uninstall_base#\~/}" ;; esac
   case "$uninstall_prefix" in /*) ;; *) uninstall_prefix="$PWD/$uninstall_prefix" ;; esac
@@ -1065,8 +1065,16 @@ uninstall_masc() {
     # Leaving the record behind after purging the workspace it names would
     # point the next install at a directory that is gone.
     record="${XDG_CONFIG_HOME:-$HOME/.config}/masc/default-base-path"
-    if [ -f "$record" ] && [ "$(head -n 1 "$record" 2>/dev/null)" = "$uninstall_base" ]; then
-      targets+=("$record")
+    if [ -f "$record" ]; then
+      # Compare existing directory identities too: init records the canonical
+      # path, while purge may name the same workspace through a symlink or ./.
+      if recorded_base=$(head -n 1 "$record" 2>/dev/null); then
+        if [ "$recorded_base" = "$uninstall_base" ] || [ "$recorded_base" -ef "$uninstall_base" ]; then
+          targets+=("$record")
+        fi
+      else
+        log "default workspace record could not be read; leaving it in place: $record"
+      fi
     fi
   fi
   log "stop running MASC servers and TUI sessions before uninstalling; no processes will be killed"
@@ -1617,20 +1625,11 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
   MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
-  # An upgrade keeps the operator's config as it is, files it removed
-  # included, and only installs builtin Skill packages that are missing;
-  # --reset-config is the one way to seed the whole config tree again.
+  # Package publication waits until the binary/dashboard transaction commits.
+  # Config seeding is needed by the wizard before that boundary.
   if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$RESET_CONFIG" -eq 0 ]; then
     CONFIG_PREEXISTING=1
-    log "preserving existing config at $CONFIG_DIR; installing missing builtin Skills"
-    if [ "$DRY_RUN" -eq 1 ]; then
-      log "[dry-run] would install builtin Skills from the binary"
-    else
-      if ! init_summary="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1 | tail -1)"; then
-        die "builtin Skill seed failed: $init_summary"
-      fi
-      log "$init_summary"
-    fi
+    log "preserving existing config at $CONFIG_DIR; builtin Skills refresh after bundle commit"
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
   else
@@ -1645,12 +1644,12 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     # --record-default: this is the operator's workspace, so later commands
     # should find it without being told again. `masc init` does not record by
     # default, because a throwaway workspace must not become the machine's.
-    init_args=(init --base-path "$BASE_PATH" --record-default)
+    init_args=(init --config-only --base-path "$BASE_PATH" --record-default)
     [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
-    if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
-      die "config seed failed ($DEST ${init_args[*]}): $init_summary"
+    if ! init_output="$("$DEST" "${init_args[@]}" 2>&1)"; then
+      die "config seed failed ($DEST ${init_args[*]}): $init_output"
     fi
-    log "$init_summary"
+    log "$init_output"
     [ -e "$RUNTIME_FILE" ] || die "config seed produced no $RUNTIME_FILE"
   fi
 fi
@@ -1793,6 +1792,16 @@ fi
 
 python3 "$BUNDLE_HELPER" commit --prefix "$PREFIX"
 BUNDLE_TRANSACTION_ACTIVE=0
+# --- committed builtin Skill refresh ----------------------------------------
+# A later package error must not restore an older executable underneath newer
+# instructions. The complete previous package remains in its own backup.
+if [ "$SEED_CONFIG" -eq 1 ]; then
+  if ! init_output="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1)"; then
+    die "binary/dashboard committed; builtin Skill refresh failed: $init_output"
+  fi
+  log "$init_output"
+fi
+# --- end committed builtin Skill refresh ------------------------------------
 configure_shell_path
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but

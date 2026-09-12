@@ -575,6 +575,28 @@ let test_no_row_of_a_drawing_loop_walks_a_list () =
   Alcotest.(check int) "and none walks one unguarded either" 0
     (inside_for "List.nth")
 
+(* Both strips that a reader walks -- the surface strip across the top and the
+   keeper detail tabs -- mark where they are with one value. The mark is style
+   plus a glyph, and style is the half that does not survive: a monochrome
+   terminal, a terminal that drops underline, and every text capture keep the
+   glyph and lose the bold. So the glyph is the answer, and it has to come from
+   the shared binding rather than a literal spelled twice.
+
+   Asserted here because the screen this draws has no other gate: the frame is
+   pinned in test/test_tui_keyboard_input.py, which is Python, and no CI path
+   runs Python. Re-inlining the literal in either strip typechecks and draws
+   the same thing today, then drifts the first time one of them changes. *)
+let test_both_strips_mark_where_they_are_from_one_value () =
+  let mark binding module_path =
+    Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
+      ~binding_name:binding ~callees:[]
+      ~identifiers:[ "Masc_tui_theme.Glyph.current_entry" ]
+  in
+  Alcotest.(check bool) "the keeper detail tabs mark the tab they are on" true
+    (mark "keeper_detail_pane" render > 0);
+  Alcotest.(check bool) "the surface strip reads the same mark" true
+    (mark "surface_strip" "bin/masc_tui_render_prim.ml" > 0)
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -623,5 +645,7 @@ let () =
             `Quick test_the_window_is_measured_where_the_cursor_lands
         ; Alcotest.test_case "no row of a drawing loop walks a list" `Quick
             test_no_row_of_a_drawing_loop_walks_a_list
+        ; Alcotest.test_case "both strips mark where they are from one value"
+            `Quick test_both_strips_mark_where_they_are_from_one_value
         ] )
     ]

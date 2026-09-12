@@ -18490,8 +18490,14 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
+                 (* Saturating, like every other clamped scroll: the frame
+                    reports the row it drew and until it has, the stored value
+                    may be a row past the end. *)
                  state.metrics_scroll <-
-                   max 0 (state.metrics_scroll + (direction * page))
+                   (if direction > 0 then
+                      Masc_tui_types.scroll_down_from state.metrics_scroll
+                        ~by:page
+                    else max 0 (state.metrics_scroll + (direction * page)))
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
@@ -19419,7 +19425,9 @@ and is loaded on demand through keeper_skill.
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | Metrics -> state.metrics_scroll <- state.metrics_scroll + 1
+            | Metrics ->
+                state.metrics_scroll <-
+                  Masc_tui_types.scroll_down_from state.metrics_scroll ~by:1
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then
                   state.system_logs_detail_scroll <-

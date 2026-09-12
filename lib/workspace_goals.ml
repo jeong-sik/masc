@@ -337,6 +337,20 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created"
             | `updated -> "updated"
           in
+          (* A goal's creation emitted nothing, so goals.json -- which holds only
+             the current set -- was the only record that one ever existed. A goal
+             that finished and left the set left nothing behind to count or to
+             name, which is why "how many goals were opened" and "what were they"
+             had no answer (#35359). Phase transitions already emit; this closes
+             the other end of the same ledger. The payload is the goal as created
+             so its title outlives its row in the store. An update emits nothing:
+             the question is when a goal began, and a later edit is not a second
+             beginning. *)
+          (match action with
+           | `created ->
+             emit_goal_event ctx ~goal_id:goal.id ~event_type:"goal_created"
+               ~payload:(Goal_store.goal_to_yojson goal)
+           | `updated -> ());
           ok_result
             ~tool_name
             ~start_time

@@ -408,6 +408,7 @@ let install () =
           ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~native_tools
           ~dispatch
+          ~context:(Agent_core.Context.create ())
           ~output_contract:Keeper_turn_driver.Tool_verdict
           ~on_runtime_attempt_error
           ?sw

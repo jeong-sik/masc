@@ -602,7 +602,10 @@ let surface_strip (state : state) ~cols =
     in
     if i = active then
       Buffer.add_string parts
-        (Ansi.bold ^ (if is_alert then Theme.warn () else Theme.info ()) ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+        (Ansi.bold
+        ^ (if is_alert then Theme.warn () else Theme.info ())
+        ^ Masc_tui_theme.Glyph.current_entry
+        ^ label i ^ Ansi.reset)
     else if is_alert then
       Buffer.add_string parts
         (Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset)
@@ -983,8 +986,8 @@ type chrome_body = {
   push_empty : unit -> unit;
 }
 
-let surface_chrome (state : state) ~terminal_rows ~cols ~surface_key ~title
-    ~hints ~(body : budget:int -> chrome_body -> unit) =
+let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
+    ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
@@ -1020,7 +1023,12 @@ let surface_chrome (state : state) ~terminal_rows ~cols ~surface_key ~title
   done;
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
-  finish_surface state ~surface_key ~rows:terminal_rows ~cols buf
+  (* Read after the body, because that is the only moment the value exists:
+     a surface whose rows the drawing counts cannot say what it clamped to
+     before it has drawn. A thunk rather than a value for the same reason. *)
+  finish_surface state
+    ?clamped:(match clamped with None -> None | Some read -> read ())
+    ~surface_key ~rows:terminal_rows ~cols buf
 
 
 let connection_status_badge (status : Masc_tui_types.connection_status) =

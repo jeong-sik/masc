@@ -150,6 +150,7 @@ type chrome_body = {
 }
 
 val surface_chrome :
+  ?clamped:(unit -> Masc_tui_types.clamped_scroll option) ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   cols:int ->
@@ -158,6 +159,8 @@ val surface_chrome :
   hints:string ->
   body:(budget:int -> chrome_body -> unit) ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** [clamped] is read after the body has drawn, which is the only moment a
+    surface whose rows the drawing counts can say what it clamped to. *)
 
 val connection_badge : Masc_tui_types.state -> string
 

@@ -198,8 +198,7 @@ let test_partial_input_recovers_and_replacement_keeps_exact_coordinates () =
   let produce ~binding =
     let replacing = member "value" binding = `String "replacement" in
     let history, value = if replacing then "history-b", "2" else "history-a", "7" in
-    { output with
-      rows = List.map (fun (row : Types.row) ->
+    { Types.rows = List.map (fun (row : Types.row) ->
         {row with clock=Some {domain="frame/" ^ history; value}}) output.rows;
       coverage = [{source_id="fixture";incarnation=history;cursor=Some value;
         complete=not !partial;detail=(if !partial then Some "fixture input incomplete" else None)}] }

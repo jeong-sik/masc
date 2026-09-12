@@ -23,7 +23,9 @@
 #
 # Exit status is 0 only when every binary stays at or below the floor. A
 # binary with no dynamic glibc references at all (a static musl build, such as
-# masc-exec-shim) passes: it has no floor to exceed.
+# masc-exec-shim) passes: it has no floor to exceed. A file objdump cannot read
+# fails — it is not a measurement, and this runs on packaged assets where a
+# wrong file is one of the things being looked for.
 #
 # Requires `objdump` (binutils). Reads only; never modifies the binaries.
 set -euo pipefail
@@ -36,13 +38,15 @@ fi
 floor="$1"
 shift
 
-case "$floor" in
-  [0-9]*.[0-9]*) ;;
-  *)
-    echo "check-glibc-floor: floor must look like 2.35, got '$floor'" >&2
-    exit 2
-    ;;
-esac
+# Dot-separated numbers and nothing else. The glob this replaced accepted
+# "2..35", because `*` matches any text, and GNU sort -V then places
+# GLIBC_2..35 *after* GLIBC_2.38 (measured, coreutils 9.x): a typo in --floor
+# would have made every binary meet it. The one caller that can carry a typo
+# is build-linux-release.sh's --floor, which passes its value straight here.
+if ! [[ "$floor" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+  echo "check-glibc-floor: floor must look like 2.35, got '$floor'" >&2
+  exit 2
+fi
 
 if ! command -v objdump >/dev/null 2>&1; then
   # Refusing is the point: a missing objdump must not read as "nothing above
@@ -55,18 +59,25 @@ fi
 floor_tag="GLIBC_${floor}"
 status=0
 
-# Highest GLIBC_x.y referenced by $1, or the empty string when the binary
-# references none. `sort -V` orders 2.9 below 2.10, which a lexical sort does
-# not — that difference decides this check for every floor past 2.9.
+# Every GLIBC_x.y referenced in the symbol table $1, one per line, oldest
+# first. `sort -V` orders 2.9 below 2.10, which a lexical sort does not — that
+# difference decides this check for every floor past 2.9.
 #
 # The trailing `|| true` is load-bearing: a static binary matches nothing, grep
 # exits 1, and under `pipefail` that would abort the whole script rather than
 # report the pass that no references actually means.
-max_glibc_ref() {
-  objdump -T "$1" 2>/dev/null \
-    | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' \
-    | sort -u -V \
-    | tail -1 || true
+glibc_refs() {
+  printf '%s\n' "$1" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -u -V || true
+}
+
+# True when the tag $1 is strictly above the floor. Both tags share the GLIBC_
+# prefix, so version-sorting the pair puts the newer one last; equal to the
+# floor is allowed. The verdict and the symbol listing both ask through here,
+# so there is one answer to "is this above the floor" instead of two that
+# disagree — the arithmetic this replaced read only two components, so it
+# called GLIBC_2.38.1 equal to GLIBC_2.38.
+above_floor() {
+  [ "$(printf '%s\n%s\n' "$1" "$floor_tag" | sort -V | tail -1)" != "$floor_tag" ]
 }
 
 for binary in "$@"; do
@@ -76,16 +87,29 @@ for binary in "$@"; do
     continue
   fi
 
-  highest="$(max_glibc_ref "$binary")"
+  # objdump's exit status is kept rather than discarded. "This binary has no
+  # glibc references" and "objdump could not read this file" both come out as
+  # an empty symbol list, and the first of those is a pass — so a truncated
+  # file, a file built for another architecture, or anything that is not an ELF
+  # would be reported as a static binary and shipped. Refusing a missing
+  # objdump above while accepting an unreadable file here is the same hole
+  # twice, and packaging is exactly where a wrong file arrives.
+  if ! table="$(objdump -T "$binary" 2>&1)"; then
+    echo "check-glibc-floor: objdump could not read $binary" >&2
+    printf '%s\n' "$table" | sed 's/^/       /' >&2
+    status=1
+    continue
+  fi
+
+  refs="$(glibc_refs "$table")"
+  highest="$(printf '%s\n' "$refs" | tail -1)"
 
   if [ -z "$highest" ]; then
     echo "ok   $binary — no dynamic glibc references (static)"
     continue
   fi
 
-  # Both tags share the GLIBC_ prefix, so version-sorting the pair puts the
-  # newer one last. Equal to the floor is allowed; above it is not.
-  if [ "$(printf '%s\n%s\n' "$highest" "$floor_tag" | sort -V | tail -1)" = "$floor_tag" ]; then
+  if ! above_floor "$highest"; then
     echo "ok   $binary — needs at most $highest (floor $floor_tag)"
     continue
   fi
@@ -93,9 +117,15 @@ for binary in "$@"; do
   echo "FAIL $binary — needs $highest, above the floor $floor_tag" >&2
   # Name the symbols. Without them the next reader has to rediscover that the
   # cause is two stray references and not a deliberate dependency.
-  objdump -T "$binary" 2>/dev/null \
-    | grep -E 'GLIBC_[0-9]+(\.[0-9]+)+' \
-    | awk -v floor="$floor_tag" '
+  above="$(printf '%s\n' "$refs" | while IFS= read -r ref; do
+    if [ -n "$ref" ] && above_floor "$ref"; then printf '%s\n' "$ref"; fi
+  done)"
+  printf '%s\n' "$table" \
+    | awk -v above="$above" '
+        BEGIN {
+          count = split(above, listed, "\n")
+          for (i = 1; i <= count; i++) if (listed[i] != "") wanted[listed[i]] = 1
+        }
         {
           ver = ""; sym = ""
           for (i = 1; i <= NF; i++) {
@@ -106,11 +136,7 @@ for binary in "$@"; do
             if (field ~ /^GLIBC_[0-9]/) { ver = field; sym = $(i + 1); break }
           }
         }
-        ver != "" && ver != floor {
-          split(substr(ver, 7), a, ".")
-          split(substr(floor, 7), b, ".")
-          if (a[1] > b[1] || (a[1] == b[1] && a[2] > b[2])) print "       " ver "  " sym
-        }
+        ver in wanted { print "       " ver "  " sym }
       ' \
     | sort -u >&2 || true
   status=1

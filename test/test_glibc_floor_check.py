@@ -50,13 +50,18 @@ class GlibcFloorCheckTest(unittest.TestCase):
         self.binary = self.root / 'masc'
         self.binary.write_bytes(b'\x7fELF not really')
 
-    def stub_objdump(self, output: str, *, present: bool = True) -> dict[str, str]:
+    def stub_objdump(self, output: str, *, present: bool = True,
+                     exit_code: int = 0, stderr: str = '') -> dict[str, str]:
         """A PATH holding only our objdump, so the real one cannot answer."""
         bin_dir = self.root / 'stub-bin'
         bin_dir.mkdir(exist_ok=True)
         if present:
             stub = bin_dir / 'objdump'
-            stub.write_text('#!/bin/sh\ncat <<"OUT"\n' + output + 'OUT\n')
+            script = ['#!/bin/sh', 'cat <<"OUT"', output + 'OUT']
+            if stderr:
+                script.append('cat >&2 <<"ERR"\n' + stderr + 'ERR')
+            script.append(f'exit {exit_code}')
+            stub.write_text('\n'.join(script) + '\n')
             stub.chmod(0o755)
         env = dict(os.environ)
         # Keep a real PATH for the shell's own utilities (grep, sort, awk) but
@@ -140,6 +145,56 @@ class GlibcFloorCheckTest(unittest.TestCase):
         result = self.run_check('2.35', str(self.root / 'absent'), env=env)
         self.assertEqual(result.returncode, 1)
         self.assertIn('no such file', result.stderr)
+
+    def test_a_file_objdump_cannot_read_is_a_failure_not_a_static_pass(self):
+        # objdump exits 1 on a truncated, foreign-architecture or non-ELF file
+        # (measured: binutils/llvm objdump -T on a text file). Discarding that
+        # status left an empty symbol list, which this script reads as "static,
+        # nothing to exceed" -- so a wrong file would have passed the gate that
+        # exists to keep wrong files out of a release.
+        env = self.stub_objdump(
+            '', exit_code=1,
+            stderr="objdump: 'masc': file format not recognized\n")
+        result = self.run_check('2.35', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('objdump could not read', result.stderr)
+        self.assertIn('file format not recognized', result.stderr)
+        self.assertNotIn('no dynamic glibc references', result.stdout)
+
+    def test_one_unreadable_binary_does_not_stop_the_others(self):
+        second = self.root / 'masc-tui'
+        second.write_bytes(b'\x7fELF not really')
+        env = self.stub_objdump('', exit_code=1, stderr='broken\n')
+        result = self.run_check('2.35', str(self.binary), str(second), env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(str(self.binary), result.stderr)
+        self.assertIn(str(second), result.stderr)
+
+    def test_a_third_version_component_above_the_floor_is_named(self):
+        # The verdict compares with sort -V, which reads all three components.
+        # A second comparison written in awk read only two and called
+        # GLIBC_2.38.1 equal to the floor, so the failure named no symbol at
+        # all -- a FAIL nobody could act on.
+        env = self.stub_objdump(objdump_output(('GLIBC_2.38.1', 'fmod')))
+        result = self.run_check('2.38', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('needs GLIBC_2.38.1', result.stderr)
+        self.assertIn('fmod', result.stderr)
+
+    def test_a_malformed_floor_is_refused_before_anything_is_compared(self):
+        # sort -V places GLIBC_2..35 after GLIBC_2.38 (measured, GNU coreutils
+        # 9.x), so a floor with a doubled dot would have passed every binary.
+        # build-linux-release.sh --floor reaches the check unchanged.
+        env = self.stub_objdump(objdump_output(('GLIBC_2.38', 'fmod')))
+        result = self.run_check('2..35', env=env)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('floor must look like', result.stderr)
+
+    def test_a_floor_with_no_minor_version_is_refused(self):
+        env = self.stub_objdump(objdump_output(('GLIBC_2.38', 'fmod')))
+        result = self.run_check('2', env=env)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('floor must look like', result.stderr)
 
     def test_a_floor_that_is_not_a_version_is_refused(self):
         env = self.stub_objdump(objdump_output(('GLIBC_2.34', 'memcpy')))

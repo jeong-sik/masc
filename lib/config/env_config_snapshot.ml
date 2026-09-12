@@ -119,7 +119,7 @@ let storage_entries =
 let transport_entries =
   [
     entry ~default:"8936" "MASC_GRPC_PORT" "gRPC server port";
-    entry ~default:"true" "MASC_GRPC_ENABLED" "Enable gRPC transport";
+    entry ~default:"false" "MASC_GRPC_ENABLED" "Enable gRPC transport";
     entry ~default:"(derived)" "MASC_GRPC_TARGET" "gRPC client target address";
     entry ~default:"48" "MASC_GRPC_STREAM_MAX_BUFFER"
       "Per-subscriber outbound buffer drop threshold.  When the stream has \

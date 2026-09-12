@@ -1,0 +1,120 @@
+{
+  "schema": "fusion-consumption-audit.v1",
+  "run_id": "kmsg-f381606a185bf86825c3f99ffd36e185",
+  "captured_at": "2026-09-12T13:39:43.420948+00:00",
+  "scope": "Read-only durable evidence; no live/model/tool invocation. All writes are under this /tmp audit directory.",
+  "registry": [
+    {
+      "event": "register",
+      "id": "kmsg-f381606a185bf86825c3f99ffd36e185",
+      "started_at": 1789218558.891315,
+      "registration": {
+        "keeper": "exhibit-editor",
+        "preset": "collaboration",
+        "topology": "simple"
+      }
+    },
+    {
+      "event": "complete",
+      "id": "kmsg-f381606a185bf86825c3f99ffd36e185",
+      "completion": {
+        "result": {
+          "outcome": "succeeded",
+          "decision": "answer — 가장 균형 있는 조합은 C(무음 자막 MP4) 주 방식 + B의 선택 투표를 무음 토큰/패널 방식으로 재설계한 보조 활...",
+          "summary": "두 패널은 독립적으로 같은 판정에 수렴한다. (1) 조합: '무음'을 문자 그대로 적용하면 초보적 선택 B 주+C 보는 성립하지 않는다(발표 채널 위반). 가장 균형 있는 조합은 C(무음 자..."
+        },
+        "finished_at": 1789218873.258176
+      }
+    }
+  ],
+  "board": {
+    "post_id": "p-c0bb49d30e7a617ea6596d100e845215",
+    "origin": {
+      "turn_ref": "trace-1789042595401-00001#408",
+      "source": "fusion",
+      "fusion_run_id": "kmsg-f381606a185bf86825c3f99ffd36e185"
+    },
+    "visibility": "unlisted",
+    "created_at": 1789218873.245684,
+    "expires_at": 1789823673.245669,
+    "full_evidence": {
+      "path": "deliberation.redacted.json",
+      "sha256": "22393a4edb4c95a3522dcf61d7e8c11e4e4ea02c4118193e8369107b9ed19782"
+    }
+  },
+  "source_context": {
+    "keeper": "exhibit-editor",
+    "turn_ref": "trace-1789042595401-00001#408",
+    "task": null,
+    "goals": [],
+    "question": "초등 고학년(11~12세)과 보호자가 함께 참여하는 전시장 체험 프로그램에서, 승인된 세 편 연작 소설(주제 '같은 것, 다른 기억', 핵심 갈등 '기억을 지키는 선택 vs 다른 사람의 선택 존중', 열린 결말 유지)을 관객 참여형으로 적응하려 합니다. 세 후보(낭독+질문카드 / PPTX 발표+선택 투표 / 무음 자막 MP4 반복 재생) 중 주 방식과 보조 방식을 골라야 합니다. 두 가지 접근성 시나리오(긴 글을 읽기 어려운 관람객, 소리를 낼 수 없는 전시 환경)를 동시에 고려할 때, 어느 조합이 가장 균형 있고 어떤 접근성 희생이 남는지, 그리고 '선택 투표가 다수결로 오해되는' 위험을 줄기 위한 구체적 장치를 제안해 주세요. 각 답변은 자신이 어떤 관점(예: 아동 발달, 전시 기획, 접근성 설계)에서 말하는지 밝혀 주세요.",
+    "decision_context": "전시 출판물 편집자의 적응 결정: 가상 전시 《기억의 정원》(은빛정류장 전시실, 초등 고학년+보호자 대상)의 승인된 연작 소설 세 편을 관객 참여형으로 옮긴다. 후보 A 낭독+질문카드(소인원·진행자 의존), B 진행자 발표+관객 선택 투표 PPTX(중인원·장비 의존), C 자동재생 무음 MP4(진행자 불필요·자막 중심). 초보적 선택은 B 주+C 보. 상충: 빠른 설명↔독자 선택권, 시청각 접근성↔표현 밀도(글 읽기 어려운 관객 vs 소리 없는 환경이 요구가 반대), 인과 보존↔압축(세 편 인과를 장면 3개로 압축 시 3편 규칙 문구 소실 위험). 원칙: 정답 제시 금지(원작 '결말은 읽는 사람의 몫'), 허구 고지 필수, 미검증 사용자 조사 주장 금지."
+  },
+  "panel_outcomes": [
+    {
+      "model": "glm-coding.glm-5.3",
+      "status": "answered",
+      "input_tokens": 715,
+      "output_tokens": 10466,
+      "answer_sha256": "743380cc1cce04deb0159ff4fc7c22bd41069baecb2a9595a40a9062617b0093",
+      "answer_bytes": 6410
+    },
+    {
+      "model": "codex_subscription.gpt-5.6-sol",
+      "status": "answered",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "answer_sha256": "74fae54a7b1033f8c34690b6385e67dc23762c723284155ac375d5dd3b68cb4c",
+      "answer_bytes": 3558
+    }
+  ],
+  "judge": {
+    "status": "synthesized",
+    "decision": "answer — 가장 균형 있는 조합은 C(무음 자막 MP4) 주 방식 + B의 선택 투표를 무음 토큰/패널 방식으로 재설계한 보조 활동(A의 질문카드는 짧은 문장·그림형으로 부분 차용, A 낭독 자체는 조건부)이다. 초보적 선택 B 주+C 보는 무음 제약 하에서 발표 채널 위반으로 성립하지 않는다. 남는 희생은 전맹·저시각 배제, 중증 읽기 곤란 관람객의 불리, 아동-보호자 구두 대화 억제이며, 트레이드오프는 해소가 아니라 이동이다. 다수결 오해 방지를 위해 '투표' 명칭 삭제, 사적 기록 선후 공개, 집계·순위·승자 표시 금지, '아직 모르겠다' 슬롯, 진행자 금지어, 보호자 안내, '선택은 결말을 정하지 않음' 명시, 결말 분기 금지를 적용하라. 단, '무음'의 운영 정의 확인 전까지 최종 확정은 보류하고 발화 가능 시간대가 확인되면 B 주+C 보로 전환 가능하다.",
+    "observed_actor": {
+      "phase": "judge",
+      "actor": "single (glm-coding.glm-5.3)",
+      "judge_role": "single"
+    }
+  },
+  "tool_trace": {
+    "status": "partial",
+    "observed_actors": [
+      {
+        "phase": "panel",
+        "actor": "glm-coding.glm-5.3"
+      },
+      {
+        "phase": "judge",
+        "actor": "single (glm-coding.glm-5.3)",
+        "judge_role": "single"
+      }
+    ],
+    "dropped_events": 0,
+    "gaps": [
+      {
+        "phase": "panel",
+        "actor": "codex_subscription.gpt-5.6-sol",
+        "reason": "official_client_uninstrumented"
+      }
+    ],
+    "events": []
+  },
+  "delivery_ack": {
+    "path": "delivery-ack.redacted.json",
+    "sha256": "d0e48ed70f997ef98d6d05ed23b94cffc8c087b33516ad09c8689b4b3fcf7c96"
+  },
+  "consumption": {
+    "path": "consumption-edits.redacted.json",
+    "sha256": "8bcc97a6c502ad7f258ed9c6c9b6ce47ce0a0cc117beacff65e57aa26ff8485f"
+  },
+  "findings": [
+    "Fusion completed with two answered panels (GLM, Codex) and GLM synthesized judge; this is not verdict_insufficient or three panelists.",
+    "Exact result and correct board ID were delivered in fusion_completed source and terminally acknowledged at 1789219046.587685.",
+    "Editor turn 411 used mistyped post ID p-c0bb49d30e7a617ea654d100e845215 instead of actual p-c0bb49d30e7a617ea6596d100e845215. NotFound tool prose said deleted or expired; actual post exists and expires seven days after creation.",
+    "Turn 411 successfully edited decision.md three times. It recorded panel 3/3/verdict_insufficient, claimed TTL loss, and attributed an A+C recommendation; the source instead recommends C main plus B silent-choice support and conditional A. This is inaccurate consumption despite successful delivery and file effects.",
+    "Subsequent turn 414 review.md repeats those inaccurate attribution claims.",
+    "source_context task is null and goals is empty; question/decision_context explicitly describe the adaptation decision, and origin joins originating turn 408.",
+    "Codex panel answer is durably preserved but its tool trace is explicitly official_client_uninstrumented and usage fields are zero; no native tool trace completeness or zero-cost claim."
+  ]
+}

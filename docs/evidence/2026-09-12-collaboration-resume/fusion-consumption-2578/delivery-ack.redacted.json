@@ -1,0 +1,51 @@
+{
+  "schema": "keeper.reaction_ledger.v7",
+  "record_kind": "reaction",
+  "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:111:76d79ea0a703589e822065f2571cf87d8312d58100263670a4178860ca8d9832:source:0",
+  "keeper_name": "exhibit-editor",
+  "recorded_at_unix": 1789219046.587685,
+  "stimulus_id": "stimulus:065e7f773492b21b4df80351ed32188c253ec34ad8fc39b316f063a302ed6500",
+  "reaction": {
+    "kind": "event_queue_ack",
+    "source": "keeper_event_queue_transition",
+    "post_id": "fusion-run:kmsg-f381606a185bf86825c3f99ffd36e185",
+    "stimulus_kind": "fusion_completed",
+    "source_index": 0,
+    "source_count": 1,
+    "transition_source": {
+      "stimulus_id": "stimulus:065e7f773492b21b4df80351ed32188c253ec34ad8fc39b316f063a302ed6500",
+      "post_id": "fusion-run:kmsg-f381606a185bf86825c3f99ffd36e185",
+      "stimulus_kind": "fusion_completed"
+    },
+    "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:111:76d79ea0a703589e822065f2571cf87d8312d58100263670a4178860ca8d9832",
+    "transition_receipt": {
+      "transition_id": "pending-source-terminal-ack:turn-attempt-terminal:111:76d79ea0a703589e822065f2571cf87d8312d58100263670a4178860ca8d9832",
+      "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:111:76d79ea0a703589e822065f2571cf87d8312d58100263670a4178860ca8d9832",
+      "applied_at_unix": 1789219046.587685,
+      "transition": {
+        "kind": "ack_source_terminal",
+        "source": {
+          "post_id": "fusion-run:kmsg-f381606a185bf86825c3f99ffd36e185",
+          "urgency": "normal",
+          "arrived_at_unix": 1789218873.258804,
+          "payload": {
+            "kind": "fusion_completed",
+            "run_id": "kmsg-f381606a185bf86825c3f99ffd36e185",
+            "terminal": {
+              "kind": "succeeded",
+              "message": "두 패널은 독립적으로 같은 판정에 수렴한다. (1) 조합: '무음'을 문자 그대로 적용하면 초보적 선택 B 주+C 보는 성립하지 않는다(발표 채널 위반). 가장 균형 있는 조합은 C(무음 자막 MP4)를 주 방식으로 두되 자막은 장면당 짧게 하고 세 편의 규칙 문구·인과는 고정 패널(또는 편당 '사건–선택–남은 질문')로 보존하며, B는 '선택 표시' 구조만 인쇄 패널+토큰·카드 방식으로 무음 재설계해 보조로 두고, A는 소리 가능 시간대·공간 확보 시에만 조건부 운영하는 것이다(A의 질문카드 자산은 짧은 문장·그림형으로 부분 차용 가능하다). (2) 남는 희생: 전맹·저시각 관람객의 잔여 배제, 보호자 부재·중증 읽기 곤란 관람객의 이해 깊이 손실, 규칙 문구 보존과 글 부담의 트레이드오프 이동, 아동-보호자 구두 대화 억제, 무음 영상의 주의 경쟁. (3) 다수결 오해 방지 장치: '투표' 명칭 삭제('기억 꽂기' 등), 타인 결과 관람 전 사적 기록 선행(사유 쓰기/그리기 포함), 득표수·순위·승자 표시 금지 및 이유 병렬 전시(또는 완전 비공개 기록), '아직 모르겠다' 열린 슬롯, 진행자 금지어 목록, 보호자용 한 줄 안내, 아동·보호자 개별 선택, '이 선택은 결말을 정하지 않는다'는 종료 명시, 투표 결과에 의한 결말 분기 금지. (4) 전제 조건: '무음'의 정의(증폭만 금지인지 전면 발화 금지인지) 확인 전까지 최종 확정하지 말 것. 발화 가능 시간대가 존재하면 B 주+C 보가 조건부로 부활하며, 그 경우 다수결 방지 장치는 오히려 더 강하게 적용해야 한다. 자막 밀도 등 세부 기준은 파일럿 관찰로 조정해야 하며(미검증 사용자 조사 주장 금지 원칙 준수), 허구 고지는 모든 매체에 상시 표기한다."
+            },
+            "board_post_id": "p-c0bb49d30e7a617ea6596d100e845215",
+            "channel": {
+              "kind": "unrouted",
+              "reason": "no originating connector"
+            }
+          }
+        },
+        "source_incarnation": 111,
+        "operator_operation_id": "turn-attempt-terminal:111:76d79ea0a703589e822065f2571cf87d8312d58100263670a4178860ca8d9832",
+        "source_receipt_kind": "turn_completed"
+      }
+    }
+  }
+}

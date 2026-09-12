@@ -1,5 +1,8 @@
-(** Voice_config — voice (TTS / STT / session) configuration
-    loaded from \[<masc_dir>/voice_config.json\].
+(** Voice_config — voice (TTS / STT / session) configuration.
+
+    The source is the [\[voice\]] section of runtime.toml.  A standalone
+    \[<masc_dir>/voice_config.json\] is read only when that section is
+    absent: {!load_detailed} prefers the TOML and falls back to the JSON.
 
     Persistent file shape: nested record with [tts] / [stt] /
     [session] / [local_playback] sections.  Each section carries
@@ -17,6 +20,8 @@ type endpoint_kind =
   | Openai_compat
   | Elevenlabs_direct
   | Voice_mcp
+  | Macos_say
+  | Whisper_cli
 
 val string_of_endpoint_kind : endpoint_kind -> string
 (** [string_of_endpoint_kind k] returns the canonical lowercase
@@ -35,6 +40,7 @@ type endpoint = {
   enabled : bool;
   timeout_seconds : float option;
   default_voice : string option;
+  command : string option;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the
@@ -233,6 +239,16 @@ type load_error =
           parsed; the string names the source and the reason.
           Callers must surface this to the operator instead of
           substituting defaults. *)
+
+val parse_runtime_toml_text : string -> (t option, string) result
+(** Parse the [\[voice\]] section out of runtime.toml source text.  [Ok None]
+    when the section is absent, [Error] when the text does not parse as TOML or
+    the section is broken.
+
+    Taking text rather than a path lets a writer check its own edit before
+    committing it: the parser that will load the file is the one that answers
+    whether the edit is loadable, so a voice section cannot reach disk in a
+    shape that only fails later, at the first speak or transcribe. *)
 
 val load_detailed : unit -> (t, load_error) result
 (** [load_detailed ()] distinguishes "voice is not configured"

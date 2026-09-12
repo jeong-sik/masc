@@ -477,6 +477,17 @@ let test_comment_id_pattern_mirror () =
     [ "comment_id"; "parent_id" ]
 ;;
 
+(* Constitution article id. [World_constitution_types.Article_id] derives the
+   pattern from its own prefix and length; keeper_constitution_remove.toml
+   hand-copies it. Without this, changing random_bytes leaves the tool schema
+   advertising a shape every mint then fails, with nothing red at build time. *)
+let test_article_id_pattern_mirror () =
+  check (list string)
+    "article_id pattern matches Article_id"
+    [ Masc.World_constitution_types.Article_id.json_schema_pattern ]
+    (declared_patterns_for_schemas (all_schemas ()) ~property:"article_id")
+;;
+
 (* A guard that passes when the thing it guards is empty is not a guard. *)
 let test_owners_are_non_empty () =
   List.iter
@@ -502,6 +513,8 @@ let () =
         ; test_case "board sort order" `Quick test_sort_order_mirror
         ; test_case "board vote direction" `Quick test_vote_direction_mirror
         ; test_case "board comment id pattern" `Quick test_comment_id_pattern_mirror
+        ; test_case "constitution article id pattern" `Quick
+            test_article_id_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "library source enum" `Quick test_library_source_mirrors_its_owner
         ; test_case "runtime tool owners" `Quick test_runtime_tool_owners_match

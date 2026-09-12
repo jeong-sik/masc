@@ -34,6 +34,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
+module Rows = Masc_tui_rows
 
 let acting_pane_reserved_cols = ref 0
 
@@ -1134,8 +1135,9 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
     if state.keeper_cursor < content_height then 0
     else state.keeper_cursor - content_height + 1
   in
+  let keepers_window = Rows.of_list ~first:first ~height:content_height state.keepers in
   for i = 0 to content_height - 1 do
-    match List.nth_opt state.keepers (first + i) with
+    match Rows.at keepers_window (first + i) with
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in

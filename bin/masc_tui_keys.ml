@@ -241,7 +241,9 @@ let for_surface = function
       [ b Navigate "j/k" "move"
         (* The list draws each ask on one row. Enter is where a multi-line
            argument is readable before y answers it. *)
-      ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
+      ; b Act "Enter" "read the whole ask"
+          ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
+                 Home/End reach its ends, [ / ] step asks, Esc goes back"
       ; b Act "y" "confirm"
       ; b Act "n" "deny"
       ; b Act "R" "retry Auto Judge"

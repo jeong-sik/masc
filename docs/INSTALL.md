@@ -33,8 +33,8 @@ Piping the script straight into `bash` leaves the setup questions no terminal to
 read from, so use one of the two forms above.
 
 The rest of this document is reference material: what is installed, how to choose
-a model, how the sandboxes differ, and how to upgrade or uninstall. It describes
-**0.35.14**. Check tag and asset availability on
+a model, how the sandboxes differ, and how to upgrade or uninstall. Check tag
+and asset availability on
 [GitHub Releases](https://github.com/jeong-sik/masc/releases). Multi-selection
 requires 0.35.2 or later.
 
@@ -77,7 +77,7 @@ If startup fails, use the executable path and raw stderr shown by the installer 
 ## Install
 
 The quick start above covers a normal install. Name the workspace directly when
-you do not want to be asked, and pin a release when you need a specific one:
+you do not want to be asked:
 
 ```bash
 curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
@@ -85,8 +85,18 @@ curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh
 bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
-`--version vX.Y.Z` pins a release; without it the installer resolves the latest
-one. Downloading `install.sh` from a specific tag installs that tag's assets.
+To install one specific release instead of the latest one, take that tag's
+installer and pin it:
+
+```bash
+TAG=v0.35.12
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
+  -o /tmp/masc-install.sh
+bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+`install.sh` from a tag installs that tag's assets; without `--version` the
+installer resolves the latest release.
 
 The installer writes `~/.local/bin` into the shell profile, so a new terminal
 finds `masc`. For the terminal you installed from, run

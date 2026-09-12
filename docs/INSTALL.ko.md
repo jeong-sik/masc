@@ -34,10 +34,9 @@ bash /tmp/masc-install.sh
 가지 중 하나를 쓰세요.
 
 나머지는 참고 자료입니다. 무엇이 설치되는지, 모델을 어떻게 고르는지, sandbox가
-어떻게 다른지, 업그레이드와 삭제는 어떻게 하는지를 다룹니다. **0.35.14** 기준이며
-태그와 자산 제공 여부는
-[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 확인하세요.
-다중 선택은 0.35.2부터 지원합니다.
+어떻게 다른지, 업그레이드와 삭제는 어떻게 하는지를 다룹니다. 태그와 자산 제공
+여부는 [GitHub Releases](https://github.com/jeong-sik/masc/releases)에서
+확인하세요. 다중 선택은 0.35.2부터 지원합니다.
 
 ## 플랫폼과 준비물
 
@@ -76,8 +75,8 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 
 ## 설치
 
-위의 빠른 시작이 보통의 설치입니다. 묻는 과정 없이 workspace를 정하거나 특정
-릴리스를 설치하려면 이렇게 하세요.
+위의 빠른 시작이 보통의 설치입니다. 묻는 과정 없이 workspace를 정하려면 이렇게
+하세요.
 
 ```bash
 curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
@@ -85,8 +84,17 @@ curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh
 bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
-`--version vX.Y.Z`로 릴리스를 지정할 수 있고, 지정하지 않으면 설치기가 최신
-릴리스를 찾습니다. 특정 태그에서 받은 `install.sh`는 그 태그의 자산을 설치합니다.
+최신 릴리스가 아니라 특정 릴리스를 설치하려면 그 태그의 설치기를 받아 고정합니다.
+
+```bash
+TAG=v0.35.12
+curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
+  -o /tmp/masc-install.sh
+bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+```
+
+태그에서 받은 `install.sh`는 그 태그의 자산을 설치하고, `--version`이 없으면
+설치기가 최신 릴리스를 찾습니다.
 
 설치기가 `~/.local/bin`을 셸 설정에 적으므로 새 터미널에서는 `masc`가 잡힙니다.
 방금 설치한 터미널에서는 `export PATH="$HOME/.local/bin:$PATH"`를 따로

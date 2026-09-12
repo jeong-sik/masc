@@ -66,7 +66,7 @@ let write ~path changes =
   | Ok (revision, _) ->
     (match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
      | Error error -> Alcotest.fail (Voice_setup.error_message error)
-     | Ok () -> ())
+     | Ok _revision -> ())
 
 let test_what_the_writer_sets_is_what_the_tui_reads () =
   with_workspace (fun ~base ~path ->

@@ -3892,6 +3892,22 @@
 
 
 (rule
+ (alias runtest-test_tui_keyboard_input-voice-wizard)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   voice-wizard)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-voice-wizard)))
+
+(rule
  (alias runtest-test_tui_keyboard_input-code-memo)
  (deps
   test_tui_keyboard_input.py

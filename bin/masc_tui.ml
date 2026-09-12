@@ -15747,12 +15747,13 @@ and is loaded on demand through keeper_skill.
         && ((not state.help_open && not state.keeper_deletions_open))
         && (not state.agenda_open)
         && (not state.context_inspector_open)
-        && (not state.palette_open)
-        && Option.is_none state.runtime_param_edit
-        && Option.is_none state.search
-        && text_input_target state ~compact_viewport <> Some Text_browser_url
-        && text_input_target state ~compact_viewport <> Some Text_ask_answer
-        && not (state.view = Board && state.board_mode = Board_compose)
+        (* Any open field takes the key before the composer does. This was six
+           conditions naming six fields, and the ones added later were not in
+           it: typing an endpoint name containing [i] in the voice wizard put
+           the [i] into a keeper message and sent the rest of the word after
+           it. Asking whether a field is open at all is the same question the
+           six were circling, and it cannot fall behind a new field. *)
+        && Option.is_none (text_input_target state ~compact_viewport)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
         && key <> Some toggle_roster_pane_key

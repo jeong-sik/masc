@@ -56,6 +56,8 @@ let with_fixture ?(produce=(fun ~binding:_ -> output)) ?(allow_stop=ref true)
                 start=(fun ~sw:_ ~instance_id ~package:_ ~on_created ->
                   let connection : Runtime.For_testing.connection = {
                     container_id=Store.digest instance_id;
+                    action_schema = (fun () -> None);
+                    act = (fun ~arguments:_ -> Error "read-only fixture");
                     observe=(fun ~binding ~sources ->
                       Hashtbl.replace received instance_id sources; Ok (produce ~binding));
                     stop=(fun () ->

@@ -25,6 +25,7 @@ val start :
   ?mounts:mount list ->
   ?docker_command:string ->
   ?on_created:(t -> unit) ->
+  ?artifact_store:Lane_addon_store.t ->
   unit -> (t, error) result
 
 val observe :
@@ -45,6 +46,9 @@ val recover_stop :
   mgr:_ Eio.Process.mgr ->
   instance_id:string -> container_id:string option -> max_reply_bytes:int ->
   ?docker_command:string -> unit -> (unit, error) result
+
+val action_schema : t -> Yojson.Safe.t option
+val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result
 
 val container_id : t -> string
 val container_name : t -> string

@@ -10,6 +10,68 @@ let run_voice_status = Voice_bridge_transport.run_voice_status
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
 
+(* One voice as an endpoint names it. The id is what a configuration stores;
+   the name and the language are what let a person pick it. *)
+type catalogue_voice =
+  { voice_id : string
+  ; voice_name : string option
+  ; voice_language : string option
+  }
+
+let catalogue_voice_json voice =
+  `Assoc
+    ([ "id", `String voice.voice_id ]
+     @ (match voice.voice_name with
+        | Some name -> [ "name", `String name ]
+        | None -> [])
+     @
+     match voice.voice_language with
+     | Some language -> [ "language", `String language ]
+     | None -> [])
+;;
+
+(* Parsing what say answers to -v ?, measured 2026-09-12 on macOS 26: 184 lines
+   shaped
+
+     Yuna                     ko_KR    # 안녕하세요. 제 이름은 유나입니다.
+     Eddy (...)               ko_KR    # ...
+     Majed                    ar_001   # ...
+
+   The columns are space-padded, not tabs. The locale is not always two letters
+   and two letters -- ar_001 is in that list -- so it is taken as the last field
+   before the hash rather than matched by shape.
+
+   Everything before the locale is the id, parentheses included: say adds them
+   to names that exist in several languages, and passing the bare name then
+   picks a different language without saying so. *)
+let say_catalogue_of_output output =
+  String.split_on_char '\n' output
+  |> List.filter_map (fun line ->
+       match String.index_opt line '#' with
+       | None -> None
+       | Some hash ->
+         let head = String.trim (String.sub line 0 hash) in
+         let fields = String.split_on_char ' ' head |> List.filter (fun p -> p <> "") in
+         (match List.rev fields with
+          | locale :: (_ :: _ as name_reversed) ->
+            let name = String.concat " " (List.rev name_reversed) in
+            Some
+              { voice_id = name; voice_name = Some name; voice_language = Some locale }
+          (* A line carrying a hash and nothing else names no voice. Dropped
+             rather than offered: a row that cannot be chosen is worse than a
+             shorter list. *)
+          | [ _ ] | [] -> None))
+;;
+
+(* Which voices an endpoint has. Only the kinds that publish a catalogue
+   answer; the rest say why there is nothing to ask, because the reader is
+   about to type the name instead. *)
+let list_voices endpoint =
+  match Voice_bridge_transport.list_voices_via_command endpoint with
+  | Error message -> Error message
+  | Ok output -> Ok (say_catalogue_of_output output)
+;;
+
 let audio_url_of_file audio_file =
   match Filename.chop_suffix_opt ~suffix:".mp3" (Filename.basename audio_file) with
   | Some token when token <> "" ->
@@ -163,6 +225,161 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
   in
   try_endpoint endpoints
 ;;
+
+(* ── endpoint probes ───────────────────────────────────────────────────── *)
+
+(* What one endpoint did when it was asked, in its own words.
+
+   The fallback chains stop at the first endpoint that answers, which is right
+   for serving a request and wrong for answering "is this configuration
+   working". A chain that succeeds says nothing about the endpoints after the
+   one that answered: a dead fallback looks exactly like a healthy one until
+   the first endpoint goes away. A probe asks every endpoint and reports each.
+
+   [try_http_tts_for_dashboard] above is the shape this replaces for
+   diagnostics: it walks the same endpoints, drops every failure reason, and
+   answers Some/None without naming which endpoint answered. Voice was down for
+   six days behind exactly that kind of silence. *)
+type probe_outcome =
+  | Answered of string
+  | Refused of string
+  | Skipped of string
+
+type probe_attempt =
+  { endpoint_id : string
+  ; kind : Voice_config.endpoint_kind
+  ; outcome : probe_outcome
+  }
+
+let probe_outcome_to_string = function
+  | Answered detail -> "answered: " ^ detail
+  | Refused reason -> "refused: " ^ reason
+  | Skipped reason -> "not asked: " ^ reason
+
+let probe_attempt_json attempt =
+  let state, detail =
+    match attempt.outcome with
+    | Answered detail -> "answered", detail
+    | Refused reason -> "refused", reason
+    | Skipped reason -> "skipped", reason
+  in
+  `Assoc
+    [ "endpoint_id", `String attempt.endpoint_id
+    ; "kind", `String (Voice_config.string_of_endpoint_kind attempt.kind)
+    ; "state", `String state
+    ; "detail", `String detail
+    ]
+
+let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
+
+let probe_tts ?(agent_id = "probe") ~message () =
+  match Voice_config.load_detailed () with
+  | Error error -> Error (Voice_config.load_error_to_string error)
+  | Ok config ->
+    (match config.Voice_config.tts with
+     | None -> Error "no [voice.tts] section is configured, so nothing speaks"
+     | Some tts ->
+       Ok
+         (List.map
+            (fun (endpoint : Voice_config.endpoint) ->
+              let outcome =
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else if
+                  not
+                    (Voice_runtime_overlay.transport_supports_http_tts
+                       (Voice_runtime_overlay.adapter_for_endpoint endpoint))
+                then Skipped "this endpoint kind does not synthesize over HTTP"
+                else (
+                  let output_file = make_audio_file () in
+                  (* The voice is resolved per endpoint: an id is provider
+                     vocabulary, so the one that suits this endpoint is the one
+                     to ask it for (#24068). *)
+                  let voice =
+                    Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
+                  in
+                  let result =
+                    speak_via_http_tts_to_file
+                      endpoint
+                      ~agent_id
+                      ~message
+                      ~voice
+                      ~model:tts.Voice_config.default_model
+                      ~output_file
+                  in
+                  remove_quietly output_file;
+                  match result with
+                  | Ok size -> Answered (Printf.sprintf "%d bytes of audio" size)
+                  | Error reason -> Refused reason)
+              in
+              { endpoint_id = endpoint.Voice_config.id
+              ; kind = endpoint.Voice_config.kind
+              ; outcome
+              })
+            tts.Voice_config.endpoints))
+
+let probe_stt ~audio_file () =
+  match Voice_config.load_detailed () with
+  | Error error -> Error (Voice_config.load_error_to_string error)
+  | Ok config ->
+    (match config.Voice_config.stt with
+     | None -> Error "no [voice.stt] section is configured, so nothing transcribes"
+     | Some stt ->
+       Ok
+         (List.map
+            (fun (endpoint : Voice_config.endpoint) ->
+              let outcome =
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else (
+                  match endpoint.Voice_config.kind with
+                  | Voice_config.Voice_mcp ->
+                    Skipped "this endpoint kind does not transcribe"
+                  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+                    (match
+                       transcribe_via_http_stt
+                         endpoint
+                         ~audio_file
+                         ~model:stt.Voice_config.default_model
+                     with
+                     | Ok json ->
+                       let text =
+                         match json with
+                         | `Assoc fields ->
+                           (match List.assoc_opt "text" fields with
+                            | Some (`String text) -> text
+                            | Some _ | None -> "")
+                         | _ -> ""
+                       in
+                       (* An empty transcript is an answer, not a failure: the
+                          endpoint was reached and heard nothing. Saying which
+                          it was keeps a silent microphone apart from a dead
+                          endpoint. *)
+                       (* A transcript is read by a person deciding whether
+                          the endpoint heard them. %S escapes UTF-8 into byte
+                          numbers, which for any language but English is
+                          unreadable -- measured on a Korean utterance. A
+                          transcript also arrives with its own line breaks,
+                          which would break the one-line-per-endpoint report. *)
+                       let spoken =
+                         String.trim
+                           (String.map
+                              (function
+                                | '\n' | '\r' | '\t' -> ' '
+                                | character -> character)
+                              text)
+                       in
+                       Answered
+                         (if String.equal spoken ""
+                          then "reached, and heard nothing in the audio"
+                          else Printf.sprintf "heard %s" spoken)
+                     | Error reason -> Refused reason))
+              in
+              { endpoint_id = endpoint.Voice_config.id
+              ; kind = endpoint.Voice_config.kind
+              ; outcome
+              })
+            stt.Voice_config.endpoints))
 
 let public_config_json () =
   match Voice_config.load_detailed () with
@@ -401,16 +618,32 @@ let attempt_tts_endpoint
   =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   match adapter.transport with
-  | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct ->
+  (* One branch for every way of producing the audio, because everything after
+     it -- playing the file, the dedup record, what gets reported -- is the
+     same. Which of the two ways is used is the endpoint's kind, not a guess. *)
+  | Voice_runtime_overlay.Openai_compat
+  | Voice_runtime_overlay.Elevenlabs_direct
+  | Voice_runtime_overlay.Macos_say ->
     let audio_file = make_audio_file () in
     (match
-       speak_via_http_tts_to_file
-         endpoint
-         ~message
-         ~voice
-         ~model
-         ~agent_id
-         ~output_file:audio_file
+       (match adapter.transport with
+        | Voice_runtime_overlay.Macos_say ->
+          Voice_bridge_transport.speak_via_command_to_file
+            endpoint
+            ~message
+            ~voice
+            ~output_file:audio_file
+        | Voice_runtime_overlay.Openai_compat
+        | Voice_runtime_overlay.Elevenlabs_direct
+        | Voice_runtime_overlay.Voice_mcp
+        | Voice_runtime_overlay.Whisper_cli ->
+          speak_via_http_tts_to_file
+            endpoint
+            ~message
+            ~voice
+            ~model
+            ~agent_id
+            ~output_file:audio_file)
      with
      | Ok file_size ->
        (* run_local_playback now owns the dedup record inside its mutex to
@@ -479,6 +712,14 @@ let attempt_tts_endpoint
        (try Sys.remove audio_file with
         | Sys_error _ -> ());
        Error (`Proven_pre_effect error))
+  (* An endpoint that transcribes is not a fallback for one that speaks: a
+     chain that quietly used it would report success for a turn nobody heard. *)
+  | Voice_runtime_overlay.Whisper_cli ->
+    Error
+      (`Proven_pre_effect
+        (Printf.sprintf
+           "voice config endpoint %s transcribes and does not speak"
+           endpoint.Voice_config.id))
   | Voice_runtime_overlay.Voice_mcp ->
     let args =
       `Assoc

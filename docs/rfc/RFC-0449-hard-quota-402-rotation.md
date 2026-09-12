@@ -26,7 +26,7 @@ implementation_prs: []
 
 ## 1. 배경 (실측)
 
-창: `~/me/.masc/logs` 09-08..09-12 UTC. 출처: `~/me/.masc/evidence/audit-adversarial-20260912/merged.md` L2·L3·L4·B5·B8.
+창: `<base-path>/.masc/logs` 09-08..09-12 UTC. 출처: `<base-path>/.masc/evidence/audit-adversarial-20260912/merged.md` L2·L3·L4·B5·B8.
 
 - **L4.** `pipeline stage failed stage=route error="[route] Payment required: Insufficient Balance"` WARN 1,145줄 (09-08T00:02Z..09-11T15:00Z). decisions.jsonl `api_error_payment_required` 796행. 09-10/11 `turn terminal (non-exhaustion error) — err=Payment required` 는 pr-updater 21, analyst 16, goo-yang-bong 15, code-reviewer 12, geek-scout 11, kidsnote-slack-context-collector 3. 전부 `deferred_next_runtime=none`. 여섯 keeper 가 3.6일 동안 매 사이클 잔고 없는 provider 를 먼저 불렀다. 같은 모양이 openai `insufficient_quota` 2,748줄, `keeper cycle FAILED … insufficient_quota` 94줄(gpt-5.6-luna 72, gpt-6-astra 22).
 - **L2.** verifier 슬롯 루프가 `retryable` 을 OR 로 접고 detail 은 마지막 슬롯만 남긴다. `evaluator unavailable runtime=ollama_cloud… retryable=true; no verdict committed: Payment required` 67회 (09-09T01:31Z..09-10T02:32Z). `scheduled retry … interval_sec=60.0` 73회. task-1479 는 25시간 동안 판정 없이 60초마다 재시도.

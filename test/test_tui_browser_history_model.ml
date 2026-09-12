@@ -15,6 +15,25 @@ let () =
   expect "a source switch cannot inherit the previous route's deferred read"
     (Masc_tui_types.Browser_lane_view.pending_read
        (Masc_tui_types.Browser_lane_view.switch_source Automation completed_action) = None);
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  state.view <- Keepers Keeper_message;
+  state.search <- Some "original search";
+  state.composer_focused <- true;
+  Masc_tui_types.show_browser_lane state;
+  let return_context = state.browser_lane_visibility in
+  state.browser_history <- Some (History.create "reader");
+  let pending_history_generation = state.browser_history_generation in
+  Masc_tui_types.show_browser_lane state;
+  expect "explicit reopen leaves history even when browser is already shown"
+    (state.browser_history = None);
+  expect "explicit reopen invalidates pending history replies"
+    (state.browser_history_generation = pending_history_generation + 1);
+  expect "explicit reopen preserves the original return surface and composer context"
+    (state.browser_lane_visibility = return_context);
+  Masc_tui_types.hide_browser_lane state;
+  expect "hide still restores the original caller after explicit reopen"
+    (state.view = Keepers Keeper_message && state.search = Some "original search"
+      && state.composer_focused);
   let waiting = History.create "reader" in
   expect "navigation during list load does not supersede the pending list"
     (History.move 1 waiting=None);

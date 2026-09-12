@@ -121,7 +121,11 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             assert b"SAVED BETA CONTENT" not in h.screen_text(frame), "late artifact replaced current selection"
             assert len(requests) == count, "history dispatched a current browser request"
             assert not any(kind == "unexpected effect" for kind, _ in requests)
-            h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
+            # An explicit browser reopen chooses the current page even when
+            # history overlays an already-visible browser lane.
+            reopen_reads = sum(kind == "read" for kind, _ in requests)
+            h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
+            assert sum(kind == "read" for kind, _ in requests) > reopen_reads
             h.send_and_wait(process, fd, output, b"a", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"ghttps://example.org/history", b"https://example.org/history")
             h.send_and_wait(process, fd, output, b"\x1b", b"g:URL")

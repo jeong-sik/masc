@@ -4628,7 +4628,7 @@ let leave_browser_lane_for_surface state destination =
   end
 
 let show_browser_lane state =
-  if Option.is_none (browser_lane_on_screen state) then close_browser_history state;
+  close_browser_history state;
   if Option.is_none (browser_lane_on_screen state) then
     state.browser_lane_visibility <- Browser_lane_shown {
       return_surface = state.view;

@@ -13,7 +13,7 @@ def section(start, end):
 
 
 class UpgradeConfigTest(unittest.TestCase):
-    def exercise(self, reset=False, missing_overlay=False):
+    def exercise(self, reset=False, missing_overlay=False, init_failure=False):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             config = base / '.masc/config'
@@ -70,6 +70,12 @@ if [ ! -e "$skill_root/browser-lanes" ]; then
   mkdir -p "$skill_root/browser-lanes"
   echo builtin > "$skill_root/browser-lanes/SKILL.md"
 fi
+echo 'preserved operator-edited browser-lanes' >&2
+echo 'recovery: masc skills-refresh browser-lanes' >&2
+if [ "$TEST_INIT_FAILURE" = 1 ]; then
+  echo 'receipt read failed' >&2
+  exit 7
+fi
 echo initialized
 ''')
             binary.chmod(0o755)
@@ -88,7 +94,7 @@ VERSION=v0.0.0
 MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S=1
 MASC_INSTALL_CURL_RETRIES=0
 PARTIAL_FILES=()
-log() { :; }
+log() { printf '%s\\n' "$*"; }
 die() { echo "$*" >&2; exit 1; }
 run_wizard() { touch "$BASE_PATH/wizard-ran"; }
 verify_checksum() { :; }
@@ -107,8 +113,18 @@ curl() {
             script += section('# --- 4. seed minimum config', '# --- 4c. keeper team preset').split('\n', 1)[1]
             script += 'seed_team() {' + section('seed_team() {', '\nif [ -n "$TEAM" ]; then')
             script += '\nseed_team classic\ntest "$(command -v masc)" = "$DEST"\n'
-            env = dict(os.environ, BASE_PATH=str(base), PREFIX=str(base), DEST=str(binary), TEST_RESET=str(int(reset)))
+            env = dict(os.environ, BASE_PATH=str(base), PREFIX=str(base), DEST=str(binary), TEST_RESET=str(int(reset)),
+                       TEST_INIT_FAILURE=str(int(init_failure)))
             result = subprocess.run(['bash', '-c', script], env=env, text=True, capture_output=True)
+            diagnostics = result.stdout + result.stderr
+            self.assertIn('preserved operator-edited browser-lanes', diagnostics)
+            self.assertIn('recovery: masc skills-refresh browser-lanes', diagnostics)
+            if init_failure:
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('receipt read failed', diagnostics)
+                self.assertNotIn('initialized', diagnostics)
+                return
+            self.assertIn('initialized', diagnostics)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(runtime.read_text(), 'seeded\n' if reset else '[runtime]\ndefault = "operator-choice"\n')
             self.assertEqual(keeper.read_text(), 'reset instructions\n' if reset else 'custom instructions\n')
@@ -124,6 +140,12 @@ curl() {
 
     def test_force_upgrade_repairs_missing_overlay_without_resetting_default(self):
         self.exercise(missing_overlay=True)
+
+    def test_skill_seed_failure_preserves_full_diagnostics_and_fails_install(self):
+        self.exercise(init_failure=True)
+
+    def test_config_seed_failure_preserves_full_diagnostics_and_fails_install(self):
+        self.exercise(missing_overlay=True, init_failure=True)
 
     def test_explicit_reset_replaces_config_and_team_and_runs_wizard(self):
         self.exercise(reset=True)

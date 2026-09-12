@@ -1626,10 +1626,10 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       log "[dry-run] would install builtin Skills from the binary"
     else
-      if ! init_summary="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1 | tail -1)"; then
-        die "builtin Skill seed failed: $init_summary"
+      if ! init_output="$("$DEST" init --skills-only --base-path "$BASE_PATH" 2>&1)"; then
+        die "builtin Skill seed failed: $init_output"
       fi
-      log "$init_summary"
+      log "$init_output"
     fi
   elif [ "$DRY_RUN" -eq 1 ]; then
     log "[dry-run] would seed configs and model catalog overlay to $CONFIG_DIR from release"
@@ -1647,10 +1647,10 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     # default, because a throwaway workspace must not become the machine's.
     init_args=(init --base-path "$BASE_PATH" --record-default)
     [ "$RESET_CONFIG" -eq 1 ] && init_args+=(--force)
-    if ! init_summary="$("$DEST" "${init_args[@]}" 2>&1 | tail -1)"; then
-      die "config seed failed ($DEST ${init_args[*]}): $init_summary"
+    if ! init_output="$("$DEST" "${init_args[@]}" 2>&1)"; then
+      die "config seed failed ($DEST ${init_args[*]}): $init_output"
     fi
-    log "$init_summary"
+    log "$init_output"
     [ -e "$RUNTIME_FILE" ] || die "config seed produced no $RUNTIME_FILE"
   fi
 fi

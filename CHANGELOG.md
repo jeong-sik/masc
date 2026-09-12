@@ -25,6 +25,9 @@
 - Dashboard: keep authenticated read observations outside the per-agent operation quota while retaining the per-IP resource boundary (#35447).
 - Fusion: include the active Task contract and Goal criteria by default, and retrieve the original deliberation by canonical run ID. Missing Board reads preserve their error rather than inventing expiry (#35501, #35511, #35510).
 - Board: relay MSX events on media changes and include verification identity in verification post titles (#35350).
+- Keeper: attribute failed cycles to the dispatched runtime candidate and distinguish verification retry from terminal stop causes in logs and Board reports (#35353, #35354).
+- Schedules: reject due wakes whose owner is absent from the authoritative Keeper store (#35361).
+- TUI: share rendering primitives, tighten Config summaries, and render browser content without repeated DOM labels (#35393, #35508, #35533).
 
 ### Added
 
@@ -36,11 +39,13 @@
 - TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
 - Goals: record creation events and recover names and lifetime observations for goals no longer in the active store; show that history in Planning (#35375, #35388, #35408).
 - TUI: fold the turn dashboard to its progress line, retain questions requiring an answer, and use Ctrl-S to expand it with terminal flow control disabled (#35458).
+- Lane packages: connect package outputs through declared TOML world inputs (#35497).
 
 ### Documentation
 
 - Align the benchmark's arm A description with its actual kimi-cli runner (#35395).
 - Update the G1 revision 2 contract and registration evidence, and document proposed typed Goal-store failures and explicit next-actor outcomes (#35485, #35524, #35479, #35480).
+- Align the documentation site's installation version with the published release, record browser composition measurements and shared-page limits, and document the proposed refusal of submissions without a contract (#35529, #35531, #35477).
 
 ## [0.35.14] - 2026-09-12
 

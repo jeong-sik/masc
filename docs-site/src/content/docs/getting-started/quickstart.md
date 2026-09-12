@@ -4,12 +4,12 @@ description: Connect your model runtime and talk to imp in its default sandbox.
 ---
 
 Install the prebuilt binary for macOS or Linux; no OCaml or Node.js build tools
-are required. This guide targets the **0.35.12**. Check publication on
+are required. This guide targets **0.35.14**. Check publication on
 [Releases](https://github.com/jeong-sik/masc/releases) and use the installer
 attached to the same tag as your binary.
 
 ```bash
-TAG=v0.35.12
+TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -25,9 +25,9 @@ Optional inspection: run `less /tmp/masc-install.sh` before installation. Press 
 
 For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
 
-## First conversation with `imp` (0.35.12)
+## First conversation with `imp` (0.35.14)
 
-This is the 0.35.12 installation contract. Check the release tag and asset
+This is the 0.35.14 installation contract. Check the release tag and asset
 availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
 
 1. Run the installer wizard with `--base-path "$HOME/masc-workspace"` and select

@@ -61,4 +61,7 @@ val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
     PPTX files additionally expose ordered source slide text and speaker notes,
     with every slide rendered from the captured presentation. Animations and
     embedded audio/video playback remain explicitly uninspected.
+    MP4 files return complete captured source identity, FFprobe stream metadata,
+    and direct FFmpeg audio/video decode results. Decode success does not assert
+    visual frame inspection or an accessibility verdict.
     Other binary output is a stated lookup failure, never text or visual proof. *)

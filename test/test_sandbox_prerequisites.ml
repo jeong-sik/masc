@@ -68,9 +68,21 @@ let test_official_clients_are_explicit_and_not_ready () =
       [mac S.Arm64 26; S.Linux S.X64])
     [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install"]
 
+let test_pdf_tools_reuse_selected_package_managers () =
+  List.iter (fun (host, distribution, expected) ->
+    let action = find "poppler_install" (P.catalog ~host ~distribution P.Pdf_tools) in
+    match action.action_effect with
+    | P.Run_commands steps -> check (list (list string)) "explicit PDF package manager" expected steps
+    | _ -> fail "PDF tools must use the selected host package manager")
+    [mac S.Arm64 26, P.Other, [["brew";"install";"poppler"]];
+     S.Linux S.X64, P.Debian, [["sudo";"apt-get";"update"];["sudo";"apt-get";"install";"-y";"poppler-utils"]]];
+  check int "unknown Linux distribution gets no guessed apt command" 0
+    (List.length (P.catalog ~host:(S.Linux S.X64) ~distribution:P.Other P.Pdf_tools))
+
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
   test_case "explicit distro plan and failure boundary" `Quick test_linux_install_is_explicit;
   test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
+  test_case "PDF package manager selection" `Quick test_pdf_tools_reuse_selected_package_managers;
   test_case "effects are not readiness" `Quick test_completion_never_means_ready]]

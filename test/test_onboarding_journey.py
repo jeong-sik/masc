@@ -34,11 +34,19 @@ def observation(base=None, checks=()):
     return dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
                 base_path=base, checks=rows)
 
+def pdf_readiness(ready=False):
+    return dict(schema='masc.pdf_tools_readiness.v1', status='tools_available' if ready else 'unavailable',
+                pdf_inspection='not_run', scope='current_process_environment', checks=[dict(command=name, status='started' if ready else 'missing')
+                    for name in ('pdftotext', 'pdftoppm')])
+
 class Journey(unittest.TestCase):
     def setUp(self):
         renderer = patch.object(SETUP, 'render', return_value=('fixture.native-model', b'', b''))
         renderer.start()
         self.addCleanup(renderer.stop)
+        pdf = patch.object(SETUP, 'pdf_tools_status', return_value=pdf_readiness())
+        pdf.start()
+        self.addCleanup(pdf.stop)
 
     def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
         def receipt(schema, **values):
@@ -334,9 +342,93 @@ class Journey(unittest.TestCase):
         response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
         with patch.object(SETUP.subprocess, 'run', return_value=response), \
                 patch.object(SETUP, 'prerequisite_menu', return_value=False) as prerequisites, \
-                patch.object(SETUP, 'pick', side_effect=[[0], [3]]), contextlib.redirect_stderr(io.StringIO()):
+                patch.object(SETUP, 'pick', side_effect=[[0], [4]]), contextlib.redirect_stderr(io.StringIO()):
             self.assertIsNone(SETUP.select_sandbox('/bin/masc', '/workspace'))
         prerequisites.assert_called_once_with('/bin/masc', 'docker', base_path='/workspace', port=8945)
+
+    def test_pdf_tools_use_existing_setup_selection_and_refresh(self):
+        catalog = dict(schema='masc.sandbox_readiness.v1', candidates=[dict(
+            id='docker', state='service_ready', reason='', advanced=False, recommended=True,
+            setup_args=['--sandbox-profile', 'docker'], capabilities=dict(network_modes=['inherit']))])
+        response = subprocess.CompletedProcess([], 0, json.dumps(catalog), '')
+        labels = []
+        def choose(title, options):
+            labels.append(options)
+            return [3] if len(labels) == 1 else [0]
+        with patch.object(SETUP.subprocess, 'run', return_value=response), \
+                patch.object(SETUP, 'pdf_tools_status', side_effect=[pdf_readiness(), pdf_readiness(True)]), \
+                patch.object(SETUP, 'prerequisite_menu', return_value=True) as install, \
+                patch.object(SETUP, 'pick', side_effect=choose), contextlib.redirect_stderr(io.StringIO()):
+            result = SETUP.select_sandbox('/owned/masc', '/workspace')
+        install.assert_called_once_with('/owned/masc', 'pdf-tools', base_path='/workspace', port=8945)
+        self.assertIn('install missing tools', labels[0][3])
+        self.assertIn('tools available', labels[1][3])
+        self.assertEqual(result, ['--sandbox-profile', 'docker', '--network-mode', 'inherit'])
+
+    def test_pdf_install_menu_requires_actual_recheck(self):
+        action = dict(id='poppler_install', label='Install PDF tools', detail='Uses the selected package manager',
+                      source_url='https://formulae.brew.sh/formula/poppler', requires_admin=False)
+        catalog = dict(schema='masc.prerequisite_actions.v1', actions=[action], dependency_readiness=pdf_readiness())
+        for ready in (False, True):
+            receipt = dict(schema='masc.prerequisite_action_result.v1',
+                status='commands_completed' if ready else 'failed',
+                readiness='tools_available' if ready else 'unavailable',
+                dependency_readiness=pdf_readiness(ready), reason='PDF tools could not start')
+            replies = [subprocess.CompletedProcess([], 0, json.dumps(catalog)),
+                       subprocess.CompletedProcess([], 0 if ready else 1, json.dumps(receipt))]
+            with self.subTest(ready=ready), patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                    patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()) as output:
+                self.assertTrue(SETUP.prerequisite_menu('/owned/masc', 'pdf-tools'))
+            self.assertEqual(run.call_args_list[-1].args[0],
+                ['/owned/masc', 'prerequisite-actions', 'pdf-tools', '--execute', 'poppler_install'])
+            self.assertEqual('both commands started successfully' in output.getvalue(), ready)
+        receipt.update(status='commands_completed', readiness='not_checked')
+        with patch.object(SETUP.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, json.dumps(catalog)),
+                subprocess.CompletedProcess([], 0, json.dumps(receipt))]), \
+                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SETUP.SetupError):
+                SETUP.prerequisite_menu('/owned/masc', 'pdf-tools')
+
+    @unittest.skipUnless(BINARY, 'requires CI-built native executable')
+    def test_native_pdf_install_rechecks_actual_command_start(self):
+        import shlex
+        for renderer in ('ready', 'missing', 'broken'):
+            install_renderer = renderer != 'missing'
+            ready = renderer == 'ready'
+            with self.subTest(renderer=renderer), tempfile.TemporaryDirectory() as home:
+                root = Path(home)
+                tools = root / 'tools'
+                tools.mkdir()
+                def command(name, body):
+                    path = tools / name
+                    path.write_text('#!/bin/sh\n' + body + '\n')
+                    path.chmod(0o700)
+                command('uname', 'case "$1" in -m) echo arm64 ;; *) echo Darwin ;; esac')
+                command('sw_vers', 'echo 15.0')
+                marker = root / 'package-manager-called'
+                calls = root / 'pdf-command-calls'
+                payload = '#!/bin/sh\n[ "$1" = -v ] || exit 95\nprintf "%s\\n" "$0" >> ' + shlex.quote(str(calls)) + '\necho "fixture PDF command started"\n'
+                installer = '[ "$1" = install ] && [ "$2" = poppler ] || exit 94\n: > ' + shlex.quote(str(marker)) + '\n'
+                for name in ('pdftotext', 'pdftoppm') if install_renderer else ('pdftotext',):
+                    target = shlex.quote(str(tools / name))
+                    tool_payload = payload + ('exit 127\n' if name == 'pdftoppm' and renderer == 'broken' else '')
+                    installer += 'printf %s ' + shlex.quote(tool_payload) + ' > ' + target + '\n/bin/chmod 700 ' + target + '\n'
+                command('brew', installer)
+                env = dict(os.environ, HOME=home, PATH=str(tools), XDG_CONFIG_HOME=home)
+                def native(*tail):
+                    return subprocess.run([BINARY, 'prerequisite-actions', 'pdf-tools', *tail],
+                        env=env, capture_output=True, text=True, timeout=20)
+                before = native()
+                self.assertEqual(before.returncode, 0, before.stderr)
+                self.assertFalse(marker.exists(), 'catalog inspection installed a package')
+                self.assertEqual(json.loads(before.stdout)['dependency_readiness']['status'], 'unavailable')
+                installed = native('--execute', 'poppler_install')
+                receipt = json.loads(installed.stdout)
+                self.assertTrue(marker.exists())
+                self.assertEqual(installed.returncode, 0 if ready else 1, installed.stderr)
+                self.assertEqual(receipt['readiness'], 'tools_available' if ready else 'unavailable')
+                self.assertEqual(receipt['dependency_readiness']['pdf_inspection'], 'not_run')
+                self.assertEqual(len(calls.read_text().splitlines()), 2 if install_renderer else 1)
 
     @unittest.skipUnless(BINARY, 'requires CI-built native executable')
     def test_native_official_client_install_rechecks_without_auth_or_model(self):

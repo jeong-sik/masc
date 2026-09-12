@@ -65,6 +65,55 @@ let test_the_readable_line_says_which_state_it_is () =
     (Masc.Voice_bridge.probe_outcome_to_string
        (Masc.Voice_bridge.Skipped "disabled in the configuration"))
 
+
+(* Which transport is asked for a transcript. Every kind is spelled out rather
+   than grouped, because the bug this pins was a kind that existed and was
+   never considered: the two command kinds reached main while the probe still
+   matched on three, and nothing was red until a build. *)
+let test_every_kind_says_how_it_transcribes () =
+  let transcriber = Masc.Voice_bridge.transcriber_of_kind in
+  let open Masc.Voice_bridge in
+  Alcotest.(check bool) "openai_compat is an address" true
+    (transcriber Voice_config.Openai_compat = Over_http);
+  Alcotest.(check bool) "so is elevenlabs" true
+    (transcriber Voice_config.Elevenlabs_direct = Over_http);
+  Alcotest.(check bool) "whisper is run, not reached" true
+    (transcriber Voice_config.Whisper_cli = By_command);
+  Alcotest.(check bool) "say speaks and has no ear" true
+    (transcriber Voice_config.Macos_say = Does_not_transcribe);
+  Alcotest.(check bool) "the mcp endpoint carries a tool call, not audio" true
+    (transcriber Voice_config.Voice_mcp = Does_not_transcribe)
+
+let transcript json =
+  match Masc.Voice_bridge.transcript_of_stt_json json with
+  | Ok text -> Ok text
+  | Error reason -> Error reason
+
+(* Silence is an answer. A person who recorded nothing and a person whose
+   endpoint answered an error both need to know which of the two happened, and
+   an empty transcript is how the first one reads. *)
+let test_an_empty_transcript_is_still_a_transcript () =
+  Alcotest.(check (result string string)) "what was heard"
+    (Ok "안녕하세요") (transcript (`Assoc [ "text", `String "안녕하세요" ]));
+  Alcotest.(check (result string string)) "and hearing nothing"
+    (Ok "") (transcript (`Assoc [ "text", `String "" ]))
+
+(* The body that has no transcript in it. Read as an empty transcript, this
+   endpoint would be reported as a quiet microphone -- the one thing the probe
+   is there to tell apart from an endpoint that did not answer properly. *)
+let test_a_body_without_a_transcript_is_not_silence () =
+  let refused json =
+    match transcript json with
+    | Error _ -> true
+    | Ok _ -> false
+  in
+  Alcotest.(check bool) "an error body names no transcript" true
+    (refused (`Assoc [ "error", `String "model not found" ]));
+  Alcotest.(check bool) "neither does a number in the text field" true
+    (refused (`Assoc [ "text", `Int 3 ]));
+  Alcotest.(check bool) "nor a body that is not an object at all" true
+    (refused (`List []))
+
 let () =
   Alcotest.run
     "voice_probe"
@@ -77,5 +126,13 @@ let () =
             test_a_transcript_survives_as_written
         ; Alcotest.test_case "the readable line says which state it is" `Quick
             test_the_readable_line_says_which_state_it_is
+        ] )
+    ; ( "which transport answers a transcript"
+      , [ Alcotest.test_case "every kind says how it transcribes" `Quick
+            test_every_kind_says_how_it_transcribes
+        ; Alcotest.test_case "an empty transcript is still a transcript" `Quick
+            test_an_empty_transcript_is_still_a_transcript
+        ; Alcotest.test_case "a body without a transcript is not silence" `Quick
+            test_a_body_without_a_transcript_is_not_silence
         ] )
     ]

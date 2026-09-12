@@ -1179,6 +1179,53 @@ let test_decode_current_turn_variants () =
         (Some 12) entry.le_output_tokens
   | Error err -> Alcotest.fail err
 
+(* The six values are required fields carrying nullable values, so a row can
+   arrive with some of them null and the rest filled -- which is the branch 75
+   of 200 rows in a live keeper's log landed on, 37% of the window. The refusal
+   now says which side of the line each value fell on. *)
+let test_a_row_with_some_values_null_names_them () =
+  let null_in_usage key json =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "usage" fields with
+        | Some (`Assoc usage) ->
+            `Assoc
+              (("usage", `Assoc ((key, `Null) :: List.remove_assoc key usage))
+              :: List.remove_assoc "usage" fields)
+        | Some _ | None -> Alcotest.fail "the fixture lost its usage block")
+    | _ -> Alcotest.fail "the fixture is not an object"
+  in
+  (match
+     Tui_decode.decode_log_entry
+       (null_in_usage "total_tokens" (current_turn_metrics ()))
+   with
+   | Ok _ -> Alcotest.fail "a null total with filled tokens has to be refused"
+   | Error detail ->
+       Alcotest.(check string) "the refusal names the one that is null"
+         "usage tokens, cost, and trust must form one current atomic \
+          observation (set=[input_tokens, output_tokens, \
+          cache_creation_tokens, cache_read_tokens, cost_usd], \
+          unset=[total_tokens])"
+         detail);
+  match
+    Tui_decode.decode_log_entry
+      (null_in_usage "input_tokens"
+         (null_in_usage "cache_read_tokens" (current_turn_metrics ())))
+  with
+  | Ok _ -> Alcotest.fail "two nulls have to be refused as well"
+  | Error detail ->
+      Alcotest.(check bool) "both are named, in the order the match reads them"
+        true
+        (let has needle =
+           let n = String.length needle in
+           let rec seek i =
+             i + n <= String.length detail
+             && (String.equal (String.sub detail i n) needle || seek (i + 1))
+           in
+           seek 0
+         in
+         has "unset=[input_tokens, cache_read_tokens]")
+
 let test_decode_current_heartbeat_metrics () =
   match Tui_decode.decode_log_entry (current_heartbeat_metrics ()) with
   | Ok entry ->
@@ -8954,6 +9001,8 @@ let () =
           test_decode_current_turn_variants;
         Alcotest.test_case "current heartbeat contract" `Quick
           test_decode_current_heartbeat_metrics;
+        Alcotest.test_case "a row with some values null names them" `Quick
+          test_a_row_with_some_values_null_names_them;
         Alcotest.test_case "retired and unknown rows fail closed" `Quick
           test_metrics_contract_rejects_retired_or_unknown_rows;
       ] );

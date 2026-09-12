@@ -481,10 +481,7 @@ let strict_write_result = function
   | Error
       (({ stage = Fs_compat.After_rename; _ } :
           Fs_compat.atomic_replace_failure) as failure) ->
-    Ok
-      [ Manifest_parent_sync_unconfirmed
-          (Fs_compat.atomic_replace_failure_to_string failure)
-      ]
+    Error (Io_error (Fs_compat.atomic_replace_failure_to_string failure))
 
 let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
     ~read_revision

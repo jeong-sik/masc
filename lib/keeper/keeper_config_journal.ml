@@ -177,9 +177,17 @@ let encode record = Yojson.Safe.to_string (record_to_yojson record)
 
 let write_atomic ~path content =
   match Fs_compat.save_file_atomic_strict_staged path content with
-  | Ok () -> Ok ()
-  | Error failure ->
-    Error (Fs_compat.atomic_replace_failure_to_string failure)
+  | Error failure -> Error (Fs_compat.atomic_replace_failure_to_string failure)
+  | Ok () ->
+    (try
+       Unix.chmod path 0o600;
+       Ok ()
+     with
+     | Sys_error message -> Error ("journal chmod failed: " ^ message)
+     | Unix.Unix_error (error, action, detail) ->
+       Error
+         (Printf.sprintf "journal chmod failed: %s %s (%s)" action detail
+            (Unix.error_message error)))
 ;;
 
 let stage ~base_path record =

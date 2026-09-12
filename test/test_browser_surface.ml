@@ -11,7 +11,9 @@ let test_tool_input_recovery () =
     Time_compat.set_clock (Eio.Stdenv.clock env);
     Eio.Switch.run (fun sw ->
       let module Tools = Masc.Tool_misc_browser_lane in
-      let valid_id = "10000000-0000-4000-8000-000000000001" in
+      (* Disconnect retires a native-process identity for the server lifetime.
+         This scenario must not reuse another scenario's connected client. *)
+      let valid_id = "30000000-0000-4000-8000-000000000001" in
       let invalid_id = valid_id ^ "1" in
       let client_id = match Browser_lane.client_id_of_string valid_id with
         | Ok id -> id | Error detail -> fail detail in
@@ -60,7 +62,7 @@ let test_tool_input_recovery () =
       check bool "malformed requests queued no command to the connected browser" true
         (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None);
       let unavailable, phase = Tools.handle_interact_with_phase ~tool_name:"BrowserInteract"
-        ~start_time:0. (interact "10000000-0000-4000-8000-000000000002") in
+        ~start_time:0. (interact "30000000-0000-4000-8000-000000000002") in
       check bool "valid identity of an absent browser remains a state rejection" true
         (Tool_result.failure_class unavailable = Some Tool_result.Workflow_rejection
          && phase = Tool_result.Proven_pre_effect);

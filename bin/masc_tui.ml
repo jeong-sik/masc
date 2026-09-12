@@ -17566,7 +17566,7 @@ and is loaded on demand through keeper_skill.
             state.keeper_message_focus <- Right_pane
        | Some "left"
          when message_mode
-              && Masc_tui_render.keeper_roster_pane_shown state
+              && keeper_roster_pane_shown state
                    ~cols:terminal_columns ->
            state.keeper_message_focus <- Left_pane
        | Some "down"

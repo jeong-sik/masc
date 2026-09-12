@@ -60,8 +60,6 @@ type chat_markdown_identity = {
   cmi_entry_index : int;
 }
 
-val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
-
 (** The Activity pane as the last frame drew it, for the input layer: how
     many columns it held on the right (zero when none was drawn), what a
     press on one of its rows acts on, and how far its list can scroll. A

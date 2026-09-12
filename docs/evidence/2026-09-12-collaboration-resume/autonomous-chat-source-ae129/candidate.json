@@ -1,11 +1,14 @@
 {
-  "head": "ae1290d076800ad02e12bd2f96926acfcc9ae0f7",
+  "head": "f75aa4f19312bf25ec009aed7acae501775dc0e4",
   "pr": 35547,
-  "test_run": 34701476206,
-  "test_status": "in_progress",
+  "test_run": 34701658049,
+  "test_status": "dispatched",
   "installed": false,
   "source_evidence": "observed-chat-turn.json",
   "component_test": "vitest.txt",
   "local_build": false,
-  "review": "independent P1/P2 resolved; no remaining findings"
+  "review": "independent P1/P2 resolved; no remaining findings",
+  "implementation_head": "ae1290d076800ad02e12bd2f96926acfcc9ae0f7",
+  "previous_implementation_test_run": 34701476206,
+  "head_change": "evidence log whitespace only"
 }

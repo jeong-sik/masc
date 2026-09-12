@@ -6,8 +6,8 @@
 
 - Chat 실패의 구체적인 원인을 실제 API 원문에서 확인했다. 자율턴428의 raw activity는 Edit2건의 이름·시간·성공만 전달하고 canonical execution_id를 버렸다. 원장에는 실행 ID와 전후 원본이 보존돼 있었다. 단순 접힘 재시도를 중단하고 원천 projection을 수정했다.
 - 별도 main 기반 PR #35547, head `ae1290d076800ad02e12bd2f96926acfcc9ae0f7`를 제출했다. exact raw start sequence와 invocation turn/planned_index를 보존하고 TurnRecord가 선언한 실행 ID를 원장 전체에서 조회·검증해 Chat에 연결한다. 같은 provider ID의 병렬 호출·역순 완료·중복 시작·중복 원장 ID가 서로 다른 증거로 오귀속되지 않도록 수정했다. Raw reasoning·도구 입력/결과·provider ID는 이 Chat projection에 싣지 않는다.
-- 파싱 검사, DET gate, 자율 Edit를 실제로 펼치는 컴포넌트 테스트(1 passed/165 skipped)와 독립 리뷰를 통과했다. Test34701476206은 exact head에서 진행 중이며 네이티브 통과·설치·실제 브라우저 성공은 아직 아니다. 기존 설치본은 aad94다. 최근200건 밖 출력 hydration은 별도 남은 문제이며, 다음 의존 worktree `/tmp/masc-autonomous-chat-output-lookup-20260913`를 해당 head에서 준비했다.
-- Board/Fusion #35536은 `ebab73c4`로 pagination과 첫 타입 오류를 수정·push했고 lint는 통과했다. 하지만 native Test34700788141이 추가 테스트 fixture의 `origin.turn_ref` 문자열/Ids.Turn_ref.t 타입 불일치로 실패했다. 이 오류도 후속 수정 대상이며 검증 도구 완료로 세지 않는다. MP4 #35532의 PR-check FFmpeg 의존성 수정은 병렬 대응 중이다.
+- 파싱 검사, DET gate, 자율 Edit를 실제로 펼치는 컴포넌트 테스트(1 passed/165 skipped)와 독립 리뷰를 통과했다. 증거 로그의 끝 공백만 정리한 현재 head는 `f75aa4f193`이며 Test34701658049를 요청했다. 구현 head의 Test34701476206과 구별한다. 현재 네이티브 통과·설치·실제 브라우저 성공은 아직 아니다. 기존 설치본은 aad94다. 최근200건 밖 출력 hydration은 별도 남은 문제이며, 다음 의존 worktree `/tmp/masc-autonomous-chat-output-lookup-20260913`를 해당 head에서 준비했다.
+- Board/Fusion #35536은 `ebab73c4`로 pagination과 첫 타입 오류를 수정·push했고 lint는 통과했다. 하지만 native Test34700788141이 추가 테스트 fixture의 `origin.turn_ref` 문자열/Ids.Turn_ref.t 타입 불일치로 실패했다. 이 오류도 후속 수정 대상이며 검증 도구 완료로 세지 않는다. MP4 #35532의 PR-check FFmpeg 의존성 수정은 `60f948bd809d2f4d8716d1242e11f6eec620dfcd`로 push했고 PR-check34701570972를 요청했다. 라이브 설치는 하지 않았다.
 
 전체18개 목표는 진행 중이다. 원래 전시·연작의 사람 확인, task004 독립 재검증, 장기runtime·통합IDE·기억 품질 조건은 유지한다. 관련 소스·실측 기록은 #35547의 `docs/evidence/2026-09-13-autonomous-chat-execution/`에 있다.
 

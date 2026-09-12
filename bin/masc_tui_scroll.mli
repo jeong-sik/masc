@@ -37,6 +37,16 @@ val page_up : count:int -> height:int -> int -> int
 val cursor_down : count:int -> int -> int
 val cursor_up : count:int -> int -> int
 
+val cursor_move : count:int -> delta:int -> int -> int
+(** The cursor moved by [delta] rows, clamped to the list. The steppers above
+    move one row and are this with [delta] of 1 and -1; a page key passes its
+    own size. Before this existed the movers took a delta and used only its
+    sign, so a page moved a single row. *)
+
+val cursor_last : count:int -> int
+(** The last row a cursor can name, and 0 for an empty list. What End lands
+    on. *)
+
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
 

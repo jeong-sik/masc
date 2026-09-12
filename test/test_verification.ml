@@ -244,6 +244,43 @@ let test_the_same_stall_is_posted_once () =
     (stalled_posts_for ~verification_id:"vrf-stall-1")
 ;;
 
+(* Re-submitting one task posted the same 'Verify: <title>' each time
+   (audit-adversarial-20260912 R10: 55 titles with three or more posts). The
+   title carries the verification id, so two requests for one task are two
+   posts a reader can tell apart. *)
+let test_verify_title_names_the_verification () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:None);
+    ignore
+      (W.add_task config ~title:"Ship the thing" ~priority:1 ~description:"");
+    let task =
+      match (W.read_backlog config).tasks with
+      | [ task ] -> task
+      | tasks ->
+        Alcotest.failf "expected one task, got %d" (List.length tasks)
+    in
+    Masc.Board_dispatch.reset_for_test ();
+    let verification_id = "vrf-r10-title" in
+    VP.notify_submit_for_verification ~config ~task ~assignee:"omega"
+      ~verification_id
+      ~claim:(Masc_domain.Completion_evidence { evidence_refs = [] });
+    let titles =
+      Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
+      |> List.filter_map (fun (post : Masc.Board.post) ->
+        match post.meta_json with
+        | Some (`Assoc fields)
+          when List.assoc_opt "verification_id" fields
+               = Some (`String verification_id) ->
+          Some post.title
+        | Some _ | None -> None)
+    in
+    Alcotest.(check (list string))
+      "the title names the task and the request"
+      [ "Verify: Ship the thing [vrf-r10-title]" ]
+      titles)
+;;
+
 let test_a_different_stall_still_reaches_the_board () =
   Eio_main.run @@ fun _env ->
   Masc.Board_dispatch.reset_for_test ();
@@ -3748,6 +3785,8 @@ let () =
         test_the_same_stall_is_posted_once;
       Alcotest.test_case "a different stall still reaches the board" `Quick
         test_a_different_stall_still_reaches_the_board;
+      Alcotest.test_case "the Verify title names the verification" `Quick
+        test_verify_title_names_the_verification;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

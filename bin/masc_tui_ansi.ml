@@ -653,9 +653,16 @@ let framed_shadow_empty buf cols =
 let box_top buf _cols = Buffer.add_char buf '\n'
 let box_bottom buf _cols = Buffer.add_char buf '\n'
 
+(* The receded colour, not the flat grey it falls back to. [Theme.recede]
+   projects onto the probed palette and holds a 3:1 contrast floor; [Ansi.gray]
+   is the value it returns when there is no palette to project onto. So on a
+   terminal that reports one, this rule used to sit at whatever grey the SGR
+   table happened to give -- which can be the background -- while the rules
+   the surfaces draw beside it were receded. *)
 let box_divider buf cols =
   Buffer.add_string buf
-    (Printf.sprintf " %s%s%s \n" Ansi.gray (draw_hline (framed_rule_width cols)) Ansi.reset)
+    (Printf.sprintf " %s%s%s \n" (Theme.recede ())
+       (draw_hline (framed_rule_width cols)) Ansi.reset)
 
 (* Rows keep the framed geometry -- two margin cells each side, content
    width {!framed_inner_width} -- and still span the full [cols], so anything that

@@ -6,6 +6,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Message_layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
+module Rows = Masc_tui_rows
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -361,8 +362,17 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
+  (* What to say where the numbers would go. They are missing for two reasons
+     and the line has to name the one that holds: nothing has arrived yet, or
+     the load failed. The table below already draws the server's own reason in
+     red, so a header that says "waiting" after a failure puts two answers to
+     the same question on one screen -- and this one is on top, so it is the
+     one that gets read. *)
+  let missing_reading waiting =
+    if Option.is_some state.memory_health_error then "load failed" else waiting
+  in
   (match state.memory_health with
-   | None -> push "  Total: waiting for memory snapshots"
+   | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
    | Some snapshot ->
        push (Printf.sprintf "  Total %d facts · %d ordinary + %d source · %s · %d keepers"
          (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
@@ -371,7 +381,7 @@ let render_memory_body ~cols ~budget (state : state)
             (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          (List.length snapshot.mhs_keepers)));
   (match state.memory_health with
-   | None -> push "  Librarian: waiting for health data"
+   | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
        push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
@@ -433,9 +443,12 @@ let render_memory_body ~cols ~budget (state : state)
     in
     push_styled ~style:(Theme.recede ()) note
   else begin
+    let keepers_window =
+      Rows.of_list ~first:scroll ~height:content_height keepers
+    in
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt keepers idx with
+      match Rows.at keepers_window idx with
       | None -> push_empty ()
       | Some k ->
           if idx = cursor then
@@ -618,9 +631,10 @@ let render_memory_facts_body ~cols ~budget (state : state)
      in
      push_styled ~style:(Theme.recede ()) empty)
   else begin
+    let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt rows idx with
+      match Rows.at rows_window idx with
       | None -> push_empty ()
       | Some row ->
           let line = memory_fact_row_line ~is_fleet ~cols row in

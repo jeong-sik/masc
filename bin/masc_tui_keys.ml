@@ -148,7 +148,7 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
-      ; b Navigate "j/k" "select / scroll"
+      ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open

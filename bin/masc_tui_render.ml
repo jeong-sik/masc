@@ -12507,7 +12507,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
-      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset value)
+      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset
+         (Terminal_text.single_line value))
   in
   let draft = session.vws_draft in
   let side =
@@ -12567,7 +12568,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
      box_line buf cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold
+          (Terminal_text.single_line session.vws_input) Ansi.reset
           (if session.vws_saving then "" else "▏")));
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
@@ -12585,6 +12587,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
      let first = max 0 (min (session.vws_voice_cursor - (window / 2)) (count - window)) in
      List.iteri
        (fun index (_id, label) ->
+         let label = Terminal_text.single_line label in
          if index >= first && index < first + window
          then
            box_line buf cols
@@ -12617,7 +12620,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | None -> ()
    | Some status ->
      box_line buf cols "";
-     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+     box_line_styled buf cols ~style:(Theme.warn ())
+       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
   (* Every endpoint, not just the first that answered. A chain stops at the
      first, which is why a dead fallback reads as healthy until the endpoint in
      front of it goes away. *)
@@ -12626,7 +12630,10 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | lines ->
      box_line buf cols "";
      box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
-     List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
+     List.iter
+       (fun line ->
+         box_line buf cols (Printf.sprintf "    %s" (Terminal_text.single_line line)))
+       lines);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -12651,12 +12658,13 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
       let first = max 0 (min (cursor - (window / 2)) (count - window)) in
       List.iteri
         (fun index item ->
+          let label = Terminal_text.single_line (draw item) in
           if index >= first && index < first + window
           then
             box_line buf cols
               (if index = cursor
-               then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold (draw item) Ansi.reset
-               else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
+               then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold label Ansi.reset
+               else Printf.sprintf "    %s  %s%s" Ansi.dim label Ansi.reset))
         items;
       box_line buf cols
         (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
@@ -12678,7 +12686,8 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
    | None -> ()
    | Some status ->
      box_line buf cols "";
-     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+     box_line_styled buf cols ~style:(Theme.warn ())
+       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"enter:assign  esc:back");
@@ -12694,7 +12703,8 @@ let render_voice (state : state) =
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
-      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset value)
+      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset
+         (Terminal_text.single_line value))
   in
   let member path json =
     List.fold_left
@@ -12740,8 +12750,10 @@ let render_voice (state : state) =
                       | Some _ | None -> ""
                     in
                     Some
-                      (Printf.sprintf "    %-20s %s%-18s%s %s%s" id Ansi.dim kind
-                         Ansi.reset address off))
+                      (Printf.sprintf "    %-20s %s%-18s%s %s%s"
+                         (Terminal_text.single_line id) Ansi.dim
+                         (Terminal_text.single_line kind) Ansi.reset
+                         (Terminal_text.single_line address) off))
               items
         | Some _ | None -> [])
   in
@@ -12762,7 +12774,9 @@ let render_voice (state : state) =
        (* The distinction the pane exists for, said in words rather than drawn
           as an empty section. *)
        box_line_styled buf cols ~style:(Theme.warn ()) "  voice did not load";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset)
+       box_line buf cols
+         (Printf.sprintf "  %s%s%s" Ansi.dim
+            (Terminal_text.single_line message) Ansi.reset)
    | None, None ->
        box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
@@ -12795,7 +12809,9 @@ let render_voice (state : state) =
        box_line buf cols "";
        box_line_styled buf cols ~style:(Theme.warn ())
          "  the endpoint list could not be read";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset));
+       box_line buf cols
+         (Printf.sprintf "  %s%s%s" Ansi.dim
+            (Terminal_text.single_line message) Ansi.reset));
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");

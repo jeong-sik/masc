@@ -14717,10 +14717,8 @@ def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
 def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
     """Giving one keeper its own voice, from the voice pane.
 
-    A workspace with several keepers and one voice cannot tell them apart by
-    ear. say ships nine Korean voices, so the reason to give each its own is no
-    longer a purchase -- which makes this the assignment being reachable
-    without editing the file.
+    The fixture publishes several voices for the operator to assign without
+    editing the file. Available system voices vary between installations.
     """
 
     def interact(
@@ -14745,6 +14743,11 @@ def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
         # be made by moving one and hoping the other followed.
         walked = press_and_settle(process, master_fd, output, b"\x1b[C")
         expect(walked, b"Han Aim", "the right arrow did not walk the voices")
+        down = press_and_settle(process, master_fd, output, b"\x1b[B")
+        expect(down, "▸ beta".encode(), "down did not select the second keeper")
+        up = press_and_settle(process, master_fd, output, b"\x1b[A")
+        expect(up, "▸ alpha".encode(), "up did not restore the first keeper")
+        press_and_settle(process, master_fd, output, b"\x1b[B")
 
         os.write(master_fd, b"\r")
         body = json.loads(
@@ -14759,14 +14762,99 @@ def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(f"the assignment wrote more than one line: {body!r}")
         if changes[0].get("voice") != "RR11BBccDDeeFFggHHii":
             raise AssertionError(f"the walked voice did not reach the save: {changes!r}")
-        if not changes[0].get("agent"):
-            raise AssertionError(f"the assignment names no keeper: {changes!r}")
+        if changes[0].get("agent") != "beta":
+            raise AssertionError(f"the keeper axis did not reach the save: {changes!r}")
 
         press_and_settle(process, master_fd, output, b"\x1b")
         read_available(master_fd, output)
         os.write(master_fd, b"q")
 
     return interact
+
+
+def run_voice_terminal_text_regression(executable: str) -> None:
+    """External labels/status draw as text; the saved voice ID stays untouched."""
+    voice_id = "ID\x1b]0;I\x07I\nD"
+    name = "NAME\x1b]0;N\x07N\nZ"
+    language = "LANG\x1b]0;L\x07L\nZ"
+    error = "ERROR\x1b]0;E\x07E\nZ"
+    fixtures = voice_wizard_http_fixtures()
+    setup = json.loads(json.dumps(VOICE_SETUP_FIXTURE))
+    setup["tts"]["endpoints"].append({
+        "id": "id\x1b]0;M\x07", "kind": "k\x1b]0;K\x07",
+        "base_url": "u\x1b]0;U\x07", "enabled": False,
+    })
+    fixtures["/api/v1/voice/voices"] = (
+        200, {"voices": [{"id": voice_id, "name": name, "language": language}]}
+    )
+    fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (400, {"error": error}) if body else (200, setup)
+    )
+    requests: HttpRequests = []
+
+    def interact(
+        process: "subprocess.Popen[bytes]", master_fd: int, _slave_fd: int,
+        output: bytearray, _base_path: str,
+    ) -> None:
+        def safe_output(needle: bytes, *, start: int = 0) -> None:
+            raw = bytes(output)
+            if needle not in CSI_RE.sub(b"", raw[start:]):
+                raise AssertionError(f"the external field was not drawn: {needle!r}")
+            for control in (
+                b"\x1b]0;I\x07", b"\x1b]0;N\x07", b"\x1b]0;L\x07", b"\x1b]0;E\x07",
+                b"\x1b]0;M\x07", b"\x1b]0;K\x07", b"\x1b]0;U\x07",
+                b"I\nD", b"N\nZ", b"L\nZ", b"E\nZ",
+            ):
+                if control in raw:
+                    raise AssertionError(f"external terminal control reached output: {control!r}")
+
+        def submit_and_check(kind: str) -> None:
+            requests.clear()
+            before_submit = len(output)
+            press_and_settle(process, master_fd, output, b"\r")
+            body = json.loads(wait_for_http_request(
+                process, master_fd, output, requests, path="/api/v1/voice/setup"
+            ))
+            changes = {change["change"]: change for change in body["changes"]}
+            saved = (changes["set_agent_voice"]["voice"] if kind == "assignment"
+                     else changes["put_endpoint"]["endpoint"]["default_voice"])
+            if saved != voice_id:
+                raise AssertionError(f"display sanitization changed the saved ID: {saved!r}")
+            safe_output(b"ERROR", start=before_submit)
+            safe_output(b"\\x1B]0;E\\x07", start=before_submit)
+
+        open_the_voice_pane(process, master_fd, output)
+        for rendered in (b"\\x1B]0;M\\x07", b"\\x1B]0;K\\x07", b"\\x1B]0;U\\x07"):
+            safe_output(rendered)
+        press_and_settle(process, master_fd, output, b"a")
+        safe_output(b"NAME")
+        safe_output(b"LANG")
+        safe_output(b"\\x1B]0;N\\x07")
+        safe_output(b"\\x1B]0;L\\x07")
+        submit_and_check("assignment")
+        press_and_settle(process, master_fd, output, b"\x1b")
+
+        press_and_settle(process, master_fd, output, b"e")
+        press_and_settle(process, master_fd, output, b"\r")
+        press_and_settle(process, master_fd, output, b"\x1b[C")  # macos_say
+        press_and_settle(process, master_fd, output, b"\r")
+        press_and_settle(process, master_fd, output, b"safe-name", cap=15.0)
+        before_voice = len(output)
+        press_and_settle(process, master_fd, output, b"\r")
+        if b"NAME" not in bytes(output[before_voice:]):
+            raise AssertionError("the hostile catalogue did not reach the wizard")
+        safe_output(b"\\x1B]0;I\\x07", start=before_voice)
+        safe_output(b"\\x1B]0;N\\x07", start=before_voice)
+        safe_output(b"\\x1B]0;L\\x07", start=before_voice)
+        press_and_settle(process, master_fd, output, b"\r")  # review
+        submit_and_check("wizard")
+        press_and_settle(process, master_fd, output, b"\x1b")
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable, description="Voice catalogue and status are terminal-safe text",
+        interact=interact, http_fixtures=fixtures, http_requests=requests,
+    )
 
 
 def run_voice_wizard_regression(executable: str) -> None:
@@ -14797,6 +14885,7 @@ def run_voice_wizard_regression(executable: str) -> None:
         http_fixtures=voice_wizard_http_fixtures(),
         http_requests=say_requests,
     )
+    run_voice_terminal_text_regression(executable)
 
 
 def run_config_regression(executable: str) -> None:

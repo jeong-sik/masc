@@ -897,6 +897,21 @@ KEEPER_ROW_SCAN_BOUND = 24
 KEEPER_ROW_STEP_TIMEOUT_S = 1.0
 
 
+KEEPERS_HEADER = b"MASC Keepers"
+
+
+def current_screen_start(output: bytearray, header: bytes) -> int:
+    """Where the screen now on display began in the cumulative output.
+
+    A frame is appended, never replaced, so [output] holds every screen the
+    run has drawn. Searching it from zero answers about screens that are gone.
+    The last time a surface drew its header is where the one on display
+    started; before any header, zero is all there is.
+    """
+    found = output.rfind(header)
+    return found if found >= 0 else 0
+
+
 def keeper_row_selected(name: bytes) -> re.Pattern[bytes]:
     """A needle that matches only while ``name`` is the selected keeper row.
 
@@ -2321,8 +2336,17 @@ def select_keeper_row(
     # starts there presses Down into an empty list -- which redraws nothing, so
     # the wait below times out -- and when the roster does land it can already
     # have walked past the row it wanted. Wait for the row to exist first.
-    wait_for_output(process, master_fd, output, name, start=0, timeout=5.0)
-    if find_needle(output, needle, 0) >= 0:
+    #
+    # From the current screen, not from byte zero. [output] is every frame the
+    # run has produced, so a scan from 0 can answer with an Overview activity
+    # line that happens to name this keeper, or with a selected row from an
+    # earlier visit to Keepers -- and the early return below then hands back a
+    # cursor that is not on the row the scenario asked for. The scenarios open
+    # this screen by waiting for its header, so the last header in the stream
+    # is where what is on screen began.
+    entry = current_screen_start(output, KEEPERS_HEADER)
+    wait_for_output(process, master_fd, output, name, start=entry, timeout=5.0)
+    if find_needle(output, needle, entry) >= 0:
         return
     for _ in range(KEEPER_ROW_SCAN_BOUND):
         read_available(master_fd, output)

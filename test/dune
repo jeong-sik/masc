@@ -5369,6 +5369,15 @@
  (deps (alias runtest-test_tui_keyboard_input-observer-reconnect)))
 
 (rule
+ (alias runtest-test_tui_harness_screen_offset)
+ (deps test_tui_harness_screen_offset.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_harness_screen_offset.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_harness_screen_offset)))
+
+(rule
  (alias runtest-test_shim_builder_bootstrap)
  (deps test_shim_builder_bootstrap.py ../scripts/remote-ssh/build-shim.sh)
  (action (run python3 %{dep:test_shim_builder_bootstrap.py})))

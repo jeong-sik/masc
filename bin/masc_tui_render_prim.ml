@@ -1865,8 +1865,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
          item nothing could split -- at 60 columns the row cut mid-word and
          "q quit", last in the list, went first. The two keys the footer pins
          lead with a plain key so it can read them past the colour. *)
-      "  "
-      ^ String.concat "  "
+      String.concat "  "
           [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"

@@ -256,7 +256,9 @@ export class DosWorld {
         const before = await this.untilSnapshot(() => true);
         const expected = (before.counter + 1) % 65536;
         inputStarted = true;
-        this.ci.simulateKeyPress('n'.charCodeAt(0));
+        // js-dos Keys.KBD_n uses the uppercase Latin key-code range (78),
+        // independent of the lower/uppercase character emitted by the guest.
+        this.ci.simulateKeyPress('N'.charCodeAt(0));
         const after = await this.untilSnapshot(snapshot => snapshot.frame.sequence > before.frame.sequence
           && snapshot.counter !== before.counter);
         if (after.counter !== expected) throw new Error('Observed guest counter differs from the requested increment');

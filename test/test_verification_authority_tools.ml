@@ -1057,6 +1057,43 @@ let test_goal_and_task_inspect_real_mp4 () =
     (In_channel.with_open_bin source In_channel.input_all)
 ;;
 
+(* A capture saved without its extension used to fall through to the ordinary
+   text Read, which projects container bytes as characters. The ISO file type
+   box is what names the format, so the same file must reach the same
+   inspection under either name. *)
+let test_a_capture_without_the_mp4_extension_is_still_inspected () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "video-signature-test"));
+  let producer_name = "video-signature-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "test/fixtures/verifier-video.mp4" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  Out_channel.with_open_bin (Filename.concat root "capture")
+    (fun out -> output_string out bytes);
+  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
+  let result = VAT.dispatch task ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String "capture"]) in
+  (match result with
+   | Tool_result.Completed {data;_} ->
+     let open Yojson.Safe.Util in
+     let data = member "inspection" data in
+     Alcotest.(check int) "exact video bytes" (String.length bytes)
+       (member "bytes" data |> to_int);
+     Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
+     Alcotest.(check bool) "no visual inspection invented" true
+       (member "visual_input" data = `Bool false)
+   | _ -> Alcotest.fail (Tool_result.message result))
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -1080,6 +1117,9 @@ let () =
     ; ( "dispatch"
       , [ Alcotest.test_case "Goal and Task inspect original MP4 metadata and all audio/video streams" `Quick
             test_goal_and_task_inspect_real_mp4
+        ; Alcotest.test_case
+            "a capture without the .mp4 extension is still inspected as video" `Quick
+            test_a_capture_without_the_mp4_extension_is_still_inspected
         ; Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
             test_goal_and_task_inspect_real_pdf
         ; Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick

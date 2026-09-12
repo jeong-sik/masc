@@ -22,15 +22,31 @@ type t =
   }
 type error =
   | Dependency_unavailable of string list
+  | Budget_spent of { program : string; budget_sec : float }
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Storage_failed of string
+
+(* Submitted evidence is not trusted input. A malformed or deliberately long
+   MP4 can make either FFmpeg command sit there, and the completion verifier
+   holds one of only four global review slots while it waits -- so the bound is
+   what keeps one recording from wedging Task and Goal verification. [inspect]
+   runs exactly four commands, so the whole inspection is bounded by four times
+   this, and the sibling PDF inspection spends the same budget per command for
+   the same reason. Generous enough to decode a long recording on a loaded
+   machine; past it the command is reported as a refusal rather than waited on. *)
+let command_timeout_sec = 120.
 
 let ( let* ) = Result.bind
 let error_to_string = function
   | Dependency_unavailable programs ->
     "video_dependency_unavailable: install FFmpeg with ffprobe in the verifier service environment; missing "
     ^ String.concat ", " programs
+  | Budget_spent {program;budget_sec} ->
+    Printf.sprintf
+      "video_budget_spent: %s did not finish within %.0f seconds; submit a shorter or less \
+       expensive recording"
+      program budget_sec
   | Command_failed {program;status;detail} ->
     let status = match status with
       | Unix.WEXITED code -> Printf.sprintf "exit=%d" code
@@ -133,9 +149,14 @@ let inspect ~base_path ~bytes =
     Auth.save_private_text_file source bytes; Unix.chmod source 0o400;
     let run program arguments =
       let status, stdout, stderr = Process_eio.run_argv_with_status_split
+        ~timeout_sec:command_timeout_sec
         ~env:(Env_keeper_scrub.filter_environment (Unix.environment ())) ~cwd:root (program :: arguments) in
       match status with
       | Unix.WEXITED 0 -> Ok {program;arguments;stdout;stderr}
+      (* [run_argv_with_status_split] synthesises 124 on its own timeout, the
+         way timeout(1) does. Naming it separately keeps a spent budget from
+         reading as a decode error the submitter cannot act on. *)
+      | Unix.WEXITED 124 -> Error (Budget_spent {program;budget_sec=command_timeout_sec})
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error (Command_failed {program;status;detail=stderr}) in
     let* probe_version = run "ffprobe" ["-version"] in
     let* decode_version = run "ffmpeg" ["-version"] in

@@ -6,6 +6,7 @@
 type t
 type error =
   | Dependency_unavailable of string list
+  | Budget_spent of { program : string; budget_sec : float }
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Storage_failed of string

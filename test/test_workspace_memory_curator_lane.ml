@@ -66,9 +66,24 @@ let test_commit_coalescing_and_restart () = with_base (fun base_path clock ->
     Alcotest.(check (list string)) "in-flight input survives; pending work captures the latest commit"
       [Inventory.fingerprint first_context; Inventory.fingerprint latest] !contexts;
     Alcotest.(check int) "both immutable proposals persisted" 2 (List.length (stored base_path));
+    (match Masc.Workspace_memory_publication.observe ~base_path with
+     | Available descriptor -> Alcotest.(check string) "Keeper discovery points at latest captured input"
+         (Inventory.fingerprint latest) descriptor.context_sha256
+     | Missing | Unavailable _ -> Alcotest.fail "curator did not publish discovery");
     Worker.request ~base_path;
     await_idle ~clock ~base_path;
     Alcotest.(check int) "unchanged wake does not call a model" 2 (List.length !contexts);
+    let published_id = match Masc.Workspace_memory_publication.observe ~base_path with
+      | Available descriptor -> descriptor.proposal_id
+      | Missing | Unavailable _ -> Alcotest.fail "missing prior publication" in
+    Sys.remove (Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory/publication.json"));
+    Worker.request ~base_path;
+    await_idle ~clock ~base_path;
+    Alcotest.(check int) "missing descriptor repair does not call a model" 2 (List.length !contexts);
+    (match Masc.Workspace_memory_publication.observe ~base_path with
+     | Available descriptor -> Alcotest.(check string) "successful exact output repairs the same discovery id"
+         published_id descriptor.proposal_id
+     | Missing | Unavailable _ -> Alcotest.fail "cache did not repair missing descriptor");
     let id, _ = List.hd (stored base_path) in
     let status, response = Server_workspace_memory_proposals.get ~base_path ~id:(Some id) in
     Alcotest.(check bool) "existing reader API reaches the background result" true (status = `OK);
@@ -99,6 +114,17 @@ let test_failure_then_changed_input () = with_base (fun base_path clock ->
     commit base_path "New evidence after provider recovery";
     await_idle ~clock ~base_path;
     Alcotest.(check int) "next commit remains eligible after failure" 1 (List.length (stored base_path));
+    let before = Masc.Workspace_memory_publication.observe ~base_path in
+    fail := true;
+    commit base_path "Changed facts while provider unavailable";
+    await_idle ~clock ~base_path;
+    Alcotest.(check bool) "failed new curation preserves prior captured publication, not current facts"
+      true (before = Masc.Workspace_memory_publication.observe ~base_path);
+    let live = Inventory.collect ~base_path |> require in
+    (match before with
+     | Available descriptor -> Alcotest.(check bool) "old descriptor is not a claim of current source currency"
+         false (descriptor.context_sha256 = Inventory.fingerprint live)
+     | Missing | Unavailable _ -> Alcotest.fail "recovered proposal was not published");
     Worker.For_testing.stop ~base_path))
 
 let test_directory_alias () = with_base (fun base_path clock ->
@@ -142,9 +168,31 @@ let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
         (input |> field "prompt" |> field "rendered" |> string);
       Worker.For_testing.stop ~base_path)))
 
+let test_failed_publication_is_not_success () = with_base (fun base_path clock ->
+  commit base_path "Original source";
+  let execute ~rendered_prompt:_ context = Ok (proposal context, "test.slot") in
+  let directory = Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory") in
+  Fs_compat.mkdir_p directory;
+  Fs_compat.save_file (Filename.concat directory "publication.json") "{broken descriptor";
+  Eio.Switch.run (fun sw ->
+    Worker.For_testing.start ~sw ~base_path ~execute;
+    await_idle ~clock ~base_path;
+    Alcotest.(check int) "immutable model output still exists for inspection" 1 (List.length (stored base_path));
+    (match Masc.Workspace_memory_publication.observe ~base_path with
+     | Unavailable _ -> () | Missing | Available _ -> Alcotest.fail "invalid latest was overwritten");
+    let canonical = Unix.realpath base_path in
+    let runs = Runs.list_runs (Runs.global ()) |> List.filter (fun (run : Runs.run) ->
+      String.equal run.actor canonical && run.lane = Runs.Workspace_curator) in
+    Alcotest.(check int) "one matching publication attempt exists" 1 (List.length runs);
+    Alcotest.(check bool) "publication failure has no successful run" true
+      (List.for_all (fun (run : Runs.run) -> match run.status with
+       | Runs.Completed { outcome = Runs.Failed _; _ } -> true | _ -> false) runs);
+    Worker.For_testing.stop ~base_path))
+
 let () = Alcotest.run "workspace curator lane"
   [ "background proposal publication",
-    [ Alcotest.test_case "commits coalesce, reader sees proposals, restart reconciles" `Quick test_commit_coalescing_and_restart
+    [ Alcotest.test_case "failed publication retains output but never succeeds" `Quick test_failed_publication_is_not_success
+    ; Alcotest.test_case "commits coalesce, reader sees proposals, restart reconciles" `Quick test_commit_coalescing_and_restart
     ; Alcotest.test_case "failure stays visible and a later commit proceeds" `Quick test_failure_then_changed_input
     ; Alcotest.test_case "canonical directory aliases share an owner" `Quick test_directory_alias
     ; Alcotest.test_case "changed prompt is delivered and recorded with unchanged facts" `Quick test_prompt_change_is_a_new_request ] ]

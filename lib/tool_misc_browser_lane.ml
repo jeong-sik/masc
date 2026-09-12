@@ -228,6 +228,33 @@ let handle_read ?keeper_name ~tool_name ~start_time args : Tool_result.result =
            (Browser_lane.issue_for ~target ~verb ~timeout_sec:default_timeout_sec |> add_client target))
 ;;
 
+(* Retention requires an owner that will commit the observation receipt. *)
+let retain_read_result ~base_path ~tool_name ~start_time args result =
+  let retained = match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "mode" fields with
+       | Some (`String "scene") -> Browser_observation.retain
+           ~base_path ~view:Browser_lane.Content result
+       | Some (`String "regions") -> Browser_observation.retain
+           ~base_path ~view:Browser_lane.Regions result
+       | _ -> Ok result)
+    | _ -> Ok result in
+  match retained with
+  | Ok result -> result
+  | Error detail ->
+    Tool_result.make_err ~tool_name ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      ~data:(Tool_result.data result)
+      ("Browser observation received but could not be retained: " ^ detail
+       ^ "; retry only the read, not preceding navigation or interaction.")
+;;
+
+let handle_read_with_retention ~base_path ?keeper_name ~tool_name ~start_time args =
+  handle_read ?keeper_name ~tool_name ~start_time args
+  |> retain_read_result ~base_path ~tool_name ~start_time args
+;;
+
 let handle_act_with_phase ?upload_paths ~tool_name ~start_time args =
   let pre_error detail =
     make_workflow_err ~tool_name ~start_time detail, Tool_result.Proven_pre_effect in

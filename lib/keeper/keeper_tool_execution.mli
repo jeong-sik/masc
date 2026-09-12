@@ -29,7 +29,8 @@ val memory_revision_wire_key : string
     text. [data] and [metadata] exist only when the producer supplied them. *)
 
 type t = private
-  { raw_output : string
+  { retained_artifacts : Tool_output.artifact_ref list
+  ; raw_output : string
   ; data : Yojson.Safe.t option
   ; metadata : Yojson.Safe.t option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition

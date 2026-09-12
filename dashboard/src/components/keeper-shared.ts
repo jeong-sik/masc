@@ -876,6 +876,7 @@ export function KeeperConversationPanel({
         <div class="kw-thread v2-monitoring-panel">
           <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
+              keeperName=${keeperName}
               entries=${transcriptEntries}
               emptyText=${transcriptEmptyText}
               showMetadata=${showMetadata}
@@ -990,6 +991,7 @@ export function KeeperConversationPanel({
           : null}
 
         <${ChatTranscript}
+          keeperName=${keeperName}
           entries=${transcriptEntries}
           emptyText=${transcriptEmptyText}
           showMetadata=${showMetadata}
@@ -1096,6 +1098,7 @@ export function KeeperConversationPanel({
               `
             : null}
           <${ChatTranscript}
+            keeperName=${keeperName}
             entries=${transcriptEntries}
             emptyText=${transcriptEmptyText}
             showMetadata=${showMetadata}

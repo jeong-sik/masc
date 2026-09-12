@@ -820,7 +820,7 @@ let test_progress_row_names_the_calls_still_out () =
   (match rows t with
    | (Transcript.Progress, text) :: _ ->
        check bool "a returned call is not reported as running" false
-         (contains ~needle:"still running" text)
+         ((contains ~needle:"preparing:" text || contains ~needle:"awaiting results:" text))
    | got -> failf "expected a progress row, got %d rows" (List.length got));
   (* One call whose invocation ended without a result, one still taking its
      arguments. Both are out; neither was visible on this row. *)
@@ -833,17 +833,17 @@ let test_progress_row_names_the_calls_still_out () =
   match rows t with
   | (Transcript.Progress, text) :: _ ->
       check bool "the row says something is still out" true
-        (contains ~needle:"still running" text);
+        ((contains ~needle:"preparing:" text || contains ~needle:"awaiting results:" text));
       check bool "and names the call whose result has not landed" true
         (contains ~needle:"Bash" text);
       check bool "and the one still taking arguments" true
         (contains ~needle:"WebFetch" text);
       check bool "the finished call keeps out of it" false
-        (contains ~needle:"still running: Read" text);
+        (contains ~needle:"awaiting results: Read" text);
       (* Before the tool mix, which is what a narrow row loses first. *)
       check bool "the running calls come before the mix" true
         (match
-           ( index_of ~needle:"still running" text
+           ( index_of ~needle:"preparing:" text
            , index_of ~needle:"Read 1" text )
          with
          | Some running, Some mix -> running < mix
@@ -868,7 +868,7 @@ let test_the_open_call_age_sits_with_the_names () =
         (contains ~needle:"in this call 42s" text);
       check bool "the age follows the names it belongs to" true
         (match
-           ( index_of ~needle:"still running" text
+           ( index_of ~needle:"preparing:" text
            , index_of ~needle:"in this call" text
            , index_of ~needle:"Read 1" text )
          with
@@ -898,7 +898,7 @@ let test_a_superseded_attempts_open_call_is_not_still_running () =
   | (Transcript.Progress, text) :: _ ->
       check bool "the abandoned attempt's call is not reported as running"
         false
-        (contains ~needle:"still running: keeper_analyze_image" text);
+        (contains ~needle:"preparing: keeper_analyze_image" text);
       check bool "the current attempt's open call still is" true
         (contains ~needle:"Read" text)
   | got -> failf "expected a progress row, got %d rows" (List.length got)
@@ -968,19 +968,41 @@ let test_the_reason_a_reader_is_asked_is_drawn_under_the_question () =
         (not (contains ~needle:"because" row))
   | rows -> failf "expected one prompt row, got %d" (List.length rows)
 
-let test_a_held_turn_does_not_say_it_is_working () =
+let test_approval_does_not_hide_other_current_work () =
   let t = fresh () in
   feed t
     [ Live.Run_started
+    ; tool_started "c1" "Edit"
     ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?"
     ];
-  match rows t with
-  | (Transcript.Progress, text) :: _ ->
-      (* "working" would read as a slow tool rather than a question waiting on
-         screen for someone. *)
-      check bool "it says it is waiting on a person" true
-        (contains ~needle:"waiting for your answer" text)
-  | rows -> failf "expected a progress row, got %d rows" (List.length rows)
+  feed ~now:(origin +. 5.) t [tool_started "c2" "BrowserRead"; tool_ended "c2"];
+  let progress () =
+    match rows ~now:(origin +. 30.) t with
+    | (Transcript.Progress, text) :: _ -> text
+    | _ -> fail "missing current progress"
+  in
+  check bool "other work remains visible while approval is outstanding" true
+    (contains ~needle:"awaiting results: BrowserRead" (progress ()));
+  check bool "the held call is not advertised as executing" false
+    (contains ~needle:"preparing: Edit" (progress ()));
+  check bool "age belongs to the other pending result, not the approval" true
+    (contains ~needle:"in this call 25s" (progress ()));
+  check bool "approval remains separately actionable" true
+    (List.exists (contains ~needle:"approval for Edit:") (approval_rows t));
+  feed t [tool_result "c2" "exec-browser"];
+  check bool "completed other work is no longer pending" false
+    (contains ~needle:"awaiting results:" (progress ()));
+  feed t
+    [ Live.Runtime_attempt_started {runtime_id = Some "other-runtime"; attempt_index = Some 1}
+    ; tool_started "c3" "Read"
+    ];
+  check bool "new attempt activity is shown after failover" true
+    (contains ~needle:"preparing: Read" (progress ()));
+  check bool "new runtime is visible" true
+    (contains ~needle:"other-runtime" (progress ()));
+  check bool "approval does not declare the entire Keeper stopped" false
+    (contains ~needle:"held at a tool call" (progress ()))
+;;
 
 let test_an_answer_clears_the_prompt () =
   let t = fresh () in
@@ -2163,8 +2185,8 @@ let () =
             test_case "the reason a reader is asked is drawn under the question"
               `Quick
               test_the_reason_a_reader_is_asked_is_drawn_under_the_question
-        ; test_case "a held turn does not say it is working" `Quick
-            test_a_held_turn_does_not_say_it_is_working
+        ; test_case "approval and other work coexist" `Quick
+            test_approval_does_not_hide_other_current_work
         ; test_case "an answer clears the prompt" `Quick
             test_an_answer_clears_the_prompt
         ; test_case "a timeout clears the prompt too" `Quick

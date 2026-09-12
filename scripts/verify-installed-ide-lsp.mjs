@@ -11,17 +11,17 @@ import { execFileSync } from 'node:child_process'
 
 const require = createRequire(new URL('../dashboard/package.json', import.meta.url))
 const { chromium } = require('playwright')
-const [prefix, expectedCommit, baseUrl, outputDirectory, tokenFile, fixtureFile, mode] = process.argv.slice(2)
+const [prefix, expectedCommit, baseUrl, outputDirectory, tokenFile, fixtureFile, mode, referenceFile] = process.argv.slice(2)
 assert.ok(prefix && expectedCommit && baseUrl && outputDirectory && tokenFile && fixtureFile,
   'Usage: INSTALLED_PREFIX EXPECTED_COMMIT BASE_URL FRESH_OUTPUT_DIR TOKEN_FILE FIXTURE_JSON [--baseline]')
-assert.ok(mode === undefined || mode === '--baseline', 'only --baseline is supported')
+assert.ok(mode === undefined || mode === '--baseline' || (mode === '--diagnostics-reference' && referenceFile), 'expected --baseline or --diagnostics-reference FILE')
 const baseline = mode === '--baseline', output = resolve(outputDirectory)
 await mkdir(output)
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const events = [], assets = [], protocol = [], blocked = [], errors = [], failures = [], navigation = []
 const receipt = { mode: baseline ? 'baseline_only' : 'installed_acceptance', probe_passed: false,
   scope: 'Installed MASC full IDE, real HTTP and WebSocket, probe-owned worktree source. Same-file reselection refreshes the real file API; this is not an autonomous Keeper or automatic file-watch proof. Unrelated dashboard WebSockets and mutation requests are blocked, so overall dashboard connectivity is outside this probe.' }
-let browser, page, fixture, source, changed = false
+let browser, page, fixture, source, diagnosticReference, changed = false
 const responseTasks = []
 
 async function changeOwnedSource(expected, replacement) {
@@ -55,6 +55,18 @@ try {
   assert.equal(await realpath(fixture.root), fixture.root)
   assert.equal(basename(fixture.source_relative), fixture.source_relative, 'one root-level probe source')
   assert.match(fixture.source_relative, /^[a-zA-Z0-9_-]+\.ml$/)
+  if (mode === '--diagnostics-reference') {
+    diagnosticReference = JSON.parse(await readFile(referenceFile, 'utf8'))
+    assert.equal(diagnosticReference.schema, 'masc.lsp_diagnostics_reference.v1')
+    assert.equal(diagnosticReference.uri, pathToFileURL(resolve(fixture.root, fixture.source_relative)).href)
+    assert.equal(diagnosticReference.process_exit_code, 0)
+    assert.equal(diagnosticReference.initial.source_sha256, fixture.initial_sha256)
+    assert.equal(diagnosticReference.updated.source_sha256, fixture.updated_sha256)
+    assert.ok(Array.isArray(diagnosticReference.initial.diagnostics))
+    assert.ok(Array.isArray(diagnosticReference.updated.diagnostics))
+    assert.ok(diagnosticReference.initial.diagnostics.length > diagnosticReference.updated.diagnostics.length)
+    receipt.diagnostics_reference = diagnosticReference
+  }
   source = resolve(fixture.root, fixture.source_relative)
   assert.equal(await realpath(source), source)
   assert.equal(digest(fixture.initial_text), fixture.initial_sha256)
@@ -221,7 +233,20 @@ try {
     const status = page.getByTestId('ide-statusbar-chip-lsp-document')
     await status.waitFor({ timeout: 45000 })
     const markers = page.locator('.cm-diagnostic-marker[title]:not([title=""])')
+    const waitForDiagnosticDisplay = async diagnostics => {
+      const messages = diagnostics.map(diagnostic => diagnostic.message)
+      await page.waitForFunction(({ messages, count }) => {
+        const titles = [...document.querySelectorAll('.cm-diagnostic-marker[title]:not([title=""])')].map(node => node.getAttribute('title'))
+        const status = document.querySelector('[data-testid="ide-statusbar-chip-lsp-document"]')?.textContent ?? ''
+        const countLabel = status.trim().split(' · ')[0]
+        return (countLabel.endsWith(` ${count} reported`) || countLabel.endsWith(` ${count} diagnostics`))
+          && (count === 0 ? titles.length === 0
+          : titles.length > 0 && titles.every(title => messages.includes(title)))
+      }, { messages, count: diagnostics.length })
+    }
+
     await markers.first().waitFor({ timeout: 45000 })
+    if (diagnosticReference) await waitForDiagnosticDisplay(diagnosticReference.initial.diagnostics)
     const opened = protocol.filter(event => event.direction === 'client' && event.message?.method === 'textDocument/didOpen')
     assert.ok(opened.some(event => event.message.params.textDocument.text === fixture.initial_text))
     assert.equal(await shown(), fixture.initial_text)
@@ -240,6 +265,15 @@ try {
       && event.direction === 'server' && event.message?.method === 'textDocument/publishDiagnostics'
       && event.message.params.uri === pathToFileURL(source).href && event.message.params.diagnostics.length > 0),
       'actual language server diagnostics must explain the initial gutter markers')
+    if (diagnosticReference) {
+      const initialReply = protocol.findLast(event => event.socket === originalSocket && event.direction === 'server'
+        && event.message?.method === 'textDocument/publishDiagnostics' && event.message.params.uri === pathToFileURL(source).href)
+      assert.deepEqual(initialReply.message.params.diagnostics, diagnosticReference.initial.diagnostics)
+      receipt.initial.diagnostics = initialReply.message.params.diagnostics
+      receipt.initial.marker_titles = await markers.evaluateAll(nodes => nodes.map(node => node.title))
+      assert.ok(receipt.initial.marker_titles.some(title => !diagnosticReference.updated.diagnostics.some(item => item.message === title)),
+        'an initially visible diagnostic must disappear after the source correction')
+    }
     await page.screenshot({ path: resolve(output, 'diagnostics-before.png'), fullPage: true })
     changed = true
     await changeOwnedSource(fixture.initial_text, fixture.updated_text)
@@ -248,8 +282,11 @@ try {
     await row.click()
     navigation.push({ action: 'reselect_same_file_to_refresh_real_api' })
     await page.waitForFunction(text => document.querySelector('.cm-content')?.textContent.includes(text.trim()), fixture.updated_text)
-    await markers.first().waitFor({ state: 'detached', timeout: 45000 })
-    await page.waitForFunction(() => /0 (reported|diagnostics)/.test(document.querySelector('[data-testid="ide-statusbar-chip-lsp-document"]')?.textContent ?? ''))
+    if (diagnosticReference) await waitForDiagnosticDisplay(diagnosticReference.updated.diagnostics)
+    else {
+      await markers.first().waitFor({ state: 'detached', timeout: 45000 })
+      await page.waitForFunction(() => /0 (reported|diagnostics)/.test(document.querySelector('[data-testid="ide-statusbar-chip-lsp-document"]')?.textContent ?? ''))
+    }
     assert.equal(await shown(), fixture.updated_text)
     const changedFrame = protocol.find(event => event.socket === originalSocket && event.direction === 'client'
       && event.message?.method === 'textDocument/didChange'
@@ -258,10 +295,13 @@ try {
     assert.ok(changedFrame.message.params.textDocument.version > originalVersion)
     const reply = protocol.slice(protocol.indexOf(changedFrame) + 1).findLast(event => event.socket === originalSocket && event.direction === 'server'
       && event.message?.method === 'textDocument/publishDiagnostics'
-      && event.message.params.uri === pathToFileURL(source).href && event.message.params.diagnostics.length === 0)
-    assert.ok(reply, 'actual language server must publish empty diagnostics for this URI')
+      && event.message.params.uri === pathToFileURL(source).href)
+    assert.ok(reply, 'actual language server must publish updated diagnostics for this URI')
+    assert.deepEqual(reply.message.params.diagnostics, diagnosticReference?.updated.diagnostics ?? [])
     receipt.updated = { source_sha256: digest(await shown()), status: await status.innerText(),
       detail: await status.getAttribute('title'), diagnostic_markers: await markers.count(), version: changedFrame.message.params.textDocument.version }
+    receipt.updated.diagnostics = reply.message.params.diagnostics
+    receipt.updated.marker_titles = await markers.evaluateAll(nodes => nodes.map(node => node.title))
     if (reply.message.params.version === undefined) assert.match(receipt.updated.status, /version unconfirmed/)
     else assert.equal(reply.message.params.version, receipt.updated.version)
     assert.ok(events.some(event => event.kind === 'fixture_source_response' && event.sha256 === fixture.updated_sha256))

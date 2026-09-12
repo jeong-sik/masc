@@ -122,7 +122,12 @@ val upsert_table_array_entry
     Refused, writing nothing, when the path already exists in another shape --
     see {!entry_error}. A line editor can add an entry beside other entries; it
     cannot reconcile an array-of-tables with a key or a standard table of the
-    same path, and producing a file the loader rejects is worse than saying so. *)
+    same path, and producing a file the loader rejects is worse than saying so.
+
+    Every entry carrying [id] is addressed, not only the first. Two entries
+    claiming one id is already a configuration this editor cannot choose
+    between, and applying to each keeps the call meaning what it says rather
+    than picking one silently and leaving the other to be found later. *)
 
 val remove_table_array_entry
   :  string
@@ -130,11 +135,15 @@ val remove_table_array_entry
   -> id_key:string
   -> id:string
   -> string
-(** Drop the [\[\[path\]\]] entry whose [id_key] is [id], from its header line to
-    the line before the next table header of any kind.
+(** Drop the [\[\[path\]\]] entry whose [id_key] is [id]: its header, its body,
+    and any table named under its path, which is that entry's own.
 
-    Comments above the header stay where they are. An operator wrote them about
-    the endpoint, and this editor cannot tell which of the lines above a header
-    belong to it: the whisper endpoint in a live runtime.toml carries twelve
-    lines of measured notes above its header, and a rule that swallowed them
-    would delete the reason the setting exists. *)
+    Two things are left where they are. Comments above the header: an operator
+    wrote them about the endpoint, nothing in the text says where that block
+    begins, and the whisper endpoint in a live runtime.toml carries twelve lines
+    of measured notes above its header -- a rule that swallowed them would
+    delete the reason the setting exists. And a comment block sitting just above
+    the NEXT header, with the blank lines separating it: that block documents
+    the header below it, not this entry.
+
+    Every entry carrying [id] is dropped, not only the first. *)

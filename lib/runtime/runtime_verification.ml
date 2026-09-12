@@ -209,12 +209,12 @@ let measure ~runtime_id ~selected_model ~challenge ~run =
             called := true;
             { success = true
             ; content = Yojson.Safe.to_string (`Assoc [ "challenge", `String challenge ])
-            ; abort_turn = None
+            ; content_blocks = None; abort_turn = None
             }
           | _ ->
             { success = false
             ; content = "This tool accepts an empty object only."
-            ; abort_turn = None
+            ; content_blocks = None; abort_turn = None
             })
     }
   in
@@ -330,7 +330,7 @@ let verify ?secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               let handler input =
                 let result = tool.call ~call_id:"readiness" input in
                 if result.success
-                then Ok { Agent_core.Types.content = result.content; content_blocks = None; _meta = None }
+                then Ok { Agent_core.Types.content = result.content; content_blocks = result.content_blocks; _meta = None }
                 else
                   Error
                     { Agent_core.Types.message = result.content

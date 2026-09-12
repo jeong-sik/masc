@@ -8,6 +8,7 @@ let dependency = function
   | "codex" -> Some Prerequisites.Codex_cli
   | "claude-code" -> Some Prerequisites.Claude_cli
   | "antigravity" -> Some Prerequisites.Antigravity_cli
+  | "pdf-tools" -> Some Prerequisites.Pdf_tools
   | "whisper" -> Some Prerequisites.Whisper_cli
   | name -> Option.map (fun backend -> Prerequisites.Sandbox backend) (Sandbox.backend_of_id name)
 
@@ -120,12 +121,37 @@ let run ~dependency:name ~action =
     let host = Sandbox.detect_host ~run:Sandbox.system_runner in
     let actions = actions host dependency in
     match action with
-    | None -> print_endline (Yojson.Safe.to_string (to_json actions)); 0
+    | None ->
+      let catalog = to_json actions in
+      let catalog = match dependency, catalog with
+        | Prerequisites.Pdf_tools, `Assoc fields ->
+          `Assoc (("dependency_readiness", Masc.Pdf_runtime_dependencies.(observe () |> to_json)) :: fields)
+        | (Sandbox _ | Codex_cli | Claude_cli | Antigravity_cli | Whisper_cli), _ -> catalog
+        | Pdf_tools, _ -> invalid_arg "prerequisite catalog encoder must return an object" in
+      print_endline (Yojson.Safe.to_string catalog); 0
     | Some requested ->
       (match List.find_opt (fun action -> id action = requested) actions with
        | None -> prerr_endline "This prerequisite action is not offered on the current host."; 1
        | Some action ->
          let outcome = execute host action in
-         print_endline (Yojson.Safe.to_string (Prerequisites.outcome_to_json outcome));
-         match outcome with Prerequisites.Failed _ -> 1
-           | External_step_pending | Commands_completed_recheck_required -> 0)
+         let receipt = Prerequisites.outcome_to_json outcome in
+         let receipt, code = match dependency, outcome with
+           | Prerequisites.Pdf_tools, Prerequisites.Commands_completed_recheck_required ->
+             let checks = Masc.Pdf_runtime_dependencies.observe () in
+             let ready = Masc.Pdf_runtime_dependencies.available checks in
+             let fields = match receipt with `Assoc fields -> fields
+               | _ -> invalid_arg "prerequisite outcome encoder must return an object" in
+             let fields = List.remove_assoc "readiness" fields in
+             let fields = if ready then
+               ("status",`String "commands_completed") :: List.remove_assoc "status" fields
+             else
+               ("status",`String "failed") ::
+               ("reason",`String "Installation finished, but PDF tools could not start. Inspect dependency_readiness, correct the installation or PATH, then refresh detection.") ::
+               List.remove_assoc "status" fields in
+             `Assoc (("readiness",`String (if ready then "tools_available" else "unavailable")) ::
+               ("dependency_readiness",Masc.Pdf_runtime_dependencies.to_json checks) :: fields),
+             (if ready then 0 else 1)
+           | _, Prerequisites.Failed _ -> receipt, 1
+           | _, (External_step_pending | Commands_completed_recheck_required) -> receipt, 0 in
+         print_endline (Yojson.Safe.to_string receipt);
+         code)

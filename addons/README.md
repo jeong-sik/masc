@@ -1,35 +1,66 @@
-# Lane observation packages
+# Lane Add-on packages
 
-These packages add observations and relationships to existing MASC activity.
-They do not create a browser, game machine, Keeper, scheduler, or new permission
-requirement. `protocol.py` provides only MCP stdio framing and the common row
-schema. Domain logic lives in the individual packages, outside the MASC host.
+A package adds observations, relationships, metrics, optional Skills or actions to
+an existing MASC run. Its manifest, scripts and execution image supply the domain
+behavior; the host supplies installation, source connections, lifecycle, retained
+evidence and the common Dashboard. A package can borrow an existing resource or
+own its environment. It does not replace a Keeper or make its results a required
+step in other Keeper activity.
 
-`web-project` derives relationships between a bound build expectation, existing
-deployment receipts, captured browser documents, and document feature probes.
-`msx-observer` projects snapshots from the existing machine and keeps its frame
-clock and incarnation. Both only read arguments; neither fetches a URL, opens a
-screen artifact, issues game input, or modifies its source.
+| Package | Contribution | Resource and state ownership |
+| --- | --- | --- |
+| [web-project](web-project/) | Relates build expectations, deployment receipts, captured documents and feature probes. | Reads supplied observations; does not create or navigate a browser. |
+| [msx-observer](msx-observer/) | Projects captures with the existing MSX frame clock and machine incarnation. | Borrows the native machine through host snapshots; does not send input or own the machine. |
+| [output-statistics](output-statistics/README.md) | Counts rows and row kinds in each supplied completed output. | Owns its worker; no cumulative event count or machine state. |
+| [frame-progress](frame-progress/README.md) | Measures frame differences between supplied MSX captures. | Keeps a baseline in worker memory; restart or missing input requires a fresh baseline. |
+| [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 
-The MSX manifest also declares `[world.skills] directory = "skills"`. Its bundled
-`msx-observe` instruction Skill and script/reference resources join the existing
-workspace Skill catalog as a read-only source. `keeper_skill` reads the selected
-bytes and reports their SHA-256; it does not execute the script or add game
-controls. The source uses the existing configured Skill resource-read bound and
-selection rules. See the [installation and Skill guide](../docs/guides/lane-addon-toml.md).
+Removing an observer or metric package leaves the source owner intact. Removing
+the DOS package ends its own environment through its worker lifecycle. The host
+retains committed output and host-owned evidence after either kind of removal.
 
-Build from the repository root (image construction belongs in CI):
+## Install and connect
+
+The package's `lane.toml` declares its image, command, contributions, resource
+envelope and optional `world` connections. A separate workspace declaration
+selects the package with `id`, `run_id`, `manifest_path` and `[binding]`.
+
+Prepare the image in CI and load it into the Docker engine used by MASC. Place the
+package where MASC can read its manifest and bundled Skills, then save the
+workspace declaration under `<resolved-config-root>/lane-addons/`. Resolve
+`manifest_path` relative to that declaration's location. Existing reconciliation
+installs, updates and removes its worker; a separate manual Attach request is not
+required. Saving TOML does not build or download the environment, and desired
+configuration is distinct from applied revision and successful observation.
+See [TOML installation](../docs/guides/lane-addon-toml.md), the
+[MSX declaration](../docs/examples/lane-addons/msx-frames.toml) and
+[DOS declaration](dos-world/install.toml).
+
+[Output composition](../docs/guides/lane-output-composition.md) connects a
+consumer's `binding.sources` to another installation in the same run using
+`kind = "lane_output"` and `selection = "latest_completed"`.
+[Named outputs](../docs/guides/lane-output-ports.md) let that source select an
+`output_id` declared by the producer: MSX publishes `frames`, DOS publishes
+`guest`, and statistics publishes `statistics`. Unknown names are unavailable;
+a known port with no matching rows is an empty supplied output. Original row
+identities and whole-producer coverage remain attached to the selected evidence.
+
+The [package image workflow](../.github/workflows/lane-addon-images.yml) discovers
+package Dockerfiles. The [DOS workflow](../.github/workflows/lane-dos-package.yml)
+also exercises the guest and retains its measured artifacts. These are example
+image build commands for CI, using the repository root and `addons` build context:
 
 ```sh
 docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 addons
 docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.1.0 addons
 ```
 
-Register the package's `lane.toml`. The manifests include example per-observer
-resource envelopes: half a CPU, 128 MiB memory, 16 processes, and a 4 MiB maximum
-reply. These values bound these small read-only workers, not Keeper activity.
-Qualification must record the actual applied envelope and measure impact; these
-defaults do not constitute measured performance acceptance.
+Each manifest specifies its worker's resource envelope. The Web, MSX, statistics
+and frame-progress examples use half a CPU, 128 MiB memory, 16 processes and a
+4 MiB maximum reply; DOS uses one CPU, 512 MiB, 64 processes and the same reply
+bound. These apply to package environments, not Keeper activity. Qualification
+records the applied envelope and measured impact; declarations alone do not
+constitute performance acceptance.
 
 The worker publishes its exact container ID before inspection and MCP
 initialization, so those operations can be interrupted by explicit detach.
@@ -42,22 +73,53 @@ An unavailable Docker daemon or mismatched ownership leaves cleanup incomplete.
 Package lifecycle tests cover blocked inspection, initialization, observation,
 and lost-receipt recovery; CI and live qualification establish the actual result.
 
-The MCP worker exposes `lane_observe`, taking `{binding, sources}` and returning
-`{rows, coverage}` in both `structuredContent` and a JSON text content block.
-`tools/list` supplies `inputSchema` and `outputSchema`. The implemented protocol
-revision is 2025-06-18; initialize negotiates that revision explicitly.
+## Skills and optional actions
 
-Run feature tests without building OCaml or an image:
+MSX, frame-progress and DOS declare `[world.skills] directory = "skills"`.
+Their bundled instructions and script/reference resources join the existing
+workspace Skill catalog as read-only sources. `keeper_skill` reads selected
+bytes and reports their identity; resource reads report a separate SHA-256.
+Reading a helper does not execute it, add controls or force instructions into a
+Keeper turn. Sources use the existing configured Skill resource-read bound and
+selection rules. The installation guide describes this read path.
+
+Installing a package does execute its declared `command` in its worker. A
+package can additionally declare `act` and `[world.actions] tool = "lane_act"`
+to accept explicit requests through the common action surface. Request receipts
+distinguish durable acceptance, dispatch and the package's reported outcome;
+confirmation still needs its stated evidence. The
+[world connection and action contract](../docs/guides/lane-world-actions.md)
+describes incarnation checks, request identity and retained artifacts.
+Observation and derivation packages need no action port.
+
+## Worker protocol and package tests
+
+Every worker advertises `lane_observe` through MCP `tools/list`. Ordinary
+observation requests contain `{binding, sources}`; acting workers also receive
+the host's instance/incarnation `context`. Observations return `rows` and
+`coverage` in `structuredContent`. Any package may include the optional
+`artifacts` bytes envelope; it does not require an action contribution. The host
+computes and retains artifact hashes without fetching arbitrary artifact URIs.
+
+The Python observation/derivation packages use `protocol.py` for MCP stdio
+framing and common row helpers. They advertise input and output schemas and
+also return a JSON text projection. DOS uses the MCP SDK and returns structured
+content without duplicating its artifact bytes in text. The host negotiates
+protocol revision 2025-06-18. Package-specific processing remains in each worker.
+
+Run the Python package feature tests without building OCaml or an image:
 
 ```sh
 python3 -m unittest discover -s addons/tests -v
 ```
 
-Tests execute the actual stdio workers, cover the four Web counterexamples,
-source coverage and actor provenance, and MSX frame reset across incarnations.
-The HTTP test measures actual served HTML; its client/document identity is
-fixture data. It is not browser, Keeper action, Docker isolation, or live MSX
-qualification. Those acceptance tests belong to the host integration.
+These tests execute the Python stdio workers and cover Web counterexamples,
+source coverage, actor provenance, MSX incarnations, supplied-row statistics and
+frame differences. The HTTP test measures served HTML with fixture client and
+document identities. Actual DOS execution has its separate package workflow.
+Package tests alone do not establish browser/Keeper action, Docker isolation,
+live MSX behavior or performance acceptance. The linked guides distinguish
+qualified host/package revisions from production deployment.
 
 ## Sources
 
@@ -78,11 +140,13 @@ An observation carries `id`, epoch `observed_at`, `actor` (actual observer or
 executor, otherwise null), and `evidence: [{uri, sha256}]`. Digests are lowercase
 SHA-256 or null. A deployment's assigned runtime never substitutes for actor.
 Event IDs are namespaced by source and incarnation when projected into rows.
-Rows reference source evidence; the host owns durable evidence preservation.
+Rows reference source evidence. The host retains acquired source/output blobs
+and supplied artifact bytes. An external URI reference alone does not establish
+that its destination bytes were copied into host storage.
 
-Unrecognized observation kinds, including raw Keeper records, produce no domain
-claims. Coverage identifies the ignored kinds and preserves the source's own
-completeness, cursor, and missing-range detail. Known kinds with malformed
+For the Web and MSX projectors, unrecognized observation kinds, including raw
+Keeper records, produce no domain claims. Coverage identifies the ignored kinds
+and preserves the source's own completeness, cursor, and missing-range detail. Known kinds with malformed
 required fields return a tool error, without invented default observations.
 
 ## Web binding and observations

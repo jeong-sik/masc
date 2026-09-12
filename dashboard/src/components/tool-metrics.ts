@@ -137,7 +137,7 @@ export function ToolMetrics({ data }: { data: ToolMetricsResponse | null }) {
       ${data ? html`
         <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
           ${data.metrics_source
-            ? '현재 프로세스 호출과 복원에 성공한 SQLite 보존 기록을 합산합니다. 이 응답은 복원·저장 상태를 확인하지 않습니다. 보존 범위 밖의 과거 사용 여부는 알 수 없습니다.'
+            ? '현재 프로세스 호출과 SQLite 보존 기록을 합산합니다. 이 응답은 복원·저장 성공 여부를 확인하지 않으므로, 보존 기록이 비어 있는 것과 복원이 실패한 것을 구분하지 않습니다. 보존 범위 밖의 과거 사용 여부는 알 수 없습니다.'
             : '사용 집계의 원천 정보가 아직 없습니다.'}
         </div>
         <div class="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">

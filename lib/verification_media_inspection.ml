@@ -14,10 +14,13 @@ let video_result ~base_path ~name ~path ~bytes ~start_time =
 
 let pdf_result ~base_path ~name ~path ~bytes ~start_time ~max_image_bytes =
   match Verification_pdf_inspection.inspect
-    ~base_path ~max_image_bytes ~bytes with
+    ~base_path ~max_image_bytes ~bytes () with
   | Error error ->
     let failure_class = match error with
-      | Verification_pdf_inspection.Image_policy_rejected _ -> Tool_result.Policy_rejection
+      (* A document refused for its size is the submitter's to fix, the same as
+         a page over the image limit, and not a fault of this runtime. *)
+      | Verification_pdf_inspection.Image_policy_rejected _
+      | Too_many_pages _ | Rendered_bytes_exceeded _ -> Tool_result.Policy_rejection
       | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time

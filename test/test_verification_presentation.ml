@@ -12,6 +12,16 @@ let test_original_presentation () =
   Masc_test_deps.init_eio_clock ~sw env;
   let temporary = Filename.get_temp_dir_name () in
   let base = Filename.concat temporary "masc-presentation-verifier" in
+  (* #9921 refuses a test workspace under $HOME so a run cannot write into a
+     developer's real one. On a GitHub runner RUNNER_TEMP is
+     /home/runner/work/_temp, so the prefix check reads this scratch directory
+     as that developer's home. The base cannot move: scripts/ci/
+     prepare-presentation-verifier.py installs the managed parser at
+     base/.masc/runtime-tools/presentation, and the dispatch below resolves it
+     from the workspace it was given. Locally RUNNER_TEMP is unset and the
+     fallback temporary directory is outside $HOME, so this changes nothing
+     there. *)
+  Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   let inputs = Filename.concat base "inputs" in
   let original = read (Filename.concat inputs "presentation.pptx") in
   let expected = Yojson.Safe.from_string (read (Filename.concat inputs "expected.json")) in

@@ -112,6 +112,9 @@
   masc.keeper_chat_delivery_identity
   masc.keeper_failure_taxonomy
   masc.keeper_toml
+  masc.voice_setup
+  masc.voice_config
+
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics

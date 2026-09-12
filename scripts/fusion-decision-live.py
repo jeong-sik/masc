@@ -12,7 +12,9 @@ import os
 from pathlib import Path
 import socket
 import signal
+import stat
 import subprocess
+import tempfile
 import time
 import tomllib
 from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
@@ -22,6 +24,72 @@ from urllib.error import HTTPError
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def read_config_bytes(path):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('Runtime configuration is not a regular file')
+        return stream.read()
+
+
+def prepare_runtime_config(path, replacement_path=None, expected_sha256=None):
+    if (replacement_path is None) != (expected_sha256 is None):
+        raise ValueError('Replacement configuration and expected current hash must be supplied together')
+    original = read_config_bytes(path)
+    if replacement_path is None:
+        return tomllib.loads(original.decode()), None
+    if hashlib.sha256(original).hexdigest() != expected_sha256:
+        raise ValueError('Runtime configuration changed before restart preparation')
+    replacement = read_config_bytes(replacement_path)
+    parsed = tomllib.loads(replacement.decode())
+    return parsed, (original, replacement)
+
+
+def validate_runtime_config_intent(state, replacement):
+    """Validate a retained intent after explicit candidate/current-hash preparation.
+
+    replacement is None or the (currently observed bytes, candidate bytes) pair
+    returned by prepare_runtime_config. This function does not mutate state.
+    """
+    intent = state.get('runtime_config_update')
+    if intent is None or intent.get('status') != 'intent':
+        return
+    if replacement is None:
+        raise ValueError('Pending runtime configuration intent requires the same explicit replacement')
+    original, candidate = replacement
+    if hashlib.sha256(candidate).hexdigest() != intent.get('after_sha256'):
+        raise ValueError('Replacement differs from the pending runtime configuration intent')
+    if hashlib.sha256(original).hexdigest() not in {
+            intent.get('before_sha256'), intent.get('after_sha256')}:
+        raise ValueError('Current runtime configuration matches neither side of the pending intent')
+
+
+def replace_stopped_runtime_config(path, original, replacement):
+    """Called only after the owned process and listener have both disappeared.
+
+    A failure after rename leaves the durable operator intent for reconciliation;
+    callers must inspect the actual file before retrying, never blindly roll back.
+    """
+    if read_config_bytes(path) != original:
+        raise ValueError('Runtime configuration changed while the owned server stopped')
+    descriptor, temporary = tempfile.mkstemp(prefix='.runtime-replacement-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(replacement)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        if read_config_bytes(path) != replacement:
+            raise ValueError('Runtime configuration replacement readback mismatch')
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def observe_process_rows(command):
@@ -68,6 +136,8 @@ def main():
     sub = p.add_subparsers(dest='command', required=True)
     start = sub.add_parser('start')
     restart = sub.add_parser('restart-owned')
+    restart.add_argument('--runtime-config-file', type=Path)
+    restart.add_argument('--expected-runtime-sha256')
     for command in (start, restart):
         source = command.add_mutually_exclusive_group(required=True)
         source.add_argument('--artifact-dir', type=Path)
@@ -143,7 +213,11 @@ def main():
         binary, digest = candidate_binary(args)
         binary.chmod(binary.stat().st_mode | 0o100)
         env = {key: value for key, value in os.environ.items() if not any(part in key for part in ['TOKEN', 'SECRET', 'API_KEY']) and not key.startswith('MASC_')}
-        runtime_config = tomllib.loads((base / '.masc/config/runtime.toml').read_text())
+        runtime_path = base / '.masc/config/runtime.toml'
+        runtime_config, replacement = prepare_runtime_config(
+            runtime_path, getattr(args, 'runtime_config_file', None),
+            getattr(args, 'expected_runtime_sha256', None))
+        validate_runtime_config_intent(state, replacement)
         for provider in runtime_config['providers'].values():
             if provider.get('protocol') in ('codex-app-server', 'ollama-http') and 'credentials' not in provider:
                 # Codex owns its subscription authentication. An explicitly
@@ -182,6 +256,18 @@ def main():
                 time.sleep(0.2)
             else:
                 raise TimeoutError('Owned process has not finished stopping; no forced kill or new process')
+            if replacement is not None:
+                original, updated = replacement
+                validate_runtime_config_intent(state, replacement)
+                retained = state.get('runtime_config_update')
+                if retained is None or retained.get('status') != 'intent':
+                    state['runtime_config_update'] = {
+                        'status': 'intent', 'before_sha256': hashlib.sha256(original).hexdigest(),
+                        'after_sha256': hashlib.sha256(updated).hexdigest()}
+                persist_state()
+                replace_stopped_runtime_config(runtime_path, original, updated)
+                state['runtime_config_update']['status'] = 'applied'
+                persist_state()
             state.pop('session', None)
             state['counter'] += 1
         with socket.socket() as sock:

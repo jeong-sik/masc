@@ -1,0 +1,16 @@
+{
+  "scope": "owned operator source and tempfile failure-boundary tests, no live restart",
+  "validation": {
+    "command": "python3 -m unittest scripts/tests/test_owned_runtime_config_replacement.py",
+    "tests": 13,
+    "exit_code": 0,
+    "observed_stderr": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.039s\n\nOK\n"
+  },
+  "source_sha256": {
+    "scripts/fusion-decision-live.py": "2c7310ae26ac064c64f4b0a178c5c2526d4cd76c98ae2a95e5cbd3c6c543283d",
+    "scripts/tests/test_owned_runtime_config_replacement.py": "12e4ac7f7da1ded1bdb2397253eab93cd3ce3b00bdd9069043e0d82b2ea7ce58"
+  },
+  "live_configuration_changed": false,
+  "live_process_stopped": false,
+  "native_catalog_validation": "prepared candidate configuration previously validated using staged a7855af native binary; this test does not establish runtime admission"
+}

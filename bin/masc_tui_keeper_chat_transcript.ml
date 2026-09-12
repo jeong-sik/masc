@@ -584,6 +584,8 @@ let handler_activity_kind handler =
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
   | Tool_surface_read

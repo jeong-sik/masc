@@ -605,12 +605,18 @@ let render_overview (state : state) =
     events_title);
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
+  let collapsed_events_window =
+    Rows.of_list ~first:event_window.oew_offset
+      ~height:row_budget.attention_rows collapsed_events
+  in
   for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
-      if i < List.length attention_items then
-        match Rows.at attention_items_window i with
-        | None -> ""
-        | Some a ->
+      (* No length guard: the window already answers [None] past the end,
+         which is the blank this drew. The guard that stood here counted the
+         whole list once per row. *)
+      match Rows.at attention_items_window i with
+      | None -> ""
+      | Some a ->
         let sev_color = attention_severity_color a.ai_severity in
         let severity_label = attention_severity_label a.ai_severity in
         (* The age answers "why is this still here": a stamped item shows how
@@ -637,12 +643,12 @@ let render_overview (state : state) =
             sev_color (fit_width severity_label 5) Ansi.reset
             Ansi.dim (fit_width age_label 3) Ansi.reset
             (Terminal_text.single_line a.ai_summary)
-      else ""
     in
     let event_str =
       let event_index = i + event_window.oew_offset in
-      if event_index < event_count then
-        let e, run = List.nth collapsed_events event_index in
+      match Rows.at collapsed_events_window event_index with
+      | None -> ""
+      | Some (e, run) ->
         let tail =
           if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
           else ""
@@ -651,7 +657,6 @@ let render_overview (state : state) =
           Ansi.dim e.timestamp Ansi.reset
           (Terminal_text.single_line e.content)
           tail
-      else ""
     in
     Buffer.add_string buf (Printf.sprintf "  %s %s%s%s %s\n"
       (fit_width attention_str (panel_width - 2))
@@ -11968,12 +11973,13 @@ let render_code (state : state) =
                   which was never lexed; it keeps the plain red band. Each
                   lexed segment's reset is followed by re-opening the diff
                   background, so the band survives the lexer's own resets. *)
-               let lexed_line index =
+               let lexed_rows =
                  match Masc_tui_fetched.current state.code_file with
                  | Some (_, Masc_tui_fetched.Ready file_rows) ->
-                   List.nth_opt file_rows (index - 1)
-                 | Some (_, _) | None -> None
+                     Rows.of_array file_rows
+                 | Some (_, _) | None -> Rows.of_array [||]
                in
+               let lexed_line index = Rows.at lexed_rows (index - 1) in
                for i = 0 to content_height - 1 do
                  match Rows.at rows_window (scroll + i) with
                  | Some row ->
@@ -12139,7 +12145,7 @@ let render_code (state : state) =
              box_empty pane_buf pane_cols
            done
        | Some (open_path, Masc_tui_fetched.Ready file_rows) ->
-           let total_lines = List.length file_rows in
+           let total_lines = Array.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
            let hscroll =
@@ -12218,7 +12224,7 @@ let render_code (state : state) =
                      Ansi.reset
                | Some (_, false) | None -> String.make blame_margin_cells ' ')
            in
-           let file_rows_window = Rows.of_list ~first:scroll ~height:content_height file_rows in
+           let file_rows_window = Rows.of_array file_rows in
            for i = 0 to content_height - 1 do
              match Rows.at file_rows_window (scroll + i) with
              | Some segments ->

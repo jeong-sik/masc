@@ -801,7 +801,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
-  ; input_schema = Agent_core.Types.params_to_input_schema tool.schema.parameters
+  ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
   ; call =
       (fun ~call_id input ->
         let schedule : Agent_core.Tool_contract.schedule =

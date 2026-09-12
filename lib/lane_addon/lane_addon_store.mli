@@ -7,6 +7,8 @@ val digest : string -> string
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
 val read_blob : t -> Lane_addon_types.evidence -> (string, string) result
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
+val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 val bindings : t -> (Yojson.Safe.t list, string) result
 val append_observation : t -> instance_id:string -> seq:int ->
   sources:Yojson.Safe.t -> Lane_addon_types.output -> (unit, string) result

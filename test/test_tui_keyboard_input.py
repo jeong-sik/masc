@@ -13052,6 +13052,39 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def flow_control_is_off_interaction() -> Interaction:
+    """Ctrl-S has to reach the key layer, not the tty.
+
+    IXON lives in c_iflag and ICANON in c_lflag, so raw mode did not clear it:
+    the terminal answered Ctrl-S by stopping output and Ctrl-Q by resuming,
+    and neither byte ever reached the program. With IXANY also on, the next
+    key released it, so what an operator saw was a stall rather than a freeze
+    -- and what it cost was a key that could not be bound to anything.
+
+    Read off the tty rather than inferred from the drawing: the flag is the
+    fact, and a screen that repaints cannot tell the difference."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+        )
+        attributes = termios.tcgetattr(slave_fd)
+        if attributes[0] & termios.IXON:
+            raise AssertionError(
+                "the tty still answers Ctrl-S itself; c_ixon must be cleared "
+                "with the rest of raw mode or the key cannot be bound"
+            )
+        send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+    return interact
+
+
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
     missing_target_requests: HttpRequests = []
@@ -13112,6 +13145,11 @@ def run_keyboard_regression(executable: str) -> None:
     )
     schedule_fixtures = schedule_detail_http_fixtures()
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="flow control leaves Ctrl-S to the key layer",
+        interact=flow_control_is_off_interaction(),
+    )
     run_terminal_scenario(
         executable,
         description="Image view over the frame",
@@ -13956,7 +13994,7 @@ def run_browser_scene_regression(executable: str) -> None:
         visible = screen_text(frame)
         # Source-context selection includes text and raster observations,
         # not only clickable controls. Preserve their document order.
-        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+        for text in (b"[>1] SCENE BEFORE CLICK", b"[2 button/link] First action",
                      b"[3 button/link] Second action",
                      "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"

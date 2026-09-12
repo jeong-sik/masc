@@ -22,6 +22,7 @@
 - A finished-but-broken structured reply advances the candidate walk instead of ending it (#35301).
 - Named routing lanes accept a `runtime_ids` array body (#35298).
 - The dashboard probes with the provider's own auth header and states the Vertex skip (#35296).
+- The setup journey names each invalid check with its own reason instead of restarting the questions, and a save that died in validation no longer reports a saved workspace (#35336).
 
 ### Performance
 
@@ -42,6 +43,7 @@
 ### Docs
 
 - RFC: TOML as the declarative system and the wire vocabulary authority (#35314).
+- RFC: a runtime load failure keeps its shape until the screen (#35339).
 
 ## [0.35.12] - 2026-09-12
 

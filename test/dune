@@ -5738,3 +5738,8 @@
 
 (include stanzas/test_browser_observation.inc)
 (include stanzas/test_browser_observation_composition.inc)
+
+(test
+ (name test_lane_addon_actions)
+ (modules test_lane_addon_actions)
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix))

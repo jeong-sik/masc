@@ -41,6 +41,9 @@
 #   --run-contract-test  also run test/test_tool_contract_truth.exe in the
 #                      container (release.yml asks for this on one arch)
 #   --print-binaries   list the binaries this script produces, then exit
+#   --print-floor      print the glibc floor this script builds at, then exit
+#                      (release.yml re-checks the packaged assets at it, so the
+#                      workflow reads the value here instead of repeating it)
 #
 # The build runs natively for the host architecture. Cross-building via qemu
 # is not offered: the release workflow gives each architecture its own runner,
@@ -98,7 +101,8 @@ while [ "$#" -gt 0 ]; do
       done
       exit 0
       ;;
-    -h|--help) sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    --print-floor) printf '%s\n' "$floor"; exit 0 ;;
+    -h|--help) sed -n '2,55p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "build-linux-release: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -117,6 +121,28 @@ esac
 
 out_dir="${out_dir:-$repo_root/artifacts/linux-$arch_label}"
 container="masc-linux-release-build-$$"
+
+# Only tracked files are copied into the container, so /src has no .git and the
+# probe in lib/build_commit/ finds no checkout to ask. Left alone it embeds
+# None, `masc build-commit` then exits 1, and scripts/release-dashboard-bundle.py
+# refuses to package a binary that cannot name its own commit -- the "binary
+# unknown" state RFC-0382 set out to end. The checkout's HEAD is read here and
+# handed to that probe through the environment; the build step below verifies
+# the binaries came out carrying it.
+build_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
+if [ -z "$build_commit" ]; then
+  echo "build-linux-release: no git HEAD here; release binaries must carry a commit" >&2
+  exit 2
+fi
+build_commit_unix_ts="$(git -C "$repo_root" show -s --format=%ct "$build_commit" 2>/dev/null || true)"
+
+# Content comes from the working tree (see the header), so an edited checkout
+# produces binaries that name a commit they were not built from. CI cannot
+# reach this -- release.yml runs `git diff --exit-code` before packaging -- but
+# a local build can, and it should say so rather than ship a quiet lie.
+if ! git -C "$repo_root" diff --quiet HEAD -- 2>/dev/null; then
+  echo "build-linux-release: tracked files differ from HEAD; the binaries will still claim $build_commit" >&2
+fi
 
 cleanup() {
   if [ "$keep" -eq 1 ]; then
@@ -218,11 +244,29 @@ if [ -n "$jobs" ]; then
 fi
 
 echo "== build"
-docker exec "$container" bash -lc '
+docker exec \
+  -e MASC_BUILD_COMMIT="$build_commit" \
+  -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" \
+  "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
   dune build --release '"${release_binaries[*]} $jobs_flag"'
+'
+
+# The injection above is only as good as what came out. A binary that cannot
+# name its commit fails two jobs later, in packaging, where the cause is far
+# from the cure.
+echo "== embedded build commit"
+docker exec -e MASC_BUILD_COMMIT="$build_commit" "$container" bash -lc '
+  set -e
+  embedded="$(/src/_build/default/bin/main_eio.exe build-commit)"
+  if [ "$embedded" != "$MASC_BUILD_COMMIT" ]; then
+    printf "build-linux-release: binary reports commit %s, expected %s\n" \
+      "${embedded:-<none>}" "$MASC_BUILD_COMMIT" >&2
+    exit 1
+  fi
+  printf "binaries testify to %s\n" "$embedded"
 '
 
 built_paths=()

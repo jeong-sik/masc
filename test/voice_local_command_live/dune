@@ -6,6 +6,7 @@
  (libraries
   alcotest
   unix
+  masc
   masc.voice_config
   masc.voice_runtime_overlay
   masc.voice_bridge_core))

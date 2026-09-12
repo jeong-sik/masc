@@ -43,3 +43,7 @@ val transcribe_via_command
   -> audio_file:string
   -> model:string
   -> (string, string) result
+
+(** Ask a command which voices it has, answering its stdout. Parsing that into
+    names belongs to the caller: this is the transport. *)
+val list_voices_via_command : Voice_config.endpoint -> (string, string) result

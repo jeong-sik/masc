@@ -18,6 +18,7 @@
    that will fail further away. *)
 
 module Overlay = Voice_runtime_overlay
+module Bridge = Masc.Voice_bridge
 
 let endpoint ?command ~kind id =
   { Voice_config.id
@@ -191,6 +192,51 @@ let test_an_address_on_a_command_kind_is_refused () =
     Alcotest.(check bool) "and says the kind runs a command" true
       (Astring.String.is_infix ~affix:"runs a command" message)
 
+(* What say actually printed, taken from the machine on 2026-09-12. Six lines
+   out of 184: two ordinary, one whose locale is not two-and-two (ar_001), one
+   whose name carries the parenthesised language say adds when a name exists in
+   several, and Korean. *)
+let say_output =
+  "Albert              en_US    # Hello! My name is Albert.\n\
+   Alice               it_IT    # Ciao! Mi chiamo Alice.\n\
+   Majed               ar_001   # \xd9\x85\xd8\xb1\xd8\xad\xd8\xa8\xd9\x8b\xd8\xa7!\n\
+   Eddy (\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4(\xed\x95\x9c\xea\xb5\xad))      ko_KR    # \xec\x95\x88\xeb\x85\x95\xed\x95\x98\xec\x84\xb8\xec\x9a\x94\n\
+   Yuna                ko_KR    # \xec\x95\x88\xeb\x85\x95\xed\x95\x98\xec\x84\xb8\xec\x9a\x94\n"
+
+let voices () = Bridge.say_catalogue_of_output say_output
+
+let test_every_printed_voice_becomes_a_row () =
+  Alcotest.(check int) "five voices, five rows" 5 (List.length (voices ()))
+
+let test_the_locale_is_read_as_the_last_field_not_by_its_shape () =
+  let majed =
+    List.find
+      (fun (v : Bridge.catalogue_voice) ->
+        v.Bridge.voice_id = "Majed")
+      (voices ())
+  in
+  (* ar_001 is not two letters and two letters. A locale regex would drop it,
+     and a reader with Arabic installed would be told they have no such voice. *)
+  Alcotest.(check (option string)) "the locale as printed" (Some "ar_001")
+    majed.Bridge.voice_language
+
+(* The id is the whole label. say -v Eddy picked an English voice that read a
+   Korean sentence as 4.7KB of noise; say -v "Eddy (한국어(한국))" gave 72KB of
+   the Korean one. Trimming the parenthetical here would hand the wizard a name
+   that silently selects the wrong language. *)
+let test_a_parenthesised_name_keeps_its_parenthesis () =
+  let ids =
+    List.map
+      (fun (v : Bridge.catalogue_voice) -> v.Bridge.voice_id)
+      (voices ())
+  in
+  Alcotest.(check bool) "the label say prints, whole" true
+    (List.exists (fun id -> Astring.String.is_prefix ~affix:"Eddy (" id) ids)
+
+let test_a_line_naming_no_voice_is_dropped () =
+  Alcotest.(check int) "nothing to choose, nothing offered" 0
+    (List.length (Bridge.say_catalogue_of_output "# just a comment\n\n"))
+
 let () =
   Alcotest.run
     "voice_local_command"
@@ -211,6 +257,16 @@ let () =
             test_a_missing_model_is_refused_by_name
         ; Alcotest.test_case "the command can be overridden" `Quick
             test_the_command_can_be_overridden
+        ] )
+    ; ( "the voices say has"
+      , [ Alcotest.test_case "every printed voice becomes a row" `Quick
+            test_every_printed_voice_becomes_a_row
+        ; Alcotest.test_case "the locale is read as the last field" `Quick
+            test_the_locale_is_read_as_the_last_field_not_by_its_shape
+        ; Alcotest.test_case "a parenthesised name keeps its parenthesis" `Quick
+            test_a_parenthesised_name_keeps_its_parenthesis
+        ; Alcotest.test_case "a line naming no voice is dropped" `Quick
+            test_a_line_naming_no_voice_is_dropped
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

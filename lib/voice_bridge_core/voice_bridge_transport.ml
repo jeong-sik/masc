@@ -238,6 +238,33 @@ let transcribe_via_command endpoint ~audio_file ~model =
     Error (Printf.sprintf "%s stopped by signal %d" command sig_num)
 ;;
 
+(* Asking a command which voices it has. The answer is its stdout, so what
+   comes back is text; parsing it belongs to the caller. *)
+let list_voices_via_command endpoint =
+  let* request = Voice_runtime_overlay.voice_listing_command_for_endpoint endpoint in
+  let command =
+    match request.Voice_runtime_overlay.argv with
+    | command :: _ -> command
+    | [] -> "the command"
+  in
+  let status, output =
+    run_voice_status
+      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      request.Voice_runtime_overlay.argv
+  in
+  match status with
+  | Unix.WEXITED 0 -> Ok output
+  | Unix.WEXITED 127 -> Error (Printf.sprintf "%s is not installed" command)
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf "%s exit %d: %s" command code
+         (if String.length output > 200 then String.sub output 0 200 else output))
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "%s killed by signal %d" command sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "%s stopped by signal %d" command sig_num)
+;;
+
 let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
   let header_args =
     List.concat_map

@@ -96,6 +96,33 @@ let test_an_unknown_voice_does_not_fail () =
           (Printf.sprintf "an unknown voice still spoke, in %d bytes" size)
           true (size > 1024))
 
+(* The catalogue, read off this machine rather than off a recorded sample. The
+   sibling suite pins the parse against six captured lines; this one runs the
+   command and checks the parse survives all 184 of them. *)
+let test_the_installed_voices_can_be_listed () =
+  match Masc.Voice_bridge.list_voices endpoint with
+  | Error message -> Alcotest.fail message
+  | Ok voices ->
+    Alcotest.(check bool)
+      (Printf.sprintf "say listed %d voices" (List.length voices))
+      true
+      (List.length voices > 10);
+    (* Every row has to be choosable: an id is what gets written to the
+       configuration, and a blank one would be written as a blank. *)
+    List.iter
+      (fun (voice : Masc.Voice_bridge.catalogue_voice) ->
+        if String.trim voice.Masc.Voice_bridge.voice_id = ""
+        then Alcotest.fail "a listed voice has no id to choose")
+      voices;
+    (* This workstation speaks Korean, and the reason the list exists is that a
+       Korean voice cannot be guessed by name. If the parse ever stops finding
+       one, the wizard would offer a list with nothing usable in it. *)
+    Alcotest.(check bool) "and at least one of them is Korean" true
+      (List.exists
+         (fun (voice : Masc.Voice_bridge.catalogue_voice) ->
+           voice.Masc.Voice_bridge.voice_language = Some "ko_KR")
+         voices)
+
 let () =
   if not (say_is_installed ())
   then
@@ -110,4 +137,8 @@ let () =
           ; Alcotest.test_case "an unknown voice does not fail" `Quick
               test_an_unknown_voice_does_not_fail
           ] )
+        ; ( "listing for real"
+          , [ Alcotest.test_case "the installed voices can be listed" `Quick
+                test_the_installed_voices_can_be_listed
+            ] )
       ]

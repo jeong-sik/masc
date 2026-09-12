@@ -11,6 +11,26 @@ include module type of Voice_bridge_core
 (** {1 Types} *)
 
 (** How one Voice MCP call failed. *)
+(** One voice as an endpoint names it. [voice_id] is what a configuration
+    stores. For [say] that id is the whole printed label, parentheses included:
+    say adds them to names that exist in several languages, and the bare name
+    then selects a different language without saying so. *)
+type catalogue_voice =
+  { voice_id : string
+  ; voice_name : string option
+  ; voice_language : string option
+  }
+
+val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
+
+(** Parse what [say -v ?] prints. Separate from the asking so a recorded answer
+    can be replayed on a machine that has no say. *)
+val say_catalogue_of_output : string -> catalogue_voice list
+
+(** Ask one endpoint which voices it has. [Error] carries why there is nothing
+    to show, in words meant for a reader who will type the name instead. *)
+val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
+
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string

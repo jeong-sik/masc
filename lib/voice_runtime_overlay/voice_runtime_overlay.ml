@@ -450,6 +450,33 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
     Ok { argv = (command :: voice_args) @ [ "-o"; output_file; message ] }
 ;;
 
+(* The command that lists the voices installed on this machine.
+
+   say publishes its own catalogue, and a fresh mac needs it more than a hosted
+   provider does: say does not fail on a voice it does not have. It exits 0 and
+   speaks in the system voice, so a mistyped name is silent -- measured
+   2026-09-12, where "Eddy" alone gave an English voice reading Korean and
+   "Eddy (한국어(한국))" gave the Korean one. A name typed from memory is a
+   coin flip; a name picked from this list is not. *)
+let voice_listing_command_for_endpoint (endpoint : Voice_config.endpoint) =
+  let adapter = adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Macos_say ->
+    let command = endpoint_command endpoint ~default:macos_say_command in
+    Ok { argv = [ command; "-v"; "?" ] }
+  | Whisper_cli ->
+    Error
+      (Printf.sprintf "voice config endpoint %s transcribes and has no voices"
+         endpoint.Voice_config.id)
+  | Openai_compat | Elevenlabs_direct | Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached over %s, which is not asked by running a \
+          command"
+         endpoint.Voice_config.id
+         (string_of_transport adapter.transport))
+;;
+
 let stt_command_for_endpoint (endpoint : Voice_config.endpoint) ~audio_file ~model =
   let adapter = adapter_for_endpoint endpoint in
   match adapter.transport with

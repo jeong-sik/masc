@@ -86,3 +86,9 @@ val stt_command_for_endpoint
   -> audio_file:string
   -> model:string
   -> (command_request, string) result
+
+(** The command that lists the voices installed on this machine, for the kinds
+    that publish one. [Error] says why there is nothing to ask for otherwise. *)
+val voice_listing_command_for_endpoint
+  :  Voice_config.endpoint
+  -> (command_request, string) result

@@ -1803,6 +1803,39 @@ let test_run_command_preserves_bare_command_argv () =
       Alcotest.(check string) "preserves bare head argv"
         "head -n 1 /home/keeper/playground/acme-sandbox/scratch/demo.txt\n" out
 
+(* [max_bytes] used to be a trim of a finished answer: [cat] wrote the whole
+   file, Process_eio held all of it, and only the returned prefix was cut. So a
+   Keeper naming a multi-gigabyte path in its own tree sized this process
+   rather than its answer. The limit now travels to the producer, which is what
+   this pins -- the returned value is a bounded prefix either way, so restoring
+   the [cat] argv passes every assertion except this one. *)
+let test_read_asks_the_sandbox_for_a_bounded_prefix () =
+  with_fake_docker fake_docker_echo_command_script @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  let base, config, meta = setup_config "acme-sandbox" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_path = Filename.concat host_root "scratch/oversize.bin" in
+  ensure_dir (Filename.dirname host_path);
+  write_file host_path (String.make 8192 'x');
+  let container_path =
+    match
+      Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
+    with
+    | Ok mapped -> mapped
+    | Error detail -> Alcotest.fail detail
+  in
+  match
+    Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path
+      ~max_bytes:4096 ~timeout_sec:5.0 ()
+  with
+  | Error error ->
+      Alcotest.fail (Keeper_sandbox_read_backend.read_error_to_string error)
+  | Ok echoed_command ->
+      Alcotest.(check string) "the sandbox is asked for the prefix, not the file"
+        (Printf.sprintf "head -c 4096 %s\n" container_path)
+        echoed_command
+
 let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
   with_fake_docker fake_docker_slow_run_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -2683,6 +2716,8 @@ let run_tests ~clock () =
             test_run_command_allows_configured_nonzero_exit;
           Alcotest.test_case "preserves bare command argv" `Quick
             test_run_command_preserves_bare_command_argv;
+          Alcotest.test_case "read asks the sandbox for a bounded prefix" `Quick
+            test_read_asks_the_sandbox_for_a_bounded_prefix;
           Alcotest.test_case "fallback uses Docker_spawn slot" `Quick
             (test_run_command_fallback_uses_docker_spawn_slot ~clock);
           Alcotest.test_case "projects keeper secret directory" `Quick

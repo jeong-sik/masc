@@ -455,8 +455,17 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
   | Error detail -> Error (Read_failed detail)
   | Ok backend_path ->
     let read () =
+      (* [max_bytes] used to be spent on [cat]'s finished output: the child
+         wrote the whole file, Process_eio accumulated all of it in memory, and
+         only the returned prefix was cut. A Keeper naming a multi-gigabyte
+         path in its own tree therefore sized this process, not its answer.
+         [head -c] moves the limit to the producer, so nothing past it is ever
+         written, read or held. Same shape, and same reason, as the bounded
+         [od -N] chunk read in Keeper_browser_upload. *)
       run_command ?turn_sandbox_factory ~config ~meta
-        ~command_argv:[ "cat"; backend_path ] ~max_bytes ~timeout_sec ()
+        ~command_argv:
+          [ "head"; "-c"; string_of_int (max 0 max_bytes); backend_path ]
+        ~max_bytes ~timeout_sec ()
       |> Result.map_error (fun detail -> Read_failed detail)
     in
     if

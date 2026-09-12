@@ -70,8 +70,10 @@ let make_backend () =
     acquire = (fun ~store:_ ~package:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
-      if container_id <> Store.digest instance_id then Error "owner mismatch"
-      else (state.recovery := (instance_id, container_id) :: !(state.recovery); Ok ()))
+      match container_id with
+      | Some id when id = Store.digest instance_id ->
+          state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
+      | Some _ | None -> Error "owner mismatch")
   } in state, backend
 
 let manifest dir mode =

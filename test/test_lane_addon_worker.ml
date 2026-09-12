@@ -12,6 +12,9 @@ argv = sys.argv[1:]
 if not argv or argv[0] != "container":
     raise SystemExit(2)
 action, args = argv[1], argv[2:]
+if (root / "daemon-unavailable").exists():
+    print("fixture daemon unavailable", file=sys.stderr)
+    raise SystemExit(7)
 def value(flag):
     return args[args.index(flag) + 1]
 def path(cid):
@@ -23,6 +26,9 @@ def output(value):
 if action == "create":
     name = value("--name")
     cid = hashlib.sha256(name.encode()).hexdigest()
+    if path(cid).exists():
+        print("container name already exists", file=sys.stderr)
+        raise SystemExit(1)
     mode = args[-1]
     config = {"Id": cid, "Name": "/" + name,
         "Config": {"Labels": dict([value("--label").split("=", 1)])},
@@ -33,6 +39,9 @@ if action == "create":
         "mode": mode, "argv": args}
     if mode == "unlimited": config["HostConfig"]["PidsLimit"] = 0
     path(cid).write_text(json.dumps(config))
+    if mode == "lost_create_response":
+        print("create receipt lost", flush=True)
+        raise SystemExit(0)
     print(cid, flush=True)
 elif action == "inspect":
     cid = args[-1]
@@ -128,8 +137,8 @@ let package directory mode : Types.package = {
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
 let sources mode = `Assoc [ "mode", `String mode ]
 let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
-let start env sw dir docker mode =
-  Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"worker-test"
+let start ?(instance_id = Random_id.uuid_v7 ()) env sw dir docker mode =
+  Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
     ~package:(package dir mode) ~docker_command:docker ()
 
 let await_marker clock file =
@@ -206,9 +215,9 @@ let test_cleanup_failure_can_be_retried () = with_fixture (fun env sw dir docker
   unwrap (Worker.stop worker))
 
 let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir docker ->
-  let worker = unwrap (start env sw dir docker "good") in
+  let worker = unwrap (start ~instance_id:"worker-test" env sw dir docker "good") in
   let recover instance_id = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
-      ~instance_id ~container_id:(Worker.container_id worker) ~max_reply_bytes:4096
+      ~instance_id ~container_id:(Some (Worker.container_id worker)) ~max_reply_bytes:4096
       ~docker_command:docker () in
   check bool "another binding cannot remove this container" true
     (Result.is_error (recover "different-owner"));
@@ -216,6 +225,69 @@ let test_restart_cleanup_requires_exact_owner () = with_fixture (fun env sw dir 
   unwrap (recover "worker-test");
   unwrap (recover "worker-test");
   unwrap (Worker.stop worker))
+
+let test_restart_without_create_receipt () = with_fixture (fun env sw dir docker ->
+  let instance_id = "lost-create-receipt" in
+  let worker = unwrap (start ~instance_id env sw dir docker "good") in
+  let other = unwrap (start env sw dir docker "good") in
+  let recover () = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+  unwrap (recover ());
+  check bool "container is found without a retained create response" false
+    (Sys.file_exists (Filename.concat dir (Worker.container_id worker ^ ".json")));
+  ignore (unwrap (observe other "good"));
+  unwrap (recover ());
+  unwrap (Worker.stop worker);
+  unwrap (Worker.stop other))
+
+let test_name_collision_preserves_foreign_owner () = with_fixture (fun env sw dir docker ->
+  let instance_id = "unpersisted-receipt" in
+  let worker = unwrap (start ~instance_id env sw dir docker "good") in
+  let path = Filename.concat dir (Worker.container_id worker ^ ".json") in
+  let original = Yojson.Safe.from_file path in
+  let changed = match original with
+    | `Assoc fields -> `Assoc (("Config", `Assoc ["Labels",
+        `Assoc ["masc.lane.instance", `String "foreign-owner"]])
+        :: List.remove_assoc "Config" fields)
+    | _ -> fail "expected fixture container object" in
+  write path (Yojson.Safe.to_string changed);
+  let recover () = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+      ~instance_id ~container_id:None ~max_reply_bytes:4096 ~docker_command:docker () in
+  check bool "matching name is not sufficient authority" true (Result.is_error (recover ()));
+  check bool "foreign owner survives recovery refusal" true (Sys.file_exists path);
+  check bool "failed creation does not clean up a foreign name collision" true
+    (Result.is_error (start ~instance_id env sw dir docker "good"));
+  check bool "foreign container remains after failed start cleanup" true (Sys.file_exists path);
+  ignore (unwrap (observe worker "good"));
+  write path (Yojson.Safe.to_string original);
+  unwrap (Worker.stop worker))
+
+let test_absence_requires_available_daemon () = with_fixture (fun env _sw dir docker ->
+  let recover container_id = Worker.recover_stop ~mgr:(Eio.Stdenv.process_mgr env)
+      ~instance_id:"not-created" ~container_id ~max_reply_bytes:4096 ~docker_command:docker () in
+  unwrap (recover None);
+  let marker = Filename.concat dir "daemon-unavailable" in
+  write marker "unavailable";
+  check bool "lost receipt plus unavailable daemon is not absence" true
+    (Result.is_error (recover None));
+  check bool "known ID plus unavailable daemon is not absence" true
+    (Result.is_error (recover (Some (String.make 64 'a'))));
+  Sys.remove marker;
+  unwrap (recover None))
+
+let test_failed_create_receipt_cleans_only_owned_container () = with_fixture (fun env sw dir docker ->
+  let other = unwrap (start env sw dir docker "good") in
+  let notified = ref false in
+  let result = Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"receipt-lost"
+      ~package:(package dir "lost_create_response") ~docker_command:docker
+      ~on_created:(fun _ -> notified := true) () in
+  check bool "invalid create receipt is reported" true (Result.is_error result);
+  check bool "identity callback has not run" false !notified;
+  check int "only unrelated container remains" 1
+    (Array.fold_left (fun count name ->
+      if Filename.check_suffix name ".json" then count + 1 else count) 0 (Sys.readdir dir));
+  ignore (unwrap (observe other "good"));
+  unwrap (Worker.stop other))
 
 exception Owner_detached
 
@@ -246,5 +318,9 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "resource refusal and bounded response" `Quick test_resource_refusal_and_bounded_reply;
   test_case "cleanup failure remains retryable" `Quick test_cleanup_failure_can_be_retried;
   test_case "restart cleanup verifies exact owner" `Quick test_restart_cleanup_requires_exact_owner;
+  test_case "restart recovers without a create receipt" `Quick test_restart_without_create_receipt;
+  test_case "deterministic name cannot authorize foreign cleanup" `Quick test_name_collision_preserves_foreign_owner;
+  test_case "absence requires a successful Docker query" `Quick test_absence_requires_available_daemon;
+  test_case "lost create response preserves unrelated containers" `Quick test_failed_create_receipt_cleans_only_owned_container;
   test_case "created identity precedes blocked inspect" `Quick test_created_identity_precedes_blocked_inspection;
 ]]

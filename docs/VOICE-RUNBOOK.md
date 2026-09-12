@@ -45,12 +45,44 @@ downloads page instead of offering a command with nowhere to write. On Linux
 both steps are a link: whisper.cpp is built rather than packaged, and naming an
 apt package would install something else or nothing.
 
+### Doing it from the TUI instead
+
+`p` to the voice pane, then `e`. The wizard opens on whatever the section
+offers first, which for speech out is say — the entry that needs nothing
+installed — so a fresh machine lands on the one it can finish.
+
+Five questions, walked in a terminal and counted there:
+
+```
+step 1/5  Is this endpoint for speech out or speech in?
+step 2/5  Which provider serves this endpoint?      macos_say
+step 3/5  What should this endpoint be called?
+step 4/5  Which voice should speech out use by default?
+step 5/5  Here is what will change.                 enter saves this
+```
+
+No address, no credential, no model. say is found under the name its kind
+knows, nothing leaves the machine, and it is asked for a voice rather than a
+model.
+
+Moving off say changes the questions, and the counter moves with them: `→` at
+step 2 reaches ElevenLabs and the walk becomes 2/7, because an address and a
+key have appeared.
+
+What the save puts on the wire for the say path, read off it rather than
+assumed: a `put_endpoint` of kind `macos_say`, a `set_tts_default_voice`, and
+**no `set_default_model`** — a blank model written there would land on a
+section a sibling endpoint shares. Neither `base_url` nor `api_key_env`
+appears at all.
+
+For speech in the wizard leads with whisper-cli, which is asked for the model
+and nothing else.
+
 ### What the configuration then says
 
 ```toml
 [voice.tts]
-default_model = "-"          # say takes no model; the section still needs the key
-default_voice = "Yuna"
+default_voice = "Yuna"       # no default_model: nothing in this section is asked for one
 
 [[voice.tts.endpoints]]
 id = "macos-say"
@@ -71,6 +103,12 @@ kind = "whisper_cli"
 `default_model` on the speech-in section is a **file path** here rather than a
 name, which is what the model means to a command that takes `-m`. A blank one
 is refused by name rather than defaulted to a path that may not exist.
+
+The speaking section above names no model at all, and that loads. The rule is
+not "a section names a model" but "a section names one when any endpoint in it
+would be asked for it by name" — and say is never asked. Put one ElevenLabs or
+OpenAI-compatible endpoint in the same section and the requirement comes back,
+because the section is shared.
 
 A `base_url` on either endpoint is refused when the configuration loads. These
 kinds run a command; an address on one would be read by nothing, and a field

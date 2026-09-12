@@ -74,8 +74,8 @@ The say save carries a `put_endpoint` of kind `macos_say` with its own `default_
 section a sibling endpoint shares. Neither `base_url` nor `api_key_env`
 appears at all.
 
-For speech in the wizard leads with whisper-cli, which is asked for the model
-and nothing else.
+Whisper CLI is available for speech in. It asks for a model file, with no
+address or credential.
 
 ### Giving each keeper its own voice
 

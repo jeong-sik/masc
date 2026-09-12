@@ -79,12 +79,15 @@ let catalog ?model_dir ~host ~distribution dependency =
            ~detail:"Choose a ggml model and note where it lands: the voice configuration names that path."
            ~source_url:whisper_models_source whisper_models_source]
       | Some dir ->
+        let destination = Filename.concat dir whisper_model_file in
+        let download = destination ^ ".download" in
         [commands ~id:"whisper_model_download"
            ~label:"Download the whisper model masc asks for"
            ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
            ~source_url:whisper_models_source ~requires_admin:false
-           [["curl";"-L";"--create-dirs";"-o";Filename.concat dir whisper_model_file;
-             whisper_model_url]]]
+           [["curl";"--fail";"-L";"--remove-on-error";"--create-dirs";"-o";download;
+             whisper_model_url];
+            ["mv";download;destination]]]
     in
     (install :: model)
   (* Homebrew is the only route this catalog can name a command for. Elsewhere
@@ -94,7 +97,11 @@ let catalog ?model_dir ~host ~distribution dependency =
     [open_ ~id:"whisper_cli_build_instructions"
        ~label:"Open whisper.cpp build instructions"
        ~detail:"Build whisper.cpp for this machine, then point the voice configuration at the binary and a ggml model."
-       ~source_url:whisper_source whisper_source]
+       ~source_url:whisper_source whisper_source;
+     open_ ~id:"whisper_model_page"
+       ~label:"Open the whisper.cpp model downloads"
+       ~detail:"Download a ggml model and set the voice section's default_model to its file path."
+       ~source_url:whisper_models_source whisper_models_source]
   | Codex_cli, _ -> [install_cli Codex; open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."
       ~source_url:codex_source codex_source]

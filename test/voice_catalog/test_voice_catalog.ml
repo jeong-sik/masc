@@ -237,6 +237,11 @@ printf '%s\n' 'Command Voice  ko_KR  # hello'
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/whisper-argv"
 printf '%s\n' '명령 음성'
 |};
+      write "slow-whisper"
+        {|#!/bin/sh
+/bin/sleep 0.05
+printf '%s\n' 'heard after delay'
+|};
       Unix.putenv "PATH" root;
       Unix.putenv "MASC_TEST_CATALOGUE_DIR" root;
       Unix.putenv "MASC_TEST_CATALOGUE_KEY" "fixture-catalogue-secret";
@@ -389,6 +394,31 @@ let test_audio_capabilities_keep_the_generated_format () =
         (Option.is_none (Voice.audio_file_of_token token)))
     [ "../clip.wav"; String.make 31 'a' ^ ".wav"; String.make 32 'g'; "clip.mp3" ]
 
+let test_command_transcription_honors_endpoint_timeout () =
+  with_catalogue_processes (fun ~read:_ ~root ->
+    let configure timeout =
+      Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out ->
+        output_string out
+          ({|[voice.stt]
+default_model = "/fixture/model.bin"
+[[voice.stt.endpoints]]
+id = "slow"
+kind = "whisper_cli"
+command = "slow-whisper"
+|} ^ timeout))
+    in
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    configure "timeout_seconds = 0.001\n";
+    (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "the endpoint deadline must stop the delayed command");
+    configure "";
+    match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+    | Ok _ -> ()
+    | Error message -> Alcotest.fail ("the configured fallback should allow the command: " ^ message))
+
 let () =
   Alcotest.run
     "voice_catalog"
@@ -403,6 +433,8 @@ let () =
             test_say_probe_refuses_an_uninstalled_voice_before_synthesis
         ; Alcotest.test_case "normal transcription uses the command transport" `Quick
             test_normal_transcription_uses_the_command_transport
+        ; Alcotest.test_case "command transcription honors endpoint timeout" `Quick
+            test_command_transcription_honors_endpoint_timeout
         ; Alcotest.test_case "audio capabilities keep the generated format" `Quick
             test_audio_capabilities_keep_the_generated_format
         ] )

@@ -86,21 +86,26 @@ let test_whisper_offers_a_package_and_a_model () =
        [ [ "brew"; "install"; "whisper-cpp" ] ] steps
    | _ -> fail "the package step must run a command");
   match (find "whisper_model_download" actions).action_effect with
-  | P.Run_commands [ argv ] ->
+  | P.Run_commands [ argv; publish ] ->
     (* --create-dirs because the cache directory will not exist on a machine
        that has never had one, and the whole path is one argv item: no shell
        expands a ~ here. *)
     check (list string) "the model, fetched to where it was told"
       [ "curl"
+      ; "--fail"
       ; "-L"
+      ; "--remove-on-error"
       ; "--create-dirs"
       ; "-o"
-      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin"
+      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin.download"
       ; "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
       ]
-      argv
+      argv;
+    check (list string) "only a completed download replaces the model"
+      [ "mv"; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin.download"
+      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin" ] publish
   | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
-    fail "the model step must be one download command"
+    fail "the model action must download before publishing"
 
 (* Offering a download with nowhere to write would produce a command that
    fails on a path nobody chose. The page is opened instead. *)
@@ -117,7 +122,9 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
   List.iter
     (fun distribution ->
       let actions = whisper (S.Linux S.X64) distribution in
-      check int "one action, and it is a link" 1 (List.length actions);
+      check int "binary instructions and model downloads" 2 (List.length actions);
+      ignore (find "whisper_cli_build_instructions" actions);
+      ignore (find "whisper_model_page" actions);
       List.iter
         (fun (action : P.action) ->
           match action.action_effect with
@@ -126,6 +133,20 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
             fail "no package name is guessed for Linux")
         actions)
     [ P.Debian; P.Ubuntu; P.Other ]
+
+let test_failed_whisper_download_is_not_published () =
+  let action =
+    find "whisper_model_download"
+      (P.catalog ~model_dir:"/fixture/cache" ~host:(mac S.Arm64 26)
+         ~distribution:P.Other P.Whisper_cli)
+  in
+  let called = ref [] in
+  let result =
+    P.execute action ~run:(fun argv -> called := argv :: !called; Error "HTTP 404")
+  in
+  check bool "a rejected download remains failed" true
+    (match result with P.Failed { step = 1; _ } -> true | _ -> false);
+  check int "publish never runs after download failure" 1 (List.length !called)
 
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
@@ -136,6 +157,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
   "hearing on a fresh machine",[
   test_case "whisper offers a package and a model" `Quick
     test_whisper_offers_a_package_and_a_model;
+  test_case "failed whisper download is not published" `Quick
+    test_failed_whisper_download_is_not_published;
   test_case "without a directory the model is a page" `Quick
     test_without_a_directory_the_model_is_a_page_not_a_command;
   test_case "linux gets instructions rather than a guessed package" `Quick

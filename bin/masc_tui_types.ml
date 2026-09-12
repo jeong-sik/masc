@@ -3701,11 +3701,19 @@ type state = {
      arbitrary wait. The clock is the caller's because this module does not
      depend on one.
 
-     One stamp per tab, not one for the screen. A background read finishing
-     elsewhere -- an Identity refresh, a GitHub login -- launches its own detail
-     read, and a single stamp would be rewritten under the tab the operator is
-     watching, resetting an elapsed count for a request that never restarted. *)
-  mutable detail_read_started_at: (keeper_detail_tab * int64) list;
+     One stamp per tab and Keeper, not one for the screen and not one per tab. A
+     background read finishing elsewhere launches its own detail read, and that
+     read is often the same tab for a different Keeper: Identity_switch_set
+     relaunches Identity for the Keeper whose switch landed, which may no longer
+     be the selected one. Keyed by tab alone, that write rewrote the stamp under
+     the Keeper on screen and restarted an elapsed count for a read that never
+     restarted.
+
+     Entries are not removed when a read lands. The loading row is only drawn
+     while a read is pending, and every way of reaching a tab relaunches its
+     read, so a landed stamp is never read; the list is bounded by the four tabs
+     that read times the Keepers visited. *)
+  mutable detail_read_started_at: ((keeper_detail_tab * string) * int64) list;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -4981,13 +4989,14 @@ let pending_elapsed_s ~now_ns started_ns =
       Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
     started_ns
 
-(* When the read this tab is waiting for was asked for, if it is waiting. *)
-let detail_read_started (state : state) tab =
-  List.assoc_opt tab state.detail_read_started_at
+(* When the read this tab is waiting for, for this Keeper, was asked for. *)
+let detail_read_started (state : state) ~tab ~keeper =
+  List.assoc_opt (tab, keeper) state.detail_read_started_at
 
-let mark_detail_read_started (state : state) ~tab ~now_ns =
+let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
+  let key = (tab, keeper) in
   state.detail_read_started_at <-
-    (tab, now_ns) :: List.remove_assoc tab state.detail_read_started_at
+    (key, now_ns) :: List.remove_assoc key state.detail_read_started_at
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor

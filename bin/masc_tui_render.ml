@@ -5821,7 +5821,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     in
     let tab_loading_row what =
       loading_row
-        ?started_ns:(Masc_tui_types.detail_read_started state state.detail_tab)
+        ?started_ns:
+          (Masc_tui_types.detail_read_started state ~tab:state.detail_tab
+             ~keeper:k.k_name)
         what
     in
     let stamped_or view error =

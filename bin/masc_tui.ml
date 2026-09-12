@@ -3941,17 +3941,18 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
    been waiting. Here rather than at the key that triggered it: the same read
    is started by entering the screen, by walking the tabs, and by R, and a
    stamp written at one of those three is missing at the other two. Each
-   launcher names the tab it reads for, so a read finishing in the background
-   cannot rewrite the stamp under the tab the operator is watching.
+   launcher names the tab and the Keeper it reads for, so a read finishing in
+   the background -- often the same tab for a different Keeper -- cannot rewrite
+   the stamp under what the operator is watching.
 
    Monotonic, because the only question asked of the stamp is how long the read
    has been pending. *)
-let mark_detail_read_started state ~tab =
-  Masc_tui_types.mark_detail_read_started state ~tab
+let mark_detail_read_started state ~tab ~keeper =
+  Masc_tui_types.mark_detail_read_started state ~tab ~keeper
     ~now_ns:(Mtime_clock.elapsed_ns ())
 
 let launch_keeper_config_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_instructions;
+  mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3973,7 +3974,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_sandbox;
+  mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4028,7 +4029,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
          (keeper_name, generation, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_github;
+  mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4053,7 +4054,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_identity_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_identity;
+  mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name;
   let host = server_peer_host in
   let port = state.port in
   let run () =

@@ -1610,6 +1610,22 @@ def preferred_language():
 
 
 def select_local_voice(binary, base):
+    """Ask for a voice, and never take the journey down with it.
+
+    An optional step cannot fail the thing it is optional to. By the time this
+    runs the workspace is initialized and the model connection is saved, and
+    the sandbox step is still ahead, so a cancel here means "not this" rather
+    than "abandon setup" -- which is what it meant before, complete with a
+    `runtime setup failed` line about a step nobody had to take.
+    """
+    try:
+        ask_local_voice(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nContinuing without voice. '
+              'Run masc voice-local-setup to turn it on later.', file=sys.stderr)
+
+
+def ask_local_voice(binary, base):
     """Turn on voice, which on a fresh mac needs nothing downloaded to speak.
 
     `say` is in the base system and runs once per utterance, so speaking is a

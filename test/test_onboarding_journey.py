@@ -767,6 +767,19 @@ class LocalVoice(unittest.TestCase):
                          ['/bin/masc', 'voice-local-setup', '--base-path', '/workspace',
                           '--voice', 'Yuna'])
 
+    def test_cancelling_the_voice_question_does_not_cancel_setup(self):
+        # An optional step cannot fail the thing it is optional to. By the time
+        # this runs the workspace and the model are saved and the sandbox step
+        # is still ahead, so `q` here means "not this", not "abandon setup".
+        with patch.object(SETUP, 'pick', side_effect=SETUP.SetupError('setup cancelled')), \
+                patch.object(SETUP.subprocess, 'run', side_effect=[completed(VOICES)]) as run, \
+                korean_terminal(), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.select_local_voice('/bin/masc', '/workspace')
+        self.assertIn('Continuing without voice', printed.getvalue())
+        # Asked for the listing, wrote nothing.
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['voice-local-setup'])
+
     def test_the_journey_asks_before_the_sandbox(self):
         # A reader who leaves at the sandbox step still leaves with a keeper
         # that can speak.

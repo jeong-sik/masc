@@ -48,38 +48,93 @@ apt package would install something else or nothing.
 ### Setup asks for a voice on the way past
 
 A fresh install does not have to be told about any of this. The journey asks
-as step 3, between the model connection and the sandbox:
+as step 3, between the model connection and the sandbox. Walked on this
+machine 2026-09-13 in a `TERM=dumb` terminal, which is why the options are
+numbered; on a real terminal they are arrow keys:
 
 ```
 3 · Give imp a voice (optional)
-  Yuna — ko_KR
-  Eddy (한국어(한국)) — ko_KR
-  Flo (한국어(한국)) — ko_KR
-  ...
-  Show every voice on this computer (184)
-  Stay text only
+  1) Eddy (한국어(한국)) — ko_KR
+  2) Flo (한국어(한국)) — ko_KR
+  3) Grandma (한국어(한국)) — ko_KR
+  4) Grandpa (한국어(한국)) — ko_KR
+  5) Reed (한국어(한국)) — ko_KR
+  6) Rocko (한국어(한국)) — ko_KR
+  7) Sandy (한국어(한국)) — ko_KR
+  8) Shelley (한국어(한국)) — ko_KR
+  9) Yuna — ko_KR
+  10) Show every voice on this computer (184)
+  11) Stay text only
 ```
 
-The list leads with the voices in the terminal's own language, read from
-`LC_ALL`/`LC_MESSAGES`/`LANG`. Choosing one runs
+Nine rows because the terminal says Korean — read from `LC_ALL`,
+`LC_MESSAGES`, `LANG` in that order. An English terminal leads with `en_*`
+and the other 175 are one keystroke away.
+
+Picking 2 wrote eight lines and nothing else:
+
+```toml
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Flo (한국어(한국))"
+```
+
+The parenthesis is part of the name, kept whole. `masc voice-verify` against
+that workspace answered `108466 bytes of audio`.
+
+The write goes through `masc voice-local-setup`, which is the same writer the
+HTTP route uses — the same revision guard, and the same refusal to publish a
+section the loader would reject.
+
+### Hearing is a second question
+
+It is the half that needs the 1.6GB download, so it is asked only after the
+first is answered:
 
 ```
-masc voice-local-setup --base-path <workspace> --voice "<the whole label>"
+Let imp hear you too? whisper-cli transcribes locally; the model it reads is 1.6GB.
+  1) Speak to imp as well
+  2) Speaking only for now
 ```
 
-which writes the section through the same writer the HTTP route uses — the
-same revision guard, the same refusal to publish a section the loader would
-reject.
+Saying yes opens the prerequisite menu — the same one `masc
+prerequisite-actions whisper` prints. Leaving it without downloading is not a
+failure:
 
-Hearing is a second question, asked only after the first is answered, because
-it is the half that needs the 1.6GB download. Saying no to it leaves speaking
-on. The model path is read from the prerequisite action that writes it, so the
-section cannot end up naming a file the download put somewhere else.
+```
+Install or start the selected prerequisite
+  1) Install whisper.cpp with Homebrew
+  2) Download the whisper model masc asks for
+  3) Refresh detection
+  4) Back to setup choices
 
-It comes before the sandbox on purpose: a reader who stops at the sandbox step
-still leaves with a keeper that can speak.
+→ The model file is not there yet, so imp will speak but not listen.
+  Run masc voice-local-setup --model <file> once it is downloaded.
+  voice is configured
+```
 
-Outside the journey the same command works on its own:
+Speaking stayed on. The model path is read from the action that downloads it
+rather than spelled here, so the section cannot name a file the download put
+somewhere else.
+
+### Cancelling here does not cancel setup
+
+`q` at the voice question prints
+
+```
+setup cancelled; existing connections were preserved
+Continuing without voice. Run masc voice-local-setup to turn it on later.
+```
+
+and the journey goes on to the sandbox, exit 0, `runtime.toml` untouched. An
+optional step cannot fail the thing it is optional to — and by this point the
+workspace and the model connection are already saved.
+
+### Outside the journey
 
 ```
 masc voice-local-setup --list-voices

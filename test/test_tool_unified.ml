@@ -46,6 +46,31 @@ let () =
         ] );
       ( "summary_report",
         [
+          test_case "usage distinguishes current catalog from retained outside names" `Quick (fun () ->
+              Tool_metrics.clear ();
+              Fun.protect ~finally:Tool_metrics.clear (fun () ->
+                let names = Masc.Config.all_tool_names () in
+                let visible = List.find (fun name -> Tool_catalog.is_visible name) names in
+                let hidden = List.find (fun name -> not (Tool_catalog.is_visible name)) names in
+                List.iter (fun name -> Tool_metrics.record
+                    (make_completed ~name ~duration_ms:1.0))
+                  [visible; hidden; "retained_tool_outside_current_catalog"];
+                let open Yojson.Safe.Util in
+                let report = Tool_unified.summary_report () in
+                let usage = report |> member "catalog_usage" in
+                check int "visible observed" 1 (usage |> member "visible_called" |> to_int);
+                check int "hidden observed" 1 (usage |> member "hidden_called" |> to_int);
+                check int "outside current catalog" 1 (usage |> member "outside_catalog_called" |> to_int);
+                check int "visible denominator partitions exactly"
+                  (usage |> member "visible_total" |> to_int)
+                  ((usage |> member "visible_called" |> to_int)
+                   + (usage |> member "visible_without_observed_call" |> to_int));
+                check int "all observed names remain counted" 3
+                  (report |> member "distinct_tools_called" |> to_int);
+                check string "metrics source owns the snapshot" "tool_metrics"
+                  (report |> member "metrics_source" |> member "kind" |> to_string);
+                check bool "no unrelated log health attached" true
+                  ((report |> member "health") = `Null)));
           test_case "report has required keys" `Quick (fun () ->
               let report = Tool_unified.summary_report () in
               let open Yojson.Safe.Util in

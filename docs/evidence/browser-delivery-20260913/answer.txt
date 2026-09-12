@@ -1,0 +1,23 @@
+Team Channels에서 현재 화면에 표시된 메시지만 기준으로 정리했습니다.
+
+- **Alpha**
+  - 현재 결정: 접근성 승인 후 Cedar를 화요일에 배포
+  - 담당자: 명시되지 않음
+  - Mina 요청: 월요일까지 접근성 체크리스트 승인
+  - [메시지 링크](http://127.0.0.1:50702/alpha.html#a2)
+
+- **Beta**
+  - 현재 결정: 월요일 Cedar의 schema v4 마이그레이션 완료
+  - 담당자: Joon
+  - Mina 요청: 마이그레이션 시작 전 클라이언트 payload 확인
+  - [메시지 링크](http://127.0.0.1:50702/beta.html#b1)
+
+- **Gamma**
+  - 현재 결정: 수요일 schema v4 기준 Cedar E2E QA 실행
+  - 담당자: Sora
+  - Mina 요청: 추가 요청 없음
+  - [메시지 링크](http://127.0.0.1:50702/gamma.html#g1)
+
+세 채널의 공통 작업은 **Cedar 출시를 위해 schema v4를 기준으로 마이그레이션·검증을 진행하고, 접근성 승인과 E2E QA를 거치는 것**입니다. Alpha의 접근성 승인과 Beta의 payload 확인은 Mina의 선행 확인 사항이며, Gamma는 이후 E2E QA를 담당합니다.
+
+읽은 범위: `http://127.0.0.1:50702/index.html`의 Channels 링크를 확인한 뒤, Alpha·Beta·Gamma 각 채널의 **현재 표시된 메시지 목록**을 직접 읽었습니다. 각 채널에서 메시지 1~2개와 표시된 시간·작성자·permalink를 확인했으며, 화면의 “Navigation summary” 및 “Old cached snippet”은 메시지 근거에서 제외했습니다. 화면에는 모두 “currently displayed messages only”라고 표시되어 있어 숨겨진 과거 기록은 확인하지 않았습니다.

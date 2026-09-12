@@ -74,11 +74,11 @@ candidates = ["native.no_tools", "binding.sample"]
     ~name:"fixture_tool" ~description:"Offered callable tool." ~parameters:[]
     (fun _ -> Ok {Agent_core.Types.content="fixture result"; content_blocks = None; _meta = None}) in
   let errors = ref [] in
-  let run ?provider_config_transform ~tool_requirement ~tools runtime_id =
+  let run ?provider_config_transform ?output_contract ~tool_requirement ~tools runtime_id =
     Keeper_turn_driver.run_named ~runtime_id ~keeper_name:"required-tools-proof"
       ~base_path:root ~system_prompt:"Tool requirement dispatch fixture."
       ~goal:"Answer the request." ~tools ~agent_core_tools:tools ~tool_requirement
-      ?provider_config_transform
+      ?provider_config_transform ?output_contract
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch error -> errors := (runtime_id,dispatch,error) :: !errors)
       ~sw ~net:env#net () in
   (match run ~tool_requirement:Required.Required ~tools:[tool] "required_tools_fixture" with
@@ -124,7 +124,17 @@ candidates = ["native.no_tools", "binding.sample"]
   check int "all refused attempts leave successful peer count unchanged" 1 (Exact_output_fixture.post_count supported);
   (match run ~tool_requirement:Required.Optional ~tools:[] "binding.sample" with
    | Ok _ -> () | Error e -> fail (Agent_core.Error.to_string e));
-  check int "ordinary tool-free call remains valid" 1 (Exact_output_fixture.post_count unsupported)
+  check int "ordinary tool-free call remains valid" 1 (Exact_output_fixture.post_count unsupported);
+  let preset_json (cfg:Llm_provider.Provider_config.t) =
+    Ok {cfg with response_format=Agent_core.Types.JsonMode} in
+  (match run ~provider_config_transform:preset_json
+     ~output_contract:Keeper_turn_driver.Tool_verdict
+     ~tool_requirement:Required.Required ~tools:[tool] "good.sample" with
+   | Ok _ -> () | Error e -> fail (Agent_core.Error.to_string e));
+  let body = Exact_output_fixture.request_bodies supported |> List.rev |> List.hd
+    |> Yojson.Safe.from_string in
+  check bool "tool verdict contract clears preset format on actual API wire" true
+    (Yojson.Safe.Util.member "response_format" body = `Null)
 
 let () = Alcotest.run "Required tool delivery across runtime candidates"
   ["actual-dispatch",[test_case "skip unsupported owners and bindings before dispatch" `Quick test_required_candidate_delivery]]

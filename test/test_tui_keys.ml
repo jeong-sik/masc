@@ -135,7 +135,10 @@ let test_plain_listing_footer_shape () =
 
 let test_system_logs_footer_names_browser_controls () =
   check str "logs names filters and detail"
-    "1 / 2:Events / Logs  j/k:move / scroll  PgUp/PgDn:detail page  [ / ]:previous / next  l:level floor  v:verbose  c:category  Right / Enter:detail  Left / Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    ("1 / 2:Events / Logs  j/k:move / scroll  PgUp/PgDn:detail page"
+     ^ "  [ / ]:previous / next  Home/End:top/bottom  l:level floor  v:verbose"
+     ^ "  c:category  Right / Enter:detail  Left / Esc:back  /:find"
+     ^ "  n / N:next / previous match  r:refresh  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints System_logs)
 
 let test_lanes_footer_opens_standalone_runs () =
@@ -532,10 +535,17 @@ let test_overview_footer_projects_by_focus () =
      Right/Enter and Left/Esc only act on a focused task. h/l stays visible
      because it selects either pane directly. *)
   check str "events mode keeps t and drops the task keys"
-    "j/k:events  h/l:pane  m:telemetry  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
+    ("j/k:events  h/l:pane  m:telemetry  Home/End:top/bottom  t:tasks"
+     ^ "  2:keepers  r:refresh  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:false);
+  (* Both columns and an open task's detail answer Home and End: the events
+     column and the detail as readings the frame clamps, the task column as a
+     row list whose window follows its cursor. So the key is named in both
+     modes rather than in one. *)
   check str "tasks mode keeps arrow/Enter/Esc and drops t"
-    "j/k:tasks  h/l:pane  m:telemetry  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
+    ("j/k:tasks  h/l:pane  m:telemetry  Home/End:top/bottom"
+     ^ "  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh"
+     ^ "  Tab:next  q:quit")
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
 
 (* Reading a queue meant Esc, move, Enter for every row -- three keys to do

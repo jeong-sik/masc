@@ -7,9 +7,9 @@ import { resolve, relative, extname, sep } from 'node:path'
 import assert from 'node:assert/strict'
 const require = createRequire(new URL('../dashboard/package.json', import.meta.url))
 const { chromium } = require('playwright')
-const [previewArgument, expectedHead, baseUrl, outputArgument, tokenFile] = process.argv.slice(2)
+const [previewArgument, expectedHead, baseUrl, outputArgument, tokenFile, expectedToolFile] = process.argv.slice(2)
 if (!previewArgument || !expectedHead || !baseUrl || !outputArgument) {
-  throw new Error('Usage: node scripts/verify-runtime-stats-preview.mjs PREVIEW_DIR PR_HEAD BACKEND_URL EVIDENCE_DIR [TOKEN_FILE]')
+  throw new Error('Usage: node scripts/verify-collaboration-tools-live-preview.mjs PREVIEW_DIR PR_HEAD BACKEND_URL EVIDENCE_DIR TOKEN_FILE EXPECTED_TOOL_JSON')
 }
 const token = tokenFile ? (await readFile(tokenFile, 'utf8')).trim() : null
 const observations = []
@@ -24,11 +24,15 @@ for (const [name, hash] of Object.entries(manifest.files)) {
 }
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' }
-await mkdir(output, { recursive: true })
+// A run owns a fresh directory; old screenshots cannot accompany a new
+// failure. verify-collaboration-installed-ui.mjs already requires this.
+await mkdir(output)
 const health = await (await fetch(new URL('/health?full=1', baseUrl))).json()
 assert.equal(health.build.commit, expectedHead)
-const expectedToolFile = process.argv[7]
-assert.ok(expectedToolFile, 'Expected tool JSON file required after token file')
+// Declared with the rest. It used to be read from argv[7], one slot past the
+// last documented argument, so the advertised usage always failed here and
+// the optional TOKEN_FILE could not actually be omitted.
+assert.ok(expectedToolFile, 'EXPECTED_TOOL_JSON is required')
 const expectedTool = JSON.parse(await readFile(expectedToolFile, 'utf8')).tool
 const browser = await chromium.launch({ headless: true })
 const blocked = [], errors = []

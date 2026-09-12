@@ -7,9 +7,9 @@ import { resolve, relative, extname, sep } from 'node:path'
 import assert from 'node:assert/strict'
 const require = createRequire(new URL('../dashboard/package.json', import.meta.url))
 const { chromium } = require('playwright')
-const [previewArgument, expectedHead, baseUrl, outputArgument, tokenFile] = process.argv.slice(2)
+const [previewArgument, expectedHead, baseUrl, outputArgument, tokenFile, goalState] = process.argv.slice(2)
 if (!previewArgument || !expectedHead || !baseUrl || !outputArgument) {
-  throw new Error('Usage: node scripts/verify-runtime-stats-preview.mjs PREVIEW_DIR PR_HEAD BACKEND_URL EVIDENCE_DIR [TOKEN_FILE]')
+  throw new Error('Usage: node scripts/verify-collaboration-goal-live-preview.mjs PREVIEW_DIR PR_HEAD BACKEND_URL EVIDENCE_DIR TOKEN_FILE GOAL_STATE\nGOAL_STATE is refuted or awaiting_confirmation')
 }
 const token = tokenFile ? (await readFile(tokenFile, 'utf8')).trim() : null
 const observations = []
@@ -24,7 +24,9 @@ for (const [name, hash] of Object.entries(manifest.files)) {
 }
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png' }
-await mkdir(output, { recursive: true })
+// A run owns a fresh directory; old screenshots cannot accompany a new
+// failure. verify-collaboration-installed-ui.mjs already requires this.
+await mkdir(output)
 const health = await (await fetch(new URL('/health?full=1', baseUrl))).json()
 assert.equal(health.build.commit, expectedHead)
 const browser = await chromium.launch({ headless: true })
@@ -53,7 +55,12 @@ try {
   })
   await page.goto(new URL('/dashboard/#workspace?section=planning&goal=exhibition-publication-baseline', baseUrl).href)
   await page.getByText('가상 전시 출판물 완성', { exact: true }).first().waitFor({ timeout: 45000 })
-  const awaitingConfirmation = process.argv[7] === 'awaiting_confirmation'
+  // Declared, not read off an undocumented argv slot: every invocation that
+  // followed the usage line selected the refuted branch, then waited 45s for a
+  // verdict the page was never going to draw.
+  assert.ok(['refuted', 'awaiting_confirmation'].includes(goalState),
+    `GOAL_STATE must be refuted or awaiting_confirmation, got ${goalState}`)
+  const awaitingConfirmation = goalState === 'awaiting_confirmation'
   const verdict = awaitingConfirmation
     ? page.getByRole('button', { name: '이 증명으로 목표 완료 확인', exact: true })
     : page.getByText('검증 · 반증됨', { exact: true })
@@ -72,6 +79,11 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   await verdict.scrollIntoViewIfNeeded()
   await page.screenshot({ path: resolve(output, 'goal-mobile.png'), fullPage: true })
-  await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ observed_at: new Date().toISOString(), manifest, health: { build: health.build, startup_phase: health.startup.phase }, responses, blocked_mutations: blocked, page_errors: errors, scope: 'CI preview identified by PR head; checkout commit may be GitHub merge commit. Actual authenticated backend GETs; no synthetic domain responses or production UI deployment.' }, null, 2) + '\n')
+  await writeFile(resolve(output, 'receipt.json'), JSON.stringify({ observed_at: new Date().toISOString(), manifest, health: { build: health.build, startup_phase: health.startup.phase }, responses, blocked_mutations: blocked, page_errors: errors, scope: `CI preview identified by PR head; checkout commit may be GitHub merge commit. ${token ? 'Actual authenticated backend GETs' : 'Actual backend GETs with no Authorization header'}; no synthetic domain responses or production UI deployment.` }, null, 2) + '\n')
+  // After the receipt, not before it: a run that raised a pageerror is exactly
+  // the run whose evidence is worth keeping. verify-collaboration-tools-live-preview.mjs
+  // and verify-collaboration-installed-ui.mjs both refuse a frame the page threw under;
+  // this one collected the errors and then passed anyway.
+  assert.deepEqual(errors, [])
   console.log(JSON.stringify({ output, response_count: responses.length, errors }))
 } finally { await browser.close() }

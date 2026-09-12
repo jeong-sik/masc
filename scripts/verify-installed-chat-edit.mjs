@@ -13,7 +13,7 @@ assert.ok(prefix && expectedCommit && baseUrl && outputDirectory && tokenFile &&
 const output = resolve(outputDirectory)
 await mkdir(output)
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-const events = [], assets = [], errors = [], failures = [], blocked = [], workers = [], matchedReceipts = []
+const events = [], assets = [], errors = [], failures = [], blocked = [], workers = [], matchedReceipts = [], navigation = []
 let browser, page, health, release, expected, originals, rendered, probePassed = false, assertionFailure = null
 try {
   const binary = await realpath(resolve(prefix, 'masc'))
@@ -92,8 +92,10 @@ try {
   await page.getByRole('button', { name: '대화 도구', exact: true }).click()
   await page.getByTestId('kw-chat-command-search').click()
   const load = page.getByRole('button', { name: /^(전체 이력|이력 불러오기)/ })
-  if (await load.count()) await load.first().click()
-  await page.getByRole('button', { name: 'Tweaks', exact: true }).click()
+  await load.first().waitFor({ timeout: 45000 })
+  await load.first().click()
+  await load.first().waitFor({ state: 'hidden', timeout: 45000 })
+  await page.getByTestId('tweaks-panel-toggle').click()
   // TweakToggle currently labels its enclosing row, not its switch element.
   for (const label of ['내부 메시지', '자율턴', '자율턴 펼침']) {
     const row = page.locator('.twk-row').filter({ has: page.locator('.twk-lbl').getByText(label, { exact: true }) })
@@ -101,10 +103,21 @@ try {
     await toggle.waitFor()
     if (await toggle.getAttribute('aria-checked') !== 'true') await toggle.click()
   }
-  await page.getByRole('button', { name: 'Tweaks', exact: true }).click()
+  await page.getByTestId('tweaks-panel-toggle').click()
   const id = expected.execution_id
   const row = page.locator(`[data-chat-tool-execution-id="${id}"], [data-chat-trace-execution-id="${id}"]`)
     .filter({ has: page.locator('[data-edit-snapshot-view]') })
+  // Each autonomous group keeps its own closed state independently of Tweaks.
+  // Walk the actual loaded history controls until the target is rendered.
+  while (await row.count() === 0) {
+    const closed = page.locator('.chat-block-trace-hd[aria-expanded="false"]')
+      .filter({ has: page.locator('.chat-block-trace-label').getByText('자율턴', { exact: true }) })
+    const more = page.locator('.chat-auto-run-more')
+    const control = await closed.count() > 0 ? closed.first() : more.first()
+    if (await control.count() === 0) break
+    navigation.push({ action: 'expand_autonomous_history', label: await control.innerText() })
+    await control.click()
+  }
   await row.first().waitFor({ timeout: 45000 })
   assert.equal(await row.count(), 1, 'The real execution must join to one rendered Edit record')
   await row.getByRole('button', { name: '편집 전후 원본 보기', exact: true }).click()
@@ -176,8 +189,8 @@ try {
     runtime_build: health?.build, runtime_status: health?.status, keeper,
     execution_id: expected?.execution_id, tool_use_id: expected?.tool_use_id,
     originals: originals?.map(({ text, ...ref }) => ref), rendered,
-    assets, events, matched_receipts: matchedReceipts, workers, errors, failures, blocked,
-    scope: 'Actual installed assets and authenticated Keeper history, execution receipt and artifact GETs. Displayed originals match retained bytes; displayed diff reconstructs after-file. Domain writes and WebSockets blocked. No fresh model turn, Gate replay, or general Dashboard health claim.',
+    assets, events, matched_receipts: matchedReceipts, navigation, workers, errors, failures, blocked,
+    scope: 'Read-only installed Dashboard acceptance probe. Original-byte equality and diff reconstruction are established only when probe_passed and rendered are present. Domain writes and WebSockets blocked. No fresh model turn, Gate replay, or general Dashboard health claim.',
   }, null, 2) + '\n')
 }
 console.log(JSON.stringify({ output, probe_passed: probePassed, matched_assets: assets.length }))

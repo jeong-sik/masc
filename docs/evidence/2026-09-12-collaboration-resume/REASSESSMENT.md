@@ -2,7 +2,32 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
-## 현재 판단과 다음 작업 (2026-09-12 23:06 KST)
+## 현재 판단과 다음 작업 (2026-09-12 23:52 KST)
+
+이번 요청은 기존 목표·실제 진행·다음 방향의 재점검이다. 루트 체크아웃은 읽기만 했고, 증거와 검사 스크립트는 기존 worktree `/tmp/masc-collaboration-resume-20260912`에서 정리했다. 아래 최신 판단이 이전 시점의 상태 설명보다 우선한다.
+
+### 무엇을 하려 했고 어디까지 했는가
+
+- **목표:** 18개 문제와 첨부 계약 전체. Keeper가 Goal·Task를 스스로 이어가고, 동료·Fusion·독립 검증을 활용하며, 실제 산출물과 Dashboard에서 행동을 확인할 수 있게 만드는 것이다. PR 수나 서버 시작을 완료 기준으로 삼지 않는다.
+- **실제 도달:** 전시와 연작 협업·산출물·독립 검증 기록이 있다. 현재 저장소를 다시 읽어 전시 Goal과 연작 Goal이 모두 `awaiting_confirmation`, 연작 task-003이 `done`임을 확인했다. 사람 확인은 남는다. 관객 참여형 PPTX·MP4 Goal은 `executing`, task-004는 다시 `in_progress`다. 이전 제출물 제작과 독립 재검증 성공을 구분한다.
+- **설치본:** 격리 포트 18951/PID42175는 `aad94bbf3fb90a4600496bf56d7590f02ff385ad`다. 실제 바이너리 SHA256은 `8942a20752f9312b31c0d0be18d29918a6f8e810839492b960cd833cac231a74`. full health는 status/overall_status 모두 `ok`, config error 0, operator_action_required false였다. 이 커밋의 Test34697880885(18 suite)와 Release34697882117 성공을 GitHub에서 재확인했다. 이전 문서의 “라이브는 2578, aad94는 미설치” 상태는 갱신됐다.
+- **원격 PR은 별개:** 현재 #35515는 `3d3c094ab7e83f8985c61a185f6a1052462ae16b`, base `main`으로 바뀌었다. 그 PR check에는 Fusion 설명 첫줄 잘림과 schema 크기 검사 실패가 있다. aad94 설치본의 성공을 현재 PR head의 성공으로 옮겨 적지 않는다. 기존 worktree는 aad94에 그대로 있으며, 다른 세션의 원격 변경을 덮어쓰지 않았다.
+- **Chat 수용은 미완료:** 처음 실제 API receipt를 받았어도 접힌 자율턴 내부 행을 기다려 실패했다. 실제 펼침 동작을 추가한 검사도 183개 펼침 뒤 대상 snapshot 행을 찾지 못했다. 최신 시도는 실제 API에서 exact Edit receipt 1개, manifest와 일치한 자산83개, HTTP/page 오류0을 기록했지만 표시 원본·diff 검사는 도달하지 못했다. 원인은 단순 접힘만으로 설명되지 않는다. 원본 데이터 부재나 diff 구현 고장으로 단정하지 않고, 로드된 이력의 갱신·trace 실행ID·receipt 결합·화면 표시를 다음 조사 대상으로 둔다. 두 실패의 원문 receipt·화면·스크린샷을 보존했다.
+- **MP4 검증 도구:** #35532 `e45362b5`는 원본 바이트에 대한 FFprobe 메타데이터·FFmpeg 전체 A/V 디코딩 구현과 exact Test34699728493 성공까지 도달했다. 현재 PR check 환경의 FFmpeg 누락과 부모 lint/version 문제는 남고, 라이브 검증자에는 미설치다. 영상의 의미·시각·접근성 판정 전체를 통과했다는 뜻도 아니다.
+- **Board/Fusion 검증 도구:** #35536 `bc39fb61`에 실제 원문 조회와 권한·오류 분류가 구현됐다. 현재 자체 테스트의 `Board.post` 타입 추론 오류와 pagination의 기본값 처리 lint 실패가 있어 완료된 후보가 아니다. PPTX prerequisite 작업은 `/tmp/masc-presentation-prerequisites`의 수정·신규9개 파일 상태이며 미커밋·미완성이다. PPTX 독립 검사 전체도 아직 없다.
+
+### 방향 조정과 바로 다음 작업
+
+1. **기존 설치본의 Chat 사용자 흐름을 먼저 확인한다.** 실제 target turn을 현재 이력과 연결하고, 화면 갱신 뒤 유지되는지 확인한 후 원본 두 개의 SHA·표시 diff·desktop/mobile을 검증한다. 동일한 전체 펼침 재시도를 반복하지 않는다. native 승인 후 원래 세션 재개는 별도 수용 조건이다.
+2. **이미 드러난 독립 검증 공백을 완성한다.** Board/Fusion의 자체 타입·pagination 오류를 수정하고 MP4의 PR-check 의존성을 연결한다. 기존 부모/통합 PR 변경은 현재 head와 조정한 뒤 반영한다. PPTX는 prerequisite 초안 검토와 실제 원본 파서·렌더 검사까지 이어간다. 제작자가 만든 검사 JSON만으로 독립 검증을 대체하지 않는다.
+3. **task-004를 정확한 최종 산출물로 재검증한다.** 후속 Chat 피드백에는 원천 동료/Fusion 근거 접근과 PPTX·MP4의 Q3 선택지 불일치가 지적돼 있다. 해당 최신 verifier 원문과 실물의 직접 대조는 다음 작업에 남는다. 원문 검증 결과·최종 파일·SHA를 대조해 각 반려 축을 해소해야 한다. 서버 교체나 검사 도구 구현만으로 Task 완료를 선언하지 않는다.
+4. **그 다음 남은 제품 범위를 넓힌다.** 통계·설정·Tools/Skills의 설치본/TUI 통합 사용성, Workspace·LSP·주석·메모의 IDE 흐름, 공동 기억의 의미 정확성, 모든 runtime의 10턴 및 1/2/4/24시간 연속성은 남아 있다. 전시·연작 Goal의 사람 확인도 별도로 유지한다.
+
+이번 재점검에서 새 과제·새 Gate·새 runtime 배포를 추가하지 않았다. 작업 우선순위는 기존 실제 시나리오의 사용자 흐름과 독립 검증 완결로 좁힌다. 전체 Goal은 진행 중이다.
+
+근거: [현재 설치본](reassessment-aad94/runtime.json), [Goal·Task 현재 상태](reassessment-aad94/domain-status.json), [GitHub 조회](reassessment-aad94/github.json), [독립 CI 감사와 실패 로그](reassessment-aad94/ci-audit/README.md), [접힘 수정 뒤 실제 Chat 실패](reassessment-aad94/chat-expanded-failure/receipt.json), [실제 화면](reassessment-aad94/chat-expanded-failure/failure.png). 아래 18개 표는 누적 근거이며 최신 상태는 이 절을 따른다.
+
+## 이전 판단과 다음 작업 (2026-09-12 23:06 KST)
 
 - **제품 소스:** Task·Goal 원문 자동 전달(#35501), run_id로 전체 Fusion 원문 조회 및 Keeper 선택 분리(#35511), Board 조회의 거짓 성공·만료 추정 제거(#35510), 잘못된 Gate binding을 저장소 손상으로 분류한 오류(#35516)를 통합했다. 다음 후보는 #35515 head `aad94bbf3f`, Test #34697880885(18개 suite), Release #34697882117이다. 직접·독립 리뷰와 파싱 검사를 통과했으며 CI와 라이브 설치 수용은 남는다.
 - **확인한 CI:** c45 Test #34696911670은 fusion_decision 4개, fusion_wake 17개 case를 통과했다. 부모 2855는 13개 suite 통과, Gate suite 7개 case 통과·1개 실패였다. 오류 분류 수정 a484를 다음 후보에 반영했다. 2855의 macOS 바이너리·자산·runtime·companion과 embedded source를 별도 임시 prefix에 설치·검증했지만 서버로 시작하지 않았다. 라이브 서버는 여전히 2578이다.

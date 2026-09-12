@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { h, render } from 'preact'
+import { waitFor } from '@testing-library/preact'
+import { IdeEditor } from './ide-editor'
+import { createKeeperLineOwnershipStore } from './keeper-line-ownership-store'
+import { EditorState } from '@codemirror/state'
+import { EditorView } from '@codemirror/view'
+import { lspDocumentStatus } from './ide-lsp-document-status'
+import { createCodeDocumentStore } from './code-document-store'
 import {
   clearLspDiagnosticSnapshot,
   EMPTY_LSP_STATUS_SNAPSHOT,
   LspConnection,
   lspDiagnosticSnapshot,
+  lspExtension,
+  lspScopeKey,
   lspStatusRejected,
   lspStatusSnapshot,
   parseLspStatusSnapshot,
@@ -63,12 +73,12 @@ class MockWebSocket {
 
 const MOCK_WORKSPACE_ROOT = '/workspace/masc'
 
-async function completeHandshake(socket: MockWebSocket): Promise<void> {
+async function completeHandshake(socket: MockWebSocket, workspaceRoot = MOCK_WORKSPACE_ROOT): Promise<void> {
   socket.open()
   const initialize = JSON.parse(socket.sent[0]!) as { id: number }
   socket.message({
     id: initialize.id,
-    result: { masc: { workspaceRoot: MOCK_WORKSPACE_ROOT } },
+    result: { masc: { workspaceRoot } },
   })
   await Promise.resolve()
   await Promise.resolve()
@@ -86,6 +96,7 @@ afterEach(() => {
   lspDiagnosticSnapshot.value = new Map()
   lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
   lspStatusRejected.value = false
+  lspDocumentStatus.value = null
   mockSockets.length = 0
   // The published scope is process-wide, so a case that declares one must not
   // decide what the next case connects with.
@@ -352,7 +363,9 @@ describe('LspConnection', () => {
       elapsed += TRANSPORT_RETRY_MAX_MS
     }
     const recovered = mockSockets[mockSockets.length - 1]!
+    conn.syncDocument('lib/example.ml', 'let source = missing\n')
     await completeHandshake(recovered)
+    diagnostics.mockClear()
     recovered.message({ method: 'textDocument/publishDiagnostics', params: {
       uri: 'file:///workspace/masc/lib/example.ml',
       diagnostics: [{ range: { start: { line: 2, character: 0 }, end: { line: 2, character: 3 } }, message: 'Unbound value', severity: 1 }],
@@ -392,7 +405,7 @@ describe('LspConnection', () => {
     const firstSocket = mockSockets[0]!
     firstSocket.open()
     const firstInitialize = JSON.parse(firstSocket.sent[0]!) as { id: number }
-    firstSocket.message({ id: firstInitialize.id, result: {} })
+    firstSocket.message({ id: firstInitialize.id, result: { masc: { workspaceRoot: MOCK_WORKSPACE_ROOT } } })
     await Promise.resolve()
 
     expect(onReady).toHaveBeenCalledTimes(1)
@@ -402,7 +415,7 @@ describe('LspConnection', () => {
     const secondSocket = mockSockets[1]!
     secondSocket.open()
     const secondInitialize = JSON.parse(secondSocket.sent[0]!) as { id: number }
-    secondSocket.message({ id: secondInitialize.id, result: {} })
+    secondSocket.message({ id: secondInitialize.id, result: { masc: { workspaceRoot: MOCK_WORKSPACE_ROOT } } })
     await Promise.resolve()
 
     expect(onReady).toHaveBeenCalledTimes(2)
@@ -505,7 +518,7 @@ describe('LspConnection', () => {
     expect(socket.sent).toHaveLength(2)
     socket.failSend = true
 
-    expect(() => conn.notifyDidOpen('lib/keeper/current.ml', 'ocaml')).not.toThrow()
+    expect(() => conn.syncDocument('lib/keeper/current.ml', 'let value = 1\n')).not.toThrow()
     expect(errors).toHaveLength(1)
     expect(socket.readyState).toBe(MockWebSocket.CLOSED)
 
@@ -513,4 +526,245 @@ describe('LspConnection', () => {
     expect(mockSockets).toHaveLength(2)
     conn.dispose()
   })
+})
+
+function wire(socket: MockWebSocket, method: string) {
+  return socket.sent.map(value => JSON.parse(value)).filter(value => value.method === method)
+}
+function readyLanguage(socket: MockWebSocket) {
+  socket.message({ method: 'masc/lspStatus', params: {
+    langs: [{ lang: 'ocaml', connected: true, command: 'ocamllsp', last_error: null }],
+  } })
+}
+const sourceDiagnostic = { range: { start: { line: 0, character: 4 }, end: { line: 0, character: 11 } },
+  message: 'Unbound value missing', severity: 1 }
+
+describe('selected document LSP continuity', () => {
+  it('sends actual source on open and monotonic full changes on store updates', async () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.syncDocument('current.ml', 'let value = missing\n')
+    conn.connect()
+    const socket = mockSockets[0]!
+    await completeHandshake(socket)
+    expect(wire(socket, 'textDocument/didOpen')[0].params.textDocument).toEqual({
+      uri: 'file:///workspace/masc/current.ml', languageId: 'ocaml', version: 1,
+      text: 'let value = missing\n',
+    })
+    conn.syncDocument('current.ml', 'let value = 1\n')
+    conn.syncDocument('current.ml', 'let value = 1\n')
+    conn.syncDocument('current.ml', 'let value = 2\n')
+    expect(wire(socket, 'textDocument/didChange').map(request => request.params)).toEqual([
+      { textDocument: { uri: 'file:///workspace/masc/current.ml', version: 2 }, contentChanges: [{ text: 'let value = 1\n' }] },
+      { textDocument: { uri: 'file:///workspace/masc/current.ml', version: 3 }, contentChanges: [{ text: 'let value = 2\n' }] },
+    ])
+    expect(lspDocumentStatus.value?.version).toBe(3)
+    conn.dispose()
+  })
+
+  it('discards a delayed old-version pull and distinguishes failed diagnostics from true empty', async () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.syncDocument('current.ml', 'let value = missing\n')
+    conn.connect()
+    const socket = mockSockets[0]!
+    await completeHandshake(socket)
+    readyLanguage(socket)
+    const old = conn.requestDiagnostics('current.ml')
+    const rejectedOld = expect(old).rejects.toThrow('Superseded')
+    const oldId = wire(socket, 'textDocument/diagnostic').at(-1).id
+    conn.syncDocument('current.ml', 'let value = 1\n')
+    socket.message({ id: oldId, result: { kind: 'full', items: [sourceDiagnostic] } })
+    await rejectedOld
+    expect(lspDocumentStatus.value?.diagnostics.kind).toBe('pending')
+    const failed = conn.requestDiagnostics('current.ml')
+    const rejectedFailed = expect(failed).rejects.toEqual({ code: -32603, message: 'analysis failed' })
+    socket.message({ id: wire(socket, 'textDocument/diagnostic').at(-1).id,
+      error: { code: -32603, message: 'analysis failed' } })
+    await rejectedFailed
+    expect(lspDocumentStatus.value?.diagnostics.kind).toBe('failed')
+    const clean = conn.requestDiagnostics('current.ml')
+    socket.message({ id: wire(socket, 'textDocument/diagnostic').at(-1).id, result: { kind: 'full', items: [] } })
+    expect((await clean).size).toBe(0)
+    expect(lspDocumentStatus.value?.diagnostics).toEqual({ kind: 'complete', count: 0 })
+    conn.dispose()
+  })
+
+  it('rejects mismatched URI/version and keeps unversioned server reports explicitly unconfirmed', async () => {
+    installWebSocketMock()
+    const observed = vi.fn()
+    const conn = new LspConnection(observed, () => {})
+    conn.syncDocument('current.ml', 'let value = 1\n')
+    conn.connect()
+    const socket = mockSockets[0]!
+    await completeHandshake(socket)
+    readyLanguage(socket)
+    conn.syncDocument('current.ml', 'let value = missing\n')
+    observed.mockClear()
+    const push = (uri: string, version?: number) => socket.message({ method: 'textDocument/publishDiagnostics',
+      params: { uri, version, diagnostics: [sourceDiagnostic] } })
+    push('file:///other/current.ml', 2)
+    push('file:///workspace/masc/current.ml', 1)
+    expect(observed).not.toHaveBeenCalled()
+    push('file:///workspace/masc/current.ml')
+    expect(observed).toHaveBeenCalledTimes(1)
+    expect(lspDocumentStatus.value?.diagnostics.kind).toBe('unversioned')
+    // Actual ocamllsp 1.27.0 uses unversioned push reports and rejects pull.
+    const unsupported = conn.requestDiagnostics('current.ml')
+    const rejected = expect(unsupported).rejects.toEqual({ code: -32603, message: 'Request not supported yet!' })
+    socket.message({ id: wire(socket, 'textDocument/diagnostic').at(-1).id,
+      error: { code: -32603, message: 'Request not supported yet!' } })
+    await rejected
+    expect(lspDocumentStatus.value?.diagnostics).toEqual({ kind: 'unversioned', count: 1 })
+    push('file:///workspace/masc/current.ml', 2)
+    expect(observed).toHaveBeenCalledTimes(2)
+    expect(lspDocumentStatus.value?.diagnostics).toEqual({ kind: 'complete', count: 1 })
+    conn.dispose()
+  })
+
+  it('changes repository scope even without a CodeMirror transaction and rejects old socket evidence', async () => {
+    installWebSocketMock()
+    publishLspScope({ repoId: 'repo-a', codebase: 'a', keeper: null })
+    const observed = vi.fn()
+    const conn = new LspConnection(observed, () => {})
+    conn.syncDocument('current.ml', 'let value = 1\n')
+    conn.connect()
+    const first = mockSockets[0]!
+    await completeHandshake(first)
+    readyLanguage(first)
+    publishLspScope({ repoId: 'repo-b', codebase: 'b', keeper: null })
+    await Promise.resolve()
+    const second = mockSockets[1]!
+    expect(second.url).toContain('repo_id=repo-b')
+    expect(lspStatusSnapshot.value.langs).toEqual([])
+    expect(lspDocumentStatus.value).toBeNull()
+    second.open()
+    second.message({ id: wire(second, 'initialize')[0].id, result: { masc: { workspaceRoot: '/workspace/other' } } })
+    await Promise.resolve()
+    expect(wire(second, 'textDocument/didOpen')).toEqual([])
+    conn.syncDocument('current.ml', 'let fresh_repository_value = 2\n')
+    expect(wire(second, 'textDocument/didOpen')[0].params.textDocument.uri).toBe('file:///workspace/other/current.ml')
+    observed.mockClear()
+    first.message({ method: 'textDocument/publishDiagnostics', params: {
+      uri: 'file:///workspace/masc/current.ml', version: 1, diagnostics: [sourceDiagnostic],
+    } })
+    expect(observed).not.toHaveBeenCalled()
+    second.close({ code: 4401, reason: 'unauthorized' })
+    expect(lspDocumentStatus.value?.connection.kind).toBe('disconnected')
+    expect(lspStatusSnapshot.value.langs).toEqual([])
+    conn.dispose()
+    expect(lspDocumentStatus.value).toBeNull()
+  })
+
+  it('does not report degraded empty responses as clean diagnostics', async () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.syncDocument('current.ml', 'let value = missing\n')
+    conn.connect()
+    const socket = mockSockets[0]!
+    await completeHandshake(socket)
+    socket.message({ method: 'masc/lspStatus', params: { langs: [
+      { lang: 'ocaml', connected: false, command: 'ocamllsp', last_error: 'not installed' },
+    ] } })
+    const pending = conn.requestDiagnostics('current.ml')
+    const rejected = expect(pending).rejects.toThrow('availability')
+    socket.message({ id: wire(socket, 'textDocument/diagnostic').at(-1).id, result: { kind: 'full', items: [] } })
+    await rejected
+    expect(lspDocumentStatus.value?.connection).toEqual({ kind: 'unavailable', reason: 'not installed' })
+    expect(lspDocumentStatus.value?.diagnostics.kind).not.toBe('complete')
+    conn.dispose()
+  })
+
+  it('synchronizes the full CM document including lines beyond the display inventory', async () => {
+    vi.useFakeTimers()
+    installWebSocketMock()
+    const content = 'let first = 1\nlet second = missing\n'
+    const store = createCodeDocumentStore({ file_path: 'current.ml', language: 'ocaml', content }, { maxLines: 1 })
+    expect(store.lines()).toHaveLength(1)
+    const parent = document.createElement('div')
+    document.body.append(parent)
+    const view = new EditorView({ parent, state: EditorState.create({
+      doc: store.document().content, extensions: [lspExtension({ filePath: 'current.ml' })],
+    }) })
+    try {
+      const socket = mockSockets[0]!
+      await completeHandshake(socket)
+      readyLanguage(socket)
+      expect(wire(socket, 'textDocument/didOpen')[0].params.textDocument.text).toBe(content)
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'let fixed = 2\n' } })
+      expect(wire(socket, 'textDocument/didChange')[0].params.contentChanges).toEqual([{ text: 'let fixed = 2\n' }])
+      await vi.advanceTimersByTimeAsync(300)
+      expect(wire(socket, 'textDocument/diagnostic')).toHaveLength(1)
+      for (const request of socket.sent.map(value => JSON.parse(value)).filter(value => value.id && value.method !== 'initialize')) {
+        socket.message({ id: request.id, result: request.method === 'textDocument/diagnostic' ? { kind: 'full', items: [] } : [] })
+      }
+      await Promise.resolve()
+      expect(lspDocumentStatus.value?.diagnostics).toEqual({ kind: 'complete', count: 0 })
+      expect(socket.sent.map(value => JSON.parse(value).method)).not.toContain('workspace/applyEdit')
+    } finally { view.destroy(); parent.remove() }
+  })
+
+  it('uses the proxy server language for JSX status and old editor cleanup cannot erase its successor', async () => {
+    installWebSocketMock()
+    const old = new LspConnection(() => {}, () => {})
+    old.syncDocument('component.tsx', 'const before = 1\n')
+    old.connect()
+    await completeHandshake(mockSockets[0]!)
+    const current = new LspConnection(() => {}, () => {})
+    current.syncDocument('component.tsx', 'const after = 2\n')
+    current.connect()
+    const socket = mockSockets[1]!
+    await completeHandshake(socket)
+    socket.message({ method: 'masc/lspStatus', params: { langs: [
+      { lang: 'typescript', connected: true, command: 'typescript-language-server', last_error: null },
+    ] } })
+    const diagnostic = { file_path: 'component.tsx', line: 1, message: 'current report' }
+    lspDiagnosticSnapshot.value = new Map([['component.tsx', [diagnostic]]])
+    old.dispose()
+    expect(lspDocumentStatus.value?.connection.kind).toBe('connected')
+    expect(lspDocumentStatus.value?.language).toBe('typescriptreact')
+    expect(lspDiagnosticSnapshot.value.get('component.tsx')).toEqual([diagnostic])
+    current.dispose()
+  })
+})
+
+
+it('remounts the actual editor for a fresh same-path workspace snapshot even when null is batched away', async () => {
+  installWebSocketMock()
+  const scopeA = { repoId: 'repo-a', codebase: 'a', keeper: null }
+  const scopeB = { repoId: 'repo-b', codebase: 'b', keeper: null }
+  publishLspScope(scopeA)
+  const store = createCodeDocumentStore({ file_path: 'current.ml', language: 'ocaml',
+    content: 'let from_a = 1\n', lsp_scope: lspScopeKey(scopeA) })
+  const container = document.createElement('div')
+  document.body.append(container)
+  render(h(IdeEditor, { documentStore: store, ownershipStore: createKeeperLineOwnershipStore('current.ml'), diffRows: () => [] }), container)
+  try {
+    await waitFor(() => expect(mockSockets.length).toBeGreaterThan(0))
+    await completeHandshake(mockSockets.at(-1)!, '/workspace/a')
+    expect(wire(mockSockets.at(-1)!, 'textDocument/didOpen')[0].params.textDocument.text).toBe('let from_a = 1\n')
+    const originalEditor = container.querySelector('.cm-editor')
+    publishLspScope(scopeB)
+    // Both store publications occur before the next Preact render.
+    store.invalidate()
+    store.load({ file_path: 'current.ml', language: 'ocaml', content: 'let from_b = missing\n', lsp_scope: lspScopeKey(scopeB) })
+    await waitFor(() => {
+      expect(container.querySelector('.cm-content')?.textContent).toContain('from_b')
+      expect(container.querySelector('.cm-editor')).not.toBe(originalEditor)
+      expect(mockSockets.at(-1)!.url).toContain('repo_id=repo-b')
+    })
+    const current = mockSockets.at(-1)!
+    await completeHandshake(current, '/workspace/b')
+    readyLanguage(current)
+    const opens = mockSockets.filter(socket => socket.url.includes('repo_id=repo-b'))
+      .flatMap(socket => wire(socket, 'textDocument/didOpen'))
+    expect(opens).toHaveLength(1)
+    expect(opens[0].params.textDocument).toMatchObject({ uri: 'file:///workspace/b/current.ml', text: 'let from_b = missing\n' })
+    current.message({ method: 'textDocument/publishDiagnostics', params: {
+      uri: 'file:///workspace/b/current.ml', version: 1, diagnostics: [sourceDiagnostic],
+    } })
+    await waitFor(() => expect(container.querySelector('.cm-diagnostic-marker[title="Unbound value missing"]')).not.toBeNull())
+    expect(lspDocumentStatus.value?.scope).toBe(lspScopeKey(scopeB))
+    expect(lspDocumentStatus.value?.diagnostics).toEqual({ kind: 'complete', count: 1 })
+  } finally { render(null, container); container.remove() }
 })

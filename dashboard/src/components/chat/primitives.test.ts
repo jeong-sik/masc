@@ -162,7 +162,7 @@ describe('ChatTranscript', () => {
   it('surfaces tool output joined by execution_id in the collapsed preview', () => {
     recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
     render(
-      html`<${ChatTranscript}
+      html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-toolu_x' })]}
         emptyText="empty"
       />`,
@@ -898,7 +898,7 @@ describe('ChatTranscript', () => {
       output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1 }),
       route_evidence: { descriptor_id: 'agent.edit_file' },
     })])
-    render(html`<${ChatTranscript}
+    render(html`<${ChatTranscript} keeperName="sangsu"
       entries=${[toolEntry({ id: 'tool-edit-proof', label: 'Edit' }),
         toolEntry({ id: 'tool-other-execution', label: 'Edit' })]}
       emptyText="empty" />`, container)
@@ -917,7 +917,7 @@ describe('ChatTranscript', () => {
         edit_snapshots: { status: 'stored', before: blob, after: blob } }),
       route_evidence: { descriptor_id: 'agent.edit_file' },
     })])
-    render(html`<${ChatTranscript} entries=${[
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${[
       toolEntry({ id: 'snapshot-row', executionId: 'execution-snapshot', toolCallId: 'repeated-provider-id', label: 'Edit' }),
       toolEntry({ id: 'other-row', executionId: 'execution-other', toolCallId: 'repeated-provider-id', label: 'Edit' }),
     ]} emptyText="empty" />`, container)
@@ -943,7 +943,7 @@ describe('ChatTranscript', () => {
         { kind: 'tool', name: 'Edit', status: 'ok', execution_id: 'another-execution' },
       ] }],
     }])
-    render(html`<${ChatTranscript} entries=${entries} emptyText="empty" />`, container)
+    render(html`<${ChatTranscript} keeperName="sangsu" entries=${entries} emptyText="empty" />`, container)
     const toggle = container.querySelector<HTMLButtonElement>('.chat-block-trace-hd')
     expect(toggle).not.toBeNull()
     fireEvent.click(toggle!)
@@ -951,6 +951,10 @@ describe('ChatTranscript', () => {
     const second = container.querySelector('[data-chat-trace-execution-id="another-execution"]')
     expect(first?.querySelector('[data-edit-snapshot-view]')?.textContent).toContain('편집 전후 원본 보기')
     expect(first?.getAttribute('data-chat-trace-provenance')).not.toBe('activity')
+    fireEvent.click(first!.querySelector<HTMLElement>('.chat-block-tstep-row')!)
+    expect(first?.querySelector('.chat-block-tool-body')).toBeNull()
+    expect(first?.textContent).not.toContain('"edit_snapshots"')
+    expect(first?.querySelector('[data-edit-snapshot-view]')).not.toBeNull()
     expect(second?.querySelector('[data-edit-snapshot-view]')).toBeNull()
     expect(container.querySelectorAll('[data-edit-snapshot-view]')).toHaveLength(1)
   })
@@ -960,7 +964,7 @@ describe('ChatTranscript', () => {
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),
     ])
     render(
-      html`<${ChatTranscript}
+      html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-toolu_y' })]}
         emptyText="empty"
       />`,
@@ -989,7 +993,7 @@ describe('ChatTranscript', () => {
   it('renders args and output in labelled sections when expanded', async () => {
     recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_z', output: 'EXPANDED OUTPUT' })])
     render(
-      html`<${ChatTranscript}
+      html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-toolu_z', text: '{"k":"v"}' })]}
         emptyText="empty"
       />`,
@@ -1028,7 +1032,7 @@ describe('ChatTranscript', () => {
     // lands (output is always late). Reading the store signal during render
     // subscribes the bubble, so a later record() must update it.
     render(
-      html`<${ChatTranscript}
+      html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-toolu_late' })]}
         emptyText="empty"
       />`,
@@ -2776,7 +2780,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
       toolCallOutput({ tool_use_id: 't2', output: 'r2' }),
     ])
     render(
-      html`<${ChatTranscript}
+      html`<${ChatTranscript} keeperName="sangsu"
         entries=${[
           toolEntry({ id: 'tool-t1', label: 'masc_board_list' }),
           toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
@@ -3348,7 +3352,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
       toolCallOutput({ tool_use_id: 't1', success: false, output: 'BOOM' }),
     ])
     render(
-      html`<${ChatTranscript}
+      html`<${ChatTranscript} keeperName="sangsu"
         entries=${[toolEntry({ id: 'tool-t1', label: 'masc_board_post', text: '{"k":"v"}' })]}
         emptyText="empty"
         groupToolCalls=${true}

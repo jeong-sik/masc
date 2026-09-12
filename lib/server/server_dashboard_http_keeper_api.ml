@@ -73,6 +73,49 @@ let file_changes_max_window_hours = 72.0
    fleet-row window that per-keeper responses derive from. *)
 let tool_calls_limit_max = 200
 
+let keeper_tool_call_lookup_response ~config ~keeper_name req =
+  let execution_parameters =
+    Uri.query (Uri.of_string req.Httpun.Request.target)
+    |> List.filter (fun (name, _) -> String.equal name "execution_id")
+  in
+  let error status code detail =
+    Some
+      (status, `Assoc [ "error", `String detail; "code", `String code ])
+  in
+  match execution_parameters with
+  | [] -> None
+  | [ _, [ execution_id ] ] when String.trim execution_id <> "" ->
+    if not (Keeper_config.validate_name keeper_name) then
+      error `Bad_request "invalid_keeper_name" "invalid keeper name"
+    else
+      let ledger_dir =
+        Filename.concat (Workspace.masc_root_dir config) "tool_calls"
+      in
+      let store = Dated_jsonl.create ~base_dir:ledger_dir () in
+      (match
+         Keeper_tool_call_index.by_execution_ids
+           ~store ~keeper_name ~execution_ids:[ execution_id ]
+       with
+       | Error detail -> error `Service_unavailable "tool_call_store_unavailable" detail
+       | Ok [] ->
+         error `Not_found "tool_call_not_found"
+           "No tool call with this execution ID exists for this keeper"
+       | Ok [ row ] ->
+         Some
+           (`OK,
+            `Assoc
+              [ "keeper", `String keeper_name
+              ; "execution_id", `String execution_id
+              ; "entry", Keeper_tool_definition_source.annotate_row row
+              ])
+       | Ok (_ :: _ :: _) ->
+         error `Conflict "tool_call_ambiguous"
+           "Multiple authoritative tool calls share this execution ID")
+  | _ ->
+    error `Bad_request "invalid_execution_id"
+      "execution_id must occur exactly once with a non-blank value"
+;;
+
 let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
   | Some body -> body
@@ -1146,6 +1189,14 @@ let handle_keeper_get_subroutes state req request reqd =
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
     else
+      match
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          keeper_tool_call_lookup_response
+            ~config:(Mcp_server.workspace_config state) ~keeper_name:name req)
+      with
+      | Some (status, json) ->
+        Http.Response.json_value ~status ~compress:true ~request:req json reqd
+      | None ->
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
         |> max 1 |> min tool_calls_limit_max

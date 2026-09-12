@@ -11495,7 +11495,12 @@ let render_acting (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:select/scroll  Enter:evidence  g:newest  G:oldest  f:turns/actions/everything");
+         (* Same gap as Config's: this row named no way out. Esc does two
+            things here and the help sheet gives it two rows -- it closes the
+            evidence pane when one is open, and otherwise leaves for Overview
+            -- so the hint says "back", the word that is true either way. *)
+         "j/k:select/scroll  Enter:evidence  g:newest  G:oldest  \
+          f:turns/actions/everything  Esc:back  q:quit");
   let clamped = match state.acting_filter with
     | Acting.Turns -> Acting scroll
     | Actions | Everything -> Acting_selection (scroll, cursor) in
@@ -13686,7 +13691,12 @@ let render_config (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:value field  v:read status  PgUp/PgDn:page  e:edit (preview-checked)  r:reload");
+         (* Esc and q last, which is where every other converted footer puts
+            them. Without them this row named no way out at all -- and it is
+            not a row that ran out of cells: at 150 columns it spent 78 of
+            them. The help sheet's own word for Esc here is "overview". *)
+         "j/k:value field  v:read status  PgUp/PgDn:page  e:edit (preview-checked)  \
+          r:reload  Esc:overview  q:quit");
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =

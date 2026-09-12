@@ -508,8 +508,23 @@ let test_the_window_is_measured_where_the_cursor_lands () =
    its place on the sites where the index really is written in the loop:
    three stood when it was added. *)
 let test_no_row_of_a_drawing_loop_walks_a_list () =
+  (* Every render module, not only the big one: the tab strip was in
+     [render] when this was written and moved to [render_prim] the same day
+     (#35333). A count over one file lets the shape leave by moving. *)
+  let render_modules =
+    [ render
+    ; "bin/masc_tui_render_prim.ml"
+    ; "bin/masc_tui_render_memory.ml"
+    ; "bin/masc_tui_render_metrics.ml"
+    ; "bin/masc_tui_render_schedule.ml"
+    ; "bin/masc_tui_render_tools.ml"
+    ]
+  in
   let inside_for callee =
-    Ast_grep.count_calls_inside_for ~module_path:render ~callee
+    List.fold_left
+      (fun total module_path ->
+        total + Ast_grep.count_calls_inside_for ~module_path ~callee)
+      0 render_modules
   in
   Alcotest.(check int) "no row walks a list to find itself" 0
     (inside_for "List.nth_opt");

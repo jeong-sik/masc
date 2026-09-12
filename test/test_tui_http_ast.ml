@@ -499,7 +499,8 @@ let test_keeper_chat_uses_current_async_contract () =
      bug this pins. *)
   check bool "every surface says when a keeper is holding a call" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"composer_line"
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"composer_line"
        ~callee:"awaiting_approval_notice"
      >= 1);
   check bool "the chat pane draws the merged transcript" true
@@ -574,7 +575,9 @@ let test_keeper_chat_uses_current_async_contract () =
    and executable hashing; neither belongs on the render dependency path just
    to compare the TUI's embedded generation with the server's snapshot. *)
 let test_footer_uses_embedded_identity_without_provenance_io () =
-  let render_path = "bin/masc_tui_render.ml" in
+  (* The footer is drawn once for every surface, so it sits with the shared
+     primitives rather than with any one of them. *)
+  let render_path = "bin/masc_tui_render_prim.ml" in
   check int "footer does not collect full build provenance" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:render_path ~binding_name:"footer_line"
@@ -744,15 +747,18 @@ let test_user_message_background_has_one_render_snapshot () =
        ~identifiers:[ "Ansi.reset" ]);
   check int "both chat diff rows use the paired foreground" 2
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"chat_markdown_palette"
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"chat_markdown_palette"
        ~callees:[] ~identifiers:[ "Theme.Syntax.diff_row_foreground" ]);
   check int "chat diff rows do not borrow the terminal default foreground" 0
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"chat_markdown_palette"
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"chat_markdown_palette"
        ~callees:[] ~identifiers:[ "Ansi.default_fg" ]);
   check int "Markdown palette has no hard-coded reset closer" 0
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"chat_markdown_palette"
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"chat_markdown_palette"
        ~callees:[] ~identifiers:[ "Ansi.reset" ]);
   List.iter
     (fun binding_name ->
@@ -2193,21 +2199,25 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     check int (binding ^ " exists exactly once") 1
       (Ast_grep.count_value_bindings ~module_path ~name:binding)
   in
-  let check_fields ?(non_rendering_calls = []) binding fields =
-    check_binding render_path binding;
+  (* Most of the drawing is still the godfile, so that is the default; the
+     rows every surface shares are drawn by the primitives and name their
+     own file. *)
+  let check_fields ?(module_path = render_path) ?(non_rendering_calls = [])
+      binding fields =
+    check_binding module_path binding;
     let allowed_calls = sanitizer_calls @ non_rendering_calls in
     List.iter
       (fun field ->
         let total =
           Ast_grep.count_field_accesses_outside_calls_in_value_binding
-            ~module_path:render_path ~binding_name:binding ~callees:[]
+            ~module_path ~binding_name:binding ~callees:[]
             ~fields:[ field ]
         in
         if total = 0 then
           failf "%s no longer accesses expected untrusted field %s" binding field;
         let outside =
           Ast_grep.count_field_accesses_outside_calls_in_value_binding
-            ~module_path:render_path ~binding_name:binding
+            ~module_path ~binding_name:binding
             ~callees:allowed_calls ~fields:[ field ]
         in
         if outside <> 0 then
@@ -2354,10 +2364,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "render_keeper_logs"
     [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
-  check_fields "footer_line" [ "sid_base_path" ];
+  check_fields ~module_path:"bin/masc_tui_render_prim.ml" "footer_line"
+    [ "sid_base_path" ];
   check int "footer path has no workspace fallback" 0
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"footer_line" ~callees:[]
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"footer_line" ~callees:[]
        ~fields:[ "workspace" ]);
   let ansi_path = "bin/masc_tui_ansi.ml" in
   [ "single_line"

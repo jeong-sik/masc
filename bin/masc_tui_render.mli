@@ -50,7 +50,7 @@ module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
 val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
-val get_terminal_size : unit -> int * int
+
 val set_table_frame : bool -> unit
 type chat_markdown_identity = {
   cmi_style : Message_layout.style;
@@ -59,7 +59,7 @@ type chat_markdown_identity = {
   cmi_observed_at : float option;
   cmi_entry_index : int;
 }
-val keeper_split_threshold_cols : int
+
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
 (** The Activity pane as the last frame drew it, for the input layer: how
@@ -83,20 +83,7 @@ val chat_row_action_at : row:int -> Masc_tui_message_layout.row_action
     so a press cannot be served by a row that is no longer on screen. *)
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
-val finish_surface :
-  Masc_tui_types.state ->
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  surface_key:string ->
-  rows:int ->
-  cols:int ->
-  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-type chrome_body = {
-  push : string -> unit;
-  push_styled : style:string -> string -> unit;
-  push_selected : string -> unit;
-  push_divider : unit -> unit;
-  push_empty : unit -> unit;
-}
+
 val overview_layout :
   Masc_tui_types.state ->
   terminal_rows:int ->

@@ -873,6 +873,30 @@ class LocalVoice(unittest.TestCase):
                          ['/bin/masc', 'voice-local-setup', '--base-path', '/workspace',
                           '--voice', 'Yuna'])
 
+    def test_listening_requires_both_cli_and_a_regular_model_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model = Path(directory) / 'ggml.bin'
+            model.write_bytes(b'model fixture')
+            for executable, model_path, expected in (
+                    (None, str(model), False),
+                    ('/fixture/whisper-cli', directory, False),
+                    ('/fixture/whisper-cli', str(model), True)):
+                with self.subTest(executable=executable, model=model_path), \
+                        patch.object(SETUP, 'pick', side_effect=[[0], [0]]), \
+                        patch.object(SETUP, 'prerequisite_menu', return_value=False), \
+                        patch.object(SETUP, 'whisper_model_path', return_value=model_path), \
+                        patch.object(SETUP.shutil, 'which', return_value=executable), \
+                        patch.object(SETUP.subprocess, 'run',
+                                     side_effect=[completed(VOICES), completed()]) as run, \
+                        korean_terminal(), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    SETUP.select_local_voice('/bin/masc', '/workspace')
+                    arguments = run.call_args_list[-1].args[0]
+                    self.assertIn('--voice', arguments)
+                    self.assertEqual('--model' in arguments, expected)
+                    if expected:
+                        self.assertEqual(arguments[-2:], ['--model', str(model)])
+
     def test_cancelling_the_voice_question_does_not_cancel_setup(self):
         # An optional step cannot fail the thing it is optional to. By the time
         # this runs the workspace and the model are saved and the sandbox step

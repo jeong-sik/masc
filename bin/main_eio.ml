@@ -1888,45 +1888,73 @@ let voice_local_voices_exit () =
     0
 
 let voice_local_setup_exit base_path speak_voice hear_model =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
   let runtime_config_path = runtime_config_path_for_base_path base_path in
+  let refuse message = prerr_endline message; 1 in
   match Voice_setup.observe ~runtime_config_path with
-  | Error error ->
-    prerr_endline (Voice_setup.error_message error);
-    1
-  | Ok (revision, _) ->
-    let speaking =
-      match speak_voice with
-      | None -> []
-      | Some voice ->
-        [ Voice_setup.Put_endpoint
-            ( Voice_setup.Tts
-            , voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say )
-        ; Voice_setup.Set_tts_default_voice voice
-        ]
-    in
-    let hearing =
-      match hear_model with
-      | None -> []
-      | Some model ->
-        [ Voice_setup.Put_endpoint
-            ( Voice_setup.Stt
-            , voice_local_endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli )
-        ; Voice_setup.Set_default_model (Voice_setup.Stt, model)
-        ]
-    in
-    (match speaking @ hearing with
-     | [] ->
-       prerr_endline
-         "Nothing to set up: pass --voice to speak, --model to listen, or both.";
-       2
-     | changes ->
-       (match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
-        | Error error ->
-          prerr_endline (Voice_setup.error_message error);
-          1
-        | Ok () ->
-          print_endline "voice is configured";
-          0))
+  | Error error -> refuse (Voice_setup.error_message error)
+  | Ok (revision, existing) ->
+    let standalone_path = Voice_config.voice_config_file_in base_path in
+    let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
+    let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
+    if Option.is_none existing && Sys.file_exists standalone_path then
+      refuse
+        (Printf.sprintf
+           "Voice settings are read from %s. Configure voice in that active file; \
+            local setup will not create a TOML section that overrides it."
+           standalone_path)
+    else if Option.is_some hear_model
+      && Option.exists
+           (fun (config : Voice_config.stt_config) -> List.exists
+             (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
+             config.Voice_config.endpoints)
+           stt then
+      refuse
+        "Existing STT endpoints share a provider model. Adding a local model file \
+         would change their model, so nothing was written. Configure the STT section explicitly."
+    else if Option.is_some speak_voice
+      && Option.exists
+           (fun (config : Voice_config.tts_config) -> List.exists
+             (fun endpoint -> String.equal endpoint.Voice_config.id "macos-say"
+               && endpoint.Voice_config.kind <> Voice_config.Macos_say)
+             config.Voice_config.endpoints)
+           tts then
+      refuse "The endpoint macos-say already names another provider; nothing was written."
+    else
+      let speaking =
+        match speak_voice with
+        | None -> []
+        | Some voice ->
+          let endpoint =
+            { (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+              with default_voice = Some voice }
+          in
+          [ Voice_setup.Put_endpoint (Voice_setup.Tts, endpoint) ]
+          @ (match tts with
+             | Some _ -> []
+             | None -> [ Voice_setup.Set_tts_default_voice voice ])
+      in
+      let hearing =
+        match hear_model with
+        | None -> []
+        | Some model ->
+          [ Voice_setup.Put_endpoint
+              ( Voice_setup.Stt
+              , voice_local_endpoint ~id:"whisper-local" ~kind:Voice_config.Whisper_cli )
+          ; Voice_setup.Set_default_model (Voice_setup.Stt, model)
+          ]
+      in
+      match speaking @ hearing with
+      | [] ->
+          prerr_endline
+            "Nothing to set up: pass --voice to speak, --model to listen, or both.";
+          2
+      | changes ->
+          match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
+          | Error error -> refuse (Voice_setup.error_message error)
+          | Ok () ->
+              print_endline "voice is configured";
+              0
 
 let voice_local_setup_cmd =
   let voice =

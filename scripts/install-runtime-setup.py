@@ -1726,11 +1726,11 @@ def ask_local_voice(binary, base):
         model = whisper_model_path(binary)
         if model is None:
             model = ask_text('Path to the whisper model file')
-        if model and Path(model).exists():
+        if model and Path(model).is_file() and shutil.which('whisper-cli'):
             arguments += ['--model', model]
         else:
-            print('The model file is not there yet, so imp will speak but not listen. '
-                  'Run masc voice-local-setup --model <file> once it is downloaded.', file=sys.stderr)
+            print('Listening needs both whisper-cli and a model file, so imp will speak but not listen. '
+                  'Run masc voice-local-setup --model <file> once both are ready.', file=sys.stderr)
     result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base] + arguments,
                             stdout=sys.stderr)
     if result.returncode != 0:

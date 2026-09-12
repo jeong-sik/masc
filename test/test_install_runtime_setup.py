@@ -951,5 +951,108 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     self.assertEqual(second['runtime_id'], result['runtime_id'])
                     self.assertEqual(before, [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')])
 
+@unittest.skipUnless(BINARY, 'actual binary is supplied by targeted CI')
+class CompiledLocalVoiceSetup(unittest.TestCase):
+    REMOTE_TTS = """
+[voice.tts]
+default_model = "remote-model"
+default_voice = "remote-voice"
+[voice.tts.agent_voices]
+imp = "imp-remote-voice"
+[[voice.tts.endpoints]]
+id = "remote-tts"
+kind = "openai_compat"
+base_url = "https://voice.fixture.invalid/v1"
+"""
+    REMOTE_STT = """
+[voice.stt]
+default_model = "remote-transcription-model"
+send_on_stop = true
+[[voice.stt.endpoints]]
+id = "remote-stt"
+kind = "openai_compat"
+base_url = "https://voice.fixture.invalid/v1"
+"""
+
+    @contextlib.contextmanager
+    def workspace(self, voice=''):
+        fixture = ROOT / 'scripts/fixtures/release-evidence'
+        with tempfile.TemporaryDirectory(prefix='voice-install-') as directory:
+            base = Path(directory)
+            config = base / '.masc/config'
+            config.mkdir(parents=True)
+            for name in ('runtime.toml', 'agent-core-models-overlay.toml'):
+                (config / name).write_bytes((fixture / name).read_bytes())
+            runtime = config / 'runtime.toml'
+            runtime.write_text(runtime.read_text() + voice)
+            yield base, runtime
+
+    def configure(self, base, *arguments):
+        assert BINARY is not None
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+        return subprocess.run(
+            [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
+            capture_output=True, text=True, env=env, check=False)
+
+    def test_speaking_keeps_remote_defaults_and_scopes_the_local_voice(self):
+        import tomllib
+        with self.workspace(self.REMOTE_TTS) as (base, runtime):
+            before = tomllib.loads(runtime.read_text())['voice']['tts']
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            after = tomllib.loads(runtime.read_text())['voice']['tts']
+            for key in ('default_model', 'default_voice', 'agent_voices'):
+                self.assertEqual(after[key], before[key])
+            self.assertEqual(after['endpoints'][0], before['endpoints'][0])
+            self.assertEqual(after['endpoints'][1]['default_voice'], 'Yuna')
+            self.assertEqual(after['endpoints'][1]['kind'], 'macos_say')
+
+    def test_a_new_tts_section_gets_both_defaults(self):
+        import tomllib
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            tts = tomllib.loads(runtime.read_text())['voice']['tts']
+            self.assertEqual(tts['default_voice'], 'Yuna')
+            self.assertEqual(tts['endpoints'][0]['default_voice'], 'Yuna')
+
+    def test_a_local_model_cannot_replace_a_remote_stt_model(self):
+        with self.workspace(self.REMOTE_STT) as (base, runtime):
+            before = runtime.read_bytes()
+            result = self.configure(base, '--voice', 'Yuna', '--model', '/fixture/ggml.bin')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Existing STT endpoints share a provider model', result.stderr)
+            self.assertEqual(runtime.read_bytes(), before)
+
+    def test_standalone_source_is_not_shadowed_by_partial_toml(self):
+        for contents in ('{"tts":null,"stt":null}', 'invalid JSON'):
+            with self.subTest(contents=contents), self.workspace() as (base, runtime):
+                standalone = base / '.masc/voice_config.json'
+                standalone.write_text(contents)
+                before = runtime.read_bytes()
+                result = self.configure(base, '--voice', 'Yuna')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(str(standalone), result.stderr)
+                self.assertEqual(runtime.read_bytes(), before)
+                self.assertEqual(standalone.read_text(), contents)
+
+    def test_existing_toml_remains_authoritative_over_standalone(self):
+        with self.workspace(self.REMOTE_TTS) as (base, _runtime):
+            standalone = base / '.masc/voice_config.json'
+            standalone.write_text('unused invalid JSON')
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(standalone.read_text(), 'unused invalid JSON')
+
+    def test_an_endpoint_name_collision_does_not_replace_a_provider(self):
+        with self.workspace(self.REMOTE_TTS.replace('remote-tts', 'macos-say')) as (base, runtime):
+            before = runtime.read_bytes()
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('already names another provider', result.stderr)
+            self.assertEqual(runtime.read_bytes(), before)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -13220,7 +13220,13 @@ let render_help (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  h:hints  Esc:close");
+       (* The sheet that names every other surface's keys did not name its own.
+          It is longer than any terminal -- at 150x78 the later sections are
+          still off screen -- so [G] is the difference between reading them and
+          pressing [j] forty times, and nothing said [G] exists. The keys are
+          handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
+       ~hints:
+         "j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds

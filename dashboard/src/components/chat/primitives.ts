@@ -3906,7 +3906,7 @@ function ToolTraceCard({
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
                           orderIndex=${index}
-                          structuralSummary=${structuralSummary}
+                          structuralSummary=${structuralSummary && !item.step.executionId}
                           orderKind="tool"
                         />`
                       })()

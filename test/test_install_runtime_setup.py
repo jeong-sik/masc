@@ -995,6 +995,26 @@ base_url = "https://voice.fixture.invalid/v1"
             [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
             capture_output=True, text=True, env=env, check=False)
 
+    def test_mcp_voice_probe_reports_its_own_transport_limit(self):
+        assert BINARY is not None
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                voice = ('\n[voice.tts]\ndefault_voice = "fixture"\n'
+                         '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
+                         f'enabled = {str(enabled).lower()}\n')
+                with self.workspace(voice) as (base, runtime):
+                    env = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+                    env.update(MASC_BASE_PATH=str(base), MASC_CONFIG_DIR=str(runtime.parent))
+                    result = subprocess.run([BINARY, 'voice-verify', '--json'],
+                                            capture_output=True, text=True, env=env, check=False)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    attempt = json.loads(result.stdout)['tts'][0]
+                    self.assertEqual(attempt['state'], 'skipped')
+                    self.assertEqual(attempt['detail'],
+                                     'this verifier does not probe the MCP synthesis transport'
+                                     if enabled else 'disabled in the configuration')
+
     def test_speaking_keeps_remote_defaults_and_scopes_the_local_voice(self):
         import tomllib
         with self.workspace(self.REMOTE_TTS) as (base, runtime):

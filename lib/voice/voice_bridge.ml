@@ -376,7 +376,10 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   | Voice_config.Openai_compat
                   | Voice_config.Elevenlabs_direct
                   | Voice_config.Macos_say -> false
-                then Skipped "this endpoint kind does not synthesize"
+                then Skipped
+                  (if endpoint.Voice_config.kind = Voice_config.Voice_mcp
+                   then "this verifier does not probe the MCP synthesis transport"
+                   else "this endpoint kind does not synthesize")
                 else (
                   let output_file =
                     make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)

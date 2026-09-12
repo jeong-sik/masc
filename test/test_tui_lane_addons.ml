@@ -22,7 +22,7 @@ max_reply_bytes=4096
 let source = "id=\"observer\"\nrun_id=\"world\"\nmanifest_path=\"../lane.toml\"\n[binding]\nsources=[]\n"
 let with_directory f =
   let root = Filename.temp_dir "tui-lane-" "" in
-  Fun.protect ~finally:(fun () -> Masc.Fs_compat.remove_tree root) (fun () ->
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let directory = Filename.concat root "declarations" in
     Unix.mkdir directory 0o700;
     write (Filename.concat root "lane.toml") manifest;

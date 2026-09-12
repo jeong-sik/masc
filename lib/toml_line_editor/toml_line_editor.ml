@@ -646,14 +646,39 @@ let trailing_blank_count lines =
   loop 0 (List.rev lines)
 ;;
 
-(* Insert [block] where the next table header begins, after the last
-   [\[\[path\]\]] entry and the blank lines that trail it, then repeat that many
-   blanks below the new entry.
+(* The tail of an entry body that documents what comes after it: a comment block
+   sitting just above the next header, plus the blanks between it and this
+   entry. A comment directly above a header describes that header, so an entry
+   appended below it would inherit a description written for something else, and
+   removing an entry would take that description with it.
+
+   Counted only when a comment is actually there. Trailing blanks alone belong
+   to the entry -- they are what separates it from the next -- and treating them
+   as detached would leave one behind on every add/remove round trip. *)
+let trailing_documentation_count lines =
+  let rec scan count saw_comment = function
+    | line :: rest ->
+      let trimmed = String.trim line in
+      if String.equal trimmed ""
+      then scan (count + 1) saw_comment rest
+      else if Char.equal trimmed.[0] '#'
+      then scan (count + 1) true rest
+      else if saw_comment
+      then count
+      else 0
+    | [] -> if saw_comment then count else 0
+  in
+  scan 0 false (List.rev lines)
+;;
+
+(* Insert [block] after the last [\[\[path\]\]] entry: past the blank lines that
+   trail it, but before any comment block documenting the next header. Then
+   repeat the trailing blanks below the new entry.
 
    The separator goes below rather than above so that adding an entry and
-   removing it again restores the file byte-for-byte: {!remove_table_array_entry}
-   takes an entry's trailing blanks with it, so an entry whose blanks sat above
-   it would leave one behind on every add/remove round trip.
+   removing it again restores the file byte-for-byte:
+   {!remove_table_array_entry} takes an entry's trailing blanks with it, so an
+   entry whose blanks sat above it would leave one behind on every round trip.
 
    With no entry present the block goes at the end of the file, separated by one
    blank line. *)
@@ -663,11 +688,8 @@ let append_table_array_entry lines ~segments ~path ~block =
     | line :: rest when is_structural state && is_table_array ~path line ->
       let body, after = split_entry_body ~segments rest in
       let after_index = index + 1 + List.length body in
-      last_entry_end
-        after_index
-        (Some (after_index, trailing_blank_count body))
-        outside
-        after
+      let insert_at = after_index - trailing_documentation_count body in
+      last_entry_end after_index (Some (insert_at, trailing_blank_count body)) outside after
     | line :: rest -> last_entry_end (index + 1) best (scan_line state line) rest
   in
   match last_entry_end 0 None outside lines with
@@ -682,9 +704,9 @@ let append_table_array_entry lines ~segments ~path ~block =
 ;;
 
 (* The path a new [\[\[a.b\]\]] would open must not already exist in another
-   shape. A key [b = \[\]] in table [a] -- which is how an empty endpoint list
-   is spelled today -- or a standard table [\[a.b\]] both make the file refuse
-   to load, and a line editor cannot merge two shapes into one. *)
+   shape. A key [b] in table [a] -- which is how an empty endpoint list is
+   spelled today -- or a standard table [\[a.b\]] both make the file refuse to
+   load, and a line editor cannot merge two shapes into one. *)
 let path_conflict lines ~path =
   let segments = path_segments path in
   let standard_table line =
@@ -773,7 +795,12 @@ let remove_table_array_entry content ~path ~id_key ~id =
     | line :: rest when is_structural state && is_table_array ~path line ->
       let body, after = split_entry_body ~segments rest in
       if entry_has_id ~id_key ~id body
-      then loop acc outside after
+      then (
+        (* A comment block documenting the next header is not this entry's to
+           take. *)
+        let documented = trailing_documentation_count body in
+        let kept = snd (split_at (List.length body - documented) body) in
+        loop (List.rev_append kept acc) outside after)
       else loop (List.rev_append body (line :: acc)) outside after
     | line :: rest -> loop (line :: acc) (scan_line state line) rest
   in

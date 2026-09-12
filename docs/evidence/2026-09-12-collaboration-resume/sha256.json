@@ -1,6 +1,6 @@
 {
   "README.md": "7078d7026605e8c1cfa717c9b1b6d8eb94df8db288dd04c9c41f365f47f39c1e",
-  "REASSESSMENT.md": "ce2d0f57e822fd64c34e1d6ee622e2ac0866778039172af46d3080d766aa9f64",
+  "REASSESSMENT.md": "9c4b379285ea4646d5049fad3f7e7efc2836d319c1270e77b2de207ed9e6b0cf",
   "before-release-03512.json": "8d75f2297580a9bbd960c5d31fb2d3acb94df47c7ded184fec4c12da97bbb4b7",
   "direct-continuation-blocker.json": "cfd92d9891f652c4d0b4d681823d5147f20c37619b2d7b85b493e44af83e35bb",
   "gate-approvals-53203.json": "25518feb8b2064a757094756fbd72f0d852bfd13c5031bf672550f97d69658b1",
@@ -34,6 +34,7 @@
   "peer-export-manifest.json": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0",
   "peer-handoff-03512.json": "eb1f81d2295203befe508164ad71c02b2234b7d3cdd4950bfb226beeea4b87f0",
   "real-memory-draft-35be4.json": "e680ddffeffe8f4a69c8bceece81b671392ab589258d462e013bc2febca83b7c",
+  "reassessment-current-state.json": "bdf4a3bd317cd3ff6be99e9551ef3d467b1d07037a4a8f5c9f767e8e7944d1a2",
   "reassessment-health.json": "f3ddce687134b5f6cade5d20e1c2e33d2424a6bb2a4aee7db824ac7655f1dedf",
   "release-archive-check.json": "daa1832b09131ccce9d8e7d45d7dade51cc71b609c16e3b347497d2699a731b0",
   "runtime-config-35be4.json": "6dcd4f4e828671e502381693292db0ed184c4873555726e65c353a643c4e76a2",

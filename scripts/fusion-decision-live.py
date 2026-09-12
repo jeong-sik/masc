@@ -6,6 +6,7 @@ runtime journals or fabricates model tool calls. Raw responses stay private.
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -33,15 +34,44 @@ def observe_process_rows(command):
     raise RuntimeError(f'{command[0]} process observation failed (exit {result.returncode}); no restart authorized')
 
 
+def candidate_binary(args):
+    if args.installed_prefix is not None:
+        prefix = args.installed_prefix.resolve()
+        spec = importlib.util.spec_from_file_location(
+            'release_dashboard_bundle', Path(__file__).with_name('release-dashboard-bundle.py'))
+        bundle = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bundle)
+        if (prefix / bundle.TRANSACTION).exists():
+            raise ValueError('Uncommitted installed release transaction')
+        binary = (prefix / 'masc').resolve(strict=True)
+        root = binary.parent
+        if binary.name != 'masc' or root.parent != prefix / '.masc-releases':
+            raise ValueError('Binary is not in this prefix immutable release tree')
+        receipt = bundle.verify_tree(root, 'masc-macos-arm64')
+        if (receipt['source_commit'] != args.expected_commit
+                or bundle.binary_commit(binary) != args.expected_commit):
+            raise ValueError('Installed release source mismatch')
+        return binary, receipt['binary_sha256']
+    manifest = json.loads((args.artifact_dir / 'manifest.json').read_text())
+    binary = (args.artifact_dir / 'main_eio.exe').resolve()
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    if (manifest['commit'] != args.expected_commit or manifest['arch'] != 'macos-arm64'
+            or manifest['sha256']['main_eio.exe'] != digest):
+        raise ValueError('CI manifest mismatch')
+    return binary, digest
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--base', type=Path, required=True)
     p.add_argument('--expected-commit', required=True)
     sub = p.add_subparsers(dest='command', required=True)
     start = sub.add_parser('start')
-    start.add_argument('--artifact-dir', type=Path, required=True)
     restart = sub.add_parser('restart-owned')
-    restart.add_argument('--artifact-dir', type=Path, required=True)
+    for command in (start, restart):
+        source = command.add_mutually_exclusive_group(required=True)
+        source.add_argument('--artifact-dir', type=Path)
+        source.add_argument('--installed-prefix', type=Path)
     call = sub.add_parser('call')
     call.add_argument('tool')
     call.add_argument('--arguments-file', type=Path, required=True)
@@ -110,11 +140,7 @@ def main():
     if args.command in ['start', 'restart-owned']:
         if args.command == 'start' and state_file.exists():
             raise ValueError('Existing operator state; refusing a second server start')
-        manifest = json.loads((args.artifact_dir / 'manifest.json').read_text())
-        binary = (args.artifact_dir / 'main_eio.exe').resolve()
-        digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-        if manifest['commit'] != args.expected_commit or manifest['arch'] != 'macos-arm64' or manifest['sha256']['main_eio.exe'] != digest:
-            raise ValueError('CI manifest mismatch')
+        binary, digest = candidate_binary(args)
         binary.chmod(binary.stat().st_mode | 0o100)
         env = {key: value for key, value in os.environ.items() if not any(part in key for part in ['TOKEN', 'SECRET', 'API_KEY']) and not key.startswith('MASC_')}
         runtime_config = tomllib.loads((base / '.masc/config/runtime.toml').read_text())

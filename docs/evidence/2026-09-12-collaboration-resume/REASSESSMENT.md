@@ -4,6 +4,10 @@
 
 ## 현재 기준점 (2026-09-12 19:50 이후)
 
+- 20:20 이후 재확인: 실제 서버는 여전히 `53203f998a`이며 full health는 `degraded`다. `keeper_owner:operation_store_unavailable`와 runnable backlog가 남아 있다. `/health`의 최상위 `ok`만으로 제품 정상이라고 판단하지 않는다.
+- 최신 main 통합은 별도 worktree `/tmp/masc-collaboration-main-20260912`, Draft PR #35429, head `bac7df436934671d2c24509129379ab5b1088e19`로 준비됐다. 통계 변경도 포함하며 native CI #34690665555는 결과 미확인이다. 아래 #35400은 실제 실행 중인 이전 후보의 근거다.
+- 직접 요청 복구 #35419의 native Test #34689988053은 실패했다. 빌드는 성공했지만 첫 시나리오가 남긴 `Runtime_lane_preference`가 같은 `direct` lane을 쓰는 두 번째 시나리오에 새어 나갔다. 예상과 다른 성공응답으로 assertion이 실패했고, settled hook의 예외가 promise를 해결하지 않아 suite도 종료되지 않았다. 시나리오별 상태 격리와 실패 전달을 수정 중이며 통과 전 라이브 복구 완료로 세지 않는다.
+- 실제 서버가 UI까지 제공하도록 동일 source의 macOS 배포 묶음을 격리 prefix에 설치하고 전체 파일 및 embedded source를 검증했다. 운영 helper에 검증된 설치 경로를 사용하는 옵션을 준비했다. 이 설치본으로 서버를 시작하지 않았으며 현재 실행 바이너리와 배포 묶음의 바이너리 해시는 구별한다.
 - 격리 서버: 포트 18951, v0.35.13 후보, source `53203f998a2df9f6149e1c033d5602836a8d7066`, PID 34999. 실제 health와 바이너리 해시를 확인했고 교체 전 캡처한 22개 파일이 교체 직후 모두 일치했다. 출시 검증 완료 선언은 아니다.
 - 통합 코드: `/tmp/masc-collaboration-media-20260912`, PR #35400. 정확한 source의 CI #34688986829 대상 15개 suite가 통과했다. 실제 CI 바이너리는 #34688988156에서 받았다.
 - 전시 출판 Goal: 동일 기준 revision과 동일 PDF/PNG로 Codex가 5/5를 승인했다. run `01a0953c-5e01-7000-9ed9-1003a66990c1`, 70.4567초. 실제 상태는 `awaiting_confirmation`이며 사람에게 최종 확인을 요청했다. 완료 처리하지 않았다.
@@ -53,6 +57,8 @@
 - [공간 기억 저장·재시작·Keeper 조회](../2026-09-10-workspace-memory-roundtrip/README.md)
 - [공간 기억 조회 UI의 합성 입력 검사](../2026-09-10-workspace-memory-view/README.md)
 
-이번 추가 재점검은 실제 상태·파일 해시·Board·Goal 원시 기록과 GitHub 상태를 다시 읽고 CI preview로 브라우저까지 실행했다. 화면의 PR head는 35be4이고 실제 checkout은 GitHub merge commit 9f72a01f이다. 브라우저는 실제 backend GET을 사용했으며 서버에 UI를 설치하지 않아 artifact 경고 배너가 남아 있다. WebSocket과 쓰기 요청은 검사에서 차단했다. 새 runtime 배포나 추가 Goal 재제출은 이번 재점검에서 수행하지 않았다.
+이전 35be4 브라우저 기록의 실제 checkout은 GitHub merge commit 9f72a01f이다. 해당 검사는 실제 backend GET을 사용했고 WebSocket과 쓰기 요청을 차단했다. 이후 53203 후보로 교체하여 원래 Goal을 다시 검증한 기록은 아래 최신 증거에 별도로 보존한다.
 
 최신 증거: `goal-approved-53203.json`, `runtime-upgrade-53203.json`, `official-vision-live-53203.json`, `goal-browser-53203/`, `tools-browser-53203/`. 브라우저는 CI preview에 실제 API 응답을 연결했다. 서버에 UI를 설치한 것은 아니며 artifact 경고와 의도적으로 차단한 WebSocket 상태가 보인다. Goal 화면의 실행 데이터 오류 알림도 남아 있어 전체 대시보드 정상으로 확대 해석하지 않는다.
+
+현재 재조회: `reassessment-current-state.json`. Goal은 동일 검증 run의 `proof_proven` / `awaiting_confirmation`을 유지하며 사람 확인 POST는 보내지 않았다. 다음 작업은 직접 요청 복구의 실제 실패 원인을 해결하고, 검증된 서버·UI 묶음에서 동료 요청과 신규 요청이 이어지는지 확인하는 것이다. 그 뒤 운영자 개입을 줄인 다른 비코드 과제로 자율성과 기억의 연속성을 검증한다.

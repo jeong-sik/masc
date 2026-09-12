@@ -2,13 +2,14 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
-## 최신 후속 진행 (2026-09-13, CLI 및 파일 맥락)
+## 최신 후속 진행 (2026-09-13, 851f412 설치 검증)
 
-- 설치본은4324764이며 실제자율Edit Chat수용은유지한다. LSP전체IDE에서실제source가보이는데didOpen은빈문자열인기존버그를직접재현했다. [설치baseline](../2026-09-13-installed-ide-lsp-baseline/README.md).
-- PR #35611은851f412a88로진행했다. 기존Chat/Fusion/Gate+원본검사+LSP통합에읽기전용inspect-file CLI가포함된다. 실제native실패를따라Dune fixture descriptor,Tool_result 직접의존성,fs-rooted CLI cwd,ReleaseFFmpeg준비를수정했다. 새Test/Release를요청했으며설치성공은아직아니다.
-- #16의가짜Codeanchor를별도main PR #35654/f1cde78d14로제출했다. 실제설치fixture는fileevents0인데3anchors였고,수정source브라우저는repoA1/repoB1/일치없음0을확인했다. 74tests/tsc/ESLint와직접·독립리뷰통과. 설치수용·Memo작성/갱신·Board오류표시·이력pagination·global이벤트의repo근거는별도로남는다.
-- 원본검사probe는PNG실제디코딩,전체argv및같은입력,rawstreamkind를대조하도록3개오판을수정했다.9개회귀검사통과는probe검증이며새CLI실행성공이아니다. statecapture는canonicaltasks/backlog.json을필수로포함하고부모symlink를거부한다. [probe준비와범위](../2026-09-13-installed-media-probe-preparation/README.md).
-- 전체18개목표,세Goal사람확인,장기다중runtime/기억연속성은계속미완료다.
+- 격리 서버를 `851f412a88`로 교체했다. exact-source Test의 15개 대상 suite/228 cases와 macOS ARM Release job이 통과했고, 배포 파일·651 Dashboard 자산·4 companions·runtime 묶음을 검증했다. 전체 Release의 다른 플랫폼 성공은 별도다.
+- 실제 기존 PPTX·PDF 원본은 각각 8페이지 파싱·렌더링, MP4는 전체 영상 스트림 디코딩을 새 설치 CLI로 통과했다. 원본과 보호한 Task·Goal·설정 바이트는 유지됐다. 새 LLM 판정이나 Task/Goal 승인은 수행하지 않았다.
+- 재시작 전후 canonical `tasks/backlog.json`을 포함한 352개 파일이 모두 동일했고 health는 정상이다. 의미적 기억 연속성이나 전체 workspace의 원자적 스냅샷을 입증한 것은 아니다.
+- 실제 자율 Edit0129의 설치 Chat diff를 새 바이너리에서 재검사해 desktop/mobile 통과했다. 반면 LSP는 올바른 원문 didOpen을 보내지만 실제 언어 서버가 `no document found`를 반환해 진단 표시가 실패했다. didChange와 진단 제거는 아직 수용하지 못했다. [설치 성공·실패 원문과 화면](../2026-09-13-installed-851f412/README.md).
+- 파일 맥락 PR #35654는 병합됐다. 대화 패널 오류·재시도 PR #35664는 318 tests/소스 브라우저, 이력 loaded/total PR #35667은 29 tests/소스 브라우저를 통과해 제출했다. 이 세 변경은 현재 설치본과 구분한다.
+- 다음은 LSP backend의 문서 전달 공백을 해결하고 같은 실제 IDE 흐름으로 재검증하는 것이다. 이후 자율 협업·공유 기억의 의미 정확성과 장기 다중 runtime 연속성으로 돌아간다. 전체 18개 목표는 진행 중이며 세 시나리오 Goal은 직접 재조회에서도 사람 확인 대기다.
 
 ## 현재 판단과 다음 방향 (2026-09-13, 설치 Chat 수용 후)
 

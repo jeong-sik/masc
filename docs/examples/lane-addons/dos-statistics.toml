@@ -1,0 +1,13 @@
+# Install alongside addons/dos-world/install.toml. Adjust both manifest paths
+# when copying declarations into the active config root's lane-addons directory.
+id = "dos-statistics"
+run_id = "dos-demo"
+manifest_path = "../../../addons/output-statistics/lane.toml"
+
+[binding]
+
+[[binding.sources]]
+source_id = "dos-output"
+kind = "lane_output"
+installation_id = "dos-demo"
+selection = "latest_completed"

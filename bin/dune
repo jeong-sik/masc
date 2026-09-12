@@ -25,6 +25,7 @@
  (package masc)
  (libraries
   masc.workspace_connection
+  masc.voice_config
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -1222,6 +1223,26 @@
   masc_tui_composer_projection
   masc_tui_roster_pane
   masc_tui_rows
+  masc_tui_code_lexer
+  masc.masc_goal
+  masc_tui_pr_ref
+  masc_tui_context_bars
+  masc.masc_types
+  masc_tui_keys
+  masc_tui_runtime_config_view
+  masc_tui_context_inspector
+  masc_tui_command
+  yojson
+  eio.unix
+  masc_tui_ask_projection
+  masc_tui_browser_lane_layout
+  masc_tui_chart
+  masc_tui_diff
+  masc_tui_keeper_chat_projection
+  masc_tui_magnitude
+  masc_tui_render_schedule
+  masc_tui_retained_view
+  masc_tui_span
   masc_tui_keeper_mark
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control

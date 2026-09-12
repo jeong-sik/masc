@@ -1663,11 +1663,22 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_completion_authority_pending_count: int;
 }
 
+type planning_goal_history = Tui_decode.planning_goal_history
+  = {
+  pgh_goal_id: string;
+  pgh_title: string option;
+  pgh_opened_at: string option;
+  pgh_closed_at: string option;
+  pgh_final_phase: string option;
+  pgh_lifetime_hours: float option;
+}
+
 type planning_snapshot = Tui_decode.planning_snapshot
   = {
   pl_goals: planning_goal list;
   pl_rollup: planning_rollup;
   pl_backlog: planning_backlog;
+  pl_goal_history: planning_goal_history list;
   pl_generated_at: string;
 }
 
@@ -2011,7 +2022,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint. *)
+   the hint.
+
+   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
+   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
+   dropped on that ground, until a 150-column frame showed the hint row does
+   not reach the screen at all: the row spends 79 cells on nine tab labels
+   before the hint starts, so the title is cut inside "Automation" and the
+   keys are never drawn. Until that row is fixed this sentence is the only
+   place an operator can read them -- #35539. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
@@ -3326,15 +3345,25 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Browser_lane_view.scene_targets view);
     let reversed, _, selected = List.fold_left
       (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
-      let label = match node.kind with
-        | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
-        | Control {disabled=true;_} -> "disabled"
-        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
       let index = Hashtbl.find_opt target_index node.node_id in
-      let prefix = match index with
-        | None -> ""
-        | Some i -> Printf.sprintf "[%s%d %s] "
-            (if i = view.scene_cursor then ">" else "") (i + 1) label in
+      (* Text is the reading surface. DOM tags do not help read a paragraph,
+         author or timestamp; the selected text still has its observed index
+         for n/p and context copying. Controls and regions retain their action
+         labels and the same indices as the interaction model. *)
+      let label = match node.kind with
+        | Text -> None
+        | Raster -> Some "image · Ctrl-O"
+        | Region role -> Some ("region · " ^ role)
+        | Control {disabled=true;_} -> Some "disabled"
+        | Control {editable=true;_} -> Some "input"
+        | Control _ -> Some "button/link" in
+      let prefix = match label, index with
+        | _, None -> ""
+        | None, Some i ->
+            if i = view.scene_cursor then Printf.sprintf "[>%d] " (i + 1) else ""
+        | Some label, Some i ->
+            Printf.sprintf "[%s%d %s] "
+              (if i = view.scene_cursor then ">" else "") (i + 1) label in
       let lines = wrap (prefix ^ node.text) in
       let selected = match selected, index with
         | None, Some i when i = view.scene_cursor -> Some offset
@@ -7101,17 +7130,10 @@ let keeper_message_status_rows (state : state) =
          List.length
            (keeper_message_visible_status_rows state live.tl_transcript
               ~now:(Unix.gettimeofday ())))
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name
-       when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->
-         2
-     | Some _ | None -> 0)
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name ->
-         Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-           ~keeper_name
-         |> keeper_message_pending_status_rows
-     | None -> 0)
+  (* The promoted line and the queued ones are entries in the history now --
+     the chat pane appends them to the same stream it scrolls, so the
+     conversation holds one time axis. Nothing is reserved for them here:
+     rows the history owns are the history's to budget. *)
   (* Pending input owns one USER-shaped header/body slot below the causal
      transcript. When its turn starts those two rows are handed to the active
      USER one-for-one, so the text does not jump through an older turn's

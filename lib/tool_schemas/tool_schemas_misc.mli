@@ -91,6 +91,8 @@ type misc_operation =
   | Misc_lane_slice
   | Misc_lane_detach
   | Misc_lane_evidence
+  | Misc_lane_act
+  | Misc_lane_action_status
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw

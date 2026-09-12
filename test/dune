@@ -2209,6 +2209,7 @@
 (include stanzas/test_sandbox_image_recipe.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
+(include stanzas/test_builtin_skill_package.inc)
 (include stanzas/test_front_door.inc)
 
 (include stanzas/test_gate_surface.inc)
@@ -3158,6 +3159,11 @@
  (name test_tui_runtime_config_receipt)
  (modules test_tui_runtime_config_receipt)
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
+
+(test
+ (name test_tui_runtime_config_summary)
+ (modules test_tui_runtime_config_summary)
+ (libraries alcotest masc_tui_runtime_config_view yojson))
 
 (test
  (name test_tui_connection_status)
@@ -5712,6 +5718,11 @@
  (libraries alcotest masc yojson unix))
 
 (test
+ (name test_lane_addon_composition)
+ (modules test_lane_addon_composition)
+ (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
@@ -5724,3 +5735,8 @@
   (source_tree ../addons/msx-observer/skills))
  (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
   masc.skill_snapshot masc.skill_snapshot_service))
+
+(test
+ (name test_lane_addon_actions)
+ (modules test_lane_addon_actions)
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix))

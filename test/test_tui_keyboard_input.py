@@ -2081,6 +2081,16 @@ def wheel_scrolls_and_clicks_do_not(
     drain_until_quiet(process, master_fd, output)
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
 
+    # The tab the detail screen opened on says so in the text, not only in
+    # bold and underline. A capture like this one is where style-only
+    # marking goes missing -- the bytes name the tab, or nothing does. And
+    # Info's own body opens with a section called "Identity", which is
+    # another tab's name, so a reader with no mark has a wrong guess ready.
+    if b"\xe2\x96\xb8Info" not in output:
+        raise AssertionError(
+            "the keeper detail screen did not mark the tab it opened on"
+        )
+
     # Wait until the process is back inside its input read, then resize and
     # send one surface shortcut without waiting for the compact frame. The
     # SIGWINCH lands after the loop's first resize poll; input must consume
@@ -13994,7 +14004,7 @@ def run_browser_scene_regression(executable: str) -> None:
         visible = screen_text(frame)
         # Source-context selection includes text and raster observations,
         # not only clickable controls. Preserve their document order.
-        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+        for text in (b"[>1] SCENE BEFORE CLICK", b"[2 button/link] First action",
                      b"[3 button/link] Second action",
                      "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"

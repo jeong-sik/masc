@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   attachLaneAddon, detachLaneAddon, fetchLaneAddons, fetchLaneAddonSlice,
   observeLaneAddon, preserveLaneAddonEvidence,
-  type LaneAddonSnapshot, type LaneAddonSlice,
+  fetchLaneAddonAction, requestLaneAddonAction,
+  type LaneAddonSnapshot, type LaneAddonSlice, type LaneAddonInstance,
+  type LaneAddonActionReceipt, type LaneAddonActionRequest,
 } from '../api/lane-addons'
 import { isRecord } from './common/normalize'
 import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
@@ -11,6 +13,115 @@ import { LaneAddonsTimeline, formatLaneTime } from './lane-addons-timeline'
 const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transparent'
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+
+type TrackedAction = {
+  request: LaneAddonActionRequest
+  receipt: LaneAddonActionReceipt | null
+  submitting: boolean
+  checking: boolean
+  error: string | null
+}
+const actionStates: Record<LaneAddonActionReceipt['state'], string> = {
+  queued: 'Queued', running: 'Running', confirmed: 'Package confirmed returned result',
+  failed_before_effect: 'Failed before effect', outcome_unknown: 'Outcome unknown',
+}
+const instanceBinding = (item: LaneAddonInstance) => `${item.instance_id}:${item.incarnation}`
+
+/** Receipts remain bound to their original instance even after replacement or detach. */
+function LaneAddonActions({ instances }: { instances: readonly LaneAddonInstance[] }) {
+  const [binding, setBinding] = useState('')
+  const [input, setInput] = useState('{}')
+  const [error, setError] = useState<string | null>(null)
+  const [requests, setRequests] = useState<TrackedAction[]>([])
+  const submitting = useRef(false)
+  const statusReads = useRef(new Map<string, AbortController>())
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    const reads = statusReads.current
+    return () => { mounted.current = false; for (const read of reads.values()) read.abort() }
+  }, [])
+  const capable = instances.filter(item => item.action_schema !== null)
+  const selected = capable.find(item => instanceBinding(item) === binding)
+  const available = selected !== undefined && selected.phase.kind !== 'detaching' && selected.phase.kind !== 'detached'
+  const properties = selected?.action_schema?.properties
+  const actionSchema = isRecord(properties) ? properties.action : selected?.action_schema
+
+  function update(requestId: string, change: Partial<TrackedAction>) {
+    if (mounted.current) setRequests(items => items.map(item => item.request.request_id === requestId ? { ...item, ...change } : item))
+  }
+  async function submit() {
+    if (!selected || !available || submitting.current) return
+    setError(null)
+    let action: unknown
+    try {
+      action = JSON.parse(input)
+      if (!isRecord(action)) throw new Error('Action must be a JSON object matching the advertised schema.')
+    } catch (err) { setError(message(err)); return }
+    const request: LaneAddonActionRequest = {
+      instance_id: selected.instance_id, expected_incarnation: selected.incarnation,
+      request_id: crypto.randomUUID(), action,
+    }
+    submitting.current = true
+    setRequests(items => [...items, { request, receipt: null, submitting: true, checking: false, error: null }])
+    try { update(request.request_id, { receipt: await requestLaneAddonAction(request) }) }
+    catch (err) { update(request.request_id, { error: message(err) }) }
+    finally { submitting.current = false; update(request.request_id, { submitting: false }) }
+  }
+  async function check(request: LaneAddonActionRequest) {
+    if (statusReads.current.has(request.request_id)) return
+    const controller = new AbortController()
+    statusReads.current.set(request.request_id, controller)
+    update(request.request_id, { checking: true, error: null })
+    try {
+      const receipt = await fetchLaneAddonAction(request, controller.signal)
+      if (!controller.signal.aborted) update(request.request_id, { receipt })
+    } catch (err) {
+      if (!controller.signal.aborted) update(request.request_id, { error: message(err) })
+    } finally {
+      statusReads.current.delete(request.request_id)
+      if (!controller.signal.aborted) update(request.request_id, { checking: false })
+    }
+  }
+  if (capable.length === 0 && requests.length === 0) return null
+  return html`<section class="space-y-3" aria-label="Package actions">
+    <h3 class="font-semibold">Package actions</h3>
+    <p>Submit an action advertised by an installed package. Observations and Keeper work continue independently.</p>
+    ${capable.length > 0 && html`<form class="space-y-2" onSubmit=${(event: Event) => { event.preventDefault(); void submit() }}>
+      <label>Action instance <select class=${inputClass} value=${binding} onChange=${(event: Event) => { setBinding((event.target as HTMLSelectElement).value); setInput('{}'); setError(null) }}>
+        <option value="">Select an installed package</option>
+        ${capable.map(item => html`<option key=${instanceBinding(item)} value=${instanceBinding(item)} disabled=${item.phase.kind === 'detaching' || item.phase.kind === 'detached'}>
+          ${item.title} · ${item.run_id} · ${item.instance_id}
+        </option>`)}
+      </select></label>
+      ${binding !== '' && !available && html`<p role="status">The selected instance is no longer available for new actions. Select an active instance.</p>`}
+      ${selected && html`<div class="space-y-2">
+        <p class="break-all">Target: ${selected.instance_id} · incarnation ${selected.incarnation}</p>
+        <details><summary>Advertised action schema</summary><pre class="whitespace-pre-wrap break-all">${JSON.stringify(actionSchema, null, 2)}</pre></details>
+        <label class="block">Action JSON <textarea class=${`${inputClass} block w-full font-mono`} rows=${5} value=${input}
+          onInput=${(event: Event) => setInput((event.target as HTMLTextAreaElement).value)} /></label>
+        <button class=${buttonClass} disabled=${!available || requests.some(item => item.submitting)} type="submit">Send new request</button>
+      </div>`}
+    </form>`}
+    ${error && html`<p role="alert">${error}</p>`}
+    ${requests.map(item => html`<article key=${item.request.request_id} class="border border-[var(--border)] rounded p-3 space-y-2" aria-label=${`Action request ${item.request.request_id}`}>
+      <p role="status">${item.submitting ? 'Awaiting acceptance receipt' : item.error ? 'Current action status unavailable'
+        : item.receipt ? actionStates[item.receipt.state] : 'Action status unknown'}</p>
+      <p class="break-all">Request ID: ${item.request.request_id}</p>
+      <p class="break-all">Target: ${item.request.instance_id} · incarnation ${item.request.expected_incarnation}</p>
+      ${item.error && html`<p role="alert">${item.error} The request may have been accepted. Check this request ID before sending another action.</p>`}
+      ${item.receipt && html`<div>
+        ${item.error && html`<p>Last recorded status: ${actionStates[item.receipt.state]}</p>`}
+        <p>Requester: ${item.receipt.requester} · executor: ${item.receipt.executor ?? 'unknown'}</p>
+        ${item.receipt.detail !== null && html`<p>${item.receipt.detail}</p>`}
+        ${item.receipt.state === 'confirmed' && html`<p>The package returned this result. Completion of the surrounding task requires separate evidence.</p>`}
+        ${item.receipt.result !== null && html`<pre class="whitespace-pre-wrap break-all" aria-label="Package returned result">${JSON.stringify(item.receipt.result, null, 2)}</pre>`}
+      </div>`}
+      <button type="button" class=${buttonClass} disabled=${item.submitting || item.checking} onClick=${() => check(item.request)}>${item.checking ? 'Checking request status…' : 'Check request status'}</button>
+      <details><summary>Submitted action and receipt</summary><pre class="whitespace-pre-wrap break-all">${JSON.stringify({ request: item.request, receipt: item.receipt }, null, 2)}</pre></details>
+    </article>`)}
+  </section>`
+}
 
 /** This component owns its reads. A slow package never joins the fleet refresh. */
 export function LaneAddonsPanel() {
@@ -146,6 +257,7 @@ export function LaneAddonsPanel() {
       <button class=${buttonClass} disabled=${item.phase.kind === 'detached'} onClick=${() => act(() => detachLaneAddon(item.instance_id))}>Detach</button></td>
     </tr>`)}</tbody></table></div>
     ${snapshot?.instances.length === 0 && html`<p>No attached packages.</p>`}
+    <${LaneAddonActions} instances=${snapshot?.instances ?? []} />
     <${LaneAddonsTimeline} rows=${rows} onWindow=${(from: number, to: number) => { setSince(String(from)); setUntil(String(to)) }} />
     <form class="flex flex-wrap gap-2" onSubmit=${(e: Event) => { e.preventDefault(); void query() }}>
       <label>Run filter <input class=${inputClass} value=${run} onInput=${(e: Event) => setRun((e.target as HTMLInputElement).value)} /></label>

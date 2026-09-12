@@ -5,7 +5,7 @@
     MASC owns the exact claim, observation, recovery, and settlement phase needed
     to avoid silently duplicating an externally admitted turn. *)
 
-type client_kind =
+type client_kind = Keeper_semantic_execution.official_client_kind =
   | Codex
   | Claude_code
   | Antigravity
@@ -162,6 +162,12 @@ val reconcile_tool_surface : claim_plan -> tool_surface_sha256:string -> claim_p
     [client_kind] or [runtime_id]: what the prior session settled against no
     longer describes this execution. Every adapter must apply this before
     [claim], and [claim] applies it again so a caller cannot skip it. *)
+
+val validate_continuation : checkpoint:Keeper_semantic_execution.official_client_checkpoint ->
+  expected:t option -> client_kind:client_kind -> runtime_id:string -> tool_surface_sha256:string ->
+  (unit, string) result
+(** Before model dispatch, bind a Gate resume to the original native session.
+    Later turns in that session are allowed; changing sessions or tools is not. *)
 
 val claim :
   base_path:string ->

@@ -208,9 +208,16 @@ let test_unsafe_slots_refused_before_spawn () =
         ^ String.sub text (offset + length) (String.length text - offset - length)
       else scan (offset + 1)
     in scan 0 in
+  let credential_path = Filename.concat root "fixture-oauth.json" in
+  write credential_path "{}";
+  let antigravity_config =
+    replace "command =" "timeout-s = 30.0\ncommand ="
+      (replace "claude-code" "antigravity-cli" (runtime_config command))
+    ^ Printf.sprintf "\n[providers.official.credentials]\ntype = \"file\"\npath = %S\n" credential_path
+  in
   let cases =
     [ "Codex", replace "claude-code" "codex-app-server" (runtime_config command), "official.verifier"
-    ; "Antigravity", replace "command =" "timeout-s = 30.0\ncommand =" (replace "claude-code" "antigravity-cli" (runtime_config command)), "official.verifier"
+    ; "Antigravity", antigravity_config, "official.verifier"
     ; "disabled tools", replace "tools-support = true" "tools-support = false" (runtime_config command), "official.verifier"
     ; "unsupported media", replace "supports-image-input = true" "supports-image-input = false" (runtime_config command), "official.verifier"
     ; "missing runtime", runtime_config command, "missing.runtime"

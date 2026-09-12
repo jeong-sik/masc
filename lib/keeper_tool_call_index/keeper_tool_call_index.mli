@@ -55,6 +55,8 @@ val forget_for_ledger : ledger_dir:string -> unit
     directory. *)
 
 module For_testing : sig
+  val select_execution_sql : string
+  (** Exact query used by the batch reader, for query-plan regression checks. *)
   val recent_rows :
     before_scan:(path:string -> unit) ->
     store:Dated_jsonl.t -> ?keeper_name:string -> n:int -> unit ->

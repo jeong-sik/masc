@@ -1,10 +1,11 @@
 # TOML로 Lane Add-on 설치하기
 
-이번 범위는 외부 관측 패키지를 파일로 설치·변경·제거하는 경로다. 기존 MSX 머신,
+Lane Add-on은 패키지를 파일로 설치·변경·제거하는 경로다. 기존 MSX 머신,
 Browser 세션, Keeper의 실행과 도구를 재사용한다. 패키지 하나가 여러 관측·관계 Lane을
 제공할 수 있다. MCP는 worker와 통신하는 규약이며, 설치 단위의 의미는 패키지가 제공하는
-관측과 관계다. 이 문서는 구현 중인 계약을 설명한다. 통합 테스트의 CI 검증은 예정이며,
-런타임 실측 합격 보고서는 아니다.
+관측과 관계다. 이 문서는 구현된 설치 계약을 설명한다. 자체 환경과 선택적 행동을 가진
+패키지도 같은 경로로 연결하며, 실제 검증 범위는 [행동 계약](lane-world-actions.md#qualification-boundary)과
+[출력 연결](lane-output-composition.md)의 고정 revision별 기록으로 구분한다.
 
 ## 설치 위치와 예제
 
@@ -134,7 +135,8 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 
 설치 선언에 임의의 `skills`, `scripts`, `environment` 최상위 필드를 추가하는 방식은 지원하지 않는다.
 Skill과 행동은 패키지 manifest의 `world`에, 실행 환경은 image·command에, 입력 연결은 설치의
-binding에 선언한다. 이미지를 준비하는 작업과 TOML 설치는 구분하며, 스크립트를 자동 실행하지 않는다.
+binding에 선언한다. 이미지를 준비하는 작업과 TOML 설치는 구분한다. 설치하면 패키지의 command를
+worker에서 실행하지만, Skill helper 스크립트는 본문이나 파일을 읽는 것만으로 실행되지 않는다.
 각 패키지의 실행·비간섭·행동 활용은 별도 실측으로 검증한다. 이 계약은 machine checkpoint·fork나
 생산성 향상을 보장하지 않는다.
 

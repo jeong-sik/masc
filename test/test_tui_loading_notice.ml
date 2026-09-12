@@ -41,12 +41,38 @@ let test_the_elapsed_needs_a_start () =
     (Types.pending_elapsed_s ~now_ns:(Int64.add (ns 90) 999_999_999L)
        (Some (ns 90)))
 
+let test_a_background_read_does_not_reset_the_visible_one () =
+  (* The operator opens Sandbox, walks to Settings, and an Identity refresh
+     finishes behind them and launches its own read. One stamp for the screen
+     was rewritten by that read, so the tab on screen reported an elapsed time
+     for a request that never restarted. *)
+  let state = fresh () in
+  Types.mark_detail_read_started state ~tab:Types.Detail_instructions
+    ~now_ns:(ns 10);
+  Types.mark_detail_read_started state ~tab:Types.Detail_identity ~now_ns:(ns 99);
+  state.detail_tab <- Types.Detail_instructions;
+  check (option int) "the tab on screen keeps its own start" (Some 90)
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state state.detail_tab));
+  check (option int) "and the one that finished behind it keeps its own" (Some 1)
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state Types.Detail_identity));
+  check (option int) "a tab nobody asked for measures nothing" None
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state Types.Detail_sandbox));
+  (* Asking again replaces that tab's start rather than stacking a second. *)
+  Types.mark_detail_read_started state ~tab:Types.Detail_instructions
+    ~now_ns:(ns 96);
+  check (option int) "R restarts the count for that tab" (Some 4)
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state Types.Detail_instructions))
+
 let test_two_reads_are_timed_apart () =
   (* The Sandbox tab's status and its container logs are two reads, and the
      operator presses o/l long after the status landed. Sharing one stamp made
      a log read that had just started claim the status read's minutes. *)
   let state = fresh () in
-  state.detail_read_started_at <- Some (ns 10);
+  Types.mark_detail_read_started state ~tab:Types.Detail_sandbox ~now_ns:(ns 10);
   state.keeper_sandbox_logs_inflight <-
     Some
       { Types.slr_keeper = "analyst"
@@ -55,7 +81,8 @@ let test_two_reads_are_timed_apart () =
       };
   let now_ns = ns 100 in
   check (option int) "the tab read has been waiting ninety seconds" (Some 90)
-    (Types.pending_elapsed_s ~now_ns state.detail_read_started_at);
+    (Types.pending_elapsed_s ~now_ns
+       (Types.detail_read_started state Types.Detail_sandbox));
   let logs_started =
     Option.map
       (fun (request : Types.sandbox_logs_request) -> request.slr_started_ns)
@@ -75,5 +102,7 @@ let () =
             test_the_elapsed_needs_a_start
         ; test_case "two reads are timed apart" `Quick
             test_two_reads_are_timed_apart
+        ; test_case "a background read does not reset the visible one" `Quick
+            test_a_background_read_does_not_reset_the_visible_one
         ] )
     ]

@@ -3570,8 +3570,13 @@ type state = {
      NTP or an operator moving the system clock makes a wall clock answer that
      wrongly -- backwards it suppresses the count, forwards it reports an
      arbitrary wait. The clock is the caller's because this module does not
-     depend on one. *)
-  mutable detail_read_started_at: int64 option;
+     depend on one.
+
+     One stamp per tab, not one for the screen. A background read finishing
+     elsewhere -- an Identity refresh, a GitHub login -- launches its own detail
+     read, and a single stamp would be rewritten under the tab the operator is
+     watching, resetting an elapsed count for a request that never restarted. *)
+  mutable detail_read_started_at: (keeper_detail_tab * int64) list;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -4840,6 +4845,14 @@ let pending_elapsed_s ~now_ns started_ns =
       Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
     started_ns
 
+(* When the read this tab is waiting for was asked for, if it is waiting. *)
+let detail_read_started (state : state) tab =
+  List.assoc_opt tab state.detail_read_started_at
+
+let mark_detail_read_started (state : state) ~tab ~now_ns =
+  state.detail_read_started_at <-
+    (tab, now_ns) :: List.remove_assoc tab state.detail_read_started_at
+
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
@@ -5165,7 +5178,7 @@ let create_state
   config_scroll = 0;
   detail_tab = Detail_info;
   keeper_run_cursor = 0;
-  detail_read_started_at = None;
+  detail_read_started_at = [];
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;

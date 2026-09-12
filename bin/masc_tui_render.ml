@@ -6442,7 +6442,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       ^ Ansi.reset
     in
     let tab_loading_row what =
-      loading_row ?started_ns:state.detail_read_started_at what
+      loading_row
+        ?started_ns:(Masc_tui_types.detail_read_started state state.detail_tab)
+        what
     in
     let stamped_or view error =
       match error with

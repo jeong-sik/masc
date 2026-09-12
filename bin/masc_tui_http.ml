@@ -2606,6 +2606,7 @@ let fetch_browser_scene ?(scene_view=Browser_lane.Content) ?scope ~host ~port ~v
   decode_scene json
 
 let refresh_browser_scene ~host ~port ~view ~tab_id ~scene_view ~scope =
+  let open Masc_tui_types.Browser_lane_view in
   match scope with
   | None -> fetch_browser_scene ~scene_view ~host ~port ~view ~tab_id ()
   | Some target ->
@@ -2614,12 +2615,12 @@ let refresh_browser_scene ~host ~port ~view ~tab_id ~scene_view ~scope =
     (* Region references belong to a document, not a URL or a channel name.
        A navigation or detached region returns the current map for selection;
        never retry an old node reference against the replacement document. *)
-    if regions.source <> view.Masc_tui_types.Browser_lane_view.source
-       || regions.client_id <> Masc_tui_types.Browser_lane_view.client_id view
+    if regions.source <> view.source
+       || regions.client_id <> client_id view
        || regions.tab_id <> tab_id || regions.content.view <> Browser_lane.Regions
        || Option.is_some regions.content.scope then
       Error "region refresh source, client, tab or scope mismatch"
-    else if Masc_tui_types.Browser_lane_view.region_observed target regions then
+    else if region_observed target regions then
       fetch_browser_scene ~scene_view ~scope:target ~host ~port ~view ~tab_id ()
     else Ok regions
 

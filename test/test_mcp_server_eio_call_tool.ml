@@ -2,6 +2,8 @@ module Types = Masc_domain
 
 open Alcotest
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 module U = Yojson.Safe.Util
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
@@ -210,6 +212,7 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
         ?invocation_ref
         ?auth_token:_
         ?internal_keeper_runtime:_
+        ?on_caller_resolved:_
         _state
         ~name:_
         ~arguments:_ ->
@@ -394,6 +397,7 @@ let test_handle_call_executes_transient_failure_once () =
               ?invocation_ref:_
               ?auth_token:_
               ?internal_keeper_runtime:_
+              ?on_caller_resolved:_
               _state
               ~name
               ~arguments:_
@@ -459,6 +463,7 @@ let test_call_captures_admission_scope_across_workspace_switch () =
               ?invocation_ref:_
               ?auth_token:_
               ?internal_keeper_runtime:_
+              ?on_caller_resolved:_
               callback_state
               ~name
               ~arguments:_
@@ -545,7 +550,7 @@ let test_failure_observation_uses_typed_failed_payload () =
   in
   let completed : Tool_result.result =
     Tool_result.Completed
-      { content_blocks = None; data = `Null
+      { retained_artifacts = []; content_blocks = None; data = `Null
       ; metadata = None
       ; tool_name = "completed-tool"
       ; duration_ms = 0.0
@@ -576,7 +581,7 @@ let test_records_mcp_server_operation_duration_metric () =
   in
   let result : Tool_result.result =
     Tool_result.Completed
-      { content_blocks = None; Tool_result.data = `String "ok"
+      { retained_artifacts = []; content_blocks = None; Tool_result.data = `String "ok"
       ; metadata = None
       ; tool_name = "get-weather"
       ; duration_ms = 123.0
@@ -862,13 +867,144 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
         (sse_payload |> U.member "tool_args_preview" |> U.to_string);
       check string "sse output preview includes result" "command exited 1"
-        (sse_payload |> U.member "tool_output_preview" |> U.to_string))
+        (sse_payload |> U.member "tool_output_preview" |> U.to_string);
+      let reference = Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path) ~bytes:"retained native observation"
+          ~mime:"application/vnd.masc.browser-scene+json" in
+      Masc.Sse.subscribe_external ~id:subscriber_id
+        ~callback:(fun _ -> failwith "post-commit subscriber unavailable") ();
+      let observed = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:0.
+          ~data:(`Assoc ["url",`String "https://example.org/page"]) ()
+          |> Tool_result.with_retained_artifacts [reference] in
+      Eio.Switch.run (fun sw ->
+      Masc.Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+        ~typed_result:observed entry ~tool_name:"BrowserRead"
+        ~arguments:(`Assoc ["mode",`String "scene"])
+        ~message:(Tool_result.message observed) ~disposition:(Tool_result.Completed ())
+        ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
+      check int "native observation root bypasses the lossy async queue" 0
+        (Masc.Keeper_tool_call_log.queued_count_for_testing ());
+      let observed_row = Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 () |> List.hd in
+      let roots = Tool_output.normalized_artifact_refs_in_json (observed_row |> U.member "artifact_refs") in
+      check bool "native MCP logger retains the producer observation" true
+        (List.exists (fun (root : Tool_output.artifact_ref) -> root.sha256=reference.sha256) roots);
+      check string "native row keeps inline body" (Tool_result.message observed)
+        (observed_row |> U.member "output" |> U.to_string));
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      let failed = try
+        Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+          ~typed_result:observed entry ~tool_name:"BrowserRead" ~arguments:(`Assoc [])
+          ~message:(Tool_result.message observed) ~disposition:(Tool_result.Completed ())
+          ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
+        false
+      with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
+      check bool "native retained receipt requires successful log commit" true failed)
+
+let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
+  with_call_tool_state (fun env sw state ->
+    let config = (Masc.Mcp_server.workspace_scope state).config in
+    let base_path = config.base_path in
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    let alias = "retention" in
+    ignore (Masc.Workspace.bind_session config ~agent_name:alias ~capabilities:[] ());
+    let keeper_name = Masc.Workspace.resolve_agent_name config alias in
+    check bool "fixture resolves a bound workspace alias" true (keeper_name <> alias);
+    let original_name = keeper_name in
+    let keeper_name = if rebind then "rebound-keeper" else original_name in
+    let session_id = "retention-session-" ^ Filename.basename base_path in
+    Masc.Client_registry_eio.set_resolved_name session_id original_name ~is_ephemeral:false;
+    if rebind then ignore (Masc.Keeper_registry.register_offline ~base_path original_name
+      (make_keeper_meta original_name));
+    let meta = make_keeper_meta keeper_name in
+    ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    Fun.protect ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      if rebind then Masc.Keeper_registry.For_testing.unregister ~base_path original_name;
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Browser_lane.install_automation_executor None;
+      Masc.Client_registry_eio.unregister_mcp_session session_id;
+      Time_compat.clear_clock ()) (fun () ->
+      let auth_token = if bearer then
+        match Auth.create_token base_path ~agent_name:keeper_name ~role:Masc_domain.Worker with
+        | Ok (token, _) -> Some token
+        | Error _ -> fail "credential fixture creation failed"
+        else None in
+      let arguments = `Assoc ["lane",`String "automation"; "tabId",`Int 7;
+        "mode",`String "scene"] in
+      let data = `Assoc [
+        "schema",`String "masc.browser.scene.v1"; "tabId",`Int 7;
+        "source",`String "automation"; "clientId",`Null;
+        "documentId",`String "canonical-owner-document";
+        "url",`String "https://example.org/page"; "title",`String "Observed";
+        "view",`String "content"; "scope",`Null;
+        "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+        "chars",`Int 0; "truncated",`Bool false; "nodes",`List []] in
+      let dispatch_count = ref 0 in
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_scene { tab_id = 7; view = Content; scope = None; _ } ->
+          incr dispatch_count;
+          check bool "browser action runs as the executor-resolved caller" true
+            (Option.is_some (Masc.Session.get_session state.session_registry ~agent_name:keeper_name));
+          if rebind then (
+            check bool "prior binding did not execute this action" true
+              (Option.is_none (Masc.Session.get_session state.session_registry ~agent_name:original_name));
+            Masc.Client_registry_eio.set_resolved_name session_id original_name ~is_ephemeral:false);
+          Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data])
+        | _ -> fail "only a scene read is expected"));
+      let failed = try
+        ignore (Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:(fun ~sw ~clock ~workspace_scope ?profile
+            ?mcp_session_id ?invocation_ref ?auth_token ?internal_keeper_runtime
+            ?on_caller_resolved state ~name ~arguments ->
+            (* Deterministically model a concurrent rebind after admission but
+               before the actual execution resolves its caller. *)
+            if rebind then Masc.Client_registry_eio.set_resolved_name session_id keeper_name ~is_ephemeral:false;
+            let result = Masc.Mcp_server_eio_execute.execute_tool_eio
+              ~sw ~clock ~workspace_scope ?profile ?mcp_session_id ?invocation_ref
+              ?auth_token ?internal_keeper_runtime ?on_caller_resolved state ~name ~arguments in
+            check bool ("actual executor succeeds: " ^ Tool_result.message result) true
+              (Tool_result.is_success result);
+            (* Inject failure only after the inner dispatch's own audit. *)
+            if fail_audit then (
+              let path = Filename.concat (Masc.Workspace.masc_dir config) Masc.Audit_log.store_dirname in
+              if Sys.file_exists path then Fs_compat.remove_tree path;
+              let channel = open_out path in close_out channel);
+            result)
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw ~clock:(Eio.Stdenv.clock env) ?auth_token
+          ?mcp_session_id:(if bearer then None else Some session_id) state (`Int 19)
+          (admit_call (`Assoc ["name",`String "masc_browser_read"; "arguments",arguments])));
+        false
+      with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
+      check int "one physical browser dispatch" 1 !dispatch_count;
+      check bool "audit failure remains visible after root commit" fail_audit failed;
+      if rebind then check int "old and later cache owner has no receipt" 0
+        (List.length (Masc.Keeper_tool_call_log.read_recent ~keeper_name:original_name ()));
+      let rows = Masc.Keeper_tool_call_log.read_recent ~keeper_name () in
+      let row = match rows with [row] -> row | _ -> fail "canonical Keeper needs exactly one receipt" in
+      let roots = Tool_output.normalized_artifact_refs_in_json (row |> U.member "artifact_refs") in
+      check int "canonical caller owns the retained scene" 1 (List.length roots);
+      let gc = match Tool_blob_maintenance.run ~base_path ~mode:Observe_only with
+        | Ok gc -> gc | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
+      check int "receipt is a durable GC root even after audit failure" 1 gc.live_references))
 
 let () =
   run "mcp_server_eio_call_tool"
     [
       ( "typed projection",
         [
+          test_case "actual executor identity survives session rebinding" `Quick
+            (test_canonical_keeper_retention ~rebind:true ~bearer:false ~fail_audit:false);
+          test_case "bearer-resolved Keeper owns retained reads" `Quick
+            (test_canonical_keeper_retention ~bearer:true ~fail_audit:false);
+          test_case "cached canonical Keeper owns retained reads" `Quick
+            (test_canonical_keeper_retention ~bearer:false ~fail_audit:false);
+          test_case "audit failure follows retained root commit" `Quick
+            (test_canonical_keeper_retention ~bearer:false ~fail_audit:true);
           test_case "free-form text does not control response" `Quick
             test_free_form_failure_text_does_not_control_response;
           test_case "call request decodes current shape once" `Quick

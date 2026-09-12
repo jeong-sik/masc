@@ -12299,11 +12299,6 @@ let render_code (state : state) =
        ~hints:(Masc_tui_keys.footer_hints_code ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
-let resource_display_name (resource : Masc_tui_mcp.resource) =
-  match resource.title with
-  | Some title when String.trim title <> "" -> title
-  | Some _ | None -> resource.name
-
 let resource_mime_essence mime =
   match String.split_on_char ';' (String.lowercase_ascii (String.trim mime)) with
   | essence :: _ -> String.trim essence
@@ -12438,7 +12433,7 @@ let render_resources (state : state) =
       match Rows.at rows_list_window (first + i) with
       | Some resource ->
           let selected = first + i = cursor in
-          let name = resource_display_name resource in
+          let name = Masc_tui_mcp.display_name resource in
           let line =
             if selected then
               Theme.selection ^ " " ^ name
@@ -12474,7 +12469,7 @@ let render_resources (state : state) =
     in
     let title =
       match shown_resource with
-      | Some resource -> "Resource · " ^ resource_display_name resource
+      | Some resource -> "Resource · " ^ Masc_tui_mcp.display_name resource
       | None -> "Resource detail"
     in
     box_top pane_buf pane_cols;

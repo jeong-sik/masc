@@ -179,17 +179,23 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
        request.messages
 ;;
 
-let caller_supplied_header_name = function
-  | [] -> None
-    (* The default header list [Provider_config.make] injects when the caller
-       passes no ~headers is configuration, not caller supply: it is exactly
-       the wire-owned application/json pair and carries no caller identity.
-       Treating it as caller-supplied rejects every exact preflight, including
-       the credential-freeze preflight #35091 added. Any other non-empty list
-       still names its first header, so genuine caller headers (Authorization
-       included) keep failing admission. *)
-  | [ ("Content-Type", "application/json") ] -> None
-  | (name, _) :: _ -> Some name
+let is_wire_default_header (name, value) =
+  String.lowercase_ascii (String.trim name) = "content-type"
+  && String.lowercase_ascii (String.trim value) = "application/json"
+;;
+
+let caller_supplied_header_name headers =
+  (* The default header list [Provider_config.make] injects when the caller
+     passes no ~headers is configuration, not caller supply: it is the wire-owned
+     application/json pair (matched case-insensitively) and carries no caller
+     identity. Treating it as caller-supplied rejects every exact preflight,
+     including the credential-freeze preflight #35091 added.
+     We filter out wire-default headers so that any genuinely caller-supplied
+     header (including custom Content-Type values or extra headers alongside
+     defaults) is accurately identified and blamed regardless of list order. *)
+  match List.find_opt (fun h -> not (is_wire_default_header h)) headers with
+  | None -> None
+  | Some (name, _) -> Some name
 ;;
 
 let rec content_capability_rejection capabilities = function
@@ -714,7 +720,7 @@ let%test "exact preflight freezes refreshed credentials until a new plan is prep
 ;;
 
 let%test "exact preflight still rejects genuinely caller-supplied headers" =
-  let rejects_with name headers =
+  let test_headers expected_err headers =
     let config =
       Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
         ~base_url:"https://example.test" ~max_tokens:16
@@ -724,8 +730,22 @@ let%test "exact preflight still rejects genuinely caller-supplied headers" =
       preflight ~config ~messages:[Types.user_msg "Hello"]
         ~body_timeout_s:None ~anthropic_thinking_control:None
     with
-    | Error (Caller_supplied_header_not_allowed reported) -> reported = name
-    | Error _ | Ok _ -> false in
-  rejects_with "X-Custom" [ ("X-Custom", "v") ]
-  && rejects_with "Content-Type" [ ("Content-Type", "text/event-stream") ]
+    | Error (Caller_supplied_header_not_allowed reported) ->
+      expected_err = Some reported
+    | Error _ -> false
+    | Ok _ -> expected_err = None in
+  test_headers None []
+  && test_headers None [ ("Content-Type", "application/json") ]
+  && test_headers None [ ("content-type", "application/json") ]
+  && test_headers None [ ("CONTENT-TYPE", "application/json") ]
+  && test_headers (Some "X-Custom") [ ("X-Custom", "v") ]
+  && test_headers (Some "Content-Type") [ ("Content-Type", "text/event-stream") ]
+  && test_headers (Some "X-Custom")
+       [ ("Content-Type", "application/json"); ("X-Custom", "v") ]
+  && test_headers (Some "X-Custom")
+       [ ("X-Custom", "v"); ("Content-Type", "application/json") ]
+  && test_headers (Some "X-Custom")
+       [ ("content-type", "application/json"); ("X-Custom", "v") ]
+  && test_headers (Some "X-First")
+       [ ("Content-Type", "application/json"); ("X-First", "1"); ("X-Second", "2") ]
 ;;

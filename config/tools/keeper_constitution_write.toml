@@ -1,14 +1,9 @@
 name = "keeper_constitution_write"
 description = """
-Write one norm into this world's constitution. Every keeper in this world \
-reads it at the top of every turn from then on, so write the sentence the \
-world agreed on, not a note to yourself — that is what keeper_memory_write is \
-for. Agreement happens on the board and in chat before you call this; the \
-tool records what was decided and judges nothing. Pass evidence_uri with the \
-board post or comment id the norm came out of when you have one. Writing a \
-norm someone else's world would not recognise, or one this world never \
-discussed, puts it in front of every keeper here anyway — removal costs one \
-call, but the turns that read it in between are spent.\
+Write one norm into this world's constitution. Every keeper here reads it at \
+the top of every turn from then on. This is the world's shared text, not your \
+own notes — those go to keeper_memory_write. Agreement happens on the board \
+before you call this; the tool records what was decided and judges nothing.\
 """
 additional_properties = false
 
@@ -16,13 +11,9 @@ additional_properties = false
 name = "text"
 type = "string"
 required = true
-description = """
-The norm, as one sentence. This is rendered verbatim into every keeper's \
-system prompt."""
+description = "The norm, as one sentence, rendered verbatim into every keeper's prompt."
 
 [[params]]
 name = "evidence_uri"
 type = "string"
-description = """
-Optional board post or comment id where this norm was agreed. Recorded with \
-the article so a later reader can find the conversation."""
+description = "Optional board post or comment id where this norm was agreed."

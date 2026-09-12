@@ -34,7 +34,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
     match
       World_constitution_types.make
         ~id:(World_constitution_types.Article_id.generate ())
-        ~text ~author:meta.name ~at:(Unix.gettimeofday ()) ~evidence
+        ~text ~author:meta.name ~at:(Time_compat.now ()) ~evidence
     with
     | Error invalid ->
       Keeper_tool_execution.failure
@@ -98,7 +98,7 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
           match
             World_constitution_store.append ~base_path
               (World_constitution_types.Removed
-                 { id; by = meta.name; at = Unix.gettimeofday () })
+                 { id; by = meta.name; at = Time_compat.now () })
           with
           | Error error ->
             Keeper_tool_execution.failure

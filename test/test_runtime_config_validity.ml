@@ -1,6 +1,14 @@
 open Alcotest
 open Masc
 
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+;;
+
+
 module Exact_output = Agent_core.Exact_output
 
 let empty_env _name = None
@@ -588,7 +596,7 @@ let openrouter_seed_runtimes =
 let test_openrouter_seed_runtimes_are_dispatchable () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
     List.iter
@@ -666,7 +674,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
      check (option bool) "deepseek pro image input" (Some false)
        entry.supports_image_input);
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok
       ( runtimes
@@ -702,7 +710,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
 let test_repo_deepseek_thinking_request () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  let runtimes = match Runtime.load_list ~config_path:path with
+  let runtimes = match load_list_text ~config_path:path with
     | Ok (runtimes, _, _, _, _) -> runtimes
     | Error detail -> fail detail in
   let runtime = match List.find_opt (fun (runtime : Runtime.t) ->
@@ -771,7 +779,7 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
 
 let test_repo_runtime_toml_all_seeded_bindings_are_keeper_dispatchable () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _, _, _, _) ->
     check bool "repo runtime seed is nonempty" true (runtimes <> []);
@@ -1206,7 +1214,7 @@ let test_lane_rejects_unknown_key () =
 let test_repo_runtime_toml_declares_no_clamped_max_context () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
     (* Shared seed model descriptions must resolve these windows from their
@@ -1338,7 +1346,7 @@ let with_uncommented_seed ~marker f =
        let oc = open_out path in
        output_string oc (uncomment_example_region ~marker content);
        close_out oc;
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Error msg ->
          failf "uncommented example region should load (%s): %s" marker msg
        | Ok (runtimes, _default, _assignments, _media_failover, _lanes) -> f runtimes)
@@ -1448,7 +1456,7 @@ let test_repo_runtime_toml_loads () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
   | Ok
       ( runtimes
@@ -3171,7 +3179,7 @@ let test_runtime_provider_disable_excludes_its_bindings () =
      default = \"active.sample\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "disabled provider should not block active runtime: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "active.sample" ]
@@ -3200,7 +3208,7 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
      default = \"local.good\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "disabled binding should not block active runtime: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "local.good" ]
@@ -3210,7 +3218,7 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
     ^ "\n[runtime.assignments]\nkeeper_a = \"local.disabled\"\n"
   in
   with_temp_runtime_toml referenced_runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Ok _ -> failf "assignment to explicitly disabled runtime should be rejected"
     | Error msg ->
       check bool "error mentions assignment table" true
@@ -3251,7 +3259,7 @@ let test_verifier_exact_slot_must_name_a_configured_route () =
   with_temp_runtime_toml
     (exact_lane_runtime_toml ~lane:"verifier_exact" ~slot:"local.absent")
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ ->
          failf "a verifier_exact slot naming no configured runtime should be rejected"
        | Error msg ->
@@ -3273,7 +3281,7 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
        with_temp_runtime_toml
          (exact_lane_runtime_toml ~lane ~slot:"local.absent")
          (fun path ->
-            match Runtime.load_list ~config_path:path with
+            match load_list_text ~config_path:path with
             | Ok _ -> ()
             | Error msg ->
               failf "%s must accept a catalog-only slot id, got: %s" lane msg))
@@ -3304,7 +3312,7 @@ let test_declared_uncapped_runtime_is_dispatchable () =
      default = \"local.sample\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg ->
       failf "an unassigned uncapped runtime must not fail the load: %s" msg
     | Ok (runtimes, _, _, _, _) ->
@@ -3356,7 +3364,7 @@ let test_official_client_runtime_is_dispatchable_without_a_body_cap () =
      default = \"local.sample\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "official-client runtime should load: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "no runtime is reported blocked" []
@@ -3389,7 +3397,7 @@ let test_binding_naming_an_undeclared_model_fails_the_load () =
      default = \"local.good\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Ok (runtimes, _, _, _, _) ->
       failf
         "binding naming an undeclared model must fail the load; got runtimes [%s]"
@@ -3431,7 +3439,7 @@ let test_non_provider_namespaces_are_not_bindings () =
      default = \"local.good\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "non-provider namespaces must not be bindings: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "only the declared provider binds a runtime"
@@ -3471,7 +3479,7 @@ let test_deliberate_disable_is_still_a_tolerated_drop () =
      default = \"local.good\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "deliberate disables must not fail the load: %s" msg
     | Ok (runtimes, _, _, _, _) ->
       check (list string) "disabled binding and disabled provider are excluded"
@@ -3584,7 +3592,7 @@ let routing_reference_base =
 
 let load_error_of_runtime_toml ~what content =
   with_temp_runtime_toml content (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Ok _ -> failf "%s should be rejected at load" what
     | Error msg -> msg)
 
@@ -4092,7 +4100,7 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
      default = \"local.no-cap\"\n"
   in
   with_temp_runtime_toml content (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "runtime TOML should materialize: %s" msg
     | Ok
         ( runtimes
@@ -4159,7 +4167,7 @@ let test_runtime_toml_reasoning_effort_flows_to_provider_config () =
      default = \"local.undeclared\"\n"
   in
   with_temp_runtime_toml content (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error msg -> failf "runtime TOML should materialize: %s" msg
     | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
       let effort id =
@@ -4218,7 +4226,7 @@ let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
         [runtime.lanes.\"subscription.sonnet\"]\n\
         candidates = [\"subscription.sonnet\", \"local.chat\"]\n")
     (fun path ->
-      match Runtime.load_list ~config_path:path with
+      match load_list_text ~config_path:path with
       | Ok _ -> ()
       | Error msg -> failf "a mixed-owner failover lane must load: %s" msg)
 
@@ -4749,7 +4757,7 @@ let test_runtime_max_context_missing_both_sources_rejected_at_load () =
     ~finally:(fun () -> Runtime.For_testing.restore snapshot)
     (fun () ->
        with_temp_runtime_toml runtime_toml (fun path ->
-         match Runtime.load_list ~config_path:path with
+         match load_list_text ~config_path:path with
          | Ok _ ->
            fail
              "runtime with no max-context override and no capability catalog \
@@ -4817,7 +4825,7 @@ let codex_app_server_runtime_toml ?credential ?(options = "") () =
 
 let test_codex_app_server_materializes_as_turn_runtime () =
   with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Error error -> failf "codex-app-server runtime should load: %s" error
     | Ok (runtimes, default, _, _, _) ->
       check int "one runtime" 1 (List.length runtimes);
@@ -4872,7 +4880,7 @@ let test_antigravity_cli_materializes_typed_process_options () =
        ~options
        ())
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Error error -> failf "antigravity-cli runtime should load: %s" error
        | Ok (runtimes, default, _, _, _) ->
          check int "one runtime" 1 (List.length runtimes);
@@ -4907,7 +4915,7 @@ let test_antigravity_cli_add_dirs_reach_the_execution_config () =
        ~options
        ())
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Error error -> failf "antigravity-cli with add-dirs should load: %s" error
        | Ok (_, default, _, _, _) ->
          (match default.execution with
@@ -4930,7 +4938,7 @@ let test_antigravity_cli_add_dirs_reject_relative_entries () =
        ~options:"timeout-s = 45.0\nadd-dirs = [\"repos\"]"
        ())
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ -> fail "a relative add-dirs entry must be rejected at load"
        | Error error ->
          check bool "diagnostic names the absolute-path requirement" true
@@ -4943,7 +4951,7 @@ let test_antigravity_cli_requires_explicit_timeout () =
        ~credential:antigravity_file_credential
        ())
     (fun path ->
-    match Runtime.load_list ~config_path:path with
+    match load_list_text ~config_path:path with
     | Ok _ -> fail "antigravity-cli silently defaulted timeout-s"
     | Error error ->
       check bool "diagnostic names required timeout" true
@@ -4958,7 +4966,7 @@ let test_antigravity_cli_requires_file_credentials () =
          ~options:"timeout-s = 45.0"
          ())
       (fun path ->
-         match Runtime.load_list ~config_path:path with
+         match load_list_text ~config_path:path with
          | Ok _ -> failf "antigravity-cli admitted %s credentials" name
          | Error error ->
            check bool (name ^ " diagnostic") true
@@ -4985,7 +4993,7 @@ let test_antigravity_options_are_protocol_scoped () =
        ~options:"agent = \"fixture-agent\""
        ())
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ -> fail "codex-app-server silently admitted an Antigravity option"
        | Error error ->
          check bool "diagnostic names scoped option" true
@@ -5001,7 +5009,7 @@ let test_antigravity_authority_fields_are_rejected () =
        ~options:"sandbox = false\ntimeout-s = 45.0"
        ())
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ -> fail "antigravity-cli admitted an operator authority override"
        | Error error ->
          check bool "diagnostic names unsupported field" true
@@ -5019,7 +5027,7 @@ let test_codex_app_server_rejects_declared_credentials () =
   with_temp_runtime_toml
     (codex_app_server_runtime_toml ~credential ())
     (fun path ->
-       match Runtime.load_list ~config_path:path with
+       match load_list_text ~config_path:path with
        | Ok _ -> fail "codex-app-server incorrectly admitted declared credentials"
        | Error error ->
          check bool "diagnostic names official subscription ownership" true

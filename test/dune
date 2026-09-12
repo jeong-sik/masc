@@ -5630,3 +5630,8 @@
  (name test_model_catalog_thinking_control)
  (modules test_model_catalog_thinking_control)
  (libraries alcotest masc.agent_core.llm_provider))
+
+(test
+ (name test_dashboard_routing_body)
+ (modules test_dashboard_routing_body)
+ (libraries masc_test_deps unix masc.server))

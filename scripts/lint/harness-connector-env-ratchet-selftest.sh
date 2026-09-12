@@ -8,7 +8,13 @@
 # one covered boot file, one uncovered boot file, and one non-booting file.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="${HARNESS_RATCHET_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Same mis-root hazard as the ratchet itself: fail loudly if this file was
+# resolved from outside the masc checkout.
+if [ ! -d "${ROOT}/scripts/harness" ]; then
+  echo "harness-connector-env-ratchet self-test ERROR: ROOT '${ROOT}' is not the masc checkout (set HARNESS_RATCHET_ROOT explicitly)" >&2
+  exit 2
+fi
 RATCHET="${ROOT}/scripts/lint/harness-connector-env-ratchet.sh"
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/harness-ratchet-selftest.XXXXXX")"

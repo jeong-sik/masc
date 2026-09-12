@@ -246,9 +246,6 @@ let end_session config ~agent_name =
            "agent session end: invalid agent JSON for %s: %s | snapshot=%s"
            actual_name e (Yojson.Safe.to_string snapshot));
 
-    (* Capture active agents before removal for relationship materialization *)
-    let peers_before_leave = (read_state config).active_agents in
-
     let _state = update_state config (fun s ->
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
@@ -269,13 +266,6 @@ let end_session config ~agent_name =
     (Atomic.get Workspace_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
       ~event:Workspace_hooks.Session_ended
       ~details:`Null;
-
-    (* Record co-presence relationships via hook (async, non-blocking) *)
-    (try (Atomic.get Workspace_hooks.relation_on_leave_fn)
-           ~leaving_agent:actual_name ~active_agents:peers_before_leave
-     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Workspace.error "relation-materializer session-end hook error: %s"
-         (Printexc.to_string exn));
 
     Printf.sprintf "%s left the namespace" actual_name
   end else

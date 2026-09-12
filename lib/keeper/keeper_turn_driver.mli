@@ -38,6 +38,12 @@ include
 
 (** {1 Named runtime execution} *)
 
+type output_contract = Provider_default | Tool_verdict
+(** [Tool_verdict] leaves final prose unconstrained: API response_format is
+    cleared and official clients use their ordinary tool-call channel. It does
+    not suppress arbitrary provider transforms or validate tool arguments; the
+    caller owns the typed verdict protocol. *)
+
 type deferred_runtime_lane = private
   { assignment_id : string
   ; failed_runtime_id : string
@@ -201,6 +207,7 @@ val run_named :
     unit) ->
   ?on_runtime_lane_terminal_error:(lane_terminal_error -> unit) ->
   ?on_deferred_runtime_consumed:(unit -> unit) ->
+  ?output_contract:output_contract ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_core.Error.t) result) ->

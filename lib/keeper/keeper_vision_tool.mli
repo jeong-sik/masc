@@ -116,6 +116,7 @@ type vision_outcome =
   | Vo_timeout
   | Vo_invalid_structured_response of string
   | Vo_provider of { failure_class : Tool_result.tool_failure_class; detail : string }
+  | Vo_official_failure of { runtime_id : string; failure : Fusion_official_client.failure }
   | Vo_empty
   | Vo_truncated
 
@@ -129,7 +130,8 @@ val outcome_of_response :
     so the operator sees the real cause. Exposed for tests. *)
 
 val run_vision
-  :  ?complete:complete_fn
+  :  ?base_path:string
+  -> ?complete:complete_fn
   -> ?runtime_id:string
   -> ?exclude_runtime_ids:string list
   -> sw:Eio.Switch.t
@@ -142,6 +144,15 @@ val run_vision
   -> vision_outcome
 (** The one-shot vision sub-call core (runtime resolution + Provider-boundary
     call + §2.2 classification). Used by {!handle} and by eager ingestion.
+
+    Only [runtime.media_failover] declares standalone image candidates; exact
+    output lane slots do not implicitly join that fleet. Image-capable Codex
+    and Claude clients use their native image and output-schema channels.
+    [base_path] supplies their process working directory; it is unnecessary
+    for API candidates. Typed client admission failures can advance to the
+    next declared candidate; host stops and ambiguous accepted turns cannot.
+    The client answer is validated using the same required nonempty [text]
+    contract as the API answer.
 
     [exclude_runtime_ids] drops candidates the caller's own walk already spent
     this turn. The quota window moves a candidate that answered a hard
@@ -170,7 +181,8 @@ val run_vision
     Eager ingestion can keep the turn alive with a typed unread placeholder. *)
 
 val handle
-  :  ?complete:complete_fn
+  :  ?base_path:string
+  -> ?complete:complete_fn
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -180,7 +192,8 @@ val handle
   -> string
 
 val handle_with_outcome
-  :  ?complete:complete_fn
+  :  ?base_path:string
+  -> ?complete:complete_fn
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

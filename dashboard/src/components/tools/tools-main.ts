@@ -62,11 +62,12 @@ export function Tools() {
   const error = toolsError.value
   const inventory = data?.tool_inventory.tools ?? []
   const usage = data?.tool_usage ?? null
+  const callLog = usage?.non_public_call_log
   const configResolution = data?.config_resolution
   const runtimeResolution = data?.runtime_resolution
   const configResolutionWarming = configResolution?.status === 'warming'
   const runtimeResolutionWarming = runtimeResolution?.status === 'warming'
-  const usageCoverageGap = usage ? coverageGapDisplay(usage) : null
+  const usageCoverageGap = callLog ? coverageGapDisplay(callLog) : null
   const keeperNames = (data?.keeper_waiting_inventory?.keepers ?? [])
     .map(keeper => keeper.keeper_name)
     .sort((left, right) => left.localeCompare(right))
@@ -200,19 +201,19 @@ export function Tools() {
       <//>
 
       <${SectionCard} label="도구 사용 현황" class="section v2-lab-panel mb-4">
-        ${usage
+        ${callLog
           ? html`
               <div class="text-xs text-[var(--color-fg-muted)] mb-2">
-                등록됨 ${usage.registered_count} (모든 MCP 서버 합산) · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
+                별도 비공개 호출 로그 · 아래 사용 집계의 상태를 나타내지 않습니다.
               </div>
               <div class="text-3xs text-[var(--color-fg-muted)] mb-2">
-                <span class="font-mono">${usage.source ?? '(unknown source)'}</span>
+                <span class="font-mono">${callLog.source ?? '(unknown source)'}</span>
                 <span class="mx-1">·</span>
-                <span class="font-mono ${sourceHealthClass(usage.health)}">${usage.health ?? 'unknown'}</span>
+                <span class="font-mono ${sourceHealthClass(callLog.health)}">${callLog.health ?? 'unknown'}</span>
                 <span class="mx-1">·</span>
-                <span>${usage.stale_reason ?? sourceFreshnessLabel(usage.latest_age_s)}</span>
+                <span>${callLog.stale_reason ?? sourceFreshnessLabel(callLog.latest_age_s)}</span>
                 <span class="mx-1">·</span>
-                <span>${(usage.entry_count ?? 0).toLocaleString()} durable rows</span>
+                <span>${callLog.entry_count?.toLocaleString() ?? '알 수 없음'}개 보존 기록</span>
               </div>
               ${usageCoverageGap ? html`
                 <div class="mb-2 grid gap-0.5 text-3xs text-[var(--color-status-warn)]">
@@ -222,12 +223,11 @@ export function Tools() {
               ` : null}
             `
           : null}
-        <${ToolMetrics} />
+        <${ToolMetrics} data=${usage} />
       <//>
       ${data?.generated_at
         ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--color-fg-muted)] text-xs">
             <span>생성 시각: ${data.generated_at}</span>
-            <span>metrics 기준: 최근 1시간</span>
           </div>`
         : null}
 

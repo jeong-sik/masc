@@ -8,15 +8,6 @@ type scenario =
   | Retry_success
   | Usage_unreported
 
-let scenario_to_string = function
-  | Success -> "success"
-  | Exit_nonzero -> "exit-nonzero"
-  | Stale_revision -> "stale-revision"
-  | Missing_artifact -> "missing-artifact"
-  | Retry_success -> "retry-success"
-  | Usage_unreported -> "usage-unreported"
-;;
-
 let scenario_of_string = function
   | "success" -> Ok Success
   | "exit-nonzero" -> Ok Exit_nonzero
@@ -27,22 +18,10 @@ let scenario_of_string = function
   | other -> Error ("unknown scenario: " ^ other)
 ;;
 
-let scenario_of_string_opt s =
-  match scenario_of_string s with
-  | Ok sc -> Some sc
-  | Error _ -> None
-;;
-
 type live_scenario =
   | Live_success
   | Live_negative
   | Live_retry_success
-
-let live_scenario_to_string = function
-  | Live_success -> "success"
-  | Live_negative -> "negative"
-  | Live_retry_success -> "retry-success"
-;;
 
 let live_scenario_of_string = function
   | "success" -> Ok Live_success
@@ -51,20 +30,9 @@ let live_scenario_of_string = function
   | other -> Error ("unknown live scenario: " ^ other)
 ;;
 
-let live_scenario_of_string_opt s =
-  match live_scenario_of_string s with
-  | Ok sc -> Some sc
-  | Error _ -> None
-;;
-
 type run_scenario =
   | Matrix_scenario of scenario
   | Live_scenario of live_scenario
-
-let run_scenario_to_string = function
-  | Matrix_scenario sc -> scenario_to_string sc
-  | Live_scenario lsc -> live_scenario_to_string lsc
-;;
 
 let run_scenario_of_string ~execution_mode s =
   match execution_mode with
@@ -91,12 +59,6 @@ let usage_scope_of_string = function
   | "per-request" -> Ok Per_request
   | "cumulative-request-snapshot" -> Ok Cumulative_request_snapshot
   | other -> Error ("invalid or unknown usage_scope: " ^ other)
-;;
-
-let usage_scope_of_string_opt s =
-  match usage_scope_of_string s with
-  | Ok scope -> Some scope
-  | Error _ -> None
 ;;
 
 type reported_usage =
@@ -1201,90 +1163,3 @@ let run_observation_of_json (json0 : Yojson.Safe.t) : (run_observation, string) 
   | Not_found -> Error "Key or element not found"
 ;;
 
-let checker_summary_to_json (s : checker_summary) : Yojson.Safe.t =
-  let findings_json =
-    List.map
-      (fun f ->
-         `Assoc
-           [ "rule_id", `String f.rule_id
-           ; "description", `String f.description
-           ; "passed", `Bool f.passed
-           ; ( "detail"
-             , match f.detail with Some d -> `String d | None -> `Null )
-           ])
-      s.findings
-  in
-  `Assoc
-    [ "matrix_expected", `Int s.matrix_expected
-    ; "matrix_observed", `Int s.matrix_observed
-    ; "matrix_passed", `Int s.matrix_passed
-    ; "live_expected", `Int s.live_expected
-    ; "live_observed", `Int s.live_observed
-    ; "live_passed", `Int s.live_passed
-    ; "false_verified_count", `Int s.false_verified_count
-    ; "required_join_missing_count", `Int s.required_join_missing_count
-    ; ( "unknown_usage_coerced_to_zero_count"
-      , `Int s.unknown_usage_coerced_to_zero_count )
-    ; "duplicated_usage_count", `Int s.duplicated_usage_count
-    ; ( "reported_usage_totals_mismatch_count"
-      , `Int s.reported_usage_totals_mismatch_count )
-    ; "overall_passed", `Bool s.overall_passed
-    ; "findings", `List findings_json
-    ]
-;;
-
-let checker_summary_of_json (json : Yojson.Safe.t) : (checker_summary, string) result =
-  try
-    let matrix_expected = json |> member "matrix_expected" |> to_int in
-    let matrix_observed = json |> member "matrix_observed" |> to_int in
-    let matrix_passed = json |> member "matrix_passed" |> to_int in
-    let live_expected = json |> member "live_expected" |> to_int in
-    let live_observed = json |> member "live_observed" |> to_int in
-    let live_passed = json |> member "live_passed" |> to_int in
-    let false_verified_count = json |> member "false_verified_count" |> to_int in
-    let required_join_missing_count =
-      json |> member "required_join_missing_count" |> to_int
-    in
-    let unknown_usage_coerced_to_zero_count =
-      json |> member "unknown_usage_coerced_to_zero_count" |> to_int
-    in
-    let duplicated_usage_count =
-      json |> member "duplicated_usage_count" |> to_int
-    in
-    let reported_usage_totals_mismatch_count =
-      json |> member "reported_usage_totals_mismatch_count" |> to_int
-    in
-    let overall_passed = json |> member "overall_passed" |> to_bool in
-    let findings =
-      json
-      |> member "findings"
-      |> to_list
-      |> List.map (fun f ->
-        { rule_id = f |> member "rule_id" |> to_string
-        ; description = f |> member "description" |> to_string
-        ; passed = f |> member "passed" |> to_bool
-        ; detail = f |> member "detail" |> to_string_option
-        })
-    in
-    Ok
-      { matrix_expected
-      ; matrix_observed
-      ; matrix_passed
-      ; live_expected
-      ; live_observed
-      ; live_passed
-      ; false_verified_count
-      ; required_join_missing_count
-      ; unknown_usage_coerced_to_zero_count
-      ; duplicated_usage_count
-      ; reported_usage_totals_mismatch_count
-      ; overall_passed
-      ; findings
-      }
-  with
-  | Yojson.Json_error msg -> Error ("JSON syntax error: " ^ msg)
-  | Yojson.Safe.Util.Type_error (msg, _) -> Error ("JSON type error: " ^ msg)
-  | Failure msg -> Error msg
-  | Invalid_argument msg -> Error msg
-  | Not_found -> Error "Key or element not found"
-;;

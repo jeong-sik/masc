@@ -1721,12 +1721,16 @@ let board_title_width ~cols =
   Render_schedule.board_title_width
     ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
 
-let board_kind_mark = function
-  | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ "@" ^ Ansi.reset
-  | Some Post_by_automation -> (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset
-  | Some Post_by_system -> " "
-  | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ "?" ^ Ansi.reset
-  | None -> " "
+(* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
+   reads from the same function. Nothing explained these marks anywhere before:
+   a reader met "@" in the first column and had to guess. *)
+let board_kind_mark kind =
+  let mark = Masc_tui_board_kind_mark.glyph kind in
+  match kind with
+  | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ mark ^ Ansi.reset
+  | Some Post_by_automation -> (Theme.warn ()) ^ mark ^ Ansi.reset
+  | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ mark ^ Ansi.reset
+  | Some Post_by_system | None -> mark
 
 (** The draft pane. For a new post the commit-message convention is stated
     on screen rather than assumed: first line is the title, the rest is the

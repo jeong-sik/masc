@@ -55,6 +55,7 @@ jobs:
             addons/msx-observer/skills/msx-observe/SKILL.md \
             addons/msx-observer/skills/msx-observe/scripts/summarize.py \
             addons/msx-observer/skills/msx-observe/references/observations.md \
+            addons/protocol.py addons/output-statistics/server.py \
             test/test_tui_palette_matching.exe 2>&1 | tee proof/build.log
           for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_schema_bytes test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_tui_palette_matching; do
             "_build/default/test/$test.exe" 2>&1 | tee "proof/$test.log"

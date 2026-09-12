@@ -558,8 +558,13 @@ let split_at_cells text cells =
    pane for a record that has not settled. A cut is the one meaning it does
    not need to carry.
 
-   The cell cost is derived rather than written as 1, so the column arithmetic
-   cannot overrun if the mark ever changes width. *)
+   The cell cost is derived rather than written as 1, so each of the three
+   budgets subtracts what the mark actually spends. That is one cell today,
+   the same number the literal said. A wider mark would not be safe by
+   derivation alone: where the column is narrower than the mark, every one of
+   the three floors its budget at zero and draws the mark anyway rather than
+   cutting it, so the mark would overrun. A two-cell mark needs those three
+   sites decided, not just this value changed. *)
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 

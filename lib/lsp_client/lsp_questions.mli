@@ -27,7 +27,7 @@ val reference_index_ready
     what to run, where this looked, and why a short list would have been
     worse than a refusal. In that order, because the sentence reaches a TUI
     pane title that truncates from the right -- at 200 columns it arrived as
-    "Run: dun~", which is the half an operator cannot act on.
+    "Run: dun…", which is the half an operator cannot act on.
 
     Asked before the question rather than after the answer, because a server
     with no index does not say so -- it answers with the occurrences in the

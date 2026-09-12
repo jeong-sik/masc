@@ -4,6 +4,19 @@ module Layout = Masc_tui_message_layout
 module Frame = Masc_tui_frame
 module Markdown_cache = Masc_tui_markdown_render_cache
 
+(* Does this text carry the renderer's cut mark? A scalar question, not a byte
+   one: [String.contains text '~'] used to answer it, and once the mark became
+   "…" that check could no longer fail -- the byte it looked for had left the
+   renderer, so an assertion meant to catch a regression passed for free. *)
+let carries_cut_mark text =
+  let mark = "\xe2\x80\xa6" in
+  let n = String.length mark in
+  let rec seek i =
+    i + n <= String.length text
+    && (String.sub text i n = mark || seek (i + 1))
+  in
+  seek 0
+
 let entry ?(timestamp = "12:34:56") ?timeline_bucket
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
@@ -92,7 +105,7 @@ let test_inline_oversized_entry_marks_the_missing_middle () =
       check bool "inline mode keeps the start that names the speaker" true
         (String.starts_with ~prefix:"abc" (String.trim first.text));
       check bool "a partial inline clock has no generic truncation mark" true
-        (not (String.contains first.gutter '~'));
+        (not (carries_cut_mark first.gutter));
       (match gap.kind with
        | Layout.Viewport_gap { hidden_rows } ->
            check int "inline marker reports only rows not drawn"

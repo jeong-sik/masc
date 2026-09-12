@@ -6679,7 +6679,7 @@ def memory_journal_timeline_interaction(
             output,
             rows=31,
             columns=12,
-            needle=b"Keeper ch…",
+            needle=b"Keeper ch\xe2\x80\xa6",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )

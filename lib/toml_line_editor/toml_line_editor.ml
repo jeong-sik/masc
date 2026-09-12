@@ -32,7 +32,26 @@ let escape_string s =
   Buffer.contents buf
 ;;
 
-let scalar_line ~key ~value = Printf.sprintf "%s = \"%s\"" key (escape_string value)
+(* A TOML bare key is letters, digits, underscore and dash. Anything else has
+   to be quoted, and a dot most of all: [edgar.a.poe = "Yuna"] is not one key
+   with dots in it, it is a path into nested tables, so the mapping written is
+   not the mapping meant and the read-back refuses it.
+
+   {!key_of_line} has always understood a quoted key. Only the writing side
+   never produced one, so a key that needed quotes could not round-trip. *)
+let render_key key =
+  let bare_char = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' -> true
+    | _ -> false
+  in
+  if key <> "" && String.for_all bare_char key
+  then key
+  else Printf.sprintf "\"%s\"" (escape_string key)
+;;
+
+let scalar_line ~key ~value =
+  Printf.sprintf "%s = \"%s\"" (render_key key) (escape_string value)
+;;
 
 (* Single-line array rendering (used by the runtime string-array editor). Fusion
    multi-line arrays are rendered by [multiline_array_lines]. *)
@@ -42,7 +61,7 @@ let string_array_line ~key ~values =
     |> List.map (fun value -> Printf.sprintf "\"%s\"" (escape_string value))
     |> String.concat ", "
   in
-  Printf.sprintf "%s = [%s]" key rendered
+  Printf.sprintf "%s = [%s]" (render_key key) rendered
 ;;
 
 (* Multi-line array block: [key = \[], one indented quoted element per line, then
@@ -51,7 +70,7 @@ let multiline_array_lines ~key ~values =
   let elements =
     List.map (fun value -> Printf.sprintf "  \"%s\"," (escape_string value)) values
   in
-  (Printf.sprintf "%s = [" key :: elements) @ [ "]" ]
+  (Printf.sprintf "%s = [" (render_key key) :: elements) @ [ "]" ]
 ;;
 
 let split_lines content =
@@ -395,9 +414,9 @@ let float_text v =
 let value_line ~key ~value =
   match value with
   | String v -> scalar_line ~key ~value:v
-  | Int v -> Printf.sprintf "%s = %d" key v
-  | Float v -> Printf.sprintf "%s = %s" key (float_text v)
-  | Bool v -> Printf.sprintf "%s = %b" key v
+  | Int v -> Printf.sprintf "%s = %d" (render_key key) v
+  | Float v -> Printf.sprintf "%s = %s" (render_key key) (float_text v)
+  | Bool v -> Printf.sprintf "%s = %b" (render_key key) v
 ;;
 
 (* ── section-scoped edits ───────────────────────────────────────────────── *)

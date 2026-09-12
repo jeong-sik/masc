@@ -4592,7 +4592,9 @@
  (modules test_tui_metrics_tail)
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_keeper_chat_projection
+  masc_tui_message_layout
   masc_tui_metrics_tail
   masc
   dated_jsonl
@@ -5073,6 +5075,16 @@
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
  (libraries alcotest masc_tui_types))
+
+(test
+ (name test_tui_log_channel_column)
+ (modules test_tui_log_channel_column)
+ (libraries alcotest masc masc_tui_observation_layout))
+
+(test
+ (name test_tui_board_kind_mark)
+ (modules test_tui_board_kind_mark)
+ (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
 
 (test
  (name test_keeper_composition_async_broker)
@@ -5727,6 +5739,7 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
+ (deps ../addons/protocol.py ../addons/output-statistics/server.py)
  (libraries masc_test_deps eio eio_main yojson unix))
 
 (test

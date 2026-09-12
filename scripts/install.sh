@@ -673,7 +673,10 @@ finish_setup_journey() {
     log "[dry-run] would open the installed workspace, model and sandbox setup journey"
     return 0
   fi
-  if ! "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2; then
+  # The journey asks for a model and a sandbox, so it needs the terminal the
+  # workspace check already borrows: an installer read from a pipe leaves this
+  # child reading the pipe, and the wizard reports a cancellation nobody asked for.
+  if ! with_terminal_input "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2; then
     warn "MASC is installed; imp preparation is incomplete. Run masc setup to resume."
     return 1
   fi
@@ -1803,6 +1806,9 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
 fi
 # --- end committed builtin Skill refresh ------------------------------------
 configure_shell_path
+# Setup can start a runtime and write workspace state. Run it only after the
+# installed bundle is committed, so cancelling setup cannot roll the binary back.
+finish_setup_journey
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
 # do not default-disable Runtime_events. If the operator supplied an override,

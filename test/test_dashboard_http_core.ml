@@ -4210,6 +4210,63 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
             config
             unrelated_surface))
 
+let test_composite_preserves_runtime_attempt_scopes () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let check_receipt ~keeper_name ~lane_attempt_count ~fallback_applied ~outcome =
+    (* Observed turn 408: the selected GLM runtime had one internal attempt,
+       after a failed Kimi candidate. Turn 409 had one candidate and no fallback.
+       Persist the receipt wire, then read the actual composite execution view. *)
+    let runtime_fields =
+      [ "name", `String "glm-coding.glm-5.3"
+      ; "attempt_count", `Int 1
+      ; "fallback_applied", `Bool fallback_applied
+      ; "outcome", `String outcome
+      ]
+      @ Option.to_list
+          (Option.map (fun count -> "lane_attempt_count", `Int count) lane_attempt_count)
+    in
+    let receipt =
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "recorded_at", `String "2026-09-12T13:09:49Z"
+        ; "outcome", `String "success"
+        ; "terminal_reason_code", `String "success"
+        ; "operator_disposition",
+          `String (if fallback_applied then "pass_next_model" else "pass")
+        ; "runtime", `Assoc runtime_fields
+        ]
+    in
+    Dated_jsonl.append
+      (Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name)
+      receipt;
+    let execution =
+      Server_dashboard_http_composite_claims.composite_execution_receipt_json
+        ~config
+        ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
+        ~keeper_name
+    in
+    let open Yojson.Safe.Util in
+    check bool "durable receipt is present" true
+      (execution |> member "latest_receipt_present" |> to_bool);
+    let runtime = execution |> member "runtime" in
+    check int "selected runtime's internal attempt count stays one" 1
+      (runtime |> member "attempt_count" |> to_int);
+    check (option int) "lane candidate count retains its own scope"
+      lane_attempt_count
+      (Json_util.get_int runtime "lane_attempt_count");
+    check bool "observed fallback is preserved" fallback_applied
+      (runtime |> member "fallback_applied" |> to_bool);
+    check string "runtime outcome is preserved" outcome
+      (runtime |> member "outcome" |> to_string)
+  in
+  check_receipt ~keeper_name:"composite-failover" ~lane_attempt_count:(Some 2)
+    ~fallback_applied:true ~outcome:"passed_to_next_model";
+  check_receipt ~keeper_name:"composite-single" ~lane_attempt_count:(Some 1)
+    ~fallback_applied:false ~outcome:"completed";
+  check_receipt ~keeper_name:"composite-unobserved" ~lane_attempt_count:None
+    ~fallback_applied:false ~outcome:"completed"
+
 let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
   let execution ~terminal_reason_code ~operator_disposition_reason =
     `Assoc
@@ -5639,6 +5696,8 @@ let () =
             test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick
             test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
+          test_case "composite preserves runtime attempt scopes" `Quick
+            test_composite_preserves_runtime_attempt_scopes;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );

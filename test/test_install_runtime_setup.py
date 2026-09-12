@@ -1000,6 +1000,7 @@ base_url = "https://voice.fixture.invalid/v1"
         for enabled in (True, False):
             with self.subTest(enabled=enabled):
                 voice = ('\n[voice.tts]\ndefault_voice = "fixture"\n'
+                         'default_model = "fixture-model"\n'
                          '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
                          f'enabled = {str(enabled).lower()}\n')
                 with self.workspace(voice) as (base, runtime):
@@ -1009,7 +1010,9 @@ base_url = "https://voice.fixture.invalid/v1"
                     result = subprocess.run([BINARY, 'voice-verify', '--json'],
                                             capture_output=True, text=True, env=env, check=False)
                     self.assertEqual(result.returncode, 1, result.stderr)
-                    attempt = json.loads(result.stdout)['tts'][0]
+                    attempts = json.loads(result.stdout)['tts']
+                    self.assertIsInstance(attempts, list, result.stdout)
+                    attempt = attempts[0]
                     self.assertEqual(attempt['state'], 'skipped')
                     self.assertEqual(attempt['detail'],
                                      'this verifier does not probe the MCP synthesis transport'

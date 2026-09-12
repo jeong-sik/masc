@@ -16402,11 +16402,13 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "esc" | "q" | "Q" -> close ()
             | "j" | "down" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 1
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
             | "k" | "up" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
             | "d" | "pagedown" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 5
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:5
             | "u" | "pageup" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
             | "g" | "home" ->
@@ -17552,7 +17554,8 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Resources ->
            open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->
-           state.resource_scroll <- state.resource_scroll + 1
+           state.resource_scroll <-
+             Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
@@ -18568,7 +18571,10 @@ and is loaded on demand through keeper_skill.
                  (match state.resource_focus with
                   | Right_pane ->
                       state.resource_scroll <-
-                        max 0 (state.resource_scroll + (direction * page))
+                        (if direction > 0 then
+                          Masc_tui_types.scroll_down_from state.resource_scroll
+                            ~by:page
+                        else max 0 (state.resource_scroll + (direction * page)))
                   | Left_pane ->
                       move_list_by_rows state ~delta:(direction * page))
              (* No row list to page. Overview's two panes and Activity's ring
@@ -19464,7 +19470,8 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <- state.resource_scroll + 1
+                  state.resource_scroll <-
+                    Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
                 else
                   let total =
                     match state.resources_list with

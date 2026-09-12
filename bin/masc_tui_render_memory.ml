@@ -15,14 +15,6 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
-(* The row under the facts title. The title says the total and the filter; this
-   says how that total breaks down and which sort produced the order, so each
-   fact is written in one place. The split runs in this direction because the
-   title is the line with no room to spare: at 140 columns the Activity pane
-   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
-   the keeper, the total, both filters, the clock and the badge.
-
-   [grand_total] is not passed in because it is not drawn here. *)
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
    for, not how it should be read, so the title reads it as a phrase. The title
    is drawn at every terminal size; a body row is not. *)
@@ -61,6 +53,14 @@ let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
     Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts \xc2\xb7 %s%s)  %s  %s" screen
       keeper total filter_label query_label timestamp badge
 
+(* The row under the facts title. The title says the total and the filter; this
+   says how that total breaks down and which sort produced the order, so each
+   fact is written in one place. The split runs in this direction because the
+   title is the line with no room to spare: at 140 columns the Activity pane
+   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
+   the keeper, the total, both filters, the clock and the badge.
+
+   [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
   Printf.sprintf "  %s(%d ord \xc2\xb7 %d src \xc2\xb7 %d drop)%s \xc2\xb7 %sSort [s]:%s %s"
     (Theme.recede ()) ordinary source dropped Ansi.reset

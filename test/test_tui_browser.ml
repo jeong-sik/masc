@@ -29,36 +29,11 @@ let test_a_quote_in_the_url_cannot_close_the_quoting () =
   ignore (Unix.close_process_in channel);
   check str "the shell sees exactly the URL, one argument" url seen
 
-let chosen_for uname =
-  match Masc_tui_browser.kernel_of_uname uname with
-  | Ok kernel ->
-    "ok:" ^ Masc_tui_browser.opener_command (Masc_tui_browser.opener_for kernel)
-  | Error reason -> "error:" ^ reason
-
-let test_darwin_gets_open_and_only_open () =
-  (* One kernel, one opener. xdg-open is never on macOS, so it is never a
-     fallback there. *)
-  check str "Darwin -> open" "ok:open" (chosen_for "Darwin\n")
-
-let test_a_refusing_opener_runs_once_and_its_refusal_is_kept () =
-  (* The shell is a counter here. A non-zero exit from the chosen opener is
-     the answer the operator sees -- opener, status, URL -- not a reason to
-     run a second opener. *)
-  let url = "https://e.com/post/1?a=1&b=2" in
-  let commands = ref [] in
-  let run command =
-    commands := command :: !commands;
-    Unix.WEXITED 1
-  in
-  let outcome =
-    Masc_tui_browser.open_url_with ~run ~kernel:Masc_tui_browser.Darwin url
-  in
-  check (Alcotest.result str str) "the refusal names opener, status and url"
-    (Error ("open exited 1 for " ^ url))
-    outcome;
-  check (Alcotest.list str) "exactly one command ran, the Darwin opener's"
-    [ "open '" ^ url ^ "'" ]
-    !commands
+let test_both_openers_are_tried () =
+  (* A machine with neither gets an error naming both. One name would leave
+     an operator checking the wrong thing. *)
+  check (Alcotest.list str) "macOS first, then freedesktop"
+    [ "open"; "xdg-open" ] Masc_tui_browser.openers
 
 let test_the_browser_gets_the_page_not_the_picture_or_the_title () =
   (* Three distinct strings, so the wrong pick is visible. The title is
@@ -73,30 +48,14 @@ let test_the_browser_gets_the_page_not_the_picture_or_the_title () =
   in
   check str "page url, not image url, not title" page_url picked
 
-let test_linux_gets_xdg_open () =
-  check str "Linux -> xdg-open" "ok:xdg-open" (chosen_for "Linux")
-
-let test_an_unknown_kernel_is_refused_by_name () =
-  (* No guess. The refusal quotes the kernel so the operator can see what
-     the machine said rather than which opener we assumed. *)
-  check str "refused, quoting the kernel"
-    "error:no link opener known for kernel \"FreeBSD\" (open on Darwin, xdg-open on Linux)"
-    (chosen_for "FreeBSD")
-
 let () =
   Alcotest.run "tui_browser"
     [ ( "the command",
         [ Alcotest.test_case "the url is quoted" `Quick test_the_url_is_quoted;
           Alcotest.test_case "a quote in the url cannot close the quoting"
             `Quick test_a_quote_in_the_url_cannot_close_the_quoting;
-          Alcotest.test_case "darwin gets open and only open" `Quick
-            test_darwin_gets_open_and_only_open;
-          Alcotest.test_case "linux gets xdg-open" `Quick
-            test_linux_gets_xdg_open;
-          Alcotest.test_case "an unknown kernel is refused by name" `Quick
-            test_an_unknown_kernel_is_refused_by_name;
-          Alcotest.test_case "a refusing opener runs once and its refusal is kept"
-            `Quick test_a_refusing_opener_runs_once_and_its_refusal_is_kept;
+          Alcotest.test_case "both openers are tried" `Quick
+            test_both_openers_are_tried;
           Alcotest.test_case "the browser gets the page, not the picture or the title"
             `Quick test_the_browser_gets_the_page_not_the_picture_or_the_title;
         ] );

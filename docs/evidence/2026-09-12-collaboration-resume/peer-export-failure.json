@@ -44,5 +44,14 @@
     "bytes": 484694,
     "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16"
   },
-  "finding": "Blob persisted correctly, but typed artifact projection requires a result manifest that export did not attach. No recipient materialization proven."
+  "finding": "Blob persisted correctly, but typed artifact projection requires a result manifest that export did not attach. No recipient materialization proven.",
+  "repair": {
+    "pr": 35364,
+    "head": "4c082dac16",
+    "targeted_test_run": 34685512137,
+    "worktree": "/tmp/masc-peer-export-manifest",
+    "source_review": "root and implementing reviewer agree missing manifest causes conversion failure",
+    "validation": "source parsing and diff checks passed; CI dispatched",
+    "deployed": false
+  }
 }

@@ -319,7 +319,7 @@ let test_checkpoint_requires_original_active_scope () =
   match Continuation.For_testing.validate_scope ~operation_id:original checkpoint with
   | Error _ -> () | Ok () -> fail "historical membership authorized another operation's checkpoint"
 
-let test_server_transcript_deferral_preserves_final_slot () =
+let test_server_transcript_deferral_preserves_final_slot ~native () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs env#fs;
   let base_dir = Filename.temp_file "direct-continuation-transcript-" "" in
@@ -332,6 +332,12 @@ let test_server_transcript_deferral_preserves_final_slot () =
         ~trace_id:(Keeper_id.Trace_id.of_string "original-session" |> require "trace")
         ~turn_count:2 ~canonical_checkpoint_bytes:"original input and completed first tool"
         |> require "checkpoint reference" in
+    let resumed_checkpoint =
+      if native then Keeper_semantic_execution.Official_client
+        {client_kind=Codex; runtime_id="codex.default"; session_id="provider/session";
+         turn_id="native-turn-before-gate"; tool_surface_sha256=String.make 64 'a';
+         frame=Keeper_repetition_snapshot.empty}
+      else Keeper_semantic_execution.Agent_core checkpoint in
     let tool execution_id : Keeper_chat_store.tool_call =
       {call_id="provider-reused-id"; execution_id=Some (Ids.Execution_id.of_string execution_id);
        call_name="Execute"; args="{}"} in
@@ -345,8 +351,8 @@ let test_server_transcript_deferral_preserves_final_slot () =
         Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant) pending);
     let terminal = Server_keeper_operation_transcript.Terminal
       {content="Final answer after alternate runtime"; kind=Keeper_chat_store.Row_kind.Utterance} in
-    persist (Some checkpoint) terminal [tool "exec-after-retry"];
-    persist (Some checkpoint) terminal [tool "exec-after-retry"];
+    persist (Some resumed_checkpoint) terminal [tool "exec-after-retry"];
+    persist (Some resumed_checkpoint) terminal [tool "exec-after-retry"];
     let rows = Keeper_chat_store.load_all ~base_dir ~keeper_name in
     let answers = List.filter (fun (row : Keeper_chat_store.chat_message) ->
         Keeper_chat_store.Role.equal row.role Keeper_chat_store.Role.Assistant) rows in
@@ -357,7 +363,7 @@ let test_server_transcript_deferral_preserves_final_slot () =
     check (list string) "pre/post retry tool evidence survives ordinal zero on each attempt"
       ["exec-before-retry"; "exec-after-retry"] executions;
     match Server_keeper_operation_transcript.persist ~base_dir ~keeper_name ~operation_id
-      ~resumed_from:(Some checkpoint) ~settlement:Server_keeper_operation_transcript.Runtime_deferred
+      ~resumed_from:(Some resumed_checkpoint) ~settlement:Server_keeper_operation_transcript.Runtime_deferred
       ~tool_calls:[tool "exec-before-retry"] () with
     | Error _ -> () | Ok () -> fail "old effect was allowed under a new attempt provenance")
 
@@ -373,4 +379,6 @@ let () = run "direct runtime continuation" ["http", [test_case
   "authority", [test_case "active original operation owns checkpoint" `Quick
     test_checkpoint_requires_original_active_scope;
     test_case "server persistence keeps final answer and both tool attempts" `Quick
-    test_server_transcript_deferral_preserves_final_slot]]
+    (test_server_transcript_deferral_preserves_final_slot ~native:false);
+    test_case "native Gate preserves original and resumed tool ordinals across reload" `Quick
+    (test_server_transcript_deferral_preserves_final_slot ~native:true)]]

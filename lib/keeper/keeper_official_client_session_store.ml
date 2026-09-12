@@ -834,7 +834,13 @@ let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_clie
       tool_surface_sha256=stored_surface; _}
     when client_kind = checkpoint.client_kind && stored_kind = checkpoint.client_kind
       && runtime_id = checkpoint.runtime_id && stored_runtime = checkpoint.runtime_id
+      (* The turn is compared, not only the session. A per-Keeper session
+         outlives the turn that opened the Gate, so a queued operation running
+         meanwhile can settle the same session on a later turn. Matching on
+         session_id alone admitted that state and appended the resumed work
+         after turns it never saw. *)
       && settled.session_id = checkpoint.session_id
+      && settled.turn_id = checkpoint.turn_id
       && tool_surface_sha256 = checkpoint.tool_surface_sha256
       && stored_surface = checkpoint.tool_surface_sha256 -> Ok ()
   | Some _ | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"

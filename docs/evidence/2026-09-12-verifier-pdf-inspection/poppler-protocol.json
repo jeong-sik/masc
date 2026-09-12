@@ -1,0 +1,37 @@
+{
+  "scope": "actual Poppler protocol probe; OCaml authority tests not yet run",
+  "source_bytes": 102608,
+  "source_sha256": "ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb",
+  "page_count": 3,
+  "pages": [
+    {
+      "page": 1,
+      "width_points": 595.2756,
+      "height_points": 841.8898,
+      "text_characters": 155,
+      "contains_title": true,
+      "rendered_bytes": 64091,
+      "rendered_sha256": "3db665442ed4dbcef2eafc5a769868ce9772814f9ecc7edd7acf2ba726e1b34c"
+    },
+    {
+      "page": 2,
+      "width_points": 595.2756,
+      "height_points": 841.8898,
+      "text_characters": 257,
+      "contains_title": true,
+      "rendered_bytes": 81051,
+      "rendered_sha256": "c85b181149d6bfd3fec00ad3fbd3e51eb75d2bb48d0a562c1e90cd6620eed731"
+    },
+    {
+      "page": 3,
+      "width_points": 595.2756,
+      "height_points": 841.8898,
+      "text_characters": 251,
+      "contains_title": true,
+      "rendered_bytes": 80753,
+      "rendered_sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62"
+    }
+  ],
+  "malformed_exit": 1,
+  "malformed_stderr": "Syntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't find trailer dictionary\nSyntax Error: Couldn't read xref table\n"
+}

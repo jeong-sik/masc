@@ -2673,6 +2673,10 @@ type voice_wizard_session =
             told rather than overwriting it. *)
   ; vws_status : string option
   ; vws_saving : bool
+  ; vws_probe : string list
+        (** What each endpoint answered after the save, one line each. The
+            wizard writes a configuration; whether anything on the other end
+            responds is measured, not inferred from the write succeeding. *)
   }
 
 let voice_wizard_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) =
@@ -2709,6 +2713,7 @@ let voice_wizard_open ~section ~provider ~revision =
   ; vws_revision = revision
   ; vws_status = None
   ; vws_saving = false
+  ; vws_probe = []
   }
 
 let voice_wizard_append session text =

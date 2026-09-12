@@ -1764,6 +1764,7 @@ type async_msg =
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
   | Voice_wizard_saved of (Yojson.Safe.t, string) result
+  | Voice_wizard_probed of (Yojson.Safe.t, string) result
   | Voice_config_loaded of
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
@@ -2563,6 +2564,53 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
 (* Saving what the wizard assembled. The request carries the revision the
    session opened against, so a session left open while something else wrote is
    told its read went stale rather than overwriting that writer. *)
+
+(* Writing a configuration is not the same as it working. After the save, every
+   configured endpoint is asked to say one sentence, and each answer is shown --
+   including the ones that refused, which is the part a chain hides by stopping
+   at the first endpoint that answers. *)
+let launch_voice_wizard_probe state ~mailbox message =
+  let host = server_peer_host in
+  let port = state.port in
+  let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
+  let run () =
+    let result =
+      Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
+    in
+    enqueue_async mailbox (Voice_wizard_probed result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async mailbox (Voice_wizard_probed (Error "Eio switch is unavailable"))
+;;
+
+(* The sentence the endpoints are asked to say. In Korean because that is what
+   this workstation speaks, and an endpoint can answer for one language and not
+   another -- which is the thing a probe is for. *)
+let voice_wizard_probe_sentence = "음성 연결을 확인합니다"
+
+let voice_wizard_probe_lines json =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "endpoints" fields with
+      | Some (`List items) ->
+          List.filter_map
+            (fun item ->
+              match item with
+              | `Assoc entry ->
+                  let text key =
+                    match List.assoc_opt key entry with
+                    | Some (`String value) -> value
+                    | Some _ | None -> "?"
+                  in
+                  Some (Printf.sprintf "%-20s %s" (text "endpoint_id") (text "detail"))
+              | _ -> None)
+            items
+      | Some _ | None -> [])
+  | _ -> []
+;;
+
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_types.voice_wizard_session) =
   match
@@ -10873,14 +10921,45 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Voice_wizard_saved result ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
-       | Some _, Ok _ ->
-           (* Closed on success, and the pane reloaded: what it was showing is
-              now one revision behind what is on disk. *)
-           state.voice_wizard <- None;
-           launch_voice_config_load state ~mailbox
+       | Some session, Ok _ ->
+           (* The pane is reloaded: what it was showing is now one revision
+              behind. The session stays open to report what answers. *)
+           launch_voice_config_load state ~mailbox;
+           (match session.vws_draft.Voice_wizard.section with
+            | Voice_setup.Tts ->
+                state.voice_wizard
+                  <- Some
+                       { session with
+                         vws_saving = false
+                       ; vws_status = Some "saved. asking the endpoints to answer…"
+                       };
+                launch_voice_wizard_probe state ~mailbox voice_wizard_probe_sentence
+            | Voice_setup.Stt ->
+                (* Transcription needs audio this pane does not have. The CLI
+                   takes a file, and the runbook says how to make one. *)
+                state.voice_wizard
+                  <- Some
+                       { session with
+                         vws_saving = false
+                       ; vws_status =
+                           Some
+                             "saved. run  masc voice-verify --audio FILE  to hear it back"
+                       })
        | Some session, Error message ->
            state.voice_wizard
              <- Some { session with vws_saving = false; vws_status = Some message })
+  | Voice_wizard_probed result ->
+      (match (state.voice_wizard, result) with
+       | None, _ -> ()
+       | Some session, Error message ->
+           state.voice_wizard <- Some { session with vws_status = Some message }
+       | Some session, Ok json ->
+           state.voice_wizard
+             <- Some
+                  { session with
+                    vws_status = Some "saved."
+                  ; vws_probe = voice_wizard_probe_lines json
+                  })
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
       (match result with

@@ -13654,6 +13654,15 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Some status ->
      box_line buf cols "";
      box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+  (* Every endpoint, not just the first that answered. A chain stops at the
+     first, which is why a dead fallback reads as healthy until the endpoint in
+     front of it goes away. *)
+  (match session.vws_probe with
+   | [] -> ()
+   | lines ->
+     box_line buf cols "";
+     box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
+     List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

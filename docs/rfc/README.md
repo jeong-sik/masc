@@ -282,7 +282,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0439 | MSX 머신은 서버에 산다 — 사람과 keeper 가 같은 기계에 키를 넣는 길 | Draft | - |
 | 0440 | 이미지 턴의 reroute 는 살아 있는 후보를 걷는다 — lane 과 media_failover 를 한 집합으로, 402·429 후보는 ... | Draft | - |
 | 0441 | A running turn must not misread or outrank the person waiting on it | Draft | - |
-| 0442 | TOML as Declarative System and Wire Vocabulary Authority | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |
@@ -329,6 +328,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-skill-usage-rollup | Skill 사용 롤업 — 세션횡단 활성화 집계를 CLI·TUI·대시보드에 표면화 | Draft | - |
 | RFC-skills-as-tools | Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다 | Active | - |
 | RFC-spawn-a-process-that-outlives-the-call | Spawn: a process that outlives the call | Draft | - |
+| RFC-toml-as-declarative-system-and-vocabulary-authority | # RFC — TOML as Declarative System and Wire Vocabulary Authority | Draft | - |
 | RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
 | RFC-tui-frame-budget | TUI 프레임 예산 — 모든 화면에서 build p99 8ms, 입력→화면 p99 20ms | Draft | - |

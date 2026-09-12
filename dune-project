@@ -64,6 +64,9 @@
   ; dirty -- and a run that nobody reverted took the dependency out (#34747).
   ; Path-pinned: `opam pin add ocaml-msx --kind=path <core repo>`, per bin/dune.
   ocaml-msx
+  ; lib/dos_lane links ocaml-dos.dosmachine, the same way lib/msx_lane links
+  ; the MSX core: a second machine keepers play on (RFC-0439).
+  ocaml-dos
   ; Native stdout colour capability detection links the system terminfo API.
   (conf-ncurses :build)
   ; Standard dependencies

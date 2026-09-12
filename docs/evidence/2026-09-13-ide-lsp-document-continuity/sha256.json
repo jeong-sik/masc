@@ -1,0 +1,20 @@
+{
+  "README.md": "3c8ccc15d70ee0c5824873ae5fe67c2ac226078eca94eaa38a2f4d5ec01779c0",
+  "first-probe-failure.json": "0c52c2eed3385bcde9b7bef93283236e4d7805fe0a3092e61f281d5cd9549b5f",
+  "invalid-document.png": "dcbd58a0036dae4900f0c1a802fe58a919d74495330c260c6d51801db6094253",
+  "native-baseline/protocol.json": "aa1f58e26808db70331ef4e5e2ec2164a94cc6b3cb9363205487551f47a9fbe3",
+  "native-baseline/receipt.json": "e4be3497e18027d6e7dd7c1a89fe604e4ee76ac3d66b27051454a7990816d049",
+  "native-baseline/stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "native-first-failure/protocol.json": "828b9e7888b31e77b773c5ea2251a82a51d0a8edc2249347dc2074d88a309707",
+  "native-first-failure/receipt.json": "cb6803cc0e641b9d09d8fef7abb5733d8d8e5340e962377c6a4de801f8b4544b",
+  "native-first-failure/stderr.txt": "5016807079de32dd63a099d7945a8d9c27b3ac850904a1d74cafe0e2aaba3ac5",
+  "native-version-support/protocol.json": "dcf4b6af8c6f1eb12fdb3522559e842431640dbe9e2ac8df25550ea7862c5a3d",
+  "native-version-support/receipt.json": "ed50931cbe58a1d1d4685a768951d742702543da61f18a315ed59fe25b06792e",
+  "native-version-support/stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "protocol.json": "7ed17ea38769c679ed4a0f69880adf83dcd92b4085f287a148ff8b5b8ba096ad",
+  "receipt.json": "0cc26eb85e7a51910282595f2ca9ab8a6c7250f7080b25e36de48b5161e1812e",
+  "source-sha256.json": "c714c4431c550d21bdb977bc68756283e570b59b748bbb342cc25022a7f330ed",
+  "spacer-probe-failure.json": "523946d28dc5592eb35336c968aa3ad547275c681feb1019e6b6eb94043bec0d",
+  "updated-document.png": "1f5097457ded045818713c289a906f295274317c471bd0dfa4db7d70248936aa",
+  "vitest.txt": "0f92af2f0f2882efcff4d55783e1df172baa64411ece69147a0799789f687b0a"
+}

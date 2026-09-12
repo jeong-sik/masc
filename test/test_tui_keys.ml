@@ -779,10 +779,23 @@ let test_fleet_total_cost () =
   Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
     (fleet_total_cost_usd state)
 
+(* The golden below holds every label, so a deliberate relabelling fails it and
+   asks to be looked at -- which is what it is for. The three hops are asserted
+   on their own underneath, because losing one of those is not a relabelling: it
+   is the only place the Config screen names a surface the ring folds under it,
+   and a reader who cannot see it has no way to the surface but the palette. *)
 let test_config_footer_names_child_hops () =
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  p:runtime.toml / models / params / prompts / themes  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next"
-    (Masc_tui_keys.footer_hints Config)
+    "j/k:select / scroll  p:next pane  PgUp/PgDn:page  v:read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  Esc:overview  r:reload  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Config);
+  let hints = Masc_tui_keys.footer_hints Config in
+  List.iter
+    (fun hop ->
+      Alcotest.(check bool) ("Config still names " ^ hop) true
+        (List.exists (String.equal hop)
+           (String.split_on_char ' ' hints
+            |> List.filter (fun piece -> not (String.equal piece "")))))
+    [ "9:Runtime"; "s:resources"; "t:tools" ]
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* g/G/f still belong to Acting. Logs owns the server level floor, direct

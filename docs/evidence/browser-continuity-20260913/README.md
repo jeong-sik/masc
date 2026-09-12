@@ -26,6 +26,8 @@ The experiment also failed cleanup: the original wait did not establish a TUI ex
 
 ## Candidate and limits
 
-`candidate.json` identifies combined source `b079feb43d99827daebfd104b27ad8fb283635ed`, including the merged progressive Skill, read recovery and viewport cadence. Native CI and focused tests were dispatched; this archive currently contains only the preceding failure evidence. It does not claim that the combined candidate passed a live trial or was deployed to the operator's local runtime.
+`candidate.json` identifies combined source `20f45f0119ad59f96b9ea70876ef3990b79917e2`, including the merged progressive Skill, read recovery, viewport cadence and shared-tab navigation follow-up ([#35708](https://github.com/jeong-sik/masc/pull/35708)). Native CI and focused tests were dispatched; this archive currently contains only the preceding failure evidence. It does not claim that this candidate passed a live trial or was deployed to the operator's local runtime.
+
+The earlier combined candidate `b079feb43d99827daebfd104b27ad8fb283635ed` was superseded after the read-recovery Test run exposed a partial-application compiler error. `compiler-error.txt` preserves the diagnostic: the new optional receipt callback was still open at the async observer call site. Commit `00e8dbb0ba` explicitly closes that optional argument in both nontracking observer call sites. The old native and focused jobs were cancelled; the ledger retains their handles and the replacement dispatches. A cancellation is not a passing build.
 
 Run `python3 docs/evidence/browser-continuity-20260913/audit.py`. This offline audit cross-checks receipt/event/turn identities and exact archived image bytes. It does not launch Firefox, rerender the terminal, or assert a comparative latency or provider-token improvement.

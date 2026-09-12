@@ -38,6 +38,15 @@ probes to succeed. Readiness always reports `presentation_inspection: not_run`.
   filesystem fixtures, an empty real Python venv import failure, and fake package
   managers that cannot install host packages.
 
+The first targeted native run, [34702828002](https://github.com/jeong-sik/masc/actions/runs/34702828002),
+failed at source `449743276f3172d9a32dd8caa7b17db95fdefb0f`: the
+`Masc_cli_prerequisites.run` implementation and CLI caller supplied `base_path`,
+but its public interface still omitted that required argument. The interface now
+matches both. Its parse-only check passed, and the Python suite again passed 56
+cases with 12 native-only cases skipped. These local checks do not establish a
+successful native build or execution; the targeted CI run must be repeated at
+the corrected head.
+
 No host dependency installation, local build, deployment, submitted PPTX parsing,
 slide rendering, accessibility check, or end-to-end PPTX verification was performed
 as part of this change. This is the dependency setup component for that later

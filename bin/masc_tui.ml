@@ -1,6 +1,7 @@
 open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
+open Masc_tui_render_prim
 open Masc_tui_loader
 
 (* How long the pane waits on [gh pr view --web] before reporting it. The

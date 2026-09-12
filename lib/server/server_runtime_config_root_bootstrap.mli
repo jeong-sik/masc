@@ -28,3 +28,10 @@ val seed_missing_builtin_skills : base_path:string -> int
 (** Seed complete first-party packages from the binary into [.masc/skills].
     Existing package directories are preserved as a whole, including operator
     resource deletions. Returns the number of newly installed packages. *)
+
+val builtin_skills : unit -> Builtin_skill_package.package list
+
+val refresh_builtin_skills : base_path:string -> int
+(** Installer update: seed missing packages and update recorded, unmodified
+    packages. Print preserved package revisions for explicit operator review.
+    Existing packages without receipts are preserved. *)

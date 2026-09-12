@@ -27,7 +27,7 @@
   masc_string_util)
  (foreign_stubs
   (language c)
-  (names capability_exact_read_stubs)))
+  (names capability_exact_read_stubs directory_exchange_stubs)))
 
 (library
  (name fs_compat)

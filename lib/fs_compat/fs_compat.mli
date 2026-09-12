@@ -843,6 +843,16 @@ val file_mtime : string -> float option
 (** Rename file. *)
 val rename : string -> string -> unit
 
+val exchange_paths : string -> string -> unit
+(** Atomically exchange two existing paths on the same filesystem. Uses
+    RENAME_EXCHANGE on Linux and RENAME_SWAP on macOS. Raises [Unix_error]
+    without changing either path if unsupported; never falls back to two
+    renames. The caller owns path validation and post-publication sync. *)
+
+val rename_noreplace : string -> string -> unit
+(** Publish [src] at [dst] only if [dst] does not exist, including an empty
+    directory or dangling symlink. Unsupported filesystems raise Unix_error. *)
+
 (** [rename_if_exists ~src ~dst] renames [src] to [dst], returning [true]
     on success and [false] if [src] did not exist. Other I/O errors
     propagate as [Sys_error] (Eio.Io is normalized internally, matching

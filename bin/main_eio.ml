@@ -1270,7 +1270,7 @@ let init_record_default =
   Arg.(value & flag & info [ "record-default" ] ~doc)
 
 let init_skills_only =
-  let doc = "Install missing builtin Skills without changing runtime config files" in
+  let doc = "Install or update unmodified builtin Skills without changing runtime config files" in
   Arg.(value & flag & info ["skills-only"] ~doc)
 
 type init_tally = { written : int; skipped : int; failed : int }
@@ -1324,8 +1324,8 @@ let init_cmd_exit base_path force skills_only record_default =
                |> Option.map (fun dest_rel -> rel, dest_rel))
            Embedded_config.file_list))
   in
-  let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
-  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
+  let skills = Server_runtime_config_root_bootstrap.refresh_builtin_skills ~base_path in
+  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed or updated (root=%s)\n"
     result.written result.skipped result.failed skills target_root;
   (* A seeded workspace is the one thing a later bare `masc` needs to know
      about, and until now nothing wrote it down: the operator had to re-supply
@@ -1366,14 +1366,66 @@ let init_cmd =
      Skills in .masc/skills/, and puts one Keeper in keepers/ for you to edit \
      -- it does not autoboot, so it waits until a model and a sandbox exist. \
      The same split the server makes when it creates a config root itself. \
-     Existing config files are kept unless --force; existing Skill packages are \
-     always preserved."
+     Existing config files are kept unless --force; recorded, unmodified Skill packages are updated. Operator edits and \
+     packages without installation receipts are preserved."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info
     Term.(
       const init_cmd_exit $ base_path $ init_force $ init_skills_only
       $ init_record_default)
+
+let skills_refresh_exit base_path name apply expected_revision export_to =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  match List.find_opt (fun package -> Builtin_skill_package.name package = name)
+          (Server_runtime_config_root_bootstrap.builtin_skills ()) with
+  | None -> Printf.eprintf "Unknown builtin Skill package: %s\n" name; 1
+  | Some package ->
+    if Option.is_some export_to then
+      match apply, expected_revision, export_to with
+      | false, None, Some destination ->
+        (match Builtin_skill_package.export ~destination package with
+         | Ok () -> Printf.printf "Bundled package exported to %s\n" destination; 0
+         | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
+      | (true, _, _) | (false, Some _, _) | (false, None, None) ->
+        prerr_endline "--export-to cannot be combined with --apply or --expected-revision"; 1
+    else if apply then
+      match expected_revision with
+      | None -> prerr_endline "--apply requires --expected-revision from a reviewed package"; 1
+      | Some revision ->
+        (match Builtin_skill_package.install ~base_path
+                 ~request:(Builtin_skill_package.Replace_if_revision revision) package with
+         | Ok (Builtin_skill_package.Updated { backup }) ->
+           Printf.printf "Updated %s; previous package: %s\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup; 0
+         | Ok Builtin_skill_package.Current -> print_endline "Package is current"; 0
+         | Ok (Builtin_skill_package.Installed | Builtin_skill_package.Already_present
+               | Builtin_skill_package.Preserved _ | Builtin_skill_package.Preserved_invalid_path _) ->
+           prerr_endline "Package was not replaced"; 1
+         | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
+    else if Option.is_some expected_revision then (
+      prerr_endline "--expected-revision requires --apply"; 1)
+    else
+      match Builtin_skill_package.inspect ~base_path package with
+      | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1
+      | Ok Builtin_skill_package.Missing -> print_endline "Package is missing; masc init --skills-only installs it"; 0
+      | Ok (Builtin_skill_package.Present { revision; bundled_revision; ownership }) ->
+        let ownership = match ownership with
+          | Builtin_skill_package.Recorded -> "recorded, unchanged since installation"
+          | Builtin_skill_package.Untracked -> "untracked; review operator changes before replacement"
+          | Builtin_skill_package.Modified -> "modified since installation; review operator changes before replacement"
+        in
+        Printf.printf "package: %s\ninstalled revision: %s\nbundled revision: %s\nownership: %s\nReview the complete package, then use --apply --expected-revision %s.\n" name revision bundled_revision ownership revision;
+        0
+
+let skills_refresh_cmd =
+  let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"PACKAGE") in
+  let apply = Arg.(value & flag & info [ "apply" ] ~doc:"Replace the reviewed package and retain its complete previous directory") in
+  let expected = Arg.(value & opt (some string) None & info [ "expected-revision" ] ~docv:"SHA256"
+    ~doc:"Reviewed whole-package revision; edits after inspection reject the update") in
+  let export_to = Arg.(value & opt (some string) None & info [ "export-to" ] ~docv:"NEW_DIRECTORY"
+    ~doc:"Export the bundled package to a new directory so its complete changes can be reviewed with diff") in
+  Cmd.v (Cmd.info "skills-refresh" ~doc:"Inspect or explicitly replace one installed builtin Skill package")
+    Term.(const skills_refresh_exit $ base_path $ name $ apply $ expected $ export_to)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -3022,6 +3074,7 @@ let cmd =
       Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
     info
     [ init_cmd
+    ; skills_refresh_cmd
     ; start_cmd
     ; login_cmd
     ; mcp_config_cmd

@@ -1148,6 +1148,14 @@ let file_mtime (path : string) : float option =
        | Unix.Unix_error _ -> None)
 ;;
 
+external publish_paths_raw : bool -> string -> string -> unit = "caml_masc_publish_paths"
+let publish_paths exchange left right =
+  if String.contains left '\000' || String.contains right '\000' then
+    invalid_arg "filesystem publication paths cannot contain NUL";
+  publish_paths_raw exchange left right
+let exchange_paths left right = publish_paths true left right
+let rename_noreplace src dst = publish_paths false src dst
+
 let rename (src : string) (dst : string) : unit =
   with_fs_or_fallback
     ~path:src

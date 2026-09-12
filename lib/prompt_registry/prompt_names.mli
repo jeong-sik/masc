@@ -75,6 +75,7 @@ val keeper_observation_rejected_digest_row : string
     metric/target reachable in principle? *)
 
 val librarian : string
+val workspace_memory_curator : string
 
 val fusion_judge : string
 val fusion_judge_refine : string

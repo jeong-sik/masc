@@ -1024,14 +1024,16 @@ type exact_lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
+  | Workspace_curator
   | Verifier
 
-let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Verifier ]
+let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Workspace_curator; Verifier ]
 
 let exact_lane_id = function
   | Librarian -> "librarian_exact"
   | Hitl_auto_judge -> "hitl_auto_judge"
   | Board_attention -> "board_attention_exact"
+  | Workspace_curator -> "workspace_curator_exact"
   | Verifier -> verifier_exact_lane_id
 ;;
 
@@ -1039,12 +1041,14 @@ let exact_lane_of_id = function
   | "librarian_exact" -> Some Librarian
   | "hitl_auto_judge" -> Some Hitl_auto_judge
   | "board_attention_exact" -> Some Board_attention
+  | "workspace_curator_exact" -> Some Workspace_curator
   | "verifier_exact" -> Some Verifier
   | _ -> None
 ;;
 
 let exact_lane_supports_cli_tail = function
   | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
+  | Workspace_curator -> false
 ;;
 
 let verifier_exact_slot_ids_of_lane_decls
@@ -3044,7 +3048,9 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
                 in
                 Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            all_exact_lanes
+            (* Shared-memory curation is explicitly configured, not enabled by
+               provisioning a general-purpose runtime. *)
+            (List.filter (function Workspace_curator -> false | _ -> true) all_exact_lanes)
         in
         commit_runtime_config_text ~path next)
     in

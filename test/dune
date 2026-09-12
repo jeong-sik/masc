@@ -16,6 +16,12 @@
 ; Test Environment Configuration
 
 (test
+ (name test_workspace_memory_curator_lane)
+ (modules test_workspace_memory_curator_lane)
+ (deps ../config/prompts/workspace_memory_curator.md)
+ (libraries alcotest masc masc.server masc.masc_core masc.fs_compat masc.config_dir_resolver yojson eio eio_main unix))
+
+(test
  (name test_msx_vision)
  (modules test_msx_vision)
  (libraries alcotest unix base64 yojson fs_compat masc masc_test_deps

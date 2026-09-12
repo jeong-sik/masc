@@ -48,10 +48,18 @@
   "repair": {
     "pr": 35364,
     "head": "4c082dac16",
-    "targeted_test_run": 34685512137,
+    "targeted_test_run": 34685539828,
     "worktree": "/tmp/masc-peer-export-manifest",
     "source_review": "root and implementing reviewer agree missing manifest causes conversion failure",
-    "validation": "source parsing and diff checks passed; CI dispatched",
-    "deployed": false
+    "validation": "source parsing and diff checks passed; corrected target CI in progress at reassessment",
+    "deployed": false,
+    "targeted_suites": [
+      "test_keeper_tool_dispatch_runtime",
+      "test_tool_bridge_externalize"
+    ],
+    "superseded_test_run": {
+      "id": 34685512137,
+      "reason": "cancelled: requested nonexistent test_tool_bridge suite"
+    }
   }
 }

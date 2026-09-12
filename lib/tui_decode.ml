@@ -1010,7 +1010,14 @@ let validate_usage_projection ~input_tokens ~output_tokens
            keeper's log 75 of 200 rows landed here -- 37% of the window -- with
            no way to tell which field the writer left out. Same shape as the
            field-set refusal in {!require_exact_object_fields}: the groups that
-           decide the verdict are the groups worth printing. *)
+           decide the verdict are the groups worth printing.
+
+           The missing names come first because this sentence is read on one
+           cut row. Two carriers sit in front of it -- the metrics notice and
+           the row number -- so at 100 columns the reader has about 38 cells of
+           this sentence and at 140 about 78. A writer that fills five of six
+           leaves one name unset and five set: put the five first and the one
+           the writer skipped is what falls off the right edge. *)
         let named =
           [ ("input_tokens", Option.is_some input_tokens)
           ; ("output_tokens", Option.is_some output_tokens)
@@ -1028,9 +1035,8 @@ let validate_usage_projection ~input_tokens ~output_tokens
         in
         Error
           (Printf.sprintf
-             "usage tokens, cost, and trust must form one current atomic \
-              observation (set=[%s], unset=[%s])"
-             (names true) (names false))
+             "usage unset=[%s] set=[%s] is not one current atomic observation"
+             (names false) (names true))
   in
   let* classified = classified in
   let expected_trust = Keeper_usage_trust.to_string classified in

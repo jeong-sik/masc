@@ -1201,11 +1201,10 @@ let test_a_row_with_some_values_null_names_them () =
    with
    | Ok _ -> Alcotest.fail "a null total with filled tokens has to be refused"
    | Error detail ->
-       Alcotest.(check string) "the refusal names the one that is null"
-         "usage tokens, cost, and trust must form one current atomic \
-          observation (set=[input_tokens, output_tokens, \
-          cache_creation_tokens, cache_read_tokens, cost_usd], \
-          unset=[total_tokens])"
+       Alcotest.(check string) "the refusal names the one that is null first"
+         "usage unset=[total_tokens] set=[input_tokens, output_tokens, \
+          cache_creation_tokens, cache_read_tokens, cost_usd] is not one \
+          current atomic observation"
          detail);
   match
     Tui_decode.decode_log_entry

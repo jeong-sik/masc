@@ -150,7 +150,7 @@ let surface_body_height ~rows
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
-  | None -> current + delta
+  | None -> Masc_tui_scroll.step_uncounted ~delta current
   | Some scrolled ->
       let height = surface_body_height ~rows scrolled in
       if delta >= 0 then
@@ -285,7 +285,7 @@ let surface_body_height_at (state : state) ~cursor scrolled =
 
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
-  | None -> (cursor, scroll + delta)
+  | None -> (cursor, Masc_tui_scroll.step_uncounted ~delta scroll)
   | Some ({ sc_count; _ } as scrolled) ->
       (* [delta], not its sign. The two steppers move one row, and reading
          only the direction meant a page key that routed through here moved

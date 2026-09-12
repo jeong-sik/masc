@@ -333,8 +333,9 @@ let test_cancelled_tls_fd_flat () =
       true
     end) in
   let config = { Masc_http_client.Pool.default_config with
-    connect_timeout_seconds = 30.0;
-    connect_failure_cooldown_seconds = 0.0 } in
+    (* Keep cooldown enabled: repeated caller cancellations must not
+       populate it or suppress the next real handshake. *)
+    connect_timeout_seconds = 30.0 } in
   let pool = Masc_http_client.Pool.create ~sw ~env ~config () in
   let url = Printf.sprintf "https://127.0.0.1:%d/" port in
   let cancelled = ref 0 in
@@ -362,6 +363,88 @@ let test_cancelled_tls_fd_flat () =
   Alcotest.(check int) "cancellation does not create backoff state" 0
     (Masc_http_client.Pool.For_testing.connect_failure_count pool);
   Masc_http_client.Pool.shutdown pool
+
+let env_with_clock (env : Eio_unix.Stdenv.base) clock : Eio_unix.Stdenv.base =
+  object
+    method clock = clock
+    method net = env#net
+    method stdin = env#stdin
+    method stdout = env#stdout
+    method stderr = env#stderr
+    method domain_mgr = env#domain_mgr
+    method process_mgr = env#process_mgr
+    method mono_clock = env#mono_clock
+    method fs = env#fs
+    method cwd = env#cwd
+    method secure_random = env#secure_random
+    method debug = env#debug
+    method backend_id = env#backend_id
+  end
+
+let test_establishment_timeout_during_tls () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let module Pool = Masc_http_client.Pool in
+  let started = Eio.Stream.create 1 in
+  let handshakes = ref 0 in
+  let port, completed = start_loopback_server ~sw env (fun flow ->
+    if not (tls_started flow) then false else begin
+      (* tls_started consumed the record type. Read the remaining record
+         header (version + length) and the handshake message type. *)
+      let hello_header = Cstruct.create 5 in
+      Eio.Flow.read_exact flow hello_header;
+      Alcotest.(check int) "handshake message is ClientHello" 1
+        (Cstruct.get_uint8 hello_header 4);
+      incr handshakes;
+      Eio.Stream.add started ();
+      drain_until_eof flow;
+      true
+    end) in
+  let mock_clock = Eio_mock.Clock.make () in
+  let pool_env = env_with_clock env
+    (mock_clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+  let config = Pool.default_config in
+  let pool = Pool.create ~sw ~env:pool_env ~config () in
+  let url = Printf.sprintf "https://127.0.0.1:%d/" port in
+  let attempt () =
+    (* The real clock only bounds broken fixture I/O. The pool's own
+       establishment timer is fired deterministically after TLS starts. *)
+    Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+      let deadline = Eio.Time.now mock_clock +. config.connect_timeout_seconds in
+      let result, () = Eio.Fiber.pair
+        (fun () -> Pool.request pool ~method_:`GET ~url ())
+        (fun () ->
+          Eio.Stream.take started;
+          Eio_mock.Clock.set_time mock_clock deadline) in
+      Alcotest.(check string) "configured establishment timeout during real TLS"
+        (Printf.sprintf "connect timeout: https://127.0.0.1:%d" port)
+        (error_message result);
+      (* Published after the server sees EOF and closes its own socket. *)
+      Eio.Stream.take completed;
+      Eio.Switch.check sw)
+  in
+  attempt ();
+  Alcotest.(check int) "timeout records a connect failure" 1
+    (Pool.For_testing.connect_failure_count pool);
+  let before_ = fd_count () in
+  let backoff = error_message (Pool.request pool ~method_:`GET ~url ()) in
+  Alcotest.(check bool) "timeout activates configured cooldown" true
+    (Astring.String.is_prefix ~affix:"connect backoff:" backoff);
+  Alcotest.(check int) "backoff started no new TLS handshake" 1 !handshakes;
+  Alcotest.(check int) "backoff opened no descriptor" before_ (fd_count ());
+  for _ = 1 to 50 do
+    Eio_mock.Clock.set_time mock_clock
+      (Eio.Time.now mock_clock +. config.connect_failure_cooldown_seconds);
+    attempt ()
+  done;
+  Alcotest.(check int) "every expiry occurred after a real ClientHello" 51 !handshakes;
+  Alcotest.(check int) "timed-out TLS retains no descriptors while pool is alive"
+    before_ (fd_count ());
+  let stats = Pool.stats pool in
+  Alcotest.(check int) "timed-out construction never returned a client" 0
+    stats.create_count_total;
+  Alcotest.(check int) "no timed-out client was parked" 0 stats.total_idle;
+  Pool.shutdown pool
 
 let test_healthy_reuse_and_scope_shutdown ~explicit () =
   Eio_main.run @@ fun env ->
@@ -453,6 +536,8 @@ let () =
             test_failed_tls_fd_flat;
           Alcotest.test_case "cancelled TLS releases descriptors" `Quick
             test_cancelled_tls_fd_flat;
+          Alcotest.test_case "establishment timeout closes real TLS and records backoff" `Quick
+            test_establishment_timeout_during_tls;
           Alcotest.test_case "healthy client reuses and shuts down" `Quick
             (test_healthy_reuse_and_scope_shutdown ~explicit:true);
           Alcotest.test_case "parent teardown closes parked client" `Quick

@@ -13565,6 +13565,45 @@ let render_voice (state : state) =
     | Some (`Int i) -> Some (string_of_int i)
     | Some _ | None -> None
   in
+  (* One line per endpoint, from the admin setup read. The public config route
+     answers whether a fallback is configured and not which one, so a chain that
+     has quietly gone dead reads there exactly like a healthy one. *)
+  let endpoints section =
+    match state.voice_setup with
+    | None -> []
+    | Some json -> (
+        match member [ section; "endpoints" ] json with
+        | Some (`List items) ->
+            List.filter_map
+              (fun item ->
+                match string_of [ "id" ] item with
+                | None -> None
+                | Some id ->
+                    let kind = Option.value (string_of [ "kind" ] item) ~default:"?" in
+                    let address =
+                      match
+                        (string_of [ "base_url" ] item, string_of [ "mcp_url" ] item)
+                      with
+                      | Some url, _ -> url
+                      | None, Some url -> url
+                      | None, None -> "—"
+                    in
+                    let off =
+                      match member [ "enabled" ] item with
+                      | Some (`Bool false) -> "  (disabled)"
+                      | Some _ | None -> ""
+                    in
+                    Some
+                      (Printf.sprintf "    %-20s %s%-18s%s %s%s" id Ansi.dim kind
+                         Ansi.reset address off))
+              items
+        | Some _ | None -> [])
+  in
+  let show_endpoints section =
+    match endpoints section with
+    | [] -> ()
+    | lines -> List.iter (fun line -> box_line buf cols line) lines
+  in
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
@@ -13588,6 +13627,7 @@ let render_voice (state : state) =
          (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
        field "voice"
          (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
+       show_endpoints "tts";
        box_line buf cols "";
        box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
        field "model"
@@ -13599,7 +13639,17 @@ let render_voice (state : state) =
        field "fallback"
          (Option.value
             (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
-            ~default:"—"));
+            ~default:"—");
+       show_endpoints "stt");
+  (* Said once, not per section: the endpoints are missing from both when this
+     read fails, and repeating it twice would read as two faults. *)
+  (match state.voice_setup_error with
+   | None -> ()
+   | Some message ->
+       box_line buf cols "";
+       box_line_styled buf cols ~style:(Theme.warn ())
+         "  the endpoint list could not be read";
+       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset));
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");

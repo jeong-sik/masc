@@ -3469,6 +3469,11 @@ type state = {
   mutable voice_config: Yojson.Safe.t option;
   mutable voice_config_error: string option;
   mutable voice_input_device: string option;
+  (* The admin setup read: each endpoint by id, kind and address. Kept apart
+     from voice_config because one route can answer while the other does not,
+     and a panel that folded them would report the wrong one as broken. *)
+  mutable voice_setup: Yojson.Safe.t option;
+  mutable voice_setup_error: string option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -5069,6 +5074,8 @@ let create_state
   voice_config = None;
   voice_config_error = None;
   voice_input_device = None;
+  voice_setup = None;
+  voice_setup_error = None;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;

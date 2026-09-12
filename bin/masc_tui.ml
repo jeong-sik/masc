@@ -1763,7 +1763,10 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
-  | Voice_config_loaded of (Yojson.Safe.t, string) result * string option
+  | Voice_config_loaded of
+      (Yojson.Safe.t, string) result
+      * (Yojson.Safe.t, string) result
+      * string option
   | Voice_level of { keeper : string; db : float }
   | Voice_transcribed of { keeper : string; text : string }
   | Voice_silent of { keeper : string; reason : string }
@@ -2588,14 +2591,30 @@ let launch_voice_config_load state ~mailbox =
            None
          | Masc_tui_audio_device.No_probe_on_this_platform -> None)
     in
-    enqueue_async mailbox (Voice_config_loaded (config, device))
+    (* The admin read, which names each endpoint. The public config route above
+       answers three booleans and no identity, so a panel built only on it can
+       say that a fallback exists and not which one. *)
+    let setup =
+      match Masc_tui_http.http_get ~host ~port ~path:"/api/v1/voice/setup" with
+      | Ok (200, body) ->
+        (match Yojson.Safe.from_string body with
+         | json -> Ok json
+         | exception _ -> Error "voice setup did not parse as JSON")
+      | Ok (code, body) ->
+        Error (Printf.sprintf "voice setup HTTP %d: %s" code (String.trim body))
+      | Error message -> Error message
+    in
+    enqueue_async mailbox (Voice_config_loaded (config, setup, device))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
     enqueue_async
       mailbox
-      (Voice_config_loaded (Error "Eio switch is unavailable", None))
+      (Voice_config_loaded
+         ( Error "Eio switch is unavailable"
+         , Error "Eio switch is unavailable"
+         , None ))
 ;;
 
 let launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
@@ -10813,7 +10832,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
      first capture no longer belongs to this draft. *)
-  | Voice_config_loaded (result, device) ->
+  | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
       (match result with
        | Ok json ->
@@ -10821,7 +10840,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            state.voice_config_error <- None
        | Error message ->
            state.voice_config <- None;
-           state.voice_config_error <- Some message)
+           state.voice_config_error <- Some message);
+      (match setup with
+       | Ok json ->
+           state.voice_setup <- Some json;
+           state.voice_setup_error <- None
+       | Error message ->
+           state.voice_setup <- None;
+           state.voice_setup_error <- Some message)
   | Voice_level { keeper; db } ->
       if state.voice_capture = Some keeper
          && state.voice_stop_requested <> Some Masc.Voice_bridge.Discard

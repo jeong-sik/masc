@@ -478,24 +478,69 @@ let prepare_review
           }
 ;;
 
+(* RFC-0361 D7(b): the one authority identity every review commits under. *)
+let system_authority = Masc_domain.System_llm_agent { agent_run_id = authority_actor }
+
+(* What one review attempt asks of the scheduler. This is a request: whether
+   a retry is armed, and how soon, is known only after the scheduler answers
+   ([retry_admission]). *)
+type retry_request =
+  | Retry_requested
+  | No_retry_requested
+
+(* What the scheduler did with one request. [Armed_timer]: this request
+   forked the timer, which fires after the full interval. [Joined_running_timer]:
+   the request added keys to a batch whose timer was already running.
+   [Already_pending]: the pending batch already covered every key. *)
+type retry_admission =
+  | Armed_timer
+  | Joined_running_timer
+  | Already_pending
+
+(* What happened to the retry after the attempt was recorded: the value the
+   Board post is projected from. *)
+type retry_scheduling =
+  | Retry_not_requested
+  | Retry_admitted of retry_admission
+
 type process_outcome =
   | Committed
   | Deferred
-  | Retryable_deferred
+  | Stalled of
+      { gate : string
+      ; detail : string
+      ; retry : retry_request
+      }
 
-let process_outcome_of_evaluator_retryable = function
-  | Some true -> Retryable_deferred
-  | Some false | None -> Deferred
+(* The one place that reads the evaluator's retryability. [Some true] is the
+   only automatic-retry authority; [Some false] and [None] leave the next move
+   to the producer, the operator, or the whole-backlog sweep. *)
+let retry_request_of_evaluator_retryable : bool option -> retry_request = function
+  | Some true -> Retry_requested
+  | Some false | None -> No_retry_requested
 ;;
 
-let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~reason () =
+(* The Board disposition for one stall, from what the scheduler reported. A
+   timer this stall armed fires after the lane's full interval; a timer it
+   joined, or one already holding its key, fires when it fires. *)
+let stall_disposition_of_scheduling ~retry_interval_sec
+  : retry_scheduling -> Verification_protocol.stall_disposition
+  = function
+  | Retry_not_requested -> Verification_protocol.No_retry_armed
+  | Retry_admitted Armed_timer ->
+    Verification_protocol.Retry_scheduled
+      { delay = Verification_protocol.Full_interval { seconds = retry_interval_sec } }
+  | Retry_admitted (Joined_running_timer | Already_pending) ->
+    Verification_protocol.Retry_scheduled { delay = Verification_protocol.Shared_timer }
+;;
+
+let defer ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
     "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
-    reason;
-  process_outcome_of_evaluator_retryable evaluator_retryable
+    reason
 ;;
 
 (* Returns the control-flow outcome the scan loop acts on, paired with the
@@ -535,8 +580,8 @@ let commit_verdict
     Committed, on_commit
   | Error error ->
     let detail = Masc_domain.masc_error_to_string error in
-    ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
-    , Verification_run_registry.Commit_failed { detail } )
+    defer ~task_id:task.id ~verification_id ~authority ~reason:detail ();
+    Deferred, Verification_run_registry.Commit_failed { detail }
 ;;
 
 (** What the system lane does with one Task it was woken for, read off the
@@ -576,9 +621,7 @@ let process_task_once
       ~assignee
       ~verification_id
   =
-  (* RFC-0361 D7(b): fixed identity, not a per-judgement random mint — see
-     [authority_actor] above. *)
-  let authority = Masc_domain.System_llm_agent { agent_run_id = authority_actor } in
+  let authority = system_authority in
   (* Register before any work. Every exit below records through [complete],
      including paths that produce no semantic verdict. *)
   let registry = Verification_run_registry.global () in
@@ -612,9 +655,9 @@ let process_task_once
     process_outcome
   in
   let defer_unavailable ~stage ~detail =
+    defer ~task_id:task.id ~verification_id ~authority ~reason:detail ();
     complete
-      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
-      , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
+      (Deferred, Verification_run_registry.Infrastructure_unavailable { stage; detail })
   in
   try
     match admission_of_status task.task_status with
@@ -714,25 +757,19 @@ let process_task_once
            | None -> gate
          in
          (* No verdict means nobody judged this submission. The registry row
-            alone reaches no one, so the outcome is always promoted to the
-            Board, where the producer Keeper and the operator both read it and
-            decide whether to resubmit. The authority does not decide that on
-            their behalf. *)
-         Verification_protocol.notify_stalled_verification
-           ~authority
-           ~task_id:task.id
-           ~verification_id
-           ~gate
-           ~detail;
+            alone reaches no one, so the outcome is promoted to the Board —
+            by [process_task], after this row is recorded and the scheduler
+            has answered, so the post describes the timer that exists rather
+            than the one this attempt asked for. *)
+         defer ~task_id:task.id ~verification_id ~authority ~reason:detail ();
          complete
            ~evaluator_runtime
-           ( defer
-               ~evaluator_retryable:result.evaluator_error_retryable
-               ~task_id:task.id
-               ~verification_id
-               ~authority
-               ~reason:detail
-               ()
+           ( Stalled
+               { gate
+               ; detail
+               ; retry =
+                   retry_request_of_evaluator_retryable result.evaluator_error_retryable
+               }
            , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
@@ -783,9 +820,8 @@ let process_task_once
     raise exn
   | exn ->
     let detail = Printexc.to_string exn in
-    complete
-      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
-      , Verification_run_registry.Raised { detail } )
+    defer ~task_id:task.id ~verification_id ~authority ~reason:detail ();
+    complete (Deferred, Verification_run_registry.Raised { detail })
 ;;
 
 (* Boot and a failed backlog read have no key to aim at. Everything else does,
@@ -826,24 +862,24 @@ let queue_retry ~sw ~wait ~dispatch pending scope =
         }
     in
     if batch.sweep = next.sweep && Review_keys.equal batch.keys next.keys
-    then false
+    then Already_pending
     else if Atomic.compare_and_set pending current (Some next)
     then (
-      (match current with
-       | Some _ -> ()
-       | None ->
-         Eio.Fiber.fork ~sw (fun () ->
+      match current with
+      | Some _ -> Joined_running_timer
+      | None ->
+        Eio.Fiber.fork ~sw (fun () ->
            wait ();
            (* Detach the entire batch before publication. A retry arriving
               during dispatch owns the next timer and cannot be cleared by
               this one. A cancelled timer leaves the durable awaiting Tasks
               for the next runtime's boot sweep. *)
-           match Atomic.exchange pending None with
-           | None -> ()
-           | Some { keys; sweep } ->
-             dispatch
-               (if sweep then Whole_backlog else Targets (Review_keys.elements keys))));
-      true)
+          match Atomic.exchange pending None with
+          | None -> ()
+          | Some { keys; sweep } ->
+            dispatch
+              (if sweep then Whole_backlog else Targets (Review_keys.elements keys)));
+        Armed_timer)
     else enqueue ()
   in
   enqueue ()
@@ -867,7 +903,7 @@ let schedule_retry (runtime : runtime) key =
 let schedule_sweep_retry (runtime : runtime) =
   (* The backlog-read diagnostic already names this request. A duplicate
      sweep shares the existing timer and needs no separate notification. *)
-  let (_ : bool) = schedule_retry_scope runtime Whole_backlog in
+  let (_ : retry_admission) = schedule_retry_scope runtime Whole_backlog in
   ()
 ;;
 
@@ -877,37 +913,67 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
   then (
     (* A retryable evaluator failure has no producer action that can legally
        advance the Task: it is still [AwaitingVerification]. Re-arm the
-       application-owned scan after the durable run/Board observation is
-       recorded. Non-retryable deferrals keep the existing producer/operator
-       contract, and restart recovery still comes from [start]'s initial
-       pending scan. *)
+       application-owned scan after the durable run observation is recorded,
+       then tell the Board what the scheduler did. Non-retryable stalls keep
+       the producer/operator contract, and restart recovery still comes from
+       [start]'s initial pending scan. *)
     let outcome =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
-    match outcome with
-    | Retryable_deferred ->
-      if schedule_retry runtime key
-      then
-        Log.Misc.info
-          "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
-          task.id
-          verification_id
-          runtime.retry_interval_sec
-    | Committed -> ()
-    | Deferred ->
-      (* Nothing schedules another look at this key: the scope rule admits it
-         again only through a fresh submission, or through the sweep, which is
-         armed at boot and after a failed backlog read rather than on a timer.
-         So the Task sits in [AwaitingVerification] until a producer or operator
-         acts. The Task's own status already says so; this line is per-task
-         bookkeeping of a sweep that touches every awaiting Task, and at Info
-         it was 46 lines per boot (#34641), so it is routine. *)
+    (* Nothing schedules another look at a key that settles: the scope rule
+       admits it again only through a fresh submission, or through the sweep,
+       which is armed at boot and after a failed backlog read rather than on a
+       timer. So the Task sits in [AwaitingVerification] until a producer or
+       operator acts. The Task's own status already says so; this line is
+       per-task bookkeeping of a sweep that touches every awaiting Task, and
+       at Info it was 46 lines per boot (#34641), so it is routine. *)
+    let settled_without_retry () =
       Log.Misc.routine
         "system LLM completion authority settled without retry; producer or operator owns the next move task_id=%s verification_id=%s"
         task.id
-        verification_id)
+        verification_id
+    in
+    match outcome with
+    | Committed -> ()
+    | Deferred -> settled_without_retry ()
+    | Stalled { gate; detail; retry } ->
+      let scheduling =
+        match retry with
+        | No_retry_requested ->
+          settled_without_retry ();
+          Retry_not_requested
+        | Retry_requested ->
+          let admission = schedule_retry runtime key in
+          (match admission with
+           | Armed_timer ->
+             Log.Misc.info
+               "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
+               task.id
+               verification_id
+               runtime.retry_interval_sec
+           | Joined_running_timer ->
+             Log.Misc.info
+               "system LLM completion authority joined the pending retry batch task_id=%s verification_id=%s"
+               task.id
+               verification_id
+           | Already_pending -> ());
+          Retry_admitted admission
+      in
+      (* The post is projected from the scheduler's answer, after the run row
+         is recorded and the retry (if any) is armed: the reader is told about
+         a timer that exists. Visibility only; the Board schedules nothing. *)
+      Verification_protocol.notify_stalled_verification
+        ~authority:system_authority
+        ~task_id:task.id
+        ~verification_id
+        ~gate
+        ~detail
+        ~disposition:
+          (stall_disposition_of_scheduling
+             ~retry_interval_sec:runtime.retry_interval_sec
+             scheduling))
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -1078,13 +1144,30 @@ module For_testing = struct
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
 
+  type nonrec retry_request = retry_request =
+    | Retry_requested
+    | No_retry_requested
+
+  type nonrec retry_admission = retry_admission =
+    | Armed_timer
+    | Joined_running_timer
+    | Already_pending
+
+  type nonrec retry_scheduling = retry_scheduling =
+    | Retry_not_requested
+    | Retry_admitted of retry_admission
+
   type nonrec process_outcome = process_outcome =
     | Committed
     | Deferred
-    | Retryable_deferred
+    | Stalled of
+        { gate : string
+        ; detail : string
+        ; retry : retry_request
+        }
 
-  let process_outcome_of_evaluator_retryable =
-    process_outcome_of_evaluator_retryable
+  let retry_request_of_evaluator_retryable = retry_request_of_evaluator_retryable
+  let stall_disposition_of_scheduling = stall_disposition_of_scheduling
 
   type nonrec review_key = review_key =
     { task_id : string

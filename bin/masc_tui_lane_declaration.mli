@@ -18,6 +18,7 @@ type request = Read of string | Save of session
 type response = Read_document of document | Written of receipt | Rejected of failure
 val template : string
 val create : string -> (session, string) result
+val editable_source_path : directory:string -> string -> bool
 val from_document : document -> session
 val write_json : session -> Yojson.Safe.t
 val decode_response : request -> status:int -> body:string -> (response, string) result

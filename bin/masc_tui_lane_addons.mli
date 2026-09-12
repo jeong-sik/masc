@@ -34,6 +34,7 @@ val selected_declaration : t -> declaration option
 val selected_document : t -> Document.session option
 val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
+val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
 val lines : ?width:int -> t -> string list
 

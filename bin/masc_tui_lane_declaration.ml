@@ -65,6 +65,9 @@ let create file_name =
     || String.length file_name <= String.length ".toml" || not (Filename.check_suffix file_name ".toml")
   then Error "Choose one direct-child .toml filename"
   else Ok {file_name;base=None;current=None;text=template;message=None}
+let editable_source_path ~directory source_path =
+  let file_name = Filename.basename source_path in
+  source_path=Filename.concat directory file_name && Result.is_ok (create file_name)
 let from_document (document : document) =
   {file_name=document.file_name;base=Some document;current=Some document;text=document.source_text;message=None}
 let write_json (session : session) =

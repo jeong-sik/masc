@@ -171,6 +171,17 @@ let put_document view (document : Document.session) =
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
     document_key=Some document.file_name}
 let selected_instance view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.instances view.instance_cursor)
+let selected_source_path view =
+  Option.bind view.snapshot (fun snapshot ->
+    Option.bind snapshot.configuration (fun config ->
+      let path = match view.focus with
+        | Configurations -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
+        | Instances | Rows -> Option.bind (selected_instance view) (fun instance ->
+            List.find_map (fun (d : declaration) ->
+              if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
+              then Some d.source_path else None) config.declarations) in
+      Option.bind path (fun path ->
+        if Document.editable_source_path ~directory:config.directory path then Some path else None)))
 let selected_row view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.output.rows view.row_cursor)
 let phase_label = function
   | Row.Attached -> "attached" | Row.Observing -> "observing" | Row.Detaching -> "detaching"
@@ -215,6 +226,8 @@ let configuration_lines view snapshot = match snapshot.configuration with
            (Option.value ~default:"unresolved installation" declaration.installation_id) declaration.source_path;
          "   desired " ^ Option.value ~default:"unknown" declaration.desired;
          "   applied " ^ Option.value ~default:"none" declaration.applied]
+        @ (if Document.editable_source_path ~directory:config.directory declaration.source_path then []
+           else ["   Configuration issue; no declaration file to edit"])
         @ List.map (fun message -> "   Error: " ^ message) declaration.issues) config.declarations)
 let instance_lines view instances =
   List.concat (List.mapi (fun i item ->

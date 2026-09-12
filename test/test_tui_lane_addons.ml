@@ -107,13 +107,26 @@ let configuration_and_ports () =
     "configuration":{"directory":"/config/lane-addons","complete":false,
       "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
         "desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
-      "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"}]},
+      "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"},
+        {"id":null,"source_path":"/config/lane-addons","message":"inventory unavailable"},
+        {"id":null,"source_path":"/config/lane-addons/nested/a.toml","message":"nested file"},
+        {"id":null,"source_path":"/config/sibling/a.toml","message":"other directory"}]},
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
   let view = {UI.initial with snapshot=Some snapshot;configuration_cursor=1} in
   check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
     (Option.get (UI.selected_declaration view)).source_path;
+  check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")
+    (UI.selected_source_path view);
+  List.iter (fun configuration_cursor ->
+    check (option string) "directory/nested/sibling issues cannot become edit targets" None
+      (UI.selected_source_path {view with configuration_cursor})) [2;3;4];
+  check (option string) "current instance can edit its declaration" (Some "/config/lane-addons/custom.toml")
+    (UI.selected_source_path {view with focus=UI.Instances});
+  let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
+  check (option string) "retained historical source does not authorize a new owner edit" None
+    (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
   let lines = UI.lines view in
   check bool "unknown parse identity remains unknown" true
     (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);

@@ -14461,17 +14461,9 @@ let main
   in
   let select_lane_document view =
     let module Addons = Masc_tui_lane_addons in
-    let path = match view.Addons.focus with
-      | Addons.Configurations -> Option.map (fun (d : Addons.declaration) -> d.source_path) (Addons.selected_declaration view)
-      | Addons.Instances | Addons.Rows ->
-          Option.bind (Addons.selected_instance view) (fun instance ->
-            Option.bind view.snapshot (fun snapshot ->
-              Option.bind snapshot.configuration (fun config ->
-                List.find_map (fun (d : Addons.declaration) ->
-                  if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
-                  then Some d.source_path else None) config.declarations))) in
+    let path = Addons.selected_source_path view in
     match path with
-    | None -> state.lane_addons <- Some {view with error=Some "Choose a TOML installation or configuration issue first"}
+    | None -> state.lane_addons <- Some {view with error=Some "Choose a current declaration .toml file; directory issues have no file to edit"}
     | Some path ->
         (match List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=Filename.basename path) view.documents with
          | Some session -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)

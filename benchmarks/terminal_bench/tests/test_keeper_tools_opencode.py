@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.keeper_tools_opencode import KeeperToolsOpenCode  # noqa: E402
+from harbor.models.agent.context import AgentContext  # noqa: E402
 
 
 class FakeEnv:
@@ -75,7 +76,7 @@ def _capture_instruction(monkeypatch) -> dict:
 
 def test_the_pool_prompt_precedes_the_task(tmp_path, monkeypatch):
     captured = _capture_instruction(monkeypatch)
-    asyncio.run(make_agent(tmp_path).run("solve the task", FakeEnv(), object()))
+    asyncio.run(make_agent(tmp_path).run("solve the task", FakeEnv(), AgentContext()))
     assert captured["instruction"].endswith("solve the task")
     assert "`bench-1`" in captured["instruction"]
     assert "masc_keeper_msg" in captured["instruction"]
@@ -84,7 +85,7 @@ def test_the_pool_prompt_precedes_the_task(tmp_path, monkeypatch):
 def test_announce_pool_false_leaves_the_task_prompt_alone(tmp_path, monkeypatch):
     captured = _capture_instruction(monkeypatch)
     agent = make_agent(tmp_path, announce_pool=False)
-    asyncio.run(agent.run("solve the task", FakeEnv(), object()))
+    asyncio.run(agent.run("solve the task", FakeEnv(), AgentContext()))
     assert captured["instruction"] == "solve the task"
 
 
@@ -117,9 +118,19 @@ def test_registration_refuses_an_empty_token(tmp_path):
 
 def test_install_adds_masc_on_top_of_opencode(tmp_path, monkeypatch):
     installed = []
+    bootstrapped_first = []
 
     async def fake_super_install(self, environment):
         installed.append("opencode")
+        # The ordering is the point, and a stub cannot fail on a missing token
+        # the way the real install does: the config patch it appends reads the
+        # bearer token at /opt/masc-bench/token, which bootstrap.sh mints. So
+        # record whether bootstrap had already run by the time the parent
+        # install started. With the old order this is False and every fresh
+        # container failed setup.
+        bootstrapped_first.append(
+            any("bootstrap.sh" in command for command in environment.commands)
+        )
 
     monkeypatch.setattr(
         "harbor.agents.installed.opencode.OpenCode.install", fake_super_install
@@ -142,10 +153,69 @@ def test_install_adds_masc_on_top_of_opencode(tmp_path, monkeypatch):
 
     env = asyncio.run(go())
     assert installed == ["opencode"]
+    assert bootstrapped_first == [True]
     assert ("file", "/opt/masc-bench/bin/masc") in [(k, d) for k, _, d in env.uploads]
     assert any("bootstrap.sh" in c for c in env.commands)
     # The other arms drive keepers from a script; here the model does.
     assert not any("run_episode.sh" in c for c in env.commands)
+
+
+def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
+    """What the keepers spent is the number the arm is compared on."""
+    rows = [
+        '{"input_tokens": 100, "output_tokens": 10, "cost_usd": 0.25,'
+        ' "cache_read_tokens": 7, "cache_creation_tokens": 3}',
+        '{"input_tokens": 50, "output_tokens": 5, "cost_usd": 0.75, "usage_missing": true}',
+        "not json",
+        "",
+    ]
+
+    class LedgerEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            self.commands.append(command)
+
+            class R:
+                stdout = "\n".join(rows) if "costs" in command else ""
+                stderr = ""
+                returncode = 0
+                return_code = 0
+
+            return R()
+
+    async def fake_super_run(self, instruction, environment, context):
+        # The agent's own usage is already recorded by the time the merge runs.
+        context.n_input_tokens = 1_000
+        context.cost_usd = 1.0
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.opencode.OpenCode.run", fake_super_run
+    )
+    context = AgentContext()
+    asyncio.run(make_agent(tmp_path).run("solve the task", LedgerEnv(), context))
+    # Added to what the agent reported, not replacing it.
+    assert context.n_input_tokens == 1_150
+    assert context.n_output_tokens == 15
+    assert context.n_cache_tokens == 10
+    assert context.cost_usd == pytest.approx(2.0)
+    keeper = context.metadata["keeper_usage"]
+    assert keeper["rows"] == 2
+    # A turn the provider never reported usage for is counted, not folded in as
+    # zero: a total that quietly omits turns is worse than one that says so.
+    assert keeper["rows_without_reported_usage"] == 1
+    assert keeper["unparseable_rows"] == 1
+
+
+def test_a_run_without_a_ledger_leaves_the_totals_alone(tmp_path, monkeypatch):
+    async def fake_super_run(self, instruction, environment, context):
+        context.n_input_tokens = 42
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.opencode.OpenCode.run", fake_super_run
+    )
+    context = AgentContext()
+    asyncio.run(make_agent(tmp_path).run("solve the task", FakeEnv(), context))
+    assert context.n_input_tokens == 42
+    assert context.metadata["keeper_usage"]["rows"] == 0
 
 
 def test_the_container_env_names_the_pool(tmp_path):

@@ -38,6 +38,7 @@ from masc_sidecar import (  # noqa: E402
     MASC_MCP_URL,
     MCP_SERVER_NAME,
     MascSidecar,
+    merge_keeper_usage,
     pool_names,
     pool_prompt,
     read_token_guard,
@@ -71,9 +72,16 @@ class KeeperToolsOpenCode(MascSidecar, OpenCode):
         return "masc-keeper-tools-opencode"
 
     async def install(self, environment: BaseEnvironment) -> None:
-        # opencode first: it is the agent, MASC is the thing it can reach.
-        await super().install(environment)
+        # MASC first, even though opencode is the agent and MASC is only the
+        # thing it can reach. The config patch appended by
+        # _build_register_config_command runs inside the parent install and
+        # reads the bearer token at /opt/masc-bench/token; bootstrap.sh mints
+        # that token, and it runs in install_masc. With opencode first, every
+        # fresh container failed setup on a token that did not exist yet.
+        # install_masc uploads binaries and runs bootstrap, none of which needs
+        # opencode present, so the order is free to be this way round.
         await self.install_masc(environment)
+        await super().install(environment)
 
     async def run(
         self,
@@ -92,6 +100,9 @@ class KeeperToolsOpenCode(MascSidecar, OpenCode):
         if self.announce_pool:
             instruction = f"{pool_prompt(self.pool_names)}\n\n{instruction}"
         await super().run(instruction, environment, context)
+        # What the keepers spent is not in what opencode reports, and the arm is
+        # compared on cost.
+        await merge_keeper_usage(self, environment, context)
 
     def _build_register_config_command(self) -> str | None:
         """Add the MASC server to opencode.json with its bearer header.

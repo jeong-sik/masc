@@ -30,6 +30,7 @@ disk there.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -37,6 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from harbor.environments.base import BaseEnvironment
+from harbor.models.agent.context import AgentContext
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -53,6 +55,9 @@ from render_configs import (  # noqa: E402
 
 REMOTE = "/opt/masc-bench"
 TOKEN_PATH = f"{REMOTE}/token"
+# bootstrap.sh sets MASC_BASE_PATH to this, and MASC writes one cost row per
+# provider turn under it.
+KEEPER_COSTS = f"{REMOTE}/base/.masc/costs"
 MASC_MCP_URL = "http://127.0.0.1:8935/mcp"
 MCP_SERVER_NAME = "masc"
 
@@ -176,6 +181,70 @@ class MascSidecar:
             env=self.masc_container_env(),
             timeout_sec=900,
         )
+
+
+async def merge_keeper_usage(
+    agent, environment: BaseEnvironment, context: AgentContext
+) -> None:
+    """Add what the keepers spent to the episode totals.
+
+    The harness records the agent process's own usage. Keepers reach providers
+    themselves, and that spend lands in MASC's cost ledger inside the container
+    rather than in anything harbor sees -- so without this an arm that delegates
+    reads as cheaper than the baseline it exists to be compared with, which is
+    the one number the comparison turns on.
+
+    Rows whose usage the provider never reported are counted and carried in
+    metadata rather than folded in as zero: a total that quietly omits turns is
+    worse than one that says how many it could not see.
+    """
+    # AgentContext starts with no metadata at all rather than an empty mapping.
+    if context.metadata is None:
+        context.metadata = {}
+    ledger = await environment.exec(
+        f"cat {KEEPER_COSTS}/*/*.jsonl 2>/dev/null || true"
+    )
+    if ledger.return_code != 0:
+        context.metadata["keeper_usage"] = {"read_failed": ledger.stderr[-400:]}
+        return
+    totals = {"input": 0, "output": 0, "cache": 0}
+    cost = 0.0
+    rows = 0
+    unreported = 0
+    unparseable = 0
+    for line in ledger.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            unparseable += 1
+            continue
+        rows += 1
+        if row.get("usage_missing"):
+            unreported += 1
+        totals["input"] += int(row.get("input_tokens") or 0)
+        totals["output"] += int(row.get("output_tokens") or 0)
+        totals["cache"] += int(row.get("cache_read_tokens") or 0) + int(
+            row.get("cache_creation_tokens") or 0
+        )
+        cost += float(row.get("cost_usd") or 0.0)
+    # The agent's own usage is already here; these are additional requests, so
+    # they add rather than replace.
+    context.n_input_tokens = (context.n_input_tokens or 0) + totals["input"]
+    context.n_output_tokens = (context.n_output_tokens or 0) + totals["output"]
+    context.n_cache_tokens = (context.n_cache_tokens or 0) + totals["cache"]
+    context.cost_usd = (context.cost_usd or 0.0) + cost
+    context.metadata["keeper_usage"] = {
+        "rows": rows,
+        "input_tokens": totals["input"],
+        "output_tokens": totals["output"],
+        "cache_tokens": totals["cache"],
+        "cost_usd": cost,
+        "rows_without_reported_usage": unreported,
+        "unparseable_rows": unparseable,
+    }
 
 
 def read_token_guard() -> str:

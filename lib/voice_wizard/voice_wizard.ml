@@ -158,6 +158,7 @@ let changes draft =
 ;;
 
 type step =
+  | Section
   | Provider
   | Name
   | Address
@@ -182,10 +183,12 @@ let steps draft =
     | Voice_setup.Tts -> [ Voice ]
     | Voice_setup.Stt -> []
   in
-  ((Provider :: Name :: address) @ credential @ [ Model ] @ voice) @ [ Review ]
+  ((Section :: Provider :: Name :: address) @ credential @ [ Model ] @ voice)
+  @ [ Review ]
 ;;
 
 let step_prompt = function
+  | Section -> "Is this endpoint for speech out or speech in?"
   | Provider -> "Which provider serves this endpoint?"
   | Name -> "What should this endpoint be called? It is how the entry is addressed later."
   | Address -> "What address does it answer on?"
@@ -198,6 +201,7 @@ let step_prompt = function
 ;;
 
 let step_gap = function
+  | Section -> None
   | Provider -> None
   | Name -> Some Endpoint_id_is_blank
   | Address -> Some Address_is_blank
@@ -278,3 +282,22 @@ let save_request draft ~revision =
         [ "expected_revision", `String revision
         ; "changes", `List (List.map change_json changes)
         ])
+
+(* Changing the side re-picks the provider when the current one does not serve
+   it: an MCP tool speaks and does not listen, so carrying it across would leave
+   a draft whose provider is not in its own offered list. Everything else is
+   provider vocabulary and is reset with it. *)
+let with_section draft section =
+  if draft.section = section
+  then draft
+  else (
+    let provider =
+      if List.mem draft.provider (providers_for section)
+      then draft.provider
+      else (
+        match providers_for section with
+        | first :: _ -> first
+        | [] -> draft.provider)
+    in
+    let fresh = blank ~section ~provider in
+    { fresh with endpoint_id = draft.endpoint_id })

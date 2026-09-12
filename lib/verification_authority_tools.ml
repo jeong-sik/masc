@@ -377,13 +377,14 @@ let is_pdf path bytes =
 
 let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
   match Verification_pdf_inspection.inspect
-    ~base_path:t.config.base_path ~max_image_bytes ~bytes with
+    ~base_path:t.config.base_path ~max_image_bytes ~bytes () with
   | Error error ->
     let failure_class = match error with
-      (* Both are the lane's own limits answering, not the run failing: a
-         document that spends the Poppler budget spends it again on a retry. *)
+      (* These are the lane's own limits answering, not the run failing: a
+         document over a size or Poppler budget is the submitter's to fix. *)
       | Verification_pdf_inspection.Image_policy_rejected _
-      | Verification_pdf_inspection.Poppler_budget_spent _ -> Tool_result.Policy_rejection
+      | Verification_pdf_inspection.Poppler_budget_spent _
+      | Too_many_pages _ | Rendered_bytes_exceeded _ -> Tool_result.Policy_rejection
       | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time

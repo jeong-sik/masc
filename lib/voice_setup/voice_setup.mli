@@ -36,6 +36,12 @@ type change =
       (** Required once a section exists, and never blank: every endpoint in
           the section is asked for this model by name. *)
   | Set_tts_default_voice of string
+  | Set_send_on_stop of bool
+      (** [\[voice.stt\]].send_on_stop: whether ending a capture also sends
+          what was heard, instead of leaving it in the draft. Here rather than
+          in a TUI-only key because this is the section a configuring surface
+          writes, and the setting could otherwise only be turned on by editing
+          runtime.toml by hand. *)
   | Set_agent_voice of string * string option
       (** [(agent_id, voice)] in [\[voice.tts.agent_voices\]]. [None] drops the
           mapping, so the agent falls back to [tts.default_voice]. *)

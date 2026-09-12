@@ -19,6 +19,8 @@ type error =
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
   | Poppler_budget_spent of { program : string; budget_sec : float }
+  | Too_many_pages of { pages : int; limit : int }
+  | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
   | Storage_failed of string
 
 let error_to_string = function
@@ -38,6 +40,15 @@ let error_to_string = function
     Printf.sprintf
       "pdf_inspection_budget_spent: %s did not finish within the %.0fs this inspection gets for every Poppler call together"
       program budget_sec
+  | Too_many_pages {pages;limit} ->
+    Printf.sprintf
+      "pdf_page_budget_exceeded: %d pages, over the %d this verifier renders"
+      pages limit
+  | Rendered_bytes_exceeded {pages;bytes;limit} ->
+    Printf.sprintf
+      "pdf_render_budget_exceeded: %d pages rendered to %d bytes, over the %d one \
+       response carries"
+      pages bytes limit
   | Storage_failed detail -> "pdf_inspection_storage_failed: " ^ detail
 
 let ( let* ) = Result.bind
@@ -75,7 +86,15 @@ let parsed_pages xml =
    slot. *)
 let poppler_budget_sec = 60.0
 
-let inspect ~base_path ~max_image_bytes ~bytes =
+(* Every page can sit under [max_image_bytes] and the document still be too
+   large: the render loop holds each PNG and the result base64-encodes all of
+   them into one response. Both the count and the total are capped, because
+   either one alone lets the other run away. *)
+let max_pages = 64
+let max_total_image_bytes = 24 * 1024 * 1024
+
+let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
+      ~base_path ~max_image_bytes ~bytes () =
   let missing = Pdf_runtime_dependencies.missing () in
   if missing <> [] then Error (Dependency_unavailable missing)
   else
@@ -122,7 +141,12 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
       let* xml = read_owned root xml_path in
       let* descriptions = parsed_pages xml in
-      let rec render number acc = function
+      let page_count = List.length descriptions in
+      let* () =
+        if page_count > max_pages
+        then Error (Too_many_pages {pages=page_count;limit=max_pages})
+        else Ok () in
+      let rec render number total acc = function
         | [] -> Ok (List.rev acc)
         | (width_points,height_points,text) :: rest ->
           let prefix = Filename.concat root (Printf.sprintf "page-%d" number) in
@@ -137,8 +161,14 @@ let inspect ~base_path ~max_image_bytes ~bytes =
             else match Keeper_vision_tool.sniff_image_media_type png with
               | Ok "image/png" -> Ok ()
               | Ok _ | Error _ -> Error (Invalid_output "Poppler page rendering is not a PNG") in
-          render (number + 1) ({number;width_points;height_points;text;png} :: acc) rest in
-      let* pages = render 1 [] descriptions in
+          let total = total + size in
+          let* () =
+            if total > max_total_image_bytes
+            then Error (Rendered_bytes_exceeded
+                          {pages=page_count;bytes=total;limit=max_total_image_bytes})
+            else Ok () in
+          render (number + 1) total ({number;width_points;height_points;text;png} :: acc) rest in
+      let* pages = render 1 0 [] descriptions in
       let* retained = read_owned root source in
       if not (String.equal retained bytes) then Error (Invalid_output "captured PDF changed during inspection")
       else Ok {source_bytes=String.length bytes;source_sha256=Digestif.SHA256.(digest_string bytes |> to_hex);

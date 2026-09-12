@@ -113,7 +113,9 @@ let io_cases =
           write path
             "[tui]\ntheme = \"monokai\"\nboard_sort = \"discussed\"\n\
              lift_colours = false\ntable_frame = true\nhints_visible = false\n\
-             coalesce_queued_input = true\nvoice_send_on_stop = false\n";
+             coalesce_queued_input = true\n\n\
+             [voice.stt]\ndefault_model = \"scribe_v1\"\nsend_on_stop = false\n\n\
+             [[voice.stt.endpoints]]\nid = \"eleven\"\nkind = \"elevenlabs_direct\"\n";
           let chosen = Config.load ~base_path:base in
           write path "[tui]\ntheme = \"nord\"\n";
           check_opt "retained theme" (Some "monokai") chosen.theme;
@@ -122,11 +124,11 @@ let io_cases =
           Alcotest.(check (option bool)) "frame" (Some true) chosen.table_frame;
           Alcotest.(check (option bool)) "hints" (Some false) chosen.hints_visible;
           Alcotest.(check (option bool)) "coalesce" (Some true) chosen.coalesce_queued_input;
-          Alcotest.(check (option bool)) "voice consent" (Some false) chosen.voice_send_on_stop;
+          Alcotest.(check (option bool)) "voice consent" (Some false) chosen.send_on_stop;
           let next = Config.load ~base_path:base in
           check_opt "new read sees new theme" (Some "nord") next.theme;
           check_opt "new read sees removed order" None next.board_sort;
-          Alcotest.(check (option bool)) "removed voice setting is absent" None next.voice_send_on_stop))
+          Alcotest.(check (option bool)) "removed voice setting is absent" None next.send_on_stop))
   ; Alcotest.test_case "reads theme from the base's runtime.toml" `Quick
       (fun () ->
         with_temp_base (fun ~base ~config ->
@@ -179,26 +181,61 @@ let coalesce_cases =
           (coalesce_of "[tui]\ncoalesce_queued_input = \"yes\"\n"))
   ]
 
-(* Whether ^Y also sends, [tui].voice_send_on_stop. Absence must read as None
+(* Whether ^Y also sends, [voice.stt].send_on_stop. Absence must read as None
    so the caller's default (off) stands: unlike its neighbours this one sends
    a message without the operator confirming it, and a file that never
-   mentions it is not that operator asking for it. *)
-let send_on_stop_of s = Config.voice_send_on_stop_of_doc (doc_of s)
+   mentions it is not that operator asking for it.
 
-let voice_send_on_stop_cases =
-  [ Alcotest.test_case "reads [tui] voice_send_on_stop" `Quick (fun () ->
+   Read out of the [voice] section rather than a [tui] key. The setting used
+   to have two spellings: this file read [tui].voice_send_on_stop, which no
+   surface published, while [voice.stt].send_on_stop was parsed, published by
+   GET /api/v1/voice/config and by the voice setup route, and read by nothing.
+   An operator who set the documented one got silence. *)
+let send_on_stop_of = Config.send_on_stop_of_text
+
+(* A whole stt section, because that is what the parser needs: every
+   transcriber is asked for a model by name, so a section naming none does not
+   load and the key inside it is not reachable either. *)
+let stt_section ?(extra = "") () =
+  "[voice.stt]\ndefault_model = \"scribe_v1\"\n" ^ extra
+  ^ "\n[[voice.stt.endpoints]]\nid = \"eleven\"\nkind = \"elevenlabs_direct\"\n"
+
+let send_on_stop_cases =
+  [ Alcotest.test_case "reads [voice.stt] send_on_stop" `Quick (fun () ->
         Alcotest.(check (option bool)) "true" (Some true)
-          (send_on_stop_of "[tui]\nvoice_send_on_stop = true\n"))
+          (send_on_stop_of (stt_section ~extra:"send_on_stop = true\n" ())))
   ; Alcotest.test_case "false stays false" `Quick (fun () ->
         Alcotest.(check (option bool)) "false" (Some false)
-          (send_on_stop_of "[tui]\nvoice_send_on_stop = false\n"))
-  ; Alcotest.test_case "absent key -> None (caller keeps the draft)" `Quick
+          (send_on_stop_of (stt_section ~extra:"send_on_stop = false\n" ())))
+  (* A section that loads but never names the key reads as off, not as absent:
+     [Voice_config] carries this one as a plain [bool] defaulting to false, so
+     "not asked for" and "asked for off" are the same answer -- which they are,
+     because both keep the draft. Only a missing or unloadable section is
+     [None], and that too keeps the draft. *)
+  ; Alcotest.test_case "a section that omits the key reads as off" `Quick
       (fun () ->
+        Alcotest.(check (option bool)) "off" (Some false)
+          (send_on_stop_of (stt_section ())))
+  ; Alcotest.test_case "no [voice] section at all -> None" `Quick (fun () ->
         Alcotest.(check (option bool)) "none" None
           (send_on_stop_of "[tui]\ntheme = \"x\"\n"))
+  (* A section the voice parser refuses reads as off rather than as the last
+     value that happened to parse. The TUI is not where a broken voice config
+     is reported -- the speak and transcribe paths name it -- and off is the
+     direction that does not send a message nobody confirmed. *)
   ; Alcotest.test_case "wrong type -> None, not a crash" `Quick (fun () ->
         Alcotest.(check (option bool)) "string" None
-          (send_on_stop_of "[tui]\nvoice_send_on_stop = \"yes\"\n"))
+          (send_on_stop_of (stt_section ~extra:"send_on_stop = \"yes\"\n" ())))
+  ; Alcotest.test_case "a section that does not load -> None" `Quick (fun () ->
+        Alcotest.(check (option bool)) "no model named" None
+          (send_on_stop_of
+             "[voice.stt]\nsend_on_stop = true\n\n\
+              [[voice.stt.endpoints]]\nid = \"eleven\"\nkind = \"elevenlabs_direct\"\n"))
+  (* The old spelling is not read any more. A file that still carries it gets
+     the default, which is what makes this a cut rather than two settings. *)
+  ; Alcotest.test_case "the old [tui] spelling is not read" `Quick (fun () ->
+        Alcotest.(check (option bool)) "ignored" None
+          (send_on_stop_of "[tui]\nvoice_send_on_stop = true\n"))
   ]
 
 (* The write side of [tui].theme. It is the only key here that changes while
@@ -338,7 +375,7 @@ let () =
     ; ( "lift_colours", lift_cases )
     ; ("hints_visible_of_doc", hints_cases)
     ; ("coalesce_queued_input", coalesce_cases)
-    ; ("voice_send_on_stop", voice_send_on_stop_cases)
+    ; ("send_on_stop", send_on_stop_cases)
     ; ("theme_io", io_cases)
     ; ("text_with_theme", write_cases)
     ; ("set_theme", store_cases)

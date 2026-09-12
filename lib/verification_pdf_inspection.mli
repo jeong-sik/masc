@@ -26,9 +26,36 @@ type error =
           document that hangs a tool, or that declares enough pages to spend
           the budget across them, fails here rather than holding one of the
           four global review slots. *)
+  | Too_many_pages of { pages : int; limit : int }
+      (** Raised from the page count, before any page is rendered. *)
+  | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
+      (** Raised part way through rendering; [bytes] is what had accumulated. *)
   | Storage_failed of string
 
 val error_to_string : error -> string
-val inspect : base_path:string -> max_image_bytes:int -> bytes:string -> (t, error) result
+
+val max_pages : int
+(** Pages one inspection renders. A document with more is refused before any
+    page is rendered. *)
+
+val max_total_image_bytes : int
+(** Rendered PNG bytes one inspection carries, counted across its pages. The
+    per-page [max_image_bytes] limit does not bound this: every page can sit
+    under it and the document still be too large to answer with. *)
+
+val inspect :
+  ?max_pages:int ->
+  ?max_total_image_bytes:int ->
+  base_path:string ->
+  max_image_bytes:int ->
+  bytes:string ->
+  unit ->
+  (t, error) result
 (** Requires installed pdftotext and pdftoppm. Missing dependencies are explicit
-    failures; bundled release archives do not currently provide Poppler. *)
+    failures; bundled release archives do not currently provide Poppler.
+
+    Every Poppler command shares one inspection-wide wall-clock budget, so a
+    document that spends it comes back as [Poppler_budget_spent] instead of
+    holding the caller's verification slot. The size budgets default to {!max_pages} and
+    {!max_total_image_bytes}; they are arguments so a test can reach the
+    refusal with a document small enough to write inline. *)

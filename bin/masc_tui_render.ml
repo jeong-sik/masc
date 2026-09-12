@@ -9283,11 +9283,10 @@ let render_browser_history (state : state) (history : Browser_history.t) =
         (Printf.sprintf "  Text %d/%d" (if count=0 then 0 else scroll+1) count))
 
 let render_connectors (state : state) =
-  match browser_lane_on_screen state with
-  | Some _ when Option.is_some state.browser_history ->
-      Option.iter (render_browser_history state) state.browser_history
-  | Some view -> render_browser_lane state view
-  | None ->
+  match browser_lane_on_screen state, state.browser_history with
+  | Some _, Some history -> render_browser_history state history
+  | Some view, None -> render_browser_lane state view
+  | None, _ ->
   let terminal_rows, cols = get_terminal_size () in
   let connectors =
     match state.connectors with

@@ -17118,7 +17118,7 @@ and is loaded on demand through keeper_skill.
                      let limit = Masc_tui_render.browser_history_scroll_limit state ~terminal_rows ~cols history in
                      let delta = match key with "j" | "down" -> 1 | "k" | "up" -> -1
                        | "pagedown" -> max 1 (terminal_rows-10) | "pageup" -> -(max 1 (terminal_rows-10)) | _ -> -history.scroll in
-                     state.browser_history <- Some {history with scroll=max 0 (min limit (history.scroll+delta))}
+                     state.browser_history <- Some {history with scroll=max 0 (min limit (min limit history.scroll+delta))}
                  | _ -> ()))
        | Some "h" when (match browser_lane_on_screen state with
            | Some {url_draft=None;client_picker=None;_} -> true | _ -> false) ->

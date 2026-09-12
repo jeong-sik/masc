@@ -12,10 +12,6 @@
       "finding": "Synthesis changes source s18 three quantitative criteria into three files. Source says file existence, three pages and evidence recording; published Goal actually references fivefiles. Do not promote the inferred filecount."
     },
     {
-      "claim_index": 7,
-      "finding": "Source s17 already wrongly calls 봅 a syllable of 바라봅니다. Synthesis faithfully copies that factual error; 출처일치 is not factual correctness."
-    },
-    {
       "conflict_index": 1,
       "finding": "Final synthesis preserves admission fee as unresolved, improving on the first group that copied corrupted wording as a claim."
     },
@@ -23,5 +19,12 @@
       "finding": "Source revisions11/20 were already12/28 at earlier live read; proposal representscaptured snapshots, not current workspace state."
     }
   ],
-  "published": false
+  "published": false,
+  "validated_source_example": {
+    "source": "s17",
+    "codepoint": "U+BD05",
+    "syllable": "봅",
+    "word": "바라봅니다",
+    "syllable_in_word": true
+  }
 }

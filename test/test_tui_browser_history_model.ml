@@ -5,6 +5,16 @@ let () =
   List.iter (fun key -> expect "global keys remain outside history ownership" (not (History.owns_key key)))
     ["tab";"\t";"shift-tab";"q";"Q";"?";":";"\020";"\002";"\012";"\030"];
   expect "history owns the browser screenshot key" (History.owns_key "\015");
+  let completed_action = Masc_tui_types.Browser_lane_view.after_action
+    (Masc_tui_types.Browser_lane_view.create ())
+    |> Masc_tui_types.Browser_lane_view.defer_read in
+  expect "action follow-up is pending even without a selected tab"
+    (Masc_tui_types.Browser_lane_view.pending_read completed_action = Some Read);
+  expect "ordinary cadence cannot replace the pending action read"
+    (Masc_tui_types.Browser_lane_view.cadence_operation completed_action = None);
+  expect "a source switch cannot inherit the previous route's deferred read"
+    (Masc_tui_types.Browser_lane_view.pending_read
+       (Masc_tui_types.Browser_lane_view.switch_source Automation completed_action) = None);
   let waiting = History.create "reader" in
   expect "navigation during list load does not supersede the pending list"
     (History.move 1 waiting=None);

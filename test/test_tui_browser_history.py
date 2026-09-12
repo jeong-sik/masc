@@ -17,6 +17,9 @@ def run(binary, *, quit_from_history=False, disconnected=False):
     beta_entered = threading.Event()
     beta_release = threading.Event()
     beta_returned = threading.Event()
+    goto_entered = threading.Event()
+    goto_release = threading.Event()
+    goto_returned = threading.Event()
 
     def node(text):
         return {"nodeId": "text", "kind": "text", "tag": "p", "text": text,
@@ -75,13 +78,23 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             kind="control", tag="button", clickable=True, editable=False, disabled=False)]
         return 200, {"ok": True, "data": current_scene}
 
+    def pending_goto(body):
+        request = json.loads(body)
+        assert request == {"url": "https://example.org/continued"}
+        requests.append(("goto", request))
+        goto_entered.set()
+        assert goto_release.wait(timeout=5), "test never released pending navigation"
+        goto_returned.set()
+        return 200, {"ok": True}
+
     def effect(body):
         requests.append(("unexpected effect", json.loads(body)))
         return 500, {"error": "history must never send a browser action"}
 
     fixtures["/api/v1/dashboard/browser-lane/read"] = h.RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = h.RequestHttpResponse(read_scene)
-    for suffix in ["interact", "act", "screenshot", "session", "goto"]:
+    fixtures["/api/v1/dashboard/browser-lane/goto"] = h.RequestHttpResponse(pending_goto)
+    for suffix in ["interact", "act", "screenshot", "session"]:
         fixtures["/api/v1/dashboard/browser-lane/" + suffix] = h.RequestHttpResponse(effect)
 
     def interact(process, fd, _slave, output, _base):
@@ -115,6 +128,22 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
                 needle=b"CURRENT PAGE CONTENT", controls=(h.FULL_REDRAW,))
             assert b"URL>" not in h.screen_text(frame), "Escape did not close the URL editor"
+            h.send_and_wait(process, fd, output, b"ghttps://example.org/continued", b"https://example.org/continued")
+            h.write_all(fd, output, b"\r")
+            assert h.wait_for_fixture_event(process, fd, output, goto_entered, timeout=5)
+            h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
+            reads_before_completion = sum(kind == "read" for kind, _ in requests)
+            goto_release.set()
+            assert h.wait_for_fixture_event(process, fd, output, goto_returned, timeout=5)
+            h.drain_until_quiet(process, fd, output)
+            h.resize_and_wait(process, fd, output, rows=30, columns=100,
+                needle=b"SAVED BETA CONTENT", controls=(h.FULL_REDRAW,))
+            assert sum(kind == "read" for kind, _ in requests) == reads_before_completion, \
+                "navigation follow-up escaped history isolation"
+            h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
+            assert sum(kind == "read" for kind, _ in requests) > reads_before_completion, \
+                "closing history did not resume the deferred read"
+            assert sum(kind == "goto" for kind, _ in requests) == 1, "history replayed navigation"
             h.send_and_wait(process, fd, output, b"l", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"s", b"CURRENT SCENE CONTROL")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
@@ -131,6 +160,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             os.write(fd, b"q")
         finally:
             beta_release.set()
+            goto_release.set()
 
     h.run_terminal_scenario(binary, description="retained browser observation isolation",
                             interact=interact, http_fixtures=fixtures)

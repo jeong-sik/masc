@@ -2898,6 +2898,7 @@ module Browser_lane_view = struct
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
+  type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
   type t = {
@@ -2907,6 +2908,7 @@ module Browser_lane_view = struct
     scene : scene option; scene_cursor : int;
     read_view : read_view;
     refresh_pending : int option;
+    read_continuation : read_continuation;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
@@ -2923,9 +2925,15 @@ module Browser_lane_view = struct
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None }
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None; read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
   let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; read_view = Text_view }
+  let after_action t =
+    { t with reading = None; scene = None; scene_cursor = 0;
+      selected_tab = None; scroll = 0; load = Idle; read_continuation = No_read_continuation }
+  let defer_read t = { t with read_continuation = Deferred_read }
+  let pending_read t = match t.read_continuation with
+    | No_read_continuation -> None | Deferred_read -> Some Read
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url

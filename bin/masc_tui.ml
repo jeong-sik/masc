@@ -4313,7 +4313,10 @@ let launch_browser_history state ~mailbox ~reload =
 let launch_browser_lane state ~mailbox operation =
   let open Browser_lane_view in
   match state.browser_lane with
-  | _ when Option.is_some state.browser_history -> ()
+  | Some view when Option.is_some state.browser_history ->
+      (match operation with
+       | Read -> state.browser_lane <- Some (defer_read view)
+       | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
   | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
@@ -4341,6 +4344,7 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation);
+        read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
@@ -12881,8 +12885,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
                  | Ok () ->
                      state.browser_lane <- Some
-                       { view with reading = None; scene = None; scene_cursor = 0;
-                         selected_tab = None; scroll = 0; load = Idle };
+                       (Browser_lane_view.after_action view);
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
             | Loading _ | Idle | No_browser | Failed _ -> ())
        | None -> ())
@@ -17104,7 +17107,9 @@ and is loaded on demand through keeper_skill.
             | Some history ->
                 (match key with
                  | "esc" | "left" | "h" ->
-                     close_browser_history state
+                     close_browser_history state;
+                     Option.iter (fun operation -> launch_browser_lane state ~mailbox:async_messages operation)
+                       (Option.bind state.browser_lane Browser_lane_view.pending_read)
                  | "[" | "]" ->
                      Option.iter (fun next ->
                        state.browser_history <- Some next;

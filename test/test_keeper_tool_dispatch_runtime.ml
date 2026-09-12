@@ -7972,7 +7972,7 @@ let test_edit_manifest_through_model_projection () =
 ;;
 
 let test_peer_artifact_materializes_exact_binary () =
-  with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
+  with_exec_fixture ~process:true "peer-artifact" (fun ~config ~meta ~publication_recovery ~ctx_work ->
     let sender = { meta with sandbox_profile = Keeper_types_profile_sandbox.Docker;
       sandbox_image = Some "alpine:peer-fixture" } in
     let peer = { sender with name = "receiving-peer" } in
@@ -7992,7 +7992,7 @@ let test_peer_artifact_materializes_exact_binary () =
     Fs_compat.save_file source bytes;
     let docker = Filename.concat config.base_path "docker" in
     let script = Printf.sprintf
-      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\nshift\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\nexec /bin/cat %s\n"
+      "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\ninspect)\n  [ \"$2\" = --format ] || exit 95\n  [ \"$3\" = '{{json .State.Running}}' ] || exit 96\n  printf 'true\\n'; exit 0;;\nexec)\n  shift\n  while [ \"$#\" -gt 0 ]; do\n    case \"$1\" in\n      --user|-w|--env|-e) shift 2;;\n      -i) shift;;\n      masc-keeper-docker-*) shift; break;;\n      *) exit 97;;\n    esac\n  done;;\nrun)\n  while [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:peer-fixture' ]; do shift; done\n  shift;;\n*) exit 92;;\nesac\n[ \"$1\" = cat ] || exit 93\n[ \"$2\" = %s ] || exit 94\n[ \"$#\" = 2 ] || exit 98\nexec /bin/cat %s\n"
       (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root sender.name) "generated.png"))
       (Filename.quote source) in
     Fs_compat.save_file docker script; Unix.chmod docker 0o755;
@@ -8003,17 +8003,33 @@ let test_peer_artifact_materializes_exact_binary () =
     Fun.protect ~finally:(fun () ->
       Unix.putenv "PATH" previous_path;
       Unix.putenv "MASC_TEST_FAKE_DOCKER_PATH" (Option.value ~default:"" previous_fake)) (fun () ->
-    let exported = Masc.Keeper_peer_artifact.handle ~config ~meta:sender
-        ~turn_sandbox_factory:None ~write:(fun _ -> fail "export attempted a write")
-        ~args:(`Assoc ["action", `String "export"; "path", `String "generated.png"; "purpose", `String "Poster image"]) in
-    check bool "sender export completed" true (exported.disposition = Tool_result.Completed ());
-    let exported_json = Yojson.Safe.Util.member "artifact" (parse_json exported.raw_output) in
+    let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta:sender ~publication_recovery ~ctx_snapshot:ctx_work () in
+    Fun.protect ~finally:bundle.cleanup @@ fun () ->
+    let transfer = List.find (fun (tool : Agent_core.Tool.t) ->
+        String.equal tool.schema.name "keeper_artifact_transfer") bundle.tools in
+    let export () = Agent_core.Tool.execute
+        ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
+        transfer (`Assoc ["action", `String "export"; "path", `String "generated.png";
+                         "purpose", `String "Poster image"]) in
+    let exported = match export () with
+      | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
+    let manifest = match Tool_output.decode_from_agent_core exported.content with
+      | Tool_output.Decoded reference ->
+        check string "model receives durable export manifest" Tool_output.artifact_manifest_mime reference.mime;
+        reference
+      | _ -> fail "export omitted its durable result manifest" in
+    let exported_json = Yojson.Safe.Util.member "artifact"
+        (structured_tool_output_exn ~base_path:config.base_path exported.content) in
     let request = match Masc.Keeper_invocation_contract.request_of_json
         (`Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
                  "prompt", `String "Reuse this PNG"; "artifacts", `List [exported_json]]) with
       | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in
     let reference = match Masc.Keeper_invocation_contract.artifacts request with
       | [reference] -> reference | _ -> fail "delegation lost reference" in
+    check int "model-visible export preserves complete binary size" (String.length bytes) reference.blob.bytes;
+    check string "model-visible export preserves complete binary digest"
+      Digestif.SHA256.(digest_string bytes |> to_hex) reference.blob.sha256;
     let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
@@ -8024,6 +8040,28 @@ let test_peer_artifact_materializes_exact_binary () =
     let path = Filename.concat (Masc.Keeper_sandbox.host_root_abs_of_meta ~config peer) "received.png" in
     check string "binary exact" bytes (Fs_compat.load_file path);
     check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
+    (* Block only the already-known manifest destination. The binary export
+       still succeeds, so its post-effect error must preserve the exact handle. *)
+    let manifest_path = Filename.concat
+        (Filename.concat (Tool_blob_store.root_dir store) (String.sub manifest.sha256 0 2))
+        manifest.sha256 in
+    Unix.unlink manifest_path;
+    Fs_compat.mkdir_p manifest_path;
+    (match export () with
+     | Ok _ -> fail "manifest storage failure was disguised as success"
+     | Error error ->
+       let payload = Yojson.Safe.from_string error.Agent_core.Types.message in
+       check string "exported effect remains explicit" "proven_post_effect"
+         Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
+       let references = Tool_output.normalized_artifact_refs_in_json payload in
+       check int "post-effect failure retains one exported artifact" 1 (List.length references);
+       check string "post-effect failure retains exact exported bytes" bytes
+         (fetch_artifact_exn ~base_path:config.base_path (List.hd references));
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+         check bool "terminal boundary retains applied export" true
+           (failure.effect_disposition = Tool_result.Proven_post_effect)
+       | _ -> fail "export manifest failure lost terminal effect evidence");
     let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.blob.sha256 0 2)) reference.blob.sha256 in
     Fs_compat.save_file blob "corrupted";
     check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))

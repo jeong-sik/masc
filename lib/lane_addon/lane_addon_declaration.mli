@@ -1,6 +1,10 @@
 (** One bounded document owner for HTTP and Keeper configuration editing.
     These blocking filesystem operations run under the runtime's configuration
-    serializer and a system-thread boundary. They never start workers. *)
+    serializer and a system-thread boundary. They never start workers.
+    Revision conflict exclusion applies to callers sharing that serializer.
+    Direct filesystem writers are not participants: the final read detects
+    already-visible edits, but cannot make replacement conditional on arbitrary
+    concurrent writes after that read. *)
 type document = private {
   file_name : string; source_path : string; source_text : string;
   source_revision : string; desired_revision : string option;

@@ -135,6 +135,8 @@ blocking_lints() {
   run_lint "Harness connector env ratchet (#28807)" \
     bash scripts/lint/harness-connector-env-ratchet.sh --self-test
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
+  run_lint "Wire-field removal schema gate (#29516/#29601/#29666)" \
+    bash scripts/wire-field-removal-schema-gate-selftest.sh
   run_lint "Timeout env knob ceiling (RFC-0138)" bash scripts/lint/timeout-env-ceiling.sh
   run_self_test_when_changed ".mli env knob exists self-test" \
     scripts/lint/mli-env-knob-exists.sh \

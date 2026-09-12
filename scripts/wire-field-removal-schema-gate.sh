@@ -42,7 +42,15 @@
 
 set -eu
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="${WIRE_GATE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Guard against the mis-root failure observed in this sandbox: the ROOT
+# formula can land OUTSIDE any real checkout, where the gate would silently
+# report "no protected module changed" while scanning nothing. A correct
+# root (live or synthetic) must at least be a git worktree.
+if ! git -C "${REPO_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "WIRE-GATE ERROR: REPO_ROOT '${REPO_ROOT}' is not a git worktree (set WIRE_GATE_ROOT explicitly)" >&2
+  exit 2
+fi
 BASE_REF="${1:-${BASE_REF:-origin/main}}"
 
 # Persistence modules whose wire shapes are load-bearing for live stores.

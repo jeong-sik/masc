@@ -173,6 +173,7 @@
   test_pool
   test_pool_dead_server_fd
   test_pool_address_selection
+  test_pool_scope_failure
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -522,6 +523,7 @@
   test_pool
   test_pool_dead_server_fd
   test_pool_address_selection
+  test_pool_scope_failure
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field

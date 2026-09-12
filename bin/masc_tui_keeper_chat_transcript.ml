@@ -1064,10 +1064,14 @@ let phase_text ~now t =
         | None -> None
         | Some awaiting ->
             (* Provider ids need not be unique. Exclude a held call only when
-               the current attempt identifies exactly one occurrence. *)
+               the current attempt identifies exactly one pending occurrence.
+               A completed earlier use of the same provider id cannot be held. *)
             (match List.filter
                (fun (call : live_tool_call) ->
-                 Option.exists (String.equal awaiting.call_id) call.call_id)
+                 Option.exists (String.equal awaiting.call_id) call.call_id
+                 && (match (activity_of_live_call call).outcome with
+                     | Started | Awaiting_result -> true
+                     | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
                current_calls with
              | [call] -> Some call.local_id
              | _ -> None)

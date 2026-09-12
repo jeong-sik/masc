@@ -1023,6 +1023,32 @@ let test_approval_does_not_hide_other_current_work () =
     (contains ~needle:"held at a tool call" (progress ()))
 ;;
 
+let test_approval_reused_id_ignores_completed_occurrences () =
+  let t = fresh () in
+  feed t [Live.Run_started;
+    tool_started ~block_index:0 "reused" "Read";
+    tool_ended ~block_index:0 "reused";
+    tool_result ~block_index:0 "reused" "completed-read";
+    tool_started ~block_index:1 "reused" "Edit";
+    requested ~call_id:"reused" ~tool_name:"Edit" ~question:"Apply edit?"];
+  let progress () = match rows ~now:(origin +. 30.) t with
+    | (Transcript.Progress, text) :: _ -> text
+    | _ -> fail "missing current progress" in
+  check bool "completed occurrence does not make held call ambiguous" false
+    (contains ~needle:"preparing:" (progress ()));
+  check bool "uniquely pending reused id remains an approval fact" true
+    (contains ~needle:"approval pending: Edit" (progress ()));
+  check bool "held occurrence contributes no running age" false
+    (contains ~needle:"in this call" (progress ()));
+  feed t [tool_started ~block_index:2 "reused" "Search"];
+  check bool "two pending occurrences cannot be guessed from the tool name" true
+    (contains ~needle:"preparing:" (progress ()));
+  check bool "ambiguous pending occurrence retains activity age" true
+    (contains ~needle:"in this call" (progress ()));
+  check bool "ambiguous identity does not erase the actionable approval" true
+    (List.exists (contains ~needle:"approval for Edit:") (approval_rows t))
+;;
+
 let test_approval_controls_precede_variable_text () =
   let t = fresh () in
   feed t [requested ~call_id:"long" ~tool_name:(String.make 120 'T')
@@ -2220,6 +2246,8 @@ let () =
               test_the_reason_a_reader_is_asked_is_drawn_under_the_question
         ; test_case "approval and other work coexist" `Quick
             test_approval_does_not_hide_other_current_work
+        ; test_case "approval correlation ignores terminal reused ids" `Quick
+            test_approval_reused_id_ignores_completed_occurrences
         ; test_case "approval controls survive narrow panes" `Quick
             test_approval_controls_precede_variable_text
         ; test_case "an answer clears the prompt" `Quick

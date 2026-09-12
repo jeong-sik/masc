@@ -156,6 +156,7 @@ let test_scheduler_sample_availability () =
       let lines = ref [] in
       let push line = lines := line :: !lines in
       Render_metrics.render_metrics_body ~cols:200 ~budget:40 state
+        ~report_scroll:(fun _ -> ())
         ~push ~push_styled:(fun ~style:_ line -> push line)
         ~push_selected:push ~push_divider:(fun () -> ())
         ~push_empty:(fun () -> ());
@@ -451,6 +452,7 @@ let test_render_metrics_body_budget () =
     ~cols:80
     ~budget:15
     state
+    ~report_scroll:(fun _ -> ())
     ~push:(fun _ -> incr count)
     ~push_styled:(fun ~style:_ _ -> incr count)
     ~push_selected:(fun _ -> incr count)
@@ -459,6 +461,42 @@ let test_render_metrics_body_budget () =
   check bool "lines within budget" true (!count <= 15)
 ;;
 
+(* The section's lines are formatted here, so the keypress cannot bound the
+   scroll and steps an unbounded value. Before the frame reported back, the
+   stored value kept climbing past the end and coming home took one press per
+   step taken beyond it -- and End had nothing to correct the row it named.
+   What the drawing could actually start at is what it hands back. *)
+let test_metrics_reports_the_row_it_could_draw () =
+  let render ~budget ~scroll =
+    let state = make_state () in
+    state.metrics_section <- Types.Section_fleet;
+    state.metrics_scroll <- scroll;
+    let reported = ref (-1) in
+    let drawn = ref 0 in
+    Render_metrics.render_metrics_body
+      ~cols:85
+      ~budget
+      ~report_scroll:(fun s -> reported := s)
+      state
+      ~push:(fun _ -> incr drawn)
+      ~push_styled:(fun ~style:_ _ -> incr drawn)
+      ~push_selected:(fun _ -> incr drawn)
+      ~push_divider:(fun () -> incr drawn)
+      ~push_empty:(fun () -> incr drawn);
+    !reported
+  in
+  let settled = render ~budget:20 ~scroll:max_int in
+  check bool "a row past the end comes back as a row that exists" true
+    (settled >= 0 && settled < max_int);
+  check int "and asking for that row again is already there" settled
+    (render ~budget:20 ~scroll:settled);
+  check int "the top is the top" 0 (render ~budget:20 ~scroll:0);
+  check int "and a negative scroll is the top too" 0
+    (render ~budget:20 ~scroll:(-5));
+  (* A budget with room for every line has no scroll to report. *)
+  check int "nothing to scroll reports the top" 0
+    (render ~budget:400 ~scroll:max_int)
+
 let test_compact_metrics_preserve_source_labels () =
   List.iter (fun cols ->
     let state = make_state () in
@@ -466,6 +504,7 @@ let test_compact_metrics_preserve_source_labels () =
     let lines = ref [] in
     let push line = lines := line :: !lines in
     Render_metrics.render_metrics_body ~cols ~budget:40 state
+      ~report_scroll:(fun _ -> ())
       ~push ~push_styled:(fun ~style:_ line -> push line)
       ~push_selected:push ~push_divider:(fun () -> ())
       ~push_empty:(fun () -> ());
@@ -491,6 +530,7 @@ let test_render_metrics_body_all_sections () =
       Render_metrics.render_metrics_body
         ~cols:85
         ~budget:20
+        ~report_scroll:(fun _ -> ())
         state
         ~push:(fun _ -> incr count)
         ~push_styled:(fun ~style:_ _ -> incr count)
@@ -528,6 +568,8 @@ let () =
       , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )
     ; ( "render_body"
       , [ test_case "budget" `Quick test_render_metrics_body_budget
+        ; test_case "reports the row it could draw" `Quick
+            test_metrics_reports_the_row_it_could_draw
         ; test_case "compact metrics preserve source labels" `Quick test_compact_metrics_preserve_source_labels
         ; test_case "all_sections" `Quick test_render_metrics_body_all_sections
         ] )

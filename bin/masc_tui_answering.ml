@@ -97,8 +97,9 @@ let chat_activity ~now ~keeper_name ~error rows =
         ["Latest output: " ^ Terminal_text.single_line preview.ktp_text_tail]
       | Some _ | None -> []
     in
-    stale @ [Printf.sprintf "Current %s turn · %s · %s"
-      (lane_word lane) (elapsed_text ~now started_at_unix)
+    let observed = match error with None -> "Current" | Some _ -> "Last observed" in
+    stale @ [Printf.sprintf "%s %s turn · %s · %s"
+      observed (lane_word lane) (elapsed_text ~now started_at_unix)
       (Terminal_text.single_line status)] @ text
 ;;
 

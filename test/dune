@@ -4633,9 +4633,15 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_chat_activity)
+ (modules test_tui_chat_activity)
+ (libraries alcotest masc_tui_types masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue))
+
+(test
  (name test_keeper_turn_preview)
  (modules test_keeper_turn_preview)
- (libraries alcotest masc))
+ (libraries alcotest astring agent_core masc))
 
 (test
  (name test_tui_help_scroll)

@@ -2,15 +2,15 @@
     the turns route also rejects observations older than its running turn.
     Provider attempts, stream events, and tool hooks write this projection. *)
 
-type activity = Preparing | Awaiting_response | Receiving_response | Failed
+type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
 type t =
   { text_tail : string
         (** Last {!tail_bytes} of the newest response text, cut on a UTF-8
             boundary. [""] when the turn has produced no text yet. *)
-  ; current_tool : string option
-        (** The tool call in flight ([PreToolUse] sets it, [PostToolUse]
-            clears it), or [None] between calls. *)
+  ; last_tool : string option
+        (** Most recently observed tool name, including requests before validation
+            and returned calls. This does not claim a tool is executing. *)
   ; updated_at : float
   ; runtime_id : string option
   ; activity : activity
@@ -25,7 +25,7 @@ val note_text : keeper_name:string -> now:float -> string -> unit
 (** Record the newest response text's tail. Blank text is ignored — a
     tool-only turn must not erase the last visible words. *)
 
-val note_tool : keeper_name:string -> now:float -> string option -> unit
+val note_tool : keeper_name:string -> now:float -> string -> unit
 
 val reset : keeper_name:string -> now:float -> unit
 val note_attempt : keeper_name:string -> now:float -> runtime_id:string -> unit

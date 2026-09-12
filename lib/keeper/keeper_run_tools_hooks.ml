@@ -677,14 +677,14 @@ let assemble_hooks
           Some
             (fun event ->
               match event with
-              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ }
-                when not
-                       (String.equal
-                          tool_name
-                          Keeper_tool_composition_catalog.skill_tool_name) ->
+              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ } ->
+                (* A pre-hook observes a request, before validation/approval.
+                   Include Skill without claiming the handler has started. *)
                 Keeper_turn_preview.note_tool ~keeper_name:meta.name
-                  ~now:(Unix.gettimeofday ()) (Some tool_name);
-                if Skill_delivery_state.active skill_delivery_state <> []
+                  ~now:(Unix.gettimeofday ()) tool_name;
+                if not (String.equal tool_name
+                          Keeper_tool_composition_catalog.skill_tool_name)
+                   && Skill_delivery_state.active skill_delivery_state <> []
                 then
                   (match
                      Keeper_skill_activation_recorder.observe_action
@@ -703,7 +703,6 @@ let assemble_hooks
                        tool_name
                        (Keeper_skill_activation_recorder.error_to_string error));
                 Agent_core.Hooks.Continue
-              | Agent_core.Hooks.PreToolUse _
               | BeforeTurn _
               | BeforeTurnParams _
               | AfterTurn _

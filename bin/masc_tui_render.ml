@@ -13328,16 +13328,12 @@ let render_answering (state : state) =
     in
     match cursor_preview with
     | Some (keeper_name, preview) ->
-        let doing =
-          match preview.Tui_decode.ktp_current_tool with
-          | Some tool_name -> "\xe2\x96\xb6 " ^ tool_name
-          | None -> "\xe2\x96\xb6 writing"
-        in
+        let doing = Terminal_text.single_line preview.Tui_decode.ktp_status_text in
         let tail =
           match
             Terminal_text.single_line preview.Tui_decode.ktp_text_tail
           with
-          | "" -> "(no text yet \xe2\x80\x94 tool calls only)"
+          | "" -> "(no text reported yet)"
           | tail -> tail
         in
         [ Ansi.bold ^ keeper_name ^ Ansi.reset ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ doing

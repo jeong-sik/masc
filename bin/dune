@@ -1047,6 +1047,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_answering
   masc_tui_lane_addons
   masc.browser_lane
   masc.sse_wire

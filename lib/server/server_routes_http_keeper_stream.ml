@@ -433,8 +433,8 @@ let handle_keeper_turns_list state request reqd =
                 `Assoc
                   [ ("status_text", `String (Keeper_turn_preview.status_text preview))
                   ; ("text_tail", `String preview.text_tail)
-                  ; ( "current_tool"
-                    , match preview.current_tool with
+                  ; ( "last_tool"
+                    , match preview.last_tool with
                       | None -> `Null
                       | Some tool_name -> `String tool_name )
                   ; ("updated_at_unix", `Float preview.updated_at)

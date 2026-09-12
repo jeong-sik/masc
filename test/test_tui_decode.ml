@@ -5502,8 +5502,8 @@ let test_decode_keeper_turns_reads_the_preview () =
                       ; ( "preview"
                         , `Assoc
                             [ ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
-                            ; ("status_text", `String "tool running: Execute")
-                            ; ("current_tool", `String "Execute")
+                            ; ("status_text", `String "last observed tool: Execute")
+                            ; ("last_tool", `String "Execute")
                             ; ("updated_at_unix", `Float 2.0)
                             ] )
                       ] )
@@ -5516,8 +5516,8 @@ let test_decode_keeper_turns_reads_the_preview () =
    | Ok [ { ktr_state = Tui_decode.Keeper_turn_running { preview = Some p; _ }; _ } ] ->
      Alcotest.(check bool) "text tail rides" true
        (Astring.String.is_infix ~affix:"PR body" p.Tui_decode.ktp_text_tail);
-     Alcotest.(check (option string)) "current tool rides" (Some "Execute")
-       p.Tui_decode.ktp_current_tool
+     Alcotest.(check (option string)) "last observed tool rides" (Some "Execute")
+       p.Tui_decode.ktp_last_tool
    | Ok _ -> Alcotest.fail "preview did not decode as running+Some");
   (* An older server sends no preview field at all: running still decodes. *)
   match Tui_decode.decode_keeper_turns keeper_turns_json with

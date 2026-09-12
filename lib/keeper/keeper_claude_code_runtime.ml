@@ -199,7 +199,9 @@ let claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_ac
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_claude_code.Native_tool_started observation ->
-          Keeper_turn_preview.note_tool ~keeper_name ~now:(Unix.gettimeofday ()) observation.tool_name;
+          Option.iter
+            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Unix.gettimeofday ()))
+            observation.tool_name;
           Option.iter
             (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
             on_native_action;
@@ -221,7 +223,9 @@ let claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_ac
                ; tool_name = observation.tool_name
                })
         | Runtime_claude_code.Native_tool_finished observation ->
-          Keeper_turn_preview.note_tool ~keeper_name ~now:(Unix.gettimeofday ()) None;
+          Option.iter
+            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Unix.gettimeofday ()))
+            observation.tool_name;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run

@@ -2,11 +2,11 @@
     the turns route also rejects observations older than its running turn.
     Provider attempts, stream events, and tool hooks write this projection. *)
 
-type activity = Preparing | Awaiting_response | Receiving_response | Failed
+type activity = Preparing | Awaiting_response | Receiving_response | Tool_observed | Failed
 
 type t =
   { text_tail : string
-  ; current_tool : string option
+  ; last_tool : string option
   ; updated_at : float
   ; runtime_id : string option
   ; activity : activity
@@ -43,7 +43,7 @@ let with_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
 
 let empty now =
-  { text_tail = ""; current_tool = None; updated_at = now
+  { text_tail = ""; last_tool = None; updated_at = now
   ; runtime_id = None; activity = Preparing; last_failure = None }
 
 let current ~keeper_name =
@@ -59,12 +59,12 @@ let reset ~keeper_name ~now = update ~keeper_name ~now (fun _ -> empty now)
 let note_attempt ~keeper_name ~now ~runtime_id =
   update ~keeper_name ~now (fun old ->
     { old with runtime_id = Some runtime_id; activity = Awaiting_response
-    ; current_tool = None; text_tail = "" })
+    ; last_tool = None; text_tail = "" })
 
 let note_failure ~keeper_name ~now ~runtime_id detail =
   update ~keeper_name ~now (fun old ->
     { old with runtime_id = Some runtime_id; activity = Failed
-    ; current_tool = None; last_failure = Some detail })
+    ; last_tool = None; last_failure = Some detail })
 
 let note_text ~keeper_name ~now text =
   let text = String.trim text in
@@ -73,8 +73,9 @@ let note_text ~keeper_name ~now text =
       { old with text_tail = utf8_tail ~max_bytes:tail_bytes text
       ; activity = Receiving_response })
 
-let note_tool ~keeper_name ~now current_tool =
-  update ~keeper_name ~now (fun old -> { old with current_tool })
+let note_tool ~keeper_name ~now tool_name =
+  update ~keeper_name ~now (fun old ->
+    { old with last_tool = Some tool_name; activity = Tool_observed })
 
 let note_stream ~keeper_name ~now event =
   match event with
@@ -90,14 +91,15 @@ let note_stream ~keeper_name ~now event =
 
 let status_text preview =
   let activity =
-    match preview.current_tool, preview.activity with
-    | Some tool, _ -> "tool running: " ^ tool
-    | None, Preparing -> "preparing turn"
-    | None, Awaiting_response -> "waiting for provider response"
-    | None, Receiving_response -> "receiving response"
-    | None, Failed -> "provider attempt failed"
+    match preview.activity with
+    | Preparing -> "preparing turn"
+    | Awaiting_response -> "waiting for provider response"
+    | Receiving_response -> "receiving response"
+    | Tool_observed -> "tool activity observed"
+    | Failed -> "provider attempt failed"
   in
   String.concat " · "
     (List.filter_map Fun.id
        [ preview.runtime_id; Some activity
+       ; Option.map (fun name -> "last observed tool: " ^ name) preview.last_tool
        ; Option.map (fun detail -> "last failure: " ^ detail) preview.last_failure ])

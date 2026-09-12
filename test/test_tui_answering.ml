@@ -381,8 +381,8 @@ let test_lanes_that_were_never_loaded_are_not_running () =
 
 let test_chat_shows_background_work_and_uncertainty () =
   let preview : Tui_decode.keeper_turn_preview =
-    { ktp_text_tail = "editing the report"; ktp_current_tool = Some "Execute"
-    ; ktp_status_text = "glm · tool running: Execute · last failure: 401" } in
+    { ktp_text_tail = "editing the report"; ktp_last_tool = Some "Execute"
+    ; ktp_status_text = "glm · tool activity observed · last observed tool: Execute · last failure: 401" } in
   let rows =
     [ running ~preview ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
     ; running ~lane:Tui_decode.Turn_lane_maintenance ~started:950. "other" ] in
@@ -403,6 +403,8 @@ let test_chat_shows_background_work_and_uncertainty () =
     ~error:(Some "timeout") rows in
   Alcotest.(check bool) "failed observation is labelled" true
     (Astring.String.is_infix ~affix:"Activity unavailable" (List.hd stale));
+  Alcotest.(check bool) "cached progress is marked last observed" true
+    (Astring.String.is_infix ~affix:"Last observed autonomous" (String.concat "\n" stale));
   Alcotest.(check (list string)) "idle has no stale running preview" []
     (Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo" ~error:None
       [row "echo" Tui_decode.Keeper_turn_idle])

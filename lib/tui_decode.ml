@@ -7071,7 +7071,7 @@ let keeper_turn_lane_of_string = function
 type keeper_turn_preview = {
   ktp_status_text : string;
   ktp_text_tail : string;
-  ktp_current_tool : string option;
+  ktp_last_tool : string option;
 }
 
 type keeper_turn_state =
@@ -7126,11 +7126,11 @@ let decode_keeper_turn_row json =
                 let* ktp_text_tail =
                   required_string_field preview_json "text_tail"
                 in
-                let* ktp_current_tool =
-                  required_nullable_string_field preview_json "current_tool"
+                let* ktp_last_tool =
+                  required_nullable_string_field preview_json "last_tool"
                 in
                 let* ktp_status_text = required_string_field preview_json "status_text" in
-                Ok (Some { ktp_text_tail; ktp_current_tool; ktp_status_text })
+                Ok (Some { ktp_text_tail; ktp_last_tool; ktp_status_text })
             | Some other ->
                 Error
                   (Printf.sprintf

@@ -1005,8 +1005,32 @@ let validate_usage_projection ~input_tokens ~output_tokens
         in
         Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
     | _ ->
+        (* Name which of the six are set. The sentence on its own sent a reader
+           to diff the payload against this match by hand, and on a live
+           keeper's log 75 of 200 rows landed here -- 37% of the window -- with
+           no way to tell which field the writer left out. Same shape as the
+           field-set refusal in {!require_exact_object_fields}: the groups that
+           decide the verdict are the groups worth printing. *)
+        let named =
+          [ ("input_tokens", Option.is_some input_tokens)
+          ; ("output_tokens", Option.is_some output_tokens)
+          ; ("cache_creation_tokens", Option.is_some cache_creation_tokens)
+          ; ("cache_read_tokens", Option.is_some cache_read_tokens)
+          ; ("total_tokens", Option.is_some total_tokens)
+          ; ("cost_usd", Option.is_some cost_usd)
+          ]
+        in
+        let names wanted =
+          String.concat ", "
+            (List.filter_map
+               (fun (name, present) -> if present = wanted then Some name else None)
+               named)
+        in
         Error
-          "usage tokens, cost, and trust must form one current atomic observation"
+          (Printf.sprintf
+             "usage tokens, cost, and trust must form one current atomic \
+              observation (set=[%s], unset=[%s])"
+             (names true) (names false))
   in
   let* classified = classified in
   let expected_trust = Keeper_usage_trust.to_string classified in

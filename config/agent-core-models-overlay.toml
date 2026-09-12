@@ -119,6 +119,36 @@ supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
 
+# Local Ollama Qwen3.8 27B build, probed on 2026-09-12. Pairs with the
+# [[targets]] row below and config/runtime.toml [models.qwen3-8-27b]; without
+# this row the runtime binding falls through to the ollama provider base and
+# MASC projects the wrong capabilities onto it.
+[[models]]
+id_prefix = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+provider_name = "ollama"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+# AGENT_CORE native Ollama /api/chat does not serialize tool_choice
+# (agent_core backend_ollama.ml), so a forced tool choice would be dropped
+# without an error. Declared false rather than inherited.
+supports_tool_choice = false
+supports_reasoning = true
+# Answers the native /api/chat top-level `think` field rather than a
+# chat-template token. Probed 2026-09-12: `"think": false` suppressed the
+# reasoning block, and a tools request returned get_weather(city="Seoul").
+thinking_control_format = "ollama_think"
+# `/api/show` reports vision and a 64x64 PNG answered in 9.3s end to end.
+# Latency on full-size screenshots is not measured, so no modality_priority
+# is declared here and the runtime stays out of [runtime] media_failover.
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+supports_seed = true
+supports_top_k = true
+input_per_million = 0.0
+output_per_million = 0.0
+
 # Local Ollama Gemma 4 E2B edge build, probed on 2026-07-06.
 [[models]]
 id_prefix = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
@@ -490,6 +520,14 @@ enable_thinking = false
 id = "ollama.gemma4-26b-a4b-qat"
 provider_ref = "ollama"
 model_id = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+
+# The local Qwen3.8 27B that is already resident in this deployment's Ollama.
+# Paired with the runtime.toml binding of the same name so the exact-output
+# lanes can admit it; without this row the runtime exists but no lane can name it.
+[[targets]]
+id = "ollama.qwen3-8-27b"
+provider_ref = "ollama"
+model_id = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
 
 [[targets]]
 id = "ollama_cloud.ollama-cloud-glm-5-3-flash"

@@ -1,4 +1,4 @@
-import { fetchToolBlob } from './tool-blob'
+import { fetchVerifiedToolBlobText } from './verified-tool-blob'
 
 interface SnapshotRef { readonly sha256: string; readonly bytes: number }
 export interface EditSnapshots { readonly before: SnapshotRef; readonly after: SnapshotRef }
@@ -33,22 +33,9 @@ export function parseEditSnapshots(value: unknown): EditSnapshotReceipt | null {
 // JSON transport must round-trip the stored bytes before claiming exact text.
 // Invalid UTF-8 or corrupt/mismatched responses remain explicit failures.
 export async function fetchEditSnapshots(refs: EditSnapshots, signal?: AbortSignal) {
-  const subtle = globalThis.crypto?.subtle
-  if (!subtle) {
-    throw new Error('이 브라우저 환경에서는 편집 원본의 바이트를 검증할 수 없습니다. HTTPS 또는 localhost에서 다시 열어 주세요.')
-  }
-  async function read(ref: SnapshotRef): Promise<string> {
-    const response = await fetchToolBlob(ref.sha256, { signal })
-    if (typeof response.content !== 'string') throw new Error('편집 원본 응답에 텍스트가 없습니다.')
-    const bytes = new TextEncoder().encode(response.content)
-    const digest = await subtle.digest('SHA-256', bytes)
-    const hash = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
-    if (response.sha256 !== ref.sha256 || response.bytes !== ref.bytes
-        || bytes.byteLength !== ref.bytes || hash !== ref.sha256) {
-      throw new Error('편집 원본의 바이트 검증에 실패했습니다. 텍스트로 표시할 수 없는 파일이거나 저장된 참조와 응답이 다릅니다.')
-    }
-    return response.content
-  }
-  const [before, after] = await Promise.all([read(refs.before), read(refs.after)])
+  const [before, after] = await Promise.all([
+    fetchVerifiedToolBlobText(refs.before, signal),
+    fetchVerifiedToolBlobText(refs.after, signal),
+  ])
   return { before, after }
 }

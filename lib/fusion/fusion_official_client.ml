@@ -159,7 +159,23 @@ let antigravity_config ~base_dir ~runtime_id ~override_s ~output_schema
   }
 ;;
 
-let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =
+type image_input = { media_type : string; base64_data : string }
+type response = { text : string; model : string }
+type failure =
+  | Setup_failure of Fusion_types.panel_failure
+  | Codex_failure of Runtime_codex_app_server.error
+  | Claude_failure of Runtime_claude_code.error
+  | Claude_admission_failure of Runtime_claude_code.error
+  | Antigravity_failure of Runtime_antigravity.error
+
+let panel_failure ~runtime_id = function
+  | Setup_failure failure -> failure
+  | Codex_failure error -> provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)
+  | Claude_failure error | Claude_admission_failure error -> provider_error ~runtime_id (Runtime_claude_code.error_to_string error)
+  | Antigravity_failure error -> provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
+
+
+let run_with_images ~images ~base_dir ~(runtime : Runtime.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let ( let* ) = Result.bind in
   (* Both adapters take the system prompt as an option and treat [None] as
      "client default". An empty group prompt is not an instruction, so it
@@ -167,11 +183,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
   let system_prompt =
     match String.trim system_prompt with "" -> None | text -> Some text
   in
-  let* runtime =
-    match Runtime.get_runtime_by_id runtime_id with
-    | Some runtime -> Ok runtime
-    | None -> Error (provider_error ~runtime_id "runtime is not configured")
-  in
+  let runtime_id = runtime.id in
   (* Capture ownership with the execution before any subprocess yields. A
      runtime catalog reload may change the credential alias under this id. *)
   let execution = runtime.Runtime.execution in
@@ -180,7 +192,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
     Runtime_quota_window.note_succeeded ~scope:quota_scope;
     Ok text
   in
-  let claude_failed error =
+  let claude_failed ~admission error =
     (match error with
      | Runtime_claude_code.Quota_blocked { rate_limit; _ } ->
        (match Option.bind rate_limit (fun limit -> limit.Runtime_claude_code.resets_at) with
@@ -189,9 +201,9 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
             ~scope:quota_scope ~resets_at:(float_of_int resets_at)
         | None -> Runtime_quota_window.note_observed_exhausted ~scope:quota_scope)
      | _ -> ());
-    Error (provider_error ~runtime_id (Runtime_claude_code.error_to_string error))
+    Error (if admission then Claude_admission_failure error else Claude_failure error)
   in
-  let* env, clock = eio_context ~runtime_id in
+  let* env, clock = eio_context ~runtime_id |> Result.map_error (fun failure -> Setup_failure failure) in
   let mgr = Posix_spawn_process_mgr.mgr in
   let cwd = Eio.Path.(Eio.Stdenv.fs env / base_dir) in
   match execution with
@@ -200,9 +212,9 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
        here means the split in Fusion_panel disagreed with [is_official_client],
        which is a bug in this module's callers rather than a provider failure. *)
     Error
-      (provider_error
+      (Setup_failure (provider_error
          ~runtime_id
-         "runtime is Agent_core-owned; it belongs on the Async_agent path")
+         "runtime is Agent_core-owned; it belongs on the Async_agent path"))
   | Runtime_execution.Claude_code execution ->
     let config =
       claude_config ~base_dir ~runtime_id ~system_prompt ~override_s:timeout_s
@@ -220,7 +232,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
          ~cwd
          probe_config
      with
-     | Error error -> claude_failed error
+     | Error error -> claude_failed ~admission:true error
      | Ok admitted_subscription ->
        (match
           Runtime_claude_code.run_turn
@@ -230,19 +242,24 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
             ~cwd
             config
             ~prompt
-            ~images:[]
+            ~images:(List.map (fun (image : image_input) ->
+              ({ media_type = image.media_type; base64_data = image.base64_data }
+               : Runtime_claude_code.image_input)) images)
         with
-        | Ok (result : Runtime_claude_code.turn_result) -> succeeded result.text
-        | Error error -> claude_failed error))
+        | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model }
+        | Error error -> claude_failed ~admission:false error))
   | Runtime_execution.Codex_app_server execution ->
     let config =
       codex_config ~runtime_id ~system_prompt ~override_s:timeout_s ~output_schema execution
     in
-    (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:[] with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded result.text
+    (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:(List.map (fun (image : image_input) ->
+           ({ media_type = image.media_type; base64_data = image.base64_data }
+            : Runtime_codex_app_server.image_input)) images) with
+     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->
-       Error
-         (provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)))
+       Error (Codex_failure error))
+  | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
+    Error (Setup_failure (provider_error ~runtime_id "Antigravity transport does not support image input"))
   | Runtime_execution.Antigravity_cli execution ->
     let config =
       antigravity_config ~base_dir ~runtime_id ~override_s:timeout_s ~output_schema execution
@@ -251,9 +268,20 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema 
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
     (match Runtime_antigravity.run_turn ~mgr ~clock ~cwd config ~prompt with
-     | Ok (result : Runtime_antigravity.turn_result) -> succeeded result.text
+     | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model }
      | Error error ->
-       Error (provider_error ~runtime_id (Runtime_antigravity.error_to_string error)))
+       Error (Antigravity_failure error))
+;;
+
+let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =
+  let ( let* ) = Result.bind in
+  let* runtime = match Runtime.get_runtime_by_id runtime_id with
+    | Some runtime -> Ok runtime
+    | None -> Error (provider_error ~runtime_id "runtime is not configured") in
+  run_with_images ~images:[] ~base_dir ~runtime ~system_prompt ?timeout_s
+    ?output_schema ~prompt ()
+  |> Result.map (fun (response : response) -> response.text)
+  |> Result.map_error (panel_failure ~runtime_id)
 ;;
 
 module For_testing = struct

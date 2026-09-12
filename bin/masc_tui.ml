@@ -1768,7 +1768,9 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
-  | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot * Yojson.Safe.t option), string) result
+  | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
+  | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
+      * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
   | Msx_frame_loaded of msx_poll_request * (Masc_tui_types.msx_frame option, string) result
   (* A microphone capture, from the fiber that runs it. The keeper is carried
@@ -4244,12 +4246,51 @@ let launch_connectors_load state ~mailbox =
         enqueue_async mailbox (Connectors_loaded (Error "Eio switch is unavailable"))
   end
 
+let map_lane_addons state f =
+  match state.lane_addons with
+  | Some view -> state.lane_addons <- Some (f view)
+  | None -> state.lane_addons_cached <- f state.lane_addons_cached
+
+let launch_lane_declaration state ~mailbox ~edit request =
+  let module Document = Masc_tui_lane_declaration in
+  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  if view.loading then
+    map_lane_addons state (fun view -> {view with error=Some "A request is pending; drafts remain editable"})
+  else (
+    state.lane_addons_generation <- state.lane_addons_generation + 1;
+    let generation = state.lane_addons_generation in
+    let document_key = Some (match request with Document.Read path -> Filename.basename path | Document.Save session -> session.file_name) in
+    state.lane_addons <- Some {view with generation;loading=true;error=None;editor_ready=false;document_key};
+    let host = server_peer_host and port = state.port in
+    let perform () =
+      let ( let* ) = Result.bind in
+      let* status, body = match request with
+        | Document.Read source_path -> Masc_tui_http.http_get ~host ~port
+            ~path:("/api/v1/lane-addons/declaration?source_path=" ^ Masc_tui_http.percent_encode_query_value source_path)
+        | Document.Save session -> Masc_tui_http.http_post ~host ~port
+            ~headers:(Masc_tui_http.auth_headers ()) ~path:"/api/v1/lane-addons/declaration"
+            ~body:(Yojson.Safe.to_string (Document.write_json session)) in
+      Document.decode_response request ~status ~body in
+    match Eio_context.get_switch_opt () with
+    | None -> map_lane_addons state (fun view -> {view with loading=false;error=Some "Eio switch unavailable"})
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+        let result = try perform () with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn) in
+        enqueue_async mailbox (Lane_declaration_loaded (generation, request, edit, result)); `Stop_daemon))
+
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
-  let view = Option.value ~default:Addons.initial state.lane_addons in
+  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  if view.loading then
+    state.lane_addons <- Some {view with error=Some "A Lane request is pending; Esc returns to existing activity"}
+  else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
-  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None };
+  let last_action, action_receipt = match request with
+    | Addons.Act action | Addons.Action_status action -> Some action, None
+    | _ -> view.last_action, view.action_receipt in
+  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;last_action;action_receipt };
   let host = server_peer_host and port = state.port in
   let perform () =
     let ( let* ) = Result.bind in
@@ -4257,23 +4298,32 @@ let launch_lane_addons state ~mailbox request =
       let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons" in
       Addons.decode json in
     match request with
-    | Addons.Inspect -> let* snapshot = inspect () in Ok (snapshot, None)
+    | Addons.Inspect -> let* snapshot = inspect () in Ok (Some snapshot, None, None)
     | Addons.Slice query ->
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
         let* json = Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/slice?" ^ query) in
-        let instances = match view.snapshot with None -> [] | Some snapshot -> snapshot.instances in
-        let* snapshot = Addons.decode_slice ~instances json in Ok (snapshot, None)
+        let* previous = match view.snapshot with None -> inspect () | Some snapshot -> Ok snapshot in
+        let* snapshot = Addons.decode_slice ~snapshot:previous json in Ok (Some snapshot, None, None)
+    | Addons.Act action | Addons.Action_status action ->
+        let* json = match request with
+          | Addons.Act _ -> Masc_tui_http.post_json ~host ~port ~path:"/api/v1/lane-addons/actions"
+              ~body:(Yojson.Safe.to_string (Addons.action_json action))
+          | _ -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/actions?instance_id="
+              ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
+              ^ Masc_tui_http.percent_encode_query_value action.request_id) in
+        let* receipt = Addons.action_receipt action json in
+        Ok (view.snapshot, Some json, Some receipt)
     | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Evidence _ ->
         let suffix, body = match request with
           | Addons.Attach json -> "attach", json
           | Addons.Observe id -> "observe", `Assoc ["instance_id", `String id]
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
-          | Addons.Inspect | Addons.Slice _ -> assert false in
+          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ -> assert false in
         let* receipt = Masc_tui_http.post_json ~host ~port ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         (match inspect () with
-         | Ok snapshot -> Ok (snapshot, Some receipt)
+         | Ok snapshot -> Ok (Some snapshot, Some receipt, None)
          | Error detail -> Error ("Action receipt: " ^ Yojson.Safe.to_string receipt ^ "; inspect failed: " ^ detail))
   in
   match Eio_context.get_switch_opt () with
@@ -4282,7 +4332,7 @@ let launch_lane_addons state ~mailbox request =
       let result = try perform () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn) in
-      enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon)
+      enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon))
 
 let launch_browser_lane state ~mailbox operation =
   let open Browser_lane_view in
@@ -8003,7 +8053,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       (match Masc_tui_lane_addons.parse_request input with
        | Ok request -> launch_lane_addons state ~mailbox request
        | Error detail ->
-           let view = Option.value ~default:Masc_tui_lane_addons.initial state.lane_addons in
+           let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
            state.lane_addons <- Some { view with error = Some detail })
   | Masc_tui_command.Open_metrics ->
       Buffer.clear state.msg_input;
@@ -10816,13 +10866,38 @@ let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
   | Lane_addons_loaded (generation, result) ->
-      (match state.lane_addons with
-       | Some view when view.generation = generation ->
-           state.lane_addons <- Some (match result with
-             | Error detail -> { view with loading = false; error = Some detail }
-             | Ok (snapshot, receipt) -> { view with loading = false; error = None;
-                 snapshot = Some snapshot; receipt = (match receipt with None -> view.receipt | Some _ -> receipt) })
-       | Some _ | None -> ())
+      map_lane_addons state (fun view ->
+        if view.generation <> generation then view else
+        match result with
+        | Error detail -> {view with loading=false;error=Some detail}
+        | Ok (snapshot, receipt, action) -> {view with loading=false;error=None;snapshot=(match snapshot with None -> view.snapshot | Some _ -> snapshot);
+            action_receipt=(match action with None -> view.action_receipt | Some _ -> action);
+            receipt=(match receipt with None -> view.receipt | Some _ -> receipt)})
+  | Lane_declaration_loaded (generation, request, edit, result) ->
+      let module Addons = Masc_tui_lane_addons in
+      let module Document = Masc_tui_lane_declaration in
+      let visible = Option.is_some state.lane_addons in
+      map_lane_addons state (fun view ->
+        if view.generation <> generation then view else
+        let view = {view with loading=false} in
+        match result with
+        | Error detail -> {view with error=Some detail}
+        | Ok response ->
+            let key = match request with Document.Read path -> Filename.basename path
+              | Document.Save session -> session.file_name in
+            let existing = List.find_opt (fun (s : Document.session) -> s.file_name=key) view.documents in
+            let session = match existing, response with
+              | Some session, _ -> Some (Document.after_response session response)
+              | None, Document.Read_document document -> Some (Document.from_document document)
+              | None, Document.Written receipt -> Some (Document.from_document receipt.document)
+              | None, Document.Rejected _ -> None in
+            let selected = view.document_key=Some key in
+            let view = match session with None -> view | Some session ->
+              let updated = Addons.put_document view session in
+              {updated with document_key=view.document_key} in
+            match response with
+            | Document.Rejected failure -> {view with error=Some failure.message}
+            | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))})
   (* Every voice message carries the keeper the capture was started for, and
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
@@ -14367,6 +14442,41 @@ let main
           (Printf.sprintf "runtime.toml at [models.%s] - e to edit"
              row.Masc_tui_model_runtime_table.model))
   in
+  let handle_lane_document_editor () =
+    let module Addons = Masc_tui_lane_addons in
+    match state.lane_addons with
+    | None -> ()
+    | Some view ->
+        state.lane_addons <- Some {view with editor_ready=false};
+        (match Addons.selected_document view with
+         | None -> ()
+         | Some session ->
+             match Masc_tui_editor.roundtrip ~restore:restore_terminal
+               ~reenter:reenter_terminal ~suffix:".toml" session.text with
+             | Error abort -> map_lane_addons state (fun view ->
+                 {view with error=Some (Masc_tui_editor.abort_detail abort ^ "; TOML draft retained")})
+             | Ok text -> map_lane_addons state (fun view ->
+                 Addons.put_document {view with error=None;scroll=0}
+                   {session with text;message=Some "Draft edited; s saves through the shared TOML owner"}))
+  in
+  let select_lane_document view =
+    let module Addons = Masc_tui_lane_addons in
+    let path = match view.Addons.focus with
+      | Addons.Configurations -> Option.map (fun (d : Addons.declaration) -> d.source_path) (Addons.selected_declaration view)
+      | Addons.Instances | Addons.Rows ->
+          Option.bind (Addons.selected_instance view) (fun instance ->
+            Option.bind view.snapshot (fun snapshot ->
+              Option.bind snapshot.configuration (fun config ->
+                List.find_map (fun (d : Addons.declaration) ->
+                  if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
+                  then Some d.source_path else None) config.declarations))) in
+    match path with
+    | None -> state.lane_addons <- Some {view with error=Some "Choose a TOML installation or configuration issue first"}
+    | Some path ->
+        (match List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=Filename.basename path) view.documents with
+         | Some session -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
+         | None -> launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path))
+  in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> report_action state "error" "config not loaded yet; r to reload"
@@ -15074,6 +15184,9 @@ and is loaded on demand through keeper_skill.
           ~http_scoped_refresh_inflight ~scoped_refresh_followup
           ~frame_presenter ~render_schedule async_messages
       then Render_schedule.request render_schedule Render_schedule.Background;
+      (match state.lane_addons with
+       | Some view when view.editor_ready -> handle_lane_document_editor ()
+       | Some _ | None -> ());
       (* Check for input *)
       let input_timeout =
         Render_schedule.input_timeout_seconds render_schedule
@@ -15670,25 +15783,66 @@ and is loaded on demand through keeper_skill.
                      (match key with
                       | "esc" -> update { view with draft = None }
                       | "\r" | "\n" | "enter" ->
-                          (match Addons.parse_request draft with
-                           | Ok request -> launch_lane_addons state ~mailbox:async_messages request
-                           | Error detail -> update { view with error = Some detail })
+                          if view.naming then
+                            (match Masc_tui_lane_declaration.create draft with
+                             | Error detail -> update {view with error=Some detail}
+                             | Ok fresh ->
+                                 let session = Option.value ~default:fresh
+                                   (List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=fresh.file_name) view.documents) in
+                                 update (Addons.put_document {view with draft=None;naming=false;editor_ready=true;scroll=0;error=None} session))
+                          else
+                            (match Addons.parse_request draft with
+                             | Ok request -> launch_lane_addons state ~mailbox:async_messages request
+                             | Error detail -> update { view with error = Some detail })
                       | "\127" | "\b" | "backspace" -> update { view with draft = Some (Masc_tui_message_layout.drop_last_utf8_scalar draft) }
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
                       | _ -> ())
                  | None ->
                      match key with
-                     | "esc" | "q" -> state.lane_addons <- None
-                     | ":" -> update { view with draft = Some ""; scroll = 0 }
+                     | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
+                     | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
+                     | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
+                     | ":" -> update { view with draft = Some ""; naming=false; scroll = 0 }
+                     | "E" ->
+                         (match Addons.selected_document view with
+                          | Some _ -> update {view with editor_ready=true}
+                          | None -> select_lane_document view)
+                     | "s" ->
+                         (match Addons.selected_document view with
+                          | None -> update {view with error=Some "Open a TOML draft with n or E first"}
+                          | Some session -> launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Save session))
+                     | "l" ->
+                         (match Addons.selected_document view with
+                          | None -> ()
+                          | Some session ->
+                              let path = match session.base, session.current with
+                                | Some base, _ | None, Some base -> Some base.source_path
+                                | None, None -> Option.bind view.snapshot (fun snapshot ->
+                                    Option.map (fun (config : Addons.configuration) -> Filename.concat config.directory session.file_name) snapshot.configuration) in
+                              (match path with None -> update {view with error=Some "Configuration directory unknown; r inspects it"}
+                               | Some path -> launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Read path)))
+                     | "u" | "U" ->
+                         (match Addons.selected_document view with
+                          | None -> ()
+                          | Some session ->
+                              let apply = if key="u" then Masc_tui_lane_declaration.use_current_revision else Masc_tui_lane_declaration.replace_with_current in
+                              (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
+                               | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                     | "t" ->
+                         (match view.last_action with None -> update {view with error=Some "No action request yet; :act submits one"}
+                          | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Instances) }
+                     | "\t" | "tab" -> update { view with focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" -> update { view with scroll = max 0 (min (List.length (Addons.lines view) - 1) (view.scroll + (if key = "J" then 1 else -1))) }
                      | "j" | "down" | "k" | "up" ->
                          let delta = if key = "j" || key = "down" then 1 else -1 in
                          (match view.snapshot, view.focus with
+                          | Some snapshot, Addons.Configurations ->
+                              let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
+                              update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
                           | None, _ -> ())

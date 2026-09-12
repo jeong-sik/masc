@@ -157,7 +157,21 @@ detaching cancels undispatched actions without replaying the running request.
 Orphan receipt tests exercise recovery without dispatch. These tests do not
 establish real emulator behavior, a whole-server restart, or a Keeper model turn.
 
-The next package qualification must freeze this host revision, install the
-package using TOML, act through the common surface, and independently inspect
-retained bytes and the Dashboard. If the domain needs another host dispatcher
-or component branch, package-only extensibility has not passed.
+The DOS package passed this bounded scenario on host and Dashboard revision
+`4218e1c05e2029e7b63d8847aa857a18dd6db084`, using package source commit
+`e0d4e0c35ae9b550d53a952c3340709f2deac4c6`: TOML installation, Skill document
+discovery/read, one common Dashboard action, independently decoded retained
+STATE and VGA pixels changing from counter 0 to 1, and evidence retained after
+detach. Another observer continued during the workflow. The host came from
+[native CI](https://github.com/jeong-sik/masc/actions/runs/34699821571) and
+[Dashboard CI](https://github.com/jeong-sik/masc/actions/runs/34699823363); the
+[package CI](https://github.com/jeong-sik/masc/actions/runs/34699775204) separately
+exercised actual DOS on amd64 and arm64. These identities describe the qualified
+candidates, not a production deployment or every later merge.
+
+Future packages must likewise freeze the host, install through TOML, act through
+the common surface when applicable, and independently inspect their state,
+retained bytes and Dashboard. If the domain needs another host dispatcher or
+component branch, package-only extensibility has not passed. The DOS proof does
+not establish strategic gameplay, Keeper model use, long-duration continuity or
+performance improvement.

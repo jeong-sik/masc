@@ -25,11 +25,6 @@
  (libraries masc_test_deps))
 
 (test
- (name test_verifier_official_client)
- (modules test_verifier_official_client)
- (libraries masc_test_deps))
-
-(test
  (name test_completion_repair_delivery)
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))

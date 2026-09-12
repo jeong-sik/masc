@@ -98,7 +98,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"a", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"ghttps://example.org/history", b"https://example.org/history")
-            h.write_all(fd, output, b"\x1b")
+            h.send_and_wait(process, fd, output, b"\x1b", b"g:URL")
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
                 needle=b"CURRENT PAGE CONTENT", controls=(h.FULL_REDRAW,))
             assert b"URL>" not in h.screen_text(frame), "Escape did not close the URL editor"

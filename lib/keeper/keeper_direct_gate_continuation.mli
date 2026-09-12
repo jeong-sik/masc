@@ -24,7 +24,10 @@ val pending : base_path:string -> keeper_name:string -> operation_id:Keeper_chat
 
 (** Called only after the resumed direct model turn completed successfully.
     The existing spent-wake intake then retires its correlation stimulus. *)
-val observe_native_input : ?blocks:Agent_core.Types.content_block list -> config:Workspace.config -> user_message:string -> admission -> transmitted:string -> (unit, string) result
+(** Called by the official adapter's post-write callback. The inputs are the
+    prepared arguments passed to that adapter, not serialized wire bytes. The
+    complete Gate message and stable replay identity must remain in those inputs. *)
+val observe_native_input : ?blocks:Agent_core.Types.content_block list -> prepared:Keeper_gate_replay.model_message -> config:Workspace.config -> user_message:string -> admission -> transmitted:string -> (unit, string) result
 val complete_native : config:Workspace.config -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result
 val record_completed : config:Workspace.config -> keeper_name:string -> admission ->

@@ -334,12 +334,41 @@ let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
     now -. attempt_started_at > threshold_sec
 ;;
 
+type provider_lease_phase =
+  | Provider_active_since of float
+  | Provider_yielded
+
+let observe_provider_lease ~now ~on_yield ~on_resume =
+  let phase = Atomic.make (Provider_active_since (now ())) in
+  let yield () =
+    Atomic.set phase Provider_yielded;
+    Option.iter (fun notify -> notify ()) on_yield
+  in
+  let resume () =
+    Option.iter (fun notify -> notify ()) on_resume;
+    Atomic.set phase (Provider_active_since (now ()))
+  in
+  phase, yield, resume
+;;
+
+let provider_lease_stalled ~lease_phase ~now ~threshold_sec ~attempt_started_at
+    ~sample =
+  match lease_phase with
+  | Provider_yielded -> false
+  | Provider_active_since resumed_at ->
+    let sample = Option.map (fun sample ->
+      { sample with last_progress_at = max resumed_at sample.last_progress_at }) sample in
+    attempt_stalled ~now ~threshold_sec
+      ~attempt_started_at:(max resumed_at attempt_started_at) ~sample
+;;
+
 (* #28417: blocks until the attempt has gone [threshold_sec] without a
    progress signal, then returns. [probe] is contracted not to raise (the
    injection site converts a failed registry read into [None]), so a
    transient read failure degrades this fiber to the elapsed fallback instead
    of cancelling the attempt it is watching. *)
-let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe =
+let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
+    ~lease_phase =
   Eio.Time.sleep clock progress_poll_interval_sec;
   let sample =
     match probe with
@@ -351,13 +380,15 @@ let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe =
      [Keeper_registry_setup.stamp_turn_progress] with [Time_compat.now], and a
      difference between two clocks is only meaningful when both readings come
      from the same one. [clock] is used for sleeping, not for dating. *)
-  if attempt_stalled
+  if provider_lease_stalled
+       ~lease_phase:(Atomic.get lease_phase)
        ~now:(Time_compat.now ())
        ~threshold_sec
        ~attempt_started_at
        ~sample
   then ()
   else await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
+    ~lease_phase
 ;;
 
 let rejected_body_bytes = function
@@ -1075,6 +1106,15 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
       (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
          decisions do not branch on this timestamp. *)
     in
+    (* Tools and recovery judgment run after the main provider releases its
+       inference lease. Observe that boundary synchronously: direct chat can
+       lack the unified turn's asynchronous tool-count mirror. Its absence
+       must not turn a running image subcall into a main-provider timeout.
+       Delegated calls retain their own configured transport boundaries. *)
+    let lease_phase, on_yield, on_resume =
+      observe_provider_lease ~now:Time_compat.now
+        ~on_yield:ctx.on_yield ~on_resume:ctx.on_resume
+    in
     let run_attempt_switch () =
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
@@ -1087,8 +1127,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 ~config
                 ~checkpoint
                 ?on_event:ctx.on_event
-                ?on_yield:ctx.on_yield
-                ?on_resume:ctx.on_resume
+                ~on_yield
+                ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ()
@@ -1099,8 +1139,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 ~config
                 ?agent_core_checkpoint:ctx.agent_core_checkpoint
                 ?on_event:ctx.on_event
-                ?on_yield:ctx.on_yield
-                ?on_resume:ctx.on_resume
+                ~on_yield
+                ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 blocks
@@ -1111,8 +1151,8 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                 ~config
                 ?agent_core_checkpoint:ctx.agent_core_checkpoint
                 ?on_event:ctx.on_event
-                ?on_yield:ctx.on_yield
-                ?on_resume:ctx.on_resume
+                ~on_yield
+                ~on_resume
                 ~agent_ref:attempt_agent_ref
                 ?cooperative_yield_probe:ctx.cooperative_yield_probe
                 ctx.goal
@@ -1148,6 +1188,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
                  ~clock
                  ~threshold_sec
                  ~attempt_started_at
+                 ~lease_phase
                  ~probe:ctx.provider_progress_probe;
                `Attempt_stalled)
          with
@@ -1604,6 +1645,7 @@ let run_try_provider_with_truncation_recovery
 ;;
 
 module For_testing = struct
+  let observe_provider_lease = observe_provider_lease
   let apply_accept = apply_accept
   let checkpoint_before_incomplete_response = checkpoint_before_incomplete_response
   let max_tokens_truncation_error = max_tokens_truncation_error

@@ -50,17 +50,8 @@ module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
 val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
-val get_terminal_size : unit -> int * int
+
 val set_table_frame : bool -> unit
-type chat_markdown_identity = {
-  cmi_style : Message_layout.style;
-  cmi_keeper_name : string;
-  cmi_request_id : string;
-  cmi_observed_at : float option;
-  cmi_entry_index : int;
-}
-val keeper_split_threshold_cols : int
-val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
 (** The Activity pane as the last frame drew it, for the input layer: how
     many columns it held on the right (zero when none was drawn), what a
@@ -73,7 +64,6 @@ val acting_pane_target_at : line:int -> Masc_tui_acting_pane.row_target
 
 val acting_pane_scroll_limit : unit -> int
 
-val chat_row_action_at : row:int -> Masc_tui_message_layout.row_action
 (** What a press on this terminal row opens in the chat history the last frame
     drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.
 
@@ -83,20 +73,7 @@ val chat_row_action_at : row:int -> Masc_tui_message_layout.row_action
     so a press cannot be served by a row that is no longer on screen. *)
 val keeper_roster_marquee_target :
   Masc_tui_types.state -> cols:int -> string option
-val finish_surface :
-  Masc_tui_types.state ->
-  ?clamped:Masc_tui_types.clamped_scroll ->
-  surface_key:string ->
-  rows:int ->
-  cols:int ->
-  Buffer.t -> Frame_presenter.frame * Masc_tui_types.clamped_scroll option
-type chrome_body = {
-  push : string -> unit;
-  push_styled : style:string -> string -> unit;
-  push_selected : string -> unit;
-  push_divider : unit -> unit;
-  push_empty : unit -> unit;
-}
+
 val overview_layout :
   Masc_tui_types.state ->
   terminal_rows:int ->
@@ -115,48 +92,7 @@ type lane_run_tool_counts = {
   failed : int;
   other : int;
 }
-type keeper_call_association =
-    Call_log_not_loaded
-  | Call_log_loading
-  | Call_log_unavailable of string
-  | Call_execution_unrecorded
-  | Call_execution_missing
-  | Call_execution_ambiguous of int
-  | Call_execution_exact of Planning_detail.Tui_decode.keeper_call
-type visible_timeline_memo = {
-  vtm_messages : Masc_tui_types.msg_entry list;
-  vtm_memory : Masc_tui_types.memory_visibility;
-  vtm_reasoning : Masc_tui_types.reasoning_visibility;
-  vtm_tools : Masc_tui_types.tool_visibility;
-  vtm_timeline : (Masc_tui_types.msg_entry * float option) list;
-}
-type layout_entries_memo = {
-  lem_keeper_name : string;
-  lem_chat_cols : int;
-  lem_memory : Masc_tui_types.memory_visibility;
-  lem_reasoning : Masc_tui_types.reasoning_visibility;
-  lem_tools : Masc_tui_types.tool_visibility;
-  lem_file_changes_keeper : string option;
-  lem_file_change_index : Keeper_chat_diff.index;
-  lem_calls_keeper : string option;
-  lem_calls_loading : bool;
-  lem_calls_error : string option;
-  lem_calls : Planning_detail.Tui_decode.keeper_calls_snapshot option;
-  lem_palette_generation : int;
-  lem_visible_timeline : (Masc_tui_types.msg_entry * float option) list;
-  lem_visible_entries :
-    (Masc_tui_types.msg_entry * float option * Masc_tui_types.turn_edge) list;
-  lem_entries : Message_layout.entry list;
-}
-val keeper_message_find_scroll :
-  Masc_tui_types.state ->
-  keeper_name:string ->
-  needle:string ->
-  older_than:Masc_tui_types.msg_anchor option ->
-  (int * Masc_tui_types.msg_anchor) option
-val render_keeper_message :
-  Masc_tui_types.state ->
-  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
 type memory_state =
     Memory_ordinary
   | Memory_warning

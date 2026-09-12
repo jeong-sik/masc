@@ -15053,17 +15053,14 @@ let render_context_inspector state =
   (* The search query, drawn where the typing lands: the Keepers strip's
      own indicator sits on a surface this pane replaced. *)
   let search_marker =
-    match state.search with
-    | Some query ->
-        Printf.sprintf "  %s/%s▌%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-          (Terminal_text.single_line query)
-          Ansi.reset
-    | None ->
-        if state.search_last = "" then ""
-        else
-          Printf.sprintf "  %s/%s (n/N)%s" Ansi.dim
-            (Terminal_text.single_line state.search_last)
-            Ansi.reset
+    match search_marker state with
+    | None -> ""
+    | Some marker ->
+        Printf.sprintf "  %s%s%s"
+          (match state.search with
+           | Some _ -> Masc_tui_theme.tone Masc_tui_theme.Accent
+           | None -> Ansi.dim)
+          marker Ansi.reset
   in
   framed_top buf cols;
   framed_line buf cols

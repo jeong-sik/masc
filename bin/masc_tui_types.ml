@@ -3452,6 +3452,19 @@ type state = {
      {!surface_row_texts} searches through the same pair. *)
   mutable search: string option;
   mutable search_last: string;
+  (* Rows the current query matches, as the last scan counted them, or [None]
+     when there is no query or the surface has no searchable rows.
+
+     The scan already visits every row to find the next match, so the count
+     costs a fold over the array it already built. Kept rather than recounted
+     while drawing: the renderer writes no state, and a count taken per frame
+     would rebuild every row's text on a surface that is only being looked
+     at.
+
+     Written where the query changes and where n/N step, so it describes the
+     query on screen. A list that changes underneath leaves it one keypress
+     stale, which is the same staleness the cursor position already has. *)
+  mutable search_matches: int option;
   (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
      read is stamped with the keeper it answers for, so a cursor move cannot
      show one keeper's instructions under another's name. *)
@@ -5061,6 +5074,7 @@ let create_state
   palette_mode = Palette_jump;
   search = None;
   search_last = "";
+  search_matches = None;
   voice_config = None;
   voice_config_error = None;
   voice_input_device = None;

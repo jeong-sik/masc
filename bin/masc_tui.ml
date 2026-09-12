@@ -5552,9 +5552,31 @@ let move_list_by_rows (state : state) ~delta =
 let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail
 
+(* Rows the query reaches. For the paths that change which query is on
+   screen without moving a cursor -- Esc falling back to the settled one --
+   because [search_jump] counts over the array it is already walking and
+   asking it to count without jumping would mean building the row texts a
+   second time on every keystroke. *)
+let search_match_count state ~query =
+  if String.length query = 0 then None
+  else
+    match surface_row_texts state state.view with
+    | None -> None
+    | Some texts ->
+        Some
+          (List.fold_left
+             (fun found text ->
+               if Masc_tui_types.palette_contains ~needle:query text then
+                 found + 1
+               else found)
+             0 texts)
+
 let search_jump ?(backwards = false) state ~query ~after =
   match surface_row_texts state state.view with
-  | None -> ()
+  (* No rows to search means no count to report, not a count of zero: zero
+     would read as "this query matches nothing here" on a surface where the
+     question was never asked. *)
+  | None -> state.search_matches <- None
   | Some texts ->
       (* Into an array before the scan, not walked per index. The scan visits
          every row once and [List.nth_opt] walked to each from the front, so a
@@ -5567,6 +5589,16 @@ let search_jump ?(backwards = false) state ~query ~after =
         let matches index =
           Masc_tui_types.palette_contains ~needle:query texts.(index)
         in
+        (* How many rows the query reaches, over the array the scan below
+           walks anyway. Without it the footer says what was typed and not
+           whether it found anything: a query that matches nothing moves no
+           cursor, which looks the same as a query whose match is already
+           under it. *)
+        let found = ref 0 in
+        for index = 0 to total - 1 do
+          if matches index then incr found
+        done;
+        state.search_matches <- Some !found;
         let rec scan step =
           if step > total then ()
           else begin
@@ -5583,6 +5615,9 @@ let search_jump ?(backwards = false) state ~query ~after =
         in
         scan 1
       end
+      (* An empty query is not a query: the footer shows what was typed and
+         nothing has been. *)
+      else state.search_matches <- None
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -5591,6 +5626,12 @@ let search_jump ?(backwards = false) state ~query ~after =
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
   leave_browser_lane_for_surface state destination;
+  (* The count belongs to the rows it was taken over. Carrying it to another
+     surface would put a number from the list left behind next to the query
+     on the list arrived at -- worse than no number, because it reads as an
+     answer. The query itself stays: n and N still step it here, and the next
+     press counts these rows. *)
+  if destination <> state.view then state.search_matches <- None;
   if state.repository_changes_open && destination <> state.view then
     close_repository_changes state;
   if state.view = Lanes || destination = Lanes then
@@ -15980,7 +16021,10 @@ and is loaded on demand through keeper_skill.
                 (* The surface search's own arm sits below this modal block,
                    so the pane starts the search itself: same state, same
                    keys, and the block above now yields while it runs. *)
-                state.search <- Some ""
+                state.search <- Some "";
+                (* Armed empty: the previous query's count is not this one's,
+                   and an empty query has none of its own. *)
+                state.search_matches <- None
             | "r" ->
                 Option.iter
                   (fun keeper_name ->
@@ -16571,7 +16615,13 @@ and is loaded on demand through keeper_skill.
               = Some Text_row_search ->
            let query = Option.value state.search ~default:"" in
            (match k with
-            | "esc" -> state.search <- None
+            (* Abandoned. The footer falls back to the settled query, which
+               n and N still step, so the count follows it there rather than
+               going blank beside a query that is still live. *)
+            | "esc" ->
+                state.search <- None;
+                state.search_matches <-
+                  search_match_count state ~query:state.search_last
             | "\r" ->
                 state.search <- None;
                 state.search_last <- query
@@ -17167,7 +17217,10 @@ and is loaded on demand through keeper_skill.
                   max 0 (min limit (min limit state.runtime_config_status_scroll + delta)))
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
-           state.search <- Some ""
+           state.search <- Some "";
+           (* Armed empty: the previous query's count is not this one's,
+              and an empty query has none of its own. *)
+           state.search_matches <- None
        | Some (("[" | "]") as bracket)
          when state.view = Keepers Keeper_detail ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
@@ -18829,6 +18882,7 @@ and is loaded on demand through keeper_skill.
                   if Option.is_some state.search || state.search_last <> "" then begin
                     state.search <- None;
                     state.search_last <- "";
+                    state.search_matches <- None;
                     state.memory_facts_cursor <- 0;
                     state.memory_facts_scroll <- 0
                   end

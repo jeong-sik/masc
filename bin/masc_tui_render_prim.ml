@@ -294,16 +294,49 @@ let awaiting_approval_notice (state : state) =
    two places drifts in one of them, and a reader who has to scan the body
    for keys on one screen and the footer on another reports exactly
    "the key help keeps moving around" (2026-08-28). *)
+(* The query on screen and how many rows it reaches, or [None] when no query
+   is on screen.
+
+   Both states, not only the armed one. Enter used to take the query off the
+   footer while n and N went on stepping through its matches, so the keys
+   that hunt said nothing about what they were hunting for. The caret marks
+   the one still being typed; "n/N" marks the one those keys now step.
+
+   The count is what tells a query that matches nothing from a query whose
+   only match is already under the cursor -- both move no cursor and, without
+   a number, look the same. Absent on a surface with no searchable rows,
+   where a number would answer a question nobody asked.
+
+   One spelling, because three surfaces draw this: the footer every surface
+   carries, the Keepers heading, and the context inspector's own title. They
+   said three different things about the same pair of fields. *)
+let search_marker (state : state) =
+  let found =
+    match state.search_matches with
+    | None -> ""
+    | Some 0 -> " (none)"
+    | Some n -> Printf.sprintf " (%d)" n
+  in
+  match state.search with
+  | Some query ->
+      Some (Printf.sprintf "/%s%s\xe2\x96\x8c" (Terminal_text.single_line query) found)
+  | None ->
+      if state.search_last = "" then None
+      else
+        Some
+          (Printf.sprintf "/%s%s n/N"
+             (Terminal_text.single_line state.search_last) found)
+
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
   (* Hints off trades the key text for status room; "?:help" stays as the
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
   let hints = if state.hints_visible then hints else "?:help" in
-  (* An armed "/" search shows its query where every surface already looks
-     for its keys. One seam instead of a per-surface indicator. *)
+  (* A "/" search shows its query where every surface already looks for its
+     keys. One seam instead of a per-surface indicator. *)
   let hints =
-    match state.search with
-    | Some query -> "/" ^ query ^ "  " ^ hints
+    match search_marker state with
+    | Some marker -> marker ^ "  " ^ hints
     | None -> hints
   in
   (* What the last keypress did, in front of the keys for the same reason the

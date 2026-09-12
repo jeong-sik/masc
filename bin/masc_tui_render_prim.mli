@@ -49,6 +49,13 @@ val page_unread_note : string
 
 val page_failed_note : string
 
+val search_marker : Masc_tui_types.state -> string option
+(** The "/" query on screen and how many rows it reaches, or [None] when no
+    query is on screen. One spelling for the three places that draw it: the
+    footer, the Keepers heading, and the context inspector's title. Plain
+    text -- the caller styles it, because the footer dims what a heading
+    accents. *)
+
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string

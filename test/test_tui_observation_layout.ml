@@ -60,13 +60,29 @@ let test_log_rows_keep_stable_columns () =
   check int "missing values keep row width" (String.length turn_row)
     (String.length heartbeat_row);
   check string "kind column" "turn" (String.sub turn_row 11 4);
-  check string "channel column" "turn    " (String.sub turn_row 16 8);
+  (* Blank where the channel would repeat the kind, and still eight cells wide:
+     the column holds its place so the numbers after it keep theirs. *)
+  check string "channel column is blank where it repeats the kind" "        "
+    (String.sub turn_row 16 8);
   check string "message column" "    7" (String.sub turn_row 25 5);
   check string "usage column" "        10/12" (String.sub turn_row 31 13);
   check string "latency column" "      0ms" (String.sub turn_row 45 9);
   check string "cost column" "   $0.000" (String.sub turn_row 55 9);
-  check string "heartbeat channel offset" "hb      "
+  check string "a heartbeat's channel is blank for the same reason" "        "
     (String.sub heartbeat_row 16 8);
+  (* The one channel that says something the kind does not is drawn, in the
+     same eight cells. *)
+  let scheduled =
+    log_entry ~kind:Decode.Log_turn
+      ~channel:Decode.Log_channel_scheduled_autonomous ~message_count:(Some 7)
+      ~input_tokens:(Some 10) ~output_tokens:(Some 12) ~latency_ms:(Some 0)
+      ~cost_usd:(Some 0.0) ~work_kind:(Some "tool_use")
+  in
+  let scheduled_row = Layout.plain_log_row ~time:"12:00:00" scheduled in
+  check int "a drawn channel does not change the width"
+    (String.length turn_row) (String.length scheduled_row);
+  check string "and it is the channel that disagrees with its kind" "sched   "
+    (String.sub scheduled_row 16 8);
   (* The names and the readings come from one description now. The widths used
      to live in this module and the names in the renderer, so this is the
      property that says they cannot drift apart again. *)

@@ -1,0 +1,20 @@
+{
+  "scope": "offline CLI fixtures and actual captured old-runtime negative control; not installed publication acceptance",
+  "script_sha256": "d48650b787d1d1a1009e60c1bfd743dc68d35b9497ef4a610cc6f41d11d47bd2",
+  "tests_sha256": "0c0dec1c46e3e70b62f3dbe8f304329c59f858845e2139fabd1652c74849b33f",
+  "fixtures": {
+    "unittest_methods": 10,
+    "reported_exit_code": 0,
+    "executed_by": "review-response implementation agent"
+  },
+  "actual_negative_control": {
+    "keeper": "exhibit-editor",
+    "turn_ref": "trace-1789042595401-00001#502",
+    "installed_source_at_capture": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "private_exact_input_archive": "/tmp/masc-workspace-memory-turn-negative-control-20260913",
+    "publication_and_fragment": "synthetic negative controls, never installed",
+    "fragment_occurrences": 0,
+    "exact_id_reads": 0,
+    "semantic_adoption": "not_verified"
+  }
+}

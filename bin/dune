@@ -1022,6 +1022,8 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc.voice_wizard
+  masc.voice_setup
   masc_tui_lane_addons
   masc.browser_lane
   masc.sse_wire

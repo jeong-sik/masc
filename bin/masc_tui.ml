@@ -15378,6 +15378,12 @@ and is loaded on demand through keeper_skill.
                       Some (Masc_tui_types.runtime_param_edit_append edit text);
                     state.runtime_params_notice <- None)
                   state.runtime_param_edit
+            | Some Text_voice_wizard ->
+                Option.iter
+                  (fun session ->
+                    state.voice_wizard <-
+                      Some (Masc_tui_types.voice_wizard_append session text))
+                  state.voice_wizard
             | Some Text_palette ->
                 state.palette_query <- state.palette_query ^ text;
                 state.palette_cursor <- 0

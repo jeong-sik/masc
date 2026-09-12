@@ -1077,6 +1077,13 @@ let initialize_owner_state_blocking
   Runtime_log_sink.install ();
   Log.Server.info
     "Runtime_log_sink installed (agent core -> MASC structured log)";
+  let state, t1, prepared_keeper_persistence =
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+      (fun ~runtime_config_path:locked_runtime_config_path ->
+  (* Keep constructor configuration reads, runtime publication and owner
+     inventory preparation in one journal-free observation interval. No
+     manifest lock is acquired here; composite writers keep their established
+     manifest-before-runtime lock order. *)
   let state =
     create_server_state
       ~sw
@@ -1090,7 +1097,11 @@ let initialize_owner_state_blocking
       ~env
       ()
   in
-  let runtime_config_path = Runtime.config_path () in
+  let runtime_config_path = match Runtime.config_path () with
+    | Some path when not (String.equal path locked_runtime_config_path) ->
+      raise (Owner_initialization_failed
+        (Runtime_config_read_failed "runtime configuration path changed during initial configuration admission"))
+    | path -> path in
   let runtime_config_observation =
     match runtime_config_path with
     | None -> Error Runtime_startup_state.Config_missing
@@ -1235,6 +1246,11 @@ let initialize_owner_state_blocking
       raise
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
+  in
+  (state, t1, prepared_keeper_persistence)) with
+    | Ok initialized -> initialized
+    | Error detail ->
+      raise (Owner_initialization_failed (Runtime_config_read_failed detail))
   in
   (match
      Eio_unix.run_in_systhread ~label:"wire-capture-prune" (fun () ->

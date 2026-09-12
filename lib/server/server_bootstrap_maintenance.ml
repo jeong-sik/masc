@@ -271,6 +271,19 @@ let recover_keeper_config_journal_on_startup ~base_path =
   report
 ;;
 
+let with_initial_configuration ~base_path initialize =
+  let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let config_root = Filename.dirname runtime_config_path in
+  (* Preserve fresh-root seeding before the lock file creates its directory.
+     Existing roots may contain an interrupted writer: their bootstrap reads
+     and backfills must stay inside the guarded constructor below. *)
+  if not (Sys.file_exists config_root) then
+    Server_runtime_config_root_bootstrap.bootstrap_base_path_config_root ~base_path;
+  Fs_compat.mkdir_p config_root;
+  Runtime.with_config_lock ~runtime_config_path (fun () ->
+    Ok (initialize ~runtime_config_path))
+;;
+
 let recover_keeper_msg_requests_on_startup ~base_path =
   let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
   Atomic.set latest_keeper_msg_recovery (Some report);

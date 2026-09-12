@@ -1823,6 +1823,95 @@ let test_actor_publication_starts_after_config_commit () =
   | Error error -> fail (P.error_to_string error)
 ;;
 
+let test_initial_configuration_rechecks_journal_after_early_recovery () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let manifest_path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path) "boot-race.toml" in
+  Fs_compat.mkdir_p (Filename.dirname manifest_path);
+  Fs_compat.save_file runtime_path "before-runtime";
+  Fs_compat.save_file manifest_path "before-manifest";
+  let early = Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path in
+  (match early.outcome with No_journal -> () | _ -> fail "expected initial no-journal observation");
+  let record : Keeper_config_journal.record =
+    {tx_id="boot-race"; keeper_name="boot-race";
+     manifest_before=Manifest_bytes "before-manifest";
+     runtime_before=Some (Runtime_bytes "before-runtime");
+     manifest_path; runtime_path=Some runtime_path; started_at_unix=0.; phase=Prepared} in
+  (* A writer acquires the same lock after the early check, then crashes
+     after the first file replacement, before startup's actual read. *)
+  (match Runtime.with_config_lock ~runtime_config_path:runtime_path (fun () ->
+     match Keeper_config_journal.stage ~base_path record with
+     | Error detail -> Error detail
+     | Ok () -> Fs_compat.save_file manifest_path "interrupted-manifest"; Ok ()) with
+   | Ok () -> () | Error detail -> fail detail);
+  let constructed = ref false in
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+     (fun ~runtime_config_path ->
+       constructed := true;
+       Runtime.load_config_observation ~runtime_config_path ()) with
+   | Error detail -> check bool "late journal requires recovery" true
+       (String.starts_with ~prefix:"configuration recovery required" detail)
+   | Ok _ -> fail "initial configuration accepted an interrupted dual write");
+  check bool "constructor and publication were never entered" false !constructed;
+  check string "retained manifest remains evidence" "interrupted-manifest"
+    (Fs_compat.load_file manifest_path);
+  check bool "diagnostic configuration reads remain available" true
+    (Result.is_ok (Runtime.load_config_observation ~runtime_config_path:runtime_path ()))
+;;
+
+let test_initial_configuration_excludes_concurrent_writers () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let attempted, publish_attempt = Eio.Promise.create () in
+  let finished, publish_finished = Eio.Promise.create () in
+  let writer_entered = ref false in
+  let initialized = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    (fun ~runtime_config_path ->
+      Fs_compat.save_file runtime_config_path "before";
+      Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        Eio.Promise.resolve publish_attempt ();
+        let result = Runtime.with_config_lock ~runtime_config_path (fun () ->
+          writer_entered := true;
+          Fs_compat.save_file runtime_config_path "after";
+          Ok ()) in
+        Eio.Promise.resolve publish_finished result);
+      Eio.Promise.await attempted;
+      check int "initial owner and blocked writer both hold lock entries" 2
+        (File_lock_eio.For_testing.holders_and_waiters ~lock_path:(runtime_config_path ^ ".lock"));
+      check bool "writer cannot enter during initial publication" false !writer_entered;
+      check string "initial readers see original bytes" "before"
+        (Fs_compat.load_file runtime_config_path);
+      runtime_config_path) in
+  let runtime_path = match initialized with Ok path -> path | Error detail -> fail detail in
+  (match Eio.Promise.await finished with Ok () -> () | Error detail -> fail detail);
+  check bool "writer proceeds after initial publication" true !writer_entered;
+  check string "subsequent reader sees completed writer" "after" (Fs_compat.load_file runtime_path)
+;;
+
+let test_initial_configuration_preserves_setup_observations () =
+  with_env "MASC_CONFIG_BOOTSTRAP" "skip" @@ fun () ->
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let observe () = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    (fun ~runtime_config_path -> Runtime.load_config_observation ~runtime_config_path ()) in
+  (match observe () with
+   | Ok (Error _) -> ()
+   | Error detail -> fail ("missing model configuration became lock failure: " ^ detail)
+   | Ok (Ok _) -> fail "missing runtime configuration was invented");
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  Fs_compat.save_file runtime_path "[invalid TOML";
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+     (fun ~runtime_config_path ->
+       match Runtime.load_config_observation ~runtime_config_path () with
+       | Error _ -> fail "invalid model bytes should remain observable"
+       | Ok observation -> Runtime.init_default_degraded_observation observation) with
+   | Ok (Error _) -> ()
+   | Error detail -> fail ("invalid model configuration became lock failure: " ^ detail)
+   | Ok (Ok _) -> fail "invalid model configuration initialized")
+;;
+
 let test_no_journal_startup_preserves_read_only_config () =
   with_persisting_context @@ fun ctx ->
   let base_path = ctx.config.Workspace.base_path in
@@ -2690,6 +2779,12 @@ let () =
             "journal recovery recovers interrupted dual-write"
             `Quick
             test_config_journal_recovery_recovers_composite_write
+        ; test_case "initial configuration rechecks a journal staged after early recovery" `Quick
+            test_initial_configuration_rechecks_journal_after_early_recovery
+        ; test_case "initial configuration excludes a concurrent writer until publication" `Quick
+            test_initial_configuration_excludes_concurrent_writers
+        ; test_case "initial configuration preserves missing and invalid setup observations" `Quick
+            test_initial_configuration_preserves_setup_observations
         ; test_case
             "journal recovery no-op when journal missing"
             `Quick

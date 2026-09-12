@@ -1026,7 +1026,10 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       mkdir_p base_path;
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
-      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
+      (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+         (fun ~runtime_config_path:_ ->
+           Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path) with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
       let config_root = Filename.concat base_path ".masc/config" in
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
@@ -1096,6 +1099,32 @@ let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       Alcotest.(check bool) "base-path config not bootstrapped" false
         (Sys.file_exists (Filename.concat base_path ".masc/config")))
+
+let test_initial_configuration_relative_override_matches_writer_path () =
+  with_temp_dir "startup-relative-override" (fun dir ->
+    let process_cwd = Filename.concat dir "process" in
+    let base_path = Filename.concat dir "workspace" in
+    mkdir_p process_cwd;
+    mkdir_p base_path;
+    let config_root = Filename.concat base_path "relative-config" in
+    mkdir_p config_root;
+    let runtime_path = Filename.concat config_root "runtime.toml" in
+    write_file runtime_path "[runtime]";
+    with_env "MASC_CONFIG_DIR" (Some "relative-config") @@ fun () ->
+    with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
+    with_cwd process_cwd @@ fun () ->
+    Config_dir_resolver.reset ();
+    Fun.protect ~finally:Config_dir_resolver.reset (fun () ->
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+       (fun ~runtime_config_path ->
+         Alcotest.(check string) "initial lock uses explicit workspace override" runtime_path runtime_config_path;
+         Alcotest.(check (option string)) "runtime initialization and resume use writer path"
+           (Some runtime_path) (Runtime.config_path ());
+         Alcotest.(check string) "generic prompt readers use the same root" config_root
+           (Config_dir_resolver.resolve ()).config_root.path;
+         Alcotest.(check string) "constructor uses the same config root" config_root
+           (Server_runtime_bootstrap.startup_config_resolution ~base_path).config_root.path) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail))
 
 let test_startup_config_resolution_defaults_to_bootstrapped_root () =
   with_temp_dir "startup-config-activate" (fun dir ->
@@ -5277,6 +5306,8 @@ let () =
             test_startup_state_json_includes_watchdog;
           Alcotest.test_case "startup json includes runtime resolution" `Quick
             test_startup_state_json_includes_runtime_resolution;
+          Alcotest.test_case "initial configuration relative override matches writer path" `Quick
+            test_initial_configuration_relative_override_matches_writer_path;
           Alcotest.test_case
             "create_server_state records runtime resolution"
             `Quick test_create_server_state_records_runtime_resolution;

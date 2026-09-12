@@ -88,6 +88,7 @@ let eager_read_eviction_reason_of_outcome = function
   | Keeper_vision_tool.Vo_invalid_request _ -> Some "eager_invalid_request"
   | Keeper_vision_tool.Vo_invalid_structured_response _ ->
     Some "eager_invalid_structured_response"
+  | Keeper_vision_tool.Vo_official_failure _
   | Keeper_vision_tool.Vo_provider _ -> Some "eager_provider_error"
 ;;
 
@@ -125,7 +126,7 @@ let raw_bytes_of_image_data data =
    in front of labelled ones only cannot be erased (warning 16), and a new
    caller of the read boundary should have to decide what its walk already
    spent rather than inherit an empty set by default. *)
-let eager_read ~exclude_runtime_ids ~media_type ~bytes
+let eager_read ~base_path ~exclude_runtime_ids ~media_type ~bytes
   : (string, string) result option
   =
   match
@@ -134,6 +135,7 @@ let eager_read ~exclude_runtime_ids ~media_type ~bytes
   | Some net, Some sw, Some clock ->
     (match
        Keeper_vision_tool.run_vision
+         ?base_path
          ~exclude_runtime_ids
          ~sw
          ~clock
@@ -264,7 +266,7 @@ let delegates_media ~runtime_id =
          (Runtime_lane.ordered_candidates lane))
 ;;
 
-let evict_blocks ~mode ~delegate ~keeper_name blocks =
+let evict_blocks ?base_path ~mode ~delegate ~keeper_name blocks =
   if delegate
   then (
     let eager_budget =
@@ -276,18 +278,18 @@ let evict_blocks ~mode ~delegate ~keeper_name blocks =
     (* This path has no lane walk behind it, so nothing is spent yet. *)
     List.map
       (evict_block
-         ~read:(eager_read ~exclude_runtime_ids:[])
+         ~read:(eager_read ~base_path ~exclude_runtime_ids:[])
          ~mode ~keeper_name ~eager_budget)
       blocks)
   else blocks
 ;;
 
-let evict_message ~mode ~delegate ~keeper_name (message : Agent_core.Types.message) =
+let evict_message ?base_path ~mode ~delegate ~keeper_name (message : Agent_core.Types.message) =
   if delegate
   then
     { message with
       Agent_core.Types.content =
-        evict_blocks ~mode ~delegate ~keeper_name message.Agent_core.Types.content
+        evict_blocks ?base_path ~mode ~delegate ~keeper_name message.Agent_core.Types.content
     }
   else message
 ;;
@@ -345,8 +347,8 @@ let fallback_projector_with_read ?(exclude_runtime_ids = []) ~read ~keeper_name 
   project
 ;;
 
-let fallback_projector ?exclude_runtime_ids ~keeper_name () =
-  fallback_projector_with_read ?exclude_runtime_ids ~read:eager_read ~keeper_name ()
+let fallback_projector ?base_path ?exclude_runtime_ids ~keeper_name () =
+  fallback_projector_with_read ?exclude_runtime_ids ~read:(eager_read ~base_path) ~keeper_name ()
 
 module For_testing = struct
   let fallback_projector = fallback_projector_with_read

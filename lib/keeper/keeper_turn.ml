@@ -502,6 +502,7 @@ let run_keeper_invocation_turn_admitted_inner
         if Option.is_some direct_resume then user_blocks else
         Option.map
           (Keeper_vision_ingest.evict_blocks
+             ~base_path:ctx.config.base_path
              ~mode:Keeper_vision_ingest.Eager
              ~delegate:
                (Keeper_vision_ingest.delegates_media

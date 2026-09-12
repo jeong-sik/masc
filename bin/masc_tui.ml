@@ -5519,6 +5519,15 @@ let row_list (state : state) : row_list option =
        | Left_pane, Some rows ->
            windowed ~count:(List.length rows) ~cursor:state.resources_cursor
              (fun index -> state.resources_cursor <- index))
+  (* The task column, when the cursor is in it and no task's detail is over
+     it. The panel is shorter than the list gets and the drawing windows
+     around the cursor, so a landing is on screen as soon as the cursor names
+     it. The events column beside it and an open detail are readings rather
+     than lists; [reading_pane] has those. *)
+  | Overview
+    when state.task_focus = Right_pane && Option.is_none state.task_detail_id ->
+      windowed ~count:(List.length state.tasks) ~cursor:state.task_cursor
+        (fun index -> state.task_cursor <- index)
   (* Named rather than caught. A surface that grows a row cursor is added
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
@@ -5527,6 +5536,123 @@ let row_list (state : state) : row_list option =
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
   | Config | Tools ->
       None
+
+(* The reading pane on screen, when one is: a pane whose rows the drawing
+   formats -- a post and its comments, a keeper's detail, a diff -- rather
+   than rows the state can count. Named as the {!Masc_tui_types.clamped_scroll}
+   it reports back through, so Home and End write the field the frame then
+   corrects: End names a row past any real end and the frame says where that
+   landed.
+
+   Home is 0 and End is the far end for every pane here, and that one rule
+   reads correctly whichever way a pane is ordered. A log-shaped pane counts
+   rows back from the newest, so its 0 is now and its far end is the oldest
+   row it holds -- which is how Keeper logs has read since it was written.
+
+   Named rather than caught, like [row_list]: a surface that grows a reading
+   pane is added here once, and a [_] would let one be forgotten. That is how
+   these came to have no way to reach their own ends -- a post with three
+   hundred comments took a page key held down, and the way back up took it
+   held down again. *)
+let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
+    =
+  let pane f = Some f in
+  match state.view with
+  (* The Git changes reader draws over whichever surface opened it, so it
+     answers before the surface underneath does. Its list is not a reading
+     pane: [row_list] has it. *)
+  | _ when state.repository_changes_open ->
+      (match state.repository_changes_diff_path with
+       | Some _ -> pane (fun v -> Repository_changes_diff_scroll v)
+       | None -> None)
+  | Overview ->
+      if Option.is_some state.task_detail_id then
+        pane (fun v -> Task_detail v)
+      else if state.task_focus = Left_pane then
+        pane (fun v -> Overview_events v)
+      else None
+  | Acting ->
+      (match state.acting_detail with
+       | Some _ -> pane (fun v -> Acting_detail_scroll v)
+       (* The ring itself reads newest first, so Home is now. [g] already
+          says that; this gives the key every other reader uses. *)
+       | None -> pane (fun v -> Acting v))
+  (* Except with the context inspector open, where the body is that tab's
+     item list and [row_list] owns the cursor. *)
+  | Keepers Keeper_detail when not state.context_inspector_open ->
+      pane (fun v -> Keeper_detail v)
+  | Keepers Keeper_calls -> pane (fun v -> Keeper_calls v)
+  | Approvals ->
+      if state.approval_detail_open then
+        pane (fun v -> Approval_detail_scroll v)
+      else None
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ when state.board_focus = Right_pane ->
+           pane (fun v -> Board_read v)
+       | Board_read _ | Board_list | Board_compose -> None)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> pane (fun v -> Planning_detail_scroll v)
+       | Planning_list -> None)
+  | Fusion ->
+      (match state.fusion_mode with
+       | Fusion_detail _ | Fusion_historical_detail _ ->
+           pane (fun v -> Fusion_detail_scroll v)
+       | Fusion_list -> None)
+  | Schedules ->
+      if Option.is_some state.schedule_detail_id then
+        pane (fun v -> Schedule_detail_scroll v)
+      else None
+  | Verification ->
+      if Option.is_some state.verification_detail_request_id then
+        pane (fun v -> Verification_detail_scroll v)
+      else None
+  | Harness ->
+      (match state.harness_detail with
+       | Some _ -> pane (fun v -> Harness_detail_scroll v)
+       | None -> None)
+  | Runtime ->
+      (match state.runtime_detail_target with
+       | Some _ -> pane (fun v -> Runtime_detail_scroll v)
+       | None -> None)
+  | System_logs ->
+      (match state.system_logs_detail_seq with
+       | Some _ -> pane (fun v -> System_log_detail_scroll v)
+       | None -> None)
+  | Lanes ->
+      (match state.lanes_mode with
+       | Lanes_run_detail _ -> pane (fun v -> Lane_run_detail_scroll v)
+       | Lanes_run_list _ | Lanes_overview -> None)
+  | Changes ->
+      (match state.changes_diff_row with
+       | Some _ -> pane (fun v -> Changes_diff_scroll v)
+       | None -> None)
+  (* The resource reading beside the catalog. The catalog is a row list and
+     [row_list] has it. *)
+  | Resources when state.resource_focus = Right_pane ->
+      pane (fun v -> Resource_scroll v)
+  (* Two panes read this way and still answer no, each for a reason of its
+     own rather than for want of an arm.
+
+     The chat scroll is pinned to a row it anchors on across live appends,
+     and the history behind it is paged in from the server -- so the far end
+     is not a row the client holds, and naming one past what is loaded would
+     ask the pin to settle on a row that has not arrived.
+
+     Metrics counts its rows in the drawing and clamps them for display
+     without reporting the value back, so End has nothing to correct it and
+     the stored scroll would stay where the key put it. Its page key already
+     climbs unbounded for the same reason. Giving it a report is the change
+     that has to come first. *)
+  | Keepers Keeper_message | Metrics -> None
+  (* Surfaces whose whole body is a row list, which [row_list] answers for,
+     and the two panes that own every key while they are open. *)
+  | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
+  | Keepers Keeper_runtime_pick | Memory | Repositories | Clients
+  | Connectors | Code | Config | Resources | Tools ->
+      None
+
 
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
@@ -18236,16 +18362,19 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
-       (* The reading, not the list. [row_list] answers for the list pane
-          below; with the text focused the rows are the ones the frame wrapped
-          out of the resource body, which the keypress cannot count -- so End
-          names a row past any of them and the frame reports back where that
-          landed. *)
-       | Some ("home" | "end")
-         when state.view = Resources && state.resource_focus = Right_pane ->
-           state.resource_scroll <-
-             (if key = Some "end" then Masc_tui_types.clamped_scroll_end
-              else 0)
+       (* A reading pane before the list behind it: a detail that is open owns
+          the scroll keys, and moving the list under it would leave the cursor
+          somewhere the reader cannot see. The pane reports its own clamp, so
+          End names a row past the end and the frame corrects it -- the same
+          report its j/k already relies on. *)
+       | Some ("home" | "end") when Option.is_some (reading_pane state) ->
+           Option.iter
+             (fun clamped ->
+               apply_clamped_scroll state
+                 (clamped
+                    (if key = Some "end" then Masc_tui_types.clamped_scroll_end
+                     else 0)))
+             (reading_pane state)
        (* Every other list. The two surfaces above answer first because their
           rows are drawn newest first, so their Home is the live end rather
           than the first row -- the rest read oldest first and take the plain
@@ -20184,6 +20313,13 @@ and is loaded on demand through keeper_skill.
            state.acting_cursor <- 0;
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
+       (* The footer has named g / G as newest / oldest since the surface was
+          written and only g answered. The ring's rows are built by the
+          drawing, so the oldest is a row past the end that the frame reports
+          back -- the same answer End gives, which is why both are spelled
+          once here. *)
+       | Some "G" when state.view = Acting ->
+           state.acting_scroll <- Masc_tui_types.clamped_scroll_end
        | Some "g"
          when (match state.view with
                | Keepers Keeper_list | Keepers Keeper_detail -> true

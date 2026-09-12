@@ -349,7 +349,6 @@
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
   test_runtime_verification
-  test_verification_pdf_budgets
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_sync
@@ -702,7 +701,6 @@
   test_keeper_tool_policy_masc_surface
   test_keeper_capability_probe
   test_runtime_verification
-  test_verification_pdf_budgets
   test_tool_resolution_runtime_projection
   test_keeper_id
   test_repo_sync
@@ -5829,3 +5827,8 @@
  (name test_lane_addon_actions)
  (modules test_lane_addon_actions)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+(test
+ (name test_verification_pdf_inspection_budgets)
+ (modules test_verification_pdf_inspection_budgets)
+ (libraries masc_test_deps))

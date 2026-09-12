@@ -2,11 +2,41 @@
 
 [한국어](INSTALL.ko.md)
 
-This document is the installation contract for **0.35.5**. Check tag and asset
-availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases).
-The download commands below select `v0.35.5` and its matching installer.
+## Quick start
 
-If you use the 0.35.2 installer, refer to that tag's documentation. Multi-selection requires 0.35.2 or later.
+One command installs the latest release and opens setup.
+
+```bash
+bash -c "$(curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh)"
+```
+
+It asks where to keep the workspace, then walks through the model connection and
+the sandbox. Claude Code and Codex appear when their CLI is on `PATH`, and a
+failed connection check can open their sign-in without losing the selection. When
+no sandbox service is installed, setup offers to install one: it checks the
+vendor's publisher and checksum, then hands the terminal to that installer.
+
+When it finishes, open a new terminal. The installer records `~/.local/bin` in the
+shell profile, so `masc` is on `PATH` there. To use it in the same terminal
+instead, run `export PATH="$HOME/.local/bin:$PATH"`.
+
+To read the script before running it:
+
+```bash
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
+  -o /tmp/masc-install.sh
+less /tmp/masc-install.sh    # q to exit
+bash /tmp/masc-install.sh
+```
+
+Piping the script straight into `bash` leaves the setup questions no terminal to
+read from, so use one of the two forms above.
+
+The rest of this document is reference material: what is installed, how to choose
+a model, how the sandboxes differ, and how to upgrade or uninstall. It describes
+**0.35.14**. Check tag and asset availability on
+[GitHub Releases](https://github.com/jeong-sik/masc/releases). Multi-selection
+requires 0.35.2 or later.
 
 ## Platforms and prerequisites
 
@@ -40,28 +70,30 @@ sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
 
 macOS requires **macOS 14.0 or later on Apple Silicon** or **macOS 15.0 or later on Intel**. The installer verifies and installs the matching Python and shared-library runtime with the release. It does not install Homebrew or Xcode command-line tools.
 
-The setup screen inspects sandbox services and explains missing prerequisites. On supported Apple Silicon Macs it can use Apple Container; Docker is available on macOS and Linux. Model connections require the provider’s subscription or API credit. Claude Code and Codex sign-in can be opened from a failed connection check without losing the selected models.
+The setup screen inspects sandbox services, explains what is missing, and offers to install it. It verifies the vendor's publisher and checksum, then hands the terminal to that vendor's own installer, so its prompts and any administrator password stay in front of you. On supported Apple Silicon Macs it can use Apple Container; Docker is available on macOS and Linux. Model connections require the provider’s subscription or API credit. Claude Code and Codex sign-in can be opened from a failed connection check without losing the selected models.
 
 If startup fails, use the executable path and raw stderr shown by the installer to diagnose it. A signal such as `SIGABRT` alone does not identify a missing library. `--force` refreshes the release files while preserving workspace configuration; it does not make an unsupported OS version compatible.
 
 ## Install
 
+The quick start above covers a normal install. Name the workspace directly when
+you do not want to be asked, and pin a release when you need a specific one:
+
 ```bash
-TAG=v0.35.12
-curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
+curl -fsSL https://github.com/jeong-sik/masc/releases/latest/download/install.sh \
   -o /tmp/masc-install.sh
-bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
+bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
-After installation, run this separate command to update PATH in the current terminal.
+`--version vX.Y.Z` pins a release; without it the installer resolves the latest
+one. Downloading `install.sh` from a specific tag installs that tag's assets.
 
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
+The installer writes `~/.local/bin` into the shell profile, so a new terminal
+finds `masc`. For the terminal you installed from, run
+`export PATH="$HOME/.local/bin:$PATH"` separately; that command takes no
+installer options.
 
-Optional inspection: run `less /tmp/masc-install.sh` before installation. Press `q` to exit, then run the `bash` installation command above.
-
-For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command. The separate `export PATH=...` command takes no installer options.
+For a reinstall, append `--force` or `--wizard` to the `bash /tmp/masc-install.sh` command.
 
 `--prefix` defaults to `$HOME/.local/bin`. A first install on a terminal asks
 for the workspace path that will hold `.masc`. For a new workspace it
@@ -126,7 +158,7 @@ change existing Keeper configurations in bulk.
 | `<base-path>/.masc/config/` | Embedded runtime/model overlay and the default configuration seed. Tools and prompts used in operation are managed from the embedded assets as well |
 | `<base-path>/.masc/microvm/shim/` | exec shim for Linux guests and its SHA256 sidecar. Can be skipped with `--no-guest-shim` |
 
-The **0.35.5 binary** installs one `imp` with `activation_mode = "manual"` and the
+The **installed binary** provisions one `imp` with `activation_mode = "manual"` and the
 `browser-lanes` skill. That `imp` defaults to the Docker sandbox and is
 started by hand once a model and an execution environment are ready. The
 installer takes its configuration from the binary. The instructions are a starting point; edit them directly. Model weights,
@@ -138,7 +170,7 @@ stand in for installing or authenticating them.
 ## Choosing a model connection
 
 AWS Bedrock and GCP/Vertex connections are TODO items for a later release.
-They are outside the 0.35.5 installation and verification scope.
+They are outside this installation and verification scope.
 
 Select existing API providers, Claude Code, Codex, or local Ollama models.
 Use **Add another server URL** for llama.cpp, vLLM, another OpenAI-compatible
@@ -168,10 +200,7 @@ store. Offered installation and sign-in actions run only when selected; model
 weights are not downloaded automatically. **Configure later** defers model setup;
 imp does not start automatically.
 
-## First conversation with `imp` (0.35.5)
-
-This is the 0.35.5 installation contract. Check the release tag and asset
-availability on [GitHub Releases](https://github.com/jeong-sik/masc/releases) before downloading.
+## First conversation with `imp`
 
 Run `masc`. No `MASC_BASE_PATH` export is needed. With no saved workspace,
 select the suggested `~/MASC` directory with Enter, or choose another location.
@@ -184,7 +213,9 @@ connection check offers official sign-in and retry with the same selections.
 Each selected model must complete an actual response and tool check before saving.
 
 The sandbox screen shows service observations, missing prerequisites and advanced
-choices. A running service still needs image preparation and imp boot. The quick
+choices. Choosing a service that is not ready opens the installation and startup
+actions available for this computer; `masc prerequisite-actions <service>` lists
+the same actions as JSON. A running service still needs image preparation and imp boot. The quick
 path permits internet access for guest commands when choosing a new backend.
 Selecting the currently configured backend preserves its network policy; Advanced
 setup can explicitly change it. Disabling guest networking affects sandbox commands.
@@ -241,7 +272,7 @@ first build needs network access to fetch the Debian base image and packages.
 
 | Execution environment | Preparation | Verification scope |
 |---|---|---|
-| Linux + Docker | Install and start the Docker daemon separately, then run `masc sandbox-image` | Server install and image creation/tool execution are checked separately |
+| Linux + Docker | Install and start the Docker daemon, from setup's actions or on your own, then run `masc sandbox-image` | Server install and image creation/tool execution are checked separately |
 | Apple Silicon + Apple Container | macOS 26 and `container` installed, then a build naming the runtime below | Passing the macOS 14 server CI alone does not prove this backend |
 | Linux + nerdctl/Kata | containerd/nerdctl/Kata with virtualization support, an explicit backend, and an image created in that store | Work volume created idempotently and confirmed with inspect; real Kata verification needed, policy networking not supported |
 | remote SSH | A remote endpoint with authentication, shim, and tools prepared | A remote environment independent of the local Docker/microVM images |
@@ -444,7 +475,7 @@ successful exit and its exit on refused authentication are checked separately
 as well.
 
 `workflow_dispatch` is for verifying branch artifacts and creates no public
-release. Pushing the `v0.35.5` tag to a verified commit publishes the GitHub
+release. Pushing a `vX.Y.Z` tag to a verified commit publishes the GitHub
 Release and `SHA256SUMS` after the four builds and asset verification. The
 tag, CI success, the actual release assets, and the result of running after
 install each have to be checked on their own.

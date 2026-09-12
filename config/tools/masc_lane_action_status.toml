@@ -1,0 +1,19 @@
+name = "masc_lane_action_status"
+description = """
+Read one durable Lane action receipt without waiting for the worker.
+
+queued and running are host dispatch states. confirmed is the package's explicit result, whose meaning and evidence must be read. outcome_unknown is never automatically retried. A retired worker cannot execute a retained queued request."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "instance_id"
+type = "string"
+required = true
+description = "Original instance that owns the action receipt."
+
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+description = "Exact previously submitted request identity."

@@ -137,15 +137,6 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
   }
 }
 
-// The receipt's activation reason, when the receipt was recognized. The
-// activation branch is a discriminated union on activation_status, so the
-// reason is read off the recognized shape rather than the raw record.
-function receiptActivationReason(request: DashboardScheduledAutomationRequest): string | null {
-  const receipt = request.dispatch_receipt
-  if (!receipt || receipt.projection_status !== 'recognized') return null
-  return receipt.activation_status === 'deferred' ? receipt.activation_reason : null
-}
-
 /** Combined queue-drain status for a request's last execution, or null when the
  * request has no keeper-wake queue evidence (board posts, or nothing dispatched
  * yet). */
@@ -154,16 +145,6 @@ export function queueDrainStatusOf(
 ): QueueDrainStatus | null {
   const state = stateOf(request)
   if (state === null) return null
-  // A cancelled wake for a Keeper the store does not know is the one case
-  // the operator can act on directly: the definition outlived its target.
-  if (state === 'cancelled' && receiptActivationReason(request) === 'owner_absent') {
-    return {
-      state,
-      ...PRESENTATION.cancelled,
-      label: '취소됨 · keeper 없음',
-      title: 'Keeper store 에 이 이름의 keeper 가 없어 큐가 wake 를 취소함 — 예약 정의가 대상보다 오래 살아남음',
-    }
-  }
   return { state, ...PRESENTATION[state] }
 }
 

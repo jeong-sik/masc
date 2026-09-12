@@ -138,6 +138,11 @@ let resources_read_request_body ~request_id ~uri =
   plain_request_body ~request_id ~method_:"resources/read"
     ~params:(`Assoc [ ("uri", `String uri) ])
 
+let display_name (resource : resource) =
+  match resource.title with
+  | Some title when String.trim title <> "" -> title
+  | Some _ | None -> resource.name
+
 type resource_content_kind =
   | Resource_text of string
   | Resource_blob of { base64_bytes : int }

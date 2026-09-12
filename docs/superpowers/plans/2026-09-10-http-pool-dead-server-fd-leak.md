@@ -4,9 +4,12 @@
 
 **Goal:** Stop the HTTP connection pool from leaking one file descriptor per request against a dead server, and stop hammering dead hosts, so a down server no longer kills the TUI with `Unix.EMFILE` within a minute on a stock macOS `ulimit -n 256`.
 
-**Architecture:** Two defenses in `lib/masc_http_client/pool.ml`, per spec `docs/superpowers/specs/2026-09-10-dead-server-resilience-design.md` (PR C section):
-1. **probe-first connect** — before `Piaf.Client.create` on the pool's long-lived switch, verify TCP reachability with `Eio.Net.connect` bound to a short-lived child switch. On refusal the child switch teardown reclaims the socket immediately, so the leak count is 0. (piaf 0.2.0 is pinned upstream and does not release the socket on its own connect-failure path; the workaround lives here.)
-2. **per-host connect-failure backoff** — after a failed connect, the host enters a cooldown (new config field) during which requests fast-fail without creating any socket. This removes the 2-second refresh-tick hammering and bounds any residual leak rate to ~0.
+**Architecture:** Resource ownership and failure suppression in `lib/masc_http_client/pool.ml`, per spec `docs/superpowers/specs/2026-09-10-dead-server-resilience-design.md` (PR C section):
+1. **Per-client scope** — the TCP probe has a short-lived switch; actual Piaf creation also has a dedicated child switch, owned by a daemon on the pool switch. Failed or cancelled creation closes and joins that scope before returning. Successful clients keep it through reuse; eviction and shutdown close it. This covers the construction sockets that a successful TCP probe cannot clean up, including TLS failures and cancellation.
+2. **Per-host connect-failure backoff** — the existing cooldown suppresses subsequent requests after a reported failure. Already concurrent requests can still attempt connections. Backoff does not establish leak freedom; each client scope owns cleanup independently.
+3. **Selected address handoff (#35386)** — pass the successful probe address to Piaf's initial DNS lookup, leaving the URI hostname and Unix socket unchanged. Disable the override after construction, including errors/cancellation, because Piaf retains the environment for later reconnects. This does not add HTTP retries or race addresses; a stalled earlier TCP probe can still consume the shared establishment deadline.
+
+**Validation boundary:** Regression cases disable cooldown and exercise refused TCP, malformed TLS responses, stalled TLS cancellation, healthy HTTP reuse, and shutdown using real loopback sockets. These cases require execution in CI at the changed commit before claiming measured TLS FD stability; adding the tests or passing syntax checks is not that evidence. The detailed checklist below records the initial probe/backoff implementation, not a verified TLS lifetime result.
 
 **Tech Stack:** OCaml 5, Eio (`Eio.Net`, `Eio.Switch`, `Eio.Fiber.first`), piaf 0.2.0, Alcotest, dune. Repo workflow note: the constitution's execution protocol makes CI the build boundary (no mandatory local dune builds); the regression test is committed first so CI shows it failing, then the fix turns it green.
 
@@ -159,8 +162,9 @@ Doc addition:
 ```
     [connect_failure_cooldown_seconds]: after a connect to a host fails,
     requests to that host fast-fail without opening a socket for this
-    long. Bounds both the probe traffic against a dead server and any
-    residual fd growth from the create path.
+    long. Suppresses requests after a reported failure; concurrent cold
+    requests can already be connecting. Each client scope owns socket
+    cleanup independently of the cooldown.
 ```
 
 And update `default_config`'s doc line to include the new field value `5.0`.

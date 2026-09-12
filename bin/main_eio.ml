@@ -368,7 +368,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_quarantine =
+let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -378,7 +378,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_qu
      the 10s force-exit timeout. *)
   try
     Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
-      ~input_base_path ~accept_store_quarantine ~make_routes
+      ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
@@ -589,23 +589,24 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
   Server_base_path_guard.exit_on_violation
     (Server_base_path_guard.enforce
        { resolved_base_path with normalized_base_path = canonical_base_path });
-  (* An explicit start is the operator naming this workspace, so it becomes the
-     default for later commands the same way `masc init` does. Only explicit
-     sources: re-recording what the record itself supplied is a no-op, and the
-     implicit default never reaches here. Off by default: a temporary server
-     workspace must not overwrite the machine's default (#35147). *)
-  if record_default then
+  let on_ready () =
+    if record_default then
     (match resolved_base_path.resolution_source with
      | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
        (match Env_config.record_default_base_path canonical_base_path with
         | Env_config.Recorded _ -> ()
-        | Env_config.No_record_location
-        | Env_config.Refused_under_test
-        | Env_config.Record_failed _ ->
-          (* Not fatal, and not worth a line on every boot: the server is
-             starting on a path the operator just supplied. *)
-          ())
-     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
+        | Env_config.No_record_location ->
+          Log.Server.warn
+            "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; pass --base-path to later commands"
+        | Env_config.Refused_under_test ->
+          Log.Server.warn
+            "default workspace not recorded: a test executable does not write the operator's default"
+        | Env_config.Record_failed { record; reason } ->
+          Log.Server.warn
+            "default workspace not recorded: could not write %s (%s); pass --base-path to later commands"
+            record reason)
+     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ())
+  in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let _base_path_lease =
@@ -839,6 +840,7 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
                 ~port
                 ~base_path:canonical_base_path
                 ~input_base_path:raw_base_path
+                ~on_ready
                 ~accept_store_quarantine)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
@@ -1269,9 +1271,15 @@ let init_record_default =
   in
   Arg.(value & flag & info [ "record-default" ] ~doc)
 
-let init_skills_only =
-  let doc = "Install missing builtin Skills without changing runtime config files" in
-  Arg.(value & flag & info ["skills-only"] ~doc)
+type init_scope = All | Config_only | Skills_only
+
+let init_scope =
+  Arg.(value & vflag All [
+    Skills_only, info ["skills-only"]
+      ~doc:"Install or update unmodified builtin Skills without changing runtime config files";
+    Config_only, info ["config-only"]
+      ~doc:"Seed runtime config without publishing builtin Skill packages";
+  ])
 
 type init_tally = { written : int; skipped : int; failed : int }
 
@@ -1298,7 +1306,7 @@ let seed_one ~target_root ~force tally (rel, dest_rel) =
         Printf.eprintf "init: %s: %s\n" dest msg;
         { tally with failed = tally.failed + 1 }
 
-let init_cmd_exit base_path force skills_only record_default =
+let init_cmd_exit base_path force scope record_default =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
@@ -1308,7 +1316,7 @@ let init_cmd_exit base_path force skills_only record_default =
       base_path
   in
   let result =
-    if skills_only then { written = 0; skipped = 0; failed = 0 }
+    if scope = Skills_only then { written = 0; skipped = 0; failed = 0 }
     else (
       Fs_compat.mkdir_p target_root;
       Fs_compat.mkdir_p (Filename.concat target_root Common.keepers_runtime_dirname);
@@ -1324,8 +1332,10 @@ let init_cmd_exit base_path force skills_only record_default =
                |> Option.map (fun dest_rel -> rel, dest_rel))
            Embedded_config.file_list))
   in
-  let skills = Server_runtime_config_root_bootstrap.seed_missing_builtin_skills ~base_path in
-  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed (root=%s)\n"
+  let skills = match scope with
+    | Config_only -> 0
+    | All | Skills_only -> Server_runtime_config_root_bootstrap.refresh_builtin_skills ~base_path in
+  Printf.printf "init: %d written, %d skipped, %d failed, %d builtin Skill package(s) installed or updated (root=%s)\n"
     result.written result.skipped result.failed skills target_root;
   (* A seeded workspace is the one thing a later bare `masc` needs to know
      about, and until now nothing wrote it down: the operator had to re-supply
@@ -1366,14 +1376,71 @@ let init_cmd =
      Skills in .masc/skills/, and puts one Keeper in keepers/ for you to edit \
      -- it does not autoboot, so it waits until a model and a sandbox exist. \
      The same split the server makes when it creates a config root itself. \
-     Existing config files are kept unless --force; existing Skill packages are \
-     always preserved."
+     Existing config files are kept unless --force; recorded, unmodified Skill packages are updated. Operator edits and \
+     packages without installation receipts are preserved."
   in
   let info = Cmd.info "init" ~doc in
   Cmd.v info
     Term.(
-      const init_cmd_exit $ base_path $ init_force $ init_skills_only
+      const init_cmd_exit $ base_path $ init_force $ init_scope
       $ init_record_default)
+
+let skills_refresh_exit base_path name apply expected_revision expected_bundle_revision export_to =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  match List.find_opt (fun package -> Builtin_skill_package.name package = name)
+          (Server_runtime_config_root_bootstrap.builtin_skills ()) with
+  | None -> Printf.eprintf "Unknown builtin Skill package: %s\n" name; 1
+  | Some package ->
+    if Option.is_some export_to then
+      match apply, expected_revision, expected_bundle_revision, export_to with
+      | false, None, None, Some destination ->
+        (match Builtin_skill_package.export ~destination package with
+         | Ok () ->
+           Printf.printf "Bundled package exported to %s\nbundled revision: %s\n"
+             destination (Builtin_skill_package.bundled_revision package); 0
+         | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
+      | (true, _, _, _) | (false, Some _, _, _) | (false, None, Some _, _) | (false, None, None, None) ->
+        prerr_endline "--export-to cannot be combined with --apply or expected revisions"; 1
+    else if apply then
+      match expected_revision, expected_bundle_revision with
+      | (None, _) | (Some _, None) ->
+        prerr_endline "--apply requires --expected-revision and --expected-bundle-revision from a reviewed package"; 1
+      | Some installed_revision, Some bundled_revision ->
+        (match Builtin_skill_package.install ~base_path
+                 ~request:(Builtin_skill_package.Replace_if_revisions { installed_revision; bundled_revision }) package with
+         | Ok (Builtin_skill_package.Updated { backup }) ->
+           Printf.printf "Updated %s; previous package: %s\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup; 0
+         | Ok Builtin_skill_package.Current -> print_endline "Package is current"; 0
+         | Ok (Builtin_skill_package.Installed | Builtin_skill_package.Already_present
+               | Builtin_skill_package.Preserved _ | Builtin_skill_package.Preserved_uninspectable _) ->
+           prerr_endline "Package was not replaced"; 1
+         | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
+    else if Option.is_some expected_revision || Option.is_some expected_bundle_revision then (
+      prerr_endline "Expected revisions require --apply"; 1)
+    else
+      match Builtin_skill_package.inspect ~base_path package with
+      | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1
+      | Ok Builtin_skill_package.Missing -> print_endline "Package is missing; masc init --skills-only installs it"; 0
+      | Ok (Builtin_skill_package.Present { revision; bundled_revision; ownership }) ->
+        let ownership = match ownership with
+          | Builtin_skill_package.Recorded -> "recorded, unchanged since installation"
+          | Builtin_skill_package.Untracked -> "untracked; review operator changes before replacement"
+          | Builtin_skill_package.Modified -> "modified since installation; review operator changes before replacement"
+        in
+        Printf.printf "package: %s\ninstalled revision: %s\nbundled revision: %s\nownership: %s\nReview the complete package, then use --apply --expected-revision %s --expected-bundle-revision %s.\n" name revision bundled_revision ownership revision bundled_revision;
+        0
+
+let skills_refresh_cmd =
+  let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"PACKAGE") in
+  let apply = Arg.(value & flag & info [ "apply" ] ~doc:"Replace the reviewed package and retain its complete previous directory") in
+  let expected = Arg.(value & opt (some string) None & info [ "expected-revision" ] ~docv:"SHA256"
+    ~doc:"Reviewed whole-package revision; edits after inspection reject the update") in
+  let expected_bundle = Arg.(value & opt (some string) None & info [ "expected-bundle-revision" ] ~docv:"SHA256"
+    ~doc:"Reviewed bundled package revision; a different executable bundle rejects the update") in
+  let export_to = Arg.(value & opt (some string) None & info [ "export-to" ] ~docv:"NEW_DIRECTORY"
+    ~doc:"Export the bundled package to a new directory so its complete changes can be reviewed with diff") in
+  Cmd.v (Cmd.info "skills-refresh" ~doc:"Inspect or explicitly replace one installed builtin Skill package")
+    Term.(const skills_refresh_exit $ base_path $ name $ apply $ expected $ expected_bundle $ export_to)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
@@ -1667,6 +1734,122 @@ let runtime_verify_cmd =
   Cmd.v (Cmd.info "runtime-verify" ~doc:"Verify the selected model response and a harmless tool-result roundtrip.")
     Term.(const runtime_verify_cmd_exit $ base_path $ runtime_id $ timeout)
 
+
+let voice_probe_lines attempts =
+  List.map
+    (fun (attempt : Masc.Voice_bridge.probe_attempt) ->
+      Printf.sprintf
+        "  %-22s %-18s %s"
+        attempt.Masc.Voice_bridge.endpoint_id
+        (Voice_config.string_of_endpoint_kind attempt.Masc.Voice_bridge.kind)
+        (Masc.Voice_bridge.probe_outcome_to_string attempt.Masc.Voice_bridge.outcome))
+    attempts
+
+let voice_probe_answered attempts =
+  List.exists
+    (fun (attempt : Masc.Voice_bridge.probe_attempt) ->
+      match attempt.Masc.Voice_bridge.outcome with
+      | Masc.Voice_bridge.Answered _ -> true
+      | Masc.Voice_bridge.Refused _ | Masc.Voice_bridge.Skipped _ -> false)
+    attempts
+
+let voice_verify_show heading = function
+  | Ok [] ->
+    print_endline heading;
+    print_endline "  no endpoints are configured in this section"
+  | Ok attempts ->
+    print_endline heading;
+    List.iter print_endline (voice_probe_lines attempts)
+  | Error reason ->
+    print_endline heading;
+    print_endline ("  " ^ reason)
+
+let voice_verify_cmd_exit message audio as_json =
+  let tts = Masc.Voice_bridge.probe_tts ~message () in
+  let stt =
+    Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
+  in
+  let section name = function
+    | Ok attempts -> name, `List (List.map Masc.Voice_bridge.probe_attempt_json attempts)
+    | Error reason -> name, `Assoc [ "error", `String reason ]
+  in
+  if as_json
+  then
+    print_endline
+      (Yojson.Safe.to_string
+         (`Assoc
+           (section "tts" tts
+            :: (match stt with
+                | Some (_, result) -> [ section "stt" result ]
+                | None -> []))))
+  else (
+    voice_verify_show "tts" tts;
+    match stt with
+    | None ->
+      print_newline ();
+      print_endline "stt";
+      print_endline "  not probed. Pass --audio FILE to have each endpoint transcribe one."
+    | Some (audio_file, result) ->
+      print_newline ();
+      voice_verify_show (Printf.sprintf "stt  (%s)" audio_file) result);
+  let answered = function
+    | Ok attempts -> voice_probe_answered attempts
+    | Error _ -> false
+  in
+  let anything_answered =
+    answered tts
+    ||
+    match stt with
+    | Some (_, result) -> answered result
+    | None -> false
+  in
+  if anything_answered then 0 else 1
+
+let voice_verify_cmd =
+  let message =
+    Arg.(
+      value
+      & opt string "음성 연결을 확인합니다"
+      & info
+          [ "message" ]
+          ~docv:"TEXT"
+          ~doc:
+            "Sentence each TTS endpoint is asked to synthesize. Say it in the language \
+             you actually use: an endpoint can answer for one language and not another.")
+  in
+  let audio =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "audio" ]
+          ~docv:"FILE"
+          ~doc:
+            "Audio file each STT endpoint is asked to transcribe. Without it, only TTS \
+             is probed.")
+  in
+  let as_json =
+    Arg.(
+      value
+      & flag
+      & info [ "json" ] ~doc:"Emit one JSON object instead of the readable report.")
+  in
+  Cmd.v
+    (Cmd.info
+       "voice-verify"
+       ~doc:"Ask every configured voice endpoint to answer, and report each separately."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "The fallback chain stops at the first endpoint that answers, so a chain \
+              that works says nothing about the endpoints behind it: a dead fallback \
+              looks healthy until the one in front of it goes away. This asks every \
+              endpoint and reports each."
+         ; `P
+             "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
+              configuration that does not load is reported as the loader's own sentence."
+         ])
+    Term.(const voice_verify_cmd_exit $ message $ audio $ as_json)
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -2723,7 +2906,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     ~sandbox_profile ~microvm_backend
     (* setup is an operator command: the workspace it prepares becomes the
        default for later ones. *)
-    ~initialize:(fun () -> init_cmd_exit base_path false false true)
+    ~initialize:(fun () -> init_cmd_exit base_path false All true)
     ~validate_runtime:(fun () -> setup_validate_runtime base_path)
     ~prepare_image:(fun ~selection ->
       let runtime = Masc.Sandbox_readiness.microvm_backend selection.Masc.Sandbox_readiness.backend in
@@ -3022,6 +3205,7 @@ let cmd =
       Term.(const front_door_cmd_exit $ host $ port_argument $ run_base_path $ accept_store_quarantine $ build_provenance_path $ build_provenance_sha256 $ build_provenance_device $ build_provenance_inode $ record_default_arg)
     info
     [ init_cmd
+    ; skills_refresh_cmd
     ; start_cmd
     ; login_cmd
     ; mcp_config_cmd
@@ -3030,6 +3214,7 @@ let cmd =
     ; runtime_probe_cmd
     ; runtime_token_sample_cmd
     ; runtime_verify_cmd
+    ; voice_verify_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_setup_render_cmd

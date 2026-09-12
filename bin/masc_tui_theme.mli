@@ -363,6 +363,12 @@ module Glyph : sig
 
   val breadcrumb_sep : string  (* ▸ *)
 
+  val current_entry : string  (* ▸ *)
+  (** Where you are, on a strip of places you could be: the surface strip's
+      active surface and the keeper detail screen's active tab. Same shape as
+      {!breadcrumb_sep}, separate name, so a strip can change its mark without
+      moving every breadcrumb with it. *)
+
   val priority : int -> string
   (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)
 

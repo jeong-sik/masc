@@ -136,6 +136,10 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
   ; default_voice = None
+  (* The wizard does not ask for a command: each command kind knows the name it
+     is installed under, and an override is for a path the wizard has no way to
+     check. Someone who needs one edits the file. *)
+  ; command = None
   }
 ;;
 

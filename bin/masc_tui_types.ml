@@ -5741,6 +5741,15 @@ type clamped_scroll =
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
 
+(* What End names on a surface whose rows the drawing counts: a row past any
+   real end, so the frame's own clamp reports the last one back. The keypress
+   cannot work the number out -- that is what a {!clamped_scroll} is -- and a
+   value it can name has to be larger than any surface's rows. One million
+   rows of a resource reading or a link card is not a screen anyone reaches;
+   the largest thing the TUI opens is a source file, and the Code surface
+   counts its own rows rather than reporting back. *)
+let clamped_scroll_end = 1_000_000
+
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
@@ -6798,6 +6807,12 @@ let surface_row_texts (state : state) : surface -> string list option = function
                 (List.map
                    (fun change -> Tui_decode.file_change_address change)
                    changes)))
+  (* The list pane only. With the text focused j/k scrolls the reading and
+     there is no row cursor for a match to land on, so the same condition the
+     cursor arm reads answers here: a search offered on one focus and silent
+     on the other would be the drift this pairing exists to prevent. *)
+  | Resources when state.resource_focus = Left_pane ->
+      Option.map (List.map Masc_tui_mcp.display_name) state.resources_list
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None

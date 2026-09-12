@@ -108,6 +108,14 @@ let test_original_presentation () =
   Alcotest.(check string) "original source remains byte-for-byte unchanged" original
     (read (Filename.concat root "presentation.pptx"))
 
+let test_source_limit_before_dependencies () =
+  let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-no-presentation-runtime" in
+  let bytes = String.make (Verification_pdf_inspection.max_source_bytes + 1) 'x' in
+  match Verification_presentation_inspection.inspect ~base_path ~max_image_bytes:1 ~bytes with
+  | Error (Policy_rejected _) -> ()
+  | Error error -> Alcotest.fail (Verification_presentation_inspection.error_to_string error)
+  | Ok _ -> Alcotest.fail "oversized source cannot be inspected"
+
 let () =
   let temporary = Option.value ~default:(Filename.get_temp_dir_name ()) (Sys.getenv_opt "RUNNER_TEMP") in
   let base = Filename.concat temporary "masc-presentation-verifier" in
@@ -116,6 +124,10 @@ let () =
     && Executable_path.command_available "soffice"
     && Sys.file_exists (Presentation_runtime_dependencies.parser_python ~base_path:base) in
   if not ready then Printf.eprintf "SKIP presentation integration: run scripts/ci/prepare-presentation-verifier.py and install LibreOffice\n%!"
-  else Alcotest.run "independent presentation verification"
-  ["Task and Goal",[Alcotest.test_case "parse original slides and notes, render every slide, preserve authority"
-    `Quick test_original_presentation]]
+  ;
+  Alcotest.run "independent presentation verification"
+    (["Source safety", [Alcotest.test_case "reject oversized source before dependency lookup"
+      `Quick test_source_limit_before_dependencies]] @
+     if ready then ["Task and Goal",[Alcotest.test_case
+       "parse original slides and notes, render every slide, preserve authority"
+       `Quick test_original_presentation]] else [])

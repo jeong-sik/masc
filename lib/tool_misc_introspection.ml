@@ -81,7 +81,7 @@ let tool_inventory_json _ctx ~include_hidden =
            `Assoc
              ([
                 ("name", `String schema.name);
-                ("description", `String help_entry.short_description);
+                ("description", `String schema.description);
                 ("registered_schema", `Bool true);
                 ( "dispatch_registered",
                   `Bool (Option.is_some (Tool_dispatch.lookup_tag schema.name)) );

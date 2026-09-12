@@ -6,6 +6,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Message_layout = Masc_tui_message_layout
 module Terminal_text = Masc_tui_ansi.Terminal_text
 module Theme = Masc_tui_ansi.Theme
+module Rows = Masc_tui_rows
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -433,9 +434,12 @@ let render_memory_body ~cols ~budget (state : state)
     in
     push_styled ~style:(Theme.recede ()) note
   else begin
+    let keepers_window =
+      Rows.of_list ~first:scroll ~height:content_height keepers
+    in
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt keepers idx with
+      match Rows.at keepers_window idx with
       | None -> push_empty ()
       | Some k ->
           if idx = cursor then
@@ -618,9 +622,10 @@ let render_memory_facts_body ~cols ~budget (state : state)
      in
      push_styled ~style:(Theme.recede ()) empty)
   else begin
+    let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
-      match List.nth_opt rows idx with
+      match Rows.at rows_window idx with
       | None -> push_empty ()
       | Some row ->
           let line = memory_fact_row_line ~is_fleet ~cols row in

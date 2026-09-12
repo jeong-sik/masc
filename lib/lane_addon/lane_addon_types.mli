@@ -1,6 +1,6 @@
 (** Optional cross-lane observations. Domain meanings belong to packages;
     these types describe provenance, presentation and worker ownership only. *)
-type contribution = Observe | Derive
+type contribution = Observe | Derive | Act
 type row_kind = Event | Value | Relation
 type evidence = { uri : string; sha256 : string option }
 type clock = { domain : string; value : string }
@@ -39,6 +39,7 @@ type package = {
   image : string;
   command : string list;
   directory : string;
+  action_tool : string option;
   skills_directory : Skill_resource_path.t option;
   resources : resources;
 }

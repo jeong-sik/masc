@@ -39,8 +39,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
      operator reads the post. The task contract describes work the producer
      says should not be finished, and is not what a stop is judged on. *)
   (* The title carries the request id: one task is re-submitted many times
-     (audit-adversarial-20260912 R10: 55 'Verify:' titles with three or more
-     posts each) and a reader must tell the posts apart by their title. *)
+     and a reader must tell the posts apart by their title alone. *)
   let board_title, board_content, evidence_refs =
     match claim with
     | Masc_domain.Completion_evidence { evidence_refs } ->

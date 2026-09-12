@@ -171,7 +171,14 @@ let test_observed_identity_survives_turn_replacement () =
     (Keeper_registry.current_turn_interrupt_token ~base_path:base name = new_token);
   Keeper_registry.clear_turn_switch_if_current ~base_path:base name successor;
   check "current finalizer clears itself"
-    (Keeper_registry.current_turn_interrupt_token ~base_path:base name = None)
+    (Keeper_registry.current_turn_interrupt_token ~base_path:base name = None);
+  Keeper_registry.For_testing.clear ();
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  Keeper_registry.set_turn_switch ~base_path:base name (Some successor);
+  check "same-name registration rejects the old lane token"
+    (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token:old_token
+      = Keeper_registry.Observed_turn_changed);
+  Keeper_registry.clear_turn_switch_if_current ~base_path:base name successor
 ;;
 
 let test_observed_interrupt_is_idempotent () =

@@ -1312,6 +1312,7 @@ let mark_turn_runtime_done ~base_path name =
 
 (* Fresh identity belongs to the switch, including interrupted turns which
    never increment the durable turn counter. It is not a scheduling policy. *)
+(* NDT-OK: randomness supplies cancellation identity only; it never selects work. *)
 let turn_switch_rng = Random.State.make_self_init ()
 let turn_switch_rng_mutex = Stdlib.Mutex.create ()
 let fresh_interrupt_token () =

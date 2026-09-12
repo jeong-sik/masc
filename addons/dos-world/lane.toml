@@ -1,0 +1,19 @@
+id = "dos-world"
+revision = "0.1.0"
+title = "DOS input and guest state"
+contributions = ["observe", "act"]
+image = "masc-lane-dos-world:0.1.0"
+command = ["node", "/opt/dos-world/server.mjs"]
+
+[world.actions]
+tool = "lane_act"
+
+[world.skills]
+directory = "skills"
+
+[resources]
+# The image owns one WASM machine; these isolate its host load, not Keeper work.
+cpus = 1.0
+memory_bytes = 536870912
+pids = 64
+max_reply_bytes = 4194304

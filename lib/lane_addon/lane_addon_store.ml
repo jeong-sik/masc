@@ -29,6 +29,18 @@ let read_blob t (reference : evidence) = protect (fun () ->
   | _ -> Error "evidence is not retained in this Lane store")
 let binding_path instance_id = Filename.concat "bindings" (digest instance_id ^ ".json")
 let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojson.Safe.to_string json)
+let action_path ~instance_id ~request_id =
+  Filename.concat "actions" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+let save_action t ~instance_id ~request_id json =
+  write t (action_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
+let load_action t ~instance_id ~request_id = protect (fun () ->
+  let path = Filename.concat t.root (action_path ~instance_id ~request_id) in
+  match Fs_compat.exact_path_kind path with
+  | Fs_compat.Exact_missing -> Ok None
+  | _ ->
+      let stat = Unix.stat path in
+      if stat.Unix.st_kind <> Unix.S_REG then Error "action receipt is not a regular file"
+      else Ok (Some (Fs_compat.load_file path |> Yojson.Safe.from_string)))
 let read_directory t relative = protect (fun () ->
   let path = Filename.concat t.root relative in
   match Fs_compat.exact_path_kind path with

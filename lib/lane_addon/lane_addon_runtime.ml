@@ -1,9 +1,12 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
-type operation = Attach | Inspect | Observe | Detach | Slice | Evidence
+type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
 exception Worker_detached
+exception Action_persistence_failed of string
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
+  action_schema : unit -> Yojson.Safe.t option;
+  act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
   stop : unit -> (unit, string) result;
   container_id : string;
 }
@@ -36,10 +39,12 @@ type entry = {
   mutable cancel_worker : (unit -> unit) option;
   mutable configuration : configuration_owner option;
   input_installations : string list;
+  action_queue : Lane_addon_action.receipt Queue.t;
+  mutable current_action : Lane_addon_action.receipt option;
 }
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
-  configuration_mutex : Eio.Mutex.t; mutable configuration_status : Yojson.Safe.t;
+  configuration_mutex : Eio.Mutex.t; action_mutex : Eio.Mutex.t; mutable configuration_status : Yojson.Safe.t;
   mutable configuration_nudge : unit -> unit }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let override : backend option ref = ref None
@@ -61,7 +66,10 @@ let configuration_of_fields fields =
       let* id = text fields "id" in let* source_path = text fields "source_path" in
       let* revision = text fields "revision" in Ok (Some {id; source_path; revision})
 let entry_json e =
-  `Assoc ["instance_id", `String e.instance_id; "run_id", `String e.run_id;
+  `Assoc ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
+    "action_schema", (match e.connection with None -> `Null
+      | Some c -> Option.fold ~none:`Null ~some:Fun.id (c.action_schema ()));
+    "run_id", `String e.run_id;
     "addon_id", `String e.package.id; "title", `String e.package.title;
     "revision", `String e.package.revision; "phase", phase_to_json e.phase;
     "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
@@ -171,6 +179,108 @@ let namespace e seq output =
   { output with rows = List.map (fun (row : row) -> { row with
       id = prefix row.id; lane_id = e.instance_id ^ "/" ^ row.lane_id;
       related_ids = List.map prefix row.related_ids }) output.rows }
+type action_writer = store:Lane_addon_store.t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+let action_writer_key : action_writer Eio.Fiber.key = Eio.Fiber.create_key ()
+let save_action_unlocked m (receipt : Lane_addon_action.receipt) =
+  let write = match Eio.Fiber.get action_writer_key with
+    | None -> (fun ~store ~instance_id ~request_id json ->
+        Lane_addon_store.save_action store ~instance_id ~request_id json)
+    | Some write -> write in
+  offload (fun () -> write ~store:m.store ~instance_id:receipt.instance_id
+    ~request_id:receipt.request_id (Lane_addon_action.to_json receipt))
+let save_action m receipt = Eio.Mutex.use_ro m.action_mutex (fun () -> save_action_unlocked m receipt)
+let finalize_actions m e =
+  (* The worker's lifetime owns dispatch. Cleanup never replays work against a
+     replacement incarnation. Remaining queued work is known not to have run. *)
+  let finish (receipt : Lane_addon_action.receipt) state detail =
+    let detail = match receipt.detail with None -> detail | Some previous -> previous ^ "; " ^ detail in
+    let receipt = {receipt with Lane_addon_action.state; detail = Some detail} in
+    match save_action m receipt with Ok () -> ()
+    | Error message -> Log.Misc.error "Lane action finalization persistence: %s" message in
+  Option.iter (fun (receipt : Lane_addon_action.receipt) ->
+    match receipt.state with
+    | Queued -> finish receipt Lane_addon_action.Failed_before_effect "worker lifetime ended before dispatch"
+    | _ -> finish receipt Lane_addon_action.Outcome_unknown
+        "worker lifetime ended before a durable action result; no automatic retry") e.current_action;
+  e.current_action <- None;
+  Queue.iter (fun receipt -> finish receipt Lane_addon_action.Failed_before_effect
+    "worker lifetime ended while request was queued") e.action_queue;
+  Queue.clear e.action_queue
+let commit_output m e ~sources output =
+  let seq = e.seq + 1 in
+  let output = namespace e seq output in
+  let* () =
+    if String.length (Yojson.Safe.to_string (output_to_json output)) <= e.package.resources.max_reply_bytes
+    then Ok () else Error "namespaced observation exceeds the package output envelope" in
+  let* () = offload (fun () -> Lane_addon_store.append_observation m.store
+    ~instance_id:e.instance_id ~seq ~sources output) in
+  e.seq <- seq; e.output <- output;
+  if not e.stopping then e.phase <- Attached;
+  let* () = persist m e in wake_dependents m e; Ok ()
+let perform_action m e c (queued : Lane_addon_action.receipt) =
+  e.current_action <- Some queued;
+  let running = {queued with state = Lane_addon_action.Running; executor = Some c.container_id} in
+  match save_action m running with
+  | Error message ->
+      let receipt = {queued with state = Lane_addon_action.Failed_before_effect;
+        detail = Some ("dispatch record could not be persisted: " ^ message)} in
+      (match save_action m receipt with Ok () -> e.current_action <- None
+       | Error error -> raise (Action_persistence_failed error))
+  | Ok () ->
+      e.current_action <- Some running;
+      let arguments = Lane_addon_action.arguments ~instance_id:e.instance_id
+        ~request_id:running.request_id ~action:running.action in
+      let result = try c.act ~arguments with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      let finished = match result with
+        | Error message -> {running with state = Lane_addon_action.Outcome_unknown;
+            detail = Some ("dispatched action has no valid package result: " ^ message)}
+        | Ok package_result ->
+            let received = {running with state = Lane_addon_action.Outcome_unknown;
+              result = Some package_result.result;
+              detail = Some "package result received; evidence and receipt durability not yet established"} in
+            (* Filesystem publication can fail after rename. Preserve the
+               received payload before either evidence or receipt writes yield. *)
+            e.current_action <- Some received;
+            let sources = `Assoc ["kind", `String "lane_action";
+              "request", Lane_addon_action.to_json running;
+              "package_status", `String (match package_result.Lane_addon_action.status with
+                | Package_confirmed -> "confirmed" | Package_failed_before_effect -> "failed_before_effect"
+                | Package_outcome_unknown -> "outcome_unknown")] in
+            (match commit_output m e ~sources package_result.output with
+             | Error message -> {received with
+                 detail = Some ("package returned a result but its evidence was not committed: " ^ message)}
+             | Ok () ->
+                 let state = match package_result.status with
+                   | Package_confirmed -> Lane_addon_action.Confirmed
+                   | Package_failed_before_effect -> Lane_addon_action.Failed_before_effect
+                   | Package_outcome_unknown -> Lane_addon_action.Outcome_unknown in
+                 {received with state;
+                   detail = Some "outcome reported by the package; interpret its result and retained evidence"}) in
+      e.current_action <- Some finished;
+      let uncertain message =
+        let detail = match finished.detail with
+          | None -> "action result persistence failed: " ^ message
+          | Some previous -> previous ^ "; action result persistence failed: " ^ message in
+        e.current_action <- Some {finished with state = Lane_addon_action.Outcome_unknown;
+          detail = Some detail} in
+      (* Publish the save outcome to readers before releasing their serializer.
+         A post-rename fsync error must not expose its visible terminal JSON as
+         a confirmed result while failure handling yields to other fibers. *)
+      let saved = Eio.Mutex.use_ro m.action_mutex (fun () ->
+        match save_action_unlocked m finished with
+        | Ok () -> e.current_action <- None; Ok ()
+        | Error message -> uncertain message; Error message
+        | exception exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            uncertain (Printexc.to_string exn);
+            Printexc.raise_with_backtrace exn backtrace) in
+      (match saved with
+       | Ok () -> ()
+       | Error message -> raise (Action_persistence_failed ("action result persistence: " ^ message)))
+
 let run ~sw backend m e =
   fork_isolated ~sw (fun () ->
     let work () = try
@@ -201,26 +311,20 @@ let run ~sw backend m e =
                 Eio.Promise.await pending;
                 clear_wake e;
                 if e.stopping then loop () else (
-                  e.phase <- Observing;
-                  let result =
-                    let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding
-                      ~resolve_lane_output:(resolve_lane_output m ~run_id:e.run_id) in
-                    let* output = c.observe ~binding:e.binding ~sources in
-                    let seq = e.seq + 1 in
-                    let output = namespace e seq output in
-                    let* () =
-                      let bytes = Yojson.Safe.to_string (output_to_json output) in
-                      if String.length bytes <= e.package.resources.max_reply_bytes then Ok ()
-                      else Error "namespaced observation exceeds the package output envelope" in
-                    let* () = offload (fun () -> Lane_addon_store.append_observation m.store
-                      ~instance_id:e.instance_id ~seq ~sources output) in
-                    Ok (seq, output) in
-                  (match result with
-                   | Ok (seq, output) -> e.seq <- seq; e.output <- output;
-                       if not e.stopping then e.phase <- Attached;
-                       (match persist m e with Ok () -> wake_dependents m e
-                        | Error message -> failed m e message)
-                   | Error message -> failed m e message);
+                  if not (Queue.is_empty e.action_queue) then (
+                    let queued = Queue.take e.action_queue in
+                    perform_action m e c queued;
+                    (* The pending observation and remaining actions continue
+                       on this worker; no Keeper turn waits on this queue. *)
+                    wake e)
+                  else (
+                    e.phase <- Observing;
+                    let result =
+                      let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding
+                        ~resolve_lane_output:(resolve_lane_output m ~run_id:e.run_id) in
+                      let* output = c.observe ~binding:e.binding ~sources in
+                      commit_output m e ~sources output in
+                    match result with Ok () -> () | Error message -> failed m e message);
                   loop ()))
             in loop ());
     with
@@ -230,21 +334,26 @@ let run ~sw backend m e =
     in
     match work () with
     | () -> e.running <- false; e.cancel_worker <- None;
+        Eio.Cancel.protect (fun () -> finalize_actions m e);
         if e.stopping && e.phase <> Detached then stop_entry ~sw ~backend m e;
         release_detached m e
     | exception exn -> e.running <- false; e.cancel_worker <- None;
+        Eio.Cancel.protect (fun () -> finalize_actions m e);
         release_detached m e; raise exn)
-let backend () = match !override with
+let backend ~store () = match !override with
   | Some backend -> backend
   | None -> {
       start = (fun ~sw ~instance_id ~package ~on_created ->
         let wrap worker = {
           container_id = Lane_addon_worker.container_id worker;
+          action_schema = (fun () -> Lane_addon_worker.action_schema worker);
+          act = (fun ~arguments -> Lane_addon_worker.act worker ~arguments
+            |> Result.map_error Lane_addon_worker.error_to_string);
           observe = (fun ~binding ~sources -> Lane_addon_worker.observe worker ~binding ~sources
             |> Result.map_error Lane_addon_worker.error_to_string);
           stop = (fun () -> Lane_addon_worker.stop worker |> Result.map_error Lane_addon_worker.error_to_string) } in
         Lane_addon_worker.start ~sw ~mgr:Posix_spawn_process_mgr.mgr ~instance_id ~package
-          ~on_created:(fun worker -> on_created (wrap worker)) ()
+          ~on_created:(fun worker -> on_created (wrap worker)) ~artifact_store:store ()
         |> Result.map wrap |> Result.map_error Lane_addon_worker.error_to_string);
       acquire = Lane_addon_sources.acquire;
       recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes ->
@@ -257,6 +366,7 @@ let manager config =
   | Some m -> m
   | None -> let m = { store = Lane_addon_store.create ~root; entries = Hashtbl.create 8;
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
+                     action_mutex = Eio.Mutex.create ();
                      configuration_status = `Null; configuration_nudge = (fun () -> ()) } in
       Hashtbl.add managers root m; m
 let notify_activity ~config =
@@ -310,7 +420,7 @@ let historical_detach ~sw m fields =
     let* () = match offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:id detaching) with
       | Ok () -> Ok ()
       | Error message -> Hashtbl.remove m.recovering id; Error message in
-    let backend = backend () in
+    let backend = backend ~store:m.store () in
     fork_isolated ~sw (fun () ->
       let result = try backend.recover_stop ~instance_id:id ~container_id ~max_reply_bytes with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -432,17 +542,18 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
     phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
     stopping = false; cleanup_running = false; wake = promise; resolver; pending = false;
     running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
+    action_queue = Queue.create (); current_action = None;
     cancel_worker = None; configuration; input_installations } in
   let* () = persist m e in
   Hashtbl.add m.entries e.instance_id e;
-  wake e; run ~sw (backend ()) m e;
+  wake e; run ~sw (backend ~store:m.store ()) m e;
   Ok (entry_json e)
 
 let detach_entry ~sw m e =
   (match e.phase with Detached -> () | _ ->
     e.stopping <- true; e.phase <- Detaching; wake e;
     wake_dependents m e;
-    stop_entry ~sw ~backend:(backend ()) m e);
+    stop_entry ~sw ~backend:(backend ~store:m.store ()) m e);
   let* () = persist m e in Ok (entry_json e)
 
 let configuration_directory config =
@@ -493,6 +604,91 @@ let remove_configuration_file ~directory (owner : configuration_owner) =
          | Unix.Unix_error (Unix.ENOENT, _, _) when not (Sys.file_exists staged) -> Ok ()
          | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
+let retained_action_unlocked m ~instance_id ~request_id =
+  let* json = offload (fun () -> Lane_addon_store.load_action m.store ~instance_id ~request_id) in
+  match json with
+  | None -> Ok None
+  | Some json ->
+      let* receipt = Lane_addon_action.of_json json in
+      let* () = if receipt.instance_id = instance_id && receipt.request_id = request_id then Ok ()
+        else Error "retained receipt belongs to a different request" in
+      let* receipt =
+        let failed_publication = match Hashtbl.find_opt m.entries instance_id with
+          | Some e -> (match e.current_action with
+              | Some current when current.request_id = request_id
+                  && current.state = Lane_addon_action.Outcome_unknown
+                  && (receipt.state = Lane_addon_action.Confirmed
+                      || receipt.state = Lane_addon_action.Failed_before_effect) -> Some current
+              | _ -> None)
+          | None -> None in
+        match failed_publication with
+        | None -> Ok receipt
+        | Some current ->
+            (* The terminal file may be visible even though its mandatory fsync
+               failed. Retain the known uncertainty before returning a receipt. *)
+            let* () = save_action_unlocked m current in Ok current in
+      let active = match Hashtbl.find_opt m.entries instance_id with
+        | Some e when e.running ->
+            let owns (queued : Lane_addon_action.receipt) = queued.request_id = request_id in
+            Option.fold ~none:false ~some:owns e.current_action
+              || Queue.fold (fun owned queued -> owned || owns queued) false e.action_queue
+        | _ -> false in
+      let recovered = match active, receipt.state with
+        | false, Lane_addon_action.Running -> Some {receipt with state = Outcome_unknown;
+            detail = Some "original worker no longer runs; dispatched outcome is unknown and will not be replayed"}
+        | false, Lane_addon_action.Queued -> Some {receipt with state = Failed_before_effect;
+            detail = Some "original worker no longer runs; queued request was not dispatched"}
+        | _ -> None in
+      (match recovered with None -> Ok (Some receipt)
+       | Some receipt -> let* () = save_action_unlocked m receipt in Ok (Some receipt))
+let action_status m args =
+  let* instance_id = text args "instance_id" in let* request_id = text args "request_id" in
+  Eio.Mutex.use_ro m.action_mutex (fun () ->
+    let* receipt = retained_action_unlocked m ~instance_id ~request_id in
+    match receipt with None -> Error "unknown action request"
+    | Some receipt -> Ok (Lane_addon_action.to_json receipt))
+let enqueue_action ?caller m args =
+  let* instance_id = text args "instance_id" in
+  let* incarnation = text args "expected_incarnation" in let* request_id = text args "request_id" in
+  let* requester = match caller with Some value when String.trim value <> "" -> Ok value
+    | _ -> Error "Lane action requires an authenticated caller" in
+  let* () = if incarnation = instance_id then Ok () else Error "stale action incarnation" in
+  let* action = match List.assoc_opt "action" args with Some (`Assoc _ as action) -> Ok action
+    | _ -> Error "action requires an object" in
+  let* action = Lane_addon_action.canonical action in
+  let* arguments = Lane_addon_action.canonical (Lane_addon_action.arguments ~instance_id ~request_id ~action) in
+  let input_sha256 = Lane_addon_action.input_digest arguments in
+  Eio.Mutex.use_ro m.action_mutex (fun () ->
+    let* previous = retained_action_unlocked m ~instance_id ~request_id in
+    match previous with
+    | Some receipt ->
+        if receipt.requester <> requester then Error "request identity belongs to a different authenticated caller"
+        else if receipt.input_sha256 <> input_sha256 then Error "request_id already names different action input"
+        else Ok (Lane_addon_action.to_json receipt)
+    | None ->
+        let* e = find m args in
+        let* () = if not e.running || e.stopping then Error "action worker is stopped or detaching" else Ok () in
+        let* c = match e.connection with Some c -> Ok c | None -> Error "action worker initialization pending" in
+        let* name, schema = match e.package.action_tool, c.action_schema () with
+          | Some name, Some schema -> Ok (name, schema)
+          | _ -> Error "worker has no available advertised action port" in
+        let* () = if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then Ok ()
+          else Error "action input exceeds the package message envelope" in
+        let* _ = Lane_addon_action.validate ~schema ~name arguments in
+        let receipt : Lane_addon_action.receipt = {instance_id; incarnation; request_id; requester;
+          executor = None; input_sha256; action; state = Queued; result = None; detail = None} in
+        let* () = save_action_unlocked m receipt in
+        (* Persistence yields. Detach and host shutdown may have completed while
+           the file was written; do not queue against a retired owner. *)
+        if not e.running || e.stopping then (
+          let receipt = {receipt with state = Failed_before_effect;
+            detail = Some "worker retired before the queued request entered its dispatch loop"} in
+          let* () = save_action_unlocked m receipt in Ok (Lane_addon_action.to_json receipt))
+        else (
+          Queue.add receipt e.action_queue;
+          wake e;
+          Ok (Lane_addon_action.to_json receipt)))
+
 let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
   let* args = object_ json in
   let allowed = match operation with
@@ -500,13 +696,17 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
     | Inspect -> ["instance_id"]
     | Observe | Detach -> ["instance_id"]
     | Slice -> ["run_id"; "lane_id"; "since"; "until"]
-    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"] in
+    | Evidence -> ["instance_id"; "row_ids"; "keeper_name"]
+    | Act -> ["instance_id"; "expected_incarnation"; "request_id"; "action"]
+    | Action_status -> ["instance_id"; "request_id"] in
   let names = List.map fst args in
   let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
     || List.exists (fun name -> not (List.mem name allowed)) names
     then Error "duplicate or unknown Lane request field" else Ok () in
   let m = manager config in
   match operation with
+  | Act -> enqueue_action ?caller m args
+  | Action_status -> action_status m args
   | Inspect ->
       let* instance_id = match List.assoc_opt "instance_id" args with
         | None -> Ok None | Some _ -> Result.map Option.some (text args "instance_id") in
@@ -730,6 +930,8 @@ let start_configuration_service ~config ~sw ~clock =
 module For_testing = struct
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
+    action_schema : unit -> Yojson.Safe.t option;
+    act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, string) result;
     container_id : string;
   }
@@ -745,6 +947,7 @@ module For_testing = struct
   }
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f
+  let with_action_writer write f = Eio.Fiber.with_binding action_writer_key write f
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;

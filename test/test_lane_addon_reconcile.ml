@@ -60,6 +60,8 @@ let make_backend () =
       let stop_sent = ref false in
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
+        action_schema = (fun () -> None);
+        act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding ~sources:_ ->
           state.observations := (instance_id, binding) :: !(state.observations);
           match package.id with

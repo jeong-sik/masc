@@ -3492,6 +3492,11 @@
  (libraries alcotest masc_tui_frame))
 
 (test
+ (name test_tui_render_tools)
+ (modules test_tui_render_tools)
+ (libraries alcotest masc_tui_keys masc_tui_render_tools masc_tui_types))
+
+(test
  (name test_tui_agenda)
  (modules test_tui_agenda)
  (deps

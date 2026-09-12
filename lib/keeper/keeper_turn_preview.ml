@@ -51,6 +51,8 @@ let current ~keeper_name =
 
 let update ~keeper_name ~now f =
   with_lock (fun () ->
+    (* DET-OK: absent in-memory telemetry starts empty; this is initialization,
+       not a fallback for unknown external input. *)
     let old = Option.value ~default:(empty now) (Hashtbl.find_opt table keeper_name) in
     Hashtbl.replace table keeper_name { (f old) with updated_at = now })
 

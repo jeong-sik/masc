@@ -94,13 +94,13 @@ let chat_activity ~now ~keeper_name ~error rows =
     in
     let text = match preview with
       | Some preview when String.trim preview.Tui_decode.ktp_text_tail <> "" ->
-        ["Latest output: " ^ Terminal_text.single_line preview.ktp_text_tail]
+        ["Latest output: " ^ Tui_decode.sanitize_terminal_text preview.ktp_text_tail]
       | Some _ | None -> []
     in
     let observed = match error with None -> "Current" | Some _ -> "Last observed" in
     stale @ [Printf.sprintf "%s %s turn · %s · %s"
       observed (lane_word lane) (elapsed_text ~now started_at_unix)
-      (Terminal_text.single_line status)] @ text
+      (Tui_decode.sanitize_terminal_text status)] @ text
 ;;
 
 let is_running (row : Tui_decode.keeper_turn_row) =

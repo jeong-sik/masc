@@ -514,7 +514,7 @@ let make_hooks
            cannot drift apart. *)
         Keeper_turn_preview.note_tool
           ~keeper_name:(!meta_ref).name
-          ~now:(Unix.gettimeofday ())
+          ~now:(Time_compat.now ())
           tool_name;
         incr tool_call_count_ref;
         (* AGENT_CORE exposes the provider-facing tool body here as text.  It is not a
@@ -858,7 +858,7 @@ let make_hooks
           { invocation; tool_name; input; stage; duration_ms; error } ->
         let meta = !meta_ref in
         Keeper_turn_preview.note_tool ~keeper_name:meta.name
-          ~now:(Unix.gettimeofday ()) tool_name;
+          ~now:(Time_compat.now ()) tool_name;
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
            is already emitted at ERROR by keeper_tools_agent_core before this

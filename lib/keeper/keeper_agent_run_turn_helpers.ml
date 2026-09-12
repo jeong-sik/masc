@@ -276,7 +276,7 @@ let make_append_manifest
     event
 
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
-  Keeper_turn_preview.reset ~keeper_name ~now:(Unix.gettimeofday ());
+  Keeper_turn_preview.reset ~keeper_name ~now:(Time_compat.now ());
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
       ~base_path:config.Workspace.base_path
@@ -310,6 +310,6 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
     else None
   in
   let on_event = Some (fun event ->
-    Keeper_turn_preview.note_stream ~keeper_name ~now:(Unix.gettimeofday ()) event;
+    Keeper_turn_preview.note_stream ~keeper_name ~now:(Time_compat.now ()) event;
     registry_progress_on_event ~record_turn_progress downstream event) in
   (record_turn_progress, yield_on_tool, on_yield, on_resume, on_event)

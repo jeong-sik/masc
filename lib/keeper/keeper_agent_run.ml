@@ -1455,7 +1455,7 @@ let run_turn
                       ~on_runtime_attempt:
                         (fun attempt ->
                            Keeper_turn_preview.note_attempt ~keeper_name:meta.name
-                             ~now:(Unix.gettimeofday ()) ~runtime_id:attempt.runtime_id;
+                             ~now:(Time_compat.now ()) ~runtime_id:attempt.runtime_id;
                            (* Each lane attempt assembles its own request.
                               Without this clear, a failed attempt's evidence
                               survives into the record of the runtime that
@@ -1479,7 +1479,7 @@ let run_turn
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
                            Keeper_turn_preview.note_failure ~keeper_name:meta.name
-                             ~now:(Unix.gettimeofday ()) ~runtime_id
+                             ~now:(Time_compat.now ()) ~runtime_id
                              (Agent_core.Error.to_string error);
                            (* The candidate this error belongs to, and whether
                               the walk invoked it. The caller's decision

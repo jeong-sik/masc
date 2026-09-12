@@ -681,7 +681,7 @@ let assemble_hooks
                 (* A pre-hook observes a request, before validation/approval.
                    Include Skill without claiming the handler has started. *)
                 Keeper_turn_preview.note_tool ~keeper_name:meta.name
-                  ~now:(Unix.gettimeofday ()) tool_name;
+                  ~now:(Time_compat.now ()) tool_name;
                 if not (String.equal tool_name
                           Keeper_tool_composition_catalog.skill_tool_name)
                    && Skill_delivery_state.active skill_delivery_state <> []

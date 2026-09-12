@@ -68,9 +68,11 @@ let test_queue_does_not_invent_a_blocking_turn () =
 let test_started_and_finished_requests_stop_waiting () =
   let state = state () in
   let log = live state (Some Live.Queued) in
+  state.keeper_turns <- [running Turn_lane_chat_operation];
   Tui.turn_log_add ~now:4. log ~seq:(Some 1) Live.Run_started;
   check (list string) "run started supersedes its old queued acceptance" []
     (Tui.keeper_message_activity_rows state);
+  state.keeper_turns <- [];
   Tui.turn_log_add ~now:5. log ~seq:(Some 2) Live.Run_finished;
   check (list string) "settled run is not queued" []
     (Tui.keeper_message_activity_rows state);

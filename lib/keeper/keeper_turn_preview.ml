@@ -64,6 +64,7 @@ let note_attempt ~keeper_name ~now ~runtime_id =
     ; last_tool = None; text_tail = "" })
 
 let note_failure ~keeper_name ~now ~runtime_id detail =
+  let detail = Observability_redact.redact_preview ~max_len:tail_bytes detail in
   update ~keeper_name ~now (fun old ->
     { old with runtime_id = Some runtime_id; activity = Failed
     ; last_tool = None; last_failure = Some detail })
@@ -85,6 +86,8 @@ let note_stream ~keeper_name ~now event =
     update ~keeper_name ~now (fun old ->
       { old with text_tail = utf8_tail ~max_bytes:tail_bytes (old.text_tail ^ text)
       ; activity = Receiving_response })
+  | ContentBlockStart { tool_name = Some tool_name; _ } ->
+    note_tool ~keeper_name ~now tool_name
   | ContentBlockDelta { delta = TextSnapshot text; _ } ->
     note_text ~keeper_name ~now text
   | MessageStart _ | ContentBlockDelta { delta = ThinkingDelta _ | ReasoningDetailsDelta _; _ } ->

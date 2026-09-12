@@ -7119,7 +7119,11 @@ let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
-    let activity = Masc_tui_answering.chat_activity
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
       ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
       state.keeper_turns in
     let submitted = match state.msg_live with

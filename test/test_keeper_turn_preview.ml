@@ -83,6 +83,13 @@ let test_overlapping_and_rejected_tools_remain_observations () =
   let keeper_name = "overlapping-tools" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
   Keeper_turn_preview.reset ~keeper_name ~now:1.;
+  Keeper_turn_preview.note_stream ~keeper_name ~now:1.5
+    (Agent_core.Types.ContentBlockStart { index=1; content_type="tool_use"; tool_id=Some "dynamic"; tool_name=Some "MCP" });
+  Alcotest.(check (option string)) "official-client dynamic tool is visible" (Some "MCP") (current ()).last_tool;
+  Keeper_turn_preview.note_failure ~keeper_name ~now:1.6 ~runtime_id:"claude" (String.make 10000 'x');
+  Alcotest.(check bool) "diagnostic cannot flood the light poll" true
+    (String.length (Option.get (current ()).last_failure) < 300);
+  Keeper_turn_preview.reset ~keeper_name ~now:1.7;
   (* The same hook can run before validation rejects Skill. *)
   Keeper_turn_preview.note_tool ~keeper_name ~now:2. "Skill";
   Alcotest.(check string) "a request does not claim execution"

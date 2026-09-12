@@ -1,0 +1,27 @@
+{
+  "files": [
+    {
+      "file": "experience.mp4",
+      "bytes": 345612,
+      "sha256": "e9f26dde92b0b4120546d617c5cb89e420a3bc43943e5587b04c746bcd7f1283"
+    },
+    {
+      "file": "experience.pptx",
+      "bytes": 25462,
+      "sha256": "4e0099d695d4e0bce0f96e10f4c181ac049f641be70c6edfe2e21abd66cd1fae"
+    },
+    {
+      "file": "experience.pdf",
+      "bytes": 57307,
+      "sha256": "d2c682cd60dba9246478cf3ddfe4f4729c29f80d097e1da5770b0bb846bf407f"
+    },
+    {
+      "file": "review.md",
+      "bytes": 10136,
+      "sha256": "ab38fbe8e069f2d1d4645af7b5161431acf38a87919eaef59f9df3cd0036ea57"
+    }
+  ],
+  "mp4_decode_exit": 0,
+  "mp4_decode_stderr": "",
+  "scope": "New artifact revision; independent full decode, not reuse of revision1 evidence"
+}

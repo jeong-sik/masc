@@ -1,0 +1,528 @@
+{
+  "keeper_turn_id": 420,
+  "operations": [
+    {
+      "ts": 1789221031.253103,
+      "tool": "masc_board_post_get",
+      "execution_id": "exec-1789221031253-00b3",
+      "tool_use_id": "call_0cc26ebdcfa44a90a4f552ff",
+      "keeper_turn_id": 420,
+      "turn": 777,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "post_id": "p-c0bb49d30e7a617ea6596d100e845215"
+      },
+      "output": "**p-c0bb49d30e7a617ea6596d100e845215** · Fusion deliberation (run kmsg-f381606a185bf86825c3f99ffd36e185): answer — ... [unlisted] (by exhibit-editor, 2026-09-12T13:14:33Z, expires: 2026-09-19T13:14:33Z)\nFusion deliberation (run kmsg-f381606a185bf86825c3f99ffd36e185): answer — 가장 균형 있는 조합은 C(무음 자막 MP4) 주 방식 + B의 선택 투표를 무음 토큰/패널 방식으로 재설계한 보조 활동(A의 질문카드는 짧은 문장·그림형으로 부분 차용, A 낭독 자체는 조건부)이다. 초보적 선택 B 주+C 보는 무음 제약 하에서 발표 채널 위반으로 성립하지 않는다. 남는 희생은 전맹·저시각 배제, 중증 읽기 곤란 관람객의 불리, 아동-보호자 구두 대화 억제이며, 트레이드오프는 해소가 아니라 이동이다. 다수결 오해 방지를 위해 '투표' 명칭 삭제, 사적 기록 선후 공개, 집계·순위·승자 표시 금지, '아직 모르겠다' 슬롯, 진행자 금지어, 보호자 안내, '선택은 결말을 정하지 않음' 명시, 결말 분기 금지를 적용하라. 단, '무음'의 운영 정의 확인 전까지 최종 확정은 보류하고 발화 가능 시간대가 확인되면 B 주+C 보로 전환 가능하다.\n[↑0 ↓0 = +0] [0 replies]\n\nNo comments."
+    },
+    {
+      "ts": 1789221151.750379,
+      "tool": "Edit",
+      "execution_id": "exec-1789221151750-00bc",
+      "tool_use_id": "call_5415d1d628944fb58c4dbcee",
+      "keeper_turn_id": 420,
+      "turn": 781,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/decision.md",
+        "new_string": "상태: **v4 — 운영자 실물 검토(2026-09-12) 반영.** ① fusion 원문 대조 정정(종전 3/3·verdict_insufficient·TTL 소실 기록은 오기였음 — 원문 게시물 p-c0bb49d30e7a617ea6596d100e845215 실재, 패널 GLM/Codex answered·GLM judge synthesized, 권고 \"C 주 + B 무음 재설계 보조 + A 부분 차용(낭독은 조건부)\"). ② 접근성 전제 정정: Goal 기준의 '소리를 듣지 못하는 상황'은 **관람객 청각 시나리오**이며 '전시장에서 소리를 낼 수 없다'는 환경 규칙이 아니었음 — fusion 프롬프트에 후자를 심은 것이 오류의 근원. ③ 산출 스펙은 Task 계약(PPTX 발표+MP4) 그대로 유지.",
+        "old_string": "상태: **v3 — 두 독립 관점(exhibit-designer VD-01~08 + fusion kmsg-f381606a) 반영 완료. 결정은 환경 제약(장비·공간 규칙) 확정 전까지 조건부 유지.**"
+      },
+      "output": {
+        "_blob": {
+          "sha256": "42a78d034b72be2e32f52cce3cf5fb2f00321385e2c5e134dde2d8fe54202af2",
+          "bytes": 1343,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 9471,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "46107a60381903b1b7d4f844cf54fb18c8fc9bb958bca78d02735420e2c49edd",
+              "bytes": 8958,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "a4c5459947ae99994764bcb21a2b446a8279eb4aa6a894f93ba05e167c44e003",
+              "bytes": 9471,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221151.862848,
+      "tool": "Edit",
+      "execution_id": "exec-1789221151862-00bd",
+      "tool_use_id": "call_61fbdbd82fa94e4186fda176",
+      "keeper_turn_id": 420,
+      "turn": 781,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/decision.md",
+        "new_string": "## 2. 상충 분석 (v4 개정)\n- **빠른 설명 ↔ 독자 선택권**: 화면 문법 자체가 다수결을 만들 수 있다(VD-02). 정답 부재는 문구가 아니라 **동등 표시 원칙**(같은 면적·서체·체류 시간)으로 지킨다.\n- **접근성 ↔ 표현 밀도 (v4 정정)**: 두 시나리오는 ① 긴 글을 읽기 어려운 독자, ② **소리를 듣지 못하는 상황(청각 접근)**이다. ②는 자막·시각 전달로 충족되고(MP4 무음 시청 가능성), '전시장 무음 규칙'으로 재해석했던 종전 v3의 환경 분기는 근거 없는 확장이었다 — 철회. 낭독(A)은 청각 경로 보강이지 무음 환경의 유일한 대안이 아니다. 전맹·저시각 배제가 이 조합의 남는 희생임(fusion 지적)은 그대로 인정하고, 대형 인쇄 카드로 부분 완화만 기록.\n- **참여 부담 축(VD-07)**: 공개 선택·기억 공개의 부담(사회불안·말하기 어려움·운동 제약·가족 기억 프라이버시) — \"보기만 하기·아직 모르기\"를 정식 선택지로 두어 해소. '투표'라는 명칭도 쓰지 않는다(선택 활동으로만 지칭).\n- **인과 보존 ↔ 압축**: \"각 편 1장면+질문 1개\"는 분량 상한이지 충분조건이 아니다(VD-06). 필수 조건: ① 서연의 '함께 물어보고 심었습니다' 이름표 ② 그 이름표를 본 도윤이의 두 이름표 제안 ③ 두 이름표 덕분의 폐막 분리 선택 — 세 **인과 앵커**를 화면에 남기고, 전환 문장(\"이름표를 본 도윤이는…\", \"두 이름표는 폐막 때 다시 선택을 만들었습니다.\")으로 연결한다. 질문 뒤 결과·성찰 슬라이드도 필수.",
+        "old_string": "## 2. 상충 분석 (v2 개정)\n- **빠른 설명 ↔ 독자 선택권**: 화면 문법 자체가 다수결을 만들 수 있다(VD-02). 정답 부재는 문구가 아니라 **동등 표시 원칙**(같은 면적·서체·체류 시간)으로 지킨다.\n- **접근성 ↔ 표현 밀도**: 글 읽기 어려운 관객(A의 낭독이 담당)과 소리 없는 환경(B·C의 시각 경로)의 요구는 반대 방향 — 단일 방식으로 동시 만족 불가, 조합으로만 커버. **추가 축(VD-07)**: 공개 선택·기억 공개의 부담(사회불안·말하기 어려움·운동 제약·가족 기억 프라이버시) — \"보기만 하기·아직 모르기\"를 정식 선택지로 두어 해소.\n- **인과 보존 ↔ 압축**: \"각 편 1장면+질문 1개\"는 분량 상한이지 충분조건이 아니다(VD-06). 필수 조건: ① 서연의 '함께 물어보고 심었습니다' 이름표 ② 그 이름표를 본 도윤이의 두 이름표 제안 ③ 두 이름표 덕분의 폐막 분리 선택 — 세 **인과 앵커**를 화면에 남기고, 전환 문장(\"이 이름표를 본 도윤이는…\", \"두 이름표는 폐막 때 다시 선택을 만들었습니다.\")으로 연결한다. 질문 뒤 결과·성찰 슬라이드도 필수."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "7db834c3d9bb7225c4693fb7241aa6b5ef38bab489456bef7085275a6253437c",
+          "bytes": 1343,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 9924,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "a4c5459947ae99994764bcb21a2b446a8279eb4aa6a894f93ba05e167c44e003",
+              "bytes": 9471,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "fa643cd8ecbb1503a7ef6803057cdf6e42c983c0658431560b1aea6a0d8b032a",
+              "bytes": 9924,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221151.92598,
+      "tool": "Edit",
+      "execution_id": "exec-1789221151925-00be",
+      "tool_use_id": "call_faa14073f8c342cf8773cad1",
+      "keeper_turn_id": 420,
+      "turn": 781,
+      "success": false,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/decision.md",
+        "new_string": "## 3. 선택 (v4 — 운영자 피드백 반영 후 재확정)\n- **주 B(PPTX 발표, 고정 순서·동등 표시·8장 구조)** + **보조 C(MP4 115초, 질문 3개)** + **A는 예약 회차·장비 실패 대안으로 보존**.\n- 이 선택은 **본인(편집자)의 결정**이며, fusion 권고(원문: \"C 주 + B를 무음 토큰/패널 방식으로 재설계한 보조, A 부분 차용·낭독 조건부\")와 다르다. 차이 이유: ① Task 계약이 '발표 파일(PPTX)+영상(MP4)' 제작을 요구하므로 B가 계약 내 주 방식이고, fusion의 '발표 채널 위반' 논리는 제가 프롬프트에 '소리를 낼 수 없는 환경'을 잘못 심어 나온 결론이다(원문에도 \"무음의 운영 정의 확인 전 확정 보류\" 단서가 있음). ② fusion 권고 중 채택한 것: '투표' 명칭 미사용, 집계·순위·승자 표시 금지, '아직 모르겠다' 슬롯, 사적 기록 선후 공개, 결말 분기 금지(원작 열린 결말 보존), 전맹·저시각 배제 희생의 명시. ③ 기각·변경: \"C 주\" — 청각 시나리오(듣지 못하는 상황)는 자막 MP4로 이미 충족되고 발표의 상호작용(선택 카드)은 PPTX가 담당하므로 계약상 B 주가 맞다. A 낭독의 '조건부'는 유지하되 환경 규칙이 아니라 예약 회차 운영 조건으로.\n- 불확실성(미검증 명시): (1) 전시장 장비·공간 운영 조건 미확정 — 발화 가능 여부는 운영 확정 시 A 회차 운영에만 반영(주·보조 구조에는 영향 없음), (2) 동시 수용 인원·회전율 미측정, (3) 자막·선택 카드 기준 수치는 프로토타입 설계값으로 사용자 검증 전. **사용자 조사는 수행하지 않았다.**",
+        "old_string": "## 3. 선택 (v3 — 조건부 확정)\n- **주 B(PPTX, 고정 순서·동등 표시·8장 구조)** + **보조 C(MP4 90~120초, 질문 3개)** + **A는 예약 회차·장비 실패 대안으로 보존**.\n- **환경 조건 분기(fusion 반영)**: '무음' 제약이 문자 그대로(소음 민감 구역)라면 A의 낭독 회차는 그 공간에서 열릴 수 없어 **A+C 조합**(예약 낭독은 별실/별시간 + 무음 반복 영상)이 더 균형적이고, 조속한 대화가 가능한 공간이라면 지금 조합(B 주+C 보+A 예약)이 유효하다. 전시장 장비·공간 규칙이 미확정(아래 불확실성 1)이므로 **결정은 환경 제약 확정 시까지 조건부**로 유지한다 — fusion judge 권고(확정 대신 2~3개 제약 아래로 내려놓기) 채택. B의 '선택 별자리'·'아직 정하지 않기' 카드는 패널이 옹호(유지).\n- PPTX 8장 구조(VD-06): 표지+허구 고지 / 1편 장면 / 1편 질문·결과 / 2편 장면·질문 / 두 이름표 결과 / 3편 장면·질문 / 세 선택 성찰 / 허구 고지·종료.\n- 불확실성(미검증 명시): (1) 전시장 장비·공간 음향 규칙 미확정 — 조건부 유지의 직접 이유, (2) 동시 수용 인원·회전율 미측정, (3) 자막·투표 기준 수치는 프로토타입 설계값으로 사용자 검증 전. **사용자 조사는 수행하지 않았다.**"
+      },
+      "output": "{\"error\":\"old_string not found in file. Patch did not match anything.\",\"path\":\"/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/decision.md\"}\nfailure_class=workflow_rejection — The current state does not admit this action; it is a rule, not a syntax problem. Read the current state first. The same call succeeds only after the state changes."
+    },
+    {
+      "ts": 1789221151.986428,
+      "tool": "Edit",
+      "execution_id": "exec-1789221151986-00bf",
+      "tool_use_id": "call_e7408d77f30b445cb29b5749",
+      "keeper_turn_id": 420,
+      "turn": 781,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/decision.md",
+        "new_string": "| 두 번째 독립 관점(fusion) | fusion kmsg-f381606a185bf86825c3f99ffd36e185, 원문 board **p-c0bb49d30e7a617ea6596d100e845215**(2026-09-12T13:14:33Z, expires 09-19) — GLM/Codex 패널 answered, GLM judge synthesized | 권고: C(무음 자막 MP4) 주 + B를 무음 토큰/패널 방식으로 재설계한 보조 + A 질문카드 부분 차용(낭독 조건부). 남는 희생: 전맹·저시각 배제, 중증 읽기 곤란 불리, 아동-보호자 구두 대화 억제. 방지 장치: '투표' 명칭 삭제, 사적 기록 선후 공개, 집계·순위·승자 금지, '아직 모르겠다' 슬롯, 진행자 금지어, '선택은 결말을 정하지 않음' 명시, 결말 분기 금지. '무음'의 운영 정의 확인 전 확정 보류 | 부분 채택(§3): 방지 장치 6종 반영, 희생 명시 반영. \"C 주+B 무음 재설계\"는 기각 — Task 계약이 발표+영상 제작을 명시하고 '소리를 듣지 못하는 상황'은 청각 시나리오(자막으로 충족)라 발표 채널 위반이 아니기 때문. **정정 기록**: 종전 v2·v3에 적은 '패널 3/3'·'verdict_insufficient'·'TTL 소실·A+C 귀속'은 오기였다 — 원문 게시물 조회에 전사한 ID가 틀려(p-…a654d… ≠ p-…a6596…) 실패를 '소실'로 오인했고, 요약 전달문을 원문으로 착각했다. 운영자 실물 검토(2026-09-12)로 바로잡음 |",
+        "old_string": "| 두 번째 독립 관점(fusion) | fusion kmsg-f381606a185bf86825c3f99ffd36e185, 판정 verdict_insufficient(패널 3/3, 2026-09-12T13:2xZ) | '무음' 제약을 문자 그대로 적용하면 A의 청각 접근 경로가 유일해지므로 B 주+C 보 조합이 성립하지 않는다. 소음 민감 구역이면 무음 MP4가 유일한 독립 운영 방식이고 A+C 조합이 더 균형적. 단 B의 '선택 별자리'와 '아직 정하지 않기' 카드는 방어. judge는 확정 대신 2~3개 제약 아래 조건부 유지 권고 | 채택: §3에 환경 조건 분기와 조건부 유지 명시. 전문 board 게시물(p-c0bb49d3…)은 TTL 만료로 소실(재조회 실측) — 요지는 Fleet Messages 동기 요약으로만 기록했음을 밝힘 |"
+      },
+      "output": {
+        "_blob": {
+          "sha256": "e7efb06c6ce8098fbf28aaf95d971a1b20e91b717c56c74ab50244e6840cf4fa",
+          "bytes": 1347,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 10549,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "fa643cd8ecbb1503a7ef6803057cdf6e42c983c0658431560b1aea6a0d8b032a",
+              "bytes": 9924,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "a30617af670705fcbd13acc86347b5b3a58a61f1d90d4e57b84ffe01c8f96d97",
+              "bytes": 10549,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221174.291877,
+      "tool": "Edit",
+      "execution_id": "exec-1789221174291-00c1",
+      "tool_use_id": "call_908b55d562c9439caeb7b6a1",
+      "keeper_turn_id": 420,
+      "turn": 783,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/decision.md",
+        "new_string": "## 3. 선택 (v4 — 운영자 피드백 반영 후 재확정)\n- **주 B(PPTX 발표, 고정 순서·동등 표시·8장 구조)** + **보조 C(MP4 115초, 질문 3개)** + **A는 예약 회차·장비 실패 대안으로 보존**.\n- 이 선택은 **본인(편집자)의 결정**이며 fusion 권고와 다르다(§4 정정 기록 참조). 차이 이유: ① Task 계약이 발표 파일(PPTX)+영상(MP4) 제작을 명시하므로 B가 계약 내 주 방식이다. ② Goal 기준의 '소리를 듣지 못하는 상황'은 관람객 청각 시나리오로 자막 MP4·시각 슬라이드로 충족된다 — '전시장 무음 규칙'으로 재해석한 것이 오류였고, fusion의 '발표 채널 위반' 논리는 이 오해가 프롬프트에 들어가 나온 결론이다. ③ fusion 권고 중 채택: '투표' 명칭 미사용, 사적 기록 선후 공개, 집계·순위·승자 표시 금지, '아직 모르겠다' 슬롯, '선택은 결말을 정하지 않음' 명시, 결말 분기 금지(원작 열린 결말 보존), 전맹·저시각 배제 희생 명시(대형 인쇄 카드로 부분 완화). 기각: \"C 주+B 무음 재설계\"(위 사유). A 낭독 '조건부'는 환경 규칙이 아니라 예약 회차 운영 조건으로 유지.\n- PPTX 8장 구조(VD-06): 표지+허구 고지 / 1편 장면 / 1편 질문·결과 / 2편 장면·질문 / 두 이름표 결과 / 3편 장면·질문 / 세 선택 성찰 / 허구 고지·종료.\n- 불확실성(미검증 명시): (1) 전시장 장비·공간 운영 조건 미확정 — 발화 가능 여부는 운영 확정 시 A 회차 운영에만 반영(주·보조 구조에는 영향 없음), (2) 동시 수용 인원·회전율 미측정, (3) 자막·선택 카드 기준 수치는 프로토타입 설계값으로 사용자 검증 전. **사용자 조사는 수행하지 않았다.**",
+        "old_string": "## 3. 선택 (v3 — 조건부 확정)\n- **주 B(PPTX, 고정 순서·동등 표시·8장 구조)** + **보조 C(MP4 90~120초, 질문 3개)** + **A는 예약 회차·장비 실패 대안으로 보존**.\n- **환경 조건 분기(fusion 반영)**: '무음' 제약이 문자 그대로(소음 민감 구역)라면 A의 낭독 회차는 그 공간에서 열릴 수 없어 **A+C 조합**(예약 낭독은 별실/별시간 + 무음 반복 영상)이 더 균형적이고, 조용한 대화가 가능한 공간이라면 지금 조합(B 주+C 보+A 예약)이 유효하다. 전시장 장비·공간 규칙이 미확정(아래 불확실성 1)이므로 **결정은 환경 제약 확정 시까지 조건부**로 유지한다 — fusion judge 권고(확정 대신 2~3개 제약 아래로 내려놓기) 채택. B의 '선택 별자리'·'아직 정하지 않기' 카드는 패널이 옹호(유지).\n- PPTX 8장 구조(VD-06): 표지+허구 고지 / 1편 장면 / 1편 질문·결과 / 2편 장면·질문 / 두 이름표 결과 / 3편 장면·질문 / 세 선택 성찰 / 허구 고지·종료.\n- 불확실성(미검증 명시): (1) 전시장 장비·공간 음향 규칙 미확정 — 조건부 유지의 직접 이유, (2) 동시 수용 인원·회전율 미측정, (3) 자막·투표 기준 수치는 프로토타입 설계값으로 사용자 검증 전. **사용자 조사는 수행하지 않았다.**"
+      },
+      "output": {
+        "_blob": {
+          "sha256": "b1bcc1908b961d18c2b51fa7fcdaac1d409f786161b32d5022a2a0e18cde83e2",
+          "bytes": 1349,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 11001,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "a30617af670705fcbd13acc86347b5b3a58a61f1d90d4e57b84ffe01c8f96d97",
+              "bytes": 10549,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "e5eac06c7a7e75dedb0a20b2e0c07e6198123e3e7001d56a197567155752523d",
+              "bytes": 11001,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221196.978123,
+      "tool": "Edit",
+      "execution_id": "exec-1789221196977-00c2",
+      "tool_use_id": "call_8415bd5cfc704609841fc8c6",
+      "keeper_turn_id": 420,
+      "turn": 784,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "### 반론 2 — fusion 패널+판정 (kmsg-f381606a185bf86825c3f99ffd36e185)\n- **원문**: board p-c0bb49d30e7a617ea6596d100e845215(2026-09-12T13:14:33Z, 09-19 만료 예정) — GLM/Codex 패널 answered, GLM judge synthesized. 권고: \"C(무음 자막 MP4) 주 + B를 무음 토큰/패널 방식으로 재설계한 보조 + A 질문카드 부분 차용(낭독은 조건부). 남는 희생은 전맹·저시각 배제, 중증 읽기 곤란 불리, 아동-보호자 구두 대화 억제. 방지 장치: '투표' 명칭 삭제, 사적 기록 선후 공개, 집계·순위·승자 금지, '아직 모르겠다' 슬롯, 진행자 금지어, 보호자 안내, '선택은 결말을 정하지 않음' 명시, 결말 분기 금지. '무음'의 운영 정의 확인 전 최종 확정 보류.\"\n- 처분: **부분 채택** — 방지 장치 6종·희생 명시는 채택(§3), \"C 주+B 무음 재설계\"는 기각(Task 계약이 발표+영상 제작 명시, '소리를 듣지 못하는 상황'은 청각 시나리오로 자막으로 충족 — 발표 채널 위반이 아님).\n- **정정(2026-09-12 운영자 실물 검토)**: 종전 본 문서와 decision.md v2·v3에 적은 '패널 3/3'·'verdict_insufficient'·'TTL 소실로 원문 소실'·'A+C 귀속 권고'는 모두 오기였다. 원인: fusion 게시물 ID를 조회에 전사하는 과정에서 …a6596d…를 …a654d…로 잘못 입력해 '게시물 없음' 응답을 받았고, 이를 'TTL 만료 소실'로 오인했으며, 비동기 요약 전달문을 판정 원문으로 착각했다. 운영자가 올바른 ID로 원문을 확인해 지적했다. 이후 원문을 직접 열어 위 요지로 기록을 교체했다.\n- 영향: '무음' 재해석(전시장 소리 금지 규칙)에 근거한 v3의 환경 조건 분기는 철회 — 원래 Goal의 접근성 시나리오(소리를 듣지 못하는 상황)는 자막·시각 전달로 충족되며, A 낭독은 청각 보강 경로로 복귀했다.",
+        "old_string": "### 반론 2 — fusion 패널+판정 (kmsg-f381606a185bf86825c3f99ffd36e185, 2026-09-12T13:2xZ)\n- verdict_insufficient(패널 3/3): '무음' 제약을 문자 그대로 적용하면 A의 낭독이 그 공간에서 불가능해 B+C 조합이 성립하지 않는다. 소음 민감 구역이라면 A+C가 더 균형적. B의 '선택 별자리'·'아직 정하지 않기' 카드는 방어. judge는 확정 대신 2~3개 제약 아래 조건부 유지 권고.\n- 처분: **채택** — decision.md v3 §3에 환경 조건 분기(소음 민감 구역이면 A+C / 대화 가능 공간이면 B+C+A)와 \"환경 제약 확정 전 조건부 유지\" 반영.\n- 전문 보존 상태: fusion 전용 게시물(p-c0bb49d3…)은 TTL 만료로 소실(2026-09-12 2회 조회 실측). 요지는 Fleet Messages 동기 요약으로만 기록 — 원문 전문은 재확보 불가임을 밝힌다."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "e231f5f07278cdbb975fcdb26bd3e75234fa793df0b80f5a8c25e9c87f0e36e4",
+          "bytes": 1339,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 4768,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "2c9bf1f0e32389e2d6760074287d5df1cbbea699a26e0590b65991577d961866",
+              "bytes": 3683,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "7de10d287e6930df8dfd43497cb9e35ed80d514ed5571f63dfc4f122046d321f",
+              "bytes": 4768,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221197.118628,
+      "tool": "Edit",
+      "execution_id": "exec-1789221197118-00c3",
+      "tool_use_id": "call_2abebf030d5a4169a5c064cd",
+      "keeper_turn_id": 420,
+      "turn": 784,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "b6728da844633e88bacc936159d7e7b9149d9b3bfb685cfc458d852e25412e74",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "## 2. 제작 (2026-09-12 진행 중 — 운영자 피드백 3건 반영)\n- 도구 체인 확정(appr_01a095bb 재생): python-pptx 부재 → PPTX는 OOXML 직접 생성(build_pptx.py). PIL 9.4.0·ffmpeg 5.1.9 확보.\n- 1차 빌드: PPTX 25,383B·SHA 555999e6…(슬라이드 8) / MP4 349,039B·SHA ac2f405b…(115.0초·1080p·무음·나눔고딕).\n- **운영자 실물 검토 지적(3번)**: 1차 PPTX의 ppt/_rels/presentation.xml.rels에 rId9/rId10이 각각 2개씩 중복(slide7/slide8이 rId9/rId10을 차지) + 슬라이드→노트 관계 대상이 `notesSlide{n}.xml`로 경로 누락(`../notesSlides/` 없음)해 실제 노트 파일에 연결되지 않음. 수정: 프레젠테이션 rId11/rId12로 재배정, 노트 대상을 `../notesSlides/notesSlide{n}.xml`로 수정, slideMaster에 theme 관계 추가. verify_adaptation.py에 **관계 무결성 검사**(전 .rels 순회 — Id 중복·대상 부재·파서 통과, 프레젠테이션 슬라이드 참조 8개, 슬라이드별 노트 링크 경로)를 추가해 재발 방지.\n- MP4 빌더 자기 검수 수정(승인 재생 전): 선택지 한 줄 30자 초과·문장 중간 줄바꿈 → 줄당 20자 이하·문장 단위로 전면 개행, 총 115초·24세그먼트 유지. **실제 수정 전후 기록 ①.**\n- 재빌드+종합검증 실행: appr_01a095e3 승인 대기(park) — 재생 결과는 다음 기록에.\n- (재생 후 기록: PPTX v2 bytes·SHA, rels_ok, 텍스트 검사, MP4 재검 증명, 추출 프레임 검수)",
+        "old_string": "## 2. 제작 (기록 예정 — 빌드 실행 승인 대기 중)\n- 도구 체인 확정(appr_01a095bb 재생): python-pptx 부재 → PPTX는 OOXML 직접 생성(build_pptx.py, 22,000B). PIL 9.4.0·ffmpeg 5.1.9 확보.\n- build_pptx.py 실행: appr_01a095c9 park(재생 대기). build_mp4.py 실행: appr_01a095ca park(재생 대기). 재발행하지 않는다.\n- (재생 도착 후 기록: 산출 bytes·SHA-256, 슬라이드 수, MP4 길이·코덱, 폰트 경로)"
+      },
+      "output": {
+        "_blob": {
+          "sha256": "f46a0aa225b61ae7fcd913182d0e8a2c3c7bb87a5e04a5c535ca38a0f7a0b88e",
+          "bytes": 1339,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 5807,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "7de10d287e6930df8dfd43497cb9e35ed80d514ed5571f63dfc4f122046d321f",
+              "bytes": 4768,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "36d5f5d735a990c0b838d697c87081418135805bc5144ec6ef595395769b009f",
+              "bytes": 5807,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221268.260341,
+      "tool": "Edit",
+      "execution_id": "exec-1789221268260-00c8",
+      "tool_use_id": "call_46313d66748b436dae7bd01a",
+      "keeper_turn_id": 420,
+      "turn": 789,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "7d0c45f8ca539a9e48ac6089fae8ad6589a81a66a1f6d31d3d22d71ba610e41d",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "- 재빌드+검증 1차(appr_01a095e3 재생, 2026-09-12): **PPTX 관계 무결성 PASS** — rels_ok=True·issues=NONE·slide_refs=8, 슬라이드 8·노트 8(노트 글자수 53~88), 필수 문구 중 '인과앵커3'(각자 자기 기억을 정했어요) 미포함으로 pptx=FAIL, 한자·가나 이상 0건. MP4 PASS — h264·1920×1080·115.0초·무음(audio=False), 프레임 5장(표지·Q1·Q2·Q3·종료) 추출 성공. 산출 v2: PPTX 25,432B·SHA e50836bf491127b095e885b9b243d1eeb3a00222085c46353189b2e0ad68eca3.\n- **실제 수정 전후 기록 ②**: 인과앵커③ 누락(운영자가 아니라 자체 검증기가 포착) — 슬라이드 6 앵커에 \"각자 자기 기억을 정했어요.\"(골드 강조) 추가, 앵커 상자 높이 1,000,000→1,100,000 EMU. 재빌드+재검증은 appr_01a095e5 승인 대기(park).",
+        "old_string": "- (재생 후 기록: PPTX v2 bytes·SHA, rels_ok, 텍스트 검사, MP4 재검 증명, 추출 프레임 검수)"
+      },
+      "output": {
+        "_blob": {
+          "sha256": "d9affcdd113faaad24cb65bc6ad2d68c8b8cfd50191cd4eab4deb2a35ed15cde",
+          "bytes": 1339,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 6532,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "36d5f5d735a990c0b838d697c87081418135805bc5144ec6ef595395769b009f",
+              "bytes": 5807,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "5dd99869efdf17f3a7fa3f4b009ac25394555e66e60307ae21b3899f66ca1457",
+              "bytes": 6532,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221394.619722,
+      "tool": "Edit",
+      "execution_id": "exec-1789221394619-00cf",
+      "tool_use_id": "call_c6f16cebe3e843e186c38511",
+      "keeper_turn_id": 420,
+      "turn": 794,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "fa90ba1076f2b16e0430e4e3c3b34c1e649c8dbdaa0565c6255712031d70f3ce",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "## 3. 검증 (2026-09-12 — 확정된 항목)\n- **구조·관계(PPTX v3, 25,462B·SHA cf0c4fb9f14d4aa7519ca3cd99b9cdb2d7b55cbb4f70fc3898e1754f2da59b88)**: rels_ok=True·issues=NONE(전 .rels 순회 — Id 중복 0·대상 부재 0·XML 파서 통과), slide_refs=8, 슬라이드 8·노트 8(노트 53~88자) — 운영자 지적 결함(rId 중복·노트 경로) 수정 확인.\n- **콘텐츠 대조(PPTX↔storyboard)**: 필수 문구 9종(허구 고지·인과 앵커 3·질문 3·동등 문법·집계 금지) must_missing=NONE, 한자·가나 이상 0건. 슬라이드 8장 전체 텍스트 덤프로 장면 순서·동등 카드 문구 확인(검증 출력).\n- **디코딩(MP4, 349,039B·SHA ac2f405b102b3a6bee1e5344b141ae0389f6551f937150a298d80ed9437b67a3)**: h264·1920×1080·115.0초·무음(오디오 스트림 부재), 프레임 추출 5/5 성공(표지 2s·Q1 26s·Q2 53s·Q3 80s·종료 112s).\n- **시각 검수(추출 프레임 → vision 모델 3장)**: 표지 — \"이야기는 곧 시작합니다\" 온전 표시, 깨진 글리프 없음, 가장자리 잘림 없음. Q1 — \"서연이라면 어떻게 할까요?\"/\"(정답은 없습니다)\"/우측 상단 \"이야기 1/3\" 진행 표식 확인, 글리프 정상(선택 카드는 29~34초 별도 구간 — 카드 프레임 추출 검수 진행 중). 종료 — \"같은 것, 다른 기억\"·\"※ 허구로 구성된 전시 세계의 이야기입니다.\" 고지 선명.\n- **접근성 시나리오 2종(Goal 기준 원문 준거)**: ① 긴 글 읽기가 어려운 독자 — 한 화면 1~2줄·줄당 20자 이하·문장 단위 줄바꿈·질문 7초 정지(MP4), 진행자 낭독 회차(A)가 청각 보강. 남는 희생: 중증 읽기 곤란 관객의 자율 시청은 제한적 — A 회차가 실질 경로. ② 소리를 듣지 못하는 상황 — MP4 전 구간 자막·무음 설계로 시각 경로만으로 이해 가능(오디오 의존 요소 0), PPTX도 문자·기호 중심. 남는 희생: 전맹·저시각 배제(fusion 원문 지적) — 대형 인쇄 카드로 부분 완화, 완전 해소는 전시 운영 단계 과제로 명시.\n- **대조(PPTX↔MP4)**: 동일 원천(storyboard.md) 준거 — 질문 3종 문구·선택 3종 문구·허구 고지 문구가 양쪽에 동일 표기(검증 출력의 슬라이드 덤프와 SEGS 대조).\n- **보류 중**: PPTX 실앱 렌더(LibreOffice 유무 확인 명령이 승인 대기 park — 결과에 따라 앱 렌더 검증 또는 검증된 라이브러리 환경 요청), 선택 카드 프레임(Q1c·Q2c·Q3c) 시각 검수. **완성품 제출은 이 두 항목 마친 뒤(운영자 지시).**",
+        "old_string": "## 3. 검증 (기록 예정)\n- 열람 가능성(PPTX 구조·텍스트·노트), 디코딩 가능성(ffprobe·대표 프레임), PPTX↔MP4↔storyboard 문구 대조, 접근성 시나리오 2종(긴 글 읽기 어려운 독자 / 소리 없는 환경) 검토, 실제 수정 전후(최소 1건) — 수행 후 기록."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "b1fb95e8fa9b89b65843750ab6511028d95d40d8734ce556d3509edc62050567",
+          "bytes": 1339,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 8841,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "5dd99869efdf17f3a7fa3f4b009ac25394555e66e60307ae21b3899f66ca1457",
+              "bytes": 6532,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "b7de23ba12c1eb3ed0596af0e9171ee964265c8aeab119448d7c664c0ab266f5",
+              "bytes": 8841,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221671.973725,
+      "tool": "Edit",
+      "execution_id": "exec-1789221671973-00e6",
+      "tool_use_id": "call_5019edf7a15440198f89abd9",
+      "keeper_turn_id": 420,
+      "turn": 811,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "065cd6437bcd023b1f52e4e22bbe6e5825abfcebed3a8cf6943e7a1f64a39822",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "- **실제 수정 전후 기록 ②**: 인과앵커③ 누락(운영자가 아니라 자체 검증기가 포착) — 슬라이드 6 앵커에 \"각자 자기 기억을 정했어요.\"(골드 강조) 추가, 앵커 상자 높이 1,000,000→1,100,000 EMU.\n- **실제 수정 전후 기록 ③(기호 깨짐)**: 선택 카드 둘째 기호 ▬(U+25AC)가 나눔고딕에 글리프가 없어 ☒로 렌더됨 — Q1c·Q2c·Q3c vision 검수 3/3에서 확인. 폰트 커버리지가 확인된 ■(U+25A0)로 교체(build_mp4.py 3곳·build_pptx.py 2곳).\n- **최종 빌드 확정(appr_01a095e9 재생)**: PPTX 25,462B·SHA 4e0099d695d4e0bce0f96e10f4c181ac049f641be70c6edfe2e21abd66cd1fae(slides=8), MP4 345,612B·SHA e9f26dde92b0b4120546d617c5cb89e420a3bc43943e5587b04c746bcd7f1283(115.0초·무음·1,150프레임·나눔고딕). 검증 VERDICT **pptx=PASS·mp4=PASS**(rels_ok·slide_refs=8·must_missing=NONE·cjk_anomaly=NONE·프레임 5/5).\n- **앱 렌더 실증**: LibreOffice(soffice) PPTX→PDF 변환 성공 — 57,307B·SHA d2c682cd60dba9246478cf3ddfe4f4729c29f80d097e1da5770b0bb846bf407f(APP_RENDER OK, 변환 46.5s).\n- **보류(마지막)**: ■ 버전 프레임(Q1c·Q2c·Q3c)·PDF 1페이지 시각 재검수 — appr_01a095eb 승인 대기(park).",
+        "old_string": "- **실제 수정 전후 기록 ②**: 인과앵커③ 누락(운영자가 아니라 자체 검증기가 포착) — 슬라이드 6 앵커에 \"각자 자기 기억을 정했어요.\"(골드 강조) 추가, 앵커 상자 높이 1,000,000→1,100,000 EMU. 재빌드+재검증은 appr_01a095e5 승인 대기(park)."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "1efd66daa9d972447eb3ce67b113389bd5979b1c89facde05463b0c43023c54c",
+          "bytes": 1339,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 9785,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "b7de23ba12c1eb3ed0596af0e9171ee964265c8aeab119448d7c664c0ab266f5",
+              "bytes": 8841,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "ab658efa0d0b1254980dafec11a5824e09655a3537c8f13963563693af3e6e2b",
+              "bytes": 9785,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    },
+    {
+      "ts": 1789221761.623267,
+      "tool": "Edit",
+      "execution_id": "exec-1789221761623-00ee",
+      "tool_use_id": "call_21cf5374d06f44dcbe1e36bf",
+      "keeper_turn_id": 420,
+      "turn": 815,
+      "success": true,
+      "lane": "tool_optional",
+      "prompt_fingerprint": "ccd3c53febd8f163c021a690170d6095a242ca80fc394893a6fbddc39bb7ef25",
+      "input": {
+        "file_path": "adaptation/review.md",
+        "new_string": "- **최종 시각 재검수(■ 버전, vision 4장 — 2026-09-12)**: Q1c·Q2c·Q3c — 기호 ● ■ ○ 정상 렌더, 깨진 글리프 0, 세 항목 동등 크기·간격(가로 폭은 문구 길이 차반). PDF 1페이지(pdf_p1) — \"기억의 정원 이야기 시간\"·부제·\"※ 허구로 구성된…\" 고지 온전 렌더, 잘림·겹침 없음, 배경 대비 양호(하단 고지는 의도된 작은 크기). **모든 검증 완료 — 완성품 제출 조건 충족.**",
+        "old_string": "- **보류(마지막)**: ■ 버전 프레임(Q1c·Q2c·Q3c)·PDF 1페이지 시각 재검수 — appr_01a095eb 승인 대기(park)."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "d50c59ef7e5274230bbea91fa73421804633fd56039d2556d0359231d4eb6488",
+          "bytes": 1343,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "effect": {
+        "ok": true,
+        "changed": true,
+        "bytes_written": 10136,
+        "edit_snapshots": {
+          "status": "stored",
+          "before": {
+            "_blob": {
+              "sha256": "ab658efa0d0b1254980dafec11a5824e09655a3537c8f13963563693af3e6e2b",
+              "bytes": 9785,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          },
+          "after": {
+            "_blob": {
+              "sha256": "ab38fbe8e069f2d1d4645af7b5161431acf38a87919eaef59f9df3cd0036ea57",
+              "bytes": 10136,
+              "mime": "application/octet-stream",
+              "preview": ""
+            }
+          }
+        }
+      },
+      "exact_replacement_verified": true
+    }
+  ],
+  "fusion_decision_tool_executions": []
+}

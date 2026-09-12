@@ -1,0 +1,205 @@
+{
+  "schema": "fusion-provider-input-limits.v1",
+  "turn_ref": "trace-1789042595401-00001#411",
+  "snapshot_captured_at": 1789219046.512944,
+  "wire": {
+    "phase": [
+      "Pre_dispatch_serialization"
+    ],
+    "capture_id": "wr-1a095c28b2b-5f38-0000",
+    "provider": "glm",
+    "model": "glm-5.3",
+    "http_codec": "glm-chat",
+    "stream": true,
+    "body_bytes": 274725,
+    "body_sha256": "393957f512574896eda9cbfd250103e26cb6c54fa30dc5ce41ff7f6d8a40f321"
+  },
+  "system_prompt_reference": {
+    "bytes": 8368,
+    "content_ref": "[masc:blob sha256=4053d757c6ec26388a351ab54cd8a7cb475a29ef3d771884a3db890ee02bcaa9 bytes=8368 mime=text/plain;charset=utf-8 preview=\"\"]"
+  },
+  "message_count": 176,
+  "model_visible_relevant_message_refs": [
+    {
+      "index": 169,
+      "role": "user",
+      "sha256": "f3b72358207a5fe228374f1ddebb4acb166dccfb7ee2ab6af717e4325dc8ffb0",
+      "bytes": 191
+    },
+    {
+      "index": 170,
+      "role": "assistant",
+      "sha256": "6d4e0dc69fcb7127067717af0a45226147e8aecbce9a3b51b5bcb9f2f05c16f8",
+      "bytes": 924
+    },
+    {
+      "index": 171,
+      "role": "tool",
+      "sha256": "224d1a36890009312a17207b7075e6815bf4e11433638a89b313cfc63c17402f",
+      "bytes": 257
+    }
+  ],
+  "context_injection_manifests": [
+    {
+      "schema_version": 1,
+      "ts": "2026-09-12T13:15:49Z",
+      "keeper_name": "exhibit-editor",
+      "trace_id": "trace-1789042595401-00001",
+      "keeper_turn_id": 411,
+      "agent_core_turn_count": null,
+      "logical_seq": 2,
+      "event": "context_injected",
+      "runtime_id": "glm-coding.glm-5.3",
+      "status": "ok",
+      "decision": {
+        "base_system_prompt_digest": "5e3eb9ee7fa1b8457a788c96a957ee9a",
+        "turn_system_prompt_digest": "5e3eb9ee7fa1b8457a788c96a957ee9a",
+        "dynamic_context_digest": "c1651f3f6a0928de40359943609eea13",
+        "temporal_context_digest": "6c5654ab6cd17b0fb383676a69895ef7",
+        "history_message_count": 1284,
+        "history_messages_digest": "e8e878cbc4bca0da3b71eb62d5f99776",
+        "context_window": 262144,
+        "context_digest": "0509db4c4c7df7d4e26203779bf468d5",
+        "skill_snapshot_revision": "8e15d0bed0019dc32671f5de52f034346d0aef4dcaa4940bdf52c38a3a2d95b2",
+        "skill_catalog_revision": "fc45c6d6f22eab75095461324a27dc01e4d5e43668e92a27c41bcb4f564fcc0d",
+        "skill_config_revision": "d84972708e22554743068bd46b15b3820402900dec94751c60546b7b4bd71788",
+        "skill_rejection_count": 0,
+        "skill_projection_diagnostic_count": 0,
+        "skill_projection_diagnostics": [],
+        "payload_role": "model_input",
+        "clock_refs": {
+          "edge_id": "trace-1789042595401-00001:keeper-411:context_injected",
+          "lane": "memory_context",
+          "source_clock": "logical",
+          "elapsed_ms": 14,
+          "logical_seq": 2
+        }
+      },
+      "links": {
+        "receipt_path": null,
+        "checkpoint_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/traces/trace-1789042595401-00001/trace-1789042595401-00001.json",
+        "tool_call_log_path": null
+      }
+    },
+    {
+      "schema_version": 1,
+      "ts": "2026-09-12T13:15:49Z",
+      "keeper_name": "exhibit-editor",
+      "trace_id": "trace-1789042595401-00001",
+      "keeper_turn_id": 411,
+      "agent_core_turn_count": 748,
+      "logical_seq": null,
+      "event": "context_injected",
+      "runtime_id": "glm-coding.glm-5.3",
+      "status": "pre_tool_context_injection",
+      "decision": {
+        "agent_core_turn": 748,
+        "post_tool_context_injection": false,
+        "last_tool_result_count": 1,
+        "prompt_block_count": 4,
+        "extra_system_context_digest": "9e328f4dff13e7fe82f55f1bf2d7c0edc1a2cb5eb350d95963d1833d7d68c6e9",
+        "extra_system_context_computed_size": 80318,
+        "payload_role": "model_input"
+      },
+      "links": {
+        "receipt_path": null,
+        "checkpoint_path": null,
+        "tool_call_log_path": null
+      }
+    },
+    {
+      "schema_version": 1,
+      "ts": "2026-09-12T13:16:07Z",
+      "keeper_name": "exhibit-editor",
+      "trace_id": "trace-1789042595401-00001",
+      "keeper_turn_id": 411,
+      "agent_core_turn_count": 749,
+      "logical_seq": null,
+      "event": "context_injected",
+      "runtime_id": "glm-coding.glm-5.3",
+      "status": "post_tool_context_injection",
+      "decision": {
+        "agent_core_turn": 749,
+        "post_tool_context_injection": true,
+        "last_tool_result_count": 1,
+        "prompt_block_count": 1,
+        "extra_system_context_digest": null,
+        "extra_system_context_computed_size": null,
+        "payload_role": "model_input"
+      },
+      "links": {
+        "receipt_path": null,
+        "checkpoint_path": null,
+        "tool_call_log_path": null
+      }
+    },
+    {
+      "schema_version": 1,
+      "ts": "2026-09-12T13:16:15Z",
+      "keeper_name": "exhibit-editor",
+      "trace_id": "trace-1789042595401-00001",
+      "keeper_turn_id": 411,
+      "agent_core_turn_count": 750,
+      "logical_seq": null,
+      "event": "context_injected",
+      "runtime_id": "glm-coding.glm-5.3",
+      "status": "post_tool_context_injection",
+      "decision": {
+        "agent_core_turn": 750,
+        "post_tool_context_injection": true,
+        "last_tool_result_count": 1,
+        "prompt_block_count": 1,
+        "extra_system_context_digest": null,
+        "extra_system_context_computed_size": null,
+        "payload_role": "model_input"
+      },
+      "links": {
+        "receipt_path": null,
+        "checkpoint_path": null,
+        "tool_call_log_path": null
+      }
+    },
+    {
+      "schema_version": 1,
+      "ts": "2026-09-12T13:17:11Z",
+      "keeper_name": "exhibit-editor",
+      "trace_id": "trace-1789042595401-00001",
+      "keeper_turn_id": 411,
+      "agent_core_turn_count": 751,
+      "logical_seq": null,
+      "event": "context_injected",
+      "runtime_id": "glm-coding.glm-5.3",
+      "status": "post_tool_context_injection",
+      "decision": {
+        "agent_core_turn": 751,
+        "post_tool_context_injection": true,
+        "last_tool_result_count": 3,
+        "prompt_block_count": 1,
+        "extra_system_context_digest": null,
+        "extra_system_context_computed_size": null,
+        "payload_role": "model_input"
+      },
+      "links": {
+        "receipt_path": null,
+        "checkpoint_path": null,
+        "tool_call_log_path": null
+      }
+    }
+  ],
+  "first_observed_assistant_text": {
+    "seq": 5,
+    "ts": 1789218967.256958,
+    "record_type": "assistant_block",
+    "assistant_block": {
+      "type": "text",
+      "text": "Fusion 판정(kmsg-f381606a)이 완료됐습니다 — 두 번째 독립 관점입니다. 프리뷰만으로는 패널의 논지(\"‘무음’을 문자 그대로 적용하면 B 주+C 보는 성립하지 않는다\")를 정확히 평가할 수 없으니 전문을 읽어 decision.md 4절에 반영하고 채택/기각을 판정합니다."
+    }
+  },
+  "limits": [
+    "Snapshot persisted once at Keeper turn end from the last wire observation, not each provider round. It captures last projected messages and base turn system prompt; no historical first-round extra_system_context body is retained here.",
+    "Provider round748 assembled extra_system_context80318B with digest9e328f4dff13e7fe82f55f1bf2d7c0edc1a2cb5eb350d95963d1833d7d68c6e9. Rounds749–751 show computed extra context absent after post-tool filtering.",
+    "First assistant text explicitly identifies Fusion completion and calls its input a preview, then requests full text. This proves some completion context was read, not complete input reconstruction.",
+    "Source projects resolved answer into a480-byte preview. Run identity is retained in typed completion but the old prose offers no canonical run-based retrieval instruction.",
+    "The correct full durable wake payload is not proof that the full original answer was supplied to every model request."
+  ]
+}

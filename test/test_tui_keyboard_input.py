@@ -10297,13 +10297,7 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        select_keeper_row(process, master_fd, output, b"beta")
         if not wait_for_fixture_event(
             process, master_fd, output, gate.requested, timeout=10.0
         ):

@@ -157,12 +157,24 @@ fi
 
 echo "PROBE_OK marker=${MARKER} written by the keeper"
 # The marker proves a file appeared; the receipt proves where the command ran.
+# Kept in a heredoc rather than -c, because the nested quoting of a one-liner
+# inside this shell string is what broke the first version of this block.
 docker exec "${NAME}" sh -c \
-  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} \;' \
-  | python3 -c "
+  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} +' \
+  | python3 <<'PYEOF' || true
 import json, sys
-d = json.loads(sys.stdin.readline())
-o = json.loads(d['"'"'output'"'"'])
-print('   argv:', (d.get('"'"'input'"'"') or {}).get('"'"'argv'"'"'))
-print('   via:', o.get('"'"'via'"'"'), '"'"'|'"'"' host:', o.get('"'"'remote_host'"'"'), '"'"'|'"'"' exit:', o.get('"'"'status'"'"'))
-" 2>/dev/null || true
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        record = json.loads(line)
+        result = json.loads(record["output"])
+    except Exception:
+        continue
+    receipt = (result.get("shim_execution_evidence") or {}).get("receipts") or [{}]
+    print("   argv:", (record.get("input") or {}).get("argv"))
+    print("   exit:", result.get("status"), "| via:", result.get("via"),
+          "| host:", result.get("remote_host"),
+          "| boundary:", (receipt[0].get("receipt") or {}).get("boundary"))
+PYEOF

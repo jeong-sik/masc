@@ -132,3 +132,23 @@ python:*-slim(debian) 이 30개가 넘는다. deps.sh 는 이제 패키지 매�
 설치하며, 안 되면 배포판 이름과 빠진 라이브러리를 찍고 죽는다. `gh` 는 debian
 stable 에 패키지가 없는데 keeper_up preflight 가 요구하므로 `dist/` 에 실어
 보낸다 (`image/fetch_masc.sh` 가 같이 받는다).
+
+### arm K 실측 (2026-09-12)
+
+`image/probe_keeper_tools.sh` 를 ubuntu:24.04 + `openrouter.z-ai/glm-4.7-flash` 로
+돌린 결과. harbor 없이 컨테이너 하나에서 arm K 의 기계적 경로 전체를 확인한다.
+
+    keeper pool up: bench-1
+    MASC server ready
+    PROBE_OK marker=/tmp/arm-k-keeper-was-here written by the keeper
+       argv: ['touch', '/tmp/arm-k-keeper-was-here']
+       exit: {'kind': 'exit', 'code': 0} | via: remote_ssh | host: 127.0.0.1
+             | boundary: sandbox_applied
+
+즉 MCP 로 키퍼를 세우고, 메시지를 주고, 모델이 턴을 돌려, 도구 호출이 **태스크
+컨테이너 안에서** 실행된다. 검증기가 보는 자리다.
+
+증인은 argv 하나로 만들 수 있어야 한다. `Execute` 는 argv 리스트를 셸 없이
+실행하므로 `printf x > /tmp/marker` 를 시키면 `>` 가 printf 의 리터럴 인자가 되어
+exit 0 으로 끝나고 파일은 안 생긴다. masc 는 이걸 정확히 보고한다(출력에 printf
+자신의 경고가 실린다). 도구가 아니라 지시가 틀린 것이다.

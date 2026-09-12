@@ -18,8 +18,8 @@ type error =
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
-  | Page_budget_exceeded of
-      { pages : int; page_limit : int; bytes : int; byte_limit : int }
+  | Too_many_pages of { pages : int; limit : int }
+  | Rendered_bytes_exceeded of { pages : int; bytes : int; limit : int }
   | Payload_budget_exceeded of { bytes : int; limit : int }
   | Storage_failed of string
 
@@ -36,17 +36,15 @@ let error_to_string = function
   | Invalid_output detail -> "pdf_inspection_invalid_output: " ^ detail
   | Image_policy_rejected {page;bytes;limit} ->
     Printf.sprintf "PDF page %d image has %d bytes, exceeding configured image limit %d" page bytes limit
-  | Page_budget_exceeded {pages;page_limit;bytes;byte_limit} ->
-    if bytes = 0
-    then
-      Printf.sprintf
-        "pdf_page_budget_exceeded: %d pages, over the %d this verifier renders"
-        pages page_limit
-    else
-      Printf.sprintf
-        "pdf_page_budget_exceeded: %d pages rendered to %d bytes, over the %d one \
-         response carries"
-        pages bytes byte_limit
+  | Too_many_pages {pages;limit} ->
+    Printf.sprintf
+      "pdf_page_budget_exceeded: %d pages, over the %d this verifier renders"
+      pages limit
+  | Rendered_bytes_exceeded {pages;bytes;limit} ->
+    Printf.sprintf
+      "pdf_render_budget_exceeded: %d pages rendered to %d bytes, over the %d one \
+       response carries"
+      pages bytes limit
   | Payload_budget_exceeded { bytes; limit } ->
     Printf.sprintf "pdf_payload_budget_exceeded: %d bytes exceed %d" bytes limit
   | Storage_failed detail -> "pdf_inspection_storage_failed: " ^ detail
@@ -89,18 +87,17 @@ let parsed_pages xml =
     |> Result.map List.rev
 
 (* Submitted evidence is not trusted input. A malformed or deliberately
-   expensive PDF can make either Poppler command sit there, and the completion
-   verifier holds a global review slot while it waits -- so the bound is what
-   keeps one document from wedging Task and Goal verification. Generous enough
-   for a large scanned document on a loaded machine; a render that needs longer
-   than this is reported as a failure rather than waited on. *)
+   expensive PDF can leave either Poppler command sitting there, and the
+   completion verifier holds its review slot for as long as it waits, so one
+   document would wedge Task and Goal verification. The bound is generous
+   enough for a large scanned document on a loaded machine; a render that
+   needs longer is reported as a failure rather than waited on. *)
 let command_timeout_sec = 120.
 
-(* Every page under [max_image_bytes] still adds up: the render loop holds each
-   PNG and the result base64-encodes all of them into one tool response, so a
-   document with many admissible pages could reach hundreds of megabytes and
-   exceed the verifier client's request limit. Both the count and the total are
-   capped, because either alone lets the other run away. *)
+(* Every page can sit under [max_image_bytes] and the document still be too
+   large: the render loop holds each PNG and the result base64-encodes all of
+   them into one response. Both the count and the total are capped, because
+   either one alone lets the other run away. *)
 let max_source_bytes = 64 * 1024 * 1024
 let max_extracted_bytes = 2 * 1024 * 1024
 let max_page_pixels = 2048
@@ -146,8 +143,7 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
       let page_count = List.length descriptions in
       let* () =
         if page_count > max_pages
-        then Error (Page_budget_exceeded {pages=page_count;page_limit=max_pages;
-                                         bytes=0;byte_limit=max_total_image_bytes})
+        then Error (Too_many_pages {pages=page_count;limit=max_pages})
         else Ok () in
       let rec render number total acc = function
         | [] -> Ok (List.rev acc)
@@ -167,8 +163,8 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
           let total = total + size in
           let* () =
             if total > max_total_image_bytes
-            then Error (Page_budget_exceeded {pages=page_count;page_limit=max_pages;
-                                              bytes=total;byte_limit=max_total_image_bytes})
+            then Error (Rendered_bytes_exceeded
+                          {pages=page_count;bytes=total;limit=max_total_image_bytes})
             else Ok () in
           render (number + 1) total ({number;width_points;height_points;text;png} :: acc) rest in
       let* pages = render 1 0 [] descriptions in

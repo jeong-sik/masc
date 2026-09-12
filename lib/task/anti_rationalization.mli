@@ -64,6 +64,13 @@ type verdict =
   | Approve of string
   | Reject of string
 
+type reviewer_reply =
+  { selected_runtime_id : string
+  ; verdict : verdict option
+  }
+(** The runtime that actually answered, not a lane alias requested by the
+    caller. A successful dispatch without a verdict still names its owner. *)
+
 val verdict_constructor_name : verdict -> string
 
 (** The verdict vocabulary the [report_review_verdict] tool schema must
@@ -206,7 +213,7 @@ val run_llm_reviewer_fn
          -> Agent_core.Error.t
          -> unit)
       -> unit
-      -> (verdict option, Agent_core.Error.t) result)
+      -> (reviewer_reply, Agent_core.Error.t) result)
        Atomic.t
 (** The system agent supplies its owning workspace BasePath explicitly; this
     callback must not substitute a process-global BasePath. *)

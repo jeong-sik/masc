@@ -52,6 +52,8 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
+type runtime_selection = Resolve_assignment | Exact_runtime | Exact_route
+
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
@@ -276,6 +278,7 @@ let lane_declares ~lane_id runtime_id =
   | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
 
 let attempt_runtime_candidates
+    ?(preserve_order = false)
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
@@ -337,6 +340,7 @@ let attempt_runtime_candidates
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let demote_rest rest =
+    if preserve_order then rest else
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
@@ -941,6 +945,7 @@ let official_client_dispatch ~provider_config_transform =
 
 let run_named
     ~runtime_id
+    ?(runtime_selection = Resolve_assignment)
     ?(keeper_name = "")
     ?pre_tool_rejects
     ~base_path
@@ -960,6 +965,7 @@ let run_named
     ?(tools = [])
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
+    ?required_native_posture
     ?(initial_messages = [])
     ?model_input_projection
     ?recovery_view
@@ -1009,7 +1015,10 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
-  if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
+  if runtime_selection <> Resolve_assignment && Option.is_some deferred_runtime_lane then
+    Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
+      {field="runtime_selection";detail="an exact runtime cannot consume an ordinary deferred lane"}))
+  else if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
       (Agent_core.Error.Config
          (Agent_core.Error.InvalidConfig
@@ -1088,10 +1097,15 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match deferred_runtime_lane with
-    | Some hint ->
+    match runtime_selection, deferred_runtime_lane with
+    | Exact_runtime, _ -> Ok (None, [runtime_id])
+    | Exact_route, _ ->
+      Ok (None, match Runtime.get_lane_by_id runtime_id with
+        | Some lane -> Runtime_lane.declared_candidates lane
+        | None -> [runtime_id])
+    | Resolve_assignment, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | None ->
+    | Resolve_assignment, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->
@@ -1155,6 +1169,9 @@ let run_named
      input capabilities and one strip bound here was right for the head only
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
+    match runtime_selection with
+    | Exact_runtime | Exact_route -> []
+    | Resolve_assignment ->
     modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
@@ -1230,10 +1247,17 @@ let run_named
      walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
      signature and its mutable state out of the delegation. *)
   let project_images =
-    Keeper_vision_ingest.fallback_projector
+    let project = Keeper_vision_ingest.fallback_projector
       ~exclude_runtime_ids:lane_candidate_ids
       ~keeper_name
-      ()
+      () in
+    fun ~mode blocks ->
+      (* Exact-lane admission also owns provider selection for image evidence:
+         retain unread artifacts, but never dispatch an out-of-lane vision call. *)
+      let mode = match runtime_selection with
+        | Resolve_assignment -> mode
+        | Exact_runtime | Exact_route -> Keeper_vision_ingest.Store_only in
+      project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return.
@@ -1248,6 +1272,7 @@ let run_named
       lane_id_opt
   in
   attempt_runtime_candidates
+    ~preserve_order:(runtime_selection <> Resolve_assignment)
     ~pre_tool_rejects
     ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred
@@ -1302,7 +1327,12 @@ let run_named
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
             ~agent_cell ~built:agent_core_tools
         | _ -> agent_core_tools in
-      let source_reader_ready = match recovery_view, runtime.Runtime.execution with
+      let source_reader_ready =
+        if required_native_posture = Some Runtime_native_tools.Native_none
+           && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
+          Error (Keeper_required_tools.to_core_error
+            {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
+        else match recovery_view, runtime.Runtime.execution with
         | Some _, Runtime_execution.Agent_core _ ->
           Keeper_recovery_transmission.require_reader agent_core_tools
           |> Result.map_error Keeper_recovery_transmission.to_core_error
@@ -1386,6 +1416,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects
@@ -1514,6 +1545,7 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             (* Antigravity's CLI assembles the wire, so the shape masc can
@@ -1621,6 +1653,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects

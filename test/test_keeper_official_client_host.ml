@@ -1610,12 +1610,33 @@ let test_native_read_is_effect_free_and_admitted () =
        ~client_label:"Codex")
 ;;
 
+let test_required_native_none_never_degrades () =
+  let resolve ~none_supported =
+    Host.resolve_native_posture
+      ~required:(Some Runtime_native_tools.Native_none)
+      ~base_path:"/nonexistent-required-native-posture-base"
+      ~keeper_name:"required-native-posture"
+      ~client_label:"fixture"
+      ~default:Runtime_native_tools.Native_read
+      ~none_supported
+  in
+  (match resolve ~none_supported:true with
+   | Ok Runtime_native_tools.Native_none -> ()
+   | Ok _ -> fail "required none must override the normal runtime default"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  match resolve ~none_supported:false with
+  | Error (Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig {field="required_native_posture"; _})) -> ()
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "an unsupported required posture must never degrade to native reads"
+;;
+
 (* RFC-0390 admission review (P0): an admission refusal must not kill the
    turn. resolve_native_posture degrades to the safest weaker posture and
    records the downgrade as a typed event. The pure predicate above still
    refuses — the policy below keeps the runtime call alive. *)
 let test_resolve_degrades_instead_of_failing_the_turn () =
-  let run = Host.resolve_native_posture in
+  let run = Host.resolve_native_posture ~required:None in
   let posture_of = function
     | Ok p -> Runtime_native_tools.to_string p
     | Error detail ->
@@ -1726,7 +1747,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   (* [full] under Auto: per-turn publication, two turns -> two events. *)
   ignore
     (posture_of
-       (Host.resolve_native_posture
+       (Host.resolve_native_posture ~required:None
           ~base_path:"/nonexistent-rfc0390-base"
           ~keeper_name:"rfc0390-full-auto-per-turn"
           ~client_label:"Claude Code"
@@ -1734,7 +1755,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
           ~none_supported:true));
   ignore
     (posture_of
-       (Host.resolve_native_posture
+       (Host.resolve_native_posture ~required:None
           ~base_path:"/nonexistent-rfc0390-base"
           ~keeper_name:"rfc0390-full-auto-per-turn"
           ~client_label:"Claude Code"
@@ -1752,7 +1773,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   for _ = 1 to 4 do
     ignore
       (posture_of
-         (Host.resolve_native_posture
+         (Host.resolve_native_posture ~required:None
             ~base_path:"/nonexistent-rfc0390-base"
             ~keeper_name:"rfc0390-none-codex-static"
             ~client_label:"Codex"
@@ -1764,7 +1785,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   (* A honoring resolution for the same pair re-arms the gate. *)
   ignore
     (posture_of
-       (Host.resolve_native_posture
+       (Host.resolve_native_posture ~required:None
           ~base_path:"/nonexistent-rfc0390-base"
           ~keeper_name:"rfc0390-none-codex-static"
           ~client_label:"Codex"
@@ -1775,7 +1796,7 @@ let test_static_contradiction_reports_once_until_rearmed () =
   for _ = 1 to 2 do
     ignore
       (posture_of
-         (Host.resolve_native_posture
+         (Host.resolve_native_posture ~required:None
             ~base_path:"/nonexistent-rfc0390-base"
             ~keeper_name:"rfc0390-none-codex-static"
             ~client_label:"Codex"
@@ -2056,6 +2077,10 @@ let () =
             "read is admitted under Auto"
             `Quick
             test_native_read_is_effect_free_and_admitted
+        ; test_case
+            "required none never degrades"
+            `Quick
+            test_required_native_none_never_degrades
         ; test_case
             "resolve degrades instead of failing the turn"
             `Quick

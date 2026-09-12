@@ -35,6 +35,7 @@ module For_testing : sig
 end
 
 val run :
+  ?required_native_posture:Runtime_native_tools.posture ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

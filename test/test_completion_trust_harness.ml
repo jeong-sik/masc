@@ -25,10 +25,10 @@ let reviewer_response = ref (Reviewer_verdict (AR.Approve ""))
 let reviewer_calls = ref []
 let submitted_verifications = ref []
 
-let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
+let reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () =
   reviewer_calls := !reviewer_response :: !reviewer_calls;
   match !reviewer_response with
-  | Reviewer_verdict verdict -> Ok (Some verdict)
+  | Reviewer_verdict verdict -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some verdict}
   | Reviewer_unavailable ->
     Error (Agent_core.Error.Internal "test evaluator unavailable")
 ;;
@@ -445,7 +445,7 @@ let test_rendered_image_reaches_verifier_http_request () =
       Eio.Fiber.fork_daemon ~sw (fun () ->
         Cohttp_eio.Server.run socket server ~on_error:raise);
       let previous = Atomic.get AR.run_llm_reviewer_fn in
-      let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_
+      let http_reviewer ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_
           ?goal_blocks ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
           ~on_runtime_attempt_error:_ () =
         match goal_blocks with
@@ -464,7 +464,7 @@ let test_rendered_image_reaches_verifier_http_request () =
               () in
           (match Llm_provider.Complete.complete ~sw ~net ~config:provider
                    ~messages:[Agent_core.Types.user_msg_blocks blocks] () with
-           | Ok _ -> Ok (Some (AR.Approve "synthetic image delivery receipt only"))
+           | Ok _ -> Ok {AR.selected_runtime_id=evaluator_runtime;verdict=Some (AR.Approve "synthetic image delivery receipt only")}
            | Error _ -> Error (Agent_core.Error.Internal "fixture HTTP request failed"))
       in
       Fun.protect ~finally:(fun () -> Atomic.set AR.run_llm_reviewer_fn previous)

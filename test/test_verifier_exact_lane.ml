@@ -55,7 +55,8 @@ let recording_reviewer calls behaviors =
   fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
     calls := !calls @ [ evaluator_runtime ];
     match List.assoc_opt evaluator_runtime behaviors with
-    | Some behavior -> behavior
+    | Some behavior -> Result.map
+        (fun verdict -> {AR.selected_runtime_id=evaluator_runtime;verdict}) behavior
     | None ->
       Error
         (Agent_core.Error.Internal
@@ -237,7 +238,7 @@ let test_recorded_images_ride_to_the_reviewer_as_blocks () =
            ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
            ~on_runtime_attempt_error:_ () ->
          received := goal_blocks;
-         Ok (Some (AR.Approve "")))
+         Ok {AR.selected_runtime_id="slot-a";verdict=Some (AR.Approve "")})
     (fun () ->
        ignore (review_with image_request ());
        (match !received with
@@ -393,7 +394,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
        ~lanes:
          [ { Runtime_schema.id = "verifier_exact"
            ; slot_ids = [ "verifier-b"; "verifier-missing"; "verifier-a" ]
-           ; cli_slot_ids = [ "official.verifier" ]
+           ; cli_slot_ids = []
            }
          ; { Runtime_schema.id = "auxiliary_exact"; slot_ids = [ "verifier-a" ]; cli_slot_ids = [] }
          ]
@@ -406,7 +407,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
   | Ok slots ->
     Alcotest.(check (list string))
       "admitted slots keep declaration order; the catalog-missing slot is dropped"
-      [ "verifier-b"; "verifier-a"; "official.verifier" ]
+      [ "verifier-b"; "verifier-a" ]
       slots
 ;;
 

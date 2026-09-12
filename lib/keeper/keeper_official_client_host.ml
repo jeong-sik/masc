@@ -1315,7 +1315,7 @@ let native_posture_static_contradiction_gate : (string, unit) Hashtbl.t =
   Hashtbl.create 16
 ;;
 
-let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
+let resolve_native_posture ~required ~base_path ~keeper_name ~client_label ~default
     ~none_supported =
   match
     Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
@@ -1328,7 +1328,8 @@ let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
          ~field:"keeper.tools.native"
          (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
   | Ok defaults ->
-    let declared = Option.value defaults.native_tool_posture ~default in
+    let declared = Option.value required
+      ~default:(Option.value defaults.native_tool_posture ~default) in
     let approval_mode =
       Keeper_tool_approval_mode.resolve
         (Keeper_tool_approval_mode.shared ())
@@ -1347,6 +1348,8 @@ let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
          native_posture_static_contradiction_gate
          static_contradiction_key;
        Ok declared
+     | Error detail when Option.is_some required ->
+       Error (config_error ~field:"required_native_posture" detail)
      | Error detail ->
        let effective =
          Runtime_native_tools.degrade_on_admission

@@ -444,6 +444,13 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
          { source = "cli-slot-carry"; contents = replacement_catalog })
   in
   let cli = [ "antigravity_subscription.gemini-3-7-flash-high" ] in
+  (match Registry.publish
+     ~lanes:[{id="mixed-kind-duplicate";slot_ids=[replacement_target];cli_slot_ids=[replacement_target]}]
+     snapshot with
+   | Error (Registry.Duplicate_lane_slot {slot_id; _}) ->
+     Alcotest.(check string) "API/CLI occurrences cannot lose their kind" replacement_target slot_id
+   | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+   | Ok _ -> Alcotest.fail "cross-kind duplicate was admitted");
   (match
      Registry.publish
        ~lanes:[ { id = "mixed"; slot_ids = [ replacement_target ]; cli_slot_ids = cli } ]
@@ -487,7 +494,19 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
      (match Runtime.verifier_exact_lane_slot_ids () with
       | Ok slots -> Alcotest.(check (list string))
           "completion authority retains configured official clients" cli slots
-      | Error detail -> Alcotest.fail detail));
+      | Error detail -> Alcotest.fail detail);
+     (* Carrying the id and being able to judge with it are different answers.
+        No runtime table here names this official client, and the server reports
+        exact_output_authority_available from the readiness one, so that is the
+        answer that has to refuse. *)
+     (match Runtime.verifier_exact_lane_readiness () with
+      | Error detail ->
+        Alcotest.(check bool)
+          "readiness names the cli slot that resolves to no runtime"
+          true
+          (String_util.contains_substring detail (List.hd cli))
+      | Ok () ->
+        Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish
       ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with
    | Error (Registry.Empty_lane _) -> ()

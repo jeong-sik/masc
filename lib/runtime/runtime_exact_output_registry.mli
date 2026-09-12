@@ -91,7 +91,8 @@ val publish
     immutable AGENT_CORE admitted-target handle before publication. Credential
     presence is deliberately excluded from publication admission. Unknown
     catalog targets are retained as typed [rejected_slot] observations and do
-    not suppress admitted siblings. Blank or duplicate ids and malformed target
+    not suppress admitted siblings. Blank or duplicate ids (including across
+    [slots] and [cli_slots]) and malformed target
     refs remain fatal. A required lane must retain at least one admitted slot.
     Returns [Publication_busy] while a replacement reservation is active. *)
 

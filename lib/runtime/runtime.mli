@@ -546,7 +546,28 @@ val verifier_exact_lane_slot_ids : unit -> (string list, string) result
     published exact-output registry — the single provider-selection SSOT for
     completion-authority judgement calls. [Error] names why the lane cannot
     judge (registry not published, lane unconfigured, or no admitted slots);
-    there is no fallback to another route. *)
+    there is no fallback to another route. Declared official-client ids are
+    carried as declared; {!verifier_exact_lane_readiness} is what asks the
+    runtime table whether they resolve. *)
+
+val verifier_exact_lane_readiness : unit -> (unit, string) result
+(** Whether the [verifier_exact] lane has a slot that can be dispatched now,
+    for a caller that reports authority readiness rather than walking the lane.
+    [Ok ()] needs one admitted API route with a materialized tool-capable
+    candidate, or one cli slot naming a materialized official-client runtime
+    that can supply the verdict tool with native tools disabled.
+    [Error] names incompatible slots, which
+    {!verifier_exact_lane_slot_ids} cannot: it carries declared
+    ids verbatim, so a typo there reads as a configured judge until the review
+    reaches dispatch. *)
+
+type verifier_slot_dispatch = Cli_runtime | Api_route
+
+val verifier_exact_slot_admission : runtime_id:string -> (verifier_slot_dispatch, string) result
+(** Reject an invalid/incompatible declared CLI candidate at its own attempt,
+    without removing it or its peers from frozen declaration order. Explicit
+    API slots and standalone overrides may name a declared lane; CLI slots
+    name one concrete runtime. Both still require driver tool admission. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a

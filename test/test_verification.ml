@@ -1639,7 +1639,7 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
                     ~start_time:0.0
                     "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
-               Ok (Some (Masc.Task.Anti_rationalization.Approve "")));
+               Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
                committed_verification_id := Some verification_id;
@@ -1871,7 +1871,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
             (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
-               Ok (Some (Masc.Task.Anti_rationalization.Approve "")));
+               Ok {Masc.Task.Anti_rationalization.selected_runtime_id="test-system-evaluator";verdict=Some (Masc.Task.Anti_rationalization.Approve "")});
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun _config ~task_id ~producer:_ ~authority ~verification_id ~decision ->
                ignore

@@ -44,6 +44,14 @@ type output_contract = Provider_default | Tool_verdict
     not suppress arbitrary provider transforms or validate tool arguments; the
     caller owns the typed verdict protocol. *)
 
+type runtime_selection = Resolve_assignment | Exact_runtime | Exact_route
+(** [Exact_runtime] dispatches only the named materialized runtime, without
+    ordinary lane/default expansion, sticky preference, or media rerouting and
+    vision delegation outside it. Its caller owns the frozen exact-lane walk.
+    [Exact_route] additionally admits a declared lane's own candidates in
+    declaration order; it never appends the workspace default. Neither exact
+    mode can be combined with a deferred ordinary lane. *)
+
 type deferred_runtime_lane = private
   { assignment_id : string
   ; failed_runtime_id : string
@@ -130,6 +138,7 @@ type attempt_input =
 
 val run_named :
   runtime_id:string ->
+  ?runtime_selection:runtime_selection ->
   ?keeper_name:string ->
   ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -140,6 +149,7 @@ val run_named :
   ?tools:Agent_core.Tool.t list ->
   agent_core_tools:Agent_core.Tool.t list ->
   ?tool_requirement:Keeper_required_tools.t ->
+  ?required_native_posture:Runtime_native_tools.posture ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
   ?recovery_view:Keeper_recovery_transmission.t ->
@@ -383,6 +393,7 @@ module For_testing : sig
     attempt_inference_policy
 
   val attempt_runtime_candidates :
+    ?preserve_order:bool ->
     ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
     ?allow_retry:
       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> bool) ->

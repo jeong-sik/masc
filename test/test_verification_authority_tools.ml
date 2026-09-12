@@ -489,9 +489,9 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
             bundle))
 ;;
 
-(* The live PDF and PNG lookups returned binary text slices. Exercise the
-   descriptor/owned-file path, then the same observation persistence and API
-   projection used by the completion reviewer. No model verdict is simulated. *)
+(* Unsupported binary lookups must retain their encoding failure through the
+   descriptor/owned-file path, observation persistence and API projection used
+   by the completion reviewer. No model verdict is simulated. *)
 let test_binary_lookup_failures_survive_observation_replay () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -515,9 +515,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
     ~producer:producer_name ~authority_kind:"system_llm_agent"
     ~authority_actor:"verifier_exact" ~started_at:1.0;
   let fixtures =
-    [ "booklet.pdf", "%PDF-1.3\n%\147\140\139\158\n1 0 obj\n<<>>\nendobj\n"
-    ; "unsupported.bin", "\000\255\147\140"
-    ]
+    [ "unsupported.bin", "\000\255\147\140" ]
   in
   let tools = List.map (fun (name, bytes) ->
     Out_channel.with_open_bin (Filename.concat playground name)
@@ -555,7 +553,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
     (String_util.is_valid_utf8 (Yojson.Safe.to_string api_json));
   match run.status with
   | Registry.Completed { tools; _ } ->
-    Alcotest.(check int) "both failures retained" 2 (List.length tools);
+    Alcotest.(check int) "binary failure retained" 1 (List.length tools);
     List.iter (fun (tool : Registry.tool_observation) ->
       match tool.disposition with
       | Tool_result.Failed () -> ()

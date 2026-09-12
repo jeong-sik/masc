@@ -1763,6 +1763,7 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
+  | Voice_wizard_saved of (Yojson.Safe.t, string) result
   | Voice_config_loaded of
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
@@ -2558,6 +2559,43 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
    The input device is read here rather than asked of the server: no server
    knows it. sox opens whatever CoreAudio calls default, and captures that come
    back empty are usually a different microphone than the operator assumes. *)
+
+(* Saving what the wizard assembled. The request carries the revision the
+   session opened against, so a session left open while something else wrote is
+   told its read went stale rather than overwriting that writer. *)
+let launch_voice_wizard_save state ~mailbox
+    (session : Masc_tui_types.voice_wizard_session) =
+  match
+    Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
+  with
+  | Error gaps ->
+    (* The wizard would not have offered Review with gaps left, but the draft
+       can be edited backwards, so the refusal is said rather than assumed
+       impossible. *)
+    state.voice_wizard
+      <- Some
+           { session with
+             vws_status =
+               Some (String.concat "; " (List.map Voice_wizard.gap_message gaps))
+           }
+  | Ok body ->
+    state.voice_wizard
+      <- Some { session with vws_saving = true; vws_status = Some "saving…" };
+    let host = server_peer_host in
+    let port = state.port in
+    let payload = Yojson.Safe.to_string body in
+    let run () =
+      let result =
+        Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/setup" ~body:payload
+      in
+      enqueue_async mailbox (Voice_wizard_saved result)
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None ->
+       enqueue_async mailbox (Voice_wizard_saved (Error "Eio switch is unavailable")))
+;;
+
 let launch_voice_config_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -10832,6 +10870,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
      first capture no longer belongs to this draft. *)
+  | Voice_wizard_saved result ->
+      (match (state.voice_wizard, result) with
+       | None, _ -> ()
+       | Some _, Ok _ ->
+           (* Closed on success, and the pane reloaded: what it was showing is
+              now one revision behind what is on disk. *)
+           state.voice_wizard <- None;
+           launch_voice_config_load state ~mailbox
+       | Some session, Error message ->
+           state.voice_wizard
+             <- Some { session with vws_saving = false; vws_status = Some message })
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
       (match result with
@@ -15769,6 +15818,50 @@ and is loaded on demand through keeper_skill.
                  set (Masc_tui_types.runtime_param_edit_append edit s);
                  state.runtime_params_notice <- None
                | _ -> ()))
+       | Some k
+         when text_input_target state ~compact_viewport = Some Text_voice_wizard ->
+           (match state.voice_wizard with
+            | None -> ()
+            | Some session ->
+              let set value = state.voice_wizard <- Some value in
+              (* A save in flight ignores everything but the key that leaves:
+                 the draft it is writing is already on its way. *)
+              if session.vws_saving && not (String.equal k "esc")
+              then ()
+              else (
+                match k with
+                | "esc" -> state.voice_wizard <- None
+                | "\r" | "\n" | "enter" ->
+                  (match session.vws_step with
+                   | Voice_wizard.Review ->
+                     launch_voice_wizard_save state ~mailbox:async_messages
+                       (Masc_tui_types.voice_wizard_commit session)
+                   | Voice_wizard.Section
+                   | Voice_wizard.Provider
+                   | Voice_wizard.Name
+                   | Voice_wizard.Address
+                   | Voice_wizard.Credential
+                   | Voice_wizard.Model
+                   | Voice_wizard.Voice -> set (Masc_tui_types.voice_wizard_next session))
+                | "up" -> set (Masc_tui_types.voice_wizard_previous session)
+                | "down" -> set (Masc_tui_types.voice_wizard_next session)
+                (* The provider is a closed set, so it walks under the same keys
+                   a bool toggles under elsewhere in this pane. *)
+                | "left" | "right" | " "
+                  when session.vws_step = Voice_wizard.Section ->
+                  set (Masc_tui_types.voice_wizard_cycle_section session)
+                | "left" | "right" | " "
+                  when session.vws_step = Voice_wizard.Provider ->
+                  set (Masc_tui_types.voice_wizard_cycle_provider session)
+                | "\127" | "\b" | "backspace" ->
+                  set (Masc_tui_types.voice_wizard_backspace session)
+                | s when String.length s = 1 && Char.code s.[0] = 21 ->
+                  set (Masc_tui_types.voice_wizard_clear session)
+                | s
+                  when (String.length s = 1 && Char.code s.[0] >= 32)
+                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                  set (Masc_tui_types.voice_wizard_append session s)
+                | _ -> ()))
        | Some _
          when quit_key
               && (compact_viewport
@@ -21035,10 +21128,26 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 (* The preset pane writes through s and r, never $EDITOR.
-                    The voice pane is a reading; runtime.toml is edited from
-                    the runtime pane, where the file already is. *)
-                 | Config_presets | Config_themes | Config_voice -> ())
+                 (* The preset pane writes through s and r, never $EDITOR. *)
+                 | Config_presets | Config_themes -> ()
+                 (* The voice pane was a reading. It now opens the wizard,
+                    which writes through the setup route rather than $EDITOR:
+                    [voice] is one table among many in runtime.toml, and an
+                    editor would hand the operator all of them to edit one. *)
+                 | Config_voice ->
+                   (match state.voice_setup with
+                    | Some (`Assoc fields) ->
+                      (* No revision, no session: the save carries it, and a
+                         wizard opened without one could only fail at the end. *)
+                      (match List.assoc_opt "revision" fields with
+                       | Some (`String revision) ->
+                         state.voice_wizard
+                           <- Some
+                                (Masc_tui_types.voice_wizard_open
+                                   ~section:Voice_setup.Tts
+                                   ~provider:Voice_wizard.Elevenlabs ~revision)
+                       | Some _ | None -> ())
+                    | Some _ | None -> ()))
             | Tools -> handle_skill_edit ()
             | Schedules -> handle_schedule_modify ()
             | Approvals ->

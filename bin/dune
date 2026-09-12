@@ -1278,6 +1278,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc.voice_wizard
+  masc.voice_setup
   masc.workspace_connection
   masc_tui_lane_addons
   masc.browser_lane

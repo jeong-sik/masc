@@ -13555,7 +13555,116 @@ let render_runtime_config_status state =
    endpoint answers first, since a local server that is down falls back to a
    paid one silently. And the input device, because a capture that comes back
    empty is more often the wrong microphone than a threshold. *)
+(* The wizard screen. The questions, their order and the completeness rule are
+   Voice_wizard's; what is drawn here is only how a terminal shows them. *)
+let render_voice_wizard (state : state) (session : voice_wizard_session) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  let field name value =
+    box_line buf cols
+      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset value)
+  in
+  let draft = session.vws_draft in
+  let side =
+    match draft.Voice_wizard.section with
+    | Voice_setup.Tts -> "speech out"
+    | Voice_setup.Stt -> "speech in"
+  in
+  let shown value = if String.trim value = "" then "—" else value in
+  let steps = Voice_wizard.steps draft in
+  let position =
+    let rec index n = function
+      | [] -> None
+      | step :: rest -> if step = session.vws_step then Some n else index (n + 1) rest
+    in
+    match index 1 steps with
+    | Some n -> Printf.sprintf "%d/%d" n (List.length steps)
+    | None -> "?"
+  in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Voice · setup")
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line buf cols "";
+  box_line buf cols
+    (Printf.sprintf "  %sstep %s%s  %s" Ansi.dim position Ansi.reset
+       (Voice_wizard.step_prompt session.vws_step));
+  box_line buf cols "";
+  (* The answer being given. A closed set shows its current value and the keys
+     that walk it; a text field shows what has been typed, with a cursor so an
+     empty field is visibly a field. *)
+  (match session.vws_step with
+   | Voice_wizard.Section ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold side
+          Ansi.reset Ansi.dim Ansi.reset)
+   | Voice_wizard.Provider ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s   %s←/→ or space to switch%s" Ansi.bold
+          (Voice_wizard.provider_label draft.Voice_wizard.provider)
+          Ansi.reset Ansi.dim Ansi.reset)
+   | Voice_wizard.Review ->
+     (match Voice_wizard.gaps draft with
+      | [] ->
+        box_line buf cols
+          (Printf.sprintf "    %senter saves this%s" Ansi.bold Ansi.reset)
+      | gaps ->
+        List.iter
+          (fun gap ->
+            box_line_styled buf cols ~style:(Theme.warn ())
+              (Printf.sprintf "    %s" (Voice_wizard.gap_message gap)))
+          gaps)
+   | Voice_wizard.Name
+   | Voice_wizard.Address
+   | Voice_wizard.Credential
+   | Voice_wizard.Model
+   | Voice_wizard.Voice ->
+     box_line buf cols
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
+          (if session.vws_saving then "" else "▏")));
+  (* A local server that never asked for a key answers 200 only while nothing
+     sends it one, so the blank is worth saying out loud rather than leaving as
+     an empty line. *)
+  (match session.vws_step with
+   | Voice_wizard.Credential when String.trim session.vws_input = "" ->
+     box_line buf cols
+       (Printf.sprintf "    %sblank sends no Authorization header%s" Ansi.dim Ansi.reset)
+   | Voice_wizard.Address when String.trim session.vws_input = "" ->
+     List.iter
+       (fun (what, address) ->
+         box_line buf cols
+           (Printf.sprintf "    %stry %s: %s%s" Ansi.dim what address Ansi.reset))
+       (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
+   | _ -> ());
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sdraft%s" Ansi.bold Ansi.reset);
+  field "side" side;
+  field "provider" (Voice_wizard.provider_label draft.Voice_wizard.provider);
+  field "name" (shown draft.Voice_wizard.endpoint_id);
+  field "address" (shown draft.Voice_wizard.address);
+  field "key var" (shown draft.Voice_wizard.credential_variable);
+  field "model" (shown draft.Voice_wizard.model);
+  (match draft.Voice_wizard.section with
+   | Voice_setup.Tts -> field "voice" (shown draft.Voice_wizard.voice)
+   | Voice_setup.Stt -> ());
+  (match session.vws_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"enter:next  up:back  esc:cancel");
+  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+;;
+
 let render_voice (state : state) =
+  match state.voice_wizard with
+  | Some session -> render_voice_wizard state session
+  | None ->
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
   let field name value =
@@ -13672,7 +13781,7 @@ let render_voice (state : state) =
        Ansi.dim Ansi.reset);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh");
+    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh  e:set up");
   finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
 ;;
 

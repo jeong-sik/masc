@@ -2682,7 +2682,7 @@ let voice_wizard_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) =
   | Voice_wizard.Credential -> draft.Voice_wizard.credential_variable
   | Voice_wizard.Model -> draft.Voice_wizard.model
   | Voice_wizard.Voice -> draft.Voice_wizard.voice
-  | Voice_wizard.Provider | Voice_wizard.Review -> ""
+  | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> ""
 
 let voice_wizard_with_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) value
   : Voice_wizard.draft
@@ -2693,7 +2693,7 @@ let voice_wizard_with_value (draft : Voice_wizard.draft) (step : Voice_wizard.st
   | Voice_wizard.Credential -> { draft with Voice_wizard.credential_variable = value }
   | Voice_wizard.Model -> { draft with Voice_wizard.model = value }
   | Voice_wizard.Voice -> { draft with Voice_wizard.voice = value }
-  | Voice_wizard.Provider | Voice_wizard.Review -> draft
+  | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> draft
 
 let voice_wizard_open ~section ~provider ~revision =
   let draft = Voice_wizard.blank ~section ~provider in
@@ -7336,3 +7336,19 @@ let palette_matches (state : state) =
          Option.map (fun r -> (r, entry)) (rank entry))
   |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
   |> List.map snd
+
+(* The side walks under the same keys the provider does: both are closed sets,
+   and the reader is picking either way. *)
+let voice_wizard_cycle_section session =
+  let other =
+    match session.vws_draft.Voice_wizard.section with
+    | Voice_setup.Tts -> Voice_setup.Stt
+    | Voice_setup.Stt -> Voice_setup.Tts
+  in
+  let draft = Voice_wizard.with_section session.vws_draft other in
+  { session with
+    vws_draft = draft
+  ; vws_input = voice_wizard_value draft session.vws_step
+  ; vws_replace_on_type = true
+  ; vws_status = None
+  }

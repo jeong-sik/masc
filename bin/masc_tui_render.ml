@@ -258,8 +258,12 @@ let workspace_health_color = function
   | Workspace_health_unknown -> (Theme.warn ())
   | Workspace_health_ok -> (Theme.ok ())
 
+(* Syslog's own names for these levels, which is why "crit" is the word and
+   not a short spelling of one. The level used to read "critical" and the
+   badge fitted it to five cells, so the row that most needed reading was the
+   only one drawn cut: [crit~]. *)
 let attention_severity_label = function
-  | Attention_critical -> "critical"
+  | Attention_critical -> "crit"
   | Attention_bad -> "bad"
   | Attention_warning -> "warn"
   | Attention_info -> "info"
@@ -268,6 +272,36 @@ let attention_severity_color = function
   | Attention_critical | Attention_bad -> (Theme.bad ())
   | Attention_warning -> (Theme.warn ())
   | Attention_info -> (Theme.info ())
+
+(* The badge column, measured from the vocabulary rather than chosen for it.
+   Fitting the label to a fixed five cells did two things: it cut the longest
+   level, and it padded the shorter ones inside their own brackets, which drew
+   [bad  ] and [warn ] -- a gap before a closing bracket reads as a typo, not
+   as a column. Taking the width from the labels means a level added or
+   renamed later widens the column instead of being cut by it.
+
+   Critical and bad share a colour (see above), so the word is the only thing
+   that tells those two rows apart. That is the reason the word may not be
+   cut, and the reason this is measured instead of assumed. *)
+let attention_severity_badge_cells =
+  let bracket_cells = 2 in
+  bracket_cells
+  + List.fold_left
+      (fun widest severity ->
+        max widest
+          (Message_layout.display_width (attention_severity_label severity)))
+      0
+      [ Attention_critical; Attention_bad; Attention_warning; Attention_info ]
+
+(* [level] in its colour, padded to the column outside the colour so a theme
+   that paints a background does not paint the gap. *)
+let attention_severity_badge severity =
+  let drawn = "[" ^ attention_severity_label severity ^ "]" in
+  attention_severity_color severity
+  ^ drawn ^ Ansi.reset
+  ^ String.make
+      (max 0 (attention_severity_badge_cells - Message_layout.display_width drawn))
+      ' '
 
 (* Compact "how long" text three surfaces share: the Attention panel's item
    age, the Lanes table's idle column, and the Keeper operations preview --
@@ -617,8 +651,7 @@ let render_overview (state : state) =
       match Rows.at attention_items_window i with
       | None -> ""
       | Some a ->
-        let sev_color = attention_severity_color a.ai_severity in
-        let severity_label = attention_severity_label a.ai_severity in
+        let severity_badge = attention_severity_badge a.ai_severity in
         (* The age answers "why is this still here": a stamped item shows how
            long ago its evidence happened, an unstamped one (a paused keeper,
            a waiting confirmation) shows an em dash because its producer put
@@ -637,10 +670,10 @@ let render_overview (state : state) =
              spends, and the events column beside this one guessed one too
              many: every event row came out a cell over its budget and was
              marked truncated whether or not anything was cut. The severity
-             label keeps its own fit -- that one is a fixed column, not a
-             guess at the rest of the row. *)
-          Printf.sprintf "%s[%s]%s %s%s%s %s"
-            sev_color (fit_width severity_label 5) Ansi.reset
+             badge pads itself to its own column, which is measured from the
+             level names rather than guessed at -- so it is the one part of
+             the row that is finished before it gets here. *)
+          Printf.sprintf "%s %s%s%s %s" severity_badge
             Ansi.dim (fit_width age_label 3) Ansi.reset
             (Terminal_text.single_line a.ai_summary)
     in

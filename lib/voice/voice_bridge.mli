@@ -28,7 +28,7 @@ val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
 val say_catalogue_of_output : string -> catalogue_voice list
 
 (** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
-    [say] answers a command; the endpoint kind selects its transport.
+    [say] answers a command; the resolved endpoint adapter selects its transport.
     [Error] explains why an endpoint has no catalogue or could not answer. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 

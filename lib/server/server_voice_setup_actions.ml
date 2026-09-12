@@ -44,12 +44,14 @@ let kind_of_string = function
   | "openai_compat" -> Ok Voice_config.Openai_compat
   | "elevenlabs_direct" -> Ok Voice_config.Elevenlabs_direct
   | "voice_mcp" -> Ok Voice_config.Voice_mcp
+  | "macos_say" -> Ok Voice_config.Macos_say
+  | "whisper_cli" -> Ok Voice_config.Whisper_cli
   | other ->
     Error
       (Invalid_request
          (Printf.sprintf
             "unknown endpoint kind %S; expected \"openai_compat\", \
-             \"elevenlabs_direct\" or \"voice_mcp\""
+             \"elevenlabs_direct\", \"voice_mcp\", \"macos_say\" or \"whisper_cli\""
             other))
 
 let ( let* ) = Result.bind

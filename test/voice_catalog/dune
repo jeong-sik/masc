@@ -3,4 +3,5 @@
 
 (test
  (name test_voice_catalog)
- (libraries alcotest yojson masc masc.voice_config masc.voice_runtime_overlay))
+ (libraries alcotest yojson masc masc.server masc.config masc.voice_config
+  masc.voice_runtime_overlay eio_main unix))

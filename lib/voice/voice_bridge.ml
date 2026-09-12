@@ -337,30 +337,31 @@ let list_voices_via_http_endpoint endpoint =
 
 (* Which voices an endpoint has. Two kinds publish a catalogue and they publish
    it differently -- ElevenLabs answers a URL, say answers a command -- so the
-   endpoint's kind picks which is asked rather than one being tried and the
-   other used when it fails. A kind with no catalogue says so in words, because
-   the reader is about to type the name instead.
+   resolved endpoint adapter picks which is asked rather than trying the other
+   when one fails. A kind with no catalogue says so in words, because the
+   reader is about to type the name instead.
 
    Saying it matters most for say, which does not fail on a voice it does not
    have: it speaks in the system voice instead, so a name typed from memory is
    wrong silently. *)
 let list_voices (endpoint : Voice_config.endpoint) =
-  match endpoint.Voice_config.kind with
-  | Voice_config.Elevenlabs_direct -> list_voices_via_http_endpoint endpoint
-  | Voice_config.Macos_say -> list_voices_via_command_endpoint endpoint
-  | Voice_config.Openai_compat ->
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Voice_runtime_overlay.Elevenlabs_direct -> list_voices_via_http_endpoint endpoint
+  | Voice_runtime_overlay.Macos_say -> list_voices_via_command_endpoint endpoint
+  | Voice_runtime_overlay.Openai_compat ->
     Error
       (Printf.sprintf
          "voice config endpoint %s speaks the OpenAI shape, which has no voice list to \
           ask for: type the voice name the server expects"
          endpoint.Voice_config.id)
-  | Voice_config.Voice_mcp ->
+  | Voice_runtime_overlay.Voice_mcp ->
     Error
       (Printf.sprintf
          "voice config endpoint %s is reached through a tool, which is asked to speak \
           rather than asked what it can speak with"
          endpoint.Voice_config.id)
-  | Voice_config.Whisper_cli ->
+  | Voice_runtime_overlay.Whisper_cli ->
     Error
       (Printf.sprintf "voice config endpoint %s transcribes and has no voices"
          endpoint.Voice_config.id)

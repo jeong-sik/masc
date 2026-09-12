@@ -187,7 +187,7 @@ type workspace_state = {
 }
 ```
 
-`paused = true`일 때 orchestrator는 새 에이전트를 spawn하지 않는다.
+RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
 
 ### 2.11 Tempo
 

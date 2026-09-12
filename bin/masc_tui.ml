@@ -13640,20 +13640,25 @@ let main
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
+      (* Bound by name: the AST guard pins this call by listing every
+         labelled argument as an identifier, so the exit writer is a named
+         function rather than an inline closure. *)
+      let finish () =
+        print_endline "Goodbye!";
+        (* Tracking off after Goodbye: a terminal left in report mode keeps
+           swallowing the wheel after this process is gone, and the farewell
+           line is the last thing a reader matches on -- a byte after it cannot
+           disturb that read. *)
+        output_string stdout mouse_tracking_disable;
+        output_string stdout bracketed_paste_disable;
+        (* The mode belongs to this program's screen. A shell that inherited it
+           would see its own keys reported in a form it does not read. *)
+        if Terminal_profile.kitty_keyboard terminal_profile then
+          output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+        flush stdout
+      in
       Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
-        ~finish:(fun () ->
-          print_endline "Goodbye!";
-          (* Tracking off after Goodbye: a terminal left in report mode keeps
-             swallowing the wheel after this process is gone, and the farewell
-             line is the last thing a reader matches on -- a byte after it cannot
-             disturb that read. *)
-          output_string stdout mouse_tracking_disable;
-          output_string stdout bracketed_paste_disable;
-          (* The mode belongs to this program's screen. A shell that inherited it
-             would see its own keys reported in a form it does not read. *)
-          if Terminal_profile.kitty_keyboard terminal_profile then
-            output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-          flush stdout)
+        ~finish
     end
   in
 

@@ -1970,7 +1970,9 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
        ~module_path:main_path ~binding_name:"cleanup"
        ~callee:"Terminal_restore.finish_after_restore"
-       ~arguments:[ "restore", "restore_terminal_outcome" ]);
+       (* Every label listed: the matcher requires the full labelled set, so
+          the exit writer is pinned as a named function next to the restore. *)
+       ~arguments:[ "restore", "restore_terminal_outcome"; "finish", "finish" ]);
   check int "suspend restores the shell terminal first" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"suspend" ~callee:"restore_terminal");

@@ -49,8 +49,22 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
               ~bytes ~mime:"application/octet-stream" in
           match Keeper_peer_artifact_ref.make ~blob ~filename:(Filename.basename path) ~purpose with
           | Error detail -> fail Tool_result.Policy_rejection detail
-          | Ok artifact -> Keeper_tool_execution.success_data
-              (`Assoc ["artifact", Keeper_peer_artifact_ref.to_json artifact])
+          | Ok artifact ->
+            (* The exported bytes are durable already. Preserve the result
+               manifest at this producer boundary before the model projection
+               replaces normalized references with its durable manifest. *)
+            Eio.Cancel.protect (fun () ->
+              let data = `Assoc ["artifact", Keeper_peer_artifact_ref.to_json artifact] in
+              let result = Tool_result.make_ok ~tool_name:"keeper_artifact_transfer"
+                  ~start_time:(Time_compat.now ()) ~data () in
+              match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
+              | Ok result -> Keeper_tool_execution.of_tool_result result
+              | Error error ->
+                Log.Keeper.error "exported peer artifact result manifest unavailable: %s" error.message;
+                Keeper_tool_execution.failure_data ~class_:Tool_result.Runtime_failure
+                  ~effect_disposition:Tool_result.Proven_post_effect
+                  ~message:"The artifact was exported, but its result manifest could not be stored. Read the recorded artifact; do not repeat the export."
+                  data)
         with Sys_error detail -> fail Tool_result.Runtime_failure detail))
   | Ok (Materialize {path; artifact}) ->
     write (`Assoc ["path", `String path; "mode", `String "overwrite";

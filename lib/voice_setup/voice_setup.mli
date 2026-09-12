@@ -61,6 +61,18 @@ type error =
           so an unrelated section that is already broken refuses a voice-only
           edit too; the message says which. *)
 
+  | Endpoint_path_unusable of string
+      (** The endpoint list cannot be written where it would have to go. An
+          empty list is spelled as a key today, [endpoints = []], and an
+          array-of-tables cannot sit beside a key of the same path. Nothing was
+          written; the message says which shape is in the way.
+
+          Not reachable through {!Tts} or {!Stt} as things stand: both refuse an
+          empty endpoint list outright, so a file spelling one as a key does not
+          load as a voice configuration and {!observe} refuses it first. It is
+          here because the writer underneath can refuse, and swallowing that
+          would be the silent failure this module exists to avoid. *)
+
 val error_message : error -> string
 
 val observe

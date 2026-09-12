@@ -14,6 +14,7 @@ type error =
   | Configuration_changed
   | Voice_section_invalid of string
   | Configuration_rejected of string
+  | Endpoint_path_unusable of string
 
 let error_message = function
   | Configuration_unavailable detail -> "runtime.toml could not be read: " ^ detail
@@ -22,6 +23,8 @@ let error_message = function
   | Voice_section_invalid detail ->
     "the edit does not load as a voice configuration, so it was not written: " ^ detail
   | Configuration_rejected detail -> "the commit was refused: " ^ detail
+  | Endpoint_path_unusable detail ->
+    "the endpoint list cannot be written where it would have to go: " ^ detail
 ;;
 
 exception Revision_changed
@@ -73,14 +76,24 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
   ]
 ;;
 
-let apply_change contents = function
-  | Put_endpoint (section, endpoint) ->
+exception Entry_refused of Toml_line_editor.entry_error
+
+let put_endpoint contents ~path (endpoint : Voice_config.endpoint) =
+  match
     Toml_line_editor.upsert_table_array_entry
       contents
-      ~path:(endpoints_path section)
+      ~path
       ~id_key:"id"
       ~id:endpoint.Voice_config.id
       ~fields:(endpoint_fields endpoint)
+  with
+  | Ok updated -> updated
+  | Error error -> raise (Entry_refused error)
+;;
+
+let apply_change contents = function
+  | Put_endpoint (section, endpoint) ->
+    put_endpoint contents ~path:(endpoints_path section) endpoint
   | Remove_endpoint (section, id) ->
     Toml_line_editor.remove_table_array_entry
       contents
@@ -141,7 +154,9 @@ let preview ~runtime_config_path ~expected_revision changes =
     else (
       match checked observation.source_text changes with
       | updated -> Ok updated
-      | exception Voice_invalid message -> Error (Voice_section_invalid message))
+      | exception Voice_invalid message -> Error (Voice_section_invalid message)
+      | exception Entry_refused error ->
+        Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error)))
 ;;
 
 let apply ~runtime_config_path ~expected_revision changes =
@@ -158,4 +173,6 @@ let apply ~runtime_config_path ~expected_revision changes =
   | Error detail -> Error (Configuration_rejected detail)
   | exception Revision_changed -> Error Configuration_changed
   | exception Voice_invalid message -> Error (Voice_section_invalid message)
+  | exception Entry_refused error ->
+    Error (Endpoint_path_unusable (Toml_line_editor.entry_error_message error))
 ;;

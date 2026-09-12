@@ -47,8 +47,10 @@ let one_live config = match live config with [entry] -> entry | _ -> fail "expec
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001;loop ()) in loop ()
 let keeper_call config name args =
-  let descriptor = match Keeper_tool_descriptor.find_public name with
+  let descriptor = match Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
     | Some d -> d | None -> fail "Keeper cannot discover declaration tool" in
+  check bool "declaration tool is exposed under its Keeper model name" true
+    (List.mem name (Keeper_tool_descriptor.keeper_model_names descriptor));
   check bool "Keeper dispatches through the in-process misc owner" true
     (descriptor.runtime_handler=Keeper_tool_descriptor.Tool_masc_misc_dispatch);
   let translated = Keeper_tool_descriptor.translate_input_for_descriptor descriptor args in

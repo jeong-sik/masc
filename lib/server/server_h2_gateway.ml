@@ -413,7 +413,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         end
     in
     let dispatch_h2_route () =
-      if client_ip_rate_limited () then () else
       match httpun_meth, path with
       (* ─────────────────────────────────────────────────────────────────────
          Health & Metrics
@@ -1573,7 +1572,13 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           h2_respond_text h2_reqd (Printf.sprintf "404 Not Found: %s" path) ~status:`Not_found ~extra_headers:cors
 
     in
-    if
+    (* The per-IP bucket is charged before the origin check, not after it. A
+       cross-origin MCP request is refused here without ever reaching
+       [dispatch_h2_route], so charging inside that function left this branch
+       unmetered: one client could hold it open with rejected requests and
+       never meet a limit. *)
+    if client_ip_rate_limited () then ()
+    else if
       is_mcp_transport_request httpun_request
       && not (validate_origin ~request_authority httpun_request)
     then

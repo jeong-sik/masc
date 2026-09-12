@@ -1131,7 +1131,13 @@ and with_permission_auth ~permission handler request reqd =
       let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_permission_request ~base_path ~permission request with
       | Ok () ->
-          (match check_agent_rate_limit request reqd with
+          (* A permission-gated GET is still an observation. The dashboard reads
+             /api/v1/dashboard/runtime-probe the way it reads anything else, and
+             metering it as an operation made watching the runtime cost an agent
+             the same tokens as changing it. Same rule [with_read_auth] applies. *)
+          (match check_agent_rate_limit
+                   ~quota:(read_request_quota request.Httpun.Request.meth)
+                   request reqd with
           | Ok () -> handler state request reqd
           | Error () -> ())
       | Error err -> respond_auth_error request reqd err)

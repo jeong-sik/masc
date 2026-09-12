@@ -35,10 +35,22 @@ absent. The shipped Skill test parses the actual file against runtime descriptor
 then executes redirect, navigation-failure, malformed-receipt and read-failure
 cases. A Skill file alone cannot supply a missing runtime output contract.
 
-The live browser already has `browser-live-click-regions`, which follows a
-verified same-tab anchor and retains its source document guard. Its input and
-navigation semantics remain distinct. Site instructions decide what to read
-from the resulting region map; neither composition guesses site selectors.
+The live browser has `browser-live-click-content` and
+`browser-live-click-regions`. Both follow a verified same-tab anchor and retain
+its source document guard. The content route reads the destination body
+directly; the regions route supports a subsequent choice of scope. Site
+instructions choose the needed observation and verify its content, without
+guessing site selectors. These follow the href directly rather than executing
+page click handlers, so their navigation semantics differ from an ordinary
+control click and from automation `BrowserGoto`.
+
+The live content route removes the required region-selection round trip for a
+page whose visible body already answers the request. This describes the call
+graph, not a measured latency improvement. Executor tests load both actual
+Skill files and check pinned source identities, destination URL/document guards,
+ordered dispatch, malformed receipts, and preservation of the completed follow receipt
+without replaying navigation after a read failure. They do not prove that a
+subsequent read retry was executed.
 
 This follows [agent-browser's navigation/observation chaining](https://agent-browser.dev/quick-start)
 when intermediate output needs no decision, and [Stagehand's reuse of observed

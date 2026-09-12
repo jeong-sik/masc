@@ -2321,46 +2321,41 @@ def select_keeper_row(
 
     The roster comes from the fixture plus whatever the live read added, so a
     scenario that presses Enter on the list's first row is asserting an order
-    nothing promises. Walking down until the row reports itself selected makes
-    the scenario say which keeper it means.
+    nothing promises. Read the current completed screen after draining pending
+    bytes: a roster refresh may have selected the target during that drain.
+    Historical highlights do not prove which row is selected now.
 
-    Each step waits for the band itself, not for a frame to end. A frame is not
-    the same fact: the cursor sitting on the last row redraws nothing, so the
-    press that cannot move it ends no frame and the step waited out its whole
-    timeout before looking. The band is what the step is after, and waiting for
-    it is indifferent to how many frames the surface drew on its own.
+    A boundary arrow can produce no frame. Poll without throwing in that case,
+    then reconstruct the current screen again before deciding on another key.
+    A band in an intermediate frame is not proof of the final selection.
     """
     needle = keeper_row_selected(name)
-    # The roster is a live read that lands after the Keepers screen first draws,
-    # so "MASC Keepers" is on screen while the list is still (0). A scan that
-    # starts there presses Down into an empty list -- which redraws nothing, so
-    # the wait below times out -- and when the roster does land it can already
-    # have walked past the row it wanted. Wait for the row to exist first.
-    #
-    # From the current screen, not from byte zero. [output] is every frame the
-    # run has produced, so a scan from 0 can answer with an Overview activity
-    # line that happens to name this keeper, or with a selected row from an
-    # earlier visit to Keepers -- and the early return below then hands back a
-    # cursor that is not on the row the scenario asked for. The scenarios open
-    # this screen by waiting for its header, so the last header in the stream
-    # is where what is on screen began.
-    entry = current_screen_start(output, KEEPERS_HEADER)
-    wait_for_output(process, master_fd, output, name, start=entry, timeout=5.0)
-    if find_needle(output, needle, entry) >= 0:
-        return
     for _ in range(KEEPER_ROW_SCAN_BOUND):
         read_available(master_fd, output)
-        start = len(output)
-        os.write(master_fd, b"\x1b[B")
-        if poll_for_output(
-            process,
-            master_fd,
-            output,
-            needle,
-            start=start,
-            timeout=KEEPER_ROW_STEP_TIMEOUT_S,
-        ):
+        last_end = output.rfind(FRAME_END)
+        completed_end = 0 if last_end < 0 else last_end + len(FRAME_END)
+        if output.rfind(FRAME_START) >= completed_end:
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        rows = screen_rows(bytes(output[:completed_end]), preserve_styles=True)
+        if any(find_needle(row, needle) >= 0 for row in rows.values()):
             return
+        selected = [row for row, text in rows.items() if b"\x1b[7m" in text]
+        if not selected:
+            # The list header can arrive before its asynchronous roster. A
+            # Down here would race the first selected row and overshoot it.
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        target = screen_row_of(rows, name)
+        key = b"\x1b[A" if 0 <= target < min(selected) else b"\x1b[B"
+        start = len(output)
+        os.write(master_fd, key)
+        poll_for_output(
+            process, master_fd, output, FRAME_END,
+            start=start, timeout=KEEPER_ROW_STEP_TIMEOUT_S,
+        )
     raise AssertionError(
         f"keeper row {name!r} never became selected: {bytes(output[-2000:])!r}"
     )
@@ -4575,7 +4570,7 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
-def screen_rows(drawn: bytes) -> dict[int, bytes]:
+def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, bytes]:
     """The screen the pane has painted, as row number to plain text.
 
     A frame is a set of (row, text) pairs, not a picture, so no single frame
@@ -4601,7 +4596,8 @@ def screen_rows(drawn: bytes) -> dict[int, bytes]:
             if index + 1 < len(addresses)
             else len(drawn)
         )
-        rows[int(address.group(1))] = CSI_RE.sub(b"", drawn[address.end() : end])
+        text = drawn[address.end() : end]
+        rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
     return rows
 
 
@@ -10685,6 +10681,9 @@ def open_changes(
     could not arrive however many presses they were given.
     """
     tab_until(process, master_fd, output, b"MASC Keepers")
+    # The header precedes the asynchronous roster. The fixture's alpha must
+    # actually be selected before f captures the Keeper for this reading.
+    select_keeper_row(process, master_fd, output, b"alpha")
     return send_and_wait(process, master_fd, output, b"f", b"masc:lib/example.ml")
 
 

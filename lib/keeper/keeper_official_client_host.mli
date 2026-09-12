@@ -223,6 +223,7 @@ val prepare_turn :
 
 val dynamic_tools :
   content_transport:Runtime_official_client_tool.content_transport ->
+  accepts_image_input:bool ->
   tool_approval:Agent_core.Hooks.tool_approval_callback option ->
   runtime_label:string ->
   keeper_name:string ->
@@ -242,6 +243,12 @@ val dynamic_tools :
   unit ->
   (dynamic_tool list, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
+
+    [accepts_image_input] is the runtime's answer to "may a tool result carry an
+    image", read from {!Runtime_agent.runtime_accepts_image_input} so it is the
+    same composition dispatch applies to a turn's own media. When it is [false]
+    an image-bearing result becomes a delivery error before settlement, rather
+    than a payload the provider rejects after the tool has already run.
 
     [on_tool_boundary], when supplied, replaces the provider-local repetition
     detector. It runs after tool settlement and result observers, including when

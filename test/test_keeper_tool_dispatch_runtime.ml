@@ -6002,6 +6002,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6086,6 +6087,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6189,6 +6191,7 @@ let test_stale_spawn_handles_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6601,6 +6604,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6720,6 +6724,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -6847,6 +6852,7 @@ let test_write_then_unchanged_read_completes () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~accepts_image_input:true
                   ~content_transport:Runtime_official_client_tool.Codex
                   ~tool_approval:None
                   ~pre_tool_rejects:(ref [])
@@ -8167,6 +8173,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
       check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");
       let dynamic = Masc.Keeper_official_client_host.dynamic_tools
           ~content_transport:Runtime_official_client_tool.Codex
+          ~accepts_image_input:true
           ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
           ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
           ~event_bus:None ~context_injector:None

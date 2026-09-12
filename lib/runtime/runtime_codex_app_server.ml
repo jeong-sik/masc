@@ -1102,9 +1102,11 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
 ;;
 
 (* Media types the app-server image item accepts, mirroring the closed set the
-   analyze_image tool and the dashboard composer already use. *)
+   analyze_image tool and the dashboard composer already use. Defined next to
+   the tool-result projection that applies the same set, so the two paths into
+   the same wire item cannot drift. *)
 let supported_image_media_types =
-  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+  Runtime_official_client_tool.codex_image_media_types
 ;;
 
 (* The app-server README is explicit: the [image] input variant takes an inline

@@ -99,6 +99,9 @@ let one_dynamic_tool
       ?on_tool_boundary
       ?(runtime_label = "test")
       ?(name = "effect")
+      (* Vision-capable unless a case says otherwise: these fixtures exercise
+         delivery and settlement, and only the capability cases care. *)
+      ?(accepts_image_input = true)
       ~active
       handler
   =
@@ -113,6 +116,7 @@ let one_dynamic_tool
   let terminal_error = ref None in
   let projected =
     Host.dynamic_tools
+        ~accepts_image_input
         ~content_transport:Runtime_official_client_tool.Codex
       ~tool_approval
       ~runtime_label
@@ -713,6 +717,116 @@ let test_terminal_media_delivery_failure_keeps_applied_effect () =
         ~latency_ms:None ~usage:None stop with
        | Error _ -> () | Ok _ -> fail "failed media delivery completed the runtime")
     | _ -> fail "completed producer effect hid failed media delivery")
+;;
+
+let image_result ~receipt ~media_type ~data _ =
+  Ok { Agent_core.Types.content = receipt
+     ; content_blocks =
+         Some [ Agent_core.Types.Image { media_type; data; source_type = Base64 } ]
+     ; _meta = None }
+;;
+
+let test_image_result_is_refused_when_the_model_takes_no_image () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let handoff = ref None in
+    let tool, _terminal_error = one_dynamic_tool
+      ~accepts_image_input:false
+      ~on_result_handoff:(fun ~invocation:_ ~content -> handoff := Some content)
+      ~active
+      (image_result ~receipt:"screenshot receipt" ~media_type:"image/png" ~data:"aW1n")
+    in
+    let result = tool.call ~call_id:"vision-denied" (`Assoc []) in
+    check bool "an image a text-only model cannot read is not a success"
+      false result.success;
+    check (option string) "the refusal names the cause and keeps the receipt"
+      (Some
+         ("official-client tool result cannot deliver image content to a runtime \
+           whose model does not accept image input\nscreenshot receipt"))
+      !handoff)
+;;
+
+let test_image_result_reaches_a_model_that_accepts_images () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let handoff = ref None in
+    let tool, _terminal_error = one_dynamic_tool
+      ~accepts_image_input:true
+      ~on_result_handoff:(fun ~invocation:_ ~content -> handoff := Some content)
+      ~active
+      (image_result ~receipt:"screenshot receipt" ~media_type:"image/png" ~data:"aW1n")
+    in
+    let result = tool.call ~call_id:"vision-allowed" (`Assoc []) in
+    check bool "a vision model still receives the image" true result.success;
+    check (option string) "the receipt is untouched" (Some "screenshot receipt") !handoff)
+;;
+
+let test_codex_tool_result_image_media_type_is_checked_before_settling () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let handoff = ref None in
+    let tool, _terminal_error = one_dynamic_tool
+      ~on_result_handoff:(fun ~invocation:_ ~content -> handoff := Some content)
+      ~active
+      (image_result ~receipt:"diagram receipt" ~media_type:"image/svg+xml"
+         ~data:"PHN2Zz48L3N2Zz4=")
+    in
+    let result = tool.call ~call_id:"svg" (`Assoc []) in
+    check bool "a media type the app-server refuses is not a success"
+      false result.success;
+    check bool "the refusal names the media type and the accepted set" true
+      (match !handoff with
+       | None -> false
+       | Some content ->
+         let has needle =
+           let n = String.length needle and h = String.length content in
+           let rec scan i = i + n <= h && (String.sub content i n = needle || scan (i + 1)) in
+           scan 0
+         in
+         has "image/svg+xml" && has "image/png" && has "diagram receipt"))
+;;
+
+let test_codex_tool_result_image_data_is_checked_before_settling () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let tool, _terminal_error = one_dynamic_tool ~active
+      (image_result ~receipt:"empty receipt" ~media_type:"image/png" ~data:"   ")
+    in
+    check bool "an image carrying no bytes is not a success" false
+      (tool.call ~call_id:"empty-image" (`Assoc [])).success)
+;;
+
+(* The projector sends the blocks and never [content] when blocks are present,
+   so a flat receipt that varies -- a timestamp, an elapsed duration -- used to
+   change the fingerprint and let a model repeat an identical call forever. *)
+let test_repeated_structured_result_aborts_under_a_varying_flat_receipt () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let calls = ref 0 in
+    let tool, _terminal_error = one_dynamic_tool ~active (fun _ ->
+      incr calls;
+      Ok { Agent_core.Types.content = Printf.sprintf "elapsed %dms" !calls
+         ; content_blocks = Some [ Agent_core.Types.Text "the same structured answer" ]
+         ; _meta = None })
+    in
+    let call index = tool.call ~call_id:(Printf.sprintf "repeat-%d" index) (`Assoc []) in
+    check bool "the first call is not a repeat" true
+      (Option.is_none (call 1).abort_turn);
+    check bool "one exact retry may be deliberate" true
+      (Option.is_none (call 2).abort_turn);
+    match (call 3).abort_turn with
+    | Some (Repeated_tool_call { repeated_count; _ }) ->
+      check int "the third identical structured result stops the turn" 3 repeated_count
+    | _ -> fail "a varying flat receipt hid an identical structured result")
+;;
+
+let test_text_only_results_still_fingerprint_their_content () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let calls = ref 0 in
+    let tool, _terminal_error = one_dynamic_tool ~active (fun _ ->
+      incr calls;
+      Ok { Agent_core.Types.content = Printf.sprintf "reading %d" !calls
+         ; content_blocks = None
+         ; _meta = None })
+    in
+    let call index = tool.call ~call_id:(Printf.sprintf "text-%d" index) (`Assoc []) in
+    check bool "distinct text results are progress, not repetition" true
+      (List.for_all (fun index -> Option.is_none (call index).abort_turn) [ 1; 2; 3 ]))
 ;;
 
 let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
@@ -2022,6 +2136,18 @@ let () =
             test_terminal_post_effect_failure_aborts_the_official_client_turn
         ; test_case "terminal media delivery failure retains applied effect" `Quick
             test_terminal_media_delivery_failure_keeps_applied_effect
+        ; test_case "image result refused when the model takes no image" `Quick
+            test_image_result_is_refused_when_the_model_takes_no_image
+        ; test_case "image result reaches a model that accepts images" `Quick
+            test_image_result_reaches_a_model_that_accepts_images
+        ; test_case "codex tool-result image media type checked before settling" `Quick
+            test_codex_tool_result_image_media_type_is_checked_before_settling
+        ; test_case "codex tool-result image data checked before settling" `Quick
+            test_codex_tool_result_image_data_is_checked_before_settling
+        ; test_case "repeated structured result aborts under a varying receipt" `Quick
+            test_repeated_structured_result_aborts_under_a_varying_flat_receipt
+        ; test_case "text-only results still fingerprint their content" `Quick
+            test_text_only_results_still_fingerprint_their_content
         ; test_case
             "ordinary post-effect failure aborts official-client turn"
             `Quick

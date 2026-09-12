@@ -689,6 +689,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input:
+          (Runtime_agent.runtime_accepts_image_input ~runtime_id)
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -773,6 +775,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input:
+          (Runtime_agent.runtime_accepts_image_input ~runtime_id)
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)

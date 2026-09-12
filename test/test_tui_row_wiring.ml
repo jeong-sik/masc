@@ -181,7 +181,7 @@ let test_the_detail_pane_compares_before_repeating_the_operation () =
 
 (* The subject column took [cols - 76] -- everything the fixed parts did not
    use. On rows whose subject is a keeper name, that spent ninety cells on
-   [edgar.a.poe] and left the recurrence past it reading [daily 08:00:00 A…]:
+   [edgar.a.poe] and left the recurrence past it reading [daily 08:00:00 A~]:
    the timezone, which is the part of a recurrence a reader cannot infer.
 
    Measured from the rows now, the way the Approvals and Fusion tables measure

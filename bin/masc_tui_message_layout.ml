@@ -545,7 +545,9 @@ let split_at_cells text cells =
 
 (* What a cut leaves behind in place of the text it dropped.
 
-   One mark for all three cuts here -- tail, middle, and the composer's head.
+   One mark for every cut -- the tail, the middle, and the composer's head in
+   this module, and the roster marquee in {!Masc_tui_roster_pane}, which is the
+   fourth and the only one that spends two at once.
    The middle cut spelled it "…" and the other two "~", and a single frame
    drew both: a roster name cut to [some…-name] sat beside a notice cut to
    [http://127.0.0.1:~], so the reader had to learn two spellings of one fact.
@@ -558,13 +560,13 @@ let split_at_cells text cells =
    pane for a record that has not settled. A cut is the one meaning it does
    not need to carry.
 
-   The cell cost is derived rather than written as 1, so each of the three
-   budgets subtracts what the mark actually spends. That is one cell today,
-   the same number the literal said. A wider mark would not be safe by
-   derivation alone: where the column is narrower than the mark, every one of
-   the three floors its budget at zero and draws the mark anyway rather than
-   cutting it, so the mark would overrun. A two-cell mark needs those three
-   sites decided, not just this value changed. *)
+   The cell cost is derived rather than written as 1, so each budget subtracts
+   what the mark actually spends. That is one cell today, the same number the
+   literals said. A wider mark would not be safe by derivation alone: where a
+   column is narrower than the mark, each of the four floors its budget at zero
+   and draws the mark anyway rather than cutting it, so the mark would overrun.
+   The marquee would overrun first, since it spends two. A two-cell mark needs
+   those four sites decided, not just this value changed. *)
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 
@@ -1822,7 +1824,7 @@ let last_page_start ~height row_costs =
    every shorter one.
 
    The tiers stopped at minutes here, and the Fusion table drew its ages
-   through this: all 28 rows read [12045m…], five figures of minutes cut by
+   through this: all 28 rows read [12045m~], five figures of minutes cut by
    the column. A day-old run and a nine-day-old run were the same shape. The
    comment beside the Gate row that prompted the hour tier says what applies
    just as well here -- an operator weighs the number, and five figures is

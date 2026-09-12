@@ -33,6 +33,32 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; action = Layout.Action_none
   }
 
+(* The row the Overview draws when its load fails, at the width an eighty
+   column terminal leaves for it: the box keeps four cells, the sentence
+   "  (data unreliable: " twenty and its ")" one, so the error is cut to 55.
+   The number is written here because [Masc_tui_render], which works it out
+   from that sentence, does not link into a test.
+
+   Pinned as a whole row because the trade is easy to state wrongly. The head
+   gets a third of the column and stops inside the first word of "failed:";
+   what pays for the address is everything between -- "ed: (GET failed:
+   connect backoff:". Widen the mark to two cells and this row changes shape,
+   which is the signal: four cut sites then need deciding, not one constant. *)
+let notice_room_at_eighty_columns = 55
+
+let test_a_load_failure_keeps_its_address_at_eighty_columns () =
+  let err =
+    "overview load failed: (GET failed: connect backoff: \
+     http://127.0.0.1:8935/api/overview)"
+  in
+  let drawn = Layout.fit_middle notice_room_at_eighty_columns err in
+  check string "the row the notice draws at eighty columns"
+    ("overview load fail" ^ Layout.cut_mark
+     ^ " http://127.0.0.1:8935/api/overview)")
+    drawn;
+  check int "and it spends the column the frame gave it"
+    notice_room_at_eighty_columns (Layout.display_width drawn)
+
 let test_keeps_latest_reply () =
   let entries =
     [ entry Layout.User "you" "tui-..aaaaaaaa" (String.make 600 'u')
@@ -1370,7 +1396,7 @@ let test_age_reads_as_seconds_then_minutes () =
     ]
 
 (* The ladder did not go past minutes, and the Fusion table drew every one of
-   its 28 rows through it: [12045m…], five figures cut by a seven-cell column,
+   its 28 rows through it: [12045m~], five figures cut by a seven-cell column,
    so a day-old run and a nine-day-old run were the same shape.
 
    The widest reading is what a column has to hold, so it is pinned: a span
@@ -2233,6 +2259,8 @@ let () =
             test_compact_origin_modes_keep_and_reach_the_hour_rail
         ; test_case "DST fallback hours remain visibly distinct" `Quick
             test_repeated_dst_hour_has_distinct_rails
+        ; test_case "a load failure keeps its address at eighty columns"
+            `Quick test_a_load_failure_keeps_its_address_at_eighty_columns
         ; test_case "terminal cell width and UTF-8 fit" `Quick
             test_terminal_cell_width_and_fit
         ; test_case "an emoji cluster with VS16, ZWJ, or a skin tone is two cells"

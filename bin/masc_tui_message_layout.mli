@@ -323,6 +323,19 @@ val dress_bare_links :
     a reset alone would strip the row's own dress from everything after the
     link. *)
 
+val cut_mark : string
+(** What a cut leaves behind in place of the text it dropped.
+
+    Exported because the marquee in {!Masc_tui_roster_pane} is a cut this
+    module does not make: it holds a window open and moves the name behind it,
+    marking whichever end still has text. Spelling the glyph there again is how
+    one cut site gets left behind when the mark changes. *)
+
+val cut_mark_cells : int
+(** Cells {!cut_mark} spends, so a caller budgeting around one mark -- or, in
+    the marquee's case, around two -- takes the number from the mark rather
+    than writing it. *)
+
 val fit_width : string -> int -> string
 (** [fit_width text width] pads [text] to [width] cells, or cuts its tail to
     fit and marks the cut with ["…"] -- the same mark {!fit_middle} uses, so

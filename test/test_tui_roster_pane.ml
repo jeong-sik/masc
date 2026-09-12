@@ -105,7 +105,7 @@ let test_selected_name_window_marks_hidden_edges () =
 
 let test_name_window_is_static_until_selected_and_overflowing () =
   (* An unselected row does not move, but it still has to be identifiable.
-     It used to keep the head and drop the tail ("abcdefg…"), which rendered
+     It used to keep the head and drop the tail ("abcdefg~"), which rendered
      every keeper sharing a prefix the same. It now drops the middle, so both
      the shared family and the deciding tail survive; only the cursor row
      scrolls the whole name. See [Masc_tui_message_layout.fit_middle]. *)

@@ -7,7 +7,7 @@ let setup () = M.clear ()
 
 let make_result ~name ~success ~duration_ms : R.result =
   if success
-  then R.Completed { content_blocks = None; R.tool_name = name; data = `Null; metadata = None; duration_ms }
+  then R.Completed { retained_artifacts = []; content_blocks = None; R.tool_name = name; data = `Null; metadata = None; duration_ms }
   else
     R.Failed
       { R.class_ = Runtime_failure
@@ -26,7 +26,7 @@ let test_record_and_stats () =
   M.record (make_result ~name:"t1" ~success:false ~duration_ms:5.0);
   M.record
     (R.Deferred
-       { R.tool_name = "t1"; data = `Null; metadata = None; content_blocks = None; duration_ms = 7.0 });
+       { R.retained_artifacts = []; tool_name = "t1"; data = `Null; metadata = None; content_blocks = None; duration_ms = 7.0 });
   match M.stats_for "t1" with
   | Some s ->
     Alcotest.(check int) "call_count" 4 s.call_count;

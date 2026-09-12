@@ -42,6 +42,9 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # run_episode.sh seeds the keeper's gh hosts.yml from this and then calls
+    # keeper_up, whose remote_ssh preflight refuses without a gh identity.
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
 
 
 def make_agent(tmp_path, **kw):
@@ -227,3 +230,11 @@ def test_a_missing_cache_class_does_not_zero_the_rest(tmp_path, monkeypatch):
         tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
         input_tokens=1000, output_tokens=100)
     assert context.cost_usd == pytest.approx(1000 * 2e-06 + 100 * 1e-05)
+
+
+def test_the_env_refuses_without_a_github_credential(tmp_path, monkeypatch):
+    """keeper_up refuses a remote_ssh keeper with no gh identity, and
+    run_episode.sh calls it under set -e: the credential is named here."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="GH_TOKEN"):
+        make_agent(tmp_path)._container_env()

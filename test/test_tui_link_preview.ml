@@ -196,7 +196,8 @@ let test_a_refused_image_url_is_remembered_and_said () =
   in
   List.iter
     (fun (refusal, said) ->
-      mosaic_store url (Refused refusal);
+      clear_cache ();
+      load_mosaic url ~compute:(fun () -> Refused refusal);
       (match mosaic_lookup url with
        | Some (Refused kept) ->
            check string "refusal kept" (mosaic_refusal_text refusal) (mosaic_refusal_text kept)

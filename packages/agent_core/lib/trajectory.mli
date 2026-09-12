@@ -14,6 +14,9 @@
 
 type tool_call =
   { tool_use_id : string option
+  ; source_seq : int option
+    (** Exact raw-trace start record sequence. None for an unmatched finish or a
+        trajectory without a raw-trace source; never inferred from time or id. *)
   ; tool_name : string
   ; tool_input : Yojson.Safe.t
   ; tool_result : string option
@@ -69,7 +72,10 @@ val pp_trajectory : Format.formatter -> trajectory -> unit
 (** {1 Construction} *)
 
 (** Build trajectory from raw trace records. Pairs tool-start/finish
-    events, classifies assistant blocks into Think/Respond steps,
+    events only by their complete [(tool_use_id, tool_turn, tool_planned_index)]
+    invocation coordinates. Missing coordinates, ambiguous starts, and finishes
+    preceding their start remain unpaired; provider IDs alone do not identify an
+    invocation. Classifies assistant blocks into Think/Respond steps,
     and generates Observe steps from tool results. *)
 val of_raw_trace_records : Raw_trace.record list -> trajectory
 

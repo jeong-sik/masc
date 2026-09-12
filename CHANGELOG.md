@@ -5,6 +5,7 @@
 
 ### Fixed
 
+- HTTP pool: preserve DNS/TCP failures under one connection deadline, reclaim failed or cancelled client sockets, and connect through the address that passed the TCP probe without pinning later DNS reconnects (#35381, #35389, #35394).
 - Keeper: time spent running tools or delegated image analysis is no longer attributed to a silent parent provider; inference monitoring resumes when the provider lease is reacquired (#35454).
 - TUI: terminal and superseded tool calls no longer remain waiting for a result. The header distinguishes the observed turn runtime from configuration and clears stale runtime identity at a new attempt (#35455).
 - Runtime loading keeps typed configuration failures through to doctor diagnostics (#35378, #35417, #35435).

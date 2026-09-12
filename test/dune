@@ -5715,3 +5715,12 @@
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+(test
+ (name test_lane_addon_skills)
+ (modules test_lane_addon_skills)
+ (deps
+  ../addons/msx-observer/lane.toml
+  (source_tree ../addons/msx-observer/skills))
+ (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
+  masc.skill_snapshot masc.skill_snapshot_service))

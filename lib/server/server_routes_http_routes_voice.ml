@@ -42,29 +42,32 @@ let is_valid_token (s : string) : bool =
 let generated_media_serve_max_bytes () =
   Env_config.KeeperGeneratedMedia.max_bytes ()
 
-(* Clip path under the same audio dir [Voice_bridge_transport.make_audio_file]
-   writes to. Reuses [Voice_bridge_core.masc_base_dir] so this route and the
-   synthesis side cannot drift apart. *)
-let clip_path ~token =
-  Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio"
-  |> fun dir -> Filename.concat dir (token ^ ".mp3")
+(* The clip a token names, under the same audio dir
+   [Voice_bridge_transport.make_audio_file] writes to. Reuses
+   [Voice_bridge_core.find_clip] so this route and the synthesis side cannot
+   drift apart — including on the container, which the endpoint that spoke
+   decides: say writes WAVE, the HTTP providers answer MP3. *)
+let find_clip ~token =
+  Voice_bridge_core.find_clip ~dir:(Voice_bridge_core.audio_dir ()) ~token
 
 let serve_clip ~token request reqd =
-  let path = clip_path ~token in
-  if not (Sys.file_exists path) then
+  match find_clip ~token with
+  | None ->
     (* Never synthesized, or reaped by the 24h TTL reaper. Text-only render
        remains the dashboard fallback, so 404 is not a hard failure. *)
     respond_public_read_json_value ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
-  else (
+  | Some (path, format) -> (
     (* Raw bytes — the dashboard's <audio>/Audio element fetches this URL
-       directly. [Fs_compat.load_file] returns the mp3 bytes as a string;
-       mp3 has no OCaml-string encoding hazard. content-length is explicit
-       to avoid chunked encoding, which some clients mishandle for media. *)
+       directly. [Fs_compat.load_file] returns the encoded bytes as a string;
+       neither container has an OCaml-string encoding hazard. content-length
+       is explicit to avoid chunked encoding, which some clients mishandle
+       for media. The content type is the format found on disk, so a player
+       is never told MP3 about WAVE bytes. *)
     let body = Fs_compat.load_file path in
     let headers =
       Httpun.Headers.of_list
-        ( ("content-type", "audio/mpeg")
+        ( ("content-type", Voice_bridge_core.clip_content_type format)
         :: ("content-length", string_of_int (String.length body))
         :: public_read_cors_headers request )
     in

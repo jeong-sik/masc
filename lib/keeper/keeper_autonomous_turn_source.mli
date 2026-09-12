@@ -4,7 +4,9 @@
     identity, generation, and exact AGENT_CORE raw-trace run reference. This reader
     selects only [Autonomous] records and projects only that recorded run.
     Final text and typed execution steps come from the same exact raw trace;
-    it never scans or concatenates provider runs. *)
+    it never scans or concatenates provider runs. Tool steps carry a canonical
+    execution id only when the declared execution ledger row matches the exact
+    raw invocation occurrence. Ambiguous or missing evidence remains unlinked. *)
 
 type turn =
   { turn_id : string

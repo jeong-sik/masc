@@ -927,6 +927,34 @@ describe('ChatTranscript', () => {
     expect(other?.querySelector('[data-edit-snapshot-view]')).toBeNull()
   })
 
+  it('opens an autonomous Edit and joins original snapshots by its canonical execution', () => {
+    const blob = { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/octet-stream', preview: '' } }
+    recordToolCallOutputs([toolCallOutput({
+      execution_id: 'autonomous-edit-execution', tool_use_id: 'same-provider-id', tool: 'Edit', input: {},
+      output: JSON.stringify({ ok: true, mode: 'patch', path: 'story.md', occurrences: 1,
+        edit_snapshots: { status: 'stored', before: blob, after: blob } }),
+      route_evidence: { descriptor_id: 'agent.edit_file' },
+    })])
+    const entries = chatHistoryEntriesFromRest('writer', [{
+      id: 'autonomous:trace-writer#428', role: 'assistant', ts: 1789223399, content: null,
+      autonomous_turn: { turn_id: 'trace-writer#428' },
+      blocks: [{ t: 'trace', trace: [
+        { kind: 'tool', name: 'Edit', status: 'ok', execution_id: 'autonomous-edit-execution' },
+        { kind: 'tool', name: 'Edit', status: 'ok', execution_id: 'another-execution' },
+      ] }],
+    }])
+    render(html`<${ChatTranscript} entries=${entries} emptyText="empty" />`, container)
+    const toggle = container.querySelector<HTMLButtonElement>('.chat-block-trace-hd')
+    expect(toggle).not.toBeNull()
+    fireEvent.click(toggle!)
+    const first = container.querySelector('[data-chat-trace-execution-id="autonomous-edit-execution"]')
+    const second = container.querySelector('[data-chat-trace-execution-id="another-execution"]')
+    expect(first?.querySelector('[data-edit-snapshot-view]')?.textContent).toContain('편집 전후 원본 보기')
+    expect(first?.getAttribute('data-chat-trace-provenance')).not.toBe('activity')
+    expect(second?.querySelector('[data-edit-snapshot-view]')).toBeNull()
+    expect(container.querySelectorAll('[data-edit-snapshot-view]')).toHaveLength(1)
+  })
+
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),

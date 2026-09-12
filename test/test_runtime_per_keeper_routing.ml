@@ -961,12 +961,15 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
        | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
       check_first_run_lanes path "codex.codex" ~cli:true;
-      (match Runtime.verifier_exact_lane_slot_ids () with
-       | Error _ -> ()
-       | Ok slots ->
-         Alcotest.failf
-           "CLI first run must not give verifier_exact admitted slots, got: %s"
-           (String.concat ", " slots))))
+      (* This is the offline first-run writer. The runtime registry is a
+         server-bootstrap publication, not a side effect of saving a file.
+         test_verifier_official_client exercises that publication through the
+         default selector and a real managed client process. *)
+      (match Runtime_exact_output_registry.current () with
+       | Error Runtime_exact_output_registry.Registry_not_published -> ()
+       | Error error -> Alcotest.fail
+           (Runtime_exact_output_registry.publication_error_to_string error)
+       | Ok _ -> Alcotest.fail "offline setup unexpectedly published a live registry")))
 ;;
 
 let test_first_run_fallback_order_and_preservation () =

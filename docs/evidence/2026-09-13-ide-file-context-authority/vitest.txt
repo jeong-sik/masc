@@ -1,0 +1,22 @@
+
+ RUN  v4.1.5 /private/tmp/masc-ide-file-context-authority-20260913/dashboard
+
+(node:40378) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40383) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40374) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40377) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:40380) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+···································GET http://localhost:3000/api/v1/board?exclude_system=true&exclude_automation=true&voter=dashboard&limit=150 404 (Not Found)
+GET http://localhost:3000/api/v1/dashboard/keeper-decisions?limit=200 404 (Not Found)
+·······································
+
+ Test Files  5 passed (5)
+      Tests  74 passed (74)
+   Start at  03:00:37
+   Duration  7.32s (transform 6.52s, setup 4.65s, import 10.86s, tests 1.93s, environment 4.14s)
+

@@ -384,11 +384,18 @@ let install () =
         Log.Task.warn "verification Skills unavailable: %s" detail;
         []
     in
-    let apply_review_verdict_output_contract provider_cfg =
-      Ok
-        (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
-           provider_cfg)
+    let system_prompt =
+      Prompt_registry.render_prompt_template Prompt_names.verification_system []
     in
+    match system_prompt with
+    | Error detail ->
+      Error (Agent_core.Error.Config
+        (Agent_core.Error.InvalidConfig { field = "verification.system"; detail }))
+    | Ok system_prompt ->
+    (* Each independent review owns a fresh official-client session. Sharing the
+       empty Keeper name would resume another task's thread or contend for its
+       active client session. The owner remains in persisted runtime evidence. *)
+    let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
         Keeper_turn_driver_wrappers.run_named_with_masc_tools
@@ -396,17 +403,13 @@ let install () =
           ~base_path
           ~goal:prompt
           ?goal_blocks
-          (* This reviewer carries its whole instruction in the goal; the
-             review prose lives in config/prompts/verification.md and reaches
-             [prompt]. Empty was the old default, so this is what has been
-             running. It also means an official-client runtime in the
-             verifier_exact slots would be refused at the host (#33862) --
-             today's slots are API providers, so nothing reaches that. *)
-          ~system_prompt:""
+          ~keeper_name
+          ~system_prompt
           ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~native_tools
           ~dispatch
-          ~provider_config_transform:apply_review_verdict_output_contract
+          ~context:(Agent_core.Context.create ())
+          ~output_contract:Keeper_turn_driver.Tool_verdict
           ~on_runtime_attempt_error
           ?sw
           ())

@@ -113,6 +113,8 @@ type runtime_handler =
   | Tool_memory_search
   | Tool_memory_retract
   | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_remove
   | Tool_library_search
   | Tool_library_read
   | Tool_surface_read
@@ -244,6 +246,8 @@ let runtime_handler_to_string = function
   | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_retract -> "tool_memory_retract"
   | Tool_memory_write -> "tool_memory_write"
+  | Tool_constitution_write -> "tool_constitution_write"
+  | Tool_constitution_remove -> "tool_constitution_remove"
   | Tool_library_search -> "tool_library_search"
   | Tool_library_read -> "tool_library_read"
   | Tool_surface_read -> "tool_surface_read"
@@ -448,7 +452,13 @@ let descriptor
     match runtime_handler with
     | Tool_surface_post -> Terminal
     | Tool_memory_write | Tool_memory_retract -> Direct_terminal
+    (* The constitution tools are the memory writes' peers in layer (both are
+       durable self-writes on base_tools) but not on this axis. A memory write
+       is the conclusion of a turn; recording a decision the board already made
+       is not, so these stay Ordinary and the keeper keeps working. *)
     | ( Tool_execute
+      | Tool_constitution_write
+      | Tool_constitution_remove
       | Tool_keeper_code_query_dispatch
       | Tool_keeper_webmcp_dispatch
       | Tool_search_files
@@ -1281,6 +1291,14 @@ let memory_retract_schema_source, memory_retract_schema =
 
 let memory_write_schema_source, memory_write_schema =
   base_schema_declared "keeper_memory_write"
+;;
+
+let constitution_write_schema_source, constitution_write_schema =
+  base_schema_declared "keeper_constitution_write"
+;;
+
+let constitution_remove_schema_source, constitution_remove_schema =
+  base_schema_declared "keeper_constitution_remove"
 ;;
 
 let ide_annotate_schema_source, ide_annotate_schema =
@@ -2449,6 +2467,28 @@ let internal_descriptors : t list =
       ~input_schema:memory_write_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_memory_write
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_write_schema_source
+      ~id:"keeper.constitution.write"
+      ~name:"keeper_constitution_write"
+      ~description:constitution_write_schema.description
+      ~input_schema:constitution_write_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_constitution_write
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_remove_schema_source
+      ~id:"keeper.constitution.remove"
+      ~name:"keeper_constitution_remove"
+      ~description:constitution_remove_schema.description
+      ~input_schema:constitution_remove_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_constitution_remove
       ()
     (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
   ; in_process_descriptor

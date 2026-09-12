@@ -13722,10 +13722,59 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
 ;;
 
+(* Assigning a voice to a keeper: two lists side by side, the keeper walking
+   under up and down and the voice under the arrows. Drawn instead of the pane
+   rather than over it, because both are lists and a list over a list is two
+   cursors a reader has to keep apart. *)
+let render_voice_agent (state : state) (session : voice_agent_session) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  let window = 6 in
+  let rows label items cursor draw =
+    box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
+    let count = List.length items in
+    if count = 0
+    then box_line buf cols (Printf.sprintf "    %s—%s" Ansi.dim Ansi.reset)
+    else (
+      let first = max 0 (min (cursor - (window / 2)) (count - window)) in
+      List.iteri
+        (fun index item ->
+          if index >= first && index < first + window
+          then
+            box_line buf cols
+              (if index = cursor
+               then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold (draw item) Ansi.reset
+               else Printf.sprintf "    %s  %s%s" Ansi.dim (draw item) Ansi.reset))
+        items;
+      box_line buf cols
+        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
+  in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Voice \xc2\xb7 keeper voices")
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line buf cols "";
+  rows "keeper  (up/down)" session.vas_agents session.vas_agent_cursor (fun agent -> agent);
+  box_line buf cols "";
+  rows "voice  (left/right)" session.vas_voices session.vas_voice_cursor snd;
+  (match session.vas_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"enter:assign  esc:back");
+  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+;;
+
 let render_voice (state : state) =
-  match state.voice_wizard with
-  | Some session -> render_voice_wizard state session
-  | None ->
+  match state.voice_agent_voices, state.voice_wizard with
+  | Some session, _ -> render_voice_agent state session
+  | None, Some session -> render_voice_wizard state session
+  | None, None ->
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
   let field name value =

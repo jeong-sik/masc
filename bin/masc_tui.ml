@@ -1766,6 +1766,8 @@ type async_msg =
   | Voice_wizard_saved of (Yojson.Safe.t, string) result
   | Voice_wizard_probed of (Yojson.Safe.t, string) result
   | Voice_wizard_voices of (Yojson.Safe.t, string) result
+  | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
+  | Voice_agent_voice_saved of (Yojson.Safe.t, string) result
   | Voice_config_loaded of
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
@@ -2676,6 +2678,103 @@ let voice_wizard_voice_rows json =
          items
      | Some _ | None -> [])
   | _ -> []
+;;
+
+(* The voices to choose from when assigning one to a keeper. Asked of the
+   section's own first endpoint: the assignment is stored per keeper but read
+   per endpoint, so the ids have to be the ones that endpoint answers to. *)
+(* The kind and credential variable of the first endpoint [voice.tts] names, read
+   off the admin setup answer the pane already holds. First rather than chosen:
+   a section's endpoints are a fallback chain for one voice, so the one in front
+   is the one whose vocabulary the assignment has to speak. *)
+let voice_setup_first_tts_endpoint state =
+  let member path json =
+    List.fold_left
+      (fun acc key ->
+        match acc with
+        | Some (`Assoc fields) -> List.assoc_opt key fields
+        | Some _ | None -> None)
+      (Some json) path
+  in
+  match state.voice_setup with
+  | Some json ->
+    (match member [ "tts"; "endpoints" ] json with
+     | Some (`List (`Assoc entry :: _)) ->
+       let text key =
+         match List.assoc_opt key entry with
+         | Some (`String value) when String.trim value <> "" -> Some value
+         | Some _ | None -> None
+       in
+       (match text "kind" with
+        | Some kind -> Some (kind, text "api_key_env")
+        | None -> None)
+     | Some _ | None -> None)
+  | None -> None
+;;
+
+let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
+  let host = server_peer_host in
+  let port = state.port in
+  let payload =
+    Yojson.Safe.to_string
+      (`Assoc
+        ([ "kind", `String kind ]
+         @
+         match api_key_env with
+         | Some variable when String.trim variable <> "" ->
+           [ "api_key_env", `String variable ]
+         | Some _ | None -> []))
+  in
+  let run () =
+    let result =
+      Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/voices" ~body:payload
+    in
+    enqueue_async mailbox (Voice_agent_voices_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async mailbox (Voice_agent_voices_loaded (Error "Eio switch is unavailable"))
+;;
+
+let launch_voice_agent_voice_save state ~mailbox
+    (session : Masc_tui_types.voice_agent_session) =
+  match Masc_tui_types.voice_agent_selected session with
+  | None ->
+    state.voice_agent_voices
+      <- Some
+           { session with
+             vas_status = Some "pick a keeper and a voice first"
+           }
+  | Some (agent, voice) ->
+    state.voice_agent_voices
+      <- Some { session with vas_saving = true; vas_status = Some "saving…" };
+    let host = server_peer_host in
+    let port = state.port in
+    let payload =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "expected_revision", `String session.Masc_tui_types.vas_revision
+          ; ( "changes"
+            , `List
+                [ `Assoc
+                    [ "change", `String "set_agent_voice"
+                    ; "agent", `String agent
+                    ; "voice", `String voice
+                    ]
+                ] )
+          ])
+    in
+    let run () =
+      let result =
+        Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/setup" ~body:payload
+      in
+      enqueue_async mailbox (Voice_agent_voice_saved result)
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None ->
+       enqueue_async mailbox (Voice_agent_voice_saved (Error "Eio switch is unavailable")))
 ;;
 
 let launch_voice_wizard_save state ~mailbox
@@ -11039,6 +11138,46 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              <- Some
                   (Masc_tui_types.voice_wizard_with_voices session
                      (voice_wizard_voice_rows json)))
+  | Voice_agent_voices_loaded result ->
+      (match (state.voice_agent_voices, result) with
+       | None, _ -> ()
+       | Some session, Error message ->
+           state.voice_agent_voices
+             <- Some { session with vas_status = Some message }
+       | Some session, Ok json ->
+           state.voice_agent_voices
+             <- Some
+                  { session with
+                    vas_voices = voice_wizard_voice_rows json
+                  ; vas_voice_cursor = 0
+                  })
+  | Voice_agent_voice_saved result ->
+      (match (state.voice_agent_voices, result) with
+       | None, _ -> ()
+       | Some session, Error message ->
+           state.voice_agent_voices
+             <- Some { session with vas_saving = false; vas_status = Some message }
+       | Some session, Ok json ->
+           (* The pane is reloaded because what it was showing is a revision
+              behind, and the next save carries the revision this one
+              answered with -- a reader assigning several voices in a row
+              would otherwise be told the second is stale. *)
+           launch_voice_config_load state ~mailbox;
+           let revision =
+             match json with
+             | `Assoc fields ->
+               (match List.assoc_opt "revision" fields with
+                | Some (`String value) -> value
+                | Some _ | None -> session.vas_revision)
+             | _ -> session.vas_revision
+           in
+           state.voice_agent_voices
+             <- Some
+                  { session with
+                    vas_saving = false
+                  ; vas_revision = revision
+                  ; vas_status = Some "saved."
+                  })
   | Voice_wizard_probed result ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
@@ -15989,6 +16128,28 @@ and is loaded on demand through keeper_skill.
                  set (Masc_tui_types.runtime_param_edit_append edit s);
                  state.runtime_params_notice <- None
                | _ -> ()))
+       (* The assignment picker owns every key while it is open, the way the
+          wizard does. It is not a text field -- both axes are closed lists --
+          so it sits beside the text targets rather than among them. *)
+       | Some k when Option.is_some state.voice_agent_voices ->
+           (match state.voice_agent_voices with
+            | None -> ()
+            | Some session ->
+              let set value = state.voice_agent_voices <- Some value in
+              if session.vas_saving && not (String.equal k "esc")
+              then ()
+              else (
+                match k with
+                | "esc" -> state.voice_agent_voices <- None
+                | "up" -> set (Masc_tui_types.voice_agent_walk_agents session ~ahead:false)
+                | "down" -> set (Masc_tui_types.voice_agent_walk_agents session ~ahead:true)
+                | "left" ->
+                  set (Masc_tui_types.voice_agent_walk_voices session ~ahead:false)
+                | "right" ->
+                  set (Masc_tui_types.voice_agent_walk_voices session ~ahead:true)
+                | "\r" | "\n" | "enter" ->
+                  launch_voice_agent_voice_save state ~mailbox:async_messages session
+                | _ -> ()))
        | Some k
          when text_input_target state ~compact_viewport = Some Text_voice_wizard ->
            (match state.voice_wizard with
@@ -21007,6 +21168,38 @@ and is loaded on demand through keeper_skill.
            (* Withdrawing the choice withdraws the background with it. *)
            sync_theme_page ();
            store_theme_choice None
+       (* Assigning a voice to a keeper, on the pane that shows the voices. A
+          workspace with several keepers and one voice cannot tell them apart
+          by ear, and say ships nine Korean voices for free, so the reason to
+          give each its own is no longer a purchase. *)
+       | Some ("a" | "A") when state.view = Config && state.config_pane = Config_voice ->
+           (match state.voice_setup with
+            | Some (`Assoc fields) ->
+              (match List.assoc_opt "revision" fields with
+               | Some (`String revision) ->
+                 let agents =
+                   List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
+                 in
+                 if agents = []
+                 then report_action state "error" "배정할 키퍼가 없습니다"
+                 else (
+                   let session = Masc_tui_types.voice_agent_open ~agents ~revision in
+                   state.voice_agent_voices <- Some session;
+                   (* The ids have to be the ones the section's own endpoint
+                      answers to, so its kind is what is asked. *)
+                   match voice_setup_first_tts_endpoint state with
+                   | None ->
+                     state.voice_agent_voices
+                       <- Some
+                            { session with
+                              vas_status =
+                                Some "[voice.tts] has no endpoint to ask for voices"
+                            }
+                   | Some (kind, api_key_env) ->
+                     launch_voice_agent_voices state ~mailbox:async_messages ~kind
+                       ~api_key_env)
+               | Some _ | None -> ())
+            | Some _ | None -> ())
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets

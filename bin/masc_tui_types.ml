@@ -2687,6 +2687,60 @@ type voice_wizard_session =
             responds is measured, not inferred from the write succeeding. *)
   }
 
+(* Assigning a voice to one keeper. Separate from the wizard because it is
+   shaped differently: the wizard walks questions to write one endpoint, this
+   walks two lists to write one line of [voice.tts.agent_voices].
+
+   It exists because a workspace with more than one keeper and one voice cannot
+   tell them apart by ear, and because say ships nine Korean voices for free --
+   the reason to give each keeper its own is no longer a purchase. *)
+type voice_agent_session =
+  { vas_agents : string list
+  ; vas_agent_cursor : int
+  ; vas_voices : (string * string) list
+  ; vas_voice_cursor : int
+  ; vas_revision : string
+        (** What the configuration read as when this opened, carried by the
+            save the way the wizard carries it. *)
+  ; vas_status : string option
+  ; vas_saving : bool
+  }
+
+let voice_agent_open ~agents ~revision =
+  { vas_agents = agents
+  ; vas_agent_cursor = 0
+  ; vas_voices = []
+  ; vas_voice_cursor = 0
+  ; vas_revision = revision
+  ; vas_status = None
+  ; vas_saving = false
+  }
+
+let walk_cursor cursor ~count ~ahead =
+  if count = 0 then 0 else ((cursor + if ahead then 1 else -1) + count) mod count
+
+let voice_agent_walk_agents session ~ahead =
+  { session with
+    vas_agent_cursor =
+      walk_cursor session.vas_agent_cursor ~count:(List.length session.vas_agents) ~ahead
+  ; vas_status = None
+  }
+
+let voice_agent_walk_voices session ~ahead =
+  { session with
+    vas_voice_cursor =
+      walk_cursor session.vas_voice_cursor ~count:(List.length session.vas_voices) ~ahead
+  ; vas_status = None
+  }
+
+let voice_agent_selected session =
+  match
+    ( List.nth_opt session.vas_agents session.vas_agent_cursor
+    , List.nth_opt session.vas_voices session.vas_voice_cursor )
+  with
+  | Some agent, Some (voice_id, _) -> Some (agent, voice_id)
+  | _ -> None
+
 let voice_wizard_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) =
   match step with
   | Voice_wizard.Name -> draft.Voice_wizard.endpoint_id
@@ -3672,6 +3726,7 @@ type state = {
   mutable voice_setup: Yojson.Safe.t option;
   mutable voice_setup_error: string option;
   mutable voice_wizard: voice_wizard_session option;
+  mutable voice_agent_voices: voice_agent_session option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -5722,6 +5777,7 @@ let create_state
   workspace;
   port;
   refresh_interval;
+  voice_agent_voices = None;
 }
 
 let visible_system_log_entries (state : state) =

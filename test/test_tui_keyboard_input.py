@@ -14646,6 +14646,61 @@ def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
+    """Giving one keeper its own voice, from the voice pane.
+
+    A workspace with several keepers and one voice cannot tell them apart by
+    ear. say ships nine Korean voices, so the reason to give each its own is no
+    longer a purchase -- which makes this the assignment being reachable
+    without editing the file.
+    """
+
+    def interact(
+        process: "subprocess.Popen[bytes]",
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        def expect(frame: bytes, needle: bytes, what: str) -> None:
+            if needle not in frame:
+                raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
+
+        open_the_voice_pane(process, master_fd, output)
+        opened = press_and_settle(process, master_fd, output, b"a")
+        expect(opened, b"keeper voices", "a did not open the assignment")
+        expect(opened, b"alpha", "the keepers did not draw")
+        expect(opened, b"Korean Bright Voice", "the voices did not draw")
+
+        # Both axes move, and they move independently: the voice walks under
+        # the arrows and the keeper under up and down, so an assignment cannot
+        # be made by moving one and hoping the other followed.
+        walked = press_and_settle(process, master_fd, output, b"\x1b[C")
+        expect(walked, b"Han Aim", "the right arrow did not walk the voices")
+
+        os.write(master_fd, b"\r")
+        body = json.loads(
+            wait_for_http_request(
+                process, master_fd, output, requests, path="/api/v1/voice/setup"
+            )
+        )
+        if body.get("expected_revision") != "fixture-voice-revision":
+            raise AssertionError(f"the assignment lost the revision: {body!r}")
+        changes = body.get("changes", [])
+        if len(changes) != 1 or changes[0].get("change") != "set_agent_voice":
+            raise AssertionError(f"the assignment wrote more than one line: {body!r}")
+        if changes[0].get("voice") != "RR11BBccDDeeFFggHHii":
+            raise AssertionError(f"the walked voice did not reach the save: {changes!r}")
+        if not changes[0].get("agent"):
+            raise AssertionError(f"the assignment names no keeper: {changes!r}")
+
+        press_and_settle(process, master_fd, output, b"\x1b")
+        read_available(master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def run_voice_wizard_regression(executable: str) -> None:
     requests: HttpRequests = []
     # The probe that follows a save is left to fail: whether an endpoint
@@ -14657,6 +14712,14 @@ def run_voice_wizard_regression(executable: str) -> None:
         interact=voice_wizard_interaction(requests),
         http_fixtures=voice_wizard_http_fixtures(),
         http_requests=requests,
+    )
+    agent_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="A keeper is given its own voice from the voice pane",
+        interact=voice_agent_voice_interaction(agent_requests),
+        http_fixtures=voice_wizard_http_fixtures(),
+        http_requests=agent_requests,
     )
     say_requests: HttpRequests = []
     run_terminal_scenario(

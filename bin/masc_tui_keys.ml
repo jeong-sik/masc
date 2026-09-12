@@ -458,9 +458,10 @@ let for_surface = function
           ~help:"on presets, put the selected one back; press twice to confirm"
       ; b Act "i" "input"
           ~help:"on prompts, the input this prompt was last given"
-      ; b Act "a" "fragments"
+      ; b Act "a" "fragments / voice"
           ~help:"on prompts, show or hide the internal pieces the main prompts \
-                 are built from; not on the runtime assets reading"
+                 are built from, though not on the runtime assets reading; on \
+                 voice, give the selected keeper its own voice"
       ; b Act "o" "assets"
           ~help:"on prompts, switch between the read-only runtime assets and \
                  the registry you can override"

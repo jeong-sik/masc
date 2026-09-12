@@ -483,7 +483,7 @@ let strict_write_result = function
           Fs_compat.atomic_replace_failure) as failure) ->
     Error (Io_error (Fs_compat.atomic_replace_failure_to_string failure))
 
-let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
+let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot ~restore_runtime
     ~read_revision
     ~expected_revision ~(config : Workspace.config)
     ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
@@ -559,16 +559,15 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
         Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
       in
       let* runtime_before =
-        if Fs_compat.file_exists runtime_toml
-        then
-          Safe_ops.read_file_safe runtime_toml
-          |> Result.map (fun bytes -> Some (Keeper_config_journal.Runtime_bytes bytes))
+          Keeper_config_journal.read_before_image ~path:runtime_toml
+          |> Result.map (function
+               | Some bytes -> Some (Keeper_config_journal.Runtime_bytes bytes)
+               | None -> Some Keeper_config_journal.Runtime_absent)
           |> Result.map_error (fun detail ->
                Io_error
                  (Printf.sprintf
                     "cannot read runtime.toml before write: %s"
                     detail))
-        else Ok (Some Keeper_config_journal.Runtime_absent)
       in
       let journal_record : Keeper_config_journal.record =
         { tx_id = Printf.sprintf "tx-%.0f" (Time_compat.now () *. 1000.0)
@@ -579,8 +578,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              | Present bytes -> Keeper_config_journal.Manifest_bytes bytes)
         ; runtime_before
         ; manifest_path = path
-        ; runtime_path =
-            Runtime.keeper_assignment_transaction_path runtime_transaction
+        ; runtime_path = Some runtime_toml
         ; started_at_unix = Time_compat.now ()
         ; phase = Prepared
         }
@@ -590,19 +588,6 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
         |> Result.map_error (fun detail ->
           Io_error ("config journal stage failed: " ^ detail))
       in
-      let* write_warnings =
-        (if created
-         then
-           Keeper_toml_loader.create_keeper_toml_file_strict_staged
-             ~path
-             (full_fields parsed meta)
-         else
-           let edits = explicit_edits parsed in
-           if edits = []
-           then Ok ()
-           else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
-        |> strict_write_result
-      in
       let clear_journal () =
         match Keeper_config_journal.clear ~journal_path with
         | Ok () -> Ok ()
@@ -611,17 +596,8 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
 
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-        (* Mark the journal rolling back BEFORE restoring, so a crash
-           mid-rollback still finds a journal and recovery retries the
-           same idempotent restores. The stage result is deliberately
-           ignored: the phase line is bookkeeping, not authority — the
-           journal's mere presence is the recovery trigger, and recovery
-           reruns the same idempotent restores either way, so a failed
-           phase write cannot change the recovery outcome. *)
-        let _ =
-          Keeper_config_journal.stage ~base_path
-            { journal_record with phase = Rolling_back }
-        in
+        (* The original durable before-images remain authoritative throughout
+           compensation. Recovery needs no additional phase write. *)
         let runtime_restore =
           match restore_runtime runtime_transaction with
           | Ok
@@ -674,8 +650,26 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
                (Io_error
                   (Printf.sprintf "%s (original error: %s)" detail
                      (error_to_string error)))
-           | Error other -> Error other)        | Error reconciliation -> Error reconciliation
+           | Error other -> Error other)
+        | Error reconciliation -> Error reconciliation
       in
+      let write_result =
+        (match write_manifest with
+         | Some write -> write path
+         | None -> if created
+         then
+           Keeper_toml_loader.create_keeper_toml_file_strict_staged
+             ~path
+             (full_fields parsed meta)
+         else
+           let edits = explicit_edits parsed in
+           if edits = [] then Ok ()
+           else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
+        |> strict_write_result
+      in
+      match write_result with
+      | Error error -> rollback error
+      | Ok write_warnings ->
       (match read_revision path with
        | Error detail ->
          rollback
@@ -701,7 +695,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              Printexc.raise_with_backtrace exn backtrace
            | exception exn ->
              let backtrace = Printexc.get_raw_backtrace () in
-             rollback
+             Error
                (Publication_exception
                   { path
                   ; detail =
@@ -768,6 +762,18 @@ let persist ~expected_revision ~config ~parsed ~meta () =
     ~publish:(fun _runtime_transaction outcome -> Commit outcome) ()
 
 module For_testing = struct
+  let persist_with_faults ?write_manifest ~on_restore ~expected_revision ~config
+      ~parsed ~meta ~publish () =
+    persist_with_publication_using ?write_manifest
+      ~with_lock:with_manifest_lock
+      ~restore_snapshot:(fun path snapshot ->
+        on_restore ();
+        restore_snapshot_unlocked path snapshot)
+      ~restore_runtime:Runtime.restore_keeper_assignment_transaction
+      ~read_revision:revision_of_path_unlocked
+      ~expected_revision ~config ~parsed ~meta ~publish ()
+  ;;
+
   let persist_with_release_failure ~release_failure ~expected_revision ~config
       ~parsed ~meta () =
     let with_lock path f =

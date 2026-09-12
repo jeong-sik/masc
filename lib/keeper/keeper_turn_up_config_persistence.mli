@@ -110,6 +110,17 @@ val persist :
   (outcome receipt, error) result
 
 module For_testing : sig
+  val persist_with_faults :
+    ?write_manifest:(string -> (unit, Fs_compat.atomic_replace_failure) result) ->
+    on_restore:(unit -> unit) ->
+    expected_revision:config_revision ->
+    config:Workspace.config ->
+    parsed:Keeper_turn_up_args.parsed_args ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    publish:(Runtime.keeper_assignment_transaction -> outcome -> 'a publication) ->
+    unit ->
+    ('a receipt, error) result
+
   val persist_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
     expected_revision:config_revision ->

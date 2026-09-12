@@ -203,65 +203,47 @@ let latest_keeper_config_journal_recovery_report () =
 ;;
 
 let recover_keeper_config_journal_on_startup ~base_path =
-  let sync_parent path =
-    try
-      Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
-      Ok ()
-    with
-    | Sys_error message -> Error ("parent fsync failed: " ^ message)
-    | Unix.Unix_error (error, action, p) ->
-      Error
-        (Printf.sprintf "parent fsync failed: %s %s (%s)" action p
-           (Unix.error_message error))
-  in
-  let report =
+  let recover () =
     Keeper_config_journal.recover_interrupted ~base_path
       ~manifest_restore:(fun path before ->
         match before with
         | Keeper_config_journal.Manifest_absent ->
-          let remove =
-            if Fs_compat.file_exists path
-            then (
-              try
-                Sys.remove path;
-                Ok ()
-              with
-              | Sys_error message -> Error ("remove failed: " ^ message)
-              | Unix.Unix_error (error, action, _) ->
-                Error
-                  (Printf.sprintf "remove failed: %s (%s)" action
-                     (Unix.error_message error)))
-            else Ok ()
-          in
-          (match remove with
-           | Ok () -> sync_parent path
-           | Error _ as result -> result)
+          Keeper_config_journal.remove_durable ~path
         | Keeper_config_journal.Manifest_bytes bytes ->
           Fs_compat.save_file_atomic_strict_staged path bytes
           |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
       ~runtime_restore:(fun path image ->
         match image with
         | Keeper_config_journal.Runtime_bytes source_text ->
-          Fs_compat.save_file_atomic_strict_staged path source_text
+          Fs_compat.write_file_atomic_strict_staged path
+            ~write:(fun channel ->
+              Unix.fchmod (Unix.descr_of_out_channel channel) 0o600;
+              output_string channel source_text)
           |> Result.map_error Fs_compat.atomic_replace_failure_to_string
         | Keeper_config_journal.Runtime_absent ->
-          let remove =
-            try
-              if Fs_compat.file_exists path
-              then (
-                Sys.remove path;
-                Ok ())
-              else Ok ()
-            with
-            | Sys_error message -> Error ("remove failed: " ^ message)
-            | Unix.Unix_error (error, action, _) ->
-              Error
-                (Printf.sprintf "remove failed: %s (%s)" action
-                   (Unix.error_message error))
-          in
-          (match remove with
-           | Ok () -> sync_parent path
-           | Error _ as result -> result))
+          Keeper_config_journal.remove_durable ~path)
+  in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let failed detail : Keeper_config_journal.report =
+    { outcome = Recovery_failed { detail; notes = [] }
+    ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+    ; record = None }
+  in
+  let report =
+    try
+      Fs_compat.mkdir_p (Filename.dirname runtime_path);
+      match File_lock_eio.with_durable_lock_observed
+              ~lock_path:(runtime_path ^ ".lock") recover with
+      | File_lock_eio.Lock_not_acquired error ->
+        failed (File_lock_eio.durable_lock_error_to_string error)
+      | File_lock_eio.Body_completed { value; release_error = None } -> value
+      | File_lock_eio.Body_completed { value; release_error = Some error } ->
+        { value with outcome = Recovery_failed
+            { detail = File_lock_eio.durable_lock_error_to_string error; notes = [] } }
+    with
+    | Sys_error detail -> failed detail
+    | Unix.Unix_error (error, action, path) ->
+      failed (Printf.sprintf "%s %s: %s" action path (Unix.error_message error))
   in
   Atomic.set latest_keeper_config_journal_recovery (Some report);
   (match report.outcome with

@@ -784,6 +784,7 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_path_unavailable
   | Runtime_config_read_failed of string
+  | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
@@ -822,6 +823,13 @@ let owner_initialization_error_to_string = function
      root that holds runtime.toml"
   | Runtime_config_read_failed detail ->
     "runtime config observation failed: " ^ detail
+  | Keeper_config_recovery_failed report ->
+    let detail = match report.Keeper_config_journal.outcome with
+      | Journal_corrupt detail -> detail
+      | Recovery_failed { detail; notes } -> String.concat "; " (detail :: notes)
+      | No_journal | Recovered_rolled_back _ -> "recovery completion was not accepted"
+    in
+    "keeper configuration recovery failed: " ^ detail
   | Run_registry_already_installed `Fusion ->
     "Fusion run registry already has a process owner"
   | Run_registry_already_installed `Verification ->
@@ -907,6 +915,16 @@ let initialize_owner_state_blocking
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
   Fs_compat.set_fs fs;
+  (* Restore durable configuration before constructing any state from it.
+     A failed read/restore is an initialization error, as for the other
+     authoritative stores; it cannot publish a ready owner. *)
+  let recovery =
+    Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path
+  in
+  (match recovery.Keeper_config_journal.outcome with
+   | No_journal | Recovered_rolled_back _ -> ()
+   | Journal_corrupt _ | Recovery_failed _ ->
+     raise (Owner_initialization_failed (Keeper_config_recovery_failed recovery)));
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   let fusion_registry =
     Filename.concat masc_dir Fusion_run_registry.storage_filename
@@ -1625,16 +1643,6 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
-  let base_path = (Mcp_server.workspace_config state).base_path in
-  (* Ensure any interrupted composite keeper config write is converged before
-     we claim lock-backed keeper persistence. Startup recovery wins over
-     claim/start ordering.
-
-     This keeps startup idempotent when an interrupted request died after
-     manifest replace and before journal-clear. *)
-  let _ =
-    Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path
-  in
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own

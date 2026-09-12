@@ -80,22 +80,23 @@ val phase_to_string : phase -> string
 val record_to_yojson : record -> Yojson.Safe.t
 val record_of_yojson : Yojson.Safe.t -> (record, string) result
 
-(** Serialization is a documented compatibility surface: the journal is
-    read back by [recover_interrupted] after crashes, including across
-    version upgrades. Fields are additive; a failed decode is reported
-    as [Journal_corrupt] with the journal preserved on disk — never
-    silently discarded. [phase] is deliberately NOT serialized as
-    authoritative state (see the module note): [prepared] and
-    [manifest_committed] read identically to recovery, [rolling_back]
-    only marks that restores were already attempted. *)
+(** A failed decode is reported as [Journal_corrupt] and preserves the file.
+    Recovery treats every phase as an interrupted write. *)
 
 (** Path of the journal file for a workspace config root. *)
 val journal_path_for_base_path : base_path:string -> string
 
-(** Atomically write [record] as the current journal (strict staged
-    atomic replace: temp + rename + parent fsync). Must be called while
-    holding the manifest lock. *)
+(** Stage a new journal, refusing to overwrite an existing record. The caller
+    holds the manifest lock and workspace-wide runtime configuration lock
+    throughout staging, publication, compensation and clearing. Payload bytes
+    are written only after the temporary file has mode 0600. *)
 val stage : base_path:string -> record -> (unit, string) result
+
+val read_before_image : path:string -> (string option, string) result
+(** [None] means ENOENT only; other filesystem failures remain errors. *)
+
+val remove_durable : path:string -> (unit, string) result
+(** Unlink and synchronize the parent directory before returning success. *)
 
 (** Load and decode the current journal, if any. [Ok None] when no
     journal file exists. *)

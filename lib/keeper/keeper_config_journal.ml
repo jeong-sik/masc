@@ -91,15 +91,17 @@ let string_option_of_yojson = function
 
 let runtime_before_image_to_yojson = function
   | None -> `Null
-  | Some Runtime_absent -> `String "absent"
-  | Some (Runtime_bytes bytes) -> `String bytes
+  | Some Runtime_absent -> manifest_snapshot_to_yojson Manifest_absent
+  | Some (Runtime_bytes bytes) -> manifest_snapshot_to_yojson (Manifest_bytes bytes)
 ;;
 
 let runtime_before_image_option_of_yojson = function
   | `Null -> Ok None
-  | `String "absent" -> Ok (Some Runtime_absent)
-  | `String bytes -> Ok (Some (Runtime_bytes bytes))
-  | _ -> Error "expected string or null"
+  | json ->
+    manifest_snapshot_of_yojson json
+    |> Result.map (function
+         | Manifest_absent -> Some Runtime_absent
+         | Manifest_bytes bytes -> Some (Runtime_bytes bytes))
 
 let record_to_yojson (record : record) =
   `Assoc
@@ -176,31 +178,32 @@ let journal_path_for_base_path ~base_path =
 let encode record = Yojson.Safe.to_string (record_to_yojson record)
 
 let write_atomic ~path content =
-  match Fs_compat.save_file_atomic_strict_staged path content with
-  | Error failure -> Error (Fs_compat.atomic_replace_failure_to_string failure)
-  | Ok () ->
-    (try
-       Unix.chmod path 0o600;
-       Ok ()
-     with
-     | Sys_error message -> Error ("journal chmod failed: " ^ message)
-     | Unix.Unix_error (error, action, detail) ->
-       Error
-         (Printf.sprintf "journal chmod failed: %s %s (%s)" action detail
-            (Unix.error_message error)))
+  Fs_compat.write_file_atomic_strict_staged path
+    ~write:(fun channel ->
+      Unix.fchmod (Unix.descr_of_out_channel channel) 0o600;
+      output_string channel content)
+  |> Result.map_error Fs_compat.atomic_replace_failure_to_string
 ;;
 
-let stage ~base_path record =
-  write_atomic ~path:(journal_path_for_base_path ~base_path) (encode record)
+let read_before_image ~path =
+  Eio_unix.run_in_systhread (fun () ->
+    try
+      let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+      let channel = Unix.in_channel_of_descr fd in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> Ok (Some (In_channel.input_all channel)))
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+    | Unix.Unix_error (error, action, detail) ->
+      Error (Printf.sprintf "%s %s: %s" action detail (Unix.error_message error))
+    | Sys_error detail -> Error detail)
 ;;
 
 let load ~journal_path =
-  if not (Fs_compat.file_exists journal_path)
-  then Ok None
-  else
-    match Safe_ops.read_file_safe journal_path with
+    match read_before_image ~path:journal_path with
     | Error detail -> Error detail
-    | Ok bytes -> (
+    | Ok None -> Ok None
+    | Ok (Some bytes) -> (
       match Yojson.Safe.from_string bytes with
       | exception Yojson.Json_error detail ->
         Error ("journal parse failed: " ^ detail)
@@ -210,18 +213,55 @@ let load ~journal_path =
         | Error detail -> Error ("journal decode failed: " ^ detail)))
 ;;
 
-let clear ~journal_path =
-  if not (Fs_compat.file_exists journal_path)
-  then Ok ()
+let validate_targets ~base_path record =
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (record.keeper_name ^ ".toml")
+  in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  if not (Keeper_config.validate_name record.keeper_name) then
+    Error "journal keeper name is invalid"
+  else if not (String.equal manifest_path record.manifest_path) then
+    Error "journal manifest path does not belong to this configuration root"
   else
+    match record.runtime_path, record.runtime_before with
+    | None, None -> Ok ()
+    | Some path, Some _ when String.equal path runtime_path -> Ok ()
+    | _ -> Error "journal runtime before-image and path do not match this configuration root"
+;;
+
+let remove_durable ~path =
+  Eio_unix.run_in_systhread (fun () ->
     try
-      Sys.remove journal_path;
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
       Ok ()
     with
     | Sys_error message -> Error message
     | Unix.Unix_error (error, action, detail) ->
       Error
-        (Printf.sprintf "%s %s (%s)" action detail (Unix.error_message error))
+        (Printf.sprintf "%s %s (%s)" action detail (Unix.error_message error)))
+;;
+
+let clear ~journal_path = remove_durable ~path:journal_path
+
+let stage ~base_path record =
+  let ( let* ) = Result.bind in
+  let* () = validate_targets ~base_path record in
+  let path = journal_path_for_base_path ~base_path in
+  let* existing = load ~journal_path:path in
+  match existing with
+  | Some _ -> Error "unresolved keeper configuration journal already exists"
+  | None ->
+    (match write_atomic ~path (encode record) with
+     | Ok () -> Ok ()
+     | Error detail ->
+       (* No protected file has changed yet. If the marker rename happened,
+          retire it durably instead of leaving a resolved abort to replay. *)
+       match remove_durable ~path with
+       | Ok () -> Error detail
+       | Error cleanup -> Error (detail ^ "; journal cleanup failed: " ^ cleanup))
 ;;
 
 let apply_rollback record ~manifest_restore ~runtime_restore =
@@ -256,7 +296,10 @@ let apply_rollback record ~manifest_restore ~runtime_restore =
        | Error detail ->
          runtime_failures := detail :: !runtime_failures;
          false)
-    | _ -> true
+    | None, None -> true
+    | None, Some _ | Some _, None ->
+      runtime_failures := ["runtime before-image and target path disagree"];
+      false
   in
   let failures = !manifest_failures @ !runtime_failures in
   if not manifest_restored || not runtime_restored
@@ -274,7 +317,10 @@ let recover_interrupted ~base_path ~manifest_restore ~runtime_restore =
     }
   | Ok None -> { outcome = No_journal; journal_path; record = None }
   | Ok (Some record) ->
-    (match apply_rollback record ~manifest_restore ~runtime_restore with
+    (match validate_targets ~base_path record with
+     | Error detail -> { outcome = Journal_corrupt detail; journal_path; record = Some record }
+     | Ok () ->
+    match apply_rollback record ~manifest_restore ~runtime_restore with
      | Ok { manifest_restored; runtime_restored } ->
        (match clear ~journal_path with
         | Ok () ->

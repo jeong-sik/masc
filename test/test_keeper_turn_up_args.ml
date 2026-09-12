@@ -1439,6 +1439,15 @@ let test_config_journal_recovery_recovers_composite_write () =
    | Ok () -> ()
    | Error error ->
      fail ("journal stage failed: " ^ error));
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  check int "secret before-images are private" 0o600
+    ((Unix.stat journal_path).Unix.st_perm land 0o777);
+  let staged_bytes = Fs_compat.load_file journal_path in
+  (match Keeper_config_journal.stage ~base_path { journal_record with tx_id = "replacement" } with
+   | Error _ -> ()
+   | Ok () -> fail "unresolved before-images were overwritten");
+  check string "a rejected stage preserves the exact journal" staged_bytes
+    (Fs_compat.load_file journal_path);
   Fs_compat.save_file manifest_path "[keeper]\nname = \"changed\"\n";
   Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"changed\"\n";
   let report =
@@ -1626,6 +1635,82 @@ let test_config_journal_recovery_ignores_missing_journal () =
     (Fs_compat.load_file manifest_path);
   check string "runtime untouched without recovery" "[exec.test]\nruntime = \"before\"\n"
     (Fs_compat.load_file runtime_path)
+;;
+
+let test_config_write_failures_compensate_once () =
+  with_persisting_context @@ fun ctx ->
+  let module P = Keeper_turn_up_config_persistence in
+  let name = "journal-write-failure-fixture" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "instructions", `String "initial"]) with
+    | Ok meta -> meta | Error error -> fail error in
+  let parsed = match parse_stating_a_profile ctx
+      (`Assoc ["name", `String name; "instructions", `String "initial"]) with
+    | Ok parsed -> parsed
+    | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:ctx.config.base_path)
+      (name ^ ".toml") in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path
+      ~base_path:ctx.config.base_path in
+  let run ?write_manifest ~raises () =
+    let restores = ref 0 and publications = ref 0 in
+    let result = P.For_testing.persist_with_faults ?write_manifest
+        ~on_restore:(fun () -> incr restores)
+        ~expected_revision:missing_config_revision ~config:ctx.config ~parsed ~meta
+        ~publish:(fun _ _ ->
+          incr publications;
+          if raises then raise (Failure "injected publish failure");
+          P.Commit ()) () in
+    (match result with
+     | Error (P.Publication_exception _) when raises -> ()
+     | Error (P.Io_error _) when not raises -> ()
+     | Error error -> fail (P.error_to_string error)
+     | Ok _ -> fail "failed write was reported as committed");
+    check int "compensation runs once" 1 !restores;
+    check int "write failure does not publish" (if raises then 1 else 0) !publications;
+    check bool "no orphan manifest remains" false (Sys.file_exists path);
+    check bool "completed compensation clears recovery authority" false
+      (Sys.file_exists journal_path)
+  in
+  List.iter (fun after_rename ->
+    let sync_file _ = if not after_rename then raise (Failure "payload sync failed") in
+    let sync_parent _ = if after_rename then raise (Failure "parent sync failed") in
+    let write_manifest path =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file ~sync_parent path "new manifest bytes" in
+    run ~write_manifest ~raises:false ()) [false; true];
+  run ~raises:true ()
+;;
+
+let test_journal_rejects_foreign_paths_and_unreadable_files () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname journal_path);
+  let record : Keeper_config_journal.record =
+    { tx_id = "foreign"; keeper_name = "journal-boundary-fixture"
+    ; manifest_before = Manifest_absent; runtime_before = None
+    ; manifest_path = Filename.concat base_path "unrelated.toml"
+    ; runtime_path = None; started_at_unix = 0.; phase = Prepared } in
+  let json = Keeper_config_journal.record_to_yojson record in
+  Fs_compat.save_file journal_path (Yojson.Safe.to_string json);
+  let restores = ref 0 in
+  let report = Keeper_config_journal.recover_interrupted ~base_path
+      ~manifest_restore:(fun _ _ -> incr restores; Ok ())
+      ~runtime_restore:(fun _ _ -> incr restores; Ok ()) in
+  (match report.outcome with
+   | Journal_corrupt _ -> () | _ -> fail "foreign recovery target was accepted");
+  check int "validation precedes every restore" 0 !restores;
+  check bool "invalid evidence remains available" true (Sys.file_exists journal_path);
+  (match Keeper_config_journal.load ~journal_path:(Filename.concat journal_path "child") with
+   | Error _ -> () | Ok _ -> fail "ENOTDIR was misreported as a missing journal");
+  let sentinel = { record with runtime_before = Some (Runtime_bytes "absent") } in
+  match Keeper_config_journal.record_of_yojson
+          (Keeper_config_journal.record_to_yojson sentinel) with
+  | Ok decoded -> check bool "literal bytes do not decode as file absence" true
+      (decoded.runtime_before = Some (Runtime_bytes "absent"))
+  | Error detail -> fail detail
 ;;
 
 let test_config_journal_recovery_corrupt_journal_flags_error () =
@@ -2464,6 +2549,10 @@ let () =
             "compensated rollback clears the crash journal"
             `Quick
             test_compensated_rollback_clears_crash_journal
+        ; test_case "failed writes and publication compensate once" `Quick
+            test_config_write_failures_compensate_once
+        ; test_case "journal rejects foreign paths and preserves read errors" `Quick
+            test_journal_rejects_foreign_paths_and_unreadable_files
         ; test_case
             "journal recovery recovers interrupted dual-write"
             `Quick

@@ -7278,6 +7278,11 @@ def chat_visibility_modes_interaction(
                 start=pane_start,
                 timeout=5.0,
             )
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=end_of_needle(output, b"gate:auto_judge", pane_start),
+            timeout=5.0,
+        )
         initial += bytes(output[pane_start:])
         # The Skill can arrive before the gate identity. Reconstruct the
         # accumulated screen at the completed observation barrier instead of

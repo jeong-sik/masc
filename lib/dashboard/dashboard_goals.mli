@@ -71,7 +71,8 @@ val unlisted_goal_history_of_rows :
 (** The counting behind [unlisted_goal_history_json], over rows already read.
     [listed] are the goal ids [goals.json] still holds; a row naming one of them
     is skipped, because a listed goal is already on every goal surface. Separate
-    from the file read so it can be exercised without a workspace on disk. *)
+    from the file read so it can be exercised without a workspace on disk.
+    Ordered by goal id, so two reads of one log agree. *)
 
 val unlisted_goal_history_json :
   config:Workspace.config -> goals:Goal_store.goal list -> Yojson.Safe.t

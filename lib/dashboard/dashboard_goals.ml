@@ -121,7 +121,6 @@ let empty_goal_history_entry =
    not recognise are counted and named under [coverage] instead of dropped. *)
 let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
   let table = Hashtbl.create 16 in
-  let order = ref [] in
   let rows_without_goal_id = ref 0 in
   let unrecognised = ref [] in
   let note_unrecognised name =
@@ -138,9 +137,7 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
         let current =
           match Hashtbl.find_opt table goal_id with
           | Some entry -> entry
-          | None ->
-            order := goal_id :: !order;
-            empty_goal_history_entry
+          | None -> empty_goal_history_entry
         in
         let updated =
           match Json_util.get_string json "event_type" with
@@ -172,10 +169,7 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
       | (Some _, _) | (None, _) -> None)
     | (None, _) | (_, None) -> None
   in
-  let entry_json goal_id =
-    let entry =
-      Option.value ~default:empty_goal_history_entry (Hashtbl.find_opt table goal_id)
-    in
+  let entry_json (goal_id, entry) =
     (* Every phase is named rather than folded into a catch-all, so a phase
        added later stops the compiler here instead of silently reading as
        "still open". *)
@@ -200,8 +194,15 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
           | None -> `Null )
       ]
   in
+  (* Folded out of the table and sorted by id rather than tracked in a second
+     list of insertion order: a hash table's own traversal order is not stable,
+     and sorting is what makes two reads of one log agree. *)
+  let ordered =
+    Hashtbl.fold (fun goal_id entry acc -> (goal_id, entry) :: acc) table []
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  in
   `Assoc
-    [ "unlisted", `List (List.rev_map entry_json !order)
+    [ "unlisted", `List (List.map entry_json ordered)
     ; ( "coverage"
       , `Assoc
           [ "malformed_event_lines", `Int malformed_lines

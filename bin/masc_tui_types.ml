@@ -6780,6 +6780,11 @@ let conversation_urls (state : state) : string list =
 
 
 
+let code_file_search_focused (state : state) =
+  not state.repository_changes_open
+  && state.code_focus_file = Right_pane
+  && not state.code_history_open && not state.code_diff_open && not state.code_notes_open
+
 let surface_row_texts (state : state) : surface -> string list option = function
   | Keepers Keeper_list ->
       Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
@@ -6903,13 +6908,20 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.cs_connectors)
         state.connectors
   | Runtime ->
+      if Option.is_some state.runtime_detail_target then None
+      else
       Option.map
         (fun s ->
-          List.map
-            (fun c ->
-              c.Tui_decode.rcr_lane_id ^ " "
-              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
-            s.Tui_decode.rss_candidates)
+          match state.runtime_mode with
+          | Runtime_lanes ->
+              List.map
+                (fun c ->
+                  c.Tui_decode.rcr_lane_id ^ " "
+                  ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_candidates
+          | Runtime_all ->
+              List.map (fun runtime -> runtime.Tui_decode.ro_id)
+                s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
         state.runtime_surface
   | System_logs ->
       Option.map
@@ -6931,10 +6943,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
       (* The Git changes overlay is a row list of its own. Otherwise, with a
          file focused (and no file overlay over it), "/" searches the file's
          lines; the tree remains the default search list. *)
-      if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then
+      if code_file_search_focused state then
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
@@ -7046,6 +7055,47 @@ let surface_row_texts (state : state) : surface -> string list option = function
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None
+
+(* The fetched file's rows are replaced when content changes, like the lists
+   behind [chat_rows_memo]. Keep one derived reading keyed by that identity
+   and the query, not by the pane or path: a repaint reuses it, while a refresh
+   of the same file must recount. Other surfaces retain their live projection. *)
+type code_search_count_memo =
+  { csc_rows : (string * string) list array
+  ; csc_query : string
+  ; csc_count : int
+  }
+
+let code_search_count_memo : code_search_count_memo option ref = ref None
+
+let code_file_search_count ~query rows =
+  match !code_search_count_memo with
+  | Some memo when memo.csc_rows == rows && String.equal memo.csc_query query ->
+      memo.csc_count
+  | Some _ | None ->
+      let count =
+        Array.fold_left (fun count segments ->
+          let text = String.concat "" (List.map fst segments) in
+          if palette_contains ~needle:query text then count + 1 else count) 0 rows
+      in
+      code_search_count_memo := Some { csc_rows = rows; csc_query = query; csc_count = count };
+      count
+
+let surface_search_count (state : state) surface ~query =
+  match surface with
+  | Code when code_file_search_focused state ->
+      (match Masc_tui_fetched.current state.code_file with
+       | Some (_, Masc_tui_fetched.Ready rows) ->
+           Some (if String.equal query "" then 0 else code_file_search_count ~query rows)
+       | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+       | None -> None)
+  | _ ->
+      Option.map
+        (fun rows ->
+          if String.equal query "" then 0
+          else List.fold_left (fun count text ->
+            if palette_contains ~needle:query text then count + 1 else count) 0 rows)
+        (surface_row_texts state surface)
 
 (* Whether the chat pane is parked somewhere other than the newest row.
 

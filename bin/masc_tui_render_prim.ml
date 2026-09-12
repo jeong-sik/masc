@@ -329,13 +329,10 @@ let awaiting_approval_notice (state : state) =
    only match is already under the cursor -- both move no cursor and, without
    a number, look the same.
 
-   Counted here rather than carried in the state. A carried count outlives
-   the rows it was taken over: Enter on a Board post changes which rows the
-   surface offers without changing which surface it is, and every other
-   list/detail pair does the same. Keeping it would mean clearing it at every
-   one of those transitions, and the one that gets forgotten shows the list's
-   number beside a detail. Counting costs one walk over the rows, and only
-   while a query is on screen -- a surface nobody is searching pays nothing.
+   The count follows the current row source. Code reuses a count only while
+   its immutable fetched rows and query are unchanged, so background repaints
+   do not flatten and scan the entire open file. List/detail transitions on
+   other surfaces continue to consult their live row projection.
 
    "n/N" appears only where those keys do something. They ask
    [surface_row_texts] the same question and return without moving when it
@@ -347,25 +344,17 @@ let awaiting_approval_notice (state : state) =
    said three different things about the same pair of fields. *)
 let search_marker (state : state) =
   let marker query ~settled =
-    let rows = Masc_tui_types.surface_row_texts state state.view in
+    let reached = Masc_tui_types.surface_search_count state state.view ~query in
     let found =
-      match rows with
+      match reached with
       | None -> ""
       | Some _ when String.length query = 0 -> ""
-      | Some texts ->
-          let reached =
-            List.fold_left
-              (fun reached text ->
-                if Masc_tui_types.palette_contains ~needle:query text then
-                  reached + 1
-                else reached)
-              0 texts
-          in
+      | Some reached ->
           if reached = 0 then " (none)" else Printf.sprintf " (%d)" reached
     in
     let tail =
       if not settled then "\xe2\x96\x8c"
-      else match rows with None -> "" | Some _ -> " n/N"
+      else match reached with None -> "" | Some _ -> " n/N"
     in
     Printf.sprintf "/%s%s%s" (Terminal_text.single_line query) found tail
   in

@@ -541,7 +541,7 @@ let test_render_memory_overflow_selection () =
   let layout = Option.get (Types.scrolled_surface state Types.Memory) in
   check int "filter bounds the cursor to the one visible keeper" 1 layout.sc_count;
   check (option (list string)) "search names the same filtered row"
-    (Some ["keeper-4"]) (Types.surface_row_texts state Types.Memory);
+    (Some ["keeper-4 read-error"]) (Types.surface_row_texts state Types.Memory);
   (* A refresh/filter can change the body before another keypress. *)
   assert_selected_visible ()
 ;;

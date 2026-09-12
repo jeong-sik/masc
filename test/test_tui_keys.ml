@@ -1355,6 +1355,38 @@ let surfaces_that_answer_the_row_search =
   ; "Resources", Resources
   ]
 
+let test_code_search_count_tracks_fetched_source () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  let load path rows =
+    match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
+    | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+    | Masc_tui_fetched.Started (next, request) ->
+        state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request (Ok rows)
+  in
+  let count query = surface_search_count state Code ~query in
+  load "large.ml" (Array.init 20_000 (fun index ->
+    [((if index mod 2 = 0 then "needle" else "other"), "")]));
+  Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
+  let first_reading = !code_search_count_memo in
+  Alcotest.(check (option int)) "repaint keeps the count" (Some 10_000) (count "needle");
+  Alcotest.(check bool) "repaint reuses the settled reading" true
+    (first_reading == !code_search_count_memo);
+  Alcotest.(check (option int)) "query change recounts" (Some 0) (count "absent");
+  load "large.ml" [|[("needle", "")]|];
+  Alcotest.(check (option int)) "same-path replacement recounts" (Some 1) (count "needle");
+  state.code_focus_file <- Left_pane;
+  Alcotest.(check (option int)) "tree does not reuse file matches" (Some 0) (count "needle");
+  state.code_focus_file <- Right_pane;
+  state.repository_changes_open <- true;
+  Alcotest.(check (option int)) "overlay without a source has no count" None (count "needle");
+  state.repository_changes_open <- false;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  Alcotest.(check (option int)) "closed file has no source" None (count "needle");
+  load "empty.ml" [||];
+  Alcotest.(check (option int)) "loaded empty file has zero matches" (Some 0) (count "needle")
+
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
      that does nothing, pointing the other way. Eight of these ten answered
@@ -1538,6 +1570,8 @@ let () =
             `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
+        ; test_case "Code search counts follow immutable fetched rows"
+            `Quick test_code_search_count_tracks_fetched_source
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
         ] )

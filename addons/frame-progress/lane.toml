@@ -1,0 +1,15 @@
+id = "frame-progress"
+revision = "0.1.0"
+title = "MSX observed frame progress"
+contributions = ["derive"]
+image = "masc-lane-frame-progress:0.1.0"
+command = ["python3", "server.py"]
+
+[world.skills]
+directory = "skills"
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304

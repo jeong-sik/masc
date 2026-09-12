@@ -607,6 +607,83 @@ let test_run_failure_and_finish_set_the_phase () =
   check phase "a finished run says so" Transcript.Stream_ended
     (Transcript.phase finished)
 
+let test_terminal_turn_marks_only_unresolved_tools () =
+  List.iter
+    (fun terminal ->
+      let t = fresh () in
+      let deltas =
+        [ Live.Run_started
+        ; tool_started "preparing" "keeper_analyze_image"
+        ; tool_args_snapshot "preparing" {|{"image":"screen.png"}|}
+        ; tool_started "waiting" "Read"
+        ; tool_ended "waiting"
+        ; tool_started "returned" "Read"
+        ; tool_ended "returned"
+        ; tool_result "returned" "exec-returned"
+        ; tool_started "failed" "Write"
+        ; Live.Stream_protocol_error
+            { quarantined_occurrence = Some (occurrence "failed")
+            ; detail = "invalid tool arguments"
+            }
+        ]
+      in
+      feed t deltas;
+      let outcomes () =
+        Transcript.tool_calls t
+        |> List.map (fun (call : Transcript.tool_activity) -> call.outcome)
+      in
+      check (list tool_outcome) "live tools retain their distinct stages"
+        [ Transcript.Started; Awaiting_result; Returned; Failed ] (outcomes ());
+      feed t [ terminal ];
+      check (list tool_outcome) "terminal turn has no unresolved waiting rows"
+        [ Transcript.Never_returned; Never_returned; Returned; Failed ] (outcomes ());
+      let log = Log.create ~keeper_name:"keeper.one" ~request_id:"req-1"
+        ~started_at:origin in
+      List.iteri
+        (fun seq delta -> ignore (Log.add log ~seq:(Some seq) delta : bool))
+        (deltas @ [ terminal ]);
+      let replayed = Transcript.of_log ~now:origin log in
+      check (list tool_call) "journal replay preserves terminal tool outcomes"
+        (Transcript.tool_calls t) (Transcript.tool_calls replayed);
+      check bool "journal replay and live trail draw the same outcomes" true
+        (Transcript.trail t = Transcript.trail replayed);
+      feed t [ tool_result "waiting" "exec-late" ];
+      check (list tool_outcome) "late recorded result upgrades only its call"
+        [ Transcript.Never_returned; Returned; Returned; Failed ] (outcomes ()))
+    [ Live.Run_failed { message = "provider timeout after 900s" }; Live.Run_finished ]
+
+let test_superseded_calls_keep_attempt_identity () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; tool_started ~scope:0 "reused" "keeper_analyze_image"
+    ; tool_ended ~scope:0 "reused"
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "next-runtime"; attempt_index = Some 1 }
+    ; tool_started ~scope:1 "reused" "keeper_analyze_image"
+    ; tool_ended ~scope:1 "reused"
+    ];
+  let outcomes () = Transcript.tool_calls t
+    |> List.map (fun (call : Transcript.tool_activity) -> call.outcome) in
+  check (list tool_outcome) "only the abandoned attempt is interrupted"
+    [ Transcript.Never_returned; Awaiting_result ] (outcomes ());
+  (match Transcript.trail t with
+   | [ Transcript.Trail_superseded { attempt = 0; items = [Transcript.Trail_tools old]; _ }
+     ; Transcript.Trail_tools current ] ->
+     check (list tool_outcome) "old trail block is terminal"
+       [ Transcript.Never_returned ]
+       (List.map (fun (call : Transcript.tool_activity) -> call.outcome) old.activities);
+     check (list tool_outcome) "new trail block is still waiting"
+       [ Transcript.Awaiting_result ]
+       (List.map (fun (call : Transcript.tool_activity) -> call.outcome) current.activities)
+   | _ -> fail "attempt boundary or tool evidence was lost");
+  feed t [ tool_result ~scope:0 "reused" "old-execution" ];
+  check (list tool_outcome) "late result belongs to the old occurrence"
+    [ Transcript.Returned; Awaiting_result ] (outcomes ());
+  feed t [ Live.Run_failed { message = "second attempt failed" } ];
+  check (list tool_outcome) "failure preserves earlier completed evidence"
+    [ Transcript.Returned; Never_returned ] (outcomes ())
+
 (* The settle instant is the block's far end: it is stamped by the first
    end-of-turn delta and never moved by the ones that follow, so a turn that
    ran twenty minutes can say so while the deltas that closed it arrive
@@ -1214,6 +1291,61 @@ let test_runtime_failover_visibility_and_error_attribution () =
     (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
     (Transcript.phase t)
 
+let test_runtime_identity_separates_configured_and_observed () =
+  let identity ?(keeper_name = "keeper.one") transcript =
+    Transcript.runtime_identity_text ~keeper_name
+      ~configured_runtime:"configured-claude" transcript
+  in
+  check string "without a current transcript only configuration is known"
+    "configured: configured-claude" (identity None);
+  let t = fresh () in
+  check string "a transcript with no runtime observation uses configuration"
+    "configured: configured-claude" (identity (Some t));
+  feed t [ Live.Run_started; Live.Runtime_attempt_started
+    { runtime_id = Some "observed-glm"; attempt_index = Some 1 } ];
+  check string "failover runtime and configured runtime are labelled separately"
+    "turn: observed-glm · configured: configured-claude" (identity (Some t));
+  check string "another keeper's transcript cannot change this header"
+    "configured: configured-claude"
+    (identity ~keeper_name:"keeper.other" (Some t));
+  feed t [ Live.Run_failed { message = "provider timeout" } ];
+  check string "an error keeps the failing turn's runtime visible"
+    "turn: observed-glm · configured: configured-claude" (identity (Some t))
+
+let test_new_attempt_does_not_inherit_previous_runtime () =
+  List.iter (fun attempt_index ->
+    let t = fresh () in
+    feed t
+      [ Live.Run_started
+      ; Live.Runtime_attempt_started
+          { runtime_id = Some "old-runtime"; attempt_index = Some 0 }
+      ; Live.Text "old attempt text"
+      ; Live.Runtime_attempt_started { runtime_id = None; attempt_index }
+      ];
+    check (option string) "new attempt starts with unknown runtime" None
+      (Transcript.current_runtime_id t);
+    check string "unknown attempt header falls back to labelled configuration"
+      "configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t));
+    feed t [ Live.Stream_model_started { model = "new-model" } ];
+    check (option string) "model event names the new attempt" (Some "new-model")
+      (Transcript.current_runtime_id t);
+    feed t [ Live.Runtime_attempt_started
+      { runtime_id = None; attempt_index = Some 1 } ];
+    check (option string) "same-attempt repeat preserves observed identity"
+      (Some "new-model") (Transcript.current_runtime_id t);
+    (match Transcript.trail t with
+     | [ Transcript.Trail_superseded { attempt = 0; runtime_id; _ } ] ->
+       check (option string) "superseded block retains its old runtime"
+         (Some "old-runtime") runtime_id
+     | _ -> fail "old attempt boundary changed");
+    check string "header reports the newly observed runtime"
+      "turn: new-model · configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t)))
+    [ Some 1; None ]
+
 let test_drawn_items_carry_superseded_runtime_id () =
   let t = fresh () in
   feed t
@@ -1386,6 +1518,12 @@ let test_a_fold_reports_the_outcome_its_marker_stands_for () =
     (summary_outcome Transcript.Compact
        [ activity ~name:"read_file" ~outcome:Transcript.Returned
        ; activity ~name:"glob" ~outcome:Transcript.Returned
+       ]);
+  check (option outcome) "a settled unresolved call is not labelled preparing"
+    (Some Transcript.Never_returned)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"Read" ~outcome:Transcript.Returned
+       ; activity ~name:"keeper_analyze_image" ~outcome:Transcript.Never_returned
        ]);
   (* Expanded, every call keeps a row and a marker of its own, so there is no
      one outcome the entry stands for and nothing to colour it by. *)
@@ -1840,6 +1978,16 @@ let test_live_skill_is_not_folded_into_generic_tools () =
       failf "expected skill/text, got %d item(s): %s" (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
 
+let test_terminal_skill_is_not_still_calling () =
+  let t = fresh () in
+  feed t [ Live.Run_started; tool_started "skill" "keeper_skill";
+           tool_ended "skill"; Live.Run_failed { message = "provider timeout" } ];
+  match Transcript.trail t with
+  | [ Transcript.Trail_skill skill ] ->
+    check bool "a missing result does not keep a skill call active" true
+      (skill.state = Transcript.Skill_evidence_missing)
+  | _ -> fail "expected the skill row to remain visible"
+
 let test_full_skill_rows_show_actions_and_exact_proof () =
   let skill =
     Transcript.make_skill_activity ~skill_name:"ci-red-attribution"
@@ -2176,6 +2324,8 @@ let () =
             test_trail_drops_blank_stretches
         ; test_case "live Skill is separate from generic tools" `Quick
             test_live_skill_is_not_folded_into_generic_tools
+        ; test_case "terminal Skill is not still calling" `Quick
+            test_terminal_skill_is_not_still_calling
         ; test_case "full Skill rows show actions and exact proof" `Quick
             test_full_skill_rows_show_actions_and_exact_proof
         ] )
@@ -2302,6 +2452,10 @@ let () =
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick
             test_run_failure_and_finish_set_the_phase
+        ; test_case "terminal turns settle only unresolved tool projections" `Quick
+            test_terminal_turn_marks_only_unresolved_tools
+        ; test_case "superseded tools keep attempt identity" `Quick
+            test_superseded_calls_keep_attempt_identity
         ; test_case "a finished run stays finished" `Quick
             test_a_finished_run_does_not_go_back_to_working
         ; test_case "an interrupt signal is not an outcome" `Quick
@@ -2310,6 +2464,10 @@ let () =
             test_unreadable_lines_are_counted_with_their_last_reason
         ; test_case "runtime failover visibility and error attribution" `Quick
             test_runtime_failover_visibility_and_error_attribution
+        ; test_case "header separates configured and observed runtimes" `Quick
+            test_runtime_identity_separates_configured_and_observed
+        ; test_case "new attempt does not inherit previous runtime" `Quick
+            test_new_attempt_does_not_inherit_previous_runtime
         ; test_case "drawn items carry superseded runtime id" `Quick
             test_drawn_items_carry_superseded_runtime_id
         ] )

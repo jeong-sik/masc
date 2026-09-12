@@ -3229,7 +3229,14 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries alcotest fmt masc masc_tui_types masc_tui_ask_projection))
+ (libraries
+  alcotest
+  fmt
+  masc
+  masc_tui_types
+  masc_tui_ask_projection
+  masc.voice_setup
+  masc.voice_wizard))
 
 (test
  (name test_tui_runtime_param_picker)

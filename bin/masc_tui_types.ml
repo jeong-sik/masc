@@ -3104,6 +3104,27 @@ module Browser_lane_view = struct
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 
+  type scene_action = Read_region | Click_control
+
+  let scene_target_action (node : Masc.Browser_scene.node) =
+    match node.kind with
+    | Region _ -> Some Read_region
+    | Control { clickable = true; disabled = false; _ } -> Some Click_control
+    | Text | Raster | Control _ -> None
+
+  let move_scene_action ~backwards t =
+    let actions = scene_targets t |> List.mapi (fun index node -> index, node)
+      |> List.filter_map (fun (index, node) ->
+        Option.map (fun _ -> index) (scene_target_action node)) in
+    let ordered = if backwards then List.rev actions else actions in
+    match ordered with
+    | [] -> t
+    | first :: _ ->
+        let next = List.find_opt
+          (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
+          ordered in
+        { t with scene_cursor = Option.value ~default:first next }
+
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
@@ -3119,6 +3140,14 @@ module Browser_lane_view = struct
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;
           "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "view",`String (match scene.content.view with Content -> "content" | Regions -> "regions");
+          "scope",(match scene.content.scope with
+            | None -> `Null
+            | Some target -> `Assoc ["documentId",`String target.document_id;
+                "nodeId",`String target.node_id]);
+          "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
+            "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
+          "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;"source",source]))
     | _ -> None
 
@@ -3176,7 +3205,7 @@ module Browser_lane_view = struct
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle }
 end
 
-let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
   let wrap text =
     String.split_on_char '\n'
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
@@ -3194,27 +3223,36 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    List.concat_map (fun (node : Masc.Browser_scene.node) ->
+    let reversed, _, selected = List.fold_left
+      (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
       let label = match node.kind with
         | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
         | Control {disabled=true;_} -> "disabled"
         | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
-      let prefix = match Hashtbl.find_opt target_index node.node_id with
+      let index = Hashtbl.find_opt target_index node.node_id in
+      let prefix = match index with
         | None -> ""
         | Some i -> Printf.sprintf "[%s%d %s] "
             (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      wrap (prefix ^ node.text)) scene.content.nodes
+      let lines = wrap (prefix ^ node.text) in
+      let selected = match selected, index with
+        | None, Some i when i = view.scene_cursor -> Some offset
+        | _ -> selected in
+      List.rev_append lines reversed, offset + List.length lines, selected)
+      ([], 0, None) scene.content.nodes in
+    List.rev reversed, selected
   | None -> match view.reading with
-  | None -> []
+  | None -> [], None
   | Some reading ->
       match reading.page with
-      | None -> []
+      | None -> [], None
       | Some page ->
-          String.split_on_char '\n'
+          let lines = String.split_on_char '\n'
             (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
           |> List.concat_map (fun line ->
               if line = "" then [""] else
-              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line)
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+          lines, None
 
 let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in

@@ -1,6 +1,38 @@
 # Changelog
 
 
+## [0.35.14] - 2026-09-12
+
+### Added
+
+- World constitution: articles, the append-only ledger they fold from, and the prompt slot every keeper in a world reads (RFC-0442) (#35327).
+- Tools inventory shows each tool's exact description, expanded in place (#35390).
+- The resident local Qwen3.8-27B is a runtime a lane can name (#35325).
+- TUI: browser actions are navigable and the selection stays visible (#35383).
+
+### Fixed
+
+- Nested Keeper tool schemas reach the model wire intact instead of being rebuilt from flat parameters, which dropped enum, bounds and nested properties (#35385).
+- TUI: ongoing work is shown alongside pending approvals (#35360).
+- TUI: two chat guards were answering about a file they no longer read (#35371).
+- Lanes: recent slice rows stay ahead of historical coverage (#35367).
+- A failed Claude Code turn logs why it failed, not only its kind (#35342).
+- Benchmark arm A runs harbor's kimi-cli; terminus-2 is retired (#35343).
+
+### Performance
+
+- TUI Code diff colouring no longer walks the open file to find a row: 107ms to 0.007ms (#35341).
+
+### Changed
+
+- TUI chat surface moved into its own library (#35334).
+
+### Docs
+
+- RFC-0442: a world's norms are ratified by keeper agreement rather than by a PR, kept in a base_path ledger and projected through the system prompt (#35322).
+- RFC-0443: runtime lifecycle is not a provider stream event (#35355).
+- corrective-grammar v0.3: title and tone settled for lane distribution (#35315).
+
 ## [0.35.13] - 2026-09-12
 
 ### Added

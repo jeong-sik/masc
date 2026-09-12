@@ -72,6 +72,12 @@ let chat_markdown_cache_capacity = 1024
 
 
 
+(* What makes one rendered entry distinct from another, as the cache sees it.
+   The cache is polymorphic in its identity, so it compares whole records --
+   no field is ever named on the way out. The observed time and the entry
+   index are here because two entries from the same keeper and the same
+   request differ only in those. The comparison reads them; no projection
+   does, which is the difference the unused-field warning cannot see. *)
 type chat_markdown_identity = {
   cmi_style : Message_layout.style;
   cmi_keeper_name : string;
@@ -79,6 +85,7 @@ type chat_markdown_identity = {
   cmi_observed_at : float option;
   cmi_entry_index : int;
 }
+[@@warning "-69"]
 
 let chat_markdown_cache =
   Markdown_cache.create ~capacity:chat_markdown_cache_capacity

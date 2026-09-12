@@ -105,6 +105,7 @@ let keeper_identity = "keeper.identity"
 (* System-prompt assembly pieces: the operator-instructions block and the
    structural tags that wrap the shared prefix and the instructions. *)
 let keeper_instructions_custom = "keeper.instructions.custom"
+let keeper_constitution = "keeper.constitution"
 let keeper_tags_system_open = "keeper.tags.system_open"
 let keeper_tags_system_close = "keeper.tags.system_close"
 let keeper_tags_instructions_open = "keeper.tags.instructions_open"

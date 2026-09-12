@@ -1,0 +1,8 @@
+{
+  "app": "/tmp/masc-libreoffice-26.2.6-20260913/LibreOffice.app",
+  "codesign_verified": true,
+  "version_stdout": "LibreOffice 26.2.6.3 8221e31b3ac356a1623c672912a3d2b492f7e3d1\n\n",
+  "version_stderr": "",
+  "version_exit_code": 0,
+  "system_applications_modified": false
+}

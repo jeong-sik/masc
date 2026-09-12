@@ -1,0 +1,160 @@
+{
+  "head": "7bd85f6bd6924a0619d7113f3347f0d0b19346d3",
+  "run": 34707024488,
+  "raw_log": "/tmp/masc-media-test-34707024488-failed.log",
+  "raw_sha256": "b4364f4410895050161e3aa2841bad71a8efa843fe745a6a3c4cd903d4411a91",
+  "results": [
+    {
+      "line": 2343,
+      "text": "2026-09-12T17:08:32.7705746Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite"
+    },
+    {
+      "line": 2344,
+      "text": "2026-09-12T17:08:32.7725247Z [targeted] test_install_runtime_setup: start 2026-09-12T17:08:32Z (dune alias)"
+    },
+    {
+      "line": 2348,
+      "text": "2026-09-12T17:08:43.3186304Z Ran 68 tests in 6.343s"
+    },
+    {
+      "line": 2351,
+      "text": "2026-09-12T17:08:43.3669724Z [targeted] test_install_runtime_setup: OK in 11s"
+    },
+    {
+      "line": 2352,
+      "text": "2026-09-12T17:08:43.6859625Z [targeted] dune build test/test_verification_presentation.exe test/test_verification_authority_tools.exe test/test_verification_collaboration_evidence.exe test/test_board_persistence_load_contract.exe test/test_board_persistence_schema.exe test/test_keeper_tool_plan.exe test/test_sandbox_prerequisites.exe test/test_fusion_decision.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/fixtures/verifier-image-lookup.png test/fixtures/verifier-video.mp4 docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf"
+    },
+    {
+      "line": 2354,
+      "text": "2026-09-12T17:08:54.7786171Z [targeted] test/test_verification_presentation: start 2026-09-12T17:08:54Z"
+    },
+    {
+      "line": 2392,
+      "text": "2026-09-12T17:08:54.8185167Z 1 failure! in 0.001s. 1 test run."
+    },
+    {
+      "line": 2394,
+      "text": "2026-09-12T17:08:54.8198877Z [targeted] test/test_verification_presentation: FAIL exit 1 in 0s"
+    },
+    {
+      "line": 2396,
+      "text": "2026-09-12T17:08:54.8599627Z [targeted] test/test_verification_authority_tools: start 2026-09-12T17:08:54Z"
+    },
+    {
+      "line": 2693,
+      "text": "2026-09-12T17:08:56.5415877Z Test Successful in 1.643s. 19 tests run."
+    },
+    {
+      "line": 2695,
+      "text": "2026-09-12T17:08:56.5454801Z [targeted] test/test_verification_authority_tools: OK in 2s"
+    },
+    {
+      "line": 2697,
+      "text": "2026-09-12T17:08:56.5854620Z [targeted] test/test_verification_collaboration_evidence: start 2026-09-12T17:08:56Z"
+    },
+    {
+      "line": 3074,
+      "text": "2026-09-12T17:08:56.6900092Z Test Successful in 0.069s. 6 tests run."
+    },
+    {
+      "line": 3076,
+      "text": "2026-09-12T17:08:56.6926992Z [targeted] test/test_verification_collaboration_evidence: OK in 0s"
+    },
+    {
+      "line": 3078,
+      "text": "2026-09-12T17:08:56.7323740Z [targeted] test/test_board_persistence_load_contract: start 2026-09-12T17:08:56Z"
+    },
+    {
+      "line": 3089,
+      "text": "2026-09-12T17:08:56.7419376Z Test Successful in 0.002s. 3 tests run."
+    },
+    {
+      "line": 3091,
+      "text": "2026-09-12T17:08:56.7443231Z [targeted] test/test_board_persistence_load_contract: OK in 0s"
+    },
+    {
+      "line": 3093,
+      "text": "2026-09-12T17:08:56.7851185Z [targeted] test/test_board_persistence_schema: start 2026-09-12T17:08:56Z"
+    },
+    {
+      "line": 3207,
+      "text": "2026-09-12T17:08:56.8035615Z Test Successful in 0.011s. 13 tests run."
+    },
+    {
+      "line": 3209,
+      "text": "2026-09-12T17:08:56.8059169Z [targeted] test/test_board_persistence_schema: OK in 0s"
+    },
+    {
+      "line": 3211,
+      "text": "2026-09-12T17:08:56.8672956Z [targeted] test/test_keeper_tool_plan: start 2026-09-12T17:08:56Z"
+    },
+    {
+      "line": 3411,
+      "text": "2026-09-12T17:08:56.9226221Z 1 failure! in 0.017s. 56 tests run."
+    },
+    {
+      "line": 3413,
+      "text": "2026-09-12T17:08:56.9247071Z [targeted] test/test_keeper_tool_plan: FAIL exit 1 in 0s"
+    },
+    {
+      "line": 3415,
+      "text": "2026-09-12T17:08:56.9643623Z [targeted] test/test_sandbox_prerequisites: start 2026-09-12T17:08:56Z"
+    },
+    {
+      "line": 3506,
+      "text": "2026-09-12T17:08:56.9724964Z Test Successful in 0.000s. 10 tests run."
+    },
+    {
+      "line": 3508,
+      "text": "2026-09-12T17:08:56.9725613Z [targeted] test/test_sandbox_prerequisites: OK in 0s"
+    },
+    {
+      "line": 3510,
+      "text": "2026-09-12T17:08:57.0334245Z [targeted] test/test_fusion_decision: start 2026-09-12T17:08:57Z"
+    },
+    {
+      "line": 3595,
+      "text": "2026-09-12T17:08:57.1337592Z Test Successful in 0.064s. 5 tests run."
+    },
+    {
+      "line": 3597,
+      "text": "2026-09-12T17:08:57.1368023Z [targeted] test/test_fusion_decision: OK in 0s"
+    },
+    {
+      "line": 3599,
+      "text": "2026-09-12T17:08:57.1996040Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: start 2026-09-12T17:08:57Z"
+    },
+    {
+      "line": 3644,
+      "text": "2026-09-12T17:08:57.2635551Z Test Successful in 0.022s. 3 tests run."
+    },
+    {
+      "line": 3646,
+      "text": "2026-09-12T17:08:57.2671014Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: OK in 0s"
+    }
+  ],
+  "failed_log_line_ranges": [
+    [
+      2359,
+      2394
+    ],
+    [
+      3375,
+      3413
+    ]
+  ],
+  "failures": [
+    {
+      "suite": "test_verification_presentation",
+      "classification": "test setup: RUNNER_TEMP under HOME triggers test isolation guard before tool dispatch",
+      "test_count": 1,
+      "failed": 1
+    },
+    {
+      "suite": "test_keeper_tool_plan",
+      "classification": "fixture expectation omits declared BrowserGoto composable output",
+      "test_count": 56,
+      "failed": 1
+    }
+  ]
+}

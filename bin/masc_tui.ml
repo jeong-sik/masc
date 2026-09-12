@@ -1919,11 +1919,14 @@ type async_msg =
   | Image_render_ready of {
       title : string;
       caption : string list;
+      url : string;
       result : (string, string) result;
     }
       (** A [v]-requested web image, downloaded and converted to PNG off the
           render loop. [result] is the PNG bytes ready to draw, or why they
-          could not be produced. *)
+          could not be produced. [title] is indented for the screen and is
+          never a path; [url] is what was fetched, and what a browser gets
+          when drawing fails. *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -7457,14 +7460,14 @@ let launch_image_render ~mailbox ~notice ~title ~caption url =
       let result =
         Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () -> prepare_remote_image_bytes url)
       in
-      enqueue_async mailbox (Image_render_ready { title; caption; result })
+      enqueue_async mailbox (Image_render_ready { title; caption; url; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         enqueue_async mailbox
           (Image_render_ready
-             { title; caption; result = Error "Eio switch unavailable" })
+             { title; caption; url; result = Error "Eio switch unavailable" })
   end
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
@@ -12142,7 +12145,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error reason -> refuse reason
         | Ok data -> draw_image state ~refuse ~title:name data
       end
-  | Image_render_ready { title; caption; result } ->
+  | Image_render_ready { title; caption; url; result } ->
       if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
@@ -12152,13 +12155,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            draw_image state ~caption ~refuse ~title data
        | Error e -> (
-           match Masc_tui_browser.open_url title with
+           match Masc_tui_browser.open_url url with
            | Ok opener ->
                notice ~role:Message_local
                  (Printf.sprintf "Could not draw inline (%s). Opened in browser (%s): %s"
-                    e opener title)
-           | Error _ ->
-               notice ~role:Message_error (Printf.sprintf "image %s: %s" title e)))
+                    e opener url)
+           | Error opener_err ->
+               notice ~role:Message_error
+                 (Printf.sprintf "image %s: %s; browser: %s" title e opener_err)))
       end
   | Msx_frame_loaded (request, result) ->
       (match !msx_pending_poll with

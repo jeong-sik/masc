@@ -29,11 +29,28 @@ let test_a_quote_in_the_url_cannot_close_the_quoting () =
   ignore (Unix.close_process_in channel);
   check str "the shell sees exactly the URL, one argument" url seen
 
-let test_both_openers_are_tried () =
-  (* A machine with neither gets an error naming both. One name would leave
-     an operator checking the wrong thing. *)
-  check (Alcotest.list str) "macOS first, then freedesktop"
-    [ "open"; "xdg-open" ] Masc_tui_browser.openers
+let chosen_for uname =
+  match Masc_tui_browser.kernel_of_uname uname with
+  | Ok kernel ->
+    "ok:" ^ Masc_tui_browser.opener_command (Masc_tui_browser.opener_for kernel)
+  | Error reason -> "error:" ^ reason
+
+let test_darwin_gets_open_and_only_open () =
+  (* Before: "open" and "xdg-open" were tried in turn on any non-zero exit.
+     On macOS, "open" refusing a bad argument fell through to xdg-open, which
+     is never there, and the operator read 'xdg-open: command not found' for
+     a mistake that was ours. One kernel, one opener. *)
+  check str "Darwin -> open" "ok:open" (chosen_for "Darwin\n")
+
+let test_linux_gets_xdg_open () =
+  check str "Linux -> xdg-open" "ok:xdg-open" (chosen_for "Linux")
+
+let test_an_unknown_kernel_is_refused_by_name () =
+  (* No guess. The refusal quotes the kernel so the operator can see what
+     the machine said rather than which opener we assumed. *)
+  check str "refused, quoting the kernel"
+    "error:no link opener known for kernel \"FreeBSD\" (open on Darwin, xdg-open on Linux)"
+    (chosen_for "FreeBSD")
 
 let () =
   Alcotest.run "tui_browser"
@@ -41,7 +58,11 @@ let () =
         [ Alcotest.test_case "the url is quoted" `Quick test_the_url_is_quoted;
           Alcotest.test_case "a quote in the url cannot close the quoting"
             `Quick test_a_quote_in_the_url_cannot_close_the_quoting;
-          Alcotest.test_case "both openers are tried" `Quick
-            test_both_openers_are_tried;
+          Alcotest.test_case "darwin gets open and only open" `Quick
+            test_darwin_gets_open_and_only_open;
+          Alcotest.test_case "linux gets xdg-open" `Quick
+            test_linux_gets_xdg_open;
+          Alcotest.test_case "an unknown kernel is refused by name" `Quick
+            test_an_unknown_kernel_is_refused_by_name;
         ] );
     ]

@@ -1,0 +1,17 @@
+name = "keeper_constitution_remove"
+description = """
+Take one norm back out of this world's constitution. It stops reaching every \
+keeper's prompt from the next turn on. Removing an article another keeper \
+wrote costs exactly what writing one costs, and both stay in the ledger, so a \
+norm written, removed and written again reads as the disagreement it is. \
+Removing an id this world does not hold is a failure, not a quiet success.\
+"""
+additional_properties = false
+
+[[params]]
+name = "article_id"
+type = "string"
+required = true
+pattern = "^a-[0-9a-f]{32}$"
+description = """
+The id shown beside the norm in your system prompt."""

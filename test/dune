@@ -5653,3 +5653,8 @@
  (deps
   (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc_test_deps))
+
+(test
+ (name test_world_constitution_tools)
+ (modules test_world_constitution_tools)
+ (libraries alcotest masc masc_test_deps yojson unix fs_compat))

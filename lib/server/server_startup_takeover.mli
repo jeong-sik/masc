@@ -90,19 +90,26 @@ type base_path_owner =
       (** This process already holds the lease. A second acquisition in the
           same process would take the same kernel lock, which is why the
           in-process table is consulted first. *)
-  | Owner_running of int
-      (** The lease names a process that is running. Killing it releases the
-          path. *)
-  | Owner_recorded_but_gone of int
-      (** The lease names a process that is not running, so the lock belongs
-          to a process the lease does not name. Nothing is gained by killing
-          the recorded number. *)
+  | Owner_named_alive of int
+      (** The lease names this number and the process is running. That is all
+          it says. The number is written after the lock is taken, so a
+          contender inside that window reads the previous owner's -- and that
+          process may still be alive, or its number may have been reused by
+          something unrelated. Do not tell an operator to kill it. *)
+  | Owner_named_gone of int
+      (** The lease names this number and no process has it, so the lock
+          belongs to something the lease does not name. Nothing is gained by
+          killing the recorded number. *)
   | Owner_unnamed
       (** The lease file carried no readable number. *)
 
 type base_path_acquire_result =
   | Base_path_acquired of base_path_lease
-  | Base_path_already_owned of { owner : base_path_owner }
+  | Base_path_already_owned of { owner : base_path_owner; lock_path : string }
+      (** [lock_path] is the lease file whose kernel lock was refused. It is the
+          one thing that names the holder for certain: whoever holds the lock
+          has this file open, and [lsof] reads that from the kernel rather
+          than from the number the lease wrote. *)
   | Base_path_rejected of base_path_lock_rejection
 
 val base_path_lock_rejection_to_string : base_path_lock_rejection -> string

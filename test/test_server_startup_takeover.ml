@@ -44,6 +44,26 @@ let process_alive pid =
   | _ -> false
   | exception Unix.Unix_error (Unix.ECHILD, _, _) -> false
 
+(* [process_alive] answers about children, because waitpid is what it asks.
+   Production asks kill(pid, 0), so a test that plants a number has to check
+   it the same way or it is measuring a different question. *)
+let pid_is_absent pid =
+  match Unix.kill pid 0 with
+  | () -> false
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> true
+  | exception Unix.Unix_error (Unix.EPERM, _, _) -> false
+
+(* A number that names no process: fork, let the child exit, reap it. Until the
+   kernel wraps around to it again it is free. A large constant does not work --
+   Linux pid_max is 4,194,304, so 2,000,000 can be a live process and the
+   assertion would be about the host rather than the code. *)
+let reaped_pid () =
+  match Unix.fork () with
+  | 0 -> Unix._exit 0
+  | pid ->
+    ignore (Unix.waitpid [] pid : int * Unix.process_status);
+    pid
+
 let rec waitpid_nointr pid =
   try Some (Unix.waitpid [] pid) with
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
@@ -369,11 +389,10 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
            Alcotest.(check int) "child acquired lease" 1
              (Unix.read ready_read buffer 0 1);
            (* Advisory locks do not stop a write, which is exactly how the
-              file comes to disagree with the holder. Above the platform's
-              pid ceiling, so nothing can be running under it. *)
-           let absent_pid = 2_000_000 in
+              file comes to disagree with the holder. *)
+           let absent_pid = reaped_pid () in
            Alcotest.(check bool) "the planted number is not a live process"
-             false (process_alive absent_pid);
+             true (pid_is_absent absent_pid);
            let lease_path = base_path_lock_path ~run_dir base_path in
            let fd = Unix.openfile lease_path [ Unix.O_WRONLY ] 0o600 in
            Unix.ftruncate fd 0;
@@ -384,14 +403,14 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
            (match
               Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
             with
-            | Server_startup_takeover.Base_path_already_owned { owner } ->
+            | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
               Alcotest.(check bool)
                 "a recorded owner that is gone is not offered as a target"
                 true
                 (match owner with
-                 | Server_startup_takeover.Owner_recorded_but_gone pid ->
+                 | Server_startup_takeover.Owner_named_gone pid ->
                    pid = absent_pid
-                 | Server_startup_takeover.Owner_running _
+                 | Server_startup_takeover.Owner_named_alive _
                  | Server_startup_takeover.Owner_this_process _
                  | Server_startup_takeover.Owner_unnamed -> false)
             | Server_startup_takeover.Base_path_acquired lease ->
@@ -441,14 +460,14 @@ let test_base_path_lock_rejects_concurrent_lease () =
            (match
               Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
             with
-            | Server_startup_takeover.Base_path_already_owned { owner } ->
+            | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
               (* A running child: the refusal names it and says so, which is
                  what makes "kill it" the right instruction. *)
               Alcotest.(check bool) "owner is reported as running" true
                 (match owner with
-                 | Server_startup_takeover.Owner_running _ -> true
+                 | Server_startup_takeover.Owner_named_alive _ -> true
                  | Server_startup_takeover.Owner_this_process _
-                 | Server_startup_takeover.Owner_recorded_but_gone _
+                 | Server_startup_takeover.Owner_named_gone _
                  | Server_startup_takeover.Owner_unnamed -> false);
               Alcotest.(check (option int)) "owner pid is observable"
                 (Some child_pid)
@@ -509,13 +528,13 @@ let test_base_path_lock_rejects_same_process_symlink_alias () =
            match
              Server_startup_takeover.acquire_base_path_lock ~run_dir alias_base
            with
-           | Server_startup_takeover.Base_path_already_owned { owner } ->
+           | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
              Alcotest.(check bool)
                "symlink alias names this process, not a killable other" true
                (match owner with
                 | Server_startup_takeover.Owner_this_process _ -> true
-                | Server_startup_takeover.Owner_running _
-                | Server_startup_takeover.Owner_recorded_but_gone _
+                | Server_startup_takeover.Owner_named_alive _
+                | Server_startup_takeover.Owner_named_gone _
                 | Server_startup_takeover.Owner_unnamed -> false);
              Alcotest.(check (option int))
                "symlink alias observes the same process-local owner"

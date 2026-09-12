@@ -309,10 +309,10 @@ let verify_base_path_lease_owner base_path owner_pid =
         ~run_dir:lease_dir
         base_path
     with
-    | Server_startup_takeover.Base_path_already_owned { owner }
+    | Server_startup_takeover.Base_path_already_owned { owner; _ }
       when Server_startup_takeover.base_path_owner_pid owner = Some owner_pid ->
       Ok ()
-    | Server_startup_takeover.Base_path_already_owned { owner } ->
+    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in
       errorf
         "workspace writer lease owner mismatch base_path=%s expected_pid=%d actual_pid=%s"
@@ -366,7 +366,7 @@ let run_under_base_path_lease base_path command =
          ~run_dir:lease_dir
          base_path
      with
-     | Server_startup_takeover.Base_path_already_owned { owner } ->
+     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in
        errorf
          "workspace writer lease is already owned base_path=%s pid=%s"
@@ -397,7 +397,7 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
       ~run_dir:lease_dir
       base_path
   with
-  | Server_startup_takeover.Base_path_already_owned { owner } ->
+  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
     let pid = Server_startup_takeover.base_path_owner_pid owner in
     errorf
       "workspace writer lease is already owned base_path=%s pid=%s"
@@ -468,7 +468,7 @@ let handoff_base_path_lease
          ~run_dir:lease_dir
          base_path
      with
-     | Server_startup_takeover.Base_path_already_owned { owner } ->
+     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in
        errorf
          "workspace writer lease is already owned base_path=%s pid=%s"
@@ -1229,7 +1229,7 @@ let cut_run_registries base_path ~execute =
         ~run_dir:lease_dir
         base_path
     with
-    | Server_startup_takeover.Base_path_already_owned { owner } ->
+    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in
       errorf
         "workspace writer lease is already owned base_path=%s pid=%s"

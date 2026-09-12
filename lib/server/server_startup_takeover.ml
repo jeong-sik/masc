@@ -93,19 +93,22 @@ type base_path_owner =
       (** This process already holds the lease. A second acquisition in the
           same process would take the same kernel lock, which is why the
           in-process table is consulted first. *)
-  | Owner_running of int
-      (** The lease names a process that is running. Killing it releases the
-          path. *)
-  | Owner_recorded_but_gone of int
-      (** The lease names a process that is not running, so the lock belongs
-          to a process the lease does not name. Nothing is gained by killing
-          the recorded number. *)
+  | Owner_named_alive of int
+      (** The lease names this number and the process is running. That is all
+          it says. The number is written after the lock is taken, so a
+          contender inside that window reads the previous owner's -- and that
+          process may still be alive, or its number may have been reused by
+          something unrelated. Do not tell an operator to kill it. *)
+  | Owner_named_gone of int
+      (** The lease names this number and no process has it, so the lock
+          belongs to something the lease does not name. Nothing is gained by
+          killing the recorded number. *)
   | Owner_unnamed
       (** The lease file carried no readable number. *)
 
 type base_path_acquire_result =
   | Base_path_acquired of base_path_lease
-  | Base_path_already_owned of { owner : base_path_owner }
+  | Base_path_already_owned of { owner : base_path_owner; lock_path : string }
   | Base_path_rejected of base_path_lock_rejection
 
 let base_path_lock_rejection_to_string = function
@@ -273,7 +276,7 @@ let pid_exists pid =
 ;;
 
 let base_path_owner_pid = function
-  | Owner_this_process pid | Owner_running pid | Owner_recorded_but_gone pid ->
+  | Owner_this_process pid | Owner_named_alive pid | Owner_named_gone pid ->
     Some pid
   | Owner_unnamed -> None
 ;;
@@ -283,7 +286,7 @@ let base_path_owner_pid = function
    running process this operator cannot signal, which is still not "gone". *)
 let base_path_owner_of_recorded = function
   | None -> Owner_unnamed
-  | Some pid -> if pid_exists pid then Owner_running pid else Owner_recorded_but_gone pid
+  | Some pid -> if pid_exists pid then Owner_named_alive pid else Owner_named_gone pid
 ;;
 
 let sleep_poll seconds = if seconds > 0.0 then ignore (Unix.select [] [] [] seconds)
@@ -1238,7 +1241,8 @@ let acquire_base_path_lock_with
       match Hashtbl.find_opt base_path_leases prepared.path with
       | Some (Active_lease _) ->
         (* NDT-OK: the OS process id is the observed owner identity. *)
-        Base_path_already_owned { owner = Owner_this_process (Unix.getpid ()) }
+        Base_path_already_owned
+          { owner = Owner_this_process (Unix.getpid ()); lock_path = prepared.path }
       | Some (Failed_close (_, rejection)) -> Base_path_rejected rejection
       | None ->
         (match open_lease_file prepared with
@@ -1315,7 +1319,9 @@ let acquire_base_path_lock_with
                with
                | Ok () ->
                  Base_path_already_owned
-                   { owner = base_path_owner_of_recorded pid }
+                   { owner = base_path_owner_of_recorded pid
+                   ; lock_path = prepared.path
+                   }
                | Error rejection -> Base_path_rejected rejection)
             | exn ->
               let commit_rejection =

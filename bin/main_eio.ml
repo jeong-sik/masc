@@ -541,37 +541,42 @@ let acquire_pid_lock port =
 let acquire_base_path_lock ~run_dir base_path =
   match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
-  | Server_startup_takeover.Base_path_already_owned { owner } ->
-      (* Each case gets its own instruction because only one of them is
-         "kill it". The lease writes its number after it takes the lock, so a
-         refusal can read the previous owner's number -- and telling an
-         operator to kill a process that is not there leaves them with a
-         failed kill and no next step. *)
+  | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
+      (* Each case says what was actually established, which in three of the
+         four is less than a PID to kill. The lease writes its number after it
+         takes the lock, so a refusal inside that window reads the previous
+         owner's number: alive or not, that number is the lease's record and
+         not proof of who holds the lock. The one thing that does name the
+         holder is the lock file itself -- whoever holds it has it open, and
+         that comes from the kernel rather than from a process name, so it
+         finds the stdio runtime and the deployment helper's lease modes too. *)
+      let find_the_holder =
+        Printf.sprintf "Ask the kernel who has the lock file open: lsof %s" lock_path
+      in
       let detail =
         match owner with
-        | Server_startup_takeover.Owner_running pid ->
-            Printf.sprintf
-              "Another MASC runtime (PID %d) already owns base path %s. Kill \
-               it first: kill %d"
-              pid base_path pid
         | Server_startup_takeover.Owner_this_process pid ->
             Printf.sprintf
               "This process (PID %d) already owns base path %s; it cannot \
                take the path twice"
               pid base_path
-        | Server_startup_takeover.Owner_recorded_but_gone pid ->
+        | Server_startup_takeover.Owner_named_alive pid ->
+            Printf.sprintf
+              "Base path %s is locked. The lease names PID %d and that \
+               process is running, but the number is written after the lock \
+               is taken, so it may be the previous owner rather than the \
+               holder. Confirm before stopping anything. %s"
+              base_path pid find_the_holder
+        | Server_startup_takeover.Owner_named_gone pid ->
             Printf.sprintf
               "Base path %s is locked, but the lease names PID %d, which is \
                not running. The lock belongs to a process the lease does not \
-               name -- the number is written after the lock is taken, so a \
-               refusal during that window reads the previous owner. Find the \
-               holder: ps -eo pid,command | grep 'masc start'"
-              base_path pid
+               name. %s"
+              base_path pid find_the_holder
         | Server_startup_takeover.Owner_unnamed ->
             Printf.sprintf
-              "Base path %s is locked and the lease names no process. Find \
-               the holder: ps -eo pid,command | grep 'masc start'"
-              base_path
+              "Base path %s is locked and the lease names no process. %s"
+              base_path find_the_holder
       in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
         ("[FATAL] " ^ detail);

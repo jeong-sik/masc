@@ -13,6 +13,21 @@ If observation fails after navigation, the completed navigation receipt remains
 the recovery source: retry only the read. A redirect or a matching URL does not
 establish that the site's requested content is ready.
 
+`browser-navigate-content` uses the same ordered navigation boundary and reads
+the landing page's visible content with `mode=scene`. It serves pages whose
+visible body can already answer the request. The model checks that content and
+asks for a region map or a scoped read when coverage is insufficient. The two
+compositions are alternatives selected for the page and task; a successful
+content read does not require another region read by convention.
+
+This content route is the Skill used in the committed
+[three-channel native experiment](../evidence/browser-readable-20260913/README.md):
+six outer calls, three compositions and no tool errors. The current package
+ships that previously experimental declaration. Those measurements establish
+that route's observed behavior, not universal speed or completeness on every
+site. The instruction and runtime revisions of that capture remain recorded
+separately from this package change.
+
 The `BrowserGoto` descriptor declares the `url` and `title` object produced by
 `Browser_webdriver.page_summary`. Without that output contract, the Skill's
 `/url` reference is rejected during catalog loading and its callable tool is

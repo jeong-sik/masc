@@ -491,6 +491,14 @@ id = "ollama.gemma4-26b-a4b-qat"
 provider_ref = "ollama"
 model_id = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 
+# The local Qwen3.8 27B that is already resident in this deployment's Ollama.
+# Paired with the runtime.toml binding of the same name so the exact-output
+# lanes can admit it; without this row the runtime exists but no lane can name it.
+[[targets]]
+id = "ollama.qwen3-8-27b"
+provider_ref = "ollama"
+model_id = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+
 [[targets]]
 id = "ollama_cloud.ollama-cloud-glm-5-3-flash"
 provider_ref = "ollama_cloud"

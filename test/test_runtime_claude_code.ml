@@ -459,7 +459,7 @@ let test_dynamic_tool_bytes_counts_every_field () =
     ; input_schema = `Assoc [ "f", `String "g" ]
     ; call =
         (fun ~call_id:_ _ ->
-          { Runtime_claude_code.success = true; content = ""; abort_turn = None })
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None })
     }
   in
   let schema_bytes = String.length (Yojson.Safe.to_string tool.Runtime_claude_code.input_schema) in
@@ -878,7 +878,7 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   ; call =
       (fun ~call_id:_ _ ->
         incr call_count;
-        { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
+        { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
   }
 ;;
 
@@ -1227,6 +1227,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
         (fun ~call_id:_ _ ->
           { success = false
           ; content = "same deterministic failure"
+          ; content_blocks = None
           ; abort_turn =
               Some
                 (Repeated_tool_call
@@ -1264,6 +1265,7 @@ let test_host_stop_carries_the_assistant_usage_sum () =
         (fun ~call_id:_ _ ->
           { success = false
           ; content = "same deterministic failure"
+          ; content_blocks = None
           ; abort_turn =
               Some
                 (Repeated_tool_call
@@ -1310,7 +1312,7 @@ let test_dynamic_tool_callback () =
         (fun ~call_id input ->
           observed_call_id := Some call_id;
           observed_input := input;
-          { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
+          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
     }
   in
   with_fixture
@@ -1341,7 +1343,7 @@ let test_stream_events_preserve_text_and_tool_identity () =
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
+          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
     }
   in
   with_fixture
@@ -1472,7 +1474,7 @@ let test_shared_mcp_bridge_owns_exact_dispatch () =
   let callback_count = ref 0 in
   let guarded_call_tool ~name:_ ~call_id:_ ~arguments:_ =
     incr callback_count;
-    Some { Runtime_official_client_mcp.success = true; content = "unexpected" }
+    Some { Runtime_official_client_mcp.success = true; content = "unexpected"; content_blocks = None }
   in
   let fresh_session = Runtime_official_client_mcp.create_session () in
   let rejects_phase label message =
@@ -1811,7 +1813,7 @@ let test_dynamic_tool_tokenizer_chars_are_validated () =
     ; input_schema = `Assoc []
     ; call =
         (fun ~call_id:_ _ ->
-          { success = true; content = "unused"; abort_turn = None })
+          { success = true; content = "unused"; content_blocks = None; abort_turn = None })
     }
   in
   let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
@@ -1899,7 +1901,7 @@ let stub_dynamic_tool =
       (fun ~call_id:_ _ ->
         { Runtime_claude_code.success = true
         ; content = "{}"
-        ; abort_turn = None
+        ; content_blocks = None; abort_turn = None
         })
   }
 ;;

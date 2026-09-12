@@ -91,3 +91,32 @@ val run_panelist
     Timeouts stay owned by each adapter's own configuration; this module adds no
     second turn deadline. Claude's login-only preflight remains bounded even
     when the following model turn explicitly has no deadline. *)
+
+
+type image_input = { media_type : string; base64_data : string }
+type response = { text : string; model : string }
+type failure =
+  | Setup_failure of Fusion_types.panel_failure
+  | Codex_failure of Runtime_codex_app_server.error
+  | Claude_failure of Runtime_claude_code.error
+  | Claude_admission_failure of Runtime_claude_code.error
+  | Antigravity_failure of Runtime_antigravity.error
+
+val panel_failure : runtime_id:string -> failure -> Fusion_types.panel_failure
+(** Legacy panel projection. Keep [failure] intact until transport-specific
+    failover decisions have consumed its admission/effect observations. *)
+
+val run_with_images
+  :  images:image_input list
+  -> base_dir:string
+  -> runtime:Runtime.t
+  -> system_prompt:string
+  -> ?timeout_s:float
+  -> ?output_schema:Yojson.Safe.t
+  -> prompt:string
+  -> unit
+  -> (response, failure) result
+(** Stateless official-client turn using the same admission, quota accounting,
+    deadlines and output-schema channels as [run_panelist]. Codex and Claude
+    execute the admitted runtime snapshot and carry the supplied image bytes through their native transports. Antigravity
+    rejects nonempty image input. [model] is the transport's response identity. *)

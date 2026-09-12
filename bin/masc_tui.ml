@@ -1889,6 +1889,8 @@ type async_msg =
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
   | Git_diff_loaded of string * (Masc.Tui_decode.git_diff, string) result
+  | Browser_history_list_loaded of int * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+  | Browser_history_page_loaded of int * (Masc.Browser_observation.t, string) result
   | Browser_lane_clients_loaded of int * (Browser_lane_view.client list, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
@@ -4284,9 +4286,37 @@ let launch_lane_addons state ~mailbox request =
         | exn -> Error (Printexc.to_string exn) in
       enqueue_async mailbox (Lane_addons_loaded (generation, result)); `Stop_daemon)
 
+let launch_browser_history state ~mailbox ~reload =
+  match state.browser_history with
+  | None -> ()
+  | Some history ->
+      state.browser_history_generation <- state.browser_history_generation + 1;
+      let generation = state.browser_history_generation in
+      let host = server_peer_host and port = state.port in
+      let fetch () =
+        if reload then Browser_history_list_loaded (generation,
+          Masc_tui_http.fetch_keeper_calls ~host ~port ~keeper_name:history.keeper_name ~limit:100)
+        else Browser_history_page_loaded (generation,
+          match Browser_history.selected history with
+          | None -> Error "No retained observations in these 100 recent tool calls"
+          | Some entry -> Masc_tui_http.fetch_browser_observation ~host ~port entry.artifact) in
+      let perform () =
+        try fetch () with
+        | Eio.Cancel.Cancelled _ as error -> raise error
+        | error -> if reload then Browser_history_list_loaded (generation,Error (Printexc.to_string error))
+                   else Browser_history_page_loaded (generation,Error (Printexc.to_string error)) in
+      (match Eio_context.get_switch_opt () with
+       | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+           enqueue_async mailbox (perform ()); `Stop_daemon))
+
 let launch_browser_lane state ~mailbox operation =
   let open Browser_lane_view in
   match state.browser_lane with
+  | Some view when Option.is_some state.browser_history ->
+      (match operation with
+       | Read -> state.browser_lane <- Some (defer_read view)
+       | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
   | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
@@ -4314,6 +4344,7 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation);
+        read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
         refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
@@ -12882,6 +12913,23 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           add_event state "error"
             (Printf.sprintf "could not point %s at a runtime: %s" keeper_name
                detail))
+  | Browser_history_list_loaded (generation, result) ->
+      (match state.browser_history with
+       | Some history when generation=state.browser_history_generation ->
+         (match result with
+          | Error detail -> state.browser_history <- Some {history with content=List_failed detail}
+          | Ok snapshot when snapshot.kcs_keeper <> history.keeper_name || snapshot.kcs_mismatched <> 0 ->
+              state.browser_history <- Some {history with content=List_failed "Keeper history identity mismatch"}
+          | Ok snapshot ->
+              let entries = Browser_history.entries snapshot in
+              state.browser_history <- Some (Browser_history.select 0 entries history);
+              launch_browser_history state ~mailbox ~reload:false)
+       | _ -> ())
+  | Browser_history_page_loaded (generation, result) ->
+      (match state.browser_history with
+       | Some history when generation=state.browser_history_generation ->
+           state.browser_history <- Some (Browser_history.accept result history)
+       | _ -> ())
   | Browser_lane_clients_loaded (generation, result) ->
       (match state.browser_lane with
        | None -> ()
@@ -12905,6 +12953,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (* Any deliberate input cancels the overlay, including a URL edit.
               It must not leave the matching browser operation busy forever. *)
            if image_generation = state.image_request_generation
+              && Option.is_none state.browser_history
               && Option.is_some (browser_lane_on_screen state) then
              match screenshot, result with
              | Some shot, Ok (_, bytes) ->
@@ -12928,8 +12977,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                      state.browser_lane <- Some (Browser_lane_view.fail_action detail view)
                  | Ok () ->
                      state.browser_lane <- Some
-                       { view with reading = None; scene = None; scene_cursor = 0;
-                         selected_tab = None; scroll = 0; load = Idle };
+                       (Browser_lane_view.after_action view);
                      launch_browser_lane state ~mailbox Browser_lane_view.Read)
             | Loading _ | Idle | No_browser | Failed _ -> ())
        | None -> ())
@@ -17078,7 +17126,8 @@ and is loaded on demand through keeper_skill.
        | Some key
          when (match browser_lane_on_screen state with
            | Some view -> Option.is_some view.client_picker | None -> false)
-              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"]) ->
+              && Option.is_none (browser_history_on_screen state)
+              && not (List.mem key ["q"; "tab"; "shift-tab"; "\t"; "?"; ":"; "h"]) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -17106,6 +17155,7 @@ and is loaded on demand through keeper_skill.
                           launch_browser_lane state ~mailbox:async_messages Read)
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
+                       && Option.is_none (browser_history_on_screen state)
                        && Option.is_some (browser_lane_on_screen state) ->
            (match state.browser_lane with
             | None -> ()
@@ -17149,12 +17199,45 @@ and is loaded on demand through keeper_skill.
                              && (String.length text = 1 || Char.code text.[0] >= 128) ->
                      edit (Some (draft ^ text))
                  | _ -> ()))
+       | Some key when Browser_history.owns_key key && Option.is_some (browser_history_on_screen state) ->
+           (match state.browser_history with
+            | None -> ()
+            | Some history ->
+                (match key with
+                 | "esc" | "left" | "h" ->
+                     close_browser_history state;
+                     Option.iter (fun operation -> launch_browser_lane state ~mailbox:async_messages operation)
+                       (Option.bind state.browser_lane Browser_lane_view.pending_read)
+                 | "[" | "]" ->
+                     Option.iter (fun next ->
+                       state.browser_history <- Some next;
+                       launch_browser_history state ~mailbox:async_messages ~reload:false)
+                       (Browser_history.move (if key="[" then -1 else 1) history)
+                 | "r" ->
+                     state.browser_history <- Some (Browser_history.create history.keeper_name);
+                     launch_browser_history state ~mailbox:async_messages ~reload:true
+                 | "y" -> Option.iter (copy_reference_to_terminal render_schedule) (Browser_history.context history)
+                 | "j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" ->
+                     let terminal_rows, cols = get_terminal_size () in
+                     let limit = Masc_tui_render.browser_history_scroll_limit state ~terminal_rows ~cols history in
+                     let delta = match key with "j" | "down" -> 1 | "k" | "up" -> -1
+                       | "pagedown" -> max 1 (terminal_rows-10) | "pageup" -> -(max 1 (terminal_rows-10)) | _ -> -history.scroll in
+                     state.browser_history <- Some {history with scroll=max 0 (min limit (min limit history.scroll+delta))}
+                 | _ -> ()))
+       | Some "h" when (match browser_lane_on_screen state with
+           | Some {url_draft=None;_} -> true | _ -> false) ->
+           (match selected_keeper state with
+            | None -> add_event state "system" "Choose a Keeper to read its retained observations"
+            | Some keeper ->
+                state.browser_history <- Some (Browser_history.create keeper.k_name);
+                launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
+           && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
                || match browser_lane_on_screen state with
                   | Some view ->

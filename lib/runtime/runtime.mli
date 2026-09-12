@@ -533,16 +533,16 @@ val exact_lane_of_id : string -> exact_lane option
 (** Parse a lane table key into the closed exact-output lane variant. *)
 
 val exact_lane_supports_cli_tail : exact_lane -> bool
-(** Whether this exact lane has a CLI oneshot runner to walk [cli_slots]
-    when HTTP provider slots are absent or exhausted. [Verifier] does not
-    have a CLI runner and requires provider slots. *)
+(** Whether this exact lane can walk official-client [cli_slots] when HTTP
+    provider slots are absent or exhausted. Verifier uses the managed tool-call
+    runner and its typed verdict callback. *)
 
 val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
     lane id (RFC-0361 D7(a)). *)
 
 val verifier_exact_lane_slot_ids : unit -> (string list, string) result
-(** Admitted [verifier_exact] slot ids in frozen declaration order from the
+(** Admitted API slot ids followed by declared official-client slot ids from the
     published exact-output registry — the single provider-selection SSOT for
     completion-authority judgement calls. [Error] names why the lane cannot
     judge (registry not published, lane unconfigured, or no admitted slots);

@@ -16,17 +16,21 @@ let rec remove path =
     Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
   | _ -> Unix.unlink path
 
-let test_http_effect_checkpoint_owner_restart_alternate () =
+let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(lose_retained = false) ?(projection_failure = false) () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
+  (* Each case declares a fresh primary->alternate scenario. A previous
+     case's successful alternate remains sticky outside Runtime's snapshot. *)
+  Runtime_lane_preference.reset_for_testing ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "direct-runtime-resume-" "" in
   Unix.unlink base_path; Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
+    Runtime_lane_preference.reset_for_testing ();
     Runtime.For_testing.restore runtime_snapshot;
     (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
@@ -102,13 +106,17 @@ is-default = true
   let operation_id = Keeper_chat_operation.Operation_id.of_string "kmsg-http-resume"
     |> require "operation ID" in
   let source = `Assoc ["kind", `String "keeper"; "asked_by", `String "original-asker"] in
-  let input = `Assoc ["message", `String "Finish original task"; "task_id", `String "original-task";
-    "attachments", `List [`String "original-evidence"]; "channel", source] in
+  let input = Keeper_chat_operation_payload.input_to_json ~message:"Finish original task"
+    ~user_blocks:[] ~turn_instructions:(Some "Preserve the original task criteria and evidence")
+    ~surface_context:(Some (`Assoc ["task_id", `String "original-task"])) ~attachments:[] in
   let input = Keeper_chat_operation.canonical_json input |> require "canonical input" in
   let source = Keeper_chat_operation.canonical_json source |> require "canonical source" in
   let tool = Agent_core.Tool.create ~name:"record_effect" ~description:"Record one effect"
       ~parameters:[] (fun _ -> incr effects; Ok {content="effect receipt: already completed"; content_blocks = None; _meta = None}) in
   let seen_operations = ref [] in
+  let peer_id = Keeper_chat_operation.Operation_id.of_string "kmsg-peer-after-retry" |> require "peer ID" in
+  let terminal_failure = ref None in
+  let expected_terminal_failure = ref None in
   let run_phase ~resume =
     Eio.Switch.run @@ fun owner_sw ->
     let settled, resolve_settled = Eio.Promise.create () in
@@ -117,12 +125,43 @@ is-default = true
       let operation : Keeper_chat_operation.t = match claim () |> require "claim" with
         | Some operation -> operation | None -> fail "operation lost at restart" in
       seen_operations := operation.operation_id :: !seen_operations;
+      if Keeper_chat_operation.Operation_id.equal peer_id operation.operation_id then (
+        ready := false;
+        Owner.Operation_succeeded {outcome_ref="peer-work-after-terminal-failure"})
+      else (
       check bool "same original operation" true
         (Keeper_chat_operation.Operation_id.equal operation_id operation.operation_id);
-      check bool "original task/channel/attachments retained" true (operation.input = Some input && operation.source = source);
-      let admission = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
-        |> require "bound continuation" in
+      check bool "original task/channel/instructions retained" true (operation.input = Some input && operation.source = source);
+      let operation_state () = Registry.exact_operation ~base_path ~keeper_name operation_id
+        |> Result.map_error Registry.command_error_to_string
+        |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
+          | None -> Error "fixture operation disappeared") in
+      let admission = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id in
+      match admission with
+      | Error detail when resume && lose_retained ->
+        terminal_failure := Some detail;
+        Registry.submit_operation ~base_path ~keeper_name ~operation_id:peer_id ~source ~input
+          |> require "peer admission while original is claimed" |> ignore;
+        let execution = Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
+          ~operation_state ~pending_continuation:(fun () -> Keeper_direct_gate_continuation.pending
+            ~base_path ~keeper_name ~operation_id)
+          ~outcome:(Some (Server_routes_http_keeper_stream.Failed {kind=Turn_failed; detail}))
+          ~delivery:(Error detail) in
+        (match execution with
+         | Owner.Operation_failed _ -> ()
+         | Owner.Operation_deferred | Owner.Operation_succeeded _ ->
+           fail "missing retained authority did not become a terminal failure");
+        expected_terminal_failure := Some execution;
+        execution
+      | Error detail -> fail detail
+      | Ok admission ->
       check bool "restart restores typed pending continuation" resume (Option.is_some admission);
+      if resume && interleave then (
+        let again = Continuation.load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id
+          |> require "re-read admitted current-history continuation" |> Option.get in
+        check bool "reloading before consume does not duplicate continuation input" true
+          ((Continuation.checkpoint again).messages =
+           (Continuation.checkpoint (Option.get admission)).messages));
       let context = Agent_core.Context.create_sync () in
       let scope = Keeper_execution_scope_id.direct_operation operation_id in
       let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
@@ -149,23 +188,41 @@ is-default = true
         Continuation.defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id lane
           |> require "durable direct deferral";
         ready := false;
-        Owner.Operation_deferred
+        Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
+          ~operation_state ~pending_continuation:(fun () -> Keeper_direct_gate_continuation.pending
+            ~base_path ~keeper_name ~operation_id)
+          ~outcome:(Some (if projection_failure then
+            Server_routes_http_keeper_stream.Failed {kind=Stream_projection_failed; detail="fixture display failure after durable deferral"}
+            else Server_routes_http_keeper_stream.Delivered {outcome_ref="checkpointed-retry"}))
+          ~delivery:(Ok ())
       | Ok _, None ->
         check bool "alternate resumes after owner restart" true resume;
         Owner.Operation_succeeded {outcome_ref="alternate-http-completion"}
       | Error error, None -> fail (Agent_core.Error.to_string error)
-      | Ok _, Some _ -> fail "successful inference unexpectedly retained deferred failure"
+      | Ok _, Some _ -> fail "successful inference unexpectedly retained deferred failure")
     in
     let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> !ready); execute;
-      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~execution ->
-        (match execution with Owner.Operation_failed {detail; _} -> fail detail
-         | Owner.Operation_deferred | Owner.Operation_succeeded _ -> ());
-        Eio.Promise.resolve resolve_settled ())} in
+      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~execution ->
+        (* The Owner catches hook exceptions. Resolve failures back to the
+           test fiber instead of abandoning its completion promise. *)
+        match execution with
+        | Owner.Operation_failed {detail; _}
+          when Some execution <> !expected_terminal_failure ->
+          Eio.Promise.resolve resolve_settled (Error detail)
+        | Owner.Operation_failed _ | Owner.Operation_deferred | Owner.Operation_succeeded _ ->
+          if not (resume && lose_retained) ||
+             Option.exists (Keeper_chat_operation.Operation_id.equal peer_id) claimed_operation_id
+          then Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
-    Eio.Promise.await settled
+    (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
+    if resume && lose_retained then (
+      let fresh = Keeper_chat_operation.Operation_id.of_string "kmsg-new-admission-after-recovery"
+        |> require "new admission ID" in
+      Registry.submit_operation ~base_path ~keeper_name ~operation_id:fresh ~source ~input
+        |> require "fresh direct admission is not poisoned by deferred-not-queued" |> ignore)
   in
   run_phase ~resume:false;
   check int "completed tool ran before rate limit" 1 !effects;
@@ -186,10 +243,62 @@ is-default = true
   check bool "cooling retry becomes claimable once not_before passes" true
     (Store.has_claimable_queued store ~now:(now +. 5.0) |> require "has_claimable_queued after cooling");
   Store.close store |> require "close store";
+  if interleave then (
+    let original = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id |> require "original snapshot" in
+    let reference = Checkpoint.exact_snapshot_reference original in
+    let retained = Checkpoint.load_retained_exact_snapshot ~session_dir ~reference |> require "exact retained deferral" in
+    let checkpoint = Checkpoint.exact_snapshot_checkpoint retained in
+    let context = Agent_core.Context.copy checkpoint.context ~eio:true in
+    let frame = Keeper_repetition_scope.load context |> require "original frame" in
+    let other_scope = Keeper_execution_scope_id.autonomous_admission
+      (Uuidm.of_string "00112233-4455-4677-8899-aabbccddeeff" |> Option.get) in
+    let frame = Keeper_repetition_snapshot.admit frame (Keeper_repetition_snapshot.Fresh other_scope)
+      |> require "interleaved autonomous scope" in
+    Keeper_repetition_scope.save context frame;
+    let checkpoint = {checkpoint with Agent_core.Checkpoint.context;
+      messages=checkpoint.messages @ [Agent_core.Types.user_msg "Autonomous follow-up";
+        Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
+          [Agent_core.Types.Text "Board receipt: newer shared work already posted once"]];
+      turn_count=checkpoint.turn_count + 1} in
+    Checkpoint.save_agent_core_classified ~session_dir checkpoint |> require "advance shared canonical history" |> ignore;
+    if lose_retained then (
+      (* Model the observed pre-fix store: the original reference exists in the
+         journal, but no retained bytes authorize a replay after restart. *)
+      let path = Filename.concat (Filename.concat session_dir "accepted-checkpoints")
+        (reference.Keeper_checkpoint_ref.sha256 ^ ".json") in
+      Unix.unlink path));
+  if lose_retained then (
+    (* Exact persisted shape observed after the rejected continuation: operation
+       Running, semantic Recovering(Runtime_retry), original bytes absent.
+       Owner startup must reconcile this before executing the resumed claim. *)
+    let store = Store.open_or_create ~path:store_path |> require "open persisted failed-claim shape" in
+    let claimed = Store.claim_next store ~now:(now +. 5.0) |> require "persist original as running" |> Option.get in
+    check bool "same operation holds stale running projection" true
+      (Keeper_chat_operation.Operation_id.equal operation_id claimed.operation_id);
+    let execution = Store.semantic_get store (Keeper_execution_scope_id.direct_operation operation_id)
+      |> require "read recovering semantic authority" |> Option.get in
+    check bool "pending semantic authority survives failed claim" true
+      (match execution.phase with Keeper_semantic_execution.Recovering {origin=Runtime_retry _; _} -> true | _ -> false);
+    Store.close store |> require "close persisted running store");
   write runtime_path (runtime_config ~with_removed:false);
   Runtime.init_default ~config_path:runtime_path |> require "remove frozen first runtime";
   run_phase ~resume:true;
   check int "completed effect not replayed" 1 !effects;
+  if lose_retained then (
+    check int "original claims and next peer claim" 3 (List.length !seen_operations);
+    check int "missing authority never reaches alternate model" 0 (List.length !alternate_bodies);
+    check bool "lost authority remains explicit" true (Option.is_some !terminal_failure);
+    let store = Store.open_or_create ~path:store_path |> require "read terminal state" in
+    let original = Store.get store operation_id |> require "original state" |> Option.get in
+    let peer = Store.get store peer_id |> require "peer state" |> Option.get in
+    check bool "original terminal failure is durable" true
+      (match original.state with Keeper_chat_operation.Failed _ -> true | _ -> false);
+    check bool "next queued peer completed" true
+      (match peer.state with Keeper_chat_operation.Succeeded _ -> true | _ -> false);
+    check bool "new admission remains queued after recovery" true
+      (Store.has_claimable_queued store ~now:(Time_compat.now ()) |> require "owner store remains readable");
+    Store.close store |> require "close terminal store")
+  else (
   check int "same operation claimed twice" 2 (List.length !seen_operations);
   check int "one alternate request" 1 (List.length !alternate_bodies);
   let body = List.hd !alternate_bodies |> Yojson.Safe.from_string in
@@ -198,7 +307,13 @@ is-default = true
   check int "original input occurs once in resumed model input" 1
     (List.filter ((=) (`String "Finish original task")) contents |> List.length);
   check bool "completed tool receipt reaches alternate model" true
-    (List.mem (`String "effect receipt: already completed") contents)
+    (List.mem (`String "effect receipt: already completed") contents);
+  if interleave then (
+    check bool "newer Board work remains in model history" true
+      (List.mem (`String "Board receipt: newer shared work already posted once") contents);
+    check int "one explicit original-operation continuation" 1
+      (List.filter (function `String text -> String.starts_with ~prefix:"Resume the original direct operation " text
+        | _ -> false) contents |> List.length)))
 
 let test_checkpoint_requires_original_active_scope () =
   let id value = Keeper_chat_operation.Operation_id.of_string value |> require "scope operation" in
@@ -263,7 +378,13 @@ let test_server_transcript_deferral_preserves_final_slot () =
 
 let () = run "direct runtime continuation" ["http", [test_case
   "rate limit after tool result resumes same operation across owner restart" `Quick
-  test_http_effect_checkpoint_owner_restart_alternate];
+  (test_http_effect_checkpoint_owner_restart_alternate ~interleave:false ~lose_retained:false ~projection_failure:false);
+  test_case "autonomous history advances while original exact continuation survives" `Quick
+    (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:false ~projection_failure:false);
+  test_case "display failure after committed deferral keeps original continuation resumable" `Quick
+    (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:false ~projection_failure:true);
+  test_case "missing original checkpoint terminalizes and releases queued peer after restart" `Quick
+    (test_http_effect_checkpoint_owner_restart_alternate ~interleave:true ~lose_retained:true ~projection_failure:false)];
   "authority", [test_case "active original operation owns checkpoint" `Quick
     test_checkpoint_requires_original_active_scope;
     test_case "server persistence keeps final answer and both tool attempts" `Quick

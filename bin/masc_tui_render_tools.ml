@@ -323,7 +323,7 @@ let tools_pane_strip (state : state) =
     [ name Masc_tui_types.Tools_surface "호출 범위"
     ; name Masc_tui_types.Tools_async "비동기 작업"
     ; name Masc_tui_types.Tools_activations "Skill 기록"
-    ; name Masc_tui_types.Tools_usage "사용 집계"
+    ; name Masc_tui_types.Tools_usage "Skill 사용 집계"
     ; name Masc_tui_types.Tools_catalog "전체 도구"
     ]
 ;;

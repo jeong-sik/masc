@@ -7,8 +7,20 @@
 module T = Masc_tui_types
 
 let session () =
-  T.voice_wizard_open ~section:Voice_setup.Tts ~provider:Voice_wizard.Elevenlabs
-    ~revision:"rev-1"
+  T.voice_wizard_open ~section:Voice_setup.Tts ~revision:"rev-1"
+
+(* The session opens on whatever the section offers first, which for speech out
+   is say -- the entry that needs nothing installed. Cases about a provider
+   with an address or a key walk to it the way an operator does. *)
+let rec walk_to session provider guard =
+  if guard = 0
+  then Alcotest.failf "never reached the provider under test"
+  else if session.T.vws_draft.Voice_wizard.provider = provider
+  then session
+  else walk_to (T.voice_wizard_cycle_provider session) provider (guard - 1)
+
+let session_on provider =
+  walk_to (T.voice_wizard_go (session ()) Voice_wizard.Provider) provider 8
 
 let step_name : Voice_wizard.step -> string = function
   | Voice_wizard.Section -> "section"
@@ -30,8 +42,7 @@ let test_a_session_opens_on_the_first_question () =
    first keystroke replaces rather than appends. *)
 let test_the_first_keystroke_replaces_a_prefilled_value () =
   let typing =
-    session () |> fun s ->
-    T.voice_wizard_go s Voice_wizard.Credential
+    T.voice_wizard_go (session_on Voice_wizard.Elevenlabs) Voice_wizard.Credential
   in
   Alcotest.(check string) "ElevenLabs arrives with its usual variable"
     "ELEVENLABS_API_KEY" typing.T.vws_input;
@@ -49,7 +60,7 @@ let test_backspace_drops_one_scalar_not_one_byte () =
 (* Going back to change an answer has to find the answer that was given, or the
    operator retypes it every time they check something earlier. *)
 let test_going_back_finds_what_was_typed () =
-  let s = T.voice_wizard_go (session ()) Voice_wizard.Name in
+  let s = T.voice_wizard_go (session_on Voice_wizard.Elevenlabs) Voice_wizard.Name in
   let s = T.voice_wizard_append s "elevenlabs-direct" in
   let s = T.voice_wizard_next s in
   Alcotest.(check string) "moved on" "credential" (step_name s.T.vws_step);
@@ -71,8 +82,17 @@ let test_typing_reaches_the_draft_only_on_leaving_the_step () =
    a draft whose provider is not in its own offered list. *)
 let test_switching_to_speech_in_drops_a_provider_that_cannot_listen () =
   let s =
-    T.voice_wizard_open ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool
-      ~revision:"rev-1"
+    T.voice_wizard_open ~section:Voice_setup.Tts ~revision:"rev-1"
+    |> fun opened ->
+    (* Walked to the tool kind rather than opened on it: the session opens on
+       whatever the section offers first, which is deliberately not this. *)
+    let rec walk_to_tool session guard =
+      if guard = 0 then session
+      else if session.T.vws_draft.Voice_wizard.provider = Voice_wizard.Mcp_tool
+      then session
+      else walk_to_tool (T.voice_wizard_cycle_provider session) (guard - 1)
+    in
+    walk_to_tool (T.voice_wizard_go opened Voice_wizard.Provider) 6
   in
   let s = T.voice_wizard_go s Voice_wizard.Name in
   let s = T.voice_wizard_append s "kept" in
@@ -87,7 +107,7 @@ let test_switching_to_speech_in_drops_a_provider_that_cannot_listen () =
     switched.T.vws_draft.Voice_wizard.endpoint_id
 
 let test_cycling_the_provider_keeps_the_name_and_drops_the_rest () =
-  let s = T.voice_wizard_go (session ()) Voice_wizard.Name in
+  let s = T.voice_wizard_go (session_on Voice_wizard.Elevenlabs) Voice_wizard.Name in
   let s = T.voice_wizard_commit (T.voice_wizard_append s "named") in
   let cycled = T.voice_wizard_cycle_provider s in
   Alcotest.(check bool) "the provider moved" true

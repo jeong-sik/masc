@@ -21263,8 +21263,7 @@ and is loaded on demand through keeper_skill.
                          state.voice_wizard
                            <- Some
                                 (Masc_tui_types.voice_wizard_open
-                                   ~section:Voice_setup.Tts
-                                   ~provider:Voice_wizard.Elevenlabs ~revision)
+                                   ~section:Voice_setup.Tts ~revision)
                        | Some _ | None -> ())
                     | Some _ | None -> ()))
             | Tools -> handle_skill_edit ()

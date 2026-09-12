@@ -14413,7 +14413,10 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
 
         opened = press_and_settle(process, master_fd, output, b"e")
-        expect(opened, b"step 1/7", "the wizard did not open on the first of seven")
+        # The wizard opens on whatever speech out offers first, which is say --
+        # five questions. This walk is about ElevenLabs, so it moves there at
+        # the provider step and the count becomes seven.
+        expect(opened, b"step 1/5", "the wizard did not open on the first question")
         expect(opened, b"setup", "the wizard title did not draw")
         expect(opened, b"speech out", "the first question did not show its answer")
 
@@ -14432,8 +14435,14 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
 
         # Enter walks forward. Provider is the second closed set.
         provider = press_and_settle(process, master_fd, output, b"\r")
-        expect(provider, b"step 2/7", "enter did not reach the provider step")
-        expect(provider, b"elevenlabs", "the provider step showed no provider")
+        expect(provider, b"step 2/5", "enter did not reach the provider step")
+        expect(provider, b"macos_say", "say does not lead the speech out providers")
+
+        # Walking to ElevenLabs changes which questions exist, so the counter
+        # moves with it: five becomes seven as an address and a key appear.
+        chosen = press_and_settle(process, master_fd, output, b"\x1b[C")
+        expect(chosen, b"elevenlabs", "the right arrow did not reach elevenlabs")
+        expect(chosen, b"step 2/7", "the question count did not follow the provider")
 
         # Typing reaches the field, and leaving the step reaches the draft.
         expect(
@@ -14538,6 +14547,83 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
+    """The path a new mac takes: say, which needs nothing installed.
+
+    say leads the speech-out provider list, so the wizard opens on it. What
+    this holds that the ElevenLabs walk cannot: that the questions say is not
+    asked -- address, credential, model -- are absent from the terminal too,
+    and that the save carries no model change. A blank model written here
+    would land on a section a sibling endpoint shares.
+    """
+
+    def interact(
+        process: "subprocess.Popen[bytes]",
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        def expect(frame: bytes, needle: bytes, what: str) -> None:
+            if needle not in frame:
+                raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
+
+        open_the_voice_pane(process, master_fd, output)
+        opened = press_and_settle(process, master_fd, output, b"e")
+        # Five questions, not seven: no address, no credential, no model.
+        expect(opened, b"step 1/5", "the say path asked more than five questions")
+
+        provider = press_and_settle(process, master_fd, output, b"\r")
+        expect(provider, b"step 2/5", "enter did not reach the provider step")
+        expect(provider, b"macos_say", "say does not lead the speech out providers")
+
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 3/5",
+            "enter did not reach the name step",
+        )
+        press_and_settle(process, master_fd, output, b"macos-say", cap=15.0)
+
+        # Straight to the voice. An address or a credential step here would
+        # show as 4/5 asking for one.
+        voice_step = press_and_settle(process, master_fd, output, b"\r")
+        expect(voice_step, b"step 4/5", "enter did not reach the voice step")
+        expect(voice_step, b"voice", "the fourth question is not about the voice")
+        press_and_settle(process, master_fd, output, b"Yuna", cap=15.0)
+
+        review = press_and_settle(process, master_fd, output, b"\r")
+        expect(review, b"step 5/5", "enter did not reach the review")
+        expect(review, b"enter saves this", "the review did not offer to save")
+
+        os.write(master_fd, b"\r")
+        body = json.loads(
+            wait_for_http_request(
+                process, master_fd, output, requests, path="/api/v1/voice/setup"
+            )
+        )
+        changes = {change.get("change"): change for change in body.get("changes", [])}
+        if "set_default_model" in changes:
+            raise AssertionError(
+                f"say wrote a model onto the section it shares: {body!r}"
+            )
+        endpoint = changes.get("put_endpoint", {}).get("endpoint", {})
+        if endpoint.get("kind") != "macos_say":
+            raise AssertionError(f"the endpoint is not a say endpoint: {endpoint!r}")
+        # No address and no credential reach the wire either, not just the
+        # screen: a command endpoint carrying either would be refused on load.
+        for absent in ("base_url", "api_key_env"):
+            if absent in endpoint:
+                raise AssertionError(f"{absent} was sent for a command: {endpoint!r}")
+        if changes.get("set_tts_default_voice", {}).get("voice") != "Yuna":
+            raise AssertionError(f"the voice was lost: {changes!r}")
+
+        press_and_settle(process, master_fd, output, b"\x1b")
+        read_available(master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def run_voice_wizard_regression(executable: str) -> None:
     requests: HttpRequests = []
     # The probe that follows a save is left to fail: whether an endpoint
@@ -14549,6 +14635,14 @@ def run_voice_wizard_regression(executable: str) -> None:
         interact=voice_wizard_interaction(requests),
         http_fixtures=voice_wizard_http_fixtures(),
         http_requests=requests,
+    )
+    say_requests: HttpRequests = []
+    run_terminal_scenario(
+        executable,
+        description="The wizard's say path asks five questions and writes no model",
+        interact=voice_wizard_say_interaction(say_requests),
+        http_fixtures=voice_wizard_http_fixtures(),
+        http_requests=say_requests,
     )
 
 

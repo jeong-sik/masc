@@ -42,12 +42,17 @@ let model_checks config_path =
     [check "model_connection" Needs_setup "Choose a model connection for imp."
        [Configure_models]]
   else match Runtime.load_list ~config_path with
-  | Error _ ->
-    (* Resolver diagnostics can contain operator input. Keep the error useful
-       without copying credential-bearing TOML into either UI. *)
+  | Error failure ->
+    (* The reason reaches the operator now; the condition does not move yet.
+       Saving a selection does repair some of these — a stale imp assignment is
+       rewritten by runtime-default-set over the staged copy, measured — but the
+       branch alone does not say which: a reference failure covers both an
+       assignment the rewrite fixes and a lane reference it does not. Splitting
+       Invalid from Needs_setup needs that measured per situation, not inferred
+       from the constructor. *)
     None, None,
     [check "model_connection" Invalid
-       "The workspace runtime.toml is unreadable or has invalid runtime references. Repair configuration to continue."
+       (Runtime.to_operator_text ~config_path failure)
        [Inspect_configuration; Configure_models]]
   | Ok (runtimes, default, assignments, _, lanes) ->
     let selected = Runtime_verification.initial_runtime_id

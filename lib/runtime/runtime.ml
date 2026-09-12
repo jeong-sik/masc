@@ -547,6 +547,28 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       declared_model
 ;;
 
+(* The same account, minus the one part this repository did not write. A parse
+   error's text comes from the TOML parser and can quote the line it choked on,
+   which on an operator surface may be a value rather than a key. Every other
+   case names ids and config keys, so it reads identically to the diagnostic.
+   Listed case by case on purpose: a new failure has to decide where it
+   belongs instead of falling into a default. *)
+let to_operator_text ~(config_path : string) (failure : load_failure) : string =
+  match failure with
+  | Toml_unparsable errors ->
+    Printf.sprintf
+      "%s: %d parse error(s) in the file itself. Run masc runtime-probe for the \
+       parser's own report."
+      config_path
+      (List.length errors)
+  | Undeclared_bindings _
+  | Default_runtime_absent
+  | Default_runtime_unresolved _
+  | Reference_unresolved _
+  | Lane_candidate_unresolved _
+  | Max_context_absent _ -> to_diagnostic_text ~config_path failure
+;;
+
 (* The list is carried out whole rather than counted here: the caller decides
    whether an operator sees it, and how much of it. *)
 let validate_no_dangling_bindings

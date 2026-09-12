@@ -5509,13 +5509,23 @@ let row_list (state : state) : row_list option =
            windowed ~count:(List.length (fusion_list_entries state))
              ~cursor:state.fusion_cursor (fun index ->
                state.fusion_cursor <- index))
+  (* The list pane draws its window around the cursor rather than holding a
+     scroll of its own, so a landing is on screen the moment the cursor names
+     it. With the text focused j/k scrolls the reading instead and there is no
+     row to land on -- the same condition [surface_row_texts] reads. *)
+  | Resources ->
+      (match state.resource_focus, state.resources_list with
+       | Right_pane, _ | _, None -> None
+       | Left_pane, Some rows ->
+           windowed ~count:(List.length rows) ~cursor:state.resources_cursor
+             (fun index -> state.resources_cursor <- index))
   (* Named rather than caught. A surface that grows a row cursor is added
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
      reading. *)
   | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Config | Resources | Tools ->
+  | Config | Tools ->
       None
 
 (* Move the active surface's row cursor to the next row whose search text
@@ -16269,17 +16279,20 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "esc" | "q" | "Q" -> close ()
             | "j" | "down" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 1
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
             | "k" | "up" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
             | "d" | "pagedown" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 5
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:5
             | "u" | "pageup" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
             | "g" | "home" ->
                 state.link_modal_scroll <- 0
             | "G" | "end" ->
-                state.link_modal_scroll <- 9999
+                state.link_modal_scroll <-
+                  Masc_tui_types.clamped_scroll_end
             | "n" | "right" | "\t" ->
                 let count = List.length state.link_modal_links in
                 if count > 1 then begin
@@ -17435,7 +17448,8 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Resources ->
            open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->
-           state.resource_scroll <- state.resource_scroll + 1
+           state.resource_scroll <-
+             Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
@@ -18245,6 +18259,16 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       (* The reading, not the list. [row_list] answers for the list pane
+          below; with the text focused the rows are the ones the frame wrapped
+          out of the resource body, which the keypress cannot count -- so End
+          names a row past any of them and the frame reports back where that
+          landed. *)
+       | Some ("home" | "end")
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           state.resource_scroll <-
+             (if key = Some "end" then Masc_tui_types.clamped_scroll_end
+              else 0)
        (* Every other list. The two surfaces above answer first because their
           rows are drawn newest first, so their Home is the live end rather
           than the first row -- the rest read oldest first and take the plain
@@ -18430,15 +18454,29 @@ and is loaded on demand through keeper_skill.
              | Keepers _ | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
                  move_list_by_rows state ~delta:(direction * page)
-             (* No row list to page. Overview's two panes, Activity's ring and
-                the Tools and Resources listings are built by the frame out of
-                text the frame formats, so the count a page needs does not
-                exist at the keypress; Config's five panes each carry a cursor
-                of their own meaning. Activity pages with g and G, Tools with
-                Home and End. Left named rather than folded into the arm above,
-                so the day one of them gains a row list this reads as a lie
-                rather than as silence (#35305). *)
-             | Overview | Acting | Config | Tools | Resources -> ())
+             (* Two panes, two meanings: the list moves a cursor like the
+                arm above, the reading scrolls. [move_list_by_rows] finds the
+                list only while the list is focused, so the reading's own
+                page is spelled here rather than left silent. *)
+             | Resources ->
+                 (match state.resource_focus with
+                  | Right_pane ->
+                      state.resource_scroll <-
+                        (if direction > 0 then
+                          Masc_tui_types.scroll_down_from state.resource_scroll
+                            ~by:page
+                        else max 0 (state.resource_scroll + (direction * page)))
+                  | Left_pane ->
+                      move_list_by_rows state ~delta:(direction * page))
+             (* No row list to page. Overview's two panes and Activity's ring
+                are built by the frame out of text the frame formats, so the
+                count a page needs does not exist at the keypress; Config's
+                five panes each carry a cursor of their own meaning. Activity
+                goes to the newest with g, Tools with Home and End. Left named
+                rather than folded into the arm above, so the day one of them
+                gains a row list this reads as a lie rather than as silence
+                (#35305). *)
+             | Overview | Acting | Config | Tools -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which
@@ -19323,7 +19361,8 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <- state.resource_scroll + 1
+                  state.resource_scroll <-
+                    Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
                 else
                   let total =
                     match state.resources_list with

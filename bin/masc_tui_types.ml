@@ -4601,11 +4601,21 @@ let browser_lane_on_screen (state : state) =
   | Connectors, Browser_lane_shown _ -> state.browser_lane
   | _, Browser_lane_hidden | _, Browser_lane_shown _ -> None
 
+let browser_history_on_screen state =
+  Option.bind (browser_lane_on_screen state) (fun _ -> state.browser_history)
+
+let close_browser_history state =
+  state.browser_history <- None;
+  state.browser_history_generation <- state.browser_history_generation + 1
+
 let leave_browser_lane_for_surface state destination =
-  if destination <> state.view then
+  if destination <> state.view then begin
+    close_browser_history state;
     state.browser_lane_visibility <- Browser_lane_hidden
+  end
 
 let show_browser_lane state =
+  if Option.is_none (browser_lane_on_screen state) then close_browser_history state;
   if Option.is_none (browser_lane_on_screen state) then
     state.browser_lane_visibility <- Browser_lane_shown {
       return_surface = state.view;
@@ -4619,6 +4629,7 @@ let show_browser_lane state =
   state.search <- None
 
 let hide_browser_lane state =
+  close_browser_history state;
   match state.browser_lane_visibility with
   | Browser_lane_hidden -> ()
   | Browser_lane_shown previous ->

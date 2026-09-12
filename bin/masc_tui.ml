@@ -12857,6 +12857,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (* Any deliberate input cancels the overlay, including a URL edit.
               It must not leave the matching browser operation busy forever. *)
            if image_generation = state.image_request_generation
+              && Option.is_none state.browser_history
               && Option.is_some (browser_lane_on_screen state) then
              match screenshot, result with
              | Some shot, Ok (_, bytes) ->
@@ -15788,14 +15789,13 @@ and is loaded on demand through keeper_skill.
        | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
-       | Some key when Option.is_some state.browser_history ->
+       | Some key when Option.is_some (browser_history_on_screen state) ->
            (match state.browser_history with
             | None -> ()
             | Some history ->
                 (match key with
                  | "esc" | "h" ->
-                     state.browser_history <- None;
-                     state.browser_history_generation <- state.browser_history_generation + 1
+                     close_browser_history state
                  | "[" | "]" ->
                      Option.iter (fun next ->
                        state.browser_history <- Some next;

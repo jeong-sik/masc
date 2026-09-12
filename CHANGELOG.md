@@ -34,11 +34,13 @@
 - Lane packages: install observation packages from TOML and expose their Skills through the existing Keeper catalog (#35465, #35482).
 - Browser: compose navigation with landing-page region observations (#35513).
 - TUI Metrics: show retained Task throughput and lead time per assignee; these are Task observations, not a count of Keeper cycles (#35357).
+- Goals: record creation events and recover names and lifetime observations for goals no longer in the active store; show that history in Planning (#35375, #35388, #35408).
+- TUI: fold the turn dashboard to its progress line, retain questions requiring an answer, and use Ctrl-S to expand it with terminal flow control disabled (#35458).
 
 ### Documentation
 
 - Align the benchmark's arm A description with its actual kimi-cli runner (#35395).
-- Update the G1 revision 2 contract and registration evidence, and document the proposed typed unavailable Goal-store boundary (#35485, #35524, #35479).
+- Update the G1 revision 2 contract and registration evidence, and document proposed typed Goal-store failures and explicit next-actor outcomes (#35485, #35524, #35479, #35480).
 
 ## [0.35.14] - 2026-09-12
 

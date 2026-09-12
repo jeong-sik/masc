@@ -1819,13 +1819,16 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
    refused; without this the two are the same row. Idle is a blank rather than
    a glyph — most goals have never been asked, and a mark on all of them would
    carry no information. *)
-let planning_proof_mark = function
-  | Tui_decode.Proof_idle -> " "
-  | Tui_decode.Proof_pending -> (Theme.warn ()) ^ "\xe2\x80\xa6" ^ Ansi.reset
-  | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ "\xe2\x9c\x93" ^ Ansi.reset
-  | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ "\xe2\x9c\x97" ^ Ansi.reset
-  | Tui_decode.Proof_stale _ -> (Theme.warn ()) ^ "~" ^ Ansi.reset
-  | Tui_decode.Proof_unreadable _ -> (Theme.warn ()) ^ "!" ^ Ansi.reset
+let planning_proof_mark proof =
+  let mark = Masc_tui_planning_proof_mark.glyph proof in
+  match proof with
+  | Tui_decode.Proof_idle -> mark
+  | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ mark ^ Ansi.reset
+  | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ mark ^ Ansi.reset
+  | Tui_decode.Proof_pending
+  | Tui_decode.Proof_stale _
+  | Tui_decode.Proof_unreadable _ ->
+      (Theme.warn ()) ^ mark ^ Ansi.reset
 
 
 (* The footer names the action behind each key for the keeper under the cursor,

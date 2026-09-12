@@ -47,6 +47,18 @@ let test_the_revision_is_cut_to_a_comparable_length () =
     "Source revision: source-7"
     (revision (metadata ~source_revision:"source-7" ()))
 
+(* The prefix is the compact summary's economy, not the view's. [v] opens the
+   detail screen to compare this read against the last one, and a prefix cannot
+   be pasted into [git show]; test/test_tui_keyboard_input.py waits on the whole
+   string there. *)
+let test_the_detail_screen_keeps_the_whole_revision () =
+  let read = metadata () in
+  let detail n = snd (List.nth (View.detail_lines read) n) in
+  check string "the revision whole, not its first twelve"
+    "Source revision: 0123456789abcdef0123456789abcdef" (detail 0);
+  check string "and the verdict under it is the summary's"
+    (validation read) (detail 1)
+
 let test_a_clean_read_does_not_count_to_zero () =
   check string "valid says it, and says no more" "Validation: valid"
     (validation (metadata ()))
@@ -89,6 +101,8 @@ let () =
     [ ( "the rows above the listing"
       , [ test_case "the revision is cut to a comparable length" `Quick
             test_the_revision_is_cut_to_a_comparable_length
+        ; test_case "the detail screen keeps the whole revision" `Quick
+            test_the_detail_screen_keeps_the_whole_revision
         ; test_case "a clean read does not count to zero" `Quick
             test_a_clean_read_does_not_count_to_zero
         ; test_case "warnings are counted" `Quick

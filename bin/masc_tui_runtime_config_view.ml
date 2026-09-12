@@ -158,14 +158,25 @@ let validation_line = function
       in
       (if report.valid then (if warnings = 0 then Good else Warning) else Bad),
       String.concat " \xc2\xb7 " (("Validation: " ^ verdict) :: counts)
-let summary_lines metadata =
+(* The revision row, and the two verdict rows under it. Both screens draw the
+   same verdict and differ only in how much of the revision they spend a row on,
+   so the verdict lives in one place and the revision is the caller's: the
+   compact summary has three rows for the whole read and prints the prefix, the
+   detail screen has the room for the revision a reader pastes into [git show],
+   and test/test_tui_keyboard_input.py reads it there whole. *)
+let revision_row revision = Neutral, "Source revision: " ^ revision
+
+let verdict_rows metadata =
   let attention = restart metadata || metadata.preempted_keys <> [] in
-  [ Neutral, "Source revision: " ^ short_revision metadata.source_revision;
-    validation_line metadata.validation;
+  [ validation_line metadata.validation;
     (if metadata.keeper = Invalid_configuration then Bad else if attention then Warning else Neutral),
       Printf.sprintf "Routing %s · Keeper %s · restart %s"
         (routing_label metadata.routing) (keeper_label metadata.keeper)
         (if restart metadata then "required" else "not required") ]
+
+let summary_lines metadata =
+  revision_row (short_revision metadata.source_revision) :: verdict_rows metadata
+
 let detail_lines metadata =
   let keys label tone values =
     if values = [] then [] else List.map (fun key -> tone, label ^ ": " ^ key) values
@@ -180,7 +191,7 @@ let detail_lines metadata =
             (match issue.severity with Error_issue -> Bad | Warning_issue -> Warning),
             Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail) report.issues
   in
-  summary_lines metadata
+  (revision_row metadata.source_revision :: verdict_rows metadata)
   @ [ (if metadata.routing_requires_restart then Warning else Neutral),
       "Routing restart: " ^ (if metadata.routing_requires_restart then "required" else "not required");
       (if metadata.keeper_requires_restart then Warning else Neutral),

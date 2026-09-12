@@ -216,17 +216,16 @@ let endpoint_kind_of_string = function
            "endpoint.kind must be one of             openai_compat|elevenlabs_direct|voice_mcp|macos_say|whisper_cli (got %s)"
            value)
 
-(* Whether an endpoint of this kind is ever asked for the section's model by
-   name. The three that reach an address are, and so is whisper-cli, for which
-   the model is the file it loads. say takes no model at all: it is asked for a
-   voice, which is a different setting.
+(* Whether an endpoint of this kind is ever asked for the section's model.
+   HTTP speech and whisper-cli need one. say and the MCP agent_speak tool
+   consume a voice rather than a model.
 
    Exhaustive on purpose. A new kind has to answer this, because the section's
    requirement is computed from it and a wrong default would either demand a
    setting that means nothing or let one be skipped that does. *)
 let kind_needs_default_model = function
-  | Openai_compat | Elevenlabs_direct | Voice_mcp | Whisper_cli -> true
-  | Macos_say -> false
+  | Openai_compat | Elevenlabs_direct | Whisper_cli -> true
+  | Macos_say | Voice_mcp -> false
 
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
@@ -407,7 +406,13 @@ let parse_tts json =
           (* Absent stays absent rather than becoming a blank standing for it:
              a section whose endpoints take no model has none, and every reader
              below has to say what it does about that. *)
-          Ok (Json_util.get_string_nonempty tts_json "default_model")
+          (match Json_util.assoc_member_opt "default_model" tts_json with
+           | None -> Ok None
+           | Some (`String _ as value) -> Ok (trim_nonempty_json value)
+           | Some value ->
+             Error
+               (Printf.sprintf "tts.default_model must be string, got %s"
+                  (Json_util.kind_name value)))
       in
       Ok
         (Some

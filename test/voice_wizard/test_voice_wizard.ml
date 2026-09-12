@@ -138,7 +138,7 @@ let test_the_questions_depend_on_the_provider () =
        (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Openai_compatible));
   Alcotest.(check (list string))
     "a tool endpoint is not asked for a credential"
-    [ "section"; "provider"; "name"; "address"; "model"; "voice"; "review" ]
+    [ "section"; "provider"; "name"; "address"; "voice"; "review" ]
     (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool))
 
 let test_elevenlabs_arrives_with_what_is_the_same_everywhere () =
@@ -294,6 +294,19 @@ let test_moving_keeps_a_provider_that_serves_both () =
   Alcotest.(check bool) "still openai-compatible" true
     (moved.Voice_wizard.provider = Voice_wizard.Openai_compatible)
 
+let test_mcp_writes_no_unused_model () =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool) with
+      endpoint_id = "tool"; address = "http://fixture.invalid/mcp"; voice = "voice" }
+  in
+  match Voice_wizard.changes draft with
+  | Error _ -> Alcotest.fail "MCP does not require a model"
+  | Ok changes ->
+    Alcotest.(check bool) "no unused model is written" false
+      (List.exists
+         (function Voice_setup.Set_default_model _ -> true | _ -> false)
+         changes)
+
 let () =
   Alcotest.run
     "voice_wizard"
@@ -305,6 +318,7 @@ let () =
         ; Alcotest.test_case "whisper is asked for the model only" `Quick
             test_whisper_is_asked_for_the_model_only
         ; Alcotest.test_case "say writes no model" `Quick test_say_writes_no_model
+        ; Alcotest.test_case "MCP writes no unused model" `Quick test_mcp_writes_no_unused_model
         ; Alcotest.test_case "the questions depend on the provider" `Quick
             test_the_questions_depend_on_the_provider
         ; Alcotest.test_case "elevenlabs arrives with what is the same everywhere" `Quick

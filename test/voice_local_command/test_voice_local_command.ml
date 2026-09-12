@@ -284,6 +284,36 @@ let test_speech_in_always_needs_a_model () =
     Alcotest.(check bool) "and the refusal names the field" true
       (Astring.String.is_infix ~affix:"stt.default_model" message)
 
+let test_an_mcp_only_section_needs_no_model () =
+  match
+    Voice_config.parse_json
+      (Yojson.Safe.from_string
+         {|{"tts":{"default_voice":"voice","endpoints":[{"id":"tool","kind":"voice_mcp","mcp_url":"http://fixture.invalid/mcp"}]}}|})
+  with
+  | Ok { Voice_config.tts = Some tts; _ } ->
+    Alcotest.(check (option string)) "MCP is not given a model" None tts.Voice_config.default_model
+  | Ok _ -> Alcotest.fail "the speaking section should load"
+  | Error message -> Alcotest.fail message
+
+let test_a_present_optional_model_must_still_be_a_string () =
+  List.iter
+    (fun value ->
+      let json =
+        `Assoc
+          [ "tts", `Assoc
+              [ "default_voice", `String "Yuna"
+              ; "default_model", value
+              ; "endpoints", `List
+                  [ `Assoc [ "id", `String "speaker"; "kind", `String "macos_say" ] ]
+              ] ]
+      in
+      match Voice_config.parse_json json with
+      | Ok _ -> Alcotest.fail "a malformed optional model must be rejected"
+      | Error message ->
+        Alcotest.(check bool) "the refusal names the setting" true
+          (Astring.String.is_infix ~affix:"tts.default_model" message))
+    [ `Int 123; `Bool false; `Null; `List [] ]
+
 let () =
   Alcotest.run
     "voice_local_command"
@@ -322,6 +352,10 @@ let () =
             test_a_section_with_an_asked_endpoint_still_needs_one
         ; Alcotest.test_case "speech in always needs a model" `Quick
             test_speech_in_always_needs_a_model
+        ; Alcotest.test_case "an MCP-only section needs no model" `Quick
+            test_an_mcp_only_section_needs_no_model
+        ; Alcotest.test_case "a present optional model must be a string" `Quick
+            test_a_present_optional_model_must_still_be_a_string
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

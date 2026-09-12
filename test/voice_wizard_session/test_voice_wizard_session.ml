@@ -133,6 +133,14 @@ let test_the_last_step_is_review_and_next_stays_there () =
   Alcotest.(check string) "and next stays there rather than falling off" "review"
     (step_name again.T.vws_step)
 
+let test_enter_commits_the_highlighted_first_voice () =
+  let s = T.voice_wizard_go (session ()) Voice_wizard.Voice in
+  let s = T.voice_wizard_with_voices s [ "Yuna", "Korean"; "Alex", "English" ] in
+  Alcotest.(check string) "the highlighted row is the current input" "Yuna" s.T.vws_input;
+  let next = T.voice_wizard_next s in
+  Alcotest.(check string) "Enter commits the highlighted voice" "Yuna"
+    next.T.vws_draft.Voice_wizard.voice
+
 let () =
   Alcotest.run
     "voice_wizard_session"
@@ -151,6 +159,8 @@ let () =
             test_typing_reaches_the_draft_only_on_leaving_the_step
         ; Alcotest.test_case "going back finds what was typed" `Quick
             test_going_back_finds_what_was_typed
+        ; Alcotest.test_case "Enter commits the highlighted first voice" `Quick
+            test_enter_commits_the_highlighted_first_voice
         ] )
     ; ( "switching"
       , [ Alcotest.test_case "switching to speech in drops a provider that cannot listen"

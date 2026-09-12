@@ -1145,6 +1145,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
             200,
             {
                 "goals": [],
+                "goal_history": {"unlisted": []},
                 "rollup": {
                     "active_count": 0,
                     "verifying_count": 0,
@@ -1251,6 +1252,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
         200,
         {
             "goals": goals,
+            "goal_history": {"unlisted": []},
             "rollup": {
                 "active_count": len(goals),
                 "verifying_count": 0,
@@ -2080,6 +2082,16 @@ def wheel_scrolls_and_clicks_do_not(
     wait_for_terminal_input_consumed(slave_fd)
     drain_until_quiet(process, master_fd, output)
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+
+    # The tab the detail screen opened on says so in the text, not only in
+    # bold and underline. A capture like this one is where style-only
+    # marking goes missing -- the bytes name the tab, or nothing does. And
+    # Info's own body opens with a section called "Identity", which is
+    # another tab's name, so a reader with no mark has a wrong guess ready.
+    if b"\xe2\x96\xb8Info" not in output:
+        raise AssertionError(
+            "the keeper detail screen did not mark the tab it opened on"
+        )
 
     # Wait until the process is back inside its input read, then resize and
     # send one surface shortcut without waiting for the compact frame. The
@@ -3816,13 +3828,37 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
+    mode_prefix = re.search(
+        rb" MASC Planning[^\r\n]*?filter:active", CSI_RE.sub(b"", frame)
+    )
+    if mode_prefix is None:
+        raise AssertionError(f"Planning wide header omitted its modes: {frame!r}")
+    # Four cells belong to the frame margins. At this width the title and
+    # modes exactly fill the content area, before the timestamp is appended.
+    boundary_cols = fixture_cell_width(mode_prefix.group().decode("utf-8")) + 4
+    for columns in (80, boundary_cols):
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=24,
+            columns=columns,
+            needle=b"MASC Planning",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain_narrow = CSI_RE.sub(b"", narrow)
+        if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
+            raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
+    terminal_rows = 24
+
     # One press, not two. The pane opens on Planning_filter_active, so the
     # first press lands on completed, which these fixtures leave empty --
     # the note this step is about is already on that screen. The old pair
     # was written for a default of Planning_filter_all: it waited for
-    # "show:active", the filter the pane had just left, and then for a note
+    # "filter:active", the filter the pane had just left, and then for a note
     # that a second press had already carried past.
-    empty = send_and_wait(process, master_fd, output, b"f", b"show:completed")
+    empty = send_and_wait(process, master_fd, output, b"f", b"filter:completed")
     if b"no goals in this filter" not in CSI_RE.sub(b"", empty):
         raise AssertionError(
             f"the empty filter drew no note: {empty!r}"
@@ -4160,7 +4196,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         board = send_and_wait(
             process, master_fd, output, b"s", b"post-trend"
         )
-        if b"order:trending" not in board:
+        if b"sort:trending" not in board:
             raise AssertionError(f"Board sort did not expose its order: {board!r}")
 
         fixtures["/api/v1/board?sort_by=trending"] = (
@@ -8665,7 +8701,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
             b"\xe2\x96\xb8Task Verdicts",
         )
         verdicts_plain = CSI_RE.sub(b"", verdicts)
-        for needle in (b"old Harness", b"not Goal proof", b"Task Verdicts"):
+        for needle in (b"automatic Gate rulings on Tasks", b"not Goal proof", b"Task Verdicts"):
             if needle not in verdicts_plain:
                 raise AssertionError(
                     f"Task Verdicts did not explain itself ({needle!r}): "
@@ -13052,6 +13088,39 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def flow_control_is_off_interaction() -> Interaction:
+    """Ctrl-S has to reach the key layer, not the tty.
+
+    IXON lives in c_iflag and ICANON in c_lflag, so raw mode did not clear it:
+    the terminal answered Ctrl-S by stopping output and Ctrl-Q by resuming,
+    and neither byte ever reached the program. With IXANY also on, the next
+    key released it, so what an operator saw was a stall rather than a freeze
+    -- and what it cost was a key that could not be bound to anything.
+
+    Read off the tty rather than inferred from the drawing: the flag is the
+    fact, and a screen that repaints cannot tell the difference."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+        )
+        attributes = termios.tcgetattr(slave_fd)
+        if attributes[0] & termios.IXON:
+            raise AssertionError(
+                "the tty still answers Ctrl-S itself; c_ixon must be cleared "
+                "with the rest of raw mode or the key cannot be bound"
+            )
+        send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+    return interact
+
+
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
     missing_target_requests: HttpRequests = []
@@ -13112,6 +13181,11 @@ def run_keyboard_regression(executable: str) -> None:
     )
     schedule_fixtures = schedule_detail_http_fixtures()
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="flow control leaves Ctrl-S to the key layer",
+        interact=flow_control_is_off_interaction(),
+    )
     run_terminal_scenario(
         executable,
         description="Image view over the frame",
@@ -13956,7 +14030,7 @@ def run_browser_scene_regression(executable: str) -> None:
         visible = screen_text(frame)
         # Source-context selection includes text and raster observations,
         # not only clickable controls. Preserve their document order.
-        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+        for text in (b"[>1] SCENE BEFORE CLICK", b"[2 button/link] First action",
                      b"[3 button/link] Second action",
                      "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"

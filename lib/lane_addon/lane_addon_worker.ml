@@ -12,6 +12,10 @@ type mount = { source : string; destination : string }
 type t = {
   id : string;
   name : string;
+  instance_id : string;
+  package : package;
+  artifact_store : Lane_addon_store.t option;
+  mutable action_schema : Yojson.Safe.t option;
   mutable client : Agent_core.Mcp.t option;
   cleanup : unit -> (unit, error) result;
   mutex : Eio.Mutex.t;
@@ -30,6 +34,12 @@ let error_to_string = function
 let ( let* ) = Result.bind
 let container_id t = t.id
 let container_name t = t.name
+let action_schema t = t.action_schema
+let owned_name instance_id =
+  "masc-lane-" ^ Digestif.SHA256.(to_hex (digest_string instance_id))
+let valid_container_id id =
+  String.length id = 64 && String.for_all (function
+    | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id
 
 exception Control_reply_too_large
 
@@ -146,7 +156,7 @@ let find_named_container ~run name =
   if String.trim raw = "" then Ok None
   else
     try match Yojson.Safe.from_string raw with
-      | `String id when String.length id = 64 -> Ok (Some id)
+      | `String id when valid_container_id id -> Ok (Some id)
       | _ -> Error (Docker_failed { operation = "resolve owned container";
           detail = "unexpected container identity" })
     with Yojson.Json_error detail ->
@@ -161,39 +171,53 @@ let remove_container ~run id =
   | Error verify_error ->
       (match removal with Error error -> Error error | Ok _ -> Error verify_error)
 
-let recover_stop ~mgr ~instance_id ~container_id:id ~max_reply_bytes
+let inspect_owned_container ~run ~instance_id ~name id =
+  let* raw = run ~operation:"recover inspect" [ "container"; "inspect"; id ] in
+  let refusal () = Error (Docker_failed { operation = "recover ownership";
+    detail = "container identity and masc.lane.instance label must match the persisted binding" }) in
+  try match Yojson.Safe.from_string raw with
+    | `List [ `Assoc fields ] ->
+        let name_matches = match name with
+          | None -> true
+          | Some expected -> List.assoc_opt "Name" fields = Some (`String ("/" ^ expected)) in
+        (match List.assoc_opt "Id" fields, List.assoc_opt "Config" fields with
+         | Some (`String actual_id), Some (`Assoc config)
+           when String.equal id actual_id && name_matches ->
+             (match List.assoc_opt "Labels" config with
+              | Some (`Assoc labels) ->
+                  (match List.assoc_opt "masc.lane.instance" labels with
+                   | Some (`String owner) when String.equal owner instance_id -> Ok ()
+                   | _ -> refusal ())
+              | _ -> refusal ())
+         | _ -> refusal ())
+    | _ -> refusal ()
+  with Yojson.Json_error detail ->
+    Error (Docker_failed { operation = "recover ownership"; detail })
+
+let recover_stop ~mgr ~instance_id ~container_id ~max_reply_bytes
     ?(docker_command = "docker") () =
   if max_reply_bytes <= 0 then Error (Invalid_package "max_reply_bytes must be positive")
-  else if String.length id <> 64 || not (String.for_all (function
-      | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id) then
+  else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
+  else if Option.exists (fun id -> not (valid_container_id id)) container_id then
     Error (Docker_failed { operation = "recover ownership"; detail = "invalid container ID" })
   else
     let run = run_control ~mgr ~docker_command ~max_bytes:max_reply_bytes in
-    let* visible = run ~operation:"recover existence"
-        [ "container"; "ls"; "--all"; "--no-trunc";
-          "--filter"; "id=" ^ id; "--format"; "{{json .ID}}" ] in
-    if String.trim visible = "" then Ok ()
-    else
-      let* raw = run ~operation:"recover inspect" [ "container"; "inspect"; id ] in
-      let* () =
-        let refusal () = Error (Docker_failed { operation = "recover ownership";
-          detail = "container ID and masc.lane.instance label must match the persisted binding" }) in
-        try match Yojson.Safe.from_string raw with
-          | `List [ `Assoc fields ] ->
-              (match List.assoc_opt "Id" fields, List.assoc_opt "Config" fields with
-               | Some (`String actual_id), Some (`Assoc config) when String.equal id actual_id ->
-                   (match List.assoc_opt "Labels" config with
-                    | Some (`Assoc labels) ->
-                        (match List.assoc_opt "masc.lane.instance" labels with
-                         | Some (`String owner) when String.equal owner instance_id -> Ok ()
-                         | _ -> refusal ())
-                    | _ -> refusal ())
-               | _ -> refusal ())
-          | _ -> refusal ()
-        with Yojson.Json_error detail ->
-          Error (Docker_failed { operation = "recover ownership"; detail })
-      in
-      remove_container ~run id
+    let* found, name = match container_id with
+      | None ->
+          let name = owned_name instance_id in
+          let* id = find_named_container ~run name in
+          Ok (id, Some name)
+      | Some id ->
+          let* visible = run ~operation:"recover existence"
+              [ "container"; "ls"; "--all"; "--no-trunc";
+                "--filter"; "id=" ^ id; "--format"; "{{json .ID}}" ] in
+          Ok ((if String.trim visible = "" then None else Some id), None)
+    in
+    match found with
+    | None -> Ok ()
+    | Some id ->
+        let* () = inspect_owned_container ~run ~instance_id ~name id in
+        remove_container ~run id
 
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
@@ -208,15 +232,24 @@ let stop t =
     Ok ()
 
 let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
-    ?(docker_command = "docker") ?(on_created = fun _ -> ()) () =
+    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store () =
+  let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
+    else Ok () in
   let* () = validate_package package in
+  let* () = match package.action_tool, artifact_store with
+    | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
+    | _ -> Ok () in
   let* package_mount = mount_argument
       { source = package.directory; destination = "/addon" } in
   let* mounted = List.fold_left (fun acc mount ->
       let* paths = acc in
       let* path = mount_argument mount in
       Ok (paths @ [ "--mount"; path ])) (Ok []) mounts in
-  let name = "masc-lane-" ^ Random_id.uuid_v7 () in
+  (* The binding is persisted before create. Its instance ID therefore also
+     identifies a container when the process dies before receiving create's
+     stdout or persisting [on_created]. Domain labels are checked before any
+     recovered container is removed. *)
+  let name = owned_name instance_id in
   let run = run_control ~mgr ~docker_command
       ~max_bytes:package.resources.max_reply_bytes in
   let identity = ref None in
@@ -226,18 +259,12 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     else match !identity with
       | None ->
           (* create can take effect before its stdout is received (or exceed
-             a tiny reply limit). The generated exact name is already owned;
-             remove it first rather than requiring an ID response to fit. *)
-          let removal = run ~operation:"remove partially created container"
-              [ "container"; "rm"; "--force"; "--volumes"; name ] in
-          (match find_named_container ~run name with
-           | Ok None -> cleanup_finished := true; Ok ()
-           | Ok (Some _) ->
-               (match removal with
-                | Error error -> Error error
-                | Ok _ -> Error (Docker_failed { operation = "verify removal";
-                    detail = "partially created container remains visible" }))
-           | Error error -> Error error)
+             a tiny reply limit). Verify the binding's deterministic name
+             and label instead of removing an unverified name collision. *)
+          let* () = recover_stop ~mgr ~instance_id ~container_id:None
+              ~max_reply_bytes:package.resources.max_reply_bytes ~docker_command () in
+          cleanup_finished := true;
+          Ok ()
       | Some id ->
           let* () = remove_container ~run id in
           cleanup_finished := true;
@@ -270,8 +297,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     | Error error -> fail_start error
   in
   let id = String.trim created in
-  if String.length id <> 64 || not (String.for_all (function
-      | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id) then
+  if not (valid_container_id id) then
     fail_start (Docker_failed { operation = "create"; detail = "invalid container ID" })
   else begin
     identity := Some id;
@@ -282,7 +308,8 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
         try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
       stderr_source := None;
       Ok () in
-    let worker = { id; name; client = None; cleanup = worker_cleanup;
+    let worker = { id; name; instance_id; package; artifact_store; action_schema = None;
+                   client = None; cleanup = worker_cleanup;
                    mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
       on_created worker;
@@ -312,7 +339,17 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
             String.equal tool.name "lane_observe") tools) then
           Error (Protocol_failed "package must advertise lane_observe in its initial tools/list page")
         else if worker.stopping then Error Stopped
-        else Ok worker
+        else
+          let* () = match package.action_tool with
+            | None -> Ok ()
+            | Some name ->
+                (match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name = name) tools with
+                 | [tool] ->
+                     let* () = Lane_addon_action.validate_schema tool.input_schema
+                       |> Result.map_error (fun detail -> Protocol_failed detail) in
+                     worker.action_schema <- Some tool.input_schema; Ok ()
+                 | _ -> Error (Protocol_failed "package must advertise exactly one configured action tool")) in
+          Ok worker
       with
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
         | Invalid_argument _) as exn -> Error (Protocol_failed (Printexc.to_string exn))
@@ -336,7 +373,9 @@ let observe t ~binding ~sources =
         let* client = match t.client with
           | Some client -> Ok client | None -> Error (Protocol_failed "worker initialization pending") in
         let* result = Agent_core.Mcp.call_tool_full client ~name:"lane_observe"
-            ~arguments:(`Assoc [ "binding", binding; "sources", sources ])
+            ~arguments:(`Assoc ([ "binding", binding; "sources", sources ] @
+              match t.package.action_tool with None -> []
+              | Some _ -> ["context", Lane_addon_action.context t.instance_id]))
           |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
         if t.stopping then Error Stopped
         else match result.Mcp_protocol.Mcp_types.is_error with
@@ -346,10 +385,43 @@ let observe t ~binding ~sources =
           | Some false | None ->
               match result.structured_content with
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
-              | Some json -> output_of_json json |> Result.map_error (fun detail -> Invalid_observation detail)
+              | Some json ->
+                  Eio_unix.run_in_systhread (fun () ->
+                    Lane_addon_packet.decode ?store:t.artifact_store
+                      ~max_bytes:t.package.resources.max_reply_bytes json)
+                  |> Result.map_error (fun detail -> Invalid_observation detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
         | Invalid_argument _) as exn ->
           if t.stopping then Error Stopped
           else Error (Protocol_failed (Printexc.to_string exn)))
+
+(* This call only reports transport success or the package's explicit outcome.
+   Once dispatched, errors never establish that the environment was unchanged. *)
+let act t ~arguments =
+  if t.stopping then Error Stopped
+  else Eio.Mutex.use_ro t.mutex (fun () ->
+    if t.stopping then Error Stopped
+    else try
+      let* client = match t.client with Some client -> Ok client
+        | None -> Error (Protocol_failed "worker initialization pending") in
+      let* name, schema, store = match t.package.action_tool, t.action_schema, t.artifact_store with
+        | Some name, Some schema, Some store -> Ok (name, schema, store)
+        | _ -> Error (Protocol_failed "worker does not advertise an available action port") in
+      let* arguments = Lane_addon_action.validate ~schema ~name arguments
+        |> Result.map_error (fun detail -> Protocol_failed detail) in
+      let* result = Agent_core.Mcp.call_tool_full client ~name ~arguments
+        |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
+      match result.Mcp_protocol.Mcp_types.is_error with
+      | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
+      | None | Some false ->
+          (match result.structured_content with
+           | None -> Error (Protocol_failed "action tool must return structuredContent")
+           | Some json -> Eio_unix.run_in_systhread (fun () ->
+               Lane_addon_action.decode_result ~store ~max_bytes:t.package.resources.max_reply_bytes json)
+               |> Result.map_error (fun detail -> Protocol_failed detail))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
+    | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
+        Error (Protocol_failed (Printexc.to_string exn)))

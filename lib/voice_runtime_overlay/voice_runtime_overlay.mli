@@ -39,7 +39,6 @@ type voice_listing_request =
     arbitrary text, and handing it to a shell would make quoting decide what
     runs. *)
 type command_request = { argv : string list }
-
 type stt_request =
   { url : string
   ; headers : (string * string) list

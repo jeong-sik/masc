@@ -125,7 +125,7 @@ let gaps draft =
     match draft.provider with
     | Elevenlabs -> [ Endpoint_id_is_blank; Credential_variable_is_blank; Model_is_blank ]
     | Openai_compatible -> [ Endpoint_id_is_blank; Address_is_blank; Model_is_blank ]
-    | Mcp_tool -> [ Endpoint_id_is_blank; Address_is_blank; Model_is_blank ]
+    | Mcp_tool -> [ Endpoint_id_is_blank; Address_is_blank ]
     (* say needs a name and a voice and nothing else: no address, no
        credential, and no model, because it is asked for a voice rather than a
        model. The voice is added below with the rest of speech out. *)
@@ -168,9 +168,9 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
   ; default_voice = None
-  (* The wizard does not ask for a command: each command kind knows the name it
-     is installed under, and an override is for a path the wizard has no way to
-     check. Someone who needs one edits the file. *)
+  (* The wizard offers the three kinds that have an address. Naming the
+     executable belongs to the two command kinds, which it does not offer yet,
+     and each of those knows the name it is normally installed under. *)
   ; command = None
   }
 ;;
@@ -188,9 +188,9 @@ let changes draft =
        need. *)
     let model =
       match draft.provider with
-      | Elevenlabs | Openai_compatible | Mcp_tool | Whisper_cli ->
+      | Elevenlabs | Openai_compatible | Whisper_cli ->
         [ Voice_setup.Set_default_model (draft.section, String.trim draft.model) ]
-      | Macos_say -> []
+      | Macos_say | Mcp_tool -> []
     in
     let voice =
       match draft.section with
@@ -239,8 +239,8 @@ let steps draft =
      answer would be written into the section anyway. *)
   let model =
     match draft.provider with
-    | Elevenlabs | Openai_compatible | Mcp_tool | Whisper_cli -> [ Model ]
-    | Macos_say -> []
+    | Elevenlabs | Openai_compatible | Whisper_cli -> [ Model ]
+    | Macos_say | Mcp_tool -> []
   in
   ((Section :: Provider :: Name :: address) @ credential @ model @ voice) @ [ Review ]
 ;;

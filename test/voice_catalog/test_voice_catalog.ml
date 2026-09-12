@@ -152,10 +152,162 @@ let test_the_other_kinds_say_there_is_nothing_to_ask () =
   Alcotest.(check bool) "the tool refusal names the endpoint" true
     (String.length mcp > 0)
 
+let test_command_catalogues_are_not_http_requests () =
+  List.iter
+    (fun kind ->
+      match
+        Voice_runtime_overlay.voice_listing_request_for_endpoint
+          (endpoint ~kind ~base_url:None) ~api_key:""
+      with
+      | Ok _ -> Alcotest.fail "a command must not produce an HTTP catalogue request"
+      | Error message ->
+        Alcotest.(check string) "the refusal names the transport, not a missing URL"
+          "voice config endpoint under-test runs a command and has no HTTP voice catalogue"
+          message)
+    [ Voice_config.Macos_say; Voice_config.Whisper_cli ]
+
+let test_http_and_command_catalogues_share_the_wire_shape () =
+  let expected =
+    `Assoc
+      [ "id", `String "Yuna"
+      ; "name", `String "Yuna"
+      ; "language", `String "ko_KR"
+      ]
+  in
+  let say = Voice.say_catalogue_of_output "Yuna  ko_KR  # hello" in
+  let http =
+    match parse {|{"voices":[{"voice_id":"Yuna","name":"Yuna","labels":{"language":"ko_KR"}}]}|} with
+    | Ok voices -> voices
+    | Error message -> Alcotest.fail message
+  in
+  List.iter
+    (fun voices ->
+      match voices with
+      | [ voice ] ->
+        Alcotest.(check string) "the transport does not change the catalogue shape"
+          (Yojson.Safe.to_string expected)
+          (Yojson.Safe.to_string (Voice.catalogue_voice_json voice))
+      | _ -> Alcotest.fail "expected one pickable voice")
+    [ say; http ]
+
+(* Exercise the public listing call with local processes. The fake curl records
+   its actual argv and stdin; no network or real credential is used. *)
+let with_catalogue_processes f =
+  let root = Filename.temp_file "voice-catalogue" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o700;
+  let path name = Filename.concat root name in
+  let write name body =
+    Out_channel.with_open_bin (path name) (fun channel -> output_string channel body);
+    Unix.chmod (path name) 0o700
+  in
+  let env_names = [ "PATH"; "MASC_TEST_CATALOGUE_DIR"; "MASC_TEST_CATALOGUE_KEY" ] in
+  let previous = List.map (fun name -> name, Sys.getenv_opt name) env_names in
+  let read name = In_channel.with_open_bin (path name) In_channel.input_all in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (name, value) -> Unix.putenv name (Option.value value ~default:""))
+        previous;
+      Array.iter (fun name -> Sys.remove (path name)) (Sys.readdir root);
+      Unix.rmdir root)
+    (fun () ->
+      write "curl"
+        {|#!/bin/sh
+printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/argv"
+/bin/cat > "$MASC_TEST_CATALOGUE_DIR/stdin"
+printf '%s\n' '{"voices":[{"voice_id":"http-voice"}]}'
+|};
+      write "say"
+        {|#!/bin/sh
+printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/say-argv"
+printf '%s\n' 'Command Voice  ko_KR  # hello'
+|};
+      Unix.putenv "PATH" root;
+      Unix.putenv "MASC_TEST_CATALOGUE_DIR" root;
+      Unix.putenv "MASC_TEST_CATALOGUE_KEY" "fixture-catalogue-secret";
+      Eio_main.run (fun _ -> f ~read))
+
+let listed_id endpoint =
+  match Voice.list_voices endpoint with
+  | Ok [ voice ] -> voice.Voice.voice_id
+  | Ok _ -> Alcotest.fail "expected exactly one voice"
+  | Error message -> Alcotest.fail message
+
+let test_resolved_alias_selects_the_same_transport_as_the_request () =
+  with_catalogue_processes (fun ~read:_ ->
+    let endpoint =
+      { (endpoint ~kind:Voice_config.Macos_say ~base_url:None) with
+        Voice_config.id = "elevenlabs"
+      ; api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
+      }
+    in
+    Alcotest.(check string) "HTTP alias wins over the declared command kind"
+      "http-voice" (listed_id endpoint);
+    let endpoint =
+      { endpoint with Voice_config.id = "say"; kind = Voice_config.Elevenlabs_direct }
+    in
+    Alcotest.(check string) "command alias wins over the declared HTTP kind"
+      "Command Voice" (listed_id endpoint))
+
+let test_catalogue_credentials_reach_stdin_and_never_argv () =
+  with_catalogue_processes (fun ~read ->
+    let endpoint =
+      { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
+        Voice_config.api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
+      }
+    in
+    ignore (listed_id endpoint);
+    let argv = String.split_on_char '\n' (read "argv") in
+    Alcotest.(check (list string)) "curl receives only a header source and configured timeout"
+      [ "-sS"; "--fail-with-body"; "--max-time"
+      ; string_of_float Env_config_runtime.Voice.http_request_timeout_sec
+      ; "--header"; "@-"; "https://api.elevenlabs.io/v2/voices"; ""
+      ] argv;
+    Alcotest.(check string) "only stdin carries the fixture credential"
+      "xi-api-key: fixture-catalogue-secret\n" (read "stdin"))
+
+let test_catalogue_requests_dispatch_every_endpoint_kind () =
+  with_catalogue_processes (fun ~read:_ ->
+    List.iter
+      (fun (kind, expected) ->
+        let request =
+          `Assoc
+            [ "kind", `String kind
+            ; "api_key_env", `String "MASC_TEST_CATALOGUE_KEY"
+            ]
+        in
+        let endpoint =
+          match Server_voice_setup_actions.catalogue_endpoint_of_json request with
+          | Ok endpoint -> endpoint
+          | Error error ->
+            Alcotest.fail (Server_voice_setup_actions.error_message error)
+        in
+        match expected, Voice.list_voices endpoint with
+        | Some id, Ok [ voice ] ->
+          Alcotest.(check string) kind id voice.Voice.voice_id
+        | None, Error _ -> ()
+        | Some _, Error message -> Alcotest.fail message
+        | Some _, Ok _ | None, Ok _ -> Alcotest.failf "unexpected catalogue for %s" kind)
+      [ "elevenlabs_direct", Some "http-voice"
+      ; "macos_say", Some "Command Voice"
+      ; "openai_compat", None
+      ; "voice_mcp", None
+      ; "whisper_cli", None
+      ])
+
 let () =
   Alcotest.run
     "voice_catalog"
-    [ ( "what the endpoint answered"
+    [ ( "request dispatch and credentials"
+      , [ Alcotest.test_case "resolved aliases select the request transport" `Quick
+            test_resolved_alias_selects_the_same_transport_as_the_request
+        ; Alcotest.test_case "credentials reach stdin and never argv" `Quick
+            test_catalogue_credentials_reach_stdin_and_never_argv
+        ; Alcotest.test_case "catalogue requests dispatch every endpoint kind" `Quick
+            test_catalogue_requests_dispatch_every_endpoint_kind
+        ] )
+    ; ( "what the endpoint answered"
       , [ Alcotest.test_case "the answer becomes pickable rows" `Quick
             test_the_answer_becomes_pickable_rows
         ; Alcotest.test_case "a row without an id is dropped" `Quick
@@ -164,6 +316,8 @@ let () =
             test_a_voice_without_a_name_keeps_the_absence
         ; Alcotest.test_case "an answer without voices is an error" `Quick
             test_an_answer_without_voices_is_an_error
+        ; Alcotest.test_case "HTTP and command catalogues share the wire shape" `Quick
+            test_http_and_command_catalogues_share_the_wire_shape
         ] )
     ; ( "what gets asked"
       , [ Alcotest.test_case "elevenlabs is asked on the catalogue version" `Quick
@@ -172,5 +326,7 @@ let () =
             test_a_base_without_a_version_is_asked_as_it_stands
         ; Alcotest.test_case "the other kinds say there is nothing to ask" `Quick
             test_the_other_kinds_say_there_is_nothing_to_ask
+        ; Alcotest.test_case "command catalogues are not HTTP requests" `Quick
+            test_command_catalogues_are_not_http_requests
         ] )
     ]

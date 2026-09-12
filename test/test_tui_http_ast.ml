@@ -1037,7 +1037,7 @@ let test_planning_phase_uses_goal_ssot () =
      rather than for the call that no longer exists. *)
   check int "renderer labels every goal phase" 5
     (Ast_grep.count_constructors_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"planning_phase_label"
        ~constructors:
          [ "Goal_phase.Executing"
@@ -1954,15 +1954,25 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~callee:"Masc_tui_termios.disable_discard_output");
   check int "terminal restoration returns the original discard key" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal" ~callee:"Masc_tui_termios.set_discard_output");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.set_discard_output");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal" ~callee:"Frame_presenter.cleanup");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Frame_presenter.cleanup");
   check int "terminal restoration reapplies old termios" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
-       ~module_path:main_path ~binding_name:"restore_terminal"
+       ~module_path:main_path ~binding_name:"restore_terminal_outcome"
        ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"old_term");
+  check int "unit restore delegates to the outcome-bearing restore" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"restore_terminal" ~callee:"restore_terminal_outcome");
+  check int "exit output receives the terminal restoration outcome" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"cleanup"
+       ~callee:"Terminal_restore.finish_after_restore"
+       (* Every label listed: the matcher requires the full labelled set, so
+          the exit writer is pinned as a named function next to the restore. *)
+       ~arguments:[ "restore", "restore_terminal_outcome"; "finish", "finish" ]);
   check int "suspend restores the shell terminal first" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"suspend" ~callee:"restore_terminal");
@@ -2316,8 +2326,10 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   (* Every split surface hands its list through one sidebar, so this is the
      single place a row label can reach the terminal unsanitized. Seven
      callers now pass titles that came off the wire. *)
-  check_identifiers ~module_path:render_path ~binding:"write_list_sidebar"
-    ~callees:sanitizer_calls [ "label" ];
+  (* The list sidebar is drawn beside more than one surface, so it sits with
+     the shared primitives. *)
+  check_identifiers ~module_path:"bin/masc_tui_render_prim.ml"
+    ~binding:"write_list_sidebar" ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
   (* The drawing moved into [planning_detail_pane] when the goal list came to

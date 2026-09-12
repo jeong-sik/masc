@@ -309,21 +309,23 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
     Error (Printf.sprintf "STT curl stopped by signal %d" sig_num)
 ;;
 
-(* Asking an endpoint what it can speak with. A read, so GET and no body, and
-   a short deadline: this runs while somebody is waiting on a wizard step, and
-   a slow answer is worth less than the typing it saves. *)
+(* Catalogue credentials go through stdin so process arguments do not expose
+   them. Curl and the process runner use the same configured HTTP deadline. *)
 let run_voice_listing_request (req : Voice_runtime_overlay.voice_listing_request) =
-  let header_args =
-    List.concat_map
-      (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
-      req.listing_headers
+  let timeout_sec = Env_config_runtime.Voice.http_request_timeout_sec in
+  let stdin_content =
+    String.concat ""
+      (List.map
+         (fun (key, value) -> Printf.sprintf "%s: %s\n" key value)
+         req.listing_headers)
   in
   let argv =
-    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; "15"; req.listing_url ]
-    @ header_args
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; string_of_float timeout_sec
+    ; "--header"; "@-"; req.listing_url
+    ]
   in
   let status, body =
-    run_voice_status ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec argv
+    run_voice_status ~timeout_sec ~stdin_content argv
   in
   match status with
   | Unix.WEXITED 0 ->

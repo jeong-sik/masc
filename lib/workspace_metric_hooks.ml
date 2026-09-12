@@ -407,6 +407,14 @@ let install () =
           ~system_prompt
           ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~native_tools
+          (* The verdict arrives as a [report_review_verdict] call and nothing
+             else counts, so a candidate that cannot offer tools cannot answer
+             this turn. Left Optional it is dispatched anyway -- a Claude Code
+             runtime declaring tools-support = false has its tools replaced
+             with [] before the turn -- and the review ends Invalid_verdict
+             with no verdict to record. Required refuses it before dispatch so
+             the driver walks to the next declared candidate. *)
+          ~tool_requirement:Keeper_required_tools.Required
           ~dispatch
           ~context:(Agent_core.Context.create ())
           ~output_contract:Keeper_turn_driver.Tool_verdict

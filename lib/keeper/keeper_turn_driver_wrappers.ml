@@ -39,6 +39,7 @@ let run_named_with_masc_tools
     ?on_runtime_attempt_error
     ?transport
     ?(yield_on_tool = false)
+    ?tool_requirement
     ?context
     ?output_contract
     ?provider_config_transform
@@ -75,6 +76,7 @@ let run_named_with_masc_tools
       ?on_runtime_attempt_error
       ?transport
       ~yield_on_tool
+      ?tool_requirement
       ?context
       ?output_contract
       ?provider_config_transform

@@ -1789,6 +1789,67 @@ let verifier_exact_lane_slot_ids () =
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
 
+(* Whether the lane can actually judge, asked of the runtime table instead of
+   the registry. The registry carries cli slot ids verbatim on purpose --
+   "whether an id resolves to a live official-client runtime is answered at
+   execution with a typed error" (runtime_exact_output_registry.mli) -- so a
+   lane can publish, resolve, and hand back an id that names nothing. The
+   failover walk meets that typed error per attempt and moves to the next
+   candidate, which is the intended shape. A readiness claim cannot: the server
+   reports [exact_output_authority_available] from this lane resolving, so a
+   typo in [verifier_exact.cli_slots] would report an authority that is ready
+   while every review failed with an unresolved runtime. The runtime table
+   lives here, so the claim is checked here. Admitted API slots are not
+   re-checked: publication already matched them against the frozen catalog. *)
+let verifier_exact_lane_readiness () =
+  let cli_slot_rejection slot_id =
+    match
+      List.find_opt
+        (fun (runtime : t) -> String.equal runtime.id slot_id)
+        (get_runtimes ())
+    with
+    | None -> Some (Printf.sprintf "%S is not a materialized runtime" slot_id)
+    | Some runtime ->
+      (match runtime.execution with
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ -> None
+       | Runtime_execution.Agent_core _ ->
+         Some
+           (Printf.sprintf
+              "%S is an API runtime, so it cannot serve an official-client cli slot"
+              slot_id))
+  in
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match
+       Runtime_exact_output_registry.resolve_lane
+         registry
+         ~lane_id:verifier_exact_lane_id
+     with
+     | Error error ->
+       Error (Runtime_exact_output_registry.lane_resolution_error_to_string error)
+     | Ok { selected_slots; cli_slots } ->
+       let dispatchable, rejected =
+         List.fold_left
+           (fun (dispatchable, rejected) slot_id ->
+              match cli_slot_rejection slot_id with
+              | None -> dispatchable + 1, rejected
+              | Some detail -> dispatchable, detail :: rejected)
+           (0, [])
+           cli_slots
+       in
+       if selected_slots <> [] || dispatchable > 0
+       then Ok ()
+       else
+         Error
+           (Printf.sprintf
+              "verifier_exact has no dispatchable slot: %s"
+              (String.concat "; " (List.rev rejected))))
+;;
+
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
    reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
    Atomic ref set by [init_default]. *)

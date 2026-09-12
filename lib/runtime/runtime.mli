@@ -546,7 +546,18 @@ val verifier_exact_lane_slot_ids : unit -> (string list, string) result
     published exact-output registry — the single provider-selection SSOT for
     completion-authority judgement calls. [Error] names why the lane cannot
     judge (registry not published, lane unconfigured, or no admitted slots);
-    there is no fallback to another route. *)
+    there is no fallback to another route. Declared official-client ids are
+    carried as declared; {!verifier_exact_lane_readiness} is what asks the
+    runtime table whether they resolve. *)
+
+val verifier_exact_lane_readiness : unit -> (unit, string) result
+(** Whether the [verifier_exact] lane has a slot that can be dispatched now,
+    for a caller that reports authority readiness rather than walking the lane.
+    [Ok ()] needs one admitted API slot or one cli slot naming a materialized
+    official-client runtime. [Error] names each cli id that resolves to
+    nothing, which {!verifier_exact_lane_slot_ids} cannot: it carries declared
+    ids verbatim, so a typo there reads as a configured judge until the review
+    reaches dispatch. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a

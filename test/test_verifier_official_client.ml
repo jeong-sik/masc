@@ -127,6 +127,11 @@ let test_review mode =
     | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);
+  (* The lane the server reads for exact_output_authority_available. This
+     fixture declares a materialized official client, so readiness holds; the
+     precedence suite covers the id that names nothing. *)
+  (match Runtime.verifier_exact_lane_readiness () with
+   | Ok () -> () | Error detail -> failf "verifier lane must be ready: %s" detail);
   let previous_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
   Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn Runtime.verifier_exact_lane_slot_ids;
   Eio.Switch.on_release sw (fun () ->

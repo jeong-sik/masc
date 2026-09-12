@@ -37,6 +37,7 @@ val run_named_with_masc_tools :
     unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
+  ?tool_requirement:Keeper_required_tools.t ->
   ?context:Agent_core.Context.t ->
   ?output_contract:Keeper_turn_driver.output_contract ->
   ?provider_config_transform:

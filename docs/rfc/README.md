@@ -284,6 +284,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0441 | A running turn must not misread or outrank the person waiting on it | Draft | - |
 | 0442 | 세계 헌법: 규범은 PR이 아니라 합의로 굳는다 — base_path 원장에 쌓고 시스템 프롬프트로 투영한다 | Draft | - |
 | 0443 | Runtime lifecycle is not a provider stream event — a turn before its first to... | Draft | - |
+| 0447 | 서버는 영속 포트에 붙거나 기동을 거부한다 — 포트 변경은 명시적 `--port` 하나 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

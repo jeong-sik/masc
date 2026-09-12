@@ -3,6 +3,7 @@ open Masc_tui_ansi
 module Decode = Masc.Tui_decode
 module Chart = Masc_tui_chart
 module Layout = Masc_tui_message_layout
+module Rows = Masc_tui_rows
 
 module Task_flow = Masc_tui_task_flow
 
@@ -557,9 +558,12 @@ let render_metrics_body ~cols ~budget (state : state)
   let available = max 0 (room - hint_rows) in
   let max_scroll = max 0 (total_lines - available) in
   let scroll = max 0 (min state.metrics_scroll max_scroll) in
+  let section_lines_window =
+    Rows.of_list ~first:scroll ~height:available section_lines
+  in
   for i = 0 to available - 1 do
     let idx = i + scroll in
-    match List.nth_opt section_lines idx with
+    match Rows.at section_lines_window idx with
     | Some line -> push line
     | None -> push_empty ()
   done;

@@ -11181,12 +11181,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (* The pane is reloaded: what it was showing is now one revision
               behind. The session stays open to report what answers. *)
            launch_voice_config_load state ~mailbox;
+           (* The rows on screen answered the previous save. Clearing them at the
+              save, rather than when the next reply lands, keeps an earlier
+              section's answers from sitting under a status that is no longer
+              about them -- the STT arm never asks again, so without this they
+              stayed until the pane closed. *)
            (match session.vws_draft.Voice_wizard.section with
             | Voice_setup.Tts ->
                 state.voice_wizard
                   <- Some
                        { session with
                          vws_saving = false
+                       ; vws_probe = []
                        ; vws_status = Some "saved. asking the endpoints to answer…"
                        };
                 launch_voice_wizard_probe state ~mailbox voice_wizard_probe_sentence
@@ -11197,6 +11203,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   <- Some
                        { session with
                          vws_saving = false
+                       ; vws_probe = []
                        ; vws_status =
                            Some
                              "saved. run  masc voice-verify --audio FILE  to hear it back"

@@ -205,6 +205,60 @@ let test_preview_does_not_write () =
         (Astring.String.is_infix ~affix:{|default_model = "large-v3-turbo"|}
            (string_member "runtime_toml" answer)))
 
+(* The encoder and the decoder sit on opposite sides of one wire, in different
+   libraries. A drift between them shows up only as a request the server
+   refuses, which is a bad place to find it, so the two are held together here:
+   what the wizard sends is what these routes read, and the endpoint that lands
+   on disk is the one the draft described. *)
+let test_what_the_wizard_sends_is_what_the_routes_read () =
+  with_workspace (fun ~base_path ~path ->
+    let draft =
+      { (Voice_wizard.blank ~section:Voice_setup.Stt
+           ~provider:Voice_wizard.Openai_compatible)
+        with
+        Voice_wizard.endpoint_id = "second-whisper"
+      ; Voice_wizard.address = "http://127.0.0.1:9000/v1"
+      ; Voice_wizard.model = "large-v3-turbo"
+      }
+    in
+    let body =
+      match Voice_wizard.save_request draft ~revision:(revision ~base_path) with
+      | Ok body -> body
+      | Error gaps ->
+        Alcotest.failf "the draft should be complete: %s"
+          (String.concat "; " (List.map Voice_wizard.gap_message gaps))
+    in
+    match Actions.apply ~base_path body with
+    | Error error ->
+      Alcotest.failf "the routes refused what the wizard produced: %s"
+        (Actions.error_message error)
+    | Ok _ ->
+      (match Voice_config.parse_runtime_toml_text (read path) with
+       | Error message -> Alcotest.fail message
+       | Ok None -> Alcotest.fail "the section should exist"
+       | Ok (Some config) ->
+         (match config.Voice_config.stt with
+          | None -> Alcotest.fail "speech in should be configured"
+          | Some stt ->
+            Alcotest.(check string) "the model the wizard was given"
+              "large-v3-turbo" stt.Voice_config.default_model;
+            let landed =
+              List.find_opt
+                (fun (endpoint : Voice_config.endpoint) ->
+                  String.equal endpoint.Voice_config.id "second-whisper")
+                stt.Voice_config.endpoints
+            in
+            (match landed with
+             | None -> Alcotest.fail "the endpoint the wizard described is not there"
+             | Some endpoint ->
+               Alcotest.(check (option string)) "with the address it was given"
+                 (Some "http://127.0.0.1:9000/v1") endpoint.Voice_config.base_url;
+               (* A local endpoint the wizard was not given a credential for must
+                  not acquire one: the header it would add is what a server that
+                  never asked for it answers 401 to. *)
+               Alcotest.(check (option string)) "and no credential it was not given"
+                 None endpoint.Voice_config.api_key_env))))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -223,5 +277,9 @@ let () =
         ; Alcotest.test_case "a stale revision is a conflict" `Quick
             test_a_stale_revision_is_a_conflict
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
+        ] )
+    ; ( "the wizard and the routes agree"
+      , [ Alcotest.test_case "what the wizard sends is what the routes read" `Quick
+            test_what_the_wizard_sends_is_what_the_routes_read
         ] )
     ]

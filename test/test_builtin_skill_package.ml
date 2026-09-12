@@ -78,6 +78,34 @@ let test_untracked_reviewed_update () = with_base (fun base ->
   ignore (install base request second);
   assert_second base)
 
+let test_streamed_resource_revision () = with_base (fun base ->
+  ignore (install base Package.Automatic first);
+  let resource = file base "references/large.bin" in
+  let chunk = Bytes.make 65536 '\000' in
+  let chunks = 512 in
+  let fd = Unix.openfile resource [Unix.O_CREAT;Unix.O_EXCL;Unix.O_WRONLY] 0o644 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    ignore (Unix.lseek fd (Bytes.length chunk * chunks - 1) Unix.SEEK_SET);
+    ignore (Unix.write fd chunk 0 1));
+  let expected = ref Digestif.SHA256.empty in
+  for _ = 1 to chunks do expected := Digestif.SHA256.feed_bytes !expected chunk done;
+  let before = Gc.allocated_bytes () in
+  let digest = Fs_compat.sha256_owned_regular_file ~ownership_root:base resource in
+  let allocated = Gc.allocated_bytes () -. before in
+  (match digest with
+   | Ok (Some digest) -> check string "sparse resource streams exact SHA256"
+       Digestif.SHA256.(to_hex (get !expected)) digest
+   | _ -> fail "owned sparse resource digest unavailable");
+  check bool "hashing does not allocate a file-sized string" true
+    (allocated < float_of_int (Bytes.length chunk * chunks));
+  (match inspect base first with
+   | Package.Present {ownership=Package.Modified;_} -> ()
+   | _ -> fail "large operator resource participates in revision");
+  (match install base Package.Automatic second with
+   | Package.Preserved (Package.Present {ownership=Package.Modified;_}) -> ()
+   | _ -> fail "large operator resource must prevent automatic replacement");
+  check int "sparse operator resource survives" (Bytes.length chunk * chunks) (Unix.stat resource).Unix.st_size)
+
 let test_export_parent_sync_failure_retains_published_package () = with_base (fun base ->
   let destination = Filename.concat (Unix.realpath base) "exported-despite-sync-error" in
   let sync_parent path = raise (Unix.Unix_error (Unix.EIO, "fsync", path)) in
@@ -204,6 +232,40 @@ let test_invalid_deployment_roots () =
        Package.install ~base_path:base ~request:Package.Automatic second |> Result.map (fun _ -> ())]))
     ["dangling";"file-link";"file"]
 
+let test_missing_package_with_occupied_receipt () =
+  let large_receipt_bytes = 32 * 1024 * 1024 in
+  List.iter (fun kind -> with_base (fun base ->
+    let state = Filename.dirname (receipt base) in
+    Fs_compat.mkdir_p state;
+    let outside = Filename.concat base "operator-receipt" in
+    Fs_compat.save_file outside "operator bytes";
+    if kind = "directory" then begin
+      Unix.mkdir (receipt base) 0o700;
+      Fs_compat.save_file (Filename.concat (receipt base) "keep") "operator bytes"
+    end else if kind = "large-file" then begin
+      let fd = Unix.openfile (receipt base) [Unix.O_CREAT;Unix.O_EXCL;Unix.O_WRONLY] 0o600 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.ftruncate fd large_receipt_bytes)
+    end else Unix.symlink outside (receipt base);
+    let allocated_before = Gc.allocated_bytes () in
+    (match install base Package.Automatic second with
+     | Package.Preserved_uninspectable {reason} ->
+       check bool "invalid receipt is reported before publication" true (reason <> "")
+     | _ -> fail "occupied invalid receipt must preserve the absent package state");
+    check bool "receipt inspection does not allocate its logical file size" true
+      (Gc.allocated_bytes () -. allocated_before < float_of_int large_receipt_bytes);
+    check bool "no active package was published" false (Sys.file_exists (root base));
+    (match kind, (Unix.lstat (receipt base)).Unix.st_kind with
+     | "directory", Unix.S_DIR ->
+       check string "receipt directory contents remain" "operator bytes"
+         (read (Filename.concat (receipt base) "keep"))
+     | "symlink", Unix.S_LNK ->
+       check string "receipt symlink retained" outside (Unix.readlink (receipt base))
+     | "large-file", Unix.S_REG ->
+       check int "oversized receipt remains untouched" large_receipt_bytes (Unix.stat (receipt base)).Unix.st_size
+     | _ -> fail "occupied receipt was replaced");
+    check string "external receipt target untouched" "operator bytes" (read outside)))
+    ["directory";"symlink";"large-file"]
+
 let test_parallel_installers () = with_base (fun base ->
   ignore (install base Package.Automatic first);
   let third = package [ "SKILL.md", "third instruction"; "third.md", "third resource" ] in
@@ -226,6 +288,7 @@ let () = run "Builtin Skill package updates"
   [ "installation", [ test_case "whole package update and backup" `Quick test_update_complete_package
                     ; test_case "operator edits remain active" `Quick test_preserve_operator_changes
                     ; test_case "untracked package review and explicit update" `Quick test_untracked_reviewed_update
+                    ; test_case "streamed large operator resource" `Quick test_streamed_resource_revision
                     ; test_case "export sync failure retains complete published package" `Quick test_export_parent_sync_failure_retains_published_package
                     ; test_case "stale resource revision rejects replacement" `Quick test_stale_resource_revision
                     ; test_case "changed bundled revision rejects replacement" `Quick test_bundle_changed_after_review
@@ -234,4 +297,5 @@ let () = run "Builtin Skill package updates"
                     ; test_case "startup does not upgrade" `Quick test_startup_does_not_upgrade
                     ; test_case "symlinked deployment volume" `Quick test_symlinked_deployment_root
                     ; test_case "invalid deployment roots reject" `Quick test_invalid_deployment_roots
+                    ; test_case "missing package preserves occupied invalid receipt" `Quick test_missing_package_with_occupied_receipt
                     ; test_case "same-process installers serialize" `Quick test_parallel_installers ] ]

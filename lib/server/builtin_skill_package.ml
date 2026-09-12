@@ -76,9 +76,13 @@ let require_chain ~root path =
   | Ok observation -> observation
   | Error _ -> raise (Rejected (Invalid_path path))
 
-let load ~root path =
-  match Fs_compat.load_owned_regular_file ~ownership_root:root path with
-  | Ok value -> value
+let load_receipt ~root path =
+  (* Receipt format is a hex SHA-256 plus newline, never a resource payload. *)
+  let max_bytes = Digestif.SHA256.digest_size * 2 + 1 in
+  match Fs_compat.load_owned_regular_file_prefix ~ownership_root:root ~max_bytes path with
+  | Ok None -> None
+  | Ok (Some receipt) when not receipt.truncated -> Some receipt.content
+  | Ok (Some _) -> raise (Rejected (Invalid_path path))
   | Error _ -> raise (Rejected (Invalid_path path))
 
 let hash content = Digestif.SHA256.(to_hex (digest_string content))
@@ -120,9 +124,9 @@ let tree_revision ~root directory =
         ("directory", rel, info.st_perm, "") :: List.concat_map (fun child ->
           visit (if rel = "" then child else rel ^ "/" ^ child)) children
       | Unix.S_REG ->
-        (match load ~root path with
-         | Some content -> [ "file", rel, info.st_perm, hash content ]
-         | None -> raise (Rejected (Invalid_path path)))
+        (match Fs_compat.sha256_owned_regular_file ~ownership_root:root path with
+         | Ok (Some digest) -> [ "file", rel, info.st_perm, digest ]
+         | Ok None | Error _ -> raise (Rejected (Invalid_path path)))
       | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
         raise (Rejected (Invalid_path path))
     in
@@ -152,10 +156,12 @@ let locations ~base_path package =
   ; receipt = Filename.concat state (package.name ^ ".sha256") }
 
 let observe paths package =
+  (* An absent package still needs a valid receipt slot. Reject occupied
+     non-regular receipt paths before publishing any active package. *)
+  let receipt = load_receipt ~root:paths.root paths.receipt in
   match tree_revision ~root:paths.root paths.target with
   | None -> Missing
   | Some revision ->
-    let receipt = load ~root:paths.root paths.receipt in
     let ownership = match receipt with
       | None -> Untracked
       | Some recorded when recorded = revision ^ "\n" -> Recorded

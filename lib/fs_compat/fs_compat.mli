@@ -252,6 +252,12 @@ val load_owned_regular_file_with_snapshot
     and after I/O. Consumers may cache a content digest against [snapshot] and
     reuse it only while a later owned read reports an equal snapshot. *)
 
+val sha256_owned_regular_file
+  : ownership_root:string -> string -> (string option, owned_regular_file_read_error) result
+(** Stream SHA-256 using a fixed-size buffer through one validated owned regular
+    descriptor. The same parent-chain, identity and before/after snapshot checks
+    as {!load_owned_regular_file_with_snapshot} apply; no file-size allocation. *)
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int

@@ -1941,7 +1941,11 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  H:choose hearth · Sort [s]: %s"
+    (* The sort first. It has no other home on this surface now, and this row
+       is cut to the frame's inner width: at 34 columns the key hint alone
+       spent all 30 cells, so the order the rows are in was invisible while
+       the key to change it was not. H is in the sheet under [?]. *)
+    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;

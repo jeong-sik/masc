@@ -3552,6 +3552,10 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable keeper_run_cursor: int;
+  (* When the detail screen last asked for the tab it is on. The tabs that
+     read over HTTP draw "(loading...)" until their answer lands, and without
+     a start there is no way to say how long that has been. *)
+  mutable detail_read_started_at: float option;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -4784,6 +4788,30 @@ let selected_acting_entry state =
   | Masc_tui_acting.Turns -> None
   | Actions | Everything -> List.nth_opt (acting_flat_entries state) state.acting_cursor
 
+(* What a pending read says while it is pending.
+
+   The seconds appear only after a couple of them. A read that answers at once
+   would otherwise flash a number nobody asked for, and the number exists for
+   the reads that do not answer at once: against a live server the Sandbox
+   tab's status took between five and sixteen seconds (measured 2026-09-12),
+   which is long enough to be read as a stall and keyed at. The footer's
+   answering badge spends its elapsed seconds for the same reason. *)
+let pending_seconds_floor = 2
+
+let loading_notice ?elapsed_s what =
+  match elapsed_s with
+  | Some seconds when seconds >= pending_seconds_floor ->
+      Printf.sprintf "(%s\xe2\x80\xa6 %ds)" what seconds
+  | Some _ | None -> Printf.sprintf "(%s\xe2\x80\xa6)" what
+
+(* [now] is an argument so the answer is the same every time it is asked with
+   the same clock. Clamped at zero: a clock that moved backwards must not count
+   up from the future. *)
+let detail_read_elapsed ~now (state : state) =
+  Option.map
+    (fun started -> int_of_float (Float.max 0. (now -. started)))
+    state.detail_read_started_at
+
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
 
@@ -5109,6 +5137,7 @@ let create_state
   config_scroll = 0;
   detail_tab = Detail_info;
   keeper_run_cursor = 0;
+  detail_read_started_at = None;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;

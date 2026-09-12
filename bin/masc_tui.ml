@@ -3919,7 +3919,15 @@ let launch_librarian_input_load state ~mailbox ~prompt_key =
         (Librarian_input_loaded
            (prompt_key, Error "Eio switch is unavailable"))
 
+(* Each detail read stamps its own start, so the pane can say how long it has
+   been waiting. Here rather than at the key that triggered it: the same read
+   is started by entering the screen, by walking the tabs, and by R, and a
+   stamp written at one of those three is missing at the other two. *)
+let mark_detail_read_started state =
+  state.detail_read_started_at <- Some (Unix.gettimeofday ())
+
 let launch_keeper_config_view state ~mailbox keeper_name =
+  mark_detail_read_started state;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3941,6 +3949,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
+  mark_detail_read_started state;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3990,6 +3999,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
          (keeper_name, generation, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
+  mark_detail_read_started state;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4014,6 +4024,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_identity_view state ~mailbox keeper_name =
+  mark_detail_read_started state;
   let host = server_peer_host in
   let port = state.port in
   let run () =

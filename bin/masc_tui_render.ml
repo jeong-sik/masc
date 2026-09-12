@@ -6425,6 +6425,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* The non-Info tabs draw a fetched read; the stamp has to name the
        keeper on screen or the pane shows loading, never another keeper's
        answer. *)
+    (* A pending read says how long it has been pending. Five to sixteen
+       seconds is what the Sandbox tab's status took against a live server,
+       and a bare "(loading...)" through that window reads as a stall. *)
+    let loading_row what =
+      Ansi.dim ^ "  "
+      ^ Masc_tui_types.loading_notice
+          ?elapsed_s:
+            (Masc_tui_types.detail_read_elapsed ~now:(Unix.gettimeofday ())
+               state)
+          what
+      ^ Ansi.reset
+    in
     let stamped_or view error =
       match error with
       | Some detail -> [ (Theme.bad ()) ^ "  " ^ detail ^ Ansi.reset ]
@@ -6432,7 +6444,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           match view with
           | Some (stamp, lines) when String.equal stamp k.k_name ->
               List.map (fun line -> "  " ^ line) lines
-          | Some _ | None -> [ Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset ])
+          | Some _ | None -> [ loading_row "loading" ])
     in
     let channel_lines =
       match state.connectors_error, state.connectors with
@@ -6768,7 +6780,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           let logs =
             match state.keeper_sandbox_logs_inflight with
             | Some (keeper_name, _) when String.equal keeper_name k.k_name ->
-              [ Ansi.dim ^ "  (loading actual container logs…)" ^ Ansi.reset ]
+              [ loading_row "loading actual container logs" ]
             | Some _ | None ->
               match state.keeper_sandbox_logs_error with
               | Some (stamp, detail) when String.equal stamp k.k_name ->

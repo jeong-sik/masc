@@ -2702,16 +2702,24 @@ let render_planning_list (state : state) =
          ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
-          read straight off, and every one of them changes what to do next. *)
+          read straight off, and every one of them changes what to do next --
+          which is why the legend says the marks this list draws and only those.
+          Wrap complete explanations within the frame's cell width: a clipped
+          legend would lose a verdict and add a truncation mark identical to
+          the stale-proof glyph. *)
        (* Reserve the divider, a goal (or empty note), and the selected
-          verdict before spending a row on the legend. At the minimum
+          verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
        let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
-       if count_frame_lines buf + 1 + rows_after_legend <= rows then
-         box_line_styled buf cols ~style:Ansi.dim
-           ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
+       let judge_legend =
+         Masc_tui_planning_proof_mark.legend_rows
+           ~max_cells:(framed_inner_width cols)
+           ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
+           (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+       in
+       List.iter (box_line_styled buf cols ~style:Ansi.dim) judge_legend;
        box_divider buf cols;
 
        if count = 0 then begin

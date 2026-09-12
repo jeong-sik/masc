@@ -15,6 +15,14 @@
 
 open Alcotest
 open Masc
+
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+;;
+
 module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
@@ -2296,7 +2304,7 @@ let load_list_error content =
   with_temp_dir "runtime-materialize-diag" @@ fun dir ->
   let path = Filename.concat dir "runtime.toml" in
   write_file path content;
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Ok _ ->
     Alcotest.fail "expected load_list to reject the assignment; got Ok"
   | Error msg -> msg

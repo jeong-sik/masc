@@ -602,10 +602,6 @@ let capture_with_identity () =
     Ok { incarnation = st.incarnation; observation = observe st;
          frame = frame_of st; input_count = st.input_count;
          input_ledger = st.entries })
-  (* The immutable list spine is captured under the lock. Traversal need not
-     hold up another controller's input or frame progression. *)
-  |> Result.map (fun capture ->
-       { capture with input_ledger = List.rev capture.input_ledger })
 ;;
 
 (* --- RAM 인트로스펙션 — 상태 센서 ---------------------------------------

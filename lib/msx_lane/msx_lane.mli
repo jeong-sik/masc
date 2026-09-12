@@ -204,7 +204,7 @@ type identified_capture = {
   frame : frame;
   input_count : int;
   input_ledger : entry list;
-      (** Oldest-first immutable input records through [input_count], captured
+      (** Newest-first immutable input records through [input_count], captured
           with the frame and incarnation. Encoding/persistence belongs outside
           the machine lock. *)
 }
@@ -212,7 +212,7 @@ type identified_capture = {
 val capture_with_identity : unit -> (identified_capture, error) result
 (** Atomically reads the same machine as {!capture}, with its explicit history
     identity, input cursor and ledger. Never steps, peeks, or changes a RAM
-    baseline. The returned oldest-first ledger is traversed outside the lock. *)
+    baseline. The immutable list is shared without traversal or copying. *)
 
 (** {b RAM introspection} — the state sensor. The screen is the expensive
     detour a human eye needs; the game's truth is in memory, and the core

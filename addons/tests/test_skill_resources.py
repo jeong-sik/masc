@@ -33,8 +33,8 @@ class SkillResourceTests(unittest.TestCase):
                      "complete": False, "detail": "An observation is pending"}]
         document = {"rows": [capture("first", "load-a", 20), capture("second", "load-b", 20),
                              capture("not-selected", "load-b", 21)], "coverage": coverage}
-        inputs = {"format": "msx-input-jsonl", "entry_count": 2,
-                  "evidence": {"uri": "lane-evidence:" + "b" * 64, "sha256": "b" * 64}}
+        inputs = {"format": "msx-input-jsonl-sequence", "entry_count": 2,
+                  "evidence": {"uri": "lane-sequence:" + "b" * 64, "sha256": "b" * 64}}
         document["rows"][0]["fields"]["input_ledger"] = inputs
         document["rows"][0]["evidence"].append(inputs["evidence"])
         result = self.invoke(document, "first", "second")

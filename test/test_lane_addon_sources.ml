@@ -173,7 +173,7 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
     let reference observation = member "input_ledger" observation |> member "evidence" |> own_reference in
     let empty = capture () in
     check string "empty native ledger is observed, not missing" ""
-      (require (Store.read_blob store (reference empty)));
+      (require (Store.read_jsonl store (reference empty)));
     let press who name =
       let key = Msx_lane.key_of_string name |> require in
       ignore (msx (Msx_lane.press ~who ~keys:[key] ~hold_frames:1 ~step_frames:2 ~sequence:false)) in
@@ -187,27 +187,27 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
     check string "input cursor includes actual edges" "4" (member "input_cursor" observed |> text);
     check int "snapshot count matches native cursor" 4
       (member "entry_count" (member "input_ledger" observed) |> Yojson.Safe.Util.to_int);
-    let expected = before.input_ledger
+    let expected = List.rev before.input_ledger
       |> List.map (fun entry -> Yojson.Safe.to_string (Msx_lane.entry_json entry) ^ "\n") |> String.concat "" in
     let ref = reference observed in
-    check string "native frame/who/key/edge records survive" expected (require (Store.read_blob store ref));
+    check string "native frame/who/key/edge records survive" expected (require (Store.read_jsonl store ref));
     check string "snapshot equals native ledger file while controller is paused" expected
       (In_channel.with_open_bin (Filename.concat ledger_dir "ledger.jsonl") In_channel.input_all);
     check (Alcotest.list string) "actual callers preserved, not capture actor" ["keeper-A";"keeper-A";"keeper-B";"keeper-B"]
-      (List.map (fun (entry : Msx_lane.entry) -> entry.who) before.input_ledger);
+      (List.map (fun (entry : Msx_lane.entry) -> entry.who) (List.rev before.input_ledger));
     let checkpoint = Filename.concat dir "saved.json" in
     ignore (msx (Msx_lane.save ~path:checkpoint));
     press "keeper-C" "return";
     let future = capture () in
     check string "future input has a separate cursor" "6" (member "input_cursor" future |> text);
-    check string "later input never rewrites retained evidence" expected (require (Store.read_blob store ref));
+    check string "later input never rewrites retained evidence" expected (require (Store.read_jsonl store ref));
     ignore (msx (Msx_lane.restore ~path:checkpoint ~ledger_dir));
     let restored = capture () in
     check bool "restore has a new epoch" false (member "incarnation" restored = member "incarnation" observed);
     check string "restored snapshot includes saved history, not future input" expected
-      (require (Store.read_blob store (reference restored)));
+      (require (Store.read_jsonl store (reference restored)));
     ignore (msx (Msx_lane.eject ()));
-    check string "machine removal preserves input evidence" expected (require (Store.read_blob store ref))))
+    check string "machine removal preserves input evidence" expected (require (Store.read_jsonl store ref))))
 
 let () = run "Lane source provenance" ["acquisition", [
   test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;

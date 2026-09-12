@@ -14,15 +14,17 @@ def input_ledger(value: object, cursor: str | None) -> dict | None:
     if value is None:
         return None  # A frame-only source has not supplied its input history.
     ledger = object_value(value, "capture.input_ledger")
-    if ledger.get("format") != "msx-input-jsonl":
-        raise InvalidInput("capture.input_ledger format must be msx-input-jsonl")
+    if ledger.get("format") != "msx-input-jsonl-sequence":
+        raise InvalidInput("capture.input_ledger format must be msx-input-jsonl-sequence")
     count = ledger.get("entry_count")
     if isinstance(count, bool) or not isinstance(count, int) or count < 0:
         raise InvalidInput("input_ledger.entry_count must be a nonnegative integer")
     if cursor != str(count):
         raise InvalidInput("input ledger count must match the captured input cursor")
     reference = evidence([ledger.get("evidence")])[0]
-    return {"format": "msx-input-jsonl", "entry_count": count, "evidence": reference}
+    if reference["sha256"] is None or reference["uri"] != "lane-sequence:" + reference["sha256"]:
+        raise InvalidInput("input ledger must name a host-owned lane-sequence root")
+    return {"format": "msx-input-jsonl-sequence", "entry_count": count, "evidence": reference}
 
 
 def observe(binding: dict, sources: tuple[Source, ...]) -> dict:

@@ -26,7 +26,8 @@ whether that evidence is useful to the current task.
    when the underlying task calls for a game action.
 
 When input history matters, use the selected row's `input_ledger` evidence
-reference. Its snapshot records frame, input owner, key and down/up edge through
+reference and the sequence-reading steps in `references/observations.md`. Its
+immutable chain records frame, input owner, key and down/up edge through
 that capture's input cursor. Null means unobserved history; a restored machine
 can contain saved earlier inputs, which are not new actions in its new epoch.
 

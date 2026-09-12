@@ -296,8 +296,8 @@ class MsxLayer(ProtocolCase):
         capture = {"id": "capture-inputs", "kind": "capture", "observed_at": 1002,
                    "actor": None, "evidence": [], "machine_id": "game",
                    "incarnation": "machine-A", "frame": 20, "screen": reference("screen"),
-                   "input_cursor": "2", "input_ledger": {"format": "msx-input-jsonl",
-                   "entry_count": 2, "evidence": reference("inputs", input_bytes)}}
+                   "input_cursor": "2", "input_ledger": {"format": "msx-input-jsonl-sequence",
+                   "entry_count": 2, "evidence": {"uri": "lane-sequence:" + digest(input_bytes), "sha256": digest(input_bytes)}}}
         binding = {"machine_id": "game"}
         result = self.call("msx-observer", binding, [source([capture])])
         row, = result["rows"]
@@ -307,12 +307,13 @@ class MsxLayer(ProtocolCase):
         self.assertIn(capture["input_ledger"]["evidence"], row["evidence"])
         absent = {**capture, "input_ledger": None}
         empty = {**capture, "input_cursor": "0", "input_ledger": {
-                 "format": "msx-input-jsonl", "entry_count": 0, "evidence": reference("empty", "")}}
+                 "format": "msx-input-jsonl-sequence", "entry_count": 0, "evidence": {"uri": "lane-sequence:" + digest("empty-node"), "sha256": digest("empty-node")}}}
         for observation in [absent, empty]:
             output = self.call("msx-observer", binding, [source([observation])])
             self.assertEqual(output["rows"][0]["fields"]["input_ledger"], observation["input_ledger"])
         for change in [{"entry_count": -1}, {"entry_count": True}, {"entry_count": 3},
-                       {"format": "unknown"}, {"evidence": None}]:
+                       {"format": "unknown"}, {"evidence": None},
+                       {"evidence": reference("not-host-owned")}]:
             invalid = {**capture, "input_ledger": {**capture["input_ledger"], **change}}
             self.assertTrue(self.call("msx-observer", binding, [source([invalid])])["isError"])
         missing = {key: value for key, value in capture.items() if key != "input_ledger"}

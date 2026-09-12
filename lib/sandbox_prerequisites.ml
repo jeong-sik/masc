@@ -1,6 +1,5 @@
 type distribution = Debian | Ubuntu | Other
-type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
-  | Pdf_tools | Whisper_cli
+type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -106,6 +105,25 @@ let catalog ?model_dir ~host ~distribution dependency =
         ~detail:"Follow the vendor instructions, then return to sign in and verify the selected model."
         ~source_url:(Runtime_official_cli_install.source_url Antigravity)
         (Runtime_official_cli_install.source_url Antigravity)]
+  | Presentation_tools {base_path}, (Macos _ | Linux _) ->
+    let parser = commands ~id:"presentation_parser_install" ~label:"Install the presentation parser for this workspace"
+      ~detail:"Create a Python virtual environment under this workspace's .masc/runtime-tools/presentation and install python-pptx from PyPI. Uses the current host python3; it must support venv and pip. System Python, immutable release files, and producer containers are not modified."
+      ~source_url:"https://python-pptx.readthedocs.io/en/latest/user/install.html" ~requires_admin:false
+      (Presentation_runtime_dependencies.parser_install_commands ~base_path) in
+    let renderer = match host,distribution with
+      | Macos _, _ -> [commands ~id:"presentation_renderer_install" ~label:"Install LibreOffice with Homebrew"
+          ~detail:"Use existing Homebrew to install the LibreOffice cask and its soffice command. MASC does not install Homebrew or developer tools. This is a host application install, separate from the workspace parser."
+          ~source_url:"https://formulae.brew.sh/cask/libreoffice" ~requires_admin:false
+          [["brew";"install";"--cask";"libreoffice"]]]
+      | Linux _, (Debian | Ubuntu) -> [commands ~id:"presentation_renderer_install" ~label:"Install LibreOffice Impress from distribution repositories"
+          ~detail:"Use sudo to refresh signed distribution package indexes and install LibreOffice Impress and Python venv support. Parser installation remains a separate workspace action."
+          ~source_url:"https://www.libreoffice.org/installation-instructions/" ~requires_admin:true
+          [["sudo";"apt-get";"update"];["sudo";"apt-get";"install";"-y";"libreoffice-impress";"python3-venv"]]]
+      | Linux _, Other -> [open_ ~id:"presentation_renderer_instructions" ~label:"Open LibreOffice installation instructions"
+          ~detail:"Install LibreOffice using your distribution's instructions and make soffice available in the service host PATH. Return to refresh detection."
+          ~source_url:"https://www.libreoffice.org/installation-instructions/" "https://www.libreoffice.org/installation-instructions/"]
+      | Unsupported, _ -> [] in
+    renderer @ [parser]
   | Pdf_tools, Macos _ ->
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."

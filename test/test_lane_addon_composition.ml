@@ -31,7 +31,7 @@ let with_environment name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
   Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value ~default:"" previous)) f
-let with_fixture ?(produce=(fun ~binding:_ -> output)) ?(allow_stop=ref true)
+let with_fixture ?(produce=(fun ~binding:_ ~sources:_ -> output)) ?(allow_stop=ref true)
     ?(stop_attempts=ref []) f =
   let root = Filename.temp_dir "lane-composition-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> remove root) (fun () ->
@@ -59,7 +59,7 @@ let with_fixture ?(produce=(fun ~binding:_ -> output)) ?(allow_stop=ref true)
                     action_schema = (fun () -> None);
                     act = (fun ~arguments:_ -> Error "read-only fixture");
                     observe=(fun ~binding ~sources ->
-                      Hashtbl.replace received instance_id sources; Ok (produce ~binding));
+                      Hashtbl.replace received instance_id sources; Ok (produce ~binding ~sources));
                     stop=(fun () ->
                       stop_attempts := instance_id :: !stop_attempts;
                       if not !allow_stop then Error "fixture cleanup unavailable"
@@ -79,9 +79,9 @@ let with_fixture ?(produce=(fun ~binding:_ -> output)) ?(allow_stop=ref true)
                 await clock (fun () -> inspect config |> list "instances" |> List.for_all (fun json ->
                   text "kind" (member "phase" json) = "detached"));
                 result))))))))
-let manifest root =
-  let path = Filename.concat root "package.toml" in
-  write path {|id="generic-package"
+let manifest ?(name="package") ?(outputs="") root =
+  let path = Filename.concat root (name ^ ".toml") in
+  write path ({|id="generic-package"
 revision="1"
 title="Generic output"
 image="not-executed"
@@ -92,7 +92,7 @@ cpus=0.5
 memory_bytes=67108864
 pids=16
 max_reply_bytes=16384
-|}; path
+|} ^ outputs); path
 let declare ?(run="world") ?(value="initial") directory manifest id sources =
   let path = Filename.concat directory (id ^ ".toml") in
   write path (Printf.sprintf {|id=%S
@@ -102,7 +102,8 @@ manifest_path=%S
 value=%S
 sources=%s
 |} id run manifest value sources); path
-let edge id = Printf.sprintf {|[{source_id="upstream",kind="lane_output",installation_id=%S,selection="latest_completed"}]|} id
+let edge ?output_id id = Printf.sprintf {|[{source_id="upstream",kind="lane_output",installation_id=%S,selection="latest_completed"%s}]|}
+  id (Option.fold ~none:"" ~some:(Printf.sprintf ",output_id=%S") output_id)
 let reconcile config directory = let _status = unwrap (Runtime.reconcile_configuration ~config ~directory) in ()
 let source received id = match Hashtbl.find_opt received id with
   | Some (`List [value]) -> Some value | _ -> None
@@ -198,7 +199,7 @@ let test_invalid_cycle_edit_preserves_applied_producer_and_consumer () =
 
 let test_partial_input_recovers_and_replacement_keeps_exact_coordinates () =
   let partial = ref false in
-  let produce ~binding =
+  let produce ~binding ~sources:_ =
     let replacing = member "value" binding = `String "replacement" in
     let history, value = if replacing then "history-b", "2" else "history-a", "7" in
     { Types.rows = List.map (fun (row : Types.row) ->
@@ -299,7 +300,99 @@ let test_refused_cleanup_invalidates_downstream_input_without_stopping_it () =
     await clock (fun () -> List.mem producer !stopped);
     check string "successful upstream cleanup still preserves consumer" consumer (active config "consumer" |> text "instance_id"))
 
+(* Run the shipped generic statistics implementation on host-acquired sources.
+   The process is a test-owned calculator; it does not start an emulator or model. *)
+let statistics sources =
+  let package = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> Filename.concat root "addons/output-statistics/server.py"
+    | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons/output-statistics/server.py" in
+  let script = {|import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+from protocol import sources_from_json
+print(json.dumps(module["observe"]({}, sources_from_json(json.loads(sys.argv[2])))))
+|} in
+  Eio_unix.run_in_systhread (fun () ->
+    let channel = Unix.open_process_args_in "python3"
+      [|"python3"; "-c"; script; package; Yojson.Safe.to_string sources|] in
+    let bytes = match In_channel.input_all channel with
+      | bytes -> bytes
+      | exception exn -> ignore (Unix.close_process_in channel); raise exn in
+    match Unix.close_process_in channel with
+    | Unix.WEXITED 0 -> unwrap (Types.output_of_json (Yojson.Safe.from_string bytes))
+    | status -> failf "statistics fixture process failed: %s"
+        (match status with Unix.WEXITED n -> "exit " ^ string_of_int n
+         | Unix.WSIGNALED n -> "signal " ^ string_of_int n | Unix.WSTOPPED n -> "stopped " ^ string_of_int n))
+
+let test_named_output_flows_to_statistics_and_mapping_revision () =
+  let partial = ref false in
+  let produce ~binding ~sources =
+    if member "value" binding = `String "statistics" then statistics sources
+    else { Types.rows = [
+      { (List.hd output.rows) with id="frame";lane_id="msx/frame" };
+      { (List.hd output.rows) with id="state";lane_id="msx/state";kind=Types.Event }];
+      coverage=List.map (fun (c : Types.coverage) -> {c with complete=not !partial;
+        detail=(if !partial then Some "unselected state input incomplete" else None)}) output.coverage } in
+  with_fixture ~produce (fun clock config root directory received _ ->
+    let ports lane = Printf.sprintf "\n[world.outputs.frames]\nlanes=[%S]\n" lane in
+    let producer_manifest = manifest ~name:"producer" ~outputs:(ports "msx/frame") root in
+    let consumer_manifest = manifest ~name:"consumer" root in
+    let _producer_file = declare directory producer_manifest "producer" "[]" in
+    let _consumer_file = declare ~value:"statistics" directory consumer_manifest "consumer" (edge ~output_id:"frames" "producer") in
+    reconcile config directory;
+    let producer = active config "producer" |> text "instance_id" in
+    let consumer = active config "consumer" |> text "instance_id" in
+    let stats () = inspect config |> list "rows" |> List.find_opt (fun row ->
+      text "lane_id" row = consumer ^ "/outputs/producer/statistics") in
+    await clock (fun () -> Option.is_some (stats ()));
+    let fields () = require_some "statistics row missing" (stats ()) |> member "fields" in
+    check int "only selected lane reaches real generic statistics" 1
+      (fields () |> member "observed_row_count" |> Yojson.Safe.Util.to_int);
+    check string "the selected producer lane is retained" (producer ^ "/msx/frame")
+      (fields () |> list "upstream_rows" |> List.hd |> text "lane_id");
+    check string "statistics retains the selected public port" "frames"
+      (fields () |> member "producer" |> text "output_id");
+    let before = require_some "captured port input missing" (completed received consumer) in
+    let reference = list "evidence" before |> List.hd in
+    let store = Store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let read_evidence () = unwrap (Store.read_blob store
+      {Types.uri=text "uri" reference;sha256=Some (text "sha256" reference)}) in
+    let frozen = read_evidence () in
+    let old_revision = before |> member "producer" |> text "configuration_revision" in
+    partial := true;
+    let _queued = dispatch config Runtime.Observe ["instance_id",`String producer] in
+    await clock (fun () -> match stats () with Some row ->
+      let fields = member "fields" row in
+      (fields |> member "producer" |> member "observation_seq") = `Int 2
+      && member "input_complete" fields = `Bool false | None -> false);
+    check int "partial upstream does not fabricate zero or hide supplied rows" 1
+      (fields () |> member "observed_row_count" |> Yojson.Safe.Util.to_int);
+    partial := false;
+    let _updated_manifest = manifest ~name:"producer" ~outputs:(ports "msx/state") root in
+    reconcile config directory;
+    await clock (fun () -> text "kind" (member "phase" (instance config producer)) = "detached");
+    reconcile config directory;
+    let replacement = active config "producer" |> text "instance_id" in
+    await clock (fun () -> match stats () with Some row ->
+      (row |> member "fields" |> member "producer" |> text "instance_id") = replacement
+      | None -> false);
+    check bool "changed mapping replaces only the producer instance" true (replacement <> producer);
+    check string "consumer does not restart for a changed upstream port mapping" consumer
+      (active config "consumer" |> text "instance_id");
+    check string "new applied mapping selects the other exact lane" (replacement ^ "/msx/state")
+      (fields () |> list "upstream_rows" |> List.hd |> text "lane_id");
+    check bool "same package revision with different mapping has a new semantic revision" true
+      ((fields () |> member "producer" |> text "configuration_revision") <> old_revision);
+    check string "previous selected evidence survives producer replacement" frozen (read_evidence ());
+    check bool "frozen evidence retains original mapping" true
+      ((Yojson.Safe.from_string frozen |> member "producer" |> member "output_selection")
+        = `Assoc ["lanes",`List [`String "msx/frame"]]);
+    check string "inspection reports applied public port mapping" "msx/state"
+      (instance config replacement |> member "package" |> member "outputs" |> member "frames"
+        |> list "lanes" |> List.hd |> Yojson.Safe.Util.to_string))
+
 let () = run "TOML cross-Lane composition" ["world inputs",[
+  test_case "named output feeds statistics and preserves mapping revisions" `Quick
+    test_named_output_flows_to_statistics_and_mapping_revision;
   test_case "invalid edited cycle preserves existing owners and progress" `Quick
     test_invalid_cycle_edit_preserves_applied_producer_and_consumer;
   test_case "partial input and replacement preserve exact producer coordinates" `Quick

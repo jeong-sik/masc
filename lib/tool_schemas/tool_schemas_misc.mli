@@ -120,6 +120,13 @@ type misc_operation =
   | Misc_msx_step_until_change
   | Misc_msx_peek
   | Misc_msx_ram_diff
+  | Misc_dos_load
+  | Misc_dos_eject
+  | Misc_dos_screen
+  | Misc_dos_step
+  | Misc_dos_press
+  | Misc_dos_type
+  | Misc_dos_peek
 [@@deriving enumerate]
 (** Closed vocabulary routed by [Tool_misc.dispatch]. *)
 

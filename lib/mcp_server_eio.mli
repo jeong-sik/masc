@@ -114,6 +114,7 @@ val execute_tool_eio :
   ?invocation_ref:Tool_invocation_ref.t ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
+  ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
   server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->

@@ -1,0 +1,27 @@
+name = "masc_dos_type"
+description = """
+Type text on the shared DOS machine.
+
+Sends the characters in turn. For a name or a number a program is asking for; \
+a menu wants masc_dos_press, where the arrows and enter have names. A \
+character the US layout has no key for is refused before anything is typed. \
+The call stops at 4000000 instructions in total; keys_pressed says how many \
+landed, and the rest are unsent."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "text"
+type = "string"
+required = true
+description = "The characters to type, e.g. \"SAVED\"."
+max_length = 256
+
+[[params]]
+name = "steps"
+type = "integer"
+description = "Instruction budget per character. Default 1000000."
+minimum = 1
+maximum = 4000000
+default = 1000000

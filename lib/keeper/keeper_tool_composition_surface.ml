@@ -327,10 +327,10 @@ let observe_node_result
       (result : Executor.node_result)
   =
   let observed_result = node_observation_result result in
+  let committed = ref false in
   let observe () =
     let context = turn_context in
     let schedule = result.schedule in
-    let committed = ref false in
     Keeper_tool_call_log.log_call
       ~keeper_name:meta.Keeper_meta_contract.name
       ~tool_name:result.tool_name
@@ -352,6 +352,10 @@ let observe_node_result
       ~batch_size:schedule.batch_size
       ~execution_mode:schedule.execution_mode
       ~typed_result:observed_result
+      (* Schema rejection changes the node disposition, not the observation
+         already produced by that execution. Keep its durable roots even when
+         the validated result cannot carry a successful payload. *)
+      ~artifact_refs:(Tool_result.retained_artifacts result.result)
       ~result_bytes:result.result_bytes
       ?truncated_to:result.truncated_to
       ~composition_tool
@@ -425,7 +429,9 @@ let observe_node_result
       composition_tool
       (Keeper_tool_plan.Node_id.to_string result.node_id)
       (Printexc.to_string exn);
-    Ok ()
+    if not !committed && Tool_result.retained_artifacts result.result <> [] then
+      Error ("retained composition observation receipt failed: " ^ Printexc.to_string exn)
+    else Ok ()
 ;;
 
 let observe_composition_run_summary
@@ -1543,6 +1549,7 @@ let make_instruction_skill_tool
 ;;
 
 module For_testing = struct
+  let observe_node_result = observe_node_result
   let failure_payload = failure_payload
   let instruction_skill_description = instruction_skill_description
   let make_instruction_skill_tool = make_instruction_skill_tool

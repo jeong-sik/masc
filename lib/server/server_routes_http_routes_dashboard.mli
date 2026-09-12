@@ -17,6 +17,13 @@ val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 module For_testing : sig
+  val parse_runtime_route_body :
+    string ->
+    (string * string * string list, string) result
+  (** For_testing projection of the routing body parser: the lane string,
+      which field the body carried ("runtime_id" or "runtime_ids"), and
+      that field's string payload. Exposes the wire contract without
+      exporting the private body variant. *)
   val exact_lane_run_permission : Masc_domain.permission
   val runtime_probe_read_permission : Masc_domain.permission
 

@@ -1337,6 +1337,7 @@ let clear_turn_switch_if_current ~base_path name switch =
     let observed = Atomic.get entry.current_turn_switch in
     (match observed with
      | Some current when current.switch == switch ->
+       (* See switch-specific finalization: a failed CAS means a successor owns the cell. *)
        ignore (Atomic.compare_and_set entry.current_turn_switch observed None)
      | Some _ | None -> ())
 ;;

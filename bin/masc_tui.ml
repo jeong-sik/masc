@@ -8107,8 +8107,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
        | None -> notice ~role:Message_error "Select a Keeper first"
        | Some name ->
          match inflight_for state name, live_for_keeper state name with
-         | Some request, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
-           ignore request;
+         | Some _, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
            notice ~role:Message_local "Your message has already started; no new run was created"
          | Some request, Some live ->
            (match Keeper_chat_transcript.admission live.tl_transcript with

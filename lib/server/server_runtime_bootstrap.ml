@@ -1648,7 +1648,7 @@ let activate_owner_state
   }
 ;;
 
-let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantine
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
     ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
@@ -1713,6 +1713,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
   Transport_metrics.set_ws_same_origin_runtime_ready false;
   clear_server_state ();
   Server_startup_state.reset ();
+  let listener_bound, publish_listener_bound = Eio.Promise.create () in
 
   (* 2. Run owner initialization outside the accept loop. The state and
      long-lived owner fibers attach to the parent switch because HTTP request
@@ -1765,6 +1766,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      (* The owner and HTTP listener initialize independently. A successful
+         start requires both before publishing caller-owned startup effects. *)
+      (match on_ready with
+       | None -> ()
+       | Some on_ready ->
+         Eio.Promise.await listener_bound;
+         on_ready ());
       (* The lag probe forks here, on the main domain, so its ring reports
          the scheduler every handler on this domain shares. It starts at the
          readiness boundary rather than at process start so the boot replay
@@ -2075,6 +2083,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
+    Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
      | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)

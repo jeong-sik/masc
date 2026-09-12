@@ -104,7 +104,9 @@ let tree_revision ~root directory =
       let info = Unix.lstat path in
       match info.Unix.st_kind with
       | Unix.S_DIR ->
-        ignore (require_chain ~root path);
+        (match require_chain ~root path with
+         | Fs_compat.Owned_directory _ -> ()
+         | Fs_compat.Owned_directory_missing -> raise (Rejected (Invalid_path path)));
         let children = Sys.readdir path |> Array.to_list |> List.sort String.compare in
         ("directory", rel, info.st_perm, "") :: List.concat_map (fun child ->
           visit (if rel = "" then child else rel ^ "/" ^ child)) children

@@ -98,12 +98,6 @@ jobs:
       - name: Verify release evidence receipt with private captures
         run: python3 test/test_release_evidence_report.py -v
 
-      # The bench driver tells an operator which of three unrelated causes
-      # stopped the masc binary from starting. Getting that wrong sends the
-      # reader after the wrong fix, so the classifier is checked here.
-      - name: Verify the bench dependency diagnosis
-        run: python3 test/test_bench_deps_diagnosis.py -v
-
       - name: Installer onboarding and removal behavior
         run: |
           python3 test/test_package_macos_runtime.py
@@ -113,6 +107,12 @@ jobs:
           python3 test/test_installer_uninstall.py -v
           python3 test/test_install_runtime_setup.py -v
           python3 test/test_onboarding_journey.py -v
+
+      # The bench driver tells an operator which of three unrelated causes
+      # stopped the masc binary from starting. Getting that wrong sends the
+      # reader after the wrong fix, so the classifier is checked here.
+      - name: Verify the bench dependency diagnosis
+        run: python3 test/test_bench_deps_diagnosis.py -v
 
       - name: Verify onboarding oracle ordering and sibling selection
         run: |

@@ -1663,11 +1663,22 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_completion_authority_pending_count: int;
 }
 
+type planning_goal_history = Tui_decode.planning_goal_history
+  = {
+  pgh_goal_id: string;
+  pgh_title: string option;
+  pgh_opened_at: string option;
+  pgh_closed_at: string option;
+  pgh_final_phase: string option;
+  pgh_lifetime_hours: float option;
+}
+
 type planning_snapshot = Tui_decode.planning_snapshot
   = {
   pl_goals: planning_goal list;
   pl_rollup: planning_rollup;
   pl_backlog: planning_backlog;
+  pl_goal_history: planning_goal_history list;
   pl_generated_at: string;
 }
 
@@ -3326,15 +3337,25 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       (Browser_lane_view.scene_targets view);
     let reversed, _, selected = List.fold_left
       (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
-      let label = match node.kind with
-        | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
-        | Control {disabled=true;_} -> "disabled"
-        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
       let index = Hashtbl.find_opt target_index node.node_id in
-      let prefix = match index with
-        | None -> ""
-        | Some i -> Printf.sprintf "[%s%d %s] "
-            (if i = view.scene_cursor then ">" else "") (i + 1) label in
+      (* Text is the reading surface. DOM tags do not help read a paragraph,
+         author or timestamp; the selected text still has its observed index
+         for n/p and context copying. Controls and regions retain their action
+         labels and the same indices as the interaction model. *)
+      let label = match node.kind with
+        | Text -> None
+        | Raster -> Some "image · Ctrl-O"
+        | Region role -> Some ("region · " ^ role)
+        | Control {disabled=true;_} -> Some "disabled"
+        | Control {editable=true;_} -> Some "input"
+        | Control _ -> Some "button/link" in
+      let prefix = match label, index with
+        | _, None -> ""
+        | None, Some i ->
+            if i = view.scene_cursor then Printf.sprintf "[>%d] " (i + 1) else ""
+        | Some label, Some i ->
+            Printf.sprintf "[%s%d %s] "
+              (if i = view.scene_cursor then ">" else "") (i + 1) label in
       let lines = wrap (prefix ^ node.text) in
       let selected = match selected, index with
         | None, Some i when i = view.scene_cursor -> Some offset
@@ -4408,6 +4429,13 @@ type state = {
   mutable msg_reasoning_visibility: reasoning_visibility;
   mutable msg_origin_display: Masc_tui_message_layout.origin_display;
   mutable msg_tool_visibility: tool_visibility;
+  (* Whether the turn dashboard is folded to its progress line. Folded is the
+     default: the block below the conversation grew a row per thing the
+     runtime had to say, and those rows sat between the reader and what they
+     typed, so the composer read as though the input had not left the
+     screen. Folded, the turn keeps one line; the rows that ask the operator
+     for something stay whatever this says. *)
+  mutable msg_turn_folded: bool;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -5600,6 +5628,7 @@ let create_state
      metadata when the operator needs to trace a turn. *)
   msg_origin_display = Masc_tui_message_layout.Origin_inline;
   msg_tool_visibility = tool_visibility;
+  msg_turn_folded = true;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
@@ -7046,6 +7075,29 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
       String.equal pending.gp_keeper keeper_name)
     state.gate_pending
 
+(* The turn's status rows as the pane will draw them, folding included.
+
+   One function rather than two readings: the budget below counts what this
+   returns and the pane draws what this returns, which is the arrangement that
+   kept the unavailable row from going missing while the send hint still read
+   Enter:send. Folding would have been a second place to disagree. *)
+let keeper_message_visible_status_rows (state : state) live ~now =
+  let rows = Masc_tui_keeper_chat_transcript.status_rows ~now live in
+  if state.msg_turn_folded then
+    List.filter
+      (fun (kind, _) ->
+        Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+      rows
+  else rows
+
+(* How many rows the fold took, which the folded progress line reports so the
+   count is never a thing the reader has to notice is missing. *)
+let keeper_message_folded_status_count (state : state) live ~now =
+  if not state.msg_turn_folded then 0
+  else
+    List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
+    - List.length (keeper_message_visible_status_rows state live ~now)
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -7068,8 +7120,8 @@ let keeper_message_status_rows (state : state) =
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
          List.length
-           (Masc_tui_keeper_chat_transcript.status_rows
-              ~now:(Unix.gettimeofday ()) live.tl_transcript))
+           (keeper_message_visible_status_rows state live.tl_transcript
+              ~now:(Unix.gettimeofday ())))
   + (match state.msg_target_keeper_name with
      | Some keeper_name
        when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->
@@ -7088,9 +7140,13 @@ let keeper_message_status_rows (state : state) =
   (* One row whatever the queue holds, so the reservation cannot drift from
      the drawing: the pane names as many effects as fit on it and truncates
      the rest, the way every other single-line status row does. *)
+  (* Folded, the queue is a count on the progress line rather than a row of
+     its own -- which is the row #6 asked about, always there whether or not
+     anything was waiting on the operator. *)
   + (match state.msg_target_keeper_name with
      | Some keeper_name
-       when keeper_effects_at_the_gate state ~keeper_name <> [] ->
+       when (not state.msg_turn_folded)
+            && keeper_effects_at_the_gate state ~keeper_name <> [] ->
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)

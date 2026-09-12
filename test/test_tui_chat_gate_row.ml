@@ -43,6 +43,9 @@ let pending ?(waiting_s = Some 90.) ?(phase = Decode.Gate_judging) ~keeper ~tool
 let test_only_this_keepers_effects_count () =
   let state = state () in
   state.msg_target_keeper_name <- Some "polisher";
+  (* Unfolded: the queue has a row of its own. Folded it is a count on the
+     progress line, which [test_a_folded_turn_gives_the_queue_no_row] pins. *)
+  state.msg_turn_folded <- false;
   let empty = Tui_types.keeper_message_status_rows state in
   state.gate_pending <-
     [ pending ~keeper:"archivist" ~tool:"Execute" "appr-1" ];
@@ -68,6 +71,7 @@ let test_only_this_keepers_effects_count () =
 let test_many_effects_still_reserve_one_row () =
   let state = state () in
   state.msg_target_keeper_name <- Some "polisher";
+  state.msg_turn_folded <- false;
   let empty = Tui_types.keeper_message_status_rows state in
   state.gate_pending <-
     List.init 7 (fun index ->
@@ -102,7 +106,49 @@ let test_the_pane_and_the_budget_read_one_list () =
   check int "and the budget asks the same one" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"keeper_message_status_rows"
-       ~callee:"keeper_effects_at_the_gate")
+       ~callee:"keeper_effects_at_the_gate");
+  (* The fold gave the two readings a second way to disagree: the pane could
+     draw every status row while the budget counted only the ones folding
+     keeps. Both go through the one function that applies the fold, and the
+     pane does not reach past it to the raw list. *)
+  check int "the pane draws the folded list, not the raw one" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_chat.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Masc_tui_types.keeper_message_visible_status_rows");
+  check int "and does not read the unfolded list beside it" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_chat.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Keeper_chat_transcript.status_rows");
+  check int "the budget counts that same folded list" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"keeper_message_status_rows"
+       ~callee:"keeper_message_visible_status_rows")
+;;
+
+
+(* Folded, the queue stops owning a row: the progress line carries "gate N"
+   instead. The budget has to agree, or the pane reserves a line it never
+   draws and the composer sits one row low -- the same failure the row this
+   replaces was written for. *)
+let test_a_folded_turn_gives_the_queue_no_row () =
+  let state = state () in
+  state.msg_target_keeper_name <- Some "polisher";
+  state.msg_turn_folded <- true;
+  let empty = Tui_types.keeper_message_status_rows state in
+  state.gate_pending <-
+    [ pending ~keeper:"polisher" ~tool:"WebFetch" "appr-1"
+    ; pending ~keeper:"polisher" ~tool:"Execute" "appr-2"
+    ];
+  check int "a folded turn reserves no queue row" empty
+    (Tui_types.keeper_message_status_rows state);
+  check int "and the count the line reports is the queue's own" 2
+    (List.length
+       (Tui_types.keeper_effects_at_the_gate state ~keeper_name:"polisher"));
+  state.msg_turn_folded <- false;
+  check int "unfolded it takes its row back" (empty + 1)
+    (Tui_types.keeper_message_status_rows state)
 ;;
 
 let () =
@@ -118,6 +164,8 @@ let () =
             test_many_effects_still_reserve_one_row
         ; test_case "the pane and the budget read one list" `Quick
             test_the_pane_and_the_budget_read_one_list
+        ; test_case "a folded turn gives the queue no row" `Quick
+            test_a_folded_turn_gives_the_queue_no_row
         ] )
     ]
 ;;

@@ -68,12 +68,14 @@ let backend stops : Lane.For_testing.backend = {
     let stopped = ref false in
     let connection : Lane.For_testing.connection = {
       container_id = digest instance_id;
+        action_schema = (fun () -> None);
+        act = (fun ~arguments:_ -> Error "read-only fixture");
       observe = (fun ~binding:_ ~sources:_ -> Ok { Lane_addon_types.rows = []; coverage = [] });
       stop = (fun () -> if not !stopped then (stopped := true; incr stops); Ok ());
     } in
     on_created connection;
     Ok connection);
-  acquire = (fun ~store:_ ~package:_ ~binding:_ -> Ok (`List []));
+  acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
   recover_stop = (fun ~instance_id:_ ~container_id:_ ~max_reply_bytes:_ -> Ok ());
 }
 

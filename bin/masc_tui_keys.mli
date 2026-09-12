@@ -23,6 +23,13 @@ type binding = {
   group : group;
 }
 
+val expand_turn_key : string
+(** Ctrl-S: fold the turn dashboard to its progress line, or unfold it. *)
+
+val expand_turn_label : string
+(** How that key is printed on the folded line. Beside the byte so the name
+    and the binding cannot drift apart. *)
+
 val global : binding list
 (** Shared bindings shown once in Help. Text input and modal panels can own a
     printable key before its cross-surface fallback runs; each such binding's

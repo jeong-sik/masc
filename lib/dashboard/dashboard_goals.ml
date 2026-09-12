@@ -88,6 +88,146 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
   fun goal_id ->
     Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
 
+(* One goal as the event log remembers it. Local to this reader: the JSON is the
+   contract, and putting the record in the interface would invite a second
+   reader of the same rows. *)
+type goal_history_entry = {
+  gh_opened_at : string option;
+  gh_title : string option;
+  gh_last_phase : string option;
+  gh_last_phase_at : string option;
+}
+
+let empty_goal_history_entry =
+  { gh_opened_at = None; gh_title = None;
+    gh_last_phase = None; gh_last_phase_at = None }
+
+(* Goals the event log remembers and goals.json no longer lists. goals.json
+   holds only the current set, so a goal that reached a terminal phase and left
+   it had no record anywhere that it had existed -- which is why "how many goals
+   were opened" and "what were they" had no answer (#35359).
+
+   This reads the log without asking the current list what to look for, which is
+   the part [build_goal_events_projection] cannot do: its table holds every row,
+   but its callers walk the current forest and so never ask about a goal that
+   left.
+
+   [opened_at] and [title] come from the [goal_created] row, so a goal opened
+   before that row existed reports null rather than a guessed time. [closed_at]
+   is filled only when the last phase reached is terminal -- a goal that left the
+   list without one is a gap, and dating it would invent an outcome. A negative
+   [lifetime_hours] is reported as measured rather than clamped: out-of-order
+   rows are a fact about the log, not a number to tidy. Rows this reader does
+   not recognise are counted and named under [coverage] instead of dropped. *)
+let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
+  let table = Hashtbl.create 16 in
+  let rows_without_goal_id = ref 0 in
+  let unrecognised = ref [] in
+  let note_unrecognised name =
+    if not (List.mem name !unrecognised) then unrecognised := name :: !unrecognised
+  in
+  List.iter
+    (fun json ->
+      match Json_util.get_string json "goal_id" with
+      | None -> incr rows_without_goal_id
+      | Some goal_id when List.mem goal_id listed -> ()
+      | Some goal_id ->
+        let ts = Json_util.get_string json "ts" in
+        let payload = Yojson.Safe.Util.member "payload" json in
+        let current =
+          match Hashtbl.find_opt table goal_id with
+          | Some entry -> entry
+          | None -> empty_goal_history_entry
+        in
+        let updated =
+          match Json_util.get_string json "event_type" with
+          | Some "goal_created" ->
+            { current with
+              gh_opened_at = ts;
+              gh_title = Json_util.get_string payload "title" }
+          | Some "goal_phase" ->
+            { current with
+              gh_last_phase = Json_util.get_string payload "phase";
+              gh_last_phase_at = ts }
+          | Some other ->
+            note_unrecognised other;
+            current
+          | None ->
+            note_unrecognised "(no event_type)";
+            current
+        in
+        Hashtbl.replace table goal_id updated)
+    rows;
+  let lifetime_hours opened closed =
+    match opened, closed with
+    | Some opened, Some closed -> (
+      match
+        Masc_domain.parse_iso8601_opt opened, Masc_domain.parse_iso8601_opt closed
+      with
+      | Some opened, Some closed when Float.is_finite (closed -. opened) ->
+        Some ((closed -. opened) /. 3600.)
+      | (Some _, _) | (None, _) -> None)
+    | (None, _) | (_, None) -> None
+  in
+  let entry_json (goal_id, entry) =
+    (* Every phase is named rather than folded into a catch-all, so a phase
+       added later stops the compiler here instead of silently reading as
+       "still open". *)
+    let reached_terminal =
+      match Option.bind entry.gh_last_phase Goal_phase.of_string with
+      | Some Goal_phase.Completed | Some Goal_phase.Dropped -> true
+      | Some Goal_phase.Executing
+      | Some Goal_phase.Verifying
+      | Some Goal_phase.Awaiting_confirmation
+      | None -> false
+    in
+    let closed_at = if reached_terminal then entry.gh_last_phase_at else None in
+    `Assoc
+      [ "goal_id", `String goal_id
+      ; "title", Json_util.string_opt_to_json entry.gh_title
+      ; "opened_at", Json_util.string_opt_to_json entry.gh_opened_at
+      ; "closed_at", Json_util.string_opt_to_json closed_at
+      ; "final_phase", Json_util.string_opt_to_json entry.gh_last_phase
+      ; ( "lifetime_hours"
+        , match lifetime_hours entry.gh_opened_at closed_at with
+          | Some hours -> `Float hours
+          | None -> `Null )
+      ]
+  in
+  (* Folded out of the table and sorted by id rather than tracked in a second
+     list of insertion order: a hash table's own traversal order is not stable,
+     and sorting is what makes two reads of one log agree. *)
+  let ordered =
+    Hashtbl.fold (fun goal_id entry acc -> (goal_id, entry) :: acc) table []
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  in
+  `Assoc
+    [ "unlisted", `List (List.map entry_json ordered)
+    ; ( "coverage"
+      , `Assoc
+          [ "malformed_event_lines", `Int malformed_lines
+          ; "rows_without_goal_id", `Int !rows_without_goal_id
+          ; ( "unrecognised_event_types"
+            , `List (List.rev_map (fun name -> `String name) !unrecognised) )
+          ] )
+    ]
+
+(* The file read kept apart from the counting above, so the counting is testable
+   without a workspace on disk. *)
+let unlisted_goal_history_json ~(config : Workspace.config) ~goals =
+  let path =
+    Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+  in
+  let rows, malformed_lines =
+    if Workspace.path_exists config path
+    then Fs_compat.load_jsonl_diagnostics path
+    else ([], 0)
+  in
+  unlisted_goal_history_of_rows
+    ~listed:(List.map (fun (goal : Goal_store.goal) -> goal.id) goals)
+    ~rows
+    ~malformed_lines
+
 let verification_projection ~config =
   let records = Goal_verification.load_records_authoritative config in
   fun (goal : Goal_store.goal) ->
@@ -336,6 +476,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
             ("done_tasks", `Int done_tasks);
             ("pending_approvals", `Int pending_approval_total);
           ] );
+      ("goal_history", unlisted_goal_history_json ~config ~goals);
     ]
 
 let dashboard_goals_tree_json_with_pending_reader

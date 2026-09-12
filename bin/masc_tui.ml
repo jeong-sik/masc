@@ -1551,6 +1551,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           ( "tool calls " ^ tool_visibility_to_string visibility
           , Unix.gettimeofday () );
       true
+    end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
+      (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
+         where it starts; this is the key that asks for the rest. Saying what
+         it did matters more here than elsewhere -- the fold changes how many
+         rows the block below the conversation takes, and a reader who does
+         not see a row appear has no other way to tell the key landed. *)
+      state.msg_turn_folded <- not state.msg_turn_folded;
+      state.last_action <-
+        Some
+          ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
+          , Unix.gettimeofday () );
+      true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
          then gives full timestamp/request metadata a row of its own. *)
@@ -13494,8 +13506,22 @@ let main
      sends -- and the composer cannot tell "send this" from "start a new line".
      LF still submits below if some terminal sends it for Return, so this only
      ever adds a key. *)
+  (* Flow control off. IXON lives in c_iflag and ICANON in c_lflag, so raw
+     mode did not touch it: the tty was still answering Ctrl-S by stopping
+     output and Ctrl-Q by resuming it, and neither byte ever reached the
+     key layer. Measured on a pty with the TUI running: ixon=True.
+
+     What an operator saw was small, because IXANY is on too -- the next key
+     they pressed released it, so the screen stalled rather than froze. What
+     it cost was a key: Ctrl-S could not be bound to anything, which is the
+     key a reader reaches for to hold a moving surface still. *)
   let new_term =
-    { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
+    { old_term with
+      Unix.c_icanon = false
+    ; c_echo = false
+    ; c_icrnl = false
+    ; c_ixon = false
+    }
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in

@@ -1281,6 +1281,7 @@
   masc_tui_markdown
   masc_tui_observation_layout
   masc
+  masc_tui_keys
   masc_tui_types
   unix))
 

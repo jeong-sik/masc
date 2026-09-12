@@ -683,6 +683,49 @@ let test_unrelated_400_remains_turn_failed () =
     | Ok _ -> fail "an unrelated 400 terminal was reported as completion")
 ;;
 
+(* The reason a turn failed is carried in the error value, and the log call
+   that ends [run_turn] passed only [error_kind] for every failure that did
+   not stop at a host boundary. A turn that ran 184s before failing and one
+   that failed at once both reached the operator as "kind=turn_failed"
+   (2026-09-12 17:08:06 KST), so this pins the detail to the entry that is
+   actually read rather than to the value that was already correct. *)
+let test_turn_failure_reason_reaches_the_log () =
+  let cursor =
+    match Log.Ring.recent ~limit:1 () with
+    | entry :: _ -> entry.Log.Ring.seq
+    | [] -> -1
+  in
+  with_fixture [ Emit generic_400_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed_with_observation _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an unrelated 400 terminal was reported as completion");
+  let failure_entries =
+    Log.Ring.recent
+      ~since_seq:cursor
+      ~module_filter:"runtime_agent"
+      ~order:`Oldest_first
+      ()
+    |> List.filter (fun (entry : Log.Ring.entry) ->
+         Astring.String.is_infix
+           ~affix:"Claude Code turn failed"
+           entry.Log.Ring.message)
+  in
+  match failure_entries with
+  | [] -> fail "a failed turn logged no failure entry"
+  | entries ->
+    check
+      bool
+      "the failure reason reaches the log entry"
+      true
+      (List.exists
+         (fun (entry : Log.Ring.entry) ->
+           Astring.String.is_infix
+             ~affix:"diagnostic mentioned"
+             entry.Log.Ring.message)
+         entries)
+;;
+
 (* The 2026-08-14 live shape: is_error with the overflow sentence but no
    [terminal_reason] and no [api_error_status]. The sentence table admits it
    without a status requirement. *)
@@ -2055,6 +2098,10 @@ let () =
             "unrelated 400 remains turn failed"
             `Quick
             test_unrelated_400_remains_turn_failed
+        ; test_case
+            "turn failure reason reaches the log"
+            `Quick
+            test_turn_failure_reason_reaches_the_log
         ; test_case
             "statusless prompt too long is typed"
             `Quick

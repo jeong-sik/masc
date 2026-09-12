@@ -994,10 +994,13 @@ let test_a_superseded_attempts_open_call_is_not_still_running () =
    that it appears, that it says how to answer, and that it goes away on every
    path -- a prompt left up asks again for a call already decided. *)
 
+(* The question has its own kind now: it is the one row the fold cannot take,
+   so it is not lumped with the interrupts and diagnostics it used to sit
+   beside. *)
 let approval_rows t =
   rows t
   |> List.filter_map (fun (kind, text) ->
-         if kind = Transcript.Attention then Some text else None)
+         if kind = Transcript.Answer_needed then Some text else None)
 
 let requested ~call_id ~tool_name ~question =
   Live.Approval_requested
@@ -1235,6 +1238,7 @@ let test_the_whole_reasoning_trail_is_kept () =
 
 let kind_to_string : Transcript.status_kind -> string = function
   | Transcript.Progress -> "progress"
+  | Transcript.Answer_needed -> "answer_needed"
   | Transcript.Attention -> "attention"
   | Transcript.Approval outcome ->
       "approval:" ^ Transcript.approval_outcome_to_string outcome

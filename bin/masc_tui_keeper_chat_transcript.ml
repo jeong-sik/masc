@@ -1028,8 +1028,23 @@ let trail t =
 
 type status_kind =
   | Progress
+  | Answer_needed
   | Attention
   | Approval of approval_outcome
+
+(* Whether a row survives the turn dashboard being folded.
+
+   Folding is a reading aid, not a filter. The progress row is the summary
+   the folded line already is, so it stays and carries the count of what went
+   with it. A row that asks the operator for something cannot fold: the
+   question would go behind a key they have no reason to press, and the turn
+   would sit held with nothing on screen saying so. Everything else --
+   a settled approval, an interrupt already acknowledged, a stream
+   diagnostic that says the recorded outcome is unaffected -- is history the
+   operator can ask for. *)
+let status_row_survives_folding = function
+  | Progress | Answer_needed -> true
+  | Attention | Approval _ -> false
 
 let approval_outcome_of_string = function
   | "approve" | "approved" -> Approved
@@ -1255,7 +1270,7 @@ let awaiting_text t =
 
 let status_rows ~now t =
   [ Some (Progress, progress_text ~now t)
-  ; Option.map (fun text -> (Attention, text)) (awaiting_text t)
+  ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
         ( Approval settlement.settled_outcome

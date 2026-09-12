@@ -260,6 +260,11 @@ val to_diagnostic_text : config_path:string -> load_failure -> string
     CLI has always printed. A consumer that shows a failure to a person on a
     surface where parser text is unwelcome should match on the case instead. *)
 
+val to_operator_text : config_path:string -> load_failure -> string
+(** The same account with the parser's own text withheld: {!Toml_unparsable}
+    renders as a count and a pointer at [masc runtime-probe], every other case
+    identically to {!to_diagnostic_text}. *)
+
 val of_binding : config -> binding -> (t, drop_reason) result
 (** Materialize one binding while preserving failure information. [Error reason]
     when the binding is disabled, its provider/model id is unresolved, or the

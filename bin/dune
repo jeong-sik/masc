@@ -516,7 +516,9 @@
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
- (libraries masc_tui_types))
+ ; masc_tui_keeper_mark owns the marks the roster draws, and the sheet this
+ ; module builds is where a reader looks up what one means.
+ (libraries masc_tui_types masc_tui_keeper_mark))
 
 (library
  (name masc_tui_esc_interrupt)

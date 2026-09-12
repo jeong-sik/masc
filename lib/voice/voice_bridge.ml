@@ -401,16 +401,32 @@ let attempt_tts_endpoint
   =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   match adapter.transport with
-  | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct ->
+  (* One branch for every way of producing the audio, because everything after
+     it -- playing the file, the dedup record, what gets reported -- is the
+     same. Which of the two ways is used is the endpoint's kind, not a guess. *)
+  | Voice_runtime_overlay.Openai_compat
+  | Voice_runtime_overlay.Elevenlabs_direct
+  | Voice_runtime_overlay.Macos_say ->
     let audio_file = make_audio_file () in
     (match
-       speak_via_http_tts_to_file
-         endpoint
-         ~message
-         ~voice
-         ~model
-         ~agent_id
-         ~output_file:audio_file
+       (match adapter.transport with
+        | Voice_runtime_overlay.Macos_say ->
+          Voice_bridge_transport.speak_via_command_to_file
+            endpoint
+            ~message
+            ~voice
+            ~output_file:audio_file
+        | Voice_runtime_overlay.Openai_compat
+        | Voice_runtime_overlay.Elevenlabs_direct
+        | Voice_runtime_overlay.Voice_mcp
+        | Voice_runtime_overlay.Whisper_cli ->
+          speak_via_http_tts_to_file
+            endpoint
+            ~message
+            ~voice
+            ~model
+            ~agent_id
+            ~output_file:audio_file)
      with
      | Ok file_size ->
        (* run_local_playback now owns the dedup record inside its mutex to
@@ -479,6 +495,14 @@ let attempt_tts_endpoint
        (try Sys.remove audio_file with
         | Sys_error _ -> ());
        Error (`Proven_pre_effect error))
+  (* An endpoint that transcribes is not a fallback for one that speaks: a
+     chain that quietly used it would report success for a turn nobody heard. *)
+  | Voice_runtime_overlay.Whisper_cli ->
+    Error
+      (`Proven_pre_effect
+        (Printf.sprintf
+           "voice config endpoint %s transcribes and does not speak"
+           endpoint.Voice_config.id))
   | Voice_runtime_overlay.Voice_mcp ->
     let args =
       `Assoc

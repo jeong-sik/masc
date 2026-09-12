@@ -143,6 +143,7 @@ let elevenlabs_tts_endpoint : Voice_config.endpoint =
   ; enabled = true
   ; timeout_seconds = Some 30.0
   ; default_voice = None
+  ; command = None
   }
 ;;
 
@@ -221,6 +222,7 @@ let test_stt_request_elevenlabs_direct () =
     ; enabled = true
     ; timeout_seconds = Some 30.0
     ; default_voice = None
+    ; command = None
     }
   in
   with_env "ELEVENLABS_API_KEY" (Some "test-key-123") (fun () ->
@@ -260,6 +262,7 @@ let test_stt_request_openai_compat () =
     ; enabled = true
     ; timeout_seconds = Some 30.0
     ; default_voice = None
+    ; command = None
     }
   in
   match
@@ -295,6 +298,7 @@ let test_stt_request_mcp_rejected () =
     ; enabled = true
     ; timeout_seconds = Some 5.0
     ; default_voice = None
+    ; command = None
     }
   in
   match

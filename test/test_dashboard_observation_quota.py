@@ -65,8 +65,10 @@ def main():
                 while True:
                     assert process.poll() is None, (base / 'server.log').read_text()[-8000:]
                     try:
-                        status, raw = http('/health?full=1')
-                        if status == 200 and json.loads(raw).get('status') == 'ok':
+                        # MCP admission uses state_ready, not the /health
+                        # aggregate's status (which can be ok during startup).
+                        status, raw = http('/health/ready')
+                        if status == 200 and json.loads(raw).get('ready') is True:
                             break
                     except (URLError, OSError):
                         pass

@@ -2,7 +2,24 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
-## Chat 통합 후보 진행 (2026-09-13 후속)
+## 현재 판단과 다음 방향 (2026-09-13, 설치 Chat 수용 후)
+
+목표는 계속 18개 문제와 첨부 계약 전체다. 아래가 최신 관측이며 이후 절은 당시 기록이다. 작업은 각각 별도 worktree에서 진행한다.
+
+| 영역 | 현재 확인한 도달점 | 다음 완료 조건 |
+| --- | --- | --- |
+| 자율 협업·비코드 산출물 | 전시·연작·참여형 산출물과 동료 검토·Task 승인 기록. 운영자 보조가 포함됐으며 세 Goal 모두 사람 확인 대기 | 다른 과제와 runtime에서 자발적 판단·협업·기억 재사용 재현 |
+| 자율 Edit Chat | 설치본4324764에서 실제 실행0129의 원본·manifest·화면 diff 일치, desktop/mobile 통과. 정확한 source의 Test/Release 모두 성공 | #15의 남은 LSP를 설치 IDE에서 확인 |
+| 독립 원본 검증 | PPTX·MP4·Board/Fusion 소스를 통합한 #35589. 31bdf Test는 중복 Dune 선언으로 실패. 원격 수정7bd85f를 직접·독립 검토하고 Test34707024488/Release34707026611 요청 | 수정 head CI를 확인한 뒤 설치 검증자가 원본을 직접 검사한 기록 확보 |
+| LSP·IDE | 별도 worktree83f311에서 실제 내용 동기화·진단 상태 및 동일 경로 workspace 전환 수정. 111 tests와 실제 Chromium/ocamllsp 진단2→0 | 설치 MASC proxy·전체 IDE·Keeper 사용은 별도 검증 |
+| 통계·설정·Tools/Skills·Preset | 개별 구현과 일부 화면 근거 | 설치 Dashboard/TUI의 연결된 사용자 흐름 수용 |
+| 공유 기억·Local LLM | 기존 24개 source에서 10개 claim/2개 conflict 제안 및 동료 재사용 관측 | 의미 정확성과 자발적 채택, 장기 기억 연속성 검증 |
+
+다음은 독립 원본 검증과 LSP의 설치 수용을 먼저 끝내고, 자율 협업·기억·모든 runtime의 10턴 및 1/2/4/24시간 연속성 실측으로 이어간다. 새 산출물을 늘려 이 남은 조건을 대체하지 않는다. token 낭비 감소나 전체 완료율은 측정하지 않았으므로 주장하지 않는다.
+
+설치 서버는4324764/포트18951이며 health ok와 바이너리 SHA를 다시 확인했다. 재시작 비교98파일 중96개 동일,2개 memory journal은 기존 바이트가 보존된 append다. 실제 Chat 증거·PNG·CI·Goal 상태는 [installed-chat-4324764](installed-chat-4324764/README.md)에 있다. 전체 목표와 세 Goal의 사람 확인은 계속 미완료다.
+
+## Chat 통합 후보 진행 (2026-09-13 이전 관측)
 
 - Chat 단독 a28e의 native 6 suite/149 tests와 macOS ARM Release job이 통과했다. 바이너리·companion4개·runtime archive와 paired manifest 일치도 확인했지만, 현재 설치본의 Fusion·Gate 수정이 빠져 있어 배포하지 않았다.
 - 협업 부모 f81284 위에 Chat 실행 ID·오래된 출력·manifest·직접 의존성을 통합한 PR #35581의 head는4324764e95다. 설치본 관련 Fusion/Gate/Board 소스 보존을 직접·독립 리뷰했고 UI203건/타입/parse13/DET 통과다. Test34705063187 및 Release34705064645를 요청했다. 새 후보 설치와 실제 Chat diff 성공은 아직 아니다.

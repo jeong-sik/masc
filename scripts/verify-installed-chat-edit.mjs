@@ -173,9 +173,10 @@ try {
   await row.screenshot({ path: resolve(output, 'edit-record-desktop.png') })
   await writeFile(resolve(output, 'displayed.diff'), patch)
   await page.setViewportSize({ width: 390, height: 844 })
-  await row.scrollIntoViewIfNeeded()
+  await diff.scrollIntoViewIfNeeded()
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
   await page.screenshot({ path: resolve(output, 'chat-edit-mobile.png'), fullPage: true })
+  await diff.screenshot({ path: resolve(output, 'edit-diff-mobile.png') })
   assert.ok(workers.length > 0, 'Actual browser diff worker must execute')
   assert.ok(assets.some(asset => asset.name === 'index.html'))
   for (const original of originals) {

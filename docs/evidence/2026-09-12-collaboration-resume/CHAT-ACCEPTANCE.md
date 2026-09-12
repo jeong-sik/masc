@@ -1,3 +1,7 @@
+# Latest installed acceptance: 2026-09-13
+
+Actual historical autonomous Edit `exec-1789223431021-0129` now passes on installed source4324764. The manifest, before/after blob hashes, rendered originals and displayed patch agree. Desktop and mobile screenshots include the visible diff; all83 fetched assets match the installed manifest. Exact-source Test and full Release succeeded. See [receipt, screenshots and scope](installed-chat-4324764/README.md). This closes the recorded Chat display gap for that real execution. LSP and the full18-item goal remain open. Sections below preserve earlier observations and failures.
+
 # Installed Chat acceptance
 
 `scripts/verify-installed-chat-edit.mjs` observes the installed server and a retained real autonomous Edit. It does not serve fixtures or replace assets. It checks:

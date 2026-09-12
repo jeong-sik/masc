@@ -39,7 +39,7 @@ export interface DashboardShellAuthSummary {
 }
 
 export interface DashboardConfigResolutionItem {
-  path: string
+  path: string | null
   exists: boolean
   source: string
 }

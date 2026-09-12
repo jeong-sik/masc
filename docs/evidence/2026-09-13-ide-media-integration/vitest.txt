@@ -1,0 +1,19 @@
+
+ RUN  v4.1.5 /private/tmp/masc-collaboration-ide-media-acceptance-20260913/dashboard
+
+(node:16078) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17416) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:18944) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19181) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:19289) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  5 passed (5)
+      Tests  111 passed (111)
+   Start at  02:07:51
+   Duration  11.96s (transform 2.61s, setup 1.68s, import 4.61s, tests 2.69s, environment 1.85s)
+

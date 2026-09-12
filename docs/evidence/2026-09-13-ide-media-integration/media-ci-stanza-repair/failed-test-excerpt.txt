@@ -1,0 +1,18 @@
+test suite	Test	2026-09-12T16:48:55.3232394Z File "test/dune", lines 22-25, characters 0-113:
+test suite	Test	2026-09-12T16:48:55.3233012Z 22 | (test
+test suite	Test	2026-09-12T16:48:55.3233382Z 23 |  (name test_verifier_official_client)
+test suite	Test	2026-09-12T16:48:55.3234326Z 24 |  (modules test_verifier_official_client)
+test suite	Test	2026-09-12T16:48:55.3234841Z 25 |  (libraries masc_test_deps))
+test suite	Test	2026-09-12T16:48:55.3235460Z Error: Executable "test_verifier_official_client" appears for the second time
+test suite	Test	2026-09-12T16:48:55.3236123Z in this directory
+test suite	Test	2026-09-12T16:48:55.3236502Z Already defined at test/dune:27
+test suite	Test	2026-09-12T16:48:56.0274617Z [targeted] test_install_runtime_setup: FAIL exit 1 in 2s
+test suite	Test	2026-09-12T16:48:56.4661600Z [targeted] dune build test/test_verification_presentation.exe test/test_verification_authority_tools.exe test/test_verification_collaboration_evidence.exe test/test_board_persistence_load_contract.exe test/test_board_persistence_schema.exe test/test_keeper_tool_plan.exe test/test_sandbox_prerequisites.exe test/test_fusion_decision.exe test/test_server_dashboard_http_keeper_tool_lookup.exe test/fixtures/verifier-image-lookup.png test/fixtures/verifier-video.mp4 docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf
+test suite	Test	2026-09-12T16:48:56.8471416Z File "test/dune", lines 22-25, characters 0-113:
+test suite	Test	2026-09-12T16:48:56.8472187Z 22 | (test
+test suite	Test	2026-09-12T16:48:56.8472665Z 23 |  (name test_verifier_official_client)
+test suite	Test	2026-09-12T16:48:56.8473346Z 24 |  (modules test_verifier_official_client)
+test suite	Test	2026-09-12T16:48:56.8474321Z 25 |  (libraries masc_test_deps))
+test suite	Test	2026-09-12T16:48:56.8475647Z Error: Executable "test_verifier_official_client" appears for the second time
+test suite	Test	2026-09-12T16:48:56.8476392Z in this directory
+test suite	Test	2026-09-12T16:48:56.8476729Z Already defined at test/dune:27

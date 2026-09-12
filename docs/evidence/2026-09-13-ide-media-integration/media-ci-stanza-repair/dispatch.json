@@ -1,0 +1,15 @@
+{
+  "source_head": "7bd85f6bd6924a0619d7113f3347f0d0b19346d3",
+  "local_remote_equal_before_dispatch": true,
+  "test": {
+    "id": 34707024488,
+    "status_at_handle_check": "queued"
+  },
+  "release": {
+    "id": 34707026611,
+    "status_at_handle_check": "pending"
+  },
+  "outcome": "not_observed",
+  "local_build": "not_run",
+  "runtime_mutation": "not_run"
+}

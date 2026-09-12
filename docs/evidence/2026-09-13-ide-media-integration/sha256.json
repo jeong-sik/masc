@@ -1,0 +1,12 @@
+{
+  "README.md": "1e48ef60f24a74e625fc32f2876aa0959efbcf76f25a88328b07ee5db51c2d57",
+  "det.txt": "47f548691a51174d7e0cd7661d236ef8a9ae88e4d3f6b905999afbc187b43bcc",
+  "media-ci-stanza-repair/README.md": "b5e7d65ca0d16c051ae6375074818e9d6cc1c06bde82eb159cdd8aa25f82e879",
+  "media-ci-stanza-repair/declaration-audit.json": "4ea5dfbe658c6fdf8fb02d6a625e4205e67b4852d0f0242a4e7da4883813f7ca",
+  "media-ci-stanza-repair/dispatch.json": "6fc36f009ba1641d12167f6c714e5ccac9774cbd6c2c5877358fd816a32b8ac7",
+  "media-ci-stanza-repair/failed-test-excerpt.txt": "c6ea571f9e8d4f907523d3d4fafba4841097815828571a49a21f378a988acfc2",
+  "media-ci-stanza-repair/sha256.json": "4948ffce1bb3e414d5bf9faf8501c137fc17defcb26724ee0f0928ec209e1e38",
+  "source-comparison.json": "d7d2791e4ed9a84545a2b65aa25e90899b91bb80638fcb222974309824085ab5",
+  "typecheck.txt": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "vitest.txt": "1b96e965a7483d4f882e8b0671ffc4c211dfac953d7d6426ef6e1babc2b17276"
+}

@@ -33,6 +33,7 @@ end
 type delivery_key =
   | Operation of Request_id.t
   | Operation_checkpoint of { operation_id : Request_id.t; checkpoint : Keeper_checkpoint_ref.t }
+  | Operation_native of { operation_id : Request_id.t; continuation_id : Request_id.t }
   | Fusion_run of Request_id.t
   | Workspace_message of Request_id.t
   | Approval_lifecycle of Request_id.t
@@ -98,6 +99,10 @@ let delivery_key_to_yojson = function
       "operation_id", `String (Request_id.to_string operation_id);
       "trace_id", `String (Keeper_id.Trace_id.to_string checkpoint.trace_id);
       "turn_count", `Int checkpoint.turn_count; "sha256", `String checkpoint.sha256]
+  | Operation_native {operation_id; continuation_id} ->
+    `Assoc ["kind", `String "operation_native";
+      "operation_id", `String (Request_id.to_string operation_id);
+      "continuation_id", `String (Request_id.to_string continuation_id)]
   | Fusion_run request_id ->
     `Assoc
       [ "kind", `String "fusion_run"
@@ -142,6 +147,14 @@ let delivery_key_of_yojson = function
        let* checkpoint = Keeper_checkpoint_ref.of_persisted ~trace_id ~turn_count ~sha256
          |> Result.map_error (fun _ -> "invalid checkpoint delivery identity") in
        Ok (Operation_checkpoint {operation_id; checkpoint})
+     | "operation_native" ->
+       let* () = validate_fields ~context:"native operation delivery identity"
+         ~expected:["kind"; "operation_id"; "continuation_id"] fields in
+       let* operation_id = string_field "operation_id" fields in
+       let* operation_id = Request_id.of_string operation_id in
+       let* continuation_id = string_field "continuation_id" fields in
+       let* continuation_id = Request_id.of_string continuation_id in
+       Ok (Operation_native {operation_id; continuation_id})
      | "fusion_run" ->
        let* () =
          validate_fields
@@ -182,11 +195,14 @@ let delivery_key_equal left right =
   | Operation_checkpoint left, Operation_checkpoint right ->
     Request_id.equal left.operation_id right.operation_id
     && Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
+  | Operation_native left, Operation_native right ->
+    Request_id.equal left.operation_id right.operation_id
+    && Request_id.equal left.continuation_id right.continuation_id
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
   | Workspace_message left, Workspace_message right -> Request_id.equal left right
   | Approval_lifecycle left, Approval_lifecycle right -> Request_id.equal left right
-  | (Operation _ | Operation_checkpoint _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
-    (Operation _ | Operation_checkpoint _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
+  | (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _),
+    (Operation _ | Operation_checkpoint _ | Operation_native _ | Fusion_run _ | Workspace_message _ | Approval_lifecycle _) ->
     false
 ;;
 

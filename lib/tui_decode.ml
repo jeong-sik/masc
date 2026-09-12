@@ -465,10 +465,20 @@ type planning_backlog = {
   pb_cancelled : int;
 }
 
+type planning_goal_history = {
+  pgh_goal_id : string;
+  pgh_title : string option;
+  pgh_opened_at : string option;
+  pgh_closed_at : string option;
+  pgh_final_phase : string option;
+  pgh_lifetime_hours : float option;
+}
+
 type planning_snapshot = {
   pl_goals : planning_goal list;
   pl_rollup : planning_rollup;
   pl_backlog : planning_backlog;
+  pl_goal_history : planning_goal_history list;
   pl_generated_at : string;
 }
 
@@ -5342,6 +5352,19 @@ let goal_store_unavailable_detail json =
   | `Bool false, `String ("goal_store_unavailable" | "goal_task_links_unavailable"), `String detail -> Some detail
   | _ -> None
 
+(* Every field past the id is nullable on the wire, so each stays an option
+   here. A missing opening is not a zero time: the goal predates the server
+   recording openings, and dating it would invent one. *)
+let decode_planning_goal_history json =
+  let* pgh_goal_id = required_string_field json "goal_id" in
+  let* pgh_title = required_nullable_string_field json "title" in
+  let* pgh_opened_at = required_nullable_string_field json "opened_at" in
+  let* pgh_closed_at = required_nullable_string_field json "closed_at" in
+  let* pgh_final_phase = required_nullable_string_field json "final_phase" in
+  let* pgh_lifetime_hours = required_nullable_float_field json "lifetime_hours" in
+  Ok { pgh_goal_id; pgh_title; pgh_opened_at; pgh_closed_at; pgh_final_phase;
+       pgh_lifetime_hours }
+
 let decode_planning_snapshot json =
   let* () = match goal_store_unavailable_detail json with
     | Some detail -> Error detail | None -> Ok () in
@@ -5351,8 +5374,13 @@ let decode_planning_snapshot json =
   let* pl_rollup = decode_planning_rollup rollup_json in
   let* backlog_json = required_object_field json "task_backlog" in
   let* pl_backlog = decode_planning_backlog backlog_json in
+  let* history_json = required_object_field json "goal_history" in
+  let* unlisted_json = required_list_field history_json "unlisted" in
+  let* pl_goal_history =
+    decode_list "goal_history.unlisted" decode_planning_goal_history unlisted_json
+  in
   let* pl_generated_at = required_string_field json "generated_at" in
-  Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
+  Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in

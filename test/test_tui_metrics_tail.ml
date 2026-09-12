@@ -142,10 +142,11 @@ let test_diagnostic_controls_are_terminal_safe () =
   check bool "diagnostic removes escape" false (String.contains safe '\027');
   check bool "diagnostic removes bell" false (String.contains safe '\007')
 
-(* A row the shared file holds for another keeper is still counted -- it
-   consumes the physical window, which is what explains a short list -- but it
-   is counted apart from rows that could not be read. Folded together, one
-   unreadable row hid inside seventy-five normal ones on a live screen. *)
+(* A row in this Keeper's own store that names a different Keeper is counted --
+   it consumes the physical window, which is what explains a short list -- and
+   counted apart from rows that could not be read: one names who misfiled it,
+   the other names nobody. Folded together, one unreadable row hid inside
+   seventy-five misfiled ones on a live screen. *)
 let test_a_misfiled_row_is_counted_apart () =
   let snapshot =
     Tail.resolve_with ~expected_keeper:"keeper-main" ~limit:1

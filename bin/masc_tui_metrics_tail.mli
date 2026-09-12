@@ -16,9 +16,12 @@ type row_error =
       physical_index : int;
       names_keeper : string;
     }
-      (** A row the shared metrics file holds for someone else. Counted because
-          it consumes the physical window, kept apart from the rows that could
-          not be read so a single one of those cannot hide among them. *)
+      (** A row in this Keeper's own store that names a different Keeper. The
+          store is per Keeper -- [Keeper_types_support.keeper_metrics_store]
+          opens [<base-path>/.masc/keepers/<name>/metrics] -- so a writer put
+          this row in the wrong directory. Damage, like an unreadable row, and
+          counted apart from one because it names who misfiled it and because it
+          still consumes the physical window. *)
 
 type load_error =
   | Storage_error of Dated_jsonl.read_error

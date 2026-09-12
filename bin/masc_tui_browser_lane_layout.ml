@@ -9,7 +9,7 @@
    page is what Masc_tui_board_read_layout does for one Board document
    (#34272), for the same reason.
 
-   The source mirrors the branches of browser_lane_page_lines, so it holds
+   The source mirrors the branches of browser_lane_page_layout, so it holds
    every input that decides a row and nothing else. Comparison is structural,
    but polymorphic compare short-circuits on physical equality, so an
    unchanged node list costs a pointer test rather than a walk. *)
@@ -20,7 +20,8 @@ type content =
   | Empty
 
 type source = { content : content; scene_cursor : int; columns : int }
-type t = { mutable retained : (source * string array) option }
+type rows = { lines : string array; selected_row : int option }
+type t = { mutable retained : (source * rows) option }
 
 let create () = { retained = None }
 
@@ -28,9 +29,11 @@ let get cache ~source ~render =
   match cache.retained with
   | Some (previous, rows) when previous = source -> rows
   | Some _ | None ->
-      let rows = Array.of_list (render ()) in
+      let lines, selected_row = render () in
+      let rows = { lines = Array.of_list lines; selected_row } in
       cache.retained <- Some (source, rows);
       rows
 
-let count rows = Array.length rows
-let line rows index = rows.(index)
+let count rows = Array.length rows.lines
+let line rows index = rows.lines.(index)
+let selected_row rows = rows.selected_row

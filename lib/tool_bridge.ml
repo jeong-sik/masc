@@ -461,7 +461,6 @@ let agent_core_tool_of_masc
     ~description
     ~input_schema
     handler : Agent_core.Tool.t =
-  let parameters = params_of_json_schema input_schema in
   let agent_core_handler json_args =
     to_agent_core_typed_result
       ?base_path
@@ -469,7 +468,12 @@ let agent_core_tool_of_masc
       ?on_externalization_error
       (handler json_args)
   in
-  Agent_core.Tool.create ?descriptor ~name ~description ~parameters agent_core_handler
+  match Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema () with
+  | Ok schema ->
+    Agent_core.Tool.of_schema ?descriptor schema
+      (Agent_core.Tool.ignoring_execution_env agent_core_handler)
+  | Error detail ->
+    invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)
 
 let agent_core_tool_of_masc_with_execution_env
     ?descriptor

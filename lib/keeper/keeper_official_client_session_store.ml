@@ -186,15 +186,19 @@ let rec canonical_json = function
 
 let tool_surface_sha256 ~native_posture tools =
   let tool_json (tool : Agent_core.Tool.t) =
-    let parameters =
-      List.sort
-        (fun (left : Agent_core.Types.tool_param) right ->
-           String.compare left.name right.name)
+    let input_schema =
+      match tool.schema.input_schema with
+      | Some schema -> schema
+      | None ->
         tool.schema.parameters
+        |> List.sort
+          (fun (left : Agent_core.Types.tool_param) right ->
+             String.compare left.name right.name)
+        |> Agent_core.Types.params_to_input_schema
     in
     `Assoc
       [ "description", `String tool.schema.description
-      ; "input_schema", Agent_core.Types.params_to_input_schema parameters
+      ; "input_schema", input_schema
       ; "name", `String tool.schema.name
       ]
     |> canonical_json

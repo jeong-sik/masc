@@ -1,0 +1,534 @@
+[
+  {
+    "tag": "ARTICLE",
+    "class": "v2-lab-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]",
+    "rect": {
+      "x": 29.5,
+      "y": 365.734375,
+      "width": 331,
+      "height": 155.65625,
+      "right": 360.5,
+      "bottom": 521.390625
+    },
+    "clientWidth": 329,
+    "scrollWidth": 329,
+    "scrollLeft": 0,
+    "clientHeight": 154,
+    "scrollHeight": 154,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "331px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "virtual-list-fallback-row",
+    "rect": {
+      "x": 29.5,
+      "y": 365.734375,
+      "width": 331,
+      "height": 155.65625,
+      "right": 360.5,
+      "bottom": 521.390625
+    },
+    "clientWidth": 331,
+    "scrollWidth": 331,
+    "scrollLeft": 0,
+    "clientHeight": 156,
+    "scrollHeight": 156,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "auto",
+      "width": "331px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "flex flex-col gap-3",
+    "rect": {
+      "x": 29.5,
+      "y": 365.734375,
+      "width": 331,
+      "height": 155.65625,
+      "right": 360.5,
+      "bottom": 521.390625
+    },
+    "clientWidth": 331,
+    "scrollWidth": 331,
+    "scrollLeft": 0,
+    "clientHeight": 156,
+    "scrollHeight": 156,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "331px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "overflow-y-auto max-h-[calc(100vh-420px)] min-h-75",
+    "rect": {
+      "x": 29.5,
+      "y": 365.734375,
+      "width": 331,
+      "height": 281.25,
+      "right": 360.5,
+      "bottom": 646.984375
+    },
+    "clientWidth": 331,
+    "scrollWidth": 331,
+    "scrollLeft": 0,
+    "clientHeight": 281,
+    "scrollHeight": 281,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "auto",
+      "overflowY": "auto",
+      "transform": "none",
+      "minWidth": "auto",
+      "width": "331px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "p-6 flex flex-col gap-4",
+    "rect": {
+      "x": 7,
+      "y": -289.703125,
+      "width": 376,
+      "height": 959.1875,
+      "right": 383,
+      "bottom": 669.484375
+    },
+    "clientWidth": 376,
+    "scrollWidth": 376,
+    "scrollLeft": 0,
+    "clientHeight": 959,
+    "scrollHeight": 959,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "auto",
+      "width": "376px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "card !bg-transparent !backdrop-blur-none ss-card flex flex-col !p-0 overflow-hidden section v2-lab-panel mb-4",
+    "rect": {
+      "x": 6,
+      "y": -318.703125,
+      "width": 378,
+      "height": 989.1875,
+      "right": 384,
+      "bottom": 670.484375
+    },
+    "clientWidth": 376,
+    "scrollWidth": 376,
+    "scrollLeft": 0,
+    "clientHeight": 987,
+    "scrollHeight": 987,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "static",
+      "overflowX": "hidden",
+      "overflowY": "hidden",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "378px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "",
+    "rect": {
+      "x": 6,
+      "y": -6933.3125,
+      "width": 378,
+      "height": 8933.234375,
+      "right": 384,
+      "bottom": 1999.921875
+    },
+    "clientWidth": 378,
+    "scrollWidth": 378,
+    "scrollLeft": 0,
+    "clientHeight": 8933,
+    "scrollHeight": 8934,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "auto",
+      "width": "378px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "v2-lab-surface flex flex-col gap-4",
+    "rect": {
+      "x": 6,
+      "y": -7003.3125,
+      "width": 378,
+      "height": 9003.234375,
+      "right": 384,
+      "bottom": 1999.921875
+    },
+    "clientWidth": 378,
+    "scrollWidth": 378,
+    "scrollLeft": 0,
+    "clientHeight": 9003,
+    "scrollHeight": 9004,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "auto",
+      "width": "378px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6",
+    "rect": {
+      "x": 6,
+      "y": -7259,
+      "width": 378,
+      "height": 9258.921875,
+      "right": 384,
+      "bottom": 1999.921875
+    },
+    "clientWidth": 378,
+    "scrollWidth": 378,
+    "scrollLeft": 0,
+    "clientHeight": 9259,
+    "scrollHeight": 9259,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "378px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both",
+    "rect": {
+      "x": 6,
+      "y": -7259,
+      "width": 378,
+      "height": 9258.921875,
+      "right": 384,
+      "bottom": 1999.921875
+    },
+    "clientWidth": 378,
+    "scrollWidth": 378,
+    "scrollLeft": 0,
+    "clientHeight": 9259,
+    "scrollHeight": 9259,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "378px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "v2-surface",
+    "rect": {
+      "x": 6,
+      "y": -7259,
+      "width": 378,
+      "height": 9258.921875,
+      "right": 384,
+      "bottom": 1999.921875
+    },
+    "clientWidth": 378,
+    "scrollWidth": 378,
+    "scrollLeft": 0,
+    "clientHeight": 9259,
+    "scrollHeight": 9259,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "matrix(1, 0, 0, 1, 0, 0)",
+      "minWidth": "0px",
+      "width": "378px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "dashboard-main-scroll h-full p-4 max-[900px]:pb-16",
+    "rect": {
+      "x": 0,
+      "y": 102,
+      "width": 390,
+      "height": 684,
+      "right": 390,
+      "bottom": 786
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 684,
+    "scrollHeight": 9283,
+    "scrollTop": 7373,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "auto",
+      "overflowY": "auto",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "MAIN",
+    "class": "v2-surface-host",
+    "rect": {
+      "x": 0,
+      "y": 102,
+      "width": 390,
+      "height": 684,
+      "right": 390,
+      "bottom": 786
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 684,
+    "scrollHeight": 684,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "auto",
+      "overflowY": "auto",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "v2-body",
+    "rect": {
+      "x": 0,
+      "y": 102,
+      "width": 390,
+      "height": 742,
+      "right": 390,
+      "bottom": 844
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 742,
+    "scrollHeight": 742,
+    "scrollTop": 0,
+    "css": {
+      "display": "grid",
+      "position": "static",
+      "overflowX": "hidden",
+      "overflowY": "hidden",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "v2-stage",
+    "rect": {
+      "x": 0,
+      "y": 102,
+      "width": 390,
+      "height": 742,
+      "right": 390,
+      "bottom": 844
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 742,
+    "scrollHeight": 742,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "relative",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "v2-app",
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "right": 390,
+      "bottom": 844
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 844,
+    "scrollHeight": 844,
+    "scrollTop": 0,
+    "css": {
+      "display": "flex",
+      "position": "fixed",
+      "overflowX": "hidden",
+      "overflowY": "hidden",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "DIV",
+    "class": "",
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "right": 390,
+      "bottom": 844
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 844,
+    "scrollHeight": 844,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "relative",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "BODY",
+    "class": "",
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "right": 390,
+      "bottom": 844
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 844,
+    "scrollHeight": 844,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "relative",
+      "overflowX": "visible",
+      "overflowY": "visible",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  },
+  {
+    "tag": "HTML",
+    "class": "",
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 390,
+      "height": 844,
+      "right": 390,
+      "bottom": 844
+    },
+    "clientWidth": 390,
+    "scrollWidth": 390,
+    "scrollLeft": 0,
+    "clientHeight": 844,
+    "scrollHeight": 844,
+    "scrollTop": 0,
+    "css": {
+      "display": "block",
+      "position": "static",
+      "overflowX": "auto",
+      "overflowY": "scroll",
+      "transform": "none",
+      "minWidth": "0px",
+      "width": "390px",
+      "visibility": "visible"
+    }
+  }
+]

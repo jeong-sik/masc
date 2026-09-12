@@ -660,7 +660,7 @@ let test_recovery_requires_actual_binding_tool_support () =
          view
          cp
          ~runtime_id:"recovery_tools"
-         ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ error ->
+         ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
            attempts
            := (runtime_id, Keeper_required_tools.of_core_error error) :: !attempts)
          ()

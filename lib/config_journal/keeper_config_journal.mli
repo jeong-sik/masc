@@ -86,6 +86,18 @@ val record_of_yojson : Yojson.Safe.t -> (record, string) result
 (** Path of the journal file for a workspace config root. *)
 val journal_path_for_base_path : base_path:string -> string
 
+val require_resolved : runtime_config_path:string -> (unit, string) result
+(** Called under the runtime configuration lock, before any new configuration
+    mutation. An existing or unreadable journal retains recovery authority;
+    no later writer may invalidate its before-images. Observed absence is
+    synchronized before admitting a writer, including after a failed unlink
+    parent-sync left the journal visibly absent but retirement unconfirmed. *)
+
+module For_testing : sig
+  val require_resolved_with_sync_parent :
+    sync_parent:(string -> unit) -> runtime_config_path:string -> (unit, string) result
+end
+
 (** Stage a new journal, refusing to overwrite an existing record. The caller
     holds the manifest lock and workspace-wide runtime configuration lock
     throughout staging, publication, compensation and clearing. Payload bytes

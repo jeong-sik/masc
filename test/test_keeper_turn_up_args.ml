@@ -858,17 +858,21 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
   let manifest_before_uncertain_restore = Fs_compat.load_file manifest_path in
   let runtime_before_uncertain_restore = Fs_compat.load_file runtime_path in
   let restore_revision = current_revision_exn ctx.config name in
+  let restore_attempted = ref false in
   (match
      Keeper_turn_up_config_persistence.For_testing
      .persist_with_runtime_restore_replace_file
-       ~replace_file:replace_file_with_parent_sync_failure
+       ~replace_file:(fun path content ->
+         restore_attempted := true;
+         replace_file_with_parent_sync_failure path content)
        ~expected_revision:restore_revision
        ~config:ctx.config
        ~parsed:(parse "uncertain runtime restore")
        ~meta:{ meta with instructions = "uncertain runtime restore" }
        ~publish:(fun runtime_transaction _ ->
          match
-           Runtime.commit_keeper_assignment runtime_transaction ~runtime_id:None
+           Runtime.commit_keeper_assignment runtime_transaction
+             ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
          with
          | Error detail -> fail detail
          | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
@@ -884,6 +888,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
        ("unexpected uncertain restore result: "
         ^ Keeper_turn_up_config_persistence.error_to_string error)
    | Ok _ -> fail "uncertain runtime restore was reported as exact");
+  check bool "uncertain restore exercised the replacement writer" true !restore_attempted;
   check string "uncertain restore still restores visible manifest bytes"
     manifest_before_uncertain_restore (Fs_compat.load_file manifest_path);
   check string "uncertain restore still restores visible runtime bytes"
@@ -1561,7 +1566,7 @@ let test_publish_rejected_while_unresolved_journal_exists () =
    | Error (Keeper_turn_up_config_persistence.Io_error detail) as outcome ->
      if
        try
-         ignore (Str.search_forward (Str.regexp "stale keeper-config journal") detail 0);
+         ignore (Str.search_forward (Str.regexp "configuration recovery required") detail 0);
          true
        with Not_found -> false
      then ignore outcome
@@ -1710,6 +1715,71 @@ let test_journal_rejects_foreign_paths_and_unreadable_files () =
   | Ok decoded -> check bool "literal bytes do not decode as file absence" true
       (decoded.runtime_before = Some (Runtime_bytes "absent"))
   | Error detail -> fail detail
+;;
+
+let test_retained_journal_protects_all_config_writers () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let manifest_path = Filename.concat
+    (Config_dir_resolver.keepers_dir_for_base_path ~base_path) "guarded.toml" in
+  Fs_compat.mkdir_p (Filename.dirname manifest_path);
+  let source = Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml") in
+  Fs_compat.save_file runtime_config_path source;
+  Fs_compat.save_file manifest_path "before";
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  let record : Keeper_config_journal.record =
+    { tx_id = "retained"; keeper_name = "guarded";
+      manifest_before = Manifest_bytes "before"; runtime_before = Some (Runtime_bytes source);
+      manifest_path; runtime_path = Some runtime_config_path;
+      started_at_unix = 0.; phase = Prepared } in
+  let calls = ref 0 in
+  let writers =
+    [ "save", (fun () -> Runtime.save_config_text ~runtime_config_path source |> Result.map ignore)
+    ; "edit", (fun () -> Runtime.edit_config_text ~runtime_config_path
+        (fun text -> incr calls; text) |> Result.map ignore)
+    ; "assignment removal", (fun () -> Runtime.with_keeper_assignment_transaction
+        ~runtime_config_path ~keeper_name:"guarded"
+        (fun transaction -> incr calls; Runtime.commit_keeper_removal transaction)
+        |> function Error detail -> Error detail
+           | Ok receipt -> Result.map ignore receipt.Runtime.value)
+    ; "setup activation", (fun () -> Runtime.with_config_lock ~runtime_config_path
+        (fun () -> incr calls; Ok ()))
+    ; "manifest", (fun () -> Runtime.with_manifest_config_lock ~runtime_config_path ~manifest_path
+        (fun () -> incr calls; Fs_compat.save_file manifest_path "after"; Ok ())) ] in
+  let check_blocked label =
+    let journal_before = Fs_compat.load_file journal_path in
+    List.iter (fun (name, write) ->
+      match write () with
+      | Error detail -> check bool (label ^ " " ^ name ^ " reports recovery authority") true
+          (String.starts_with ~prefix:"configuration recovery required" detail)
+      | Ok () -> fail (label ^ " admitted " ^ name)) writers;
+    check int (label ^ " never entered edit bodies") 0 !calls;
+    check string (label ^ " preserves runtime") source (Fs_compat.load_file runtime_config_path);
+    check string (label ^ " preserves manifest") "before" (Fs_compat.load_file manifest_path);
+    check string (label ^ " preserves journal") journal_before (Fs_compat.load_file journal_path)
+  in
+  (match Keeper_config_journal.stage ~base_path record with Ok () -> () | Error detail -> fail detail);
+  check_blocked "retained";
+  Fs_compat.save_file journal_path "{corrupt";
+  check_blocked "corrupt";
+  (match Keeper_config_journal.clear ~journal_path with Ok () -> () | Error detail -> fail detail);
+  let synced = ref false in
+  (match Runtime.For_testing.with_config_lock_with_journal_sync_parent
+      ~runtime_config_path
+      ~sync_parent:(fun directory ->
+        synced := true;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", directory)))
+      (fun () -> incr calls) with
+   | Error detail -> check bool "failed retirement sync is explicit" true
+       (String.starts_with ~prefix:"configuration journal retirement unconfirmed" detail)
+   | Ok () -> fail "unconfirmed journal retirement admitted a writer");
+  check bool "absence still confirms durable retirement" true !synced;
+  check int "failed retirement sync does not enter writer" 0 !calls;
+  List.iter (fun (name, write) -> match write () with
+    | Ok () -> () | Error detail -> fail (name ^ ": " ^ detail)) writers;
+  check int "absent journal admits all callback bodies" 4 !calls;
+  check string "manifest writer applied after retirement" "after" (Fs_compat.load_file manifest_path)
 ;;
 
 let test_actor_publication_starts_after_config_commit () =
@@ -2610,6 +2680,8 @@ let () =
             test_config_write_failures_compensate_once
         ; test_case "journal rejects foreign paths and preserves read errors" `Quick
             test_journal_rejects_foreign_paths_and_unreadable_files
+        ; test_case "retained journal protects runtime and manifest writers" `Quick
+            test_retained_journal_protects_all_config_writers
         ; test_case "actor publication follows durable configuration commit" `Quick
             test_actor_publication_starts_after_config_commit
         ; test_case "no-journal startup preserves read-only configuration" `Quick

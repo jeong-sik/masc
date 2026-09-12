@@ -531,31 +531,6 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
       let journal_path =
         Keeper_config_journal.journal_path_for_base_path ~base_path
       in
-      (* Operator re-review 2026-09-12 (#35366, #2-a): never stage a fresh
-         journal over an unresolved one — that would silently destroy the
-         earlier write's before-images, leaving the earlier request
-         unrecoverable. A leftover journal means an interrupted request is
-         still unreconciled: refuse the new write and direct the caller to
-         startup recovery. This runs before the before-image reads below,
-         so nothing about the old write is touched. *)
-      let* () =
-        (match Keeper_config_journal.load ~journal_path with
-         | Ok None -> Ok ()
-         | Ok (Some record) ->
-           Error
-             (Io_error
-                (Printf.sprintf
-                   "stale keeper-config journal exists before write (tx=%s keeper=%s; phase=%s); run startup recovery first"
-                   record.tx_id
-                   record.keeper_name
-                   (Keeper_config_journal.phase_to_string record.phase)))
-         | Error detail ->
-           Error
-             (Io_error
-                (Printf.sprintf
-                   "cannot read keeper-config journal before write: %s"
-                   detail)))
-      in
       let runtime_toml =
         Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
       in

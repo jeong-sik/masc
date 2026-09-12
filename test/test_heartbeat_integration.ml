@@ -3241,6 +3241,16 @@ let test_configuration_removal_retries_exact_revision_without_runtime () =
     let source = "[keeper]\nautoboot = false\n" in
     write_file path source;
     let calls = ref 0 in
+    let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path:base_dir in
+    write_file journal_path "{unreadable";
+    (match Removal.submit ~config ~keeper_name ~actor:"operator"
+       ~cleanup:(fun _ -> incr calls; Ok ()) with
+     | Error (Removal.Storage_error _) -> ()
+     | Error error -> fail (Removal.error_to_string error)
+     | Ok _ -> fail "configuration removal ignored recovery authority");
+    check int "retained recovery authority prevents cleanup" 0 !calls;
+    check bool "retained recovery authority preserves manifest" true (Sys.file_exists path);
+    (match Keeper_config_journal.clear ~journal_path with Ok () -> () | Error detail -> fail detail);
     let failed = match Removal.submit ~config ~keeper_name ~actor:"operator"
       ~cleanup:(fun _ -> incr calls; Error "artifact unavailable") with
       | Ok receipt -> receipt | Error error -> fail (Removal.error_to_string error) in

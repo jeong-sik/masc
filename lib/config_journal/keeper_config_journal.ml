@@ -186,7 +186,7 @@ let write_atomic ~path content =
 ;;
 
 let read_before_image ~path =
-  Eio_unix.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"config-journal-read" (fun () ->
     try
       let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
       let channel = Unix.in_channel_of_descr fd in
@@ -220,7 +220,7 @@ let validate_targets ~base_path record =
       (record.keeper_name ^ ".toml")
   in
   let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
-  if not (Keeper_config.validate_name record.keeper_name) then
+  if not (Safe_identifier.is_portable_name record.keeper_name) then
     Error "journal keeper name is invalid"
   else if not (String.equal manifest_path record.manifest_path) then
     Error "journal manifest path does not belong to this configuration root"
@@ -231,11 +231,17 @@ let validate_targets ~base_path record =
     | _ -> Error "journal runtime before-image and path do not match this configuration root"
 ;;
 
+let sync_directory path =
+  let directory = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close directory)
+    (fun () -> Unix.fsync directory)
+;;
+
 let remove_durable ~path =
-  Eio_unix.run_in_systhread (fun () ->
+  Eio_guard.run_in_systhread ~label:"config-journal-remove" (fun () ->
     try
       (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-      Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
+      sync_directory (Filename.dirname path);
       Ok ()
     with
     | Sys_error message -> Error message
@@ -245,6 +251,35 @@ let remove_durable ~path =
 ;;
 
 let clear ~journal_path = remove_durable ~path:journal_path
+
+let require_resolved_with_sync_parent ~sync_parent ~runtime_config_path =
+  let journal_path = Filename.concat (Filename.dirname runtime_config_path) journal_filename in
+  match load ~journal_path with
+  | Ok None ->
+    (* A previous clear may have unlinked the marker but failed its parent
+       sync. Confirm its retirement before another write can invalidate the
+       before-images that a crash could otherwise resurrect. *)
+    Eio_guard.run_in_systhread ~label:"config-journal-retirement" (fun () ->
+      try sync_parent (Filename.dirname journal_path); Ok () with
+      | Sys_error detail -> Error ("configuration journal retirement unconfirmed: " ^ detail)
+      | Unix.Unix_error (error, action, path) ->
+        Error (Printf.sprintf "configuration journal retirement unconfirmed: %s %s: %s"
+          action path (Unix.error_message error)))
+  | Ok (Some record) ->
+    Error (Printf.sprintf
+      "configuration recovery required before writing %s: journal %s retains tx=%s keeper=%s; restart the owner to recover"
+      runtime_config_path journal_path record.tx_id record.keeper_name)
+  | Error detail ->
+    Error (Printf.sprintf
+      "configuration recovery required before writing %s: cannot read journal %s: %s"
+      runtime_config_path journal_path detail)
+;;
+
+let require_resolved = require_resolved_with_sync_parent ~sync_parent:sync_directory
+
+module For_testing = struct
+  let require_resolved_with_sync_parent = require_resolved_with_sync_parent
+end
 
 let stage ~base_path record =
   let ( let* ) = Result.bind in

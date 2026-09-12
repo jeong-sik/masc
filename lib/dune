@@ -115,6 +115,7 @@
   masc.keeper_execution_scope
   masc.runtime_model
   masc.runtime
+  masc.config_journal
   masc.egress_host
   masc.egress_proxy_decision
   masc.egress_proxy_net

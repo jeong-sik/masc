@@ -111,7 +111,7 @@ let test_review mode =
     let refused = Keeper_turn_driver.run_named ~runtime_id:"official.verifier"
       ~keeper_name:"arbitrary-transform-probe" ~base_path:root
       ~goal:"This request must be refused before spawn." ~system_prompt:"Explicit contract."
-      ~tools:[] ~output_contract:Keeper_turn_driver.Tool_verdict
+      ~tools:[] ~agent_core_tools:[] ~output_contract:Keeper_turn_driver.Tool_verdict
       ~provider_config_transform:(fun cfg -> Ok cfg) ~sw () in
     (match refused with
      | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="provider_config_transform"; _})) -> ()

@@ -8,11 +8,16 @@
 
     {b Time is instructions, not frames.} A DOS program has no frame clock;
     it runs until it asks for something. The unit here is one 8086
-    instruction, and the useful stopping point is not a count but
-    {!observation.waiting_for_key}: the machine asked the BIOS for a key and
-    found none. A keeper steps until that, looks, and presses. The MSX lane
-    has to guess when a screen has settled ([step_until_change]); here the
-    machine says so.
+    instruction, and the useful stopping point is {e ready}: the guest asked
+    the BIOS for a key and found none, {e and} the screen memory stopped
+    changing.
+
+    Both halves are needed. Asking alone is not reacting: a program in its
+    own loop takes a key and asks for the next one 631 instructions later
+    (measured on ZZT) while the repaint it started is still half-written.
+    Stopping there hands back the picture from before the key, and the press
+    looks like it did nothing. A menu that is genuinely blocked matches on
+    the first chunk, so the screen half costs it nothing.
 
     {b Keys are a queue, not a matrix.} DOS reads the keyboard through a
     BIOS ring buffer, so there is no hold or release — a key is put in the
@@ -68,10 +73,17 @@ val boot_steps : int
 
 type ran = {
   steps_run : int;  (** instructions actually advanced *)
-  reached_input : bool;
-      (** stopped because the guest asked for a key; false means the budget
-          ran out, or the program exited *)
+  settled : bool;
+      (** stopped because the machine is ready: it asked for a key and the
+          screen stopped moving. False means the budget ran out or the
+          program exited — the observation is then mid-repaint. *)
+  input_requests : int;
+      (** empty-ring reads during this call. Zero with [settled] false is a
+          program busy with something that is not input. *)
 }
+
+val settle_chunk : int
+(** Instructions between two screen readings while waiting for {!ran.settled}. *)
 
 val load :
   ledger_dir:string ->
@@ -92,15 +104,16 @@ val load :
 val eject : unit -> (unit, error) result
 val screen : unit -> (observation, error) result
 
-val step : steps:int -> until_input:bool -> (observation * ran, error) result
+val step : steps:int -> until_ready:bool -> (observation * ran, error) result
 (** Advances up to [steps] (1..{!max_steps_per_call}) with no key pressed.
-    With [until_input], stops as soon as the guest asks for a key — the
-    normal way to hand a turn back. *)
+    With [until_ready], stops as soon as the machine is ready for input —
+    the normal way to hand a turn back. Without it, runs the whole budget,
+    which is what a program that is computing rather than asking needs. *)
 
 val press :
   who:string -> keys:string list -> steps:int -> (observation * ran, error) result
-(** Puts each key in the BIOS ring in turn and runs until the guest has taken
-    it and asks for the next one, or [steps] runs out for that key. Key names
+(** Puts each key in the BIOS ring in turn and runs until the machine is
+    ready again, or [steps] runs out for that key. Key names
     are {!Dos_machine.key_of_string}'s: the arrows, home and page keys,
     insert, delete, enter, esc, space, tab, backspace, F1-F10, or one
     character. A name the machine has no key for is refused before anything

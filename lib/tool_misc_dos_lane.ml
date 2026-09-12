@@ -8,9 +8,11 @@
 
     The observation is text: a DOS text page is characters, and this lane
     hands them over as UTF-8 with code page 437 kept, so a keeper with no
-    vision runtime reads the game directly (RFC-0414). The field that makes
-    the lane playable is [waiting_for_key] — the guest asked the BIOS for a
-    key and found none, which is the machine saying whose turn it is. *)
+    vision runtime reads the game directly (RFC-0414). What makes the lane
+    playable is [settled]: the guest asked for a key {e and} the screen
+    stopped moving. [waiting_for_key] alone is not that — a program in its
+    own loop asks again 631 instructions after taking a key, with its
+    repaint half-written. *)
 
 open Tool_args
 
@@ -36,7 +38,8 @@ let observation_fields (o : Dos_lane.observation) =
 
 let ran_fields (r : Dos_lane.ran) =
   [ ("steps_run", `Int r.Dos_lane.steps_run)
-  ; ("reached_input", `Bool r.Dos_lane.reached_input)
+  ; ("settled", `Bool r.Dos_lane.settled)
+  ; ("input_requests", `Int r.Dos_lane.input_requests)
   ]
 ;;
 
@@ -216,7 +219,7 @@ let handle_step ~tool_name ~start_time args =
   of_lane_run ~tool_name ~start_time
     (Dos_lane.step
        ~steps:(get_int args "steps" default_steps)
-       ~until_input:(get_bool args "until_input" true))
+       ~until_ready:(get_bool args "until_ready" true))
 ;;
 
 let handle_press ~tool_name ~start_time ~who args =

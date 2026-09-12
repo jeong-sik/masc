@@ -56,10 +56,17 @@ let contains needle haystack =
   n = 0 || go 0
 ;;
 
-(* A COM image that prints HI, waits for one key, then terminates.
-   org 0x100: mov ah,9 / mov dx,msg / int 21h / mov ah,0 / int 16h / int 20h *)
+(* A COM image that prints HI, then loops on the BIOS key read until one
+   arrives, then terminates. The loop is the real idiom: a blocking read with
+   an empty ring returns AX=0 here rather than blocking the whole process, and
+   every DOS runtime spins on that. A program that fell straight through would
+   exit before anyone could press anything.
+
+   org 0x100: mov ah,9 / mov dx,msg / int 21h
+              wait: mov ah,0 / int 16h / or ax,ax / jz wait
+              int 20h / "HI$" *)
 let hello_com =
-  "\xb4\x09\xba\x0d\x01\xcd\x21\xb4\x00\xcd\x16\xcd\x20HI$"
+  "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
 ;;
 
 let rec mkdir_p dir =
@@ -111,9 +118,10 @@ let test_load_runs_to_the_first_key_request () =
     check string "the program name" "hello.com" (string_field "program" result);
     check bool "its output is on the screen" true
       (contains "HI" (string_field "screen_text" result));
-    (* The program stopped at INT 16h with an empty ring. That is the machine
-       saying whose turn it is, and it is why the load did not burn its whole
-       budget. *)
+    (* The program is spinning on INT 16h with an empty ring and its screen
+       has stopped moving. Both halves are why the load stopped here instead
+       of burning its whole budget. *)
+    check bool "it settled" true (bool_field "settled" result);
     check bool "it is waiting for a key" true (bool_field "waiting_for_key" result);
     check bool "and has not exited" false (bool_field "exited" result))
 ;;

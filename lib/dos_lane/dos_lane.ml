@@ -41,7 +41,11 @@ let boot_steps = 4_000_000
 
 let peek_max_bytes = 256
 
-type ran = { steps_run : int; reached_input : bool }
+type ran = { steps_run : int; settled : bool; input_requests : int }
+
+(* How far the machine runs between two screen readings. Measured on ZZT: the
+   repaint that follows a key finishes inside one of these. *)
+let settle_chunk = 50_000
 
 type machine = {
   m : Dos_machine.t;
@@ -121,30 +125,56 @@ let clamp_steps steps =
   else Ok steps
 ;;
 
-(* Runs the budget, stopping early when the guest asks the BIOS for a key and
-   finds none. That starvation is the machine saying "your turn" — it is a
-   fact the core reports, not a settled-screen guess. *)
-let advance st ~budget ~until_input =
-  let m = st.m in
-  let stop mm = until_input && Dos_machine.kbd_waiting mm in
-  let n = Dos_machine.run_until m ~max_steps:budget ~stop in
+(* Runs the budget straight through, with nothing watching. *)
+let advance_blind st ~budget =
+  let before = Dos_machine.input_requests st.m in
+  let n = Dos_machine.run_until st.m ~max_steps:budget ~stop:(fun _ -> false) in
   st.steps <- st.steps + n;
-  { steps_run = n; reached_input = until_input && n < budget && not (Dos_machine.exited m) }
+  { steps_run = n
+  ; settled = false
+  ; input_requests = Dos_machine.input_requests st.m - before
+  }
 ;;
 
-(* After a key goes into the ring: run until the guest has taken it and asks
-   for the next one. The latch stays up until a read succeeds, so wait for it
-   to go down once before treating it as a fresh request. *)
-let advance_after_key st ~budget =
+(* Runs until the machine is ready for input, in chunks.
+   Ready is two facts overlapped, and neither is a guess about the picture:
+
+   - the guest asked the BIOS for a key inside this chunk and the ring was
+     empty, and
+   - the screen memory is the same as it was one chunk ago.
+
+   The first alone is not enough. A program in its own loop takes a key and
+   asks for the next one 631 instructions later (measured on ZZT) while the
+   repaint it started is still half-written; stopping there hands the caller
+   the picture from before their key, and the press looks like it did
+   nothing. A menu that is genuinely blocked matches on the first chunk, so
+   waiting costs it nothing. *)
+let advance_until_ready st ~budget =
   let m = st.m in
-  let taken = ref false in
-  let stop mm =
-    if not (Dos_machine.kbd_waiting mm) then taken := true;
-    !taken && Dos_machine.kbd_waiting mm
-  in
-  let n = Dos_machine.run_until m ~max_steps:budget ~stop in
-  st.steps <- st.steps + n;
-  { steps_run = n; reached_input = n < budget && not (Dos_machine.exited m) }
+  let requests_before = Dos_machine.input_requests m in
+  let previous = ref (Dos_machine.screen_digest m) in
+  let ran = ref 0 and settled = ref false in
+  while (not !settled) && !ran < budget && not (Dos_machine.exited m) do
+    let asked_before = Dos_machine.input_requests m in
+    let n =
+      Dos_machine.run_until m ~max_steps:(min settle_chunk (budget - !ran))
+        ~stop:(fun _ -> false)
+    in
+    ran := !ran + n;
+    let asked = Dos_machine.input_requests m > asked_before in
+    let now = Dos_machine.screen_digest m in
+    if asked && now = !previous then settled := true;
+    previous := now
+  done;
+  st.steps <- st.steps + !ran;
+  { steps_run = !ran
+  ; settled = !settled
+  ; input_requests = Dos_machine.input_requests m - requests_before
+  }
+;;
+
+let advance st ~budget ~until_ready =
+  if until_ready then advance_until_ready st ~budget else advance_blind st ~budget
 ;;
 
 (* ---------- lifecycle ---------- *)
@@ -173,7 +203,7 @@ let load ~ledger_dir ~program_name ~program_bytes ~files =
         { m; steps = 0; program = program_name; ledger_path; entries = [] }
       in
       state := Some st;
-      let ran = advance st ~budget:boot_steps ~until_input:true in
+      let ran = advance st ~budget:boot_steps ~until_ready:true in
       Ok (observe st, ran)
     end)
 ;;
@@ -189,12 +219,12 @@ let eject () =
 
 let screen () = with_machine (fun st -> Ok (observe st))
 
-let step ~steps ~until_input =
+let step ~steps ~until_ready =
   with_machine (fun st ->
     match clamp_steps steps with
     | Error e -> Error e
     | Ok budget ->
-      let ran = advance st ~budget ~until_input in
+      let ran = advance st ~budget ~until_ready in
       Ok (observe st, ran))
 ;;
 
@@ -215,17 +245,18 @@ let resolve_keys names =
 ;;
 
 let press_resolved st ~who ~keys ~budget =
-  let total = ref 0 in
-  let last_reached = ref false in
+  let total = ref 0 and requests = ref 0 in
+  let last_settled = ref false in
   List.iter
     (fun (name, word) ->
       append_entry st { at_step = st.steps; who; key_name = name };
       Dos_machine.push_key st.m word;
-      let ran = advance_after_key st ~budget in
+      let ran = advance_until_ready st ~budget in
       total := !total + ran.steps_run;
-      last_reached := ran.reached_input)
+      requests := !requests + ran.input_requests;
+      last_settled := ran.settled)
     keys;
-  { steps_run = !total; reached_input = !last_reached }
+  { steps_run = !total; settled = !last_settled; input_requests = !requests }
 ;;
 
 let press ~who ~keys ~steps =

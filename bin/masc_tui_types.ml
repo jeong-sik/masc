@@ -2919,12 +2919,23 @@ module Browser_lane_view = struct
     | Loading (_, Read), _ -> Reading
     | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
+  (* The badge in the Browser Lane title. Five of these six name the read the
+     lane makes over HTTP, so the sixth -- the one for a browser that is not
+     there at all -- is the only one that speaks of something else, and it
+     says so.
+
+     Read_failed used to read "Read/action failed", which did two things. It
+     left the HTTP family its four siblings belong to, so the badge changed
+     shape rather than value when a read failed. And the status line three
+     rows down already opens "Read/action failed: " and then gives the
+     detail, so the operator read the same phrase twice and only the second
+     one told them anything. *)
   let read_status_label = function
     | Unread -> "HTTP unread"
     | Reading -> "HTTP reading"
     | Operating -> "HTTP action"
     | Read_ok -> "HTTP read ok"
-    | Read_failed -> "Read/action failed"
+    | Read_failed -> "HTTP failed"
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let request_body t =

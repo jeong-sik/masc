@@ -100,6 +100,7 @@ let endpoint ~kind ~base_url =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; command = None
   }
 
 let test_elevenlabs_is_asked_on_the_catalogue_version () =
@@ -151,6 +152,44 @@ let test_the_other_kinds_say_there_is_nothing_to_ask () =
   Alcotest.(check bool) "the tool refusal names the endpoint" true
     (String.length mcp > 0)
 
+let test_command_catalogues_are_not_http_requests () =
+  List.iter
+    (fun kind ->
+      match
+        Voice_runtime_overlay.voice_listing_request_for_endpoint
+          (endpoint ~kind ~base_url:None) ~api_key:""
+      with
+      | Ok _ -> Alcotest.fail "a command must not produce an HTTP catalogue request"
+      | Error message ->
+        Alcotest.(check string) "the refusal names the transport, not a missing URL"
+          "voice config endpoint under-test runs a command and has no HTTP voice catalogue"
+          message)
+    [ Voice_config.Macos_say; Voice_config.Whisper_cli ]
+
+let test_http_and_command_catalogues_share_the_wire_shape () =
+  let expected =
+    `Assoc
+      [ "id", `String "Yuna"
+      ; "name", `String "Yuna"
+      ; "language", `String "ko_KR"
+      ]
+  in
+  let say = Voice.say_catalogue_of_output "Yuna  ko_KR  # hello" in
+  let http =
+    match parse {|{"voices":[{"voice_id":"Yuna","name":"Yuna","labels":{"language":"ko_KR"}}]}|} with
+    | Ok voices -> voices
+    | Error message -> Alcotest.fail message
+  in
+  List.iter
+    (fun voices ->
+      match voices with
+      | [ voice ] ->
+        Alcotest.(check string) "the transport does not change the catalogue shape"
+          (Yojson.Safe.to_string expected)
+          (Yojson.Safe.to_string (Voice.catalogue_voice_json voice))
+      | _ -> Alcotest.fail "expected one pickable voice")
+    [ say; http ]
+
 let () =
   Alcotest.run
     "voice_catalog"
@@ -163,6 +202,8 @@ let () =
             test_a_voice_without_a_name_keeps_the_absence
         ; Alcotest.test_case "an answer without voices is an error" `Quick
             test_an_answer_without_voices_is_an_error
+        ; Alcotest.test_case "HTTP and command catalogues share the wire shape" `Quick
+            test_http_and_command_catalogues_share_the_wire_shape
         ] )
     ; ( "what gets asked"
       , [ Alcotest.test_case "elevenlabs is asked on the catalogue version" `Quick
@@ -171,5 +212,7 @@ let () =
             test_a_base_without_a_version_is_asked_as_it_stands
         ; Alcotest.test_case "the other kinds say there is nothing to ask" `Quick
             test_the_other_kinds_say_there_is_nothing_to_ask
+        ; Alcotest.test_case "command catalogues are not HTTP requests" `Quick
+            test_command_catalogues_are_not_http_requests
         ] )
     ]

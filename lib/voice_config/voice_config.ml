@@ -2,6 +2,8 @@ type endpoint_kind =
   | Openai_compat
   | Elevenlabs_direct
   | Voice_mcp
+  | Macos_say
+  | Whisper_cli
 
 type endpoint = {
   id : string;
@@ -13,6 +15,7 @@ type endpoint = {
   enabled : bool;
   timeout_seconds : float option;
   default_voice : string option;
+  command : string option;
 }
 
 type voice_tuning = {
@@ -201,16 +204,20 @@ let endpoint_kind_of_string = function
   | "openai_compat" -> Ok Openai_compat
   | "elevenlabs_direct" -> Ok Elevenlabs_direct
   | "voice_mcp" -> Ok Voice_mcp
+  | "macos_say" -> Ok Macos_say
+  | "whisper_cli" -> Ok Whisper_cli
   | value ->
       Error
         (Printf.sprintf
-           "endpoint.kind must be one of openai_compat|elevenlabs_direct|voice_mcp (got %s)"
+           "endpoint.kind must be one of             openai_compat|elevenlabs_direct|voice_mcp|macos_say|whisper_cli (got %s)"
            value)
 
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
   | Elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
+  | Macos_say -> "macos_say"
+  | Whisper_cli -> "whisper_cli"
 
 let parse_endpoint ~ctx json =
   let open Result in
@@ -226,6 +233,7 @@ let parse_endpoint ~ctx json =
         ; "enabled"
         ; "timeout_seconds"
         ; "default_voice"
+        ; "command"
         ]
       json
   in
@@ -243,6 +251,11 @@ let parse_endpoint ~ctx json =
   (* A voice id is provider vocabulary, so it belongs to the endpoint that
      answers to it rather than to the workspace (#24068). *)
   let default_voice = Json_util.get_string_nonempty json "default_voice" in
+  (* Which executable answers, for the kinds that are a command rather than an
+     address. Optional: each command kind knows the name it is normally
+     installed under, and this overrides it for a path the PATH does not
+     carry. *)
+  let command = Json_util.get_string_nonempty json "command" in
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
@@ -255,6 +268,15 @@ let parse_endpoint ~ctx json =
         else Error (Printf.sprintf "%s.base_url is required for openai_compat" ctx)
     | Elevenlabs_direct -> Ok ()
     | Voice_mcp -> Ok ()
+    (* A command kind needs no address, and an address on one would be read by
+       nothing. Refused rather than ignored: a field that is silently dropped
+       reads as a setting that took. *)
+    | Macos_say | Whisper_cli ->
+        if Option.is_none base_url then Ok ()
+        else
+          Error
+            (Printf.sprintf "%s.base_url means nothing for %s, which runs a command"
+               ctx (string_of_endpoint_kind kind))
   in
   Ok
     {
@@ -267,6 +289,7 @@ let parse_endpoint ~ctx json =
       enabled;
       timeout_seconds;
       default_voice;
+      command;
     }
 
 let rec parse_endpoints ~ctx acc = function

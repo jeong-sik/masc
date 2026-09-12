@@ -154,6 +154,117 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
     ~output_file
 ;;
 
+(* Running a command that writes the audio, for the kinds that are a command
+   rather than an address. The file it produces is judged the same way the HTTP
+   path judges its download: a command can exit 0 and write nothing, and a
+   caller told "spoke" about an empty file has been told the wrong thing. *)
+let smallest_believable_audio_bytes = 100
+
+let run_audio_command_to_file (req : Voice_runtime_overlay.command_request) ~output_file =
+  let status, output =
+    run_voice_status
+      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      req.Voice_runtime_overlay.argv
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    let file_size =
+      try (Unix.stat output_file).st_size with
+      | Unix.Unix_error _ -> 0
+    in
+    if file_size > smallest_believable_audio_bytes
+    then Ok file_size
+    else
+      Error
+        (Printf.sprintf
+           "%s exited cleanly and wrote %d bytes of audio"
+           (match req.Voice_runtime_overlay.argv with
+            | command :: _ -> command
+            | [] -> "the command")
+           file_size)
+  | Unix.WEXITED 127 ->
+    Error
+      (Printf.sprintf
+         "%s is not installed"
+         (match req.Voice_runtime_overlay.argv with
+          | command :: _ -> command
+          | [] -> "the command"))
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf "voice command exit %d: %s" code
+         (if String.length output > 200 then String.sub output 0 200 else output))
+  (* Named rather than wildcarded, for the reason the dispatches above are:
+     a wildcard discards which signal ended it. *)
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "voice command killed by signal %d" sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "voice command stopped by signal %d" sig_num)
+;;
+
+let speak_via_command_to_file endpoint ~message ~voice ~output_file =
+  let* request =
+    Voice_runtime_overlay.tts_command_for_endpoint endpoint ~voice ~message ~output_file
+  in
+  run_audio_command_to_file request ~output_file
+;;
+
+(* Transcribing by running a command. The transcript is the command's own
+   output, so what comes back is text rather than the JSON an HTTP endpoint
+   answers with; the caller shapes it. *)
+let transcribe_via_command endpoint ~audio_file ~model =
+  let* request =
+    Voice_runtime_overlay.stt_command_for_endpoint endpoint ~audio_file ~model
+  in
+  let status, output =
+    run_voice_status
+      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      request.Voice_runtime_overlay.argv
+  in
+  let command =
+    match request.Voice_runtime_overlay.argv with
+    | command :: _ -> command
+    | [] -> "the command"
+  in
+  match status with
+  | Unix.WEXITED 0 -> Ok (String.trim output)
+  | Unix.WEXITED 127 -> Error (Printf.sprintf "%s is not installed" command)
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf "%s exit %d: %s" command code
+         (if String.length output > 200 then String.sub output 0 200 else output))
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "%s killed by signal %d" command sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "%s stopped by signal %d" command sig_num)
+;;
+
+(* Asking a command which voices it has. The answer is its stdout, so what
+   comes back is text; parsing it belongs to the caller. *)
+let list_voices_via_command endpoint =
+  let* request = Voice_runtime_overlay.voice_listing_command_for_endpoint endpoint in
+  let command =
+    match request.Voice_runtime_overlay.argv with
+    | command :: _ -> command
+    | [] -> "the command"
+  in
+  let status, output =
+    run_voice_status
+      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      request.Voice_runtime_overlay.argv
+  in
+  match status with
+  | Unix.WEXITED 0 -> Ok output
+  | Unix.WEXITED 127 -> Error (Printf.sprintf "%s is not installed" command)
+  | Unix.WEXITED code ->
+    Error
+      (Printf.sprintf "%s exit %d: %s" command code
+         (if String.length output > 200 then String.sub output 0 200 else output))
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "%s killed by signal %d" command sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "%s stopped by signal %d" command sig_num)
+;;
+
 let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
   let header_args =
     List.concat_map

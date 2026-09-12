@@ -49,7 +49,43 @@ select_sources() {
   # bare `|| true` at the end also swallows a sed or sort that failed, and an
   # empty list then reads the same as "this pull request edits no tests".
   sources=$( { printf '%s\n' "${changed}" \
-    | grep -E '(^|/)test/test_[a-z0-9_]+\.ml$' || [ $? -eq 1 ]; } | sort -u)
+    | grep -E '(^|/)test/test_[a-z0-9_]+\.(ml|py)$' || [ $? -eq 1 ]; } | sort -u)
+
+  # A .py suite is run by a dune rule rather than a linked executable, so it
+  # is a suite only when a rule declares an alias for it; the other 25 under
+  # test/ are helper modules a scenario imports, or scripts a workflow calls
+  # by path. Measured 2026-09-13: 48 of the 73 test/test_*.py files carry one.
+  #
+  # Dropped here rather than in the run loop so --self-test covers the
+  # decision. The loop runs what it is handed.
+  runnable=""
+  while IFS= read -r candidate; do
+    candidate=$(printf '%s' "${candidate}" \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "${candidate}" ] || continue
+    case "${candidate}" in
+      *.py)
+        stem=$(basename "${candidate}" .py)
+        candidate_dir=$(dirname "${candidate}")
+        # The alias can be declared in the dune file or in a stanza it
+        # includes; 7 of the 48 are in an .inc. An unmatched glob leaves the
+        # literal, which grep reports as a missing file on the discarded
+        # stderr and does not match.
+        if grep -qF "(alias runtest-${stem})" "${candidate_dir}/dune" \
+          "${candidate_dir}"/stanzas/*.inc 2>/dev/null
+        then
+          runnable=$(printf '%s\n%s\n' "${runnable}" "${candidate}")
+        else
+          echo "-- ${candidate}: no dune rule declares runtest-${stem}"
+        fi
+        ;;
+      *) runnable=$(printf '%s\n%s\n' "${runnable}" "${candidate}") ;;
+    esac
+  done <<CANDIDATES
+${sources}
+CANDIDATES
+  sources=$( { printf '%s\n' "${runnable}" \
+    | grep -v '^[[:space:]]*$' || [ $? -eq 1 ]; } | sort -u)
 
   # A guard can protect an input that is not itself a test, and then no pull
   # request that breaks it ever edits it.
@@ -423,6 +459,19 @@ self_test() {
   check "a source and its own suite are one entry" \
     "test/test_tui_msx_graphics.ml test/test_tui_msx_load.ml test/test_tui_msx_tick.ml" \
     "bin/masc_tui_msx.ml" "test/test_tui_msx_load.ml"
+  # The regression these two exist for: every terminal scenario under test/
+  # is a .py run by a dune rule, and no pull request ran one. #35534 added
+  # test_tui_wheel_notch.py, and the check log for it names the seven .ml
+  # suites bin/masc_tui.ml is mapped to and not the scenario the pull request
+  # wrote. The same gap was found for the five node rules (#34837) and closed
+  # by building them unconditionally; a scenario that boots a terminal costs
+  # 9s against their 0.7s, so it is attributed instead.
+  check "an edited terminal scenario is selected" \
+    "test/test_tui_keyboard_input.py" "test/test_tui_keyboard_input.py"
+  # No dune rule declares an alias for this one, so nothing can run it and
+  # selecting it would fail the step on a file that is not a suite.
+  check "a .py with no rule of its own selects nothing" "" \
+    "test/test_browser_activation.py"
 
   if [ "${failures}" -eq 0 ]; then
     echo "run-edited-tests self-test: all cases pass"
@@ -468,12 +517,37 @@ failed=""
 while IFS= read -r source; do
   [ -n "${source}" ] || continue
   dir=$(dirname "${source}")
-  name=$(basename "${source}" .ml)
+  case "${source}" in
+    *.py) name=$(basename "${source}" .py) ;;
+    *) name=$(basename "${source}" .ml) ;;
+  esac
   if is_known_failure "${dir}/${name}"; then
     echo "-- ${dir}/${name}: listed in ${known_failures_file}"
     skipped=$((skipped + 1))
     continue
   fi
+  # A .py suite has no executable to build and run, so dune runs it: the rule
+  # supplies the deps and the environment its action declares, which is what
+  # the stanza reader below reconstructs by hand for a linked suite. Asked
+  # for by path (@test/runtest-x, not @runtest-x) so a name that stopped
+  # existing fails here instead of matching a rule in some other directory.
+  #
+  # Measured 2026-09-13: the alias exits 0 on a pass and 1 on a planted
+  # failure, both forms, so this is a verdict and not a build line that
+  # always reports success.
+  case "${source}" in
+    *.py)
+      echo "== ${dir}/${name} (dune rule)"
+      if ! timeout "${per_suite_timeout}" \
+        dune build "@${dir}/runtest-${name}" < /dev/null
+      then
+        failed="${failed}${dir}/${name} (run)\n"
+      else
+        ran=$((ran + 1))
+      fi
+      continue
+      ;;
+  esac
   verdict=$(python3 "${scope_tool}" "${dir}" "${name}")
   case "${verdict}" in
     run) ;;

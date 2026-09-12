@@ -88,12 +88,32 @@ val disk_boot_frames : int
     the second-stage-call replay ([Msx.boot_disk]) needs before it puts the
     machine in the loader's hands. *)
 
+type medium =
+  | Cartridge of string  (** file name in the slot *)
+  | Disk of string  (** file name in drive A *)
+
+type transition = {
+  before : medium option;  (** what the machine ran when the load began *)
+  after : medium option;  (** what the new machine runs *)
+}
+(** The medium a load replaced and the one it installed, both read inside
+    the critical section the load commits under. A medium is the disk when
+    one is in the drive (the slot is empty then), else the cartridge; [None]
+    with no machine or a BIOS-only boot. Two loads that serialise on the lane
+    see distinct transitions: the second one's [before] is the first one's
+    [after]. *)
+
+type loaded = {
+  observation : observation;
+  transition : transition;
+}
+
 val load :
   ledger_dir:string ->
   roms_dir:string ->
   cart_path:string option ->
   disk_path:string option ->
-  (observation, error) result
+  (loaded, error) result
 (** Creates the workspace machine, replacing any previous one. [roms_dir]
     holds the C-BIOS triple (cbios_main_msx2 / cbios_logo_msx2 / cbios_sub);
     the empty string means no BIOS and the bus reads 0xFF. The ledger is
@@ -109,6 +129,7 @@ val load :
     loading alone is not evidence that a game reaches an interactive screen. *)
 
 val eject : unit -> (unit, error) result
+
 val screen : unit -> (observation, error) result
 
 val step : frames:int -> (observation, error) result

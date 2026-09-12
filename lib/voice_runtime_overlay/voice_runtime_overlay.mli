@@ -8,6 +8,8 @@ type transport =
   | Openai_compat
   | Elevenlabs_direct
   | Voice_mcp
+  | Macos_say
+  | Whisper_cli
 
 type auth_mode =
   | No_auth
@@ -33,6 +35,10 @@ type voice_listing_request =
   ; listing_headers : (string * string) list
   }
 
+(** A command to run, argv already split. No shell: a message to speak is
+    arbitrary text, and handing it to a shell would make quoting decide what
+    runs. *)
+type command_request = { argv : string list }
 type stt_request =
   { url : string
   ; headers : (string * string) list
@@ -77,3 +83,29 @@ val voice_listing_request_for_endpoint
   :  Voice_config.endpoint
   -> api_key:string
   -> (voice_listing_request, string) result
+
+(** The command that speaks one message, for the kinds that run one rather than
+    reach an address. [Error] names the transport when the endpoint is reached
+    another way, or says the endpoint transcribes rather than speaks. A blank
+    [voice] is not an error: the command then uses the system voice. *)
+val tts_command_for_endpoint
+  :  Voice_config.endpoint
+  -> voice:string
+  -> message:string
+  -> output_file:string
+  -> (command_request, string) result
+
+(** The command that transcribes one file. [model] is a path here rather than a
+    name, which is what the section's model means to this command; blank is
+    refused by name rather than defaulted to a path that may not exist. *)
+val stt_command_for_endpoint
+  :  Voice_config.endpoint
+  -> audio_file:string
+  -> model:string
+  -> (command_request, string) result
+
+(** The command that lists the voices installed on this machine, for the kinds
+    that publish one. [Error] says why there is nothing to ask for otherwise. *)
+val voice_listing_command_for_endpoint
+  :  Voice_config.endpoint
+  -> (command_request, string) result

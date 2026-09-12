@@ -28,7 +28,8 @@ class Uninstall(unittest.TestCase):
             stub.write_text('#!/bin/sh\necho forbidden-tool >&2\nexit 91\n')
             stub.chmod(0o755)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith('MASC_')}
-        self.env.update(PATH=str(self.blocked) + ':/usr/bin:/bin', HOME=str(self.root))
+        self.env.update(PATH=str(self.blocked) + ':/usr/bin:/bin', HOME=str(self.root),
+                        XDG_CONFIG_HOME=str(self.root / '.config'))
 
     def run_installer(self, *args):
         return subprocess.run(['/bin/bash', str(SCRIPT), '--prefix', str(self.prefix), *args],
@@ -72,6 +73,46 @@ class Uninstall(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(os.path.lexists(linked / '.masc'))
         self.assertEqual((self.base / '.masc' / 'operator-data').read_text(), 'keep')
+
+    def test_purge_removes_record_for_equivalent_workspace_paths(self):
+        record = self.root / '.config/masc/default-base-path'
+        record.parent.mkdir(parents=True)
+        alias = self.root / 'workspace-link'
+        alias.symlink_to(self.base, target_is_directory=True)
+        for spelling in (str(self.base) + '/', './workspace', str(alias)):
+            with self.subTest(spelling=spelling):
+                (self.base / '.masc').mkdir(exist_ok=True)
+                record.write_text(str(self.base.resolve()) + '\n')
+                result = self.run_installer('--uninstall', '--purge-data', '--base-path', spelling)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertFalse(record.exists())
+                self.assertFalse((self.base / '.masc').exists())
+
+    def test_purge_preserves_another_workspaces_record(self):
+        record = self.root / '.config/masc/default-base-path'
+        record.parent.mkdir(parents=True)
+        other = self.root / 'other'
+        (other / '.masc').mkdir(parents=True)
+        content = str(other.resolve()) + '\n'
+        record.write_text(content)
+        result = self.run_installer('--uninstall', '--purge-data', '--base-path', str(self.base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(record.read_text(), content)
+        self.assertTrue((other / '.masc').is_dir())
+
+    def test_unreadable_record_does_not_block_explicit_purge(self):
+        record = self.root / '.config/masc/default-base-path'
+        record.parent.mkdir(parents=True)
+        content = str(self.base.resolve()) + '\n'
+        record.write_text(content)
+        head = self.blocked / 'head'
+        head.write_text('#!/bin/sh\nexit 1\n')
+        head.chmod(0o755)
+        result = self.run_installer('--uninstall', '--purge-data', '--base-path', str(self.base))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.base / '.masc').exists())
+        self.assertEqual(record.read_text(), content)
+        self.assertIn('record could not be read', result.stdout)
 
     def test_dry_run_lists_exact_targets_without_changes(self):
         self.install_layout()

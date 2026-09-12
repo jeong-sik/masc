@@ -8,6 +8,8 @@ type transport =
   | Openai_compat
   | Elevenlabs_direct
   | Voice_mcp
+  | Macos_say
+  | Whisper_cli
 
 type auth_mode =
   | No_auth
@@ -31,6 +33,11 @@ type voice_listing_request =
   ; listing_headers : (string * string) list
   }
 
+(* A command to run, argv already split. No shell: a message to speak is
+   arbitrary text, and handing it to a shell would make quoting the thing that
+   decides what runs. *)
+type command_request = { argv : string list }
+
 type stt_request =
   { url : string
   ; headers : (string * string) list
@@ -44,6 +51,8 @@ let string_of_transport = function
   | Openai_compat -> "openai_compat"
   | Elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
+  | Macos_say -> "macos_say"
+  | Whisper_cli -> "whisper_cli"
 ;;
 
 let openai_compat_adapter =
@@ -71,7 +80,39 @@ let voice_mcp_adapter =
   }
 ;;
 
-let adapters = [ openai_compat_adapter; elevenlabs_direct_adapter; voice_mcp_adapter ]
+(* The two that run a command rather than reach an address.
+
+   They are separate kinds rather than one "local command" because the argv
+   each takes is different -- say wants -v and -o, whisper-cli wants -m, -l and
+   -f -- and picking between them by looking at the command name would be a
+   string classifier deciding how to call a program. A kind names a calling
+   convention here the same way it names a wire protocol for the other three.
+
+   Neither takes a credential: nothing leaves the machine. *)
+let macos_say_adapter =
+  { canonical_name = "macos-say"
+  ; transport = Macos_say
+  ; auth_mode = No_auth
+  ; aliases = [ "macos-say"; "macos_say"; "say" ]
+  }
+;;
+
+let whisper_cli_adapter =
+  { canonical_name = "whisper-cli"
+  ; transport = Whisper_cli
+  ; auth_mode = No_auth
+  ; aliases = [ "whisper-cli"; "whisper_cli"; "whisper-cpp"; "whisper" ]
+  }
+;;
+
+let adapters =
+  [ openai_compat_adapter
+  ; elevenlabs_direct_adapter
+  ; voice_mcp_adapter
+  ; macos_say_adapter
+  ; whisper_cli_adapter
+  ]
+;;
 
 let resolve_adapter label =
   let normalized = normalize_label label in
@@ -89,6 +130,8 @@ let adapter_for_endpoint_kind = function
   | Voice_config.Openai_compat -> openai_compat_adapter
   | Voice_config.Elevenlabs_direct -> elevenlabs_direct_adapter
   | Voice_config.Voice_mcp -> voice_mcp_adapter
+  | Voice_config.Macos_say -> macos_say_adapter
+  | Voice_config.Whisper_cli -> whisper_cli_adapter
 ;;
 
 let adapter_for_endpoint (endpoint : Voice_config.endpoint) =
@@ -144,7 +187,9 @@ let endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
 let transport_supports_http_tts (adapter : adapter) =
   match adapter.transport with
   | Openai_compat | Elevenlabs_direct -> true
-  | Voice_mcp -> false
+  (* Neither of these speaks HTTP. They are reached by running a command, and
+     the caller picks that path by asking for a command request instead. *)
+  | Voice_mcp | Macos_say | Whisper_cli -> false
 ;;
 
 let endpoint_supports_http_tts endpoint =
@@ -314,6 +359,11 @@ let http_request_for_tts
       (Printf.sprintf
          "voice config endpoint %s uses voice_mcp and cannot build HTTP TTS request"
          endpoint.id)
+  | Some _, (Macos_say | Whisper_cli) ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s runs a command and has no HTTP TTS request"
+         endpoint.id)
   | Some base_url, Openai_compat ->
     let headers =
       [ "Content-Type", "application/json"; "Accept", "audio/mpeg" ]
@@ -387,6 +437,11 @@ let elevenlabs_catalogue_url base_url =
 let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
   let adapter = adapter_for_endpoint endpoint in
   match endpoint_base_url endpoint, adapter.transport with
+  | _, (Macos_say | Whisper_cli) ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s runs a command and has no HTTP voice catalogue"
+         endpoint.id)
   | None, _ ->
     Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
   | Some _, Openai_compat ->
@@ -408,6 +463,116 @@ let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_k
       }
 ;;
 
+(* The two kinds that are a command rather than an address.
+
+   Each argv below was run before it was written down. [say] is in the base
+   system at /usr/bin/say and carries nine Korean voices, so speech out on a
+   fresh mac needs nothing installed. [whisper-cli] comes from
+   `brew install whisper-cpp` and takes the model as a file.
+
+   masc records at 16 kHz mono 16-bit WAV already, which is the format
+   whisper.cpp requires, so nothing is converted between the microphone and
+   this. And -l auto detected Korean at p = 0.9986 on a sample from say, so
+   there is no language to configure. *)
+let macos_say_command = "say"
+let whisper_cli_command = "whisper-cli"
+
+let endpoint_command (endpoint : Voice_config.endpoint) ~default =
+  match endpoint.Voice_config.command with
+  | Some command when String.trim command <> "" -> String.trim command
+  | Some _ | None -> default
+;;
+
+let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message ~output_file =
+  let adapter = adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Openai_compat | Elevenlabs_direct | Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached over %s, not by running a command"
+         endpoint.Voice_config.id
+         (string_of_transport adapter.transport))
+  | Whisper_cli ->
+    Error
+      (Printf.sprintf "voice config endpoint %s transcribes and does not speak"
+         endpoint.Voice_config.id)
+  | Macos_say ->
+    let command = endpoint_command endpoint ~default:macos_say_command in
+    (* A blank voice is not an error: say then uses the system voice, which is
+       what a reader who never picked one has been listening to all along. *)
+    let voice_args = if String.trim voice = "" then [] else [ "-v"; String.trim voice ] in
+    Ok { argv = (command :: voice_args) @ [ "-o"; output_file; message ] }
+;;
+
+(* The command that lists the voices installed on this machine.
+
+   say publishes its own catalogue, and a fresh mac needs it more than a hosted
+   provider does: say does not fail on a voice it does not have. It exits 0 and
+   speaks in the system voice, so a mistyped name is silent -- measured
+   2026-09-12, where "Eddy" alone gave an English voice reading Korean and
+   "Eddy (한국어(한국))" gave the Korean one. A name typed from memory is a
+   coin flip; a name picked from this list is not. *)
+let voice_listing_command_for_endpoint (endpoint : Voice_config.endpoint) =
+  let adapter = adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Macos_say ->
+    let command = endpoint_command endpoint ~default:macos_say_command in
+    Ok { argv = [ command; "-v"; "?" ] }
+  | Whisper_cli ->
+    Error
+      (Printf.sprintf "voice config endpoint %s transcribes and has no voices"
+         endpoint.Voice_config.id)
+  | Openai_compat | Elevenlabs_direct | Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached over %s, which is not asked by running a \
+          command"
+         endpoint.Voice_config.id
+         (string_of_transport adapter.transport))
+;;
+
+let stt_command_for_endpoint (endpoint : Voice_config.endpoint) ~audio_file ~model =
+  let adapter = adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Openai_compat | Elevenlabs_direct | Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached over %s, not by running a command"
+         endpoint.Voice_config.id
+         (string_of_transport adapter.transport))
+  | Macos_say ->
+    Error
+      (Printf.sprintf "voice config endpoint %s speaks and does not transcribe"
+         endpoint.Voice_config.id)
+  | Whisper_cli ->
+    (* The model is a file here rather than a name, which is what the section's
+       model already means to this command. Blank is refused rather than
+       defaulted to a path that may not exist: a wrong path fails inside
+       whisper with a message about the model, and a reader should be told
+       which setting is empty instead. *)
+    if String.trim model = ""
+    then
+      Error
+        (Printf.sprintf
+           "voice config endpoint %s needs the model file to transcribe with; set the \
+            section's default_model to the path of a ggml model"
+           endpoint.Voice_config.id)
+    else (
+      let command = endpoint_command endpoint ~default:whisper_cli_command in
+      Ok
+        { argv =
+            [ command
+            ; "-m"
+            ; String.trim model
+            ; "-l"
+            ; "auto"
+            ; "-nt"
+            ; "-f"
+            ; audio_file
+            ]
+        })
+;;
+
 let stt_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key ~audio_file ~model =
   let adapter = adapter_for_endpoint endpoint in
   match endpoint_base_url endpoint, adapter.transport with
@@ -417,6 +582,11 @@ let stt_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key ~audio_
     Error
       (Printf.sprintf
          "voice config endpoint %s uses voice_mcp and cannot build HTTP STT request"
+         endpoint.id)
+  | Some _, (Macos_say | Whisper_cli) ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s runs a command and has no HTTP STT request"
          endpoint.id)
   | Some base_url, Openai_compat ->
     let headers = if api_key = "" then [] else [ "Authorization", "Bearer " ^ api_key ] in

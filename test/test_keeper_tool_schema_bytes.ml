@@ -169,7 +169,14 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
-let ceiling_bytes = 109_236
+(* 2026-09-13: native CI 34708251602 measured 110,899 bytes / 128 tools at
+   bb9d1de3d1. The two declaration read/save tools add 1,663 rendered bytes
+   to the previous 109,236-byte surface. They let Dashboard and Keeper edit
+   the same installation TOML through one owner; adding a domain package
+   needs no further tool. Set the ratchet to this measurement with no slack.
+   This is the whole available catalog, including deferred tools, not a
+   per-turn payload limit or Keeper activity budget. *)
+let ceiling_bytes = 110_899
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

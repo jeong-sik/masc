@@ -8166,6 +8166,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
       let api_tool = request |> member "tools" |> Yojson.Safe.Util.to_list |> List.hd in
       check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");
       let dynamic = Masc.Keeper_official_client_host.dynamic_tools
+          ~content_transport:Runtime_official_client_tool.Codex
           ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
           ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
           ~event_bus:None ~context_injector:None

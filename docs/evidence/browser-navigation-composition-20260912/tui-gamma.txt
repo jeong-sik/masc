@@ -1,0 +1,35 @@
+ Overview  Activity  Keepers  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+   MASC Browser Lane  automation · browser  [HTTP read ok]                                                                        
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    coordinator HTTP [connected]  Scene 5.8 ms • 6 nodes                                                                          
+    Region 1/6: Channels • n/p:select • y:copy context                                                                            
+    [1/1] Gamma · Team Channels (active)  [ / ]:select tab                                                                        
+    Page regions · viewport only · http://127.0.0.1:53659/gamma.html                                                              
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [>1 region · nav] Channels                                                                                                    
+    [2 region · main] Gamma channel                                                                                               
+    [3 region · article] Visible messages                                                                                         
+    [4 region · section] Message g1                                                                                               
+    [5 region · header] header                                                                                                    
+    [6 region · aside] Navigation summary                                                                                         
+    Text 1/6 • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane                                                                    
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+
+  Enter:read region  Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  Ctrl-O:image
+Browser Lane · automation · browser page reader                                                                                   

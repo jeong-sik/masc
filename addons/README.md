@@ -11,6 +11,13 @@ deployment receipts, captured browser documents, and document feature probes.
 clock and incarnation. Both only read arguments; neither fetches a URL, opens a
 screen artifact, issues game input, or modifies its source.
 
+The MSX manifest also declares `[world.skills] directory = "skills"`. Its bundled
+`msx-observe` instruction Skill and script/reference resources join the existing
+workspace Skill catalog as a read-only source. `keeper_skill` reads the selected
+bytes and reports their SHA-256; it does not execute the script or add game
+controls. The source uses the existing configured Skill resource-read bound and
+selection rules. See the [installation and Skill guide](../docs/guides/lane-addon-toml.md).
+
 Build from the repository root (image construction belongs in CI):
 
 ```sh

@@ -194,7 +194,9 @@ let respond_voice_setup_error request reqd error =
 
 let handle_voice_setup ~base_path ~act request reqd body =
   match Yojson.Safe.from_string body with
-  | exception _ ->
+  (* Narrowed to what the parser throws: a wildcard here would swallow
+     Eio.Cancel.Cancelled and answer a cancelled fiber with a parse error. *)
+  | exception Yojson.Json_error _ ->
     respond_json_value_with_cors ~status:`Bad_request request reqd
       (`Assoc [ "error", `String "the request body is not JSON" ])
   | json ->

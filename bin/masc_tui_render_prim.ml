@@ -602,7 +602,10 @@ let surface_strip (state : state) ~cols =
     in
     if i = active then
       Buffer.add_string parts
-        (Ansi.bold ^ (if is_alert then Theme.warn () else Theme.info ()) ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+        (Ansi.bold
+        ^ (if is_alert then Theme.warn () else Theme.info ())
+        ^ Masc_tui_theme.Glyph.current_entry
+        ^ label i ^ Ansi.reset)
     else if is_alert then
       Buffer.add_string parts
         (Ansi.bold ^ (Theme.warn ()) ^ label i ^ Ansi.reset)

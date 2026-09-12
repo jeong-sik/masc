@@ -2022,7 +2022,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint. *)
+   the hint.
+
+   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
+   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
+   dropped on that ground, until a 150-column frame showed the hint row does
+   not reach the screen at all: the row spends 79 cells on nine tab labels
+   before the hint starts, so the title is cut inside "Automation" and the
+   keys are never drawn. Until that row is fixed this sentence is the only
+   place an operator can read them -- #35539. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")

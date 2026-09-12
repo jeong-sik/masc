@@ -682,6 +682,8 @@ let assemble_hooks
                        (String.equal
                           tool_name
                           Keeper_tool_composition_catalog.skill_tool_name) ->
+                Keeper_turn_preview.note_tool ~keeper_name:meta.name
+                  ~now:(Unix.gettimeofday ()) (Some tool_name);
                 if Skill_delivery_state.active skill_delivery_state <> []
                 then
                   (match

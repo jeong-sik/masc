@@ -1702,6 +1702,7 @@ type keeper_turn_lane =
   | Turn_lane_maintenance
 
 type keeper_turn_preview = {
+  ktp_status_text : string;
   ktp_text_tail : string;
       (** Tail of the newest response text this turn has produced. *)
   ktp_current_tool : string option;

@@ -7115,6 +7115,30 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let activity = Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let waiting = match state.msg_live with
+      | Some live when turn_log_keeper_name live = keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript
+          = Masc_tui_keeper_chat_transcript.Waiting
+      | Some _ | None -> false
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ (if waiting then
+      [Printf.sprintf
+        "Your submitted message waits for the current turn to settle; start time unknown · %d more in this TUI"
+        local_count]
+      else if local_count > 0 then
+        [Printf.sprintf "%d messages waiting in this TUI; sent after your current request settles" local_count]
+      else [])
+;;
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -7123,6 +7147,7 @@ let keeper_message_status_rows (state : state) =
     | Some _ | None -> 1
   in
   List.length state.msg_inflight
+  + List.length (keeper_message_activity_rows state)
   + unavailable_target
   + (match state.msg_live with
      | None -> 0

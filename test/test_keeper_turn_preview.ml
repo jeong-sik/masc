@@ -52,10 +52,38 @@ let test_unknown_keeper_has_no_preview () =
     (Keeper_turn_preview.current ~keeper_name:"never-noted" = None)
 ;;
 
+let test_live_attempt_failover_and_new_turn () =
+  let keeper_name = "live-lifecycle" in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
+  Keeper_turn_preview.reset ~keeper_name ~now:1.;
+  Keeper_turn_preview.note_attempt ~keeper_name ~now:2. ~runtime_id:"claude";
+  Alcotest.(check bool) "silent provider wait is visible" true
+    (Astring.String.is_infix ~affix:"waiting for provider response"
+      (Keeper_turn_preview.status_text (current ())));
+  Keeper_turn_preview.note_failure ~keeper_name ~now:3. ~runtime_id:"claude" "401 invalid key";
+  Keeper_turn_preview.note_attempt ~keeper_name ~now:4. ~runtime_id:"glm";
+  let switched = Keeper_turn_preview.status_text (current ()) in
+  Alcotest.(check bool) "new provider and failure both visible" true
+    (Astring.String.is_infix ~affix:"glm" switched && Astring.String.is_infix ~affix:"401" switched);
+  Keeper_turn_preview.note_stream ~keeper_name ~now:5.
+    (Agent_core.Types.ContentBlockDelta { index = 0; delta = TextDelta "working" });
+  Alcotest.(check string) "text appears before a turn completes" "working" (current ()).text_tail;
+  Keeper_turn_preview.note_tool ~keeper_name ~now:6. (Some "Execute");
+  Alcotest.(check bool) "active tool visible" true
+    (Astring.String.is_infix ~affix:"tool running: Execute" (Keeper_turn_preview.status_text (current ())));
+  Keeper_turn_preview.note_tool ~keeper_name ~now:7. None;
+  Alcotest.(check (option string)) "returned tool is no longer running" None (current ()).current_tool;
+  Keeper_turn_preview.reset ~keeper_name ~now:8.;
+  Alcotest.(check string) "new turn cannot inherit old output" "" (current ()).text_tail;
+  Alcotest.(check (option string)) "new turn cannot inherit old failure" None (current ()).last_failure
+;;
+
 let () =
   Alcotest.run "keeper_turn_preview"
     [ ( "keeper-turn-preview"
-      , [ Alcotest.test_case "tail cuts on a UTF-8 boundary" `Quick
+      , [ Alcotest.test_case "live wait, failover, tool, and next-turn visibility" `Quick
+            test_live_attempt_failover_and_new_turn
+        ; Alcotest.test_case "tail cuts on a UTF-8 boundary" `Quick
             test_tail_cuts_on_utf8_boundary
         ; Alcotest.test_case "blank text does not erase the last words" `Quick
             test_blank_text_does_not_erase_the_last_words

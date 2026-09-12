@@ -379,9 +379,40 @@ let test_lanes_that_were_never_loaded_are_not_running () =
     (animating ~turns:[ row "delta" Tui_decode.Keeper_turn_idle ] ())
 ;;
 
+let test_chat_shows_background_work_and_uncertainty () =
+  let preview : Tui_decode.keeper_turn_preview =
+    { ktp_text_tail = "editing the report"; ktp_current_tool = Some "Execute"
+    ; ktp_status_text = "glm · tool running: Execute · last failure: 401" } in
+  let rows =
+    [ running ~preview ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo"
+    ; running ~lane:Tui_decode.Turn_lane_maintenance ~started:950. "other" ] in
+  let lines = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
+    ~error:None rows in
+  Alcotest.(check int) "running status and latest output" 2 (List.length lines);
+  let joined = String.concat "\n" lines in
+  List.iter (fun expected -> Alcotest.(check bool) expected true
+    (Astring.String.is_infix ~affix:expected joined))
+    ["autonomous"; "glm"; "Execute"; "401"; "editing the report"];
+  Alcotest.(check bool) "other Keeper never appears" false
+    (Astring.String.is_infix ~affix:"other" joined);
+  let waiting = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"other"
+    ~error:None rows |> String.concat "\n" in
+  Alcotest.(check bool) "missing events are not invented work" true
+    (Astring.String.is_infix ~affix:"progress has not been reported" waiting);
+  let stale = Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo"
+    ~error:(Some "timeout") rows in
+  Alcotest.(check bool) "failed observation is labelled" true
+    (Astring.String.is_infix ~affix:"Activity unavailable" (List.hd stale));
+  Alcotest.(check (list string)) "idle has no stale running preview" []
+    (Masc_tui_answering.chat_activity ~now:1000. ~keeper_name:"echo" ~error:None
+      [row "echo" Tui_decode.Keeper_turn_idle])
+;;
+
 let () =
   Alcotest.run "tui_answering"
-    [ ( "duration"
+    [ ( "chat activity", [Alcotest.test_case "background work and missing observation" `Quick
+          test_chat_shows_background_work_and_uncertainty])
+    ; ( "duration"
       , [ Alcotest.test_case "a long wait reads in hours" `Quick
             test_a_long_wait_reads_in_hours
         ; Alcotest.test_case "a negative span clamps" `Quick

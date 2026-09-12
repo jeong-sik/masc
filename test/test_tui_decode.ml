@@ -5502,6 +5502,7 @@ let test_decode_keeper_turns_reads_the_preview () =
                       ; ( "preview"
                         , `Assoc
                             [ ("text_tail", `String "PR body \xeb\xa7\x88\xeb\xac\xb4\xeb\xa6\xac")
+                            ; ("status_text", `String "tool running: Execute")
                             ; ("current_tool", `String "Execute")
                             ; ("updated_at_unix", `Float 2.0)
                             ] )

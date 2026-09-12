@@ -428,9 +428,11 @@ let handle_keeper_turns_list state request reqd =
             let preview_json =
               match Keeper_turn_preview.current ~keeper_name with
               | None -> `Null
+              | Some (preview : Keeper_turn_preview.t) when preview.updated_at < turn.started_at -> `Null
               | Some (preview : Keeper_turn_preview.t) ->
                 `Assoc
-                  [ ("text_tail", `String preview.text_tail)
+                  [ ("status_text", `String (Keeper_turn_preview.status_text preview))
+                  ; ("text_tail", `String preview.text_tail)
                   ; ( "current_tool"
                     , match preview.current_tool with
                       | None -> `Null

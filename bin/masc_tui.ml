@@ -5393,7 +5393,14 @@ let row_list (state : state) : row_list option =
       else None
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       (* The run list moves [lane_runs_cursor] for j/k and the page keys, so
+          the edge keys name a run the same way. Neither edge handler could
+          claim it while this arm and [reading_pane] both answered no. *)
+       | Lanes_run_list _ ->
+           let runs = List.length (Option.value state.lane_runs ~default:[]) in
+           windowed ~count:runs ~cursor:state.lane_runs_cursor (fun index ->
+             state.lane_runs_cursor <- index)
+       | Lanes_run_detail _ -> None
        | Lanes_overview ->
            of_counted (fun count ->
                windowed ~count ~cursor:state.lanes_standalone_cursor
@@ -5577,7 +5584,13 @@ let row_list (state : state) : row_list option =
       windowed
         ~count:(List.length (acting_flat_entries state))
         ~cursor:state.acting_cursor
-        (fun index -> state.acting_cursor <- index)
+        (fun index ->
+          state.acting_cursor <- index;
+          (* Landing on the newest row means the rows above it have been seen --
+             the rule j/k and the g binding already apply. Left out, Home drew
+             the newest row while the header still claimed there were new events
+             above and prompted (g) for them. *)
+          if index = 0 then state.acting_unseen <- 0)
   (* Same shape on the Runs tab: the drawing pulls [detail_scroll] to whatever
      [keeper_run_cursor] names, which is why j and k move the cursor and set
      the scroll to it. An edge jump has to name a run for the same reason. *)
@@ -5707,12 +5720,13 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
      is not a row the client holds, and naming one past what is loaded would
      ask the pin to settle on a row that has not arrived.
 
-     Metrics counts its rows in the drawing and clamps them for display
-     without reporting the value back, so End has nothing to correct it and
-     the stored scroll would stay where the key put it. Its page key already
-     climbs unbounded for the same reason. Giving it a report is the change
-     that has to come first. *)
-  | Keepers Keeper_message | Metrics -> None
+     The chat scroll is the one left. *)
+  | Keepers Keeper_message -> None
+  (* Metrics was here for want of a report, and that reason had gone stale:
+     [render_metrics] already answers [Metrics_scroll] through
+     [surface_chrome]'s [clamped] callback, so the generic End sentinel is
+     corrected after drawing exactly as the other reading panes are. *)
+  | Metrics -> pane (fun v -> Metrics_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -18561,6 +18575,21 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       (* Reading a post with the list pane focused: j/k and the page keys move
+          the list and open what they land on, so the edge keys reach the first
+          and last post the same way. This cannot go through [row_list] -- the
+          cursor alone would leave the reader on the old post, and opening one
+          needs the mailbox a place callback does not have. *)
+       | Some ("home" | "end")
+         when state.view = Board
+              && (match state.board_mode with
+                  | Board_read _ -> true
+                  | Board_list | Board_compose -> false)
+              && state.board_focus = Left_pane ->
+           let count = List.length state.board_posts in
+           let target = if key = Some "end" then count - 1 else 0 in
+           step_board_read state ~mailbox:async_messages
+             ~delta:(target - state.board_cursor)
        (* A reading pane before the list behind it: a detail that is open owns
           the scroll keys, and moving the list under it would leave the cursor
           somewhere the reader cannot see. The pane reports its own clamp, so

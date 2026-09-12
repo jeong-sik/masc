@@ -3587,7 +3587,10 @@ let test_tools_routes_serve_prepared_http_representations () =
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
     let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
-      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. () in
+      (* A real client address: the handler charges the per-client-IP bucket
+         with it, which is the limit H2 was missing. *)
+      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
     let request_headers = [ "origin", "http://localhost:8935";
       "authorization", "Bearer " ^ token ] in
     let path = "/api/v1/dashboard/tools" in
@@ -3646,7 +3649,22 @@ let test_tools_routes_serve_prepared_http_representations () =
         Yojson.Safe.Util.(json |> member "effective_keeper_surface" |> member "reason" |> to_string);
       check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
         (String_util.contains_substring body "final-decoration"))
-      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ])
+      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ];
+    (* The H1 ingress charges the per-client-IP bucket before a request reaches a
+       route. This handler took the address and discarded it, so nothing on H2
+       had that limit -- and the observation routes exempted from the per-agent
+       bucket were then unlimited on the transport a client gets by default.
+       Asserting that the bucket is charged, rather than that a burst is refused,
+       keeps this off the process-wide limiter's configuration: the bucket is a
+       singleton and whichever test forces it first fixes its size. *)
+    let rl_key = Masc.Rate_limit.key_of_sockaddr (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+    let before = Masc.Rate_limit.remaining_global ~key:rl_key in
+    let status, _, _ =
+      tools_h2_wire_response ~handler:h2_handler ~headers:request_headers path
+    in
+    check int "H2 read still succeeds" 200 status;
+    check bool "and it charged the per-client-IP bucket" true
+      (Masc.Rate_limit.remaining_global ~key:rl_key < before))
 
 let test_execution_routes_serve_prepared_http_representations () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -3676,7 +3694,7 @@ let test_execution_routes_serve_prepared_http_representations () =
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
   let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
-    ~server_start_time:0. () in
+    ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
       let headers = ("accept-encoding", encoding) :: request_headers in

@@ -760,6 +760,47 @@ let test_a_notice_too_wide_to_draw_hands_its_cells_back () =
           (List.hd (Str.split_delim (Str.regexp_string Masc_tui_footer.cut_marker)
                       (String.trim row)))))
 
+let test_status_facts_come_back_with_a_rejected_notice () =
+  (* The status facts give way for a notice the same way the keys do, so they
+     come back the same way when it goes. Shrinking in one pass left this row
+     carrying the door alone, although the answering badge and the port fit
+     once the notice was rejected. *)
+  let path = "/Users/someone/work/a-very-long-workspace-name/masc-checkout" in
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch path
+        ; Masc_tui_footer.Keeper_answering
+            { names = [ "analyst" ]; lead_elapsed_s = Some 180 }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice cannot be drawn and is not" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "the keeper answering comes back" true
+    (contains ~needle:"analyst" row);
+  check_bool "and so does the port" true (contains ~needle:"Port: 8935" row);
+  check_bool "the door was never at risk" true (contains ~needle:"q:quit" row);
+  (* The same rule where the notice is drawable on its own but two of them are
+     not. Dropping the second hands the port back, which a single shrinking pass
+     had already given up for good. *)
+  let two =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch "/work/masc"
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:70 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_at_most_cells "the narrower row respects its cells" 70 two;
+  check_bool "the notice that ranks first stays" true
+    (contains ~needle:"MISMATCH local /work/masc" two);
+  check_bool "the second one goes" false (contains ~needle:"redeploy" two);
+  check_bool "and the port it had given up comes back" true
+    (contains ~needle:"Port: 8935" two)
+
 let test_a_short_diagnosis_is_not_starved_by_a_long_one () =
   (* The wrong-workspace notice ranks above the build mismatch, but at this
      width it cannot be drawn at all. Reading priority before drawability let it
@@ -821,6 +862,8 @@ let tests =
           test_ansi_keeper_keys_remain_individually_droppable
       ; Alcotest.test_case "keys come back with a dropped notice's cells" `Quick
           test_keys_come_back_with_the_cells_a_dropped_notice_gave_up
+      ; Alcotest.test_case "status facts come back with a rejected notice" `Quick
+          test_status_facts_come_back_with_a_rejected_notice
       ; Alcotest.test_case "a notice too wide hands its cells back" `Quick
           test_a_notice_too_wide_to_draw_hands_its_cells_back
       ; Alcotest.test_case "a short diagnosis is not starved by a long one" `Quick

@@ -338,54 +338,74 @@ let drop_hint_items ~max_cells ~conflicts hints =
   let fits conflicts kept =
     Masc_tui_message_layout.display_width (row conflicts kept) <= max_cells
   in
-  let undroppable_keys = List.filter item_is_pinned keys in
-  let drawable = List.filter (fun conflict -> fits [ conflict ] undroppable_keys) conflicts in
-  let rec drop_keys conflicts kept =
+  let rec drop_keys kept =
     if fits conflicts kept then Some (row conflicts kept)
     else
       match last_droppable kept with
       | None -> None
-      | Some index ->
-        drop_keys conflicts (List.filteri (fun i _ -> i <> index) kept)
+      | Some index -> drop_keys (List.filteri (fun i _ -> i <> index) kept)
   in
-  let rec attempt conflicts =
-    match drop_keys conflicts keys with
-    | Some fitted -> Some fitted
-    | None ->
-      (match conflicts with
-       | [] -> None
-       | _ :: _ -> attempt (without_lowest_priority conflicts))
-  in
-  attempt drawable
+  drop_keys keys
 
-let rec fit_body ~max_cells ~conflicts ~hints ~omissions statuses =
+(* A notice too wide to be drawn beside the keys that cannot be dropped is not
+   drawable at this width at all, and is put aside before priority is read.
+   Otherwise one long path would starve a short, actionable build mismatch that
+   ranks below it and fits on its own. *)
+let drawable_conflicts ~max_cells ~hints conflicts =
+  let undroppable =
+    split_on_double_space hints
+    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
+    |> List.filter item_is_pinned
+  in
+  (* No cut marker in the probe. A row that gives nothing up carries none, and
+     counting it here rejected a notice that fits a row exactly. Where a key
+     does have to go the marker's cells are counted by the fit itself, which
+     then shrinks the conflict set -- the probe only has to stop a notice that
+     can never be drawn from taking the ranking down with it. *)
+  List.filter
+    (fun conflict ->
+      let row = "  " ^ String.concat "  " (conflict.text :: undroppable) in
+      Masc_tui_message_layout.display_width row <= max_cells)
+    conflicts
+
+(* What fits with this conflict set kept whole: the status facts give way in
+   [omission_order], then the keys give way as whole items. [None] when even the
+   keys that cannot be dropped will not fit beside these conflicts. *)
+let rec fit_with_conflicts ~max_cells ~conflicts ~hints ~omissions statuses =
   let leading =
     String.concat "  " (List.map (fun item -> item.text) conflicts @ [ hints ])
   in
   let rendered = body leading statuses in
-  if Masc_tui_message_layout.display_width rendered <= max_cells then rendered
+  if Masc_tui_message_layout.display_width rendered <= max_cells then
+    Some rendered
   else
     match statuses, omissions with
-    | [], _ ->
-      (* Nothing left to drop whole, so the hints themselves give way. Whole
-         items go first ({!drop_hint_items}); cell truncation is what is left
-         when even one item will not fit. Both end in {!cut_marker}, which
-         says the row was cut and says where the rest is. *)
-      (match drop_hint_items ~max_cells ~conflicts hints with
-       | Some fitted -> fitted
-       | None ->
-         (* Never cell-cut a conflict into a different path or diagnosis.
-            Only surface hints can use the last-resort text truncation. *)
-         let rendered = body hints [] in
-         let room =
-           max_cells - Masc_tui_message_layout.display_width more_key
-         in
-         if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
-         else Masc_tui_message_layout.fit_width rendered room ^ more_key)
+    | [], _ -> drop_hint_items ~max_cells ~conflicts hints
     | _, retention :: rest ->
-      fit_body ~max_cells ~conflicts ~hints ~omissions:rest
+      fit_with_conflicts ~max_cells ~conflicts ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
-    | _, [] -> fit_body ~max_cells ~conflicts ~hints ~omissions:[] []
+    | _, [] -> fit_with_conflicts ~max_cells ~conflicts ~hints ~omissions:[] []
+
+(* Dropping a notice hands its cells back to everything that gave way for it,
+   the status facts included, so each conflict set is fitted from the whole
+   status list and the whole key row again. Shrinking in one pass left a row
+   carrying only [q:quit  ...?] where the refresh interval, the answering badge
+   and the port all fit once the notice was gone. *)
+let rec fit_body ~max_cells ~conflicts ~hints ~omissions statuses =
+  match fit_with_conflicts ~max_cells ~conflicts ~hints ~omissions statuses with
+  | Some fitted -> fitted
+  | None ->
+    (match conflicts with
+     | _ :: _ ->
+       fit_body ~max_cells ~conflicts:(without_lowest_priority conflicts) ~hints
+         ~omissions statuses
+     | [] ->
+       (* Never cell-cut a conflict into a different path or diagnosis. Only
+          surface hints can use the last-resort text truncation. *)
+       let rendered = body hints [] in
+       let room = max_cells - Masc_tui_message_layout.display_width more_key in
+       if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
+       else Masc_tui_message_layout.fit_width rendered room ^ more_key)
 
 (** [line ~dim ~reset ~max_cells ~port ~hints] is one footer line, terminated by a
     newline. [Port] closes every footer and is appended here; [status] carries
@@ -404,7 +424,10 @@ let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
     List.filter_map status_item_projection (status @ [ Port port ])
   in
   let conflicts, statuses = List.partition leads_the_row statuses in
-  let conflicts = ordered_conflicts conflicts in
+  let conflicts =
+    drawable_conflicts ~max_cells:(max 0 max_cells) ~hints
+      (ordered_conflicts conflicts)
+  in
   let fitted =
     fit_body ~max_cells:(max 0 max_cells) ~conflicts ~hints ~omissions:omission_order
       statuses

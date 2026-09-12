@@ -276,10 +276,11 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         ~protocol:Transport_metrics.H2
         ~scope:Transport_metrics.Agent
     in
-    let h2_check_agent_rate_limit h2_reqd =
-      match agent_rl_key_of_request httpun_request with
-      | None -> Ok ()
-      | Some rl_key ->
+    let h2_check_agent_rate_limit ?(quota = Metered_operation) h2_reqd =
+      match quota, agent_rl_key_of_request httpun_request with
+      | Exempt_observation, _ -> Ok ()
+      | Metered_operation, None -> Ok ()
+      | Metered_operation, Some rl_key ->
           if Rate_limit.check_agent_global ~key:rl_key then Ok ()
           else (
             h2_respond_agent_rate_limited h2_reqd ~rl_key;
@@ -303,7 +304,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               httpun_request
           with
           | Ok () ->
-              (match h2_check_agent_rate_limit h2_reqd with
+              (match h2_check_agent_rate_limit
+                       ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                       h2_reqd with
                | Ok () -> f state
                | Error () -> ())
           | Error err -> h2_respond_auth_error h2_reqd err)
@@ -337,7 +340,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             httpun_request
         with
         | Ok () ->
-            (match h2_check_agent_rate_limit h2_reqd with
+            (match h2_check_agent_rate_limit
+                     ~quota:(read_request_quota httpun_request.Httpun.Request.meth)
+                     h2_reqd with
              | Ok () -> f state
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)

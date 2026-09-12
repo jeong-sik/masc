@@ -2,7 +2,12 @@
     through the real source adapter. Only external worker processes are fake. *)
 open Alcotest
 open Masc
-module Runtime = Lane_addon_runtime
+module Runtime = struct
+  include Lane_addon_runtime
+  let dispatch ?caller ~config ~operation args =
+    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    |> Result.map_error Lane_addon_runtime.error_to_string
+end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
 let unwrap = function Ok value -> value | Error message -> fail message

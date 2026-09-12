@@ -33,7 +33,7 @@ default_model = "eleven_multilingual_v2"
 default_voice = "SAz9YHcvj6GT2YYXdXww"
 
 [voice.tts.agent_voices]
-sangsu = "CwhRBWXzGAHq8TQ4Fs17"
+voice-setup-fixture = "CwhRBWXzGAHq8TQ4Fs17"
 
 # 2026-09-03: local whisper first. Measured 0.85 s on a real utterance.
 # Leaving api_key_env out is what keeps the Authorization header absent.
@@ -254,7 +254,7 @@ let test_an_agent_voice_is_set_and_cleared () =
     Alcotest.(check (option string))
       "the agent that was already mapped is left alone"
       (Some "CwhRBWXzGAHq8TQ4Fs17")
-      (List.assoc_opt "sangsu" (voices (read path))))
+      (List.assoc_opt "voice-setup-fixture" (voices (read path))))
 
 (* Moving an endpoint from a hosted provider to a local one has to drop
    api_key_env, or it sends an Authorization header the local server never

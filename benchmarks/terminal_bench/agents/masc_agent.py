@@ -147,6 +147,50 @@ class MascAgent(BaseInstalledAgent):
             except Exception:  # noqa: BLE001 - see above
                 self.logger.exception("recovering the episode result failed")
 
+    def _cost_usd(self, usage) -> float | None:
+        """What this episode cost, from the four token counts and litellm.
+
+        Every other arm's cost arrives from harbor, and the judging rule this
+        benchmark exists to answer is a cost-per-task one. Leaving it None for
+        the MASC arms does not make the comparison cautious — it removes the
+        arms from it.
+
+        Cache creation and cache read are priced separately and can differ by
+        an order of magnitude, so they are read apart rather than from the
+        summed cache_tokens. A model litellm cannot price returns None: a
+        guessed rate would feed a rule that decides which arm is cheaper.
+        """
+        try:
+            import litellm
+        except ImportError:  # pragma: no cover - harbor ships it
+            self.logger.debug("litellm not available; no cost for this episode")
+            return None
+        rates = litellm.model_cost.get(self.model_name)
+        if not rates:
+            self.logger.debug(
+                "litellm prices no model named %s; cost left unmeasured",
+                self.model_name)
+            return None
+        priced = {
+            "input_tokens": rates.get("input_cost_per_token") or 0.0,
+            "output_tokens": rates.get("output_cost_per_token") or 0.0,
+            "cache_creation_tokens":
+                rates.get("cache_creation_input_token_cost") or 0.0,
+            "cache_read_tokens": rates.get("cache_read_input_token_cost") or 0.0,
+        }
+        if priced["input_tokens"] <= 0 and priced["output_tokens"] <= 0:
+            # An entry with no usable input or output rate is not a free model.
+            return None
+        total = 0.0
+        counted = False
+        for key, rate in priced.items():
+            tokens = usage(key)
+            if tokens is None:
+                continue
+            counted = True
+            total += tokens * rate
+        return total if counted else None
+
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = Path(self.logs_dir) / "result.json"
         if not result_path.exists():
@@ -175,6 +219,7 @@ class MascAgent(BaseInstalledAgent):
         context.n_input_tokens = usage("input_tokens")
         context.n_cache_tokens = usage("cache_tokens")
         context.n_output_tokens = usage("output_tokens")
+        context.cost_usd = self._cost_usd(usage)
         context.metadata = {
             **(context.metadata or {}),
             "masc_state": data.get("state"),

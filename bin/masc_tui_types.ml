@@ -1,6 +1,7 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
 module Metrics_tail = Masc_tui_metrics_tail
+module Rows = Masc_tui_rows
 
 (* A poll shares the current read; an explicit refresh owns a new one.
    Only the owning response can settle that source and publish its result. *)
@@ -3104,6 +3105,27 @@ module Browser_lane_view = struct
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 
+  type scene_action = Read_region | Click_control
+
+  let scene_target_action (node : Masc.Browser_scene.node) =
+    match node.kind with
+    | Region _ -> Some Read_region
+    | Control { clickable = true; disabled = false; _ } -> Some Click_control
+    | Text | Raster | Control _ -> None
+
+  let move_scene_action ~backwards t =
+    let actions = scene_targets t |> List.mapi (fun index node -> index, node)
+      |> List.filter_map (fun (index, node) ->
+        Option.map (fun _ -> index) (scene_target_action node)) in
+    let ordered = if backwards then List.rev actions else actions in
+    match ordered with
+    | [] -> t
+    | first :: _ ->
+        let next = List.find_opt
+          (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
+          ordered in
+        { t with scene_cursor = Option.value ~default:first next }
+
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
@@ -3119,6 +3141,14 @@ module Browser_lane_view = struct
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;
           "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "view",`String (match scene.content.view with Content -> "content" | Regions -> "regions");
+          "scope",(match scene.content.scope with
+            | None -> `Null
+            | Some target -> `Assoc ["documentId",`String target.document_id;
+                "nodeId",`String target.node_id]);
+          "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
+            "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
+          "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;"source",source]))
     | _ -> None
 
@@ -3176,7 +3206,7 @@ module Browser_lane_view = struct
         | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle }
 end
 
-let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
   let wrap text =
     String.split_on_char '\n'
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
@@ -3194,27 +3224,36 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    List.concat_map (fun (node : Masc.Browser_scene.node) ->
+    let reversed, _, selected = List.fold_left
+      (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
       let label = match node.kind with
         | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
         | Control {disabled=true;_} -> "disabled"
         | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
-      let prefix = match Hashtbl.find_opt target_index node.node_id with
+      let index = Hashtbl.find_opt target_index node.node_id in
+      let prefix = match index with
         | None -> ""
         | Some i -> Printf.sprintf "[%s%d %s] "
             (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      wrap (prefix ^ node.text)) scene.content.nodes
+      let lines = wrap (prefix ^ node.text) in
+      let selected = match selected, index with
+        | None, Some i when i = view.scene_cursor -> Some offset
+        | _ -> selected in
+      List.rev_append lines reversed, offset + List.length lines, selected)
+      ([], 0, None) scene.content.nodes in
+    List.rev reversed, selected
   | None -> match view.reading with
-  | None -> []
+  | None -> [], None
   | Some reading ->
       match reading.page with
-      | None -> []
+      | None -> [], None
       | Some page ->
-          String.split_on_char '\n'
+          let lines = String.split_on_char '\n'
             (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
           |> List.concat_map (fun line ->
               if line = "" then [""] else
-              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line)
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+          lines, None
 
 let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
@@ -3999,8 +4038,12 @@ type state = {
      pair of options: the pair could not say "reading", so a file being
      fetched drew the same blank pane an empty file draws -- and nothing
      matched an arriving answer against the path still on screen, so a slow
-     read of one file could replace another the operator had since opened. *)
-  mutable code_file: (string, (string * string) list list) Masc_tui_fetched.t;
+     read of one file could replace another the operator had since opened.
+
+     An array, not a list: the diff pane resolves a drawn row's colouring by
+     that row's line number in the whole file, so the lookups are scattered
+     rather than sequential and a list walked from the front on every one. *)
+  mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -5741,6 +5784,32 @@ type clamped_scroll =
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
 
+(* What End names on a surface whose rows the drawing counts: a row past any
+   real end, so the frame's own clamp reports the last one back. The keypress
+   cannot work the number out -- that is what a {!clamped_scroll} is -- and a
+   value it can name has to be larger than any surface's rows.
+
+   [max_int] rather than a number someone judged large enough. An MCP resource
+   reading carries whatever text the server sent and the frame wraps it, so
+   the row count has no ceiling to sit above; a finite sentinel is a row the
+   reader can be left at, and it would be left there silently.
+
+   Arithmetic on this value is safe because it does not survive a frame. The
+   drawing clamps with [min state.resource_scroll max_scroll] and reports the
+   result back through [Resource_scroll], so by the time a page key adds to
+   [resource_scroll] it holds the real last row, not this. *)
+let clamped_scroll_end = max_int
+
+(* Moving down from [clamped_scroll_end]. The sentinel waits for a frame to
+   count the real rows and report them back, and some frames pass without
+   counting: a reading that has not arrived, and -- on a narrow terminal with
+   the list focused -- a frame that draws no reading at all. A key pressed
+   in between would carry the sentinel into [+], so the addition stops here
+   instead of wrapping negative and throwing the reader to the top. Moving up
+   needs no such care: [max 0] already holds that end. *)
+let scroll_down_from scroll ~by =
+  if scroll > max_int - by then max_int else scroll + by
+
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
@@ -6700,9 +6769,10 @@ let surface_row_texts (state : state) : surface -> string list option = function
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
-             (List.map
-                (fun segments -> String.concat "" (List.map fst segments))
-                rows)
+             (Array.to_list
+                (Array.map
+                   (fun segments -> String.concat "" (List.map fst segments))
+                   rows))
          (* Nothing to search through while the file is still being read, and
             nothing to search through if it failed. *)
          | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
@@ -6798,6 +6868,12 @@ let surface_row_texts (state : state) : surface -> string list option = function
                 (List.map
                    (fun change -> Tui_decode.file_change_address change)
                    changes)))
+  (* The list pane only. With the text focused j/k scrolls the reading and
+     there is no row cursor for a match to land on, so the same condition the
+     cursor arm reads answers here: a search offered on one focus and silent
+     on the other would be the drift this pairing exists to prevent. *)
+  | Resources when state.resource_focus = Left_pane ->
+      Option.map (List.map Masc_tui_mcp.display_name) state.resources_list
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None
@@ -6965,7 +7041,7 @@ type palette_action =
 let code_cursor_line_symbols (state : state) =
   match Masc_tui_fetched.current state.code_file with
   | Some (_, Masc_tui_fetched.Ready rows) -> (
-      match List.nth_opt rows state.code_file_cursor with
+      match Rows.at (Rows.of_array rows) state.code_file_cursor with
       | None -> []
       | Some segments ->
           let name_kind kind =

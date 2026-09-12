@@ -132,6 +132,23 @@ val observe_checkpoint_stage :
 
 val same_run_retry_allowed : bool Atomic.t -> bool
 
+type provider_lease_phase =
+  | Provider_active_since of float
+  | Provider_yielded
+(** Invocation-local main-provider lease observation, not tool completion or
+    a persisted lifecycle state. *)
+
+val provider_lease_stalled :
+  lease_phase:provider_lease_phase
+  -> now:float
+  -> threshold_sec:float
+  -> attempt_started_at:float
+  -> sample:provider_progress_sample option
+  -> bool
+(** A yielded main-provider lease cannot be stalled. On reacquisition, the
+    no-progress window starts no earlier than that reacquisition, including
+    when the asynchronous registry sample is absent or stale. *)
+
 val attempt_stalled :
   now:float
   -> threshold_sec:float
@@ -224,6 +241,11 @@ val accept_rejected_error :
   Agent_core.Error.t
 
 module For_testing : sig
+  val observe_provider_lease :
+    now:(unit -> float) -> on_yield:(unit -> unit) option ->
+    on_resume:(unit -> unit) option ->
+    provider_lease_phase Atomic.t * (unit -> unit) * (unit -> unit)
+
   val checkpoint_before_incomplete_response :
     Agent_core.Checkpoint.t -> Agent_core.Checkpoint.t option
 

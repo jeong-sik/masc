@@ -48,8 +48,8 @@ let dynamic_tool_bytes tools =
 type content_transport = Codex | Mcp
 
 let project_content transport ~content ~content_blocks =
-  (* DET-OK: [None] means the producer had no typed blocks, so [content] is the
-     whole result; the encoder drops [content] exactly when blocks are [Some]. *)
+  (* DET-OK: [None] is the producer's text-only result, so [content] is the payload;
+     [Some] stays authoritative even when empty, and unsupported media error below. *)
   let blocks = Option.value ~default:[Agent_core.Types.Text content] content_blocks in
   let text value = match transport with
     | Codex -> `Assoc ["type", `String "inputText"; "text", `String value]

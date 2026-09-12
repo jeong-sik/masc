@@ -5,6 +5,8 @@ export interface CodeDocumentSource {
   readonly file_path: string | null
   readonly language: string
   readonly content: string
+  /** Address of the workspace whose completed file fetch supplied this source. */
+  readonly lsp_scope?: string
 }
 
 export interface CodeDocumentLine {
@@ -78,12 +80,15 @@ function normalizeSource(source: unknown, maxLines: number): CodeDocumentSnapsho
   const filePath = asNullableString(source.file_path)
   const language = asNullableString(source.language)
   if (!filePath || !language || typeof source.content !== 'string') return null
+  if (source.lsp_scope !== undefined
+    && (typeof source.lsp_scope !== 'string' || source.lsp_scope.length === 0)) return null
 
   const content = source.content.replace(/\r\n?/g, '\n')
   return {
     file_path: filePath,
     language,
     content,
+    ...(typeof source.lsp_scope === 'string' ? { lsp_scope: source.lsp_scope } : {}),
     lines: parseLines(content, maxLines),
   }
 }

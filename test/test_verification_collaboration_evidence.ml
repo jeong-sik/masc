@@ -40,6 +40,14 @@ let denied surface name args code =
     check string "explicit source failure" code
       Yojson.Safe.Util.(Tool_result.message result |> Yojson.Safe.from_string |> member "code" |> to_string)
   | _ -> fail "source lookup unexpectedly succeeded"
+let invalid_input surface name args =
+  match call surface name args with
+  | Tool_result.Failed _ as result ->
+    check bool "invalid descriptor input is a workflow rejection" true
+      (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+    check bool "input rejection explains the error" true
+      (String.trim (Tool_result.message result) <> "")
+  | _ -> fail "malformed source input unexpectedly succeeded"
 let post ~author ~visibility ?origin ?meta_json content =
   Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
     ~visibility ~ttl_hours:0 ?origin ?meta_json () |> require "post"
@@ -52,7 +60,8 @@ let metadata = `Assoc
   ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"] ]
 let fusion ~author ~visibility ~source run_id =
   post ~author ~visibility ~meta_json:metadata
-    ~origin:Board.{turn_ref=Some "origin-trace#7"; source=Some source; fusion_run_id=Some run_id}
+    ~origin:Board.{turn_ref=Some (Ids.Turn_ref.make ~trace_id:"origin-trace" ~absolute_turn:7);
+                  source=Some source; fusion_run_id=Some run_id}
     "Original independent advice"
 
 let test_shared_thread_and_pagination () = with_fixture (fun _config task goal ->
@@ -91,7 +100,7 @@ let test_direct_authority_and_unknown () = with_fixture (fun _config task goal -
     ignore (read task "masc_board_post_get" (post_args shared));
     ignore (read goal "masc_board_post_get" (post_args shared))) [Board.Public; Board.Unlisted; Board.Internal])
 
-let test_pagination_input_contract () = with_fixture (fun _config task goal ->
+let test_pagination_input_contract () = with_fixture (fun config task goal ->
   let p = post ~author:"peer" ~visibility:Board.Internal "Paginated review evidence" in
   let id = Board.Post_id.to_string p.id in
   let comments = List.init (Board.Limits.default_comment_page_limit + 1) (fun i ->
@@ -99,7 +108,16 @@ let test_pagination_input_contract () = with_fixture (fun _config task goal ->
       ~content:(Printf.sprintf "Evidence entry %d" i) ~ttl_hours:0 () |> require "comment") in
   let args fields = `Assoc (("post_id", `String id) :: fields) in
   let open Yojson.Safe.Util in
-  List.iter (fun surface ->
+  List.iter (fun (surface, authority) ->
+    let reject_pagination fields =
+      let input = args fields in
+      invalid_input surface "masc_board_post_get" input;
+      (* Descriptor validation can reject before the reader runs. Check its
+         independent parser too so a malformed optional field cannot default. *)
+      match Verification_collaboration_evidence.read_board ~config ~authority ~args:input with
+      | Error (Verification_collaboration_evidence.Invalid_request _) -> ()
+      | Error _ -> fail "malformed pagination returned the wrong source error"
+      | Ok _ -> fail "reader silently defaulted malformed pagination" in
     let first = read surface "masc_board_post_get" (args []) in
     check int "omitted offset starts at zero" 0
       (first |> member "pagination" |> member "offset" |> to_int);
@@ -120,16 +138,16 @@ let test_pagination_input_contract () = with_fixture (fun _config task goal ->
        member "next_offset" (member "pagination" past_end) = `Null);
     List.iter (fun field ->
       List.iter (fun value ->
-        denied surface "masc_board_post_get" (args [field, value])
-          "verification_source_invalid_request")
+        reject_pagination [field, value])
         [`Null; `String "1"; `Float 1.; `Bool true; `List []; `Assoc [];
          `Intlit "999999999999999999999999999999"])
       ["comment_offset"; "comment_limit"];
     List.iter (fun (field, value) ->
-      denied surface "masc_board_post_get" (args [field, `Int value])
-        "verification_source_invalid_request")
+      reject_pagination [field, `Int value])
       ["comment_offset", -1; "comment_limit", 0;
-       "comment_limit", Board.Limits.max_comment_page_limit + 1]) [task; goal])
+       "comment_limit", Board.Limits.max_comment_page_limit + 1])
+    [task, Verification_collaboration_evidence.Task_producer "producer";
+     goal, Verification_collaboration_evidence.Goal_workspace])
 
 let test_fusion_original_and_separate_decision () = with_fixture (fun config task goal ->
   let id = "opaque-source-id" in

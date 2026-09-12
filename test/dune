@@ -3840,6 +3840,12 @@
  (libraries alcotest masc_tui_exit_signals unix))
 
 (test
+ (name test_tui_terminal_restore)
+ (modules test_tui_terminal_restore)
+ ; unix for the Unix.error constructors the stubbed setter raises with.
+ (libraries alcotest masc_tui_terminal_restore unix))
+
+(test
  (name test_tui_retained_view)
  (modules test_tui_retained_view)
  (libraries

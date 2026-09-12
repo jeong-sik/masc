@@ -664,17 +664,6 @@ let validate_lanes
          })
 ;;
 
-(* [runtime].default is required, so every lane can end somewhere. Without this
-   a lane walk stops at its last declared candidate and the turn dies there —
-   failover would exist only where an operator remembered to type a second
-   candidate. Appended rather than substituted: declared order is the
-   operator's, this only says where the walk terminates. *)
-let with_terminal_default ~default_runtime_id candidates =
-  if List.exists (String.equal default_runtime_id) candidates
-  then candidates
-  else candidates @ [ default_runtime_id ]
-;;
-
 let lanes_of_decls
     ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
     (runtimes : t list)
@@ -685,7 +674,8 @@ let lanes_of_decls
   Ok
     (List.map
        (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
-          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
+          Runtime_lane.make ~id candidate_ids
+          |> Runtime_lane.with_terminal_default ~runtime_id:default_runtime_id)
        lane_decls)
 ;;
 
@@ -1355,9 +1345,7 @@ let degrade_loaded_for_missing_catalog
              }
              :: dropped_lanes )
          | _ ->
-           ( Runtime_lane.make
-               ~id:(Runtime_lane.id lane)
-               kept_candidates
+           ( Runtime_lane.filter_candidates (fun id -> not (is_missing id)) lane
              :: kept
            , dropped_candidates
            , dropped_lanes ))
@@ -1843,7 +1831,7 @@ let verifier_exact_slot_admission ~runtime_id =
 let verifier_api_slot_ready slot_id =
   let state = runtime_state () in
   let candidates = match find_declared_lane state.lanes slot_id with
-    | Some lane -> Runtime_lane.ordered_candidates lane
+    | Some lane -> Runtime_lane.declared_candidates lane
     | None -> [slot_id] in
   List.exists (fun id ->
     match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
@@ -1957,13 +1945,14 @@ let resolve_assignment (assigned_id : string) =
   | None ->
     (match List.find_opt (fun (runtime : t) -> String.equal runtime.id assigned_id) state.runtimes with
      | Some runtime ->
-       let candidates =
+       let lane = Runtime_lane.make ~id:runtime.id [runtime.id] in
+       let lane =
          match state.default_runtime with
          | Some default ->
-           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
-         | None -> [ runtime.id ]
+           Runtime_lane.with_terminal_default ~runtime_id:default.id lane
+         | None -> lane
        in
-       `Lane (Runtime_lane.make ~id:runtime.id candidates)
+       `Lane lane
      | None ->
        (match Option.bind state.startup_degradation (fun degradation ->
           List.find_opt (fun (missing : missing_catalog_model) ->

@@ -32,7 +32,7 @@ def read():
     record(value)
     return value
 record({'kind':'launch','argv':sys.argv,'cwd':os.getcwd()})
-if mode == 'failed-candidate':
+if mode in ('failed-candidate', 'api-lane-exhausted', 'api-lane-explicit-default'):
     sys.exit(17)
 request = read()
 emit({'type':'control_response','response':{'subtype':'success','request_id':request['request_id'],'response':{}}})
@@ -90,7 +90,24 @@ let records path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
 let member = Yojson.Safe.Util.member
 
+let test_lane_authority_views () =
+  let lane = Runtime_lane.make ~id:"judge" ["a";"b"]
+    |> Runtime_lane.with_terminal_default ~runtime_id:"c" in
+  let degraded = Runtime_lane.filter_candidates (fun id -> id = "c") lane in
+  check (list string) "degradation preserves ordinary default" ["c"]
+    (Runtime_lane.ordered_candidates degraded);
+  check (list string) "degradation never promotes implicit default into authority" []
+    (Runtime_lane.declared_candidates degraded);
+  let explicit = Runtime_lane.make ~id:"judge" ["a";"c";"b"]
+    |> Runtime_lane.with_terminal_default ~runtime_id:"c" in
+  check (list string) "explicit default keeps its declared position" ["a";"c";"b"]
+    (Runtime_lane.declared_candidates explicit);
+  check (list string) "explicit default is not appended twice" ["a";"c";"b"]
+    (Runtime_lane.ordered_candidates explicit)
+
 let test_review mode =
+  let api_lane = List.mem mode
+    ["api-lane"; "api-lane-exhausted"; "api-lane-explicit-default"; "api-lane-tools-disabled"] in
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
@@ -117,13 +134,21 @@ let test_review mode =
   let command, capture = fixture_script root ~mode in
   let outside_command, outside_capture = fixture_script root ~mode:"outside-exact-lane" in
   let first_command, first_capture = fixture_script root ~mode:"failed-candidate" in
+  let outside_id = if mode = "api-lane-tools-disabled"
+    then "outside.capable" else "outside.verifier" in
   let outside_runtime = Printf.sprintf {|
 [providers.outside]
 protocol = "claude-code"
 command = %S
 is-non-interactive = true
-[outside.verifier]
-|} outside_command in
+[%s]
+|} outside_command outside_id
+    ^ (if mode = "api-lane-tools-disabled" then {|
+[models.capable]
+api-name = "verifier-fixture"
+max-context = 400000
+tools-support = true
+|} else "") in
   let config_path = Filename.concat root "runtime.toml" in
   let runtime_text =
     match mode with
@@ -157,10 +182,12 @@ command = %S
 is-non-interactive = true
 [unconfined.verifier]
 |} command
-    | "exact-order" | "api-lane" ->
-      runtime_config ~default:"outside.verifier"
-        ~slots:(if mode = "api-lane" then ["judge.lane"] else [])
-        ~cli_slots:(if mode = "api-lane" then [] else ["first.verifier";"official.verifier"]) command
+    | "exact-order" | "api-lane" | "api-lane-exhausted"
+    | "api-lane-explicit-default" | "api-lane-tools-disabled" ->
+      runtime_config ~default:outside_id
+        ~tools_support:(mode <> "api-lane-tools-disabled")
+        ~slots:(if api_lane then ["judge.lane"] else [])
+        ~cli_slots:(if api_lane then [] else ["first.verifier";"official.verifier"]) command
       ^ outside_runtime ^ Printf.sprintf {|
 [providers.first]
 protocol = "claude-code"
@@ -168,10 +195,10 @@ command = %S
 is-non-interactive = true
 [first.verifier]
 |} first_command
-      ^ (if mode = "api-lane" then {|
+      ^ (if api_lane then Printf.sprintf {|
 [runtime.lanes."judge.lane"]
-candidates = ["first.verifier", "official.verifier"]
-|} else "")
+candidates = ["first.verifier", "official.verifier"%s]
+|} (if mode = "api-lane-explicit-default" then ", \"outside.verifier\"" else "") else "")
     | "api-tools-disabled" ->
       runtime_config ~tools_support:false ~slots:["api.verifier"] ~cli_slots:[] command ^ {|
 [providers.api]
@@ -188,6 +215,15 @@ candidates = ["outside.verifier"]
   in
   write config_path runtime_text;
   (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+  if api_lane then (
+    let lane = Runtime.get_lane_by_id "judge.lane" |> Option.get in
+    check (list string) "ordinary lane retains its terminal default"
+      ["first.verifier";"official.verifier";outside_id]
+      (Runtime_lane.ordered_candidates lane);
+    check (list string) "authority view retains only explicitly declared candidates"
+      (["first.verifier";"official.verifier"]
+       @ if mode = "api-lane-explicit-default" then [outside_id] else [])
+      (Runtime_lane.declared_candidates lane));
   if List.mem mode ["tools-disabled"; "unconfined"] then (
     let refused = Keeper_turn_driver_wrappers.run_named_with_masc_tools
       ~runtime_id:"official.verifier" ~keeper_name:"required-tools-probe"
@@ -221,7 +257,7 @@ candidates = ["outside.verifier"]
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
   let io : Agent_core.Exact_output.resolver_io = {getenv=(fun _ -> Ok None)} in
-  let catalog = if List.mem mode ["api-lane";"api-tools-disabled"] then
+  let catalog = if api_lane || mode = "api-tools-disabled" then
       Some (Agent_core.Exact_output.Full_replacement {source="verifier-route-fixture";contents=Printf.sprintf {|
 [[providers]]
 id = "fixture_exact"
@@ -242,14 +278,14 @@ input_per_million = 1.0
 id = %S
 provider_ref = "fixture_exact"
 model_id = "verifier-fixture"
-|} (if mode = "api-lane" then "judge.lane" else "api.verifier")})
+|} (if api_lane then "judge.lane" else "api.verifier")})
     else None in
   let snapshot = match Agent_core.Exact_output.load_resolver_snapshot ~io ?catalog () with
     | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);
   let unavailable = List.mem mode
-    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding";"api-tools-disabled"] in
+    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding";"api-tools-disabled";"api-lane-tools-disabled"] in
   check bool "readiness proves at least one actually compatible candidate"
     (not unavailable) (Result.is_ok (Runtime.verifier_exact_lane_readiness ()));
   (match Runtime.verifier_exact_lane_slot_ids () with
@@ -271,29 +307,42 @@ model_id = "verifier-fixture"
     ~lookup ~base_path:root
     ~on_tool_result:(fun ~input:_ result -> calls := result :: !calls) () in
   let result = review () in
+  let launches rows = List.filter (fun row -> member "kind" row = `String "launch") rows in
+  let check_failed_launch path =
+    let rows = launches (records path) in
+    check int "declared candidate actually dispatched and failed" 1 (List.length rows);
+    List.iter (fun launch ->
+      let cwd = member "cwd" launch |> Yojson.Safe.Util.to_string in
+      check bool "failed candidate session root is removed" false (Sys.file_exists cwd)) rows in
   if unavailable then (
     check bool "unavailable verifier is reported before dispatch" true
       (result.gate = AR.Evaluator_unavailable && result.verdict = None);
-    check bool "unavailable verifier never spawns an official client" false (Sys.file_exists capture))
+    check bool "unavailable verifier never spawns an official client" false (Sys.file_exists capture);
+    check bool "capable ordinary default cannot make the exact lane available" false
+      (Sys.file_exists outside_capture))
+  else if mode = "api-lane-exhausted" then (
+    check bool "exhausted declared candidates produce no verdict" true
+      (result.gate = AR.Evaluator_unavailable && result.verdict = None);
+    check_failed_launch first_capture;
+    check_failed_launch capture;
+    check bool "all declared candidates failing never dispatches implicit default" false
+      (Sys.file_exists outside_capture))
   else (
   (match mode, result.AR.verdict, result.gate with
-   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first" | "large-read" | "api-lane"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
+   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first" | "large-read" | "api-lane" | "api-lane-explicit-default"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
    | "duplicate", None, AR.Evaluator_unavailable -> ()
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
       (AR.gate_to_string result.gate) (Option.value ~default:"none" result.fallback_reason));
-  let rows = records capture in
-  check string "compatible official client owns the verdict" "official.verifier"
+  let explicit_default = mode = "api-lane-explicit-default" in
+  let rows = records (if explicit_default then outside_capture else capture) in
+  check string "compatible official client owns the verdict"
+    (if explicit_default then outside_id else "official.verifier")
     result.evaluator_runtime;
-  check bool "ordinary default or same-name lane never dispatches outside exact slots" false
+  check bool "default dispatch requires explicit declaration" explicit_default
     (Sys.file_exists outside_capture);
-  let launches rows = List.filter (fun row -> member "kind" row = `String "launch") rows in
-  if mode = "exact-order" || mode = "api-lane" then (
-    let failed_launches = launches (records first_capture) in
-    check int "first exact candidate actually dispatched and failed" 1 (List.length failed_launches);
-    List.iter (fun launch ->
-      let cwd = member "cwd" launch |> Yojson.Safe.Util.to_string in
-      check bool "failed candidate session root is removed" false (Sys.file_exists cwd)) failed_launches);
+  if mode = "exact-order" || api_lane then check_failed_launch first_capture;
+  if explicit_default then check_failed_launch capture;
   let launch = List.hd (launches rows) in
   let argv = member "argv" launch |> Yojson.Safe.Util.to_list
     |> List.map Yojson.Safe.Util.to_string in
@@ -352,7 +401,9 @@ let () =
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts");
   Workspace_metric_hooks.install ();
   Alcotest.run "official-client completion verifier"
-    ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
+    ["lane authority", [test_case "declared and effective views" `Quick test_lane_authority_views];
+     "actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
        "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"; "large-read";
-       "api-lane"; "api-tools-disabled"]]
+       "api-lane"; "api-tools-disabled"; "api-lane-exhausted";
+       "api-lane-explicit-default"; "api-lane-tools-disabled"]]

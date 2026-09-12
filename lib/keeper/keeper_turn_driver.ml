@@ -1101,7 +1101,7 @@ let run_named
     | Exact_runtime, _ -> Ok (None, [runtime_id])
     | Exact_route, _ ->
       Ok (None, match Runtime.get_lane_by_id runtime_id with
-        | Some lane -> Runtime_lane.ordered_candidates lane
+        | Some lane -> Runtime_lane.declared_candidates lane
         | None -> [runtime_id])
     | Resolve_assignment, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)

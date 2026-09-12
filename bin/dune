@@ -9,6 +9,16 @@
  (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
 
 (executable
+ (name masc_reliable_change_g1_check)
+ (modules masc_reliable_change_g1_check)
+ (public_name masc-reliable-change-g1-check)
+ (package masc)
+ (libraries
+  masc.masc_goal
+  unix
+  yojson))
+
+(executable
  (name main_eio)
  (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
  (public_name masc)

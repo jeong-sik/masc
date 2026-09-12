@@ -149,3 +149,14 @@ val manifest_of_json : Yojson.Safe.t -> (manifest, string) result
 
 val run_observation_to_json : run_observation -> Yojson.Safe.t
 val run_observation_of_json : Yojson.Safe.t -> (run_observation, string) result
+
+val checker_summary_to_json : checker_summary -> Yojson.Safe.t
+val checker_summary_of_json : Yojson.Safe.t -> (checker_summary, string) result
+
+val summary_to_json : checker_summary -> Yojson.Safe.t
+
+val load_manifest_file : string -> (manifest, string) result
+val load_observations_file : string -> (run_observation list, string) result
+
+val write_checker_file : string -> checker_summary -> (unit, string) result
+val write_summary_file : string -> checker_summary -> (unit, string) result

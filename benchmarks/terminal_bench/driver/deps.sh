@@ -6,12 +6,38 @@
 #
 # Expects: BENCH (install root, with bin/masc already in place).
 
+# Why the masc binary would not start, from whatever the loader printed.
+# Three unrelated causes land in the same place and each needs a different fix:
+# a binary for another architecture, a glibc older than the binary's floor, and
+# an actually missing shared library. Reporting all three as "missing shared
+# libraries" sent a reader after apt packages while the real cause was an
+# aarch64 binary in an amd64 container (2026-09-12).
+#
+# Separated from the reporting so it can be exercised without a container, a
+# package manager or a binary — test/test_bench_deps_diagnosis.py feeds it the
+# loader messages verbatim.
+bench_masc_failure_reason() {
+  case "$1" in
+    *"cannot execute"*|*"Exec format error"*) echo arch ;;
+    *GLIBC_*"not found"*) echo glibc ;;
+    *) echo libraries ;;
+  esac
+}
+
 bench_install_deps() {
   # --- dependencies -----------------------------------------------------------
   # Terminal-Bench task images are not one distro. The 4.0 set alone ships
   # ubuntu 24.04 and 22.04, debian-based python:*-slim, fedora, micromamba, coq,
-  # node, bun and cuda bases. The 2026-09-11 matrix lost 36 of 72 trials per arm
-  # to a single hardcoded `libssl3t64`, which exists only on ubuntu 24.04.
+  # node, bun and cuda bases, and a hardcoded `libssl3t64` names a package that
+  # exists only on ubuntu 24.04.
+  #
+  # That is not what cost the 2026-09-11 matrix 36 of its 72 trials per arm.
+  # Measured on 2026-09-12: 12 of the 24 mini-suite images are debian 12 with
+  # glibc 2.36, and the released binary asks for GLIBC_2.38, so it cannot start
+  # there at all — 12 tasks x 3 attempts is exactly the 36 that were lost, and
+  # the 12 that survived are precisely the images at 2.39 or newer. Installing
+  # packages cannot recover those; only a release built at a lower floor can
+  # (masc#35321).
   #
   # So: install by package-manager family, ask for the runtime libraries only if
   # the binary cannot already run, and fail with the distro named rather than
@@ -84,9 +110,31 @@ bench_install_deps() {
   fi
 
   if ! masc_runs; then
-    echo "masc cannot run on $(distro_id); missing shared libraries:" >&2
-    ldd "$BENCH/bin/masc" 2>&1 | grep -i 'not found' >&2 || \
-      "$BENCH/bin/masc" --version >&2 || true
+    # Three unrelated causes reach this point and each needs a different fix,
+    # so name the one that actually happened. Reporting all three as "missing
+    # shared libraries" sent a reader after apt packages when the binary was
+    # built for another architecture entirely.
+    why="$("$BENCH/bin/masc" --version 2>&1 || true)"
+    case "$(bench_masc_failure_reason "$why")" in
+      arch)
+        echo "masc will not run on $(distro_id): wrong architecture." >&2
+        echo "  container is $(uname -m); the binary in dist/ is for another one." >&2
+        echo "  re-fetch with MASC_LINUX_ARCH matching the task images" >&2
+        echo "  (Terminal-Bench images are amd64, so MASC_LINUX_ARCH=x64)." >&2
+        ;;
+      glibc)
+        echo "masc will not run on $(distro_id): its glibc is too old." >&2
+        echo "  container has $(ldd --version 2>&1 | head -1)" >&2
+        printf '  binary asks for: %s\n' \
+          "$(printf '%s' "$why" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)" >&2
+        echo "  a release built at a lower floor is the fix, not a package." >&2
+        ;;
+      *)
+        echo "masc cannot run on $(distro_id); missing shared libraries:" >&2
+        ldd "$BENCH/bin/masc" 2>&1 | grep -i 'not found' >&2 || \
+          printf '%s\n' "$why" >&2
+        ;;
+    esac
     exit 1
   fi
 

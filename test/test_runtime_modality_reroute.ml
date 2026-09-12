@@ -7,6 +7,14 @@
 
 open Alcotest
 
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+;;
+
+
 let caps ?(image = false) ?(audio = false) ?(multimodal = false) () =
   { Llm_provider.Capabilities.default_capabilities with
     supports_image_input = image
@@ -608,7 +616,7 @@ max-request-body-bytes = 65536
   close_out channel;
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     let native =
-      match Runtime.load_list ~config_path:path with
+      match load_list_text ~config_path:path with
       | Ok (_, runtime, _, _, _) -> runtime
       | Error error -> fail error
     in
@@ -693,7 +701,7 @@ supports-image-input = true
   close_out channel;
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     let native =
-      match Runtime.load_list ~config_path:path with
+      match load_list_text ~config_path:path with
       | Ok (_, runtime, _, _, _) -> runtime
       | Error error -> fail error
     in
@@ -772,7 +780,7 @@ supports-image-input = true
   close_out channel;
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     let native =
-      match Runtime.load_list ~config_path:path with
+      match load_list_text ~config_path:path with
       | Ok (_, runtime, _, _, _) -> runtime
       | Error error -> fail error
     in

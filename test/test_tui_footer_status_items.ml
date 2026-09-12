@@ -616,6 +616,32 @@ let test_a_room_and_a_voice_do_not_draw_the_same_bar () =
           (Masc_tui_footer.voice_bar ~width:16 ~db:(Some (-20.)))))
 ;;
 
+(* Why a footer row is [key:label] items separated by two spaces, and what it
+   costs to write one another way.
+
+   Two overlays drew "[j/k] Move · [Enter] Open Chat · [Esc] Close". Neither
+   mechanism above can act on that row: the item split looks for two spaces and
+   finds one item, and the pin reads a key up to an item's first colon and finds
+   no colon. So the row can shed no whole key and keep no door -- it falls
+   through to the cell cut, where the door is whatever happens to sit inside the
+   budget.
+
+   Asserted as a comparison across widths rather than at one width, because the
+   claim is about which grammar keeps the door, not about where a particular
+   budget falls. *)
+let test_a_row_in_another_grammar_loses_its_door () =
+  let at max_cells hints =
+    Masc_tui_footer.line ~dim:"" ~reset:"" ~max_cells ~port:8935 ~hints ()
+  in
+  let widths = [ 24; 28; 32; 36; 40; 44; 48 ] in
+  let survives hints =
+    List.length
+      (List.filter (fun w -> contains ~needle:"Esc" (at w hints)) widths)
+  in
+  check_bool "two spaces and a colon keep the door at more widths" true
+    (survives "j/k:move  Enter:open chat  Esc:close"
+     > survives "[j/k] Move · [Enter] Open Chat · [Esc] Close")
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "port closes every footer" `Quick
@@ -670,6 +696,8 @@ let tests =
           test_a_label_holding_a_colon_still_reads_its_key
       ; Alcotest.test_case "hints that fit are left alone" `Quick
           test_hints_that_fit_are_left_alone
+      ; Alcotest.test_case "a row in another grammar loses its door" `Quick
+          test_a_row_in_another_grammar_loses_its_door
       ] )
   ; ( "voice meter"
     , [ Alcotest.test_case "the bar is the width it claims" `Quick

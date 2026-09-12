@@ -465,10 +465,20 @@ type planning_backlog = {
   pb_cancelled : int;
 }
 
+type planning_goal_history = {
+  pgh_goal_id : string;
+  pgh_title : string option;
+  pgh_opened_at : string option;
+  pgh_closed_at : string option;
+  pgh_final_phase : string option;
+  pgh_lifetime_hours : float option;
+}
+
 type planning_snapshot = {
   pl_goals : planning_goal list;
   pl_rollup : planning_rollup;
   pl_backlog : planning_backlog;
+  pl_goal_history : planning_goal_history list;
   pl_generated_at : string;
 }
 
@@ -4464,17 +4474,56 @@ let decode_repository_change_snapshot json =
   let* rcs_total = required_int_field json "total" in
   Ok { rcs_scope; rcs_changes; rcs_total }
 
+(* Name the fields that disagree. The check is strict on purpose -- a dashboard
+   payload whose shape has drifted is refused rather than read around -- but the
+   refusal used to say only "unknown, duplicate, or missing fields" for a
+   nine-kilobyte object, leaving the operator to diff the payload against the
+   decoder by hand. The three lists that settle the verdict are the three lists
+   worth printing, so the verdict is made from them instead of from a pair of
+   length and set comparisons that then get thrown away.
+
+   The wording follows the copy of this check in [Llm_provider.Types], which
+   has printed all three groups since it was written: same keys, same
+   brackets, so one reader learns one shape. (Its function is not named here
+   on purpose -- scripts/ci/check_exact_field_decoder_preflight.py matches
+   that name against file text without stripping comments, so writing it in
+   prose registers this module as a decoder it is not. See #35471.)
+
+   Empty groups are left out rather than drawn as "[]" -- this message goes on
+   a terminal row, where the surface cuts it. *)
 let require_exact_object_fields context expected = function
   | `Assoc fields ->
     let actual = List.map fst fields in
-    let unique_actual = List.sort_uniq String.compare actual in
-    if
-      List.length actual = List.length unique_actual
-      && List.equal String.equal
-           (List.sort String.compare expected)
-           unique_actual
-    then Ok ()
-    else Error (context ^ " has unknown, duplicate, or missing fields")
+    let seen = List.sort_uniq String.compare actual in
+    let unknown = List.filter (fun f -> not (List.mem f expected)) seen in
+    let missing =
+      List.filter (fun f -> not (List.mem f seen))
+        (List.sort_uniq String.compare expected)
+    in
+    let duplicate =
+      List.filter
+        (fun f -> List.length (List.filter (String.equal f) actual) > 1)
+        seen
+    in
+    (match (unknown, missing, duplicate) with
+     | [], [], [] -> Ok ()
+     | _ ->
+         let group label = function
+           | [] -> None
+           | names ->
+               Some (Printf.sprintf "%s=[%s]" label (String.concat ", " names))
+         in
+         let groups =
+           List.filter_map
+             (fun part -> part)
+             [ group "missing" missing
+             ; group "unknown" unknown
+             ; group "duplicates" duplicate
+             ]
+         in
+         Error
+           (Printf.sprintf "%s fields mismatch (%s)" context
+              (String.concat ", " groups)))
   | _ -> Error (context ^ " must be an object")
 ;;
 
@@ -5303,6 +5352,19 @@ let goal_store_unavailable_detail json =
   | `Bool false, `String ("goal_store_unavailable" | "goal_task_links_unavailable"), `String detail -> Some detail
   | _ -> None
 
+(* Every field past the id is nullable on the wire, so each stays an option
+   here. A missing opening is not a zero time: the goal predates the server
+   recording openings, and dating it would invent one. *)
+let decode_planning_goal_history json =
+  let* pgh_goal_id = required_string_field json "goal_id" in
+  let* pgh_title = required_nullable_string_field json "title" in
+  let* pgh_opened_at = required_nullable_string_field json "opened_at" in
+  let* pgh_closed_at = required_nullable_string_field json "closed_at" in
+  let* pgh_final_phase = required_nullable_string_field json "final_phase" in
+  let* pgh_lifetime_hours = required_nullable_float_field json "lifetime_hours" in
+  Ok { pgh_goal_id; pgh_title; pgh_opened_at; pgh_closed_at; pgh_final_phase;
+       pgh_lifetime_hours }
+
 let decode_planning_snapshot json =
   let* () = match goal_store_unavailable_detail json with
     | Some detail -> Error detail | None -> Ok () in
@@ -5312,8 +5374,13 @@ let decode_planning_snapshot json =
   let* pl_rollup = decode_planning_rollup rollup_json in
   let* backlog_json = required_object_field json "task_backlog" in
   let* pl_backlog = decode_planning_backlog backlog_json in
+  let* history_json = required_object_field json "goal_history" in
+  let* unlisted_json = required_list_field history_json "unlisted" in
+  let* pl_goal_history =
+    decode_list "goal_history.unlisted" decode_planning_goal_history unlisted_json
+  in
   let* pl_generated_at = required_string_field json "generated_at" in
-  Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
+  Ok { pl_goals; pl_rollup; pl_backlog; pl_goal_history; pl_generated_at }
 
 let decode_keeper_runtime json =
   let* kr_name = required_string_field json "name" in

@@ -193,7 +193,7 @@ export function FullInventoryView({
       ${filtered.length > 0
         ? html`<${VirtualList}
             items=${filtered}
-            itemHeight=${130}
+            estimatedItemHeight=${180}
             renderItem=${(item: DashboardToolInventoryItem) => html`<${InventoryRow} item=${item} />`}
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="flex flex-col gap-3"

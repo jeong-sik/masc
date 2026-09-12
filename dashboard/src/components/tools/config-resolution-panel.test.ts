@@ -472,6 +472,23 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('prompts')
   })
 
+  it('keeps runtime paths usable when the installed binary has no repository path', () => {
+    render(
+      html`<${ConfigResolutionPanel}
+        runtimeResolution=${{
+          ...runtimeResolutionPayload(),
+          server_repo_path: { path: null, exists: false, source: 'server_binary' },
+        }}
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('경로 없음')
+    expect(container.textContent).toContain('/tmp/runtime-input')
+    expect(container.textContent).toContain('/tmp/workspace/.masc')
+    expect(container.querySelector('[aria-label="server repo 경로 복사"]')).toBeNull()
+    expect(container.querySelector('[aria-label="data root 경로 복사"]')).not.toBeNull()
+  })
+
   it('treats slash root as a valid root-relative prefix', () => {
     render(
       html`<${ConfigResolutionPanel}

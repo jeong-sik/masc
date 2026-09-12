@@ -5,10 +5,10 @@ User acceptance: an operator can tell whether their request is waiting, executin
 ## Evidence and work
 
 - TUI live progress used ACTIVE TURN and an animated glyph for every transcript phase, including Waiting and Stream_failed. Initial patch uses the typed phase for the heading and animates Working only. Parser verification passed; compiled and physical TUI checks remain pending.
-- Tool Started and Awaiting_result both render RUNNING. Receipt submission is not proof of execution; audit the producer and distinguish argument assembly, submitted work and actual execution.
+- Tool detail labels distinguish preparation and result waiting. The live progress row now does the same, retaining a held approval separately while exposing other current-attempt calls. The added regression covers another pending result, its own elapsed age, completion while the question remains, then a subsequent runtime attempt. Compiled CI and physical TUI proof for this change are pending.
 - RUN_ERROR becomes a persistent Message_error. A request_id is present on message rows, but recovery must be joined to the same request, not inferred from a later successful turn.
-- Live transcript does not currently expose explicit retry/fallback events. Add or identify authoritative attempt transitions before promising automatic recovery in UI.
-- Dashboard audit in progress: loading indicators, error alerts, runtime/keeper state and action-required surfaces.
+- Runtime attempt events now reach the TUI; the current attempt is shown separately from superseded tool evidence. Internal provider retries still need a distinct event before the UI can describe them.
+- TUI first: dashboard work is deferred per operator instruction.
 
 ## Display contract
 
@@ -21,3 +21,7 @@ Debug view: provider messages, HTTP status, attempt identities, model transition
 ## Remaining acceptance
 
 Exercise queued -> running -> completed; same-request failure -> automatic retry -> recovered; all attempts exhausted; operator cancellation; approval wait; stream disconnection with unknown outcome; old failure followed by a distinct request. Verify normal and debug views, narrow terminal rendering and dashboard accessibility. No live evidence yet establishes completion of this audit.
+
+## Call deferral and Keeper continuity
+
+The runtime returns `Tool_result.Deferred` for an approval-bound external effect and directs the model to continue independent work (`keeper_gate_deferred_payload.ml`, `keeper_tools_agent_core_handler_exec.ml`). Approval continuation is preserved after the turn finishes (`keeper_turn.ml`). Neither a deferred call nor a retained approval proves the Keeper is globally stopped. Conversely these paths alone do not prove that another task actually ran: that requires current tool/runtime events. The progress row must expose those events while the approval remains independently actionable.

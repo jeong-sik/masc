@@ -3820,9 +3820,9 @@ def planning_resize_budget_interaction(
     # first press lands on completed, which these fixtures leave empty --
     # the note this step is about is already on that screen. The old pair
     # was written for a default of Planning_filter_all: it waited for
-    # "show:active", the filter the pane had just left, and then for a note
+    # "filter:active", the filter the pane had just left, and then for a note
     # that a second press had already carried past.
-    empty = send_and_wait(process, master_fd, output, b"f", b"show:completed")
+    empty = send_and_wait(process, master_fd, output, b"f", b"filter:completed")
     if b"no goals in this filter" not in CSI_RE.sub(b"", empty):
         raise AssertionError(
             f"the empty filter drew no note: {empty!r}"
@@ -4160,7 +4160,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         board = send_and_wait(
             process, master_fd, output, b"s", b"post-trend"
         )
-        if b"order:trending" not in board:
+        if b"sort:trending" not in board:
             raise AssertionError(f"Board sort did not expose its order: {board!r}")
 
         fixtures["/api/v1/board?sort_by=trending"] = (

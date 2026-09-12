@@ -7406,7 +7406,12 @@ let palette_entries (state : state) =
          Palette_gate_mode (lane, mode)))
         [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
       [Workspace_gate; External_gate]
+  (* Both halves, because they are one reading split in two: Task Review lists
+     what waits for a ruling and Task Verdicts what was ruled. They sit one [v]
+     apart under Planning, so offering a jump to one and not the other makes the
+     nearer half look like the only one there is. *)
   @ [ "go Task Review", Palette_goto Verification ]
+  @ [ "go Task Verdicts", Palette_goto Harness ]
   @ [ "go Lanes", Palette_goto Lanes ]
   @ [ "go Clients", Palette_goto Clients ]
   @ [ "go Schedules", Palette_goto Schedules ]

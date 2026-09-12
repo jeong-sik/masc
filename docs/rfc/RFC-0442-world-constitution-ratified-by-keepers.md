@@ -19,7 +19,7 @@ keeper들이 실측 실패를 모아 규범을 만든다. 그 규범이 관측�
 승격하는 데 PR 두 건이 들었다. 그런데 이 파일은 코드 어디에서도 읽히지 않는다.
 
 ```
-$ rg -rn "corrective.grammar|corrective_grammar" -g '!config/prompts/*'
+$ rg -n "corrective.grammar|corrective_grammar" -g '!config/prompts/*'
 (0건)
 ```
 

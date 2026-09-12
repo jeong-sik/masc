@@ -36,11 +36,42 @@ let chosen_for uname =
   | Error reason -> "error:" ^ reason
 
 let test_darwin_gets_open_and_only_open () =
-  (* Before: "open" and "xdg-open" were tried in turn on any non-zero exit.
-     On macOS, "open" refusing a bad argument fell through to xdg-open, which
-     is never there, and the operator read 'xdg-open: command not found' for
-     a mistake that was ours. One kernel, one opener. *)
+  (* One kernel, one opener. xdg-open is never on macOS, so it is never a
+     fallback there. *)
   check str "Darwin -> open" "ok:open" (chosen_for "Darwin\n")
+
+let test_a_refusing_opener_runs_once_and_its_refusal_is_kept () =
+  (* The shell is a counter here. A non-zero exit from the chosen opener is
+     the answer the operator sees -- opener, status, URL -- not a reason to
+     run a second opener. *)
+  let url = "https://e.com/post/1?a=1&b=2" in
+  let commands = ref [] in
+  let run command =
+    commands := command :: !commands;
+    Unix.WEXITED 1
+  in
+  let outcome =
+    Masc_tui_browser.open_url_with ~run ~kernel:Masc_tui_browser.Darwin url
+  in
+  check (Alcotest.result str str) "the refusal names opener, status and url"
+    (Error ("open exited 1 for " ^ url))
+    outcome;
+  check (Alcotest.list str) "exactly one command ran, the Darwin opener's"
+    [ "open '" ^ url ^ "'" ]
+    !commands
+
+let test_the_browser_gets_the_page_not_the_picture_or_the_title () =
+  (* Three distinct strings, so the wrong pick is visible. The title is
+     indented for the screen; handing it to a shell would open nothing. The
+     picture is what just failed. The page is what the operator chose. *)
+  let page_url = "https://e.com/post/1" in
+  let picked =
+    Masc_tui_browser.browser_url
+      { Masc_tui_browser.title = "  A post about nothing";
+        page_url;
+        image_url = "https://cdn.e.com/preview/1.png" }
+  in
+  check str "page url, not image url, not title" page_url picked
 
 let test_linux_gets_xdg_open () =
   check str "Linux -> xdg-open" "ok:xdg-open" (chosen_for "Linux")
@@ -64,5 +95,9 @@ let () =
             test_linux_gets_xdg_open;
           Alcotest.test_case "an unknown kernel is refused by name" `Quick
             test_an_unknown_kernel_is_refused_by_name;
+          Alcotest.test_case "a refusing opener runs once and its refusal is kept"
+            `Quick test_a_refusing_opener_runs_once_and_its_refusal_is_kept;
+          Alcotest.test_case "the browser gets the page, not the picture or the title"
+            `Quick test_the_browser_gets_the_page_not_the_picture_or_the_title;
         ] );
     ]

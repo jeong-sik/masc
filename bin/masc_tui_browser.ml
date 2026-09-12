@@ -17,10 +17,10 @@ let kernel_of_uname raw =
 
 let command_for ~opener ~url = Printf.sprintf "%s %s" opener (Filename.quote url)
 
-(* One question to the kernel, answered before any opener runs. Trying
-   openers in turn on a non-zero exit cannot tell "this opener is not here"
-   from "this opener ran and refused the argument", and on macOS that second
-   case used to fall through to xdg-open, which is never there. *)
+(* One question to the kernel, answered before the opener runs. The kernel
+   decides the opener; the opener's exit status is the answer. A non-zero
+   exit cannot tell "not installed" from "ran and refused", so it is
+   reported as-is and no second opener is run. *)
 let host_kernel () =
   match Unix.open_process_in "uname -s" with
   | exception Unix.Unix_error (err, fn, _) ->
@@ -34,13 +34,19 @@ let host_kernel () =
     | Unix.WSIGNALED signal, _ | Unix.WSTOPPED signal, _ ->
       Error (Printf.sprintf "uname -s stopped by signal %d" signal))
 
+let open_url_with ~run ~kernel url =
+  let name = opener_command (opener_for kernel) in
+  match run (command_for ~opener:name ~url) with
+  | Unix.WEXITED 0 -> Ok name
+  | Unix.WEXITED code -> Error (Printf.sprintf "%s exited %d for %s" name code url)
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+    Error (Printf.sprintf "%s stopped by signal %d for %s" name signal url)
+
 let open_url url =
   match host_kernel () with
   | Error reason -> Error reason
-  | Ok kernel -> (
-    let name = opener_command (opener_for kernel) in
-    match Unix.system (command_for ~opener:name ~url) with
-    | Unix.WEXITED 0 -> Ok name
-    | Unix.WEXITED code -> Error (Printf.sprintf "%s exited %d for %s" name code url)
-    | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-      Error (Printf.sprintf "%s stopped by signal %d for %s" name signal url))
+  | Ok kernel -> open_url_with ~run:Unix.system ~kernel url
+
+type undrawn_image = { title : string; page_url : string; image_url : string }
+
+let browser_url { title = _; page_url; image_url = _ } = page_url

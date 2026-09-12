@@ -31,8 +31,26 @@ val command_for : opener:string -> url:string -> string
     [?] by construction, and an unquoted one would reach the shell as
     several commands. *)
 
+val open_url_with :
+  run:(string -> Unix.process_status) -> kernel:kernel -> string -> (string, string) result
+(** [open_url] with the kernel already answered and the shell supplied.
+    [run] is given exactly one command, the chosen opener's, and its exit
+    status is the result: [Ok opener_name] on 0, otherwise [Error] with the
+    opener, the status and the URL. No other opener is run. *)
+
 val open_url : string -> (string, string) result
-(** Asks [uname -s] once, runs the one opener for that kernel, and returns
-    [Ok opener_name] when it exited 0. [Error] names what refused: an unknown
-    kernel, a failed [uname], or the opener's exit status with the URL it was
-    given -- something an operator can act on. *)
+(** Asks [uname -s] once, then [open_url_with] on the real shell. [Error]
+    names what refused: an unknown kernel, a failed [uname], or the opener's
+    exit status with the URL it was given -- something an operator can act
+    on. *)
+
+type undrawn_image = { title : string; page_url : string; image_url : string }
+(** A web image the TUI could not, or does not, draw inline. [title] is the
+    display line, indented for the screen, and is never a location.
+    [page_url] is the link the operator chose. [image_url] is the preview
+    picture fetched for that link -- the thing that failed. *)
+
+val browser_url : undrawn_image -> string
+(** The one URL a browser gets for an [undrawn_image]: [page_url]. The
+    picture that could not be drawn is not what the operator asked for, and
+    the display title is not a URL at all. *)

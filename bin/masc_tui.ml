@@ -1920,14 +1920,16 @@ type async_msg =
   | Image_render_ready of {
       title : string;
       caption : string list;
-      url : string;
+      page_url : string;
+      image_url : string;
       result : (string, string) result;
     }
       (** A [v]-requested web image, downloaded and converted to PNG off the
           render loop. [result] is the PNG bytes ready to draw, or why they
           could not be produced. [title] is indented for the screen and is
-          never a path; [url] is what was fetched, and what a browser gets
-          when drawing fails. *)
+          never a location. [image_url] is what was fetched; [page_url] is the
+          link the operator chose, and the one a browser gets when drawing
+          fails (see [Masc_tui_browser.browser_url]). *)
   | Keeper_turns_loaded of (Tui_decode.keeper_turn_row list, string) result
       (** Which keepers are mid-turn right now, for the "answering now"
           badge drawn from every surface. *)
@@ -7446,9 +7448,12 @@ let prepare_remote_image_bytes url =
    render fiber, not here. The blocking curl/sips live inside run_in_systhread
    so the domain keeps rendering; the loading line is shown at once so the
    keypress is not silent. terminal_draws_images = false skips the download and
-   opens a browser instead. *)
-let launch_image_render ~mailbox ~notice ~title ~caption url =
+   opens the page in a browser instead. *)
+let launch_image_render ~mailbox ~notice ~title ~caption ~page_url image_url =
   if !terminal_draws_images = Some false then
+    let url =
+      Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
+    in
     match Masc_tui_browser.open_url url with
     | Ok opener ->
         notice ~role:Message_local
@@ -7456,19 +7461,22 @@ let launch_image_render ~mailbox ~notice ~title ~caption url =
     | Error err ->
         notice ~role:Message_error (Printf.sprintf "Could not open browser: %s" err)
   else begin
-    notice ~role:Message_local (Printf.sprintf "Loading image: %s" url);
+    notice ~role:Message_local (Printf.sprintf "Loading image: %s" image_url);
     let run () =
       let result =
-        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () -> prepare_remote_image_bytes url)
+        Eio_guard.run_in_systhread ~label:"tui-remote-image-bytes" (fun () ->
+            prepare_remote_image_bytes image_url)
       in
-      enqueue_async mailbox (Image_render_ready { title; caption; url; result })
+      enqueue_async mailbox
+        (Image_render_ready { title; caption; page_url; image_url; result })
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
     | None ->
         enqueue_async mailbox
           (Image_render_ready
-             { title; caption; url; result = Error "Eio switch unavailable" })
+             { title; caption; page_url; image_url;
+               result = Error "Eio switch unavailable" })
   end
 
 (* The staged door. Ctrl-V leaves the image in the attachment as base64 for
@@ -12146,7 +12154,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         | Error reason -> refuse reason
         | Ok data -> draw_image state ~refuse ~title:name data
       end
-  | Image_render_ready { title; caption; url; result } ->
+  | Image_render_ready { title; caption; page_url; image_url; result } ->
       if not state.msx_open then begin
       let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
       (match result with
@@ -12156,6 +12164,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            in
            draw_image state ~caption ~refuse ~title data
        | Error e -> (
+           let url =
+             Masc_tui_browser.browser_url { Masc_tui_browser.title; page_url; image_url }
+           in
            match Masc_tui_browser.open_url url with
            | Ok opener ->
                notice ~role:Message_local
@@ -16328,7 +16339,7 @@ and is loaded on demand through keeper_skill.
                        @ [ "  " ^ Masc_tui_link_preview.site_label p ^ " \xc2\xb7 " ^ url ]
                      in
                      launch_image_render ~mailbox:async_messages ~notice ~title
-                       ~caption img_url
+                       ~caption ~page_url:url img_url
                  | None -> ())
             | _ -> ())
        | Some k when state.patch_modal_open ->

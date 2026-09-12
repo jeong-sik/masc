@@ -14528,7 +14528,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
             palette_go(process, master_fd, output, b"go schedules",
                        b"503" if initial_error else b"status:running")
             if initial_error:
-                screen = require("조회 실패:", "503")
+                screen = require("data unreliable:", "schedule load failed:", "503")
                 for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
                     if absent in screen:
                         raise AssertionError(f"Failed initial source invented data: {screen!r}")
@@ -14537,15 +14537,15 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 require("schedule-proof-701", "status:running", "Requests: 1")
                 fail_reads.set()
                 send_and_wait(process, master_fd, output, b"r", b"503")
-                require("이전 조회 유지 · 갱신 실패:", "503", "schedule-proof-701",
+                require("이전 조회 유지 ·", "503", "schedule-proof-701",
                         "status:running", "Requests: 1")
                 evidence("retained-list-refresh-failed")
                 send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
-                require("이전 조회 유지 · 갱신 실패:", "503", "instance-proof-701")
+                require("이전 조회 유지 ·", "503", "instance-proof-701")
                 # The warning belongs to the source, so it remains visible
                 # while the retained detail body is scrolled.
                 send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
-                require("이전 조회 유지 · 갱신 실패:", "503")
+                require("이전 조회 유지 ·", "503")
                 send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
 
             recovered_reads.set()

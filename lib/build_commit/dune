@@ -6,11 +6,12 @@
  (wrapped false))
 
 ; Embed the git commit and its timestamp together (RFC-0382 follow-up,
-; "binary unknown" root fix): a copied binary (e.g. the launchd deploy at
-; <base>/bin) must testify to its own origin. (universe) re-runs
-; the probe every build; downstream recompiles only when the hash changes.
-; Sandboxing is disabled so git can ascend to the checkout being built —
-; in a worktree that is the worktree HEAD, which is the truth we want.
+; "binary unknown" root fix). The probe is a script rather than an inline
+; command so the checkout path, the container fallback and the validation of
+; the injected value stay readable; it carries its own reasoning.
+; (universe) re-runs the probe every build; downstream recompiles only when
+; the emitted hash changes. Sandboxing is disabled so git can ascend to the
+; checkout being built.
 (rule
  (targets build_commit_generated.ml)
  (deps
@@ -19,7 +20,4 @@
  (action
   (with-stdout-to
    %{targets}
-   (run
-    bash
-    -c
-    "c=$(git rev-parse HEAD 2>/dev/null || true); if [ -n \"$c\" ]; then printf 'let commit : string option = Some \"%s\"\\n' \"$c\"; t=$(git show -s --format=%ct \"$c\" 2>/dev/null || true); case \"$t\" in ''|*[!0-9]*) printf 'let commit_unix_ts : int64 option = None\\n' ;; *) printf 'let commit_unix_ts : int64 option = Some %sL\\n' \"$t\" ;; esac; else printf 'let commit : string option = None\\nlet commit_unix_ts : int64 option = None\\n'; fi"))))
+   (run bash %{dep:probe-commit.sh}))))

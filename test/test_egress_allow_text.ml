@@ -104,11 +104,12 @@ let test_a_dotted_keeper_name_stays_one_key () =
 ;;
 
 (* The writer emits text and does not judge it; the refusal belongs to the
-   load, which is also where an operator's hand edit is caught. A NUL is
-   refused twice over -- the TOML lexer rejects the raw byte in a string
-   before the rule matcher ever sees it, which is the earlier of the two and
-   the better one. *)
-let test_a_rule_that_cannot_parse_fails_the_load_not_the_write () =
+   load, which is also where an operator's hand edit is caught. A NUL reaches
+   the load as an escape, because the writer has to escape a control byte to
+   emit TOML at all, so the rule matcher is what refuses it. What this pins is
+   that the refusal names the table the rule sits in; the wording belongs to
+   the TOML library and an upgrade may reword it. *)
+let test_a_control_byte_in_a_rule_fails_the_load_not_the_write () =
   let text = Runtime.update_egress_allow_text base ~keeper_name:"alpha" ~allow:[ "evil\x00.com" ] in
   match Runtime_toml.parse_string text with
   | Ok _ -> failf "expected a NUL rule to fail the load"
@@ -116,7 +117,7 @@ let test_a_rule_that_cannot_parse_fails_the_load_not_the_write () =
     check bool "the load refuses it and says where" true
       (List.exists
          (fun (e : Runtime_toml.parse_error) ->
-           String_util.contains_substring e.message "not allowed inside a string literal")
+           String_util.contains_substring e.path "egress.keepers")
          errors)
 ;;
 
@@ -312,8 +313,8 @@ let () =
             test_removing_an_absent_keeper_changes_nothing
         ] )
     ; ( "refusals"
-      , [ test_case "a rule that cannot parse fails the load not the write" `Quick
-            test_a_rule_that_cannot_parse_fails_the_load_not_the_write
+      , [ test_case "a control byte in a rule fails the load not the write" `Quick
+            test_a_control_byte_in_a_rule_fails_the_load_not_the_write
         ; test_case "a rule the matcher refuses fails the load" `Quick
             test_a_rule_the_matcher_refuses_fails_the_load
         ] )

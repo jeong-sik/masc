@@ -8,6 +8,8 @@ import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { RunActivityEvent } from './run-activity-store'
 import { ideContextFocus } from './ide-state'
 
+const codebase = 'github.com_test_repo'
+
 const diffRows: ReadonlyArray<UnifiedDiffRow> = [
   { kind: 'add', oldLine: null, newLine: 12, text: '+let progress = ...' },
   { kind: 'delete', oldLine: 13, newLine: null, text: '-let old = ...' },
@@ -17,6 +19,7 @@ const events: ReadonlyArray<RunActivityEvent> = [
   {
     id: 'evt-1',
     run_id: 'run-default',
+    codebase,
     keeper_id: 'sangsu',
     verb: 'commented on',
     target: 'board:post-1',
@@ -28,6 +31,7 @@ const events: ReadonlyArray<RunActivityEvent> = [
     // parsing with event.context for surface counts). Drives goal/task/
     // board/pr/git surfaces; comment comes from anchored threads.
     context: {
+      file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
       goal_id: 'goal-ide',
       task_id: 'task-42',
       board_post_id: 'post-1',
@@ -54,8 +58,44 @@ const thread: AnchoredThread = {
 }
 
 describe('IdeContextLens', () => {
+  it('focuses only explicit file events in the selected codebase across same-path repository switches', () => {
+    const shared = 'src/shared.ml'
+    const event = (id: string, scope: string | undefined, file?: string): RunActivityEvent => ({
+      id, codebase: scope, run_id: 'run-default', keeper_id: 'reviewer', verb: 'noted',
+      target: id, timestamp_ms: 1,
+      context: file === undefined ? { goal_id: 'global-goal' } : { file_path: file, line: 4 },
+    })
+    const mixed = [
+      event('repo-a-file', 'github.com_owner_a', shared),
+      event('repo-b-same-name', 'github.com_owner_b', shared),
+      event('other-file', 'github.com_owner_a', 'src/other.ml'),
+      event('global-path-without-scope', undefined, shared),
+      event('fileless', 'github.com_owner_a'),
+    ]
+    const container = document.createElement('div')
+    const show = (scope: string | undefined) => render(h(IdeContextLens, {
+      filePath: shared, codebase: scope, events: mixed, diffRows: [],
+    }), container)
+    try {
+      show('github.com_owner_a')
+      expect(container.querySelector('[data-total-anchors]')?.getAttribute('data-total-anchors')).toBe('1')
+      const first = container.querySelector<HTMLButtonElement>('.ide-context-anchor-action')!
+      expect(first.textContent).toContain('repo-a-file')
+      fireEvent.click(first)
+      expect(ideContextFocus.value).toMatchObject({ file_path: shared, line: 4, source_id: 'event-repo-a-file' })
+      show('github.com_owner_b')
+      expect(container.querySelector('[data-total-anchors]')?.getAttribute('data-total-anchors')).toBe('1')
+      expect(container.querySelector('.ide-context-anchor-action')?.textContent).toContain('repo-b-same-name')
+      expect(container.textContent).not.toContain('repo-a-file')
+      show(undefined)
+      expect(container.querySelector('[data-total-anchors]')?.getAttribute('data-total-anchors')).toBe('0')
+      expect(container.querySelector('[aria-label^="Open Code "]')).toBeNull()
+    } finally { render(null, container); ideContextFocus.value = null }
+  })
+
   it('derives linked surfaces from threads, diff rows, and activity', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows,
       events,
@@ -107,6 +147,7 @@ describe('IdeContextLens', () => {
 
   it('does not claim telemetry links from local-only code evidence', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows,
       events: [],
@@ -126,6 +167,7 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
+        codebase,
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         diffRows,
         events,
@@ -184,6 +226,7 @@ describe('IdeContextLens', () => {
     }
     render(
       h(IdeContextLens, {
+        codebase,
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         diagnostics: [
           {
@@ -218,6 +261,7 @@ describe('IdeContextLens', () => {
     const richEvent: RunActivityEvent = {
       id: 'evt-rich',
       run_id: 'run-default',
+      codebase,
       keeper_id: 'sangsu',
       verb: 'noted',
       target: 'PR #15000',
@@ -235,6 +279,7 @@ describe('IdeContextLens', () => {
       },
     }
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diagnostics: [
         {
@@ -280,6 +325,7 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
+        codebase,
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         diffRows: [],
         events: [],
@@ -303,6 +349,7 @@ describe('IdeContextLens', () => {
 
   it('links LSP diagnostics into file line anchors', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diagnostics: [{
         file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -350,6 +397,7 @@ describe('IdeContextLens', () => {
 
   it('keeps diagnostic telemetry routes quiet without source metadata', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diagnostics: [{
         file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -370,11 +418,13 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
+        codebase,
         filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         diffRows: [],
         events: [{
           id: 'evt-planning',
           run_id: 'run-default',
+          codebase,
           keeper_id: 'sangsu',
           verb: 'edited',
           target: 'lib/keeper/keeper_tool_ide_runtime.ml',
@@ -441,6 +491,7 @@ describe('IdeContextLens', () => {
 
   it('links conversation threads into board, comment, keeper, and line context', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [],
@@ -461,11 +512,13 @@ describe('IdeContextLens', () => {
 
   it('uses structured activity context as file, line, PR, task, goal, log, and git evidence', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-context',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'telemetry',
@@ -571,11 +624,13 @@ describe('IdeContextLens', () => {
 
   it('promotes tagged activity references into routeable IDE context links', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-tagged-context',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'PR #15000',
@@ -599,6 +654,7 @@ describe('IdeContextLens', () => {
         // surface. line stays in detail (context.line without file_path is
         // filtered out by deriveIdeContextLens).
         context: {
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           pr_id: '15000',
           session_id: 'sess-9',
           operation_id: 'op-9',
@@ -655,11 +711,13 @@ describe('IdeContextLens', () => {
 
   it('promotes tagged runtime references into runtime anchors', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-tagged-runtime',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'runtime scope',
@@ -669,6 +727,7 @@ describe('IdeContextLens', () => {
         // line stays in detail (refs.line); context.line without file_path
         // would be filtered out by deriveIdeContextLens.
         context: {
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           session_id: 'sess-9',
           operation_id: 'op-9',
           worker_run_id: 'wr-9',
@@ -719,11 +778,13 @@ describe('IdeContextLens', () => {
 
   it('prefers structured activity context over tagged fallback references', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-structured-wins',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'PR #99999',
@@ -749,11 +810,13 @@ describe('IdeContextLens', () => {
 
   it('keeps other-file activity out of the current-file lens', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-other-file',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'telemetry',
@@ -779,11 +842,13 @@ describe('IdeContextLens', () => {
 
   it('normalizes file paths before matching current-file lens inputs', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-backslash',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'telemetry',
@@ -817,11 +882,13 @@ describe('IdeContextLens', () => {
 
   it('does not turn unscoped event lines into current-file anchors', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-line-only',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'telemetry',
@@ -842,6 +909,7 @@ describe('IdeContextLens', () => {
 
   it('does not advertise delete-only diff rows as editor-focusable lines', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [{ kind: 'delete', oldLine: 13, newLine: null, text: '-let old = ...' }],
       events: [],
@@ -858,11 +926,13 @@ describe('IdeContextLens', () => {
 
   it('routes log context into the runtime audit focus', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-log',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'telemetry',
@@ -881,11 +951,13 @@ describe('IdeContextLens', () => {
 
   it('routes telemetry-only context into event-log query focus', () => {
     const model = deriveIdeContextLens({
+      codebase,
       filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       diffRows: [],
       events: [{
         id: 'evt-telemetry',
         run_id: 'run-default',
+        codebase,
         keeper_id: 'sangsu',
         verb: 'noted',
         target: 'telemetry',

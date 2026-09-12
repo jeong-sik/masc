@@ -1650,7 +1650,10 @@ let prepare_degraded_loaded ~config_path
         Ok (loaded, Some degradation)
   in
   let active_runtimes, _, _, _, _, _ = loaded in
-  let* () = validate_runtime_max_context ~config_path active_runtimes in
+  let* () =
+    validate_runtime_max_context active_runtimes
+    |> Result.map_error (to_diagnostic_text ~config_path)
+  in
   let* () = validate_keeper_dispatch_request_caps ~config_path
       ~verifier_exact_slot_ids:(verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
       loaded in

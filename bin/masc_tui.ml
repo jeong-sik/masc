@@ -5445,7 +5445,7 @@ let row_list (state : state) : row_list option =
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
              Some
-               { rl_count = List.length rows
+               { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
                ; rl_place =
                    (fun index ->
@@ -5509,13 +5509,23 @@ let row_list (state : state) : row_list option =
            windowed ~count:(List.length (fusion_list_entries state))
              ~cursor:state.fusion_cursor (fun index ->
                state.fusion_cursor <- index))
+  (* The list pane draws its window around the cursor rather than holding a
+     scroll of its own, so a landing is on screen the moment the cursor names
+     it. With the text focused j/k scrolls the reading instead and there is no
+     row to land on -- the same condition [surface_row_texts] reads. *)
+  | Resources ->
+      (match state.resource_focus, state.resources_list with
+       | Right_pane, _ | _, None -> None
+       | Left_pane, Some rows ->
+           windowed ~count:(List.length rows) ~cursor:state.resources_cursor
+             (fun index -> state.resources_cursor <- index))
   (* Named rather than caught. A surface that grows a row cursor is added
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
      reading. *)
   | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Config | Resources | Tools ->
+  | Config | Tools ->
       None
 
 (* Move the active surface's row cursor to the next row whose search text
@@ -11565,9 +11575,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
+          (* [rows] stays a list for the memo scan and the width fold just
+             below, both of which read it once front to back. The pane keeps
+             the array. *)
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok rows);
+              (Ok (Array.of_list rows));
           (* The jump that asked for this file may have named a line; the
              reset and the jump live together so neither overwrites the
              other. Consumed once -- the next plain open starts at the top. *)
@@ -11649,7 +11662,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                when String.equal open_path location.ll_path ->
                  let cursor =
                    max 0
-                     (min (location.ll_line - 1) (List.length rows - 1))
+                     (min (location.ll_line - 1) (Array.length rows - 1))
                  in
                  state.code_file_cursor <- cursor;
                  (* Follow the jump: a definition past the fold is a cursor
@@ -16266,17 +16279,20 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "esc" | "q" | "Q" -> close ()
             | "j" | "down" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 1
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
             | "k" | "up" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
             | "d" | "pagedown" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 5
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:5
             | "u" | "pageup" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
             | "g" | "home" ->
                 state.link_modal_scroll <- 0
             | "G" | "end" ->
-                state.link_modal_scroll <- 9999
+                state.link_modal_scroll <-
+                  Masc_tui_types.clamped_scroll_end
             | "n" | "right" | "\t" ->
                 let count = List.length state.link_modal_links in
                 if count > 1 then begin
@@ -16910,8 +16926,14 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
-         when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+         when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
+           && (not (List.mem key ["tab"; "\t"; "shift-tab"])
+               || match browser_lane_on_screen state with
+                  | Some view ->
+                      Option.is_none view.client_picker && Option.is_none view.url_draft
+                      && (Option.is_some view.scene || Browser_lane_view.busy view)
+                  | None -> false) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -16925,6 +16947,12 @@ and is loaded on demand through keeper_skill.
                 let read view =
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
+                in
+                let reveal_selection selected =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let scroll = Masc_tui_render.browser_lane_selection_scroll
+                    state ~terminal_rows ~cols selected in
+                  state.browser_lane <- Some { selected with scroll }
                 in
                 (match key with
                  | "esc" | "left" ->
@@ -16959,8 +16987,10 @@ and is loaded on demand through keeper_skill.
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
-                     if count > 0 then state.browser_lane <- Some {view with scene_cursor =
+                     if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
+                     reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
                      (match scene_context view with
                       | Some context -> copy_reference_to_terminal render_schedule context;
@@ -16968,12 +16998,15 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
-                      | Some scene, Some ({kind=Region _;_} as node) ->
+                      | Some scene, Some node ->
+                          (match scene_target_action node with
+                           | Some Read_region ->
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
-                      | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
+                           | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
+                           | None -> ())
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
@@ -17415,7 +17448,8 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Resources ->
            open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->
-           state.resource_scroll <- state.resource_scroll + 1
+           state.resource_scroll <-
+             Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
@@ -18225,6 +18259,16 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       (* The reading, not the list. [row_list] answers for the list pane
+          below; with the text focused the rows are the ones the frame wrapped
+          out of the resource body, which the keypress cannot count -- so End
+          names a row past any of them and the frame reports back where that
+          landed. *)
+       | Some ("home" | "end")
+         when state.view = Resources && state.resource_focus = Right_pane ->
+           state.resource_scroll <-
+             (if key = Some "end" then Masc_tui_types.clamped_scroll_end
+              else 0)
        (* Every other list. The two surfaces above answer first because their
           rows are drawn newest first, so their Home is the live end rather
           than the first row -- the rest read oldest first and take the plain
@@ -18410,15 +18454,29 @@ and is loaded on demand through keeper_skill.
              | Keepers _ | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
                  move_list_by_rows state ~delta:(direction * page)
-             (* No row list to page. Overview's two panes, Activity's ring and
-                the Tools and Resources listings are built by the frame out of
-                text the frame formats, so the count a page needs does not
-                exist at the keypress; Config's five panes each carry a cursor
-                of their own meaning. Activity pages with g and G, Tools with
-                Home and End. Left named rather than folded into the arm above,
-                so the day one of them gains a row list this reads as a lie
-                rather than as silence (#35305). *)
-             | Overview | Acting | Config | Tools | Resources -> ())
+             (* Two panes, two meanings: the list moves a cursor like the
+                arm above, the reading scrolls. [move_list_by_rows] finds the
+                list only while the list is focused, so the reading's own
+                page is spelled here rather than left silent. *)
+             | Resources ->
+                 (match state.resource_focus with
+                  | Right_pane ->
+                      state.resource_scroll <-
+                        (if direction > 0 then
+                          Masc_tui_types.scroll_down_from state.resource_scroll
+                            ~by:page
+                        else max 0 (state.resource_scroll + (direction * page)))
+                  | Left_pane ->
+                      move_list_by_rows state ~delta:(direction * page))
+             (* No row list to page. Overview's two panes and Activity's ring
+                are built by the frame out of text the frame formats, so the
+                count a page needs does not exist at the keypress; Config's
+                five panes each carry a cursor of their own meaning. Activity
+                goes to the newest with g, Tools with Home and End. Left named
+                rather than folded into the arm above, so the day one of them
+                gains a row list this reads as a lie rather than as silence
+                (#35305). *)
+             | Overview | Acting | Config | Tools -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which
@@ -19004,7 +19062,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19303,7 +19361,8 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <- state.resource_scroll + 1
+                  state.resource_scroll <-
+                    Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
                 else
                   let total =
                     match state.resources_list with
@@ -19376,7 +19435,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19765,7 +19824,7 @@ and is loaded on demand through keeper_skill.
                                 (min
                                    (Masc.Tui_decode.file_change_target_line change
                                     - 1)
-                                   (List.length rows - 1))
+                                   (Array.length rows - 1))
                             in
                             state.code_file_cursor <- cursor;
                             state.code_file_scroll <-

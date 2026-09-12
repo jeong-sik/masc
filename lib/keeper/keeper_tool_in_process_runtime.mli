@@ -141,6 +141,21 @@ val handle_memory_write_with_outcome
 (** Validate [args] and atomically upsert this Keeper's current Memory OS
     snapshot. This is an internal self-write, not an external Gate effect. *)
 
+val handle_constitution_write_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** Write one norm into this world's constitution (RFC-0442). An internal
+    self-write like the memory tools, not an external Gate effect. *)
+
+val handle_constitution_remove_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** Take one norm back out of this world's constitution (RFC-0442). *)
+
 val handle_memory_retract_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta

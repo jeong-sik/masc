@@ -19,8 +19,16 @@ If you use the 0.35.2 installer, refer to that tag's documentation. Multi-select
 
 This table is what CI targets. An install counts as verified only after you
 have checked the successful `Release` run for that release and the actual
-assets. Alpine/musl, Linux with an older glibc, and macOS older than the
-versions above are not covered by these binaries. An Intel Mac offers no Apple
+assets.
+
+The Linux binaries are built inside an Ubuntu 22.04 container, so they need
+**glibc 2.35 or newer** — Ubuntu 22.04, Debian 12, RHEL 10 and anything later.
+The release fails rather than publishing a binary that asks for more, so this
+floor is checked and not merely intended (`scripts/check-glibc-floor.sh`). The
+glibc floor is separate from the shared libraries listed below, which each
+distribution still has to provide. RHEL 9 ships glibc 2.34 and is below the
+floor. Alpine and other musl distributions are not covered, and neither is
+macOS older than the versions above. An Intel Mac offers no Apple
 Container based microVM, so choose Docker or remote SSH there. Runner names
 follow the [official GitHub list](https://github.com/actions/runner-images).
 
@@ -36,6 +44,14 @@ Ubuntu 24.04:
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
   libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+```
+
+Ubuntu 22.04 and Debian 12 name the OpenSSL package `libssl3`, not `libssl3t64`:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
+  libssl3 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
 macOS requires **macOS 14.0 or later on Apple Silicon** or **macOS 15.0 or later on Intel**. The installer verifies and installs the matching Python and shared-library runtime with the release. It does not install Homebrew or Xcode command-line tools.

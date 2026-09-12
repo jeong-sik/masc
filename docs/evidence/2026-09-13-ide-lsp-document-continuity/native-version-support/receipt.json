@@ -1,0 +1,181 @@
+{
+  "scope": "Real ocamllsp protocol on a synthetic standalone file; not installed IDE or Keeper evidence",
+  "pid": 37782,
+  "server": "/Users/dancer/.opam/5.5.0/bin/ocamllsp",
+  "passed": true,
+  "capabilities": {
+    "codeActionProvider": true,
+    "codeLensProvider": {
+      "resolveProvider": false
+    },
+    "completionProvider": {
+      "resolveProvider": true,
+      "triggerCharacters": [
+        ".",
+        "#"
+      ]
+    },
+    "declarationProvider": true,
+    "definitionProvider": true,
+    "documentFormattingProvider": true,
+    "documentHighlightProvider": true,
+    "documentRangeFormattingProvider": true,
+    "documentSymbolProvider": true,
+    "executeCommandProvider": {
+      "commands": [
+        "dune/promote"
+      ]
+    },
+    "experimental": {
+      "ocamllsp": {
+        "interfaceSpecificLangId": true,
+        "handleSwitchImplIntf": true,
+        "handleInferIntf": true,
+        "handleTypedHoles": true,
+        "handleJumpToTypedHole": true,
+        "handleWrappingAstNode": true,
+        "diagnostic_promotions": true,
+        "handleHoverExtended": true,
+        "handleMerlinCallCompatible": true,
+        "handleTypeEnclosing": true,
+        "handleGetDocumentation": true,
+        "handleConstruct": true,
+        "handleTypeSearch": true,
+        "handleJump": true,
+        "handlePhrase": true,
+        "handleTypeExpression": true,
+        "handleLocate": true,
+        "handleDestruct": true,
+        "handleLocateTypes": true,
+        "handleRefactorExtract": true
+      }
+    },
+    "foldingRangeProvider": true,
+    "hoverProvider": true,
+    "inlayHintProvider": true,
+    "referencesProvider": true,
+    "renameProvider": {
+      "prepareProvider": true
+    },
+    "selectionRangeProvider": true,
+    "semanticTokensProvider": {
+      "full": {
+        "delta": true
+      },
+      "legend": {
+        "tokenModifiers": [
+          "declaration",
+          "definition",
+          "readonly",
+          "static",
+          "deprecated",
+          "abstract",
+          "async",
+          "modification",
+          "documentation",
+          "defaultLibrary"
+        ],
+        "tokenTypes": [
+          "namespace",
+          "type",
+          "class",
+          "enum",
+          "interface",
+          "struct",
+          "typeParameter",
+          "parameter",
+          "variable",
+          "property",
+          "enumMember",
+          "event",
+          "function",
+          "method",
+          "macro",
+          "keyword",
+          "modifier",
+          "comment",
+          "string",
+          "number",
+          "regexp",
+          "operator",
+          "decorator"
+        ]
+      }
+    },
+    "signatureHelpProvider": {
+      "triggerCharacters": [
+        " ",
+        "~",
+        "?",
+        ":",
+        "("
+      ]
+    },
+    "textDocumentSync": {
+      "change": 2,
+      "openClose": true,
+      "save": {
+        "includeText": false
+      },
+      "willSave": false,
+      "willSaveWaitUntil": false
+    },
+    "typeDefinitionProvider": true,
+    "workspace": {
+      "workspaceFolders": {
+        "changeNotifications": true,
+        "supported": true
+      }
+    },
+    "workspaceSymbolProvider": true
+  },
+  "invalid_document_diagnostics": {
+    "diagnostics": [
+      {
+        "code": "hole",
+        "message": "This typed hole should be replaced with an expression of type 'a",
+        "range": {
+          "end": {
+            "character": 11,
+            "line": 0
+          },
+          "start": {
+            "character": 11,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      },
+      {
+        "message": "Syntax error, expecting fun_expr",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 1
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      }
+    ],
+    "uri": "file:///private/tmp/masc-lsp-native-document-v2-20260913/workspace/sample.ml"
+  },
+  "valid_document_diagnostics": {
+    "diagnostics": [],
+    "uri": "file:///private/tmp/masc-lsp-native-document-v2-20260913/workspace/sample.ml"
+  },
+  "pull_diagnostics_response": {
+    "id": 2,
+    "jsonrpc": "2.0",
+    "error": {
+      "code": -32603,
+      "message": "Request not supported yet!"
+    }
+  },
+  "exit_code": 0
+}

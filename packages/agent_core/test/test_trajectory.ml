@@ -16,6 +16,8 @@ let make_record
       ?block_kind
       ?assistant_block
       ?tool_use_id
+      ?tool_turn
+      ?tool_planned_index
       ?tool_name
       ?tool_input
       ?tool_execution_mode
@@ -48,8 +50,8 @@ let make_record
   ; native_tool_identity = None
   ; native_tool_origin = None
   ; tool_input
-  ; tool_turn = None
-  ; tool_planned_index = None
+  ; tool_turn
+  ; tool_planned_index
   ; tool_batch_index = None
   ; tool_batch_size = None
   ; tool_execution_mode
@@ -154,6 +156,7 @@ let test_tool_call_pairing () =
         ~agent_name:"tool-agent"
         ~record_type:Tool_execution_started
         ~tool_use_id:"tu-1"
+        ~tool_turn:1 ~tool_planned_index:0
         ~tool_name:"read_file"
         ~tool_input:(`Assoc [ "path", `String "/foo" ])
         ~tool_execution_mode:Tool_contract.Serial
@@ -164,6 +167,7 @@ let test_tool_call_pairing () =
         ~agent_name:"tool-agent"
         ~record_type:Tool_execution_finished
         ~tool_use_id:"tu-1"
+        ~tool_turn:1 ~tool_planned_index:0
         ~tool_name:"read_file"
         ~tool_result:"file contents here"
         ~tool_error:false
@@ -194,6 +198,7 @@ let test_tool_call_pairing () =
   in
   match act_step with
   | Trajectory.Act { tool_call; _ } ->
+    Alcotest.(check (option int)) "exact raw start sequence" (Some 2) tool_call.source_seq;
     Alcotest.(check string) "tool name" "read_file" tool_call.tool_name;
     Alcotest.(check (option string))
       "tool use id"
@@ -247,6 +252,7 @@ let test_orphan_tool_finish () =
         ~agent_name:"orphan-agent"
         ~record_type:Tool_execution_finished
         ~tool_use_id:"tu-orphan"
+        ~tool_turn:1 ~tool_planned_index:0
         ~tool_name:"bash"
         ~tool_result:"ok"
         ~tool_error:false
@@ -276,6 +282,7 @@ let test_unfinished_tool () =
         ~agent_name:"pending-agent"
         ~record_type:Tool_execution_started
         ~tool_use_id:"tu-pending"
+        ~tool_turn:1 ~tool_planned_index:0
         ~tool_name:"long_op"
         ~tool_input:(`Assoc [])
         ~tool_execution_mode:Tool_contract.Serial
@@ -349,6 +356,117 @@ let test_missing_tool_ids_are_not_correlated () =
     trajectory.steps
 ;;
 
+let tool_calls records =
+  (Trajectory.of_raw_trace_records records).steps
+  |> List.filter_map (function
+      | Trajectory.Act { tool_call; _ } -> Some tool_call
+      | _ -> None)
+;;
+
+let test_overlapping_provider_ids_pair_exact_occurrences () =
+  let start ~seq ~ts ~turn ~index path =
+    make_record ~seq ~ts ~agent_name:"parallel-agent"
+      ~record_type:Tool_execution_started ~tool_use_id:"provider-reused"
+      ~tool_turn:turn ~tool_planned_index:index ~tool_name:"Edit"
+      ~tool_input:(`Assoc [ "path", `String path ])
+      ~tool_execution_mode:Tool_contract.Concurrent ()
+  in
+  let finish ~seq ~ts ~turn ~index ~is_error result =
+    make_record ~seq ~ts ~agent_name:"parallel-agent"
+      ~record_type:Tool_execution_finished ~tool_use_id:"provider-reused"
+      ~tool_turn:turn ~tool_planned_index:index ~tool_name:"Edit"
+      ~tool_result:result ~tool_error:is_error ()
+  in
+  let calls = tool_calls
+    [ start ~seq:10 ~ts:700.0 ~turn:4 ~index:0 "first.ml"
+    ; start ~seq:11 ~ts:701.0 ~turn:4 ~index:1 "second.ml"
+    ; start ~seq:12 ~ts:702.0 ~turn:5 ~index:0 "pending.ml"
+    ; finish ~seq:13 ~ts:703.0 ~turn:4 ~index:1 ~is_error:true "second failed"
+    ; finish ~seq:14 ~ts:706.0 ~turn:4 ~index:0 ~is_error:false "first changed"
+    ]
+  in
+  Alcotest.(check int) "all three invocations survive" 3 (List.length calls);
+  let check_call seq path result is_error duration =
+    let call = List.find (fun (call : Trajectory.tool_call) ->
+        call.source_seq = Some seq) calls in
+    Alcotest.(check (option string)) "provider id retained"
+      (Some "provider-reused") call.tool_use_id;
+    Alcotest.(check string) "invocation input retained" path
+      Yojson.Safe.Util.(call.tool_input |> member "path" |> to_string);
+    Alcotest.(check (option string)) "correct result" result call.tool_result;
+    Alcotest.(check bool) "correct error status" is_error call.is_error;
+    Alcotest.(check (option (float 0.001))) "duration uses own start"
+      duration (Option.map (fun finished -> finished -. call.started_at) call.finished_at)
+  in
+  check_call 10 "first.ml" (Some "first changed") false (Some 6.0);
+  check_call 11 "second.ml" (Some "second failed") true (Some 2.0);
+  check_call 12 "pending.ml" None false None
+;;
+
+let test_incomplete_coordinates_remain_unpaired () =
+  let record ~seq ~record_type ?tool_turn ?tool_planned_index ?tool_result () =
+    make_record ~seq ~ts:(800.0 +. Float.of_int seq) ~agent_name:"partial-agent"
+      ~record_type ~tool_use_id:"same-id" ~tool_name:"Edit"
+      ?tool_turn ?tool_planned_index ?tool_result ()
+  in
+  List.iter (fun (turn, index) ->
+    let calls = tool_calls
+      [ record ~seq:1 ~record_type:Tool_execution_started
+          ?tool_turn:turn ?tool_planned_index:index ()
+      ; record ~seq:2 ~record_type:Tool_execution_finished
+          ?tool_turn:turn ?tool_planned_index:index ~tool_result:"unattributed" ()
+      ] in
+    match calls with
+    | [ start; finish ] ->
+      Alcotest.(check (option int)) "start sequence retained" (Some 1) start.source_seq;
+      Alcotest.(check (option string)) "id alone does not attach result" None start.tool_result;
+      Alcotest.(check (option (float 0.001))) "start remains pending" None start.finished_at;
+      Alcotest.(check (option int)) "finish has no source start" None finish.source_seq;
+      Alcotest.(check (option string)) "unpaired finish retains result"
+        (Some "unattributed") finish.tool_result
+    | _ -> Alcotest.fail "incomplete coordinates must preserve both records")
+    [ None, None; Some 1, None; None, Some 0 ]
+;;
+
+let test_finish_before_start_is_not_backfilled () =
+  let record ~seq ~record_type ?tool_result () =
+    make_record ~seq ~ts:(900.0 +. Float.of_int seq) ~agent_name:"out-of-order"
+      ~record_type ~tool_use_id:"same-id" ~tool_turn:1 ~tool_planned_index:0
+      ~tool_name:"Edit" ?tool_result ()
+  in
+  match tool_calls
+    [ record ~seq:1 ~record_type:Tool_execution_finished ~tool_result:"early" ()
+    ; record ~seq:2 ~record_type:Tool_execution_started ()
+    ] with
+  | [ finish; start ] ->
+    Alcotest.(check (option int)) "early finish remains unmatched" None finish.source_seq;
+    Alcotest.(check (option int)) "later start remains visible" (Some 2) start.source_seq;
+    Alcotest.(check (option string)) "later start gets no earlier result" None start.tool_result;
+    Alcotest.(check (option (float 0.001))) "later start remains pending" None start.finished_at
+  | _ -> Alcotest.fail "out-of-order records must remain separate"
+;;
+
+let test_ambiguous_starts_remain_unpaired () =
+  let record ~seq ~record_type ?tool_result () =
+    make_record ~seq ~ts:(950.0 +. Float.of_int seq) ~agent_name:"ambiguous"
+      ~record_type ~tool_use_id:"same-id" ~tool_turn:1 ~tool_planned_index:0
+      ~tool_name:"Edit" ?tool_result ()
+  in
+  let calls = tool_calls
+    [ record ~seq:1 ~record_type:Tool_execution_started ()
+    ; record ~seq:2 ~record_type:Tool_execution_started ()
+    ; record ~seq:3 ~record_type:Tool_execution_finished ~tool_result:"ambiguous" ()
+    ] in
+  match calls with
+  | [ first; second; finish ] ->
+    Alcotest.(check (option int)) "first start retained" (Some 1) first.source_seq;
+    Alcotest.(check (option int)) "second start retained" (Some 2) second.source_seq;
+    Alcotest.(check (option string)) "first remains unpaired" None first.tool_result;
+    Alcotest.(check (option string)) "second remains unpaired" None second.tool_result;
+    Alcotest.(check (option int)) "finish cannot choose between starts" None finish.source_seq
+  | _ -> Alcotest.fail "ambiguous occurrences must not overwrite starts"
+;;
+
 (* ── JSON round-trip ─────────────────────────────────────────── *)
 
 let test_json_roundtrip () =
@@ -374,6 +492,7 @@ let test_json_roundtrip () =
         ~agent_name:"json-agent"
         ~record_type:Tool_execution_started
         ~tool_use_id:"tu-rt"
+        ~tool_turn:1 ~tool_planned_index:0
         ~tool_name:"search"
         ~tool_input:(`Assoc [ "q", `String "test" ])
         ~tool_execution_mode:Tool_contract.Concurrent
@@ -384,6 +503,7 @@ let test_json_roundtrip () =
         ~agent_name:"json-agent"
         ~record_type:Tool_execution_finished
         ~tool_use_id:"tu-rt"
+        ~tool_turn:1 ~tool_planned_index:0
         ~tool_name:"search"
         ~tool_result:"found it"
         ~tool_error:false
@@ -428,6 +548,7 @@ let test_json_roundtrip () =
 let test_step_json_roundtrip () =
   let tc : Trajectory.tool_call =
     { tool_use_id = Some "tu-step"
+    ; source_seq = Some 7
     ; tool_name = "grep"
     ; tool_input = `Assoc [ "pattern", `String "foo" ]
     ; tool_result = Some "match found"
@@ -453,7 +574,12 @@ let test_step_json_roundtrip () =
          Alcotest.(check (float 0.001))
            "ts roundtrip"
            (Trajectory.step_ts step)
-           (Trajectory.step_ts step2))
+           (Trajectory.step_ts step2);
+         (match step, step2 with
+          | Trajectory.Act { tool_call = before; _ }, Trajectory.Act { tool_call = after; _ } ->
+            Alcotest.(check (option int)) "source sequence roundtrip"
+              before.source_seq after.source_seq
+          | _ -> ()))
     steps
 ;;
 
@@ -525,6 +651,14 @@ let () =
             `Quick
             test_all_withheld_reasoning_kinds_are_activity
         ; Alcotest.test_case "tool call pairing" `Quick test_tool_call_pairing
+        ; Alcotest.test_case "overlapping provider ids pair exact occurrences" `Quick
+            test_overlapping_provider_ids_pair_exact_occurrences
+        ; Alcotest.test_case "incomplete coordinates remain unpaired" `Quick
+            test_incomplete_coordinates_remain_unpaired
+        ; Alcotest.test_case "finish before start is not backfilled" `Quick
+            test_finish_before_start_is_not_backfilled
+        ; Alcotest.test_case "ambiguous starts remain unpaired" `Quick
+            test_ambiguous_starts_remain_unpaired
         ; Alcotest.test_case "error run" `Quick test_error_run
         ; Alcotest.test_case "orphan tool finish" `Quick test_orphan_tool_finish
         ; Alcotest.test_case "unfinished tool" `Quick test_unfinished_tool

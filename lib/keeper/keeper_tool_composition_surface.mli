@@ -163,6 +163,16 @@ end
     without an enclosing Keeper turn. *)
 
 module For_testing : sig
+  val observe_node_result :
+    composition_tool:string ->
+    composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+    composition_tool_kind:Keeper_tool_descriptor.tool_kind ->
+    composition_run_id:Keeper_tool_plan.Composition_run_id.t ->
+    parent_invocation:Agent_core.Tool_contract.Invocation.t ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    turn_context:Keeper_tool_call_log_context.turn_context ->
+    Keeper_tool_plan_executor.node_result -> (unit, string) result
+
   val failure_payload :
     tool_name:string ->
     tool_kind:Keeper_tool_descriptor.tool_kind ->

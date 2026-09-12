@@ -76,3 +76,9 @@
 - 다음 Goal `memory-garden-participatory-adaptation`과 `task-004`를 생성했다. 독자 선택권과 접근성의 표현 방식을 비교·논의한 뒤 실제 PPTX·MP4를 만든다. 개별 착수 또는 Fusion 도구 호출 지시는 보내지 않았다. 현재 생성/연결만 확인했으며 자발적 수행 증거는 추후 검사한다.
 - native Gate 후보의 Release는 새 상태 분기의 warning4로 실패했다. `d2dbe6d297`에서 명시적 패턴으로 정정해 통합했고, 별도 native fixture runtime 초기화 수정 `da66b0a64d`도 통합했다. 최초 replay 기록과 재조회 기록의 문구 차이, setup의 입력 보정 보존에 관한 source 수정/리뷰가 진행 중이므로 새 배포 성공을 주장하지 않는다.
 - 9월10일 디자이너의 다른 두 operation에도 original authority 없는 Gate binding이 남아 있음을 새로 확인했다. 이들은 이번에 취소하거나 복구하지 않았다. `remaining-original-gate-bindings.json`에 기록했으며 server health ok와 전체 queue 완결은 구별한다.
+
+## 22:10 KST 작업 경계
+
+- 실제 자율 턴 406이 task-004를 조회하고 12:56:58 UTC에 claim/start했으며 run_init까지 수행했다. task 생성부터 53초다. 해당 API 실행 receipt 세 건을 `participatory-adaptation-claim.json`에 보존했다. 13:00:46 UTC Fusion registry는 0건이어서 자발적 Fusion 성공은 아직 아니다.
+- quota의 stateless MCP fixture에 필요한 Mcp-Name을 보완했고, CI-built942765 macOS 바이너리로 H1 전체 검사를 통과했다. 자산60회·인증GET4회 후 MCP4회200/5번째429, mutation429, GET유지, invalidtoken401, IP429가 실제 raw log와 일치한다. 독립 fixture이며 실제 Chat 브라우저 증거를 대체하지 않는다.
+- Gate의 최초 replay 문구·paste correction·거절 identity 문제를 보완한 최종 통합 head는 `8fd8d20b3cf5a9f27c8c67024dd41b121277cd1e`다. PR #35462에 push했고 14개 실제 suite 경로를 확인해 Test #34695701869와 Release #34695703145를 요청했다. 직전94e Test는 실패 종결됐다. 새 후보의 native 실행과 설치 수용은 아직 확인 전이다.

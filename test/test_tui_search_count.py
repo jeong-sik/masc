@@ -91,7 +91,8 @@ def run(executable: str) -> None:
         # An empty filtered listing remains searchable, not an unsupported pane.
         h.send_and_wait(process, fd, output, b"/", b"/")
         h.send_and_wait(process, fd, output, b"deploy", b"/deploy (1)")
-        os.write(fd, b"\x1bq")
+        h.send_and_wait(process, fd, output, b"\x1b", b"/unmatched-fact (none) n/N")
+        os.write(fd, b"q")
 
     h.run_terminal_scenario(
         executable,

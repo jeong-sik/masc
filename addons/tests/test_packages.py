@@ -254,7 +254,8 @@ class MsxLayer(ProtocolCase):
     def test_optional_incarnation_follows_machine_without_merging_clocks(self):
         captures = [{"id": "capture", "kind": "capture", "observed_at": 1002,
                      "actor": None, "evidence": [], "machine_id": "workspace-msx",
-                     "incarnation": run, "frame": frame, "screen": reference(run), "input_cursor": None}
+                     "incarnation": run, "frame": frame, "screen": reference(run), "input_cursor": None,
+                     "input_ledger": None}
                     for run, frame in (("history-A", 50), ("history-B", 0))]
         for binding in ({"machine_id": "workspace-msx"},
                         {"machine_id": "workspace-msx", "incarnation": None}):
@@ -273,7 +274,7 @@ class MsxLayer(ProtocolCase):
             captures = [{"id": "capture-1", "kind": "capture", "observed_at": 1002,
                          "actor": None, "evidence": [reference("capture-1")],
                          "machine_id": "game", "incarnation": run, "frame": frame,
-                         "screen": screen_ref, "input_cursor": "input:4"}
+                         "screen": screen_ref, "input_cursor": "input:4", "input_ledger": None}
                         for run, frame in (("load-1", 12345), ("load-2", 0))]
             sources = [source([capture], source_id="msx", incarnation=capture["incarnation"])
                        for capture in captures]
@@ -287,6 +288,35 @@ class MsxLayer(ProtocolCase):
             self.assertEqual([r["fields"]["matches_binding"] for r in output["rows"]], [False, True])
             self.assertNotEqual(output["rows"][0]["id"], output["rows"][1]["id"])
             self.assertTrue(all(r["actor"] is None for r in output["rows"]))
+
+    def test_input_history_reference_is_retained_without_inventing_inputs(self):
+        input_bytes = ''.join(json.dumps({"who": "Alice", "key": "space", "edge": edge,
+                                         "frame": frame}) + '\n'
+                              for edge, frame in [("down", 10), ("up", 11)])
+        capture = {"id": "capture-inputs", "kind": "capture", "observed_at": 1002,
+                   "actor": None, "evidence": [], "machine_id": "game",
+                   "incarnation": "machine-A", "frame": 20, "screen": reference("screen"),
+                   "input_cursor": "2", "input_ledger": {"format": "msx-input-jsonl",
+                   "entry_count": 2, "evidence": reference("inputs", input_bytes)}}
+        binding = {"machine_id": "game"}
+        result = self.call("msx-observer", binding, [source([capture])])
+        row, = result["rows"]
+        self.assertEqual(row["lane_id"], "msx/frame")
+        self.assertIsNone(row["actor"])
+        self.assertEqual(row["fields"]["input_ledger"], capture["input_ledger"])
+        self.assertIn(capture["input_ledger"]["evidence"], row["evidence"])
+        absent = {**capture, "input_ledger": None}
+        empty = {**capture, "input_cursor": "0", "input_ledger": {
+                 "format": "msx-input-jsonl", "entry_count": 0, "evidence": reference("empty", "")}}
+        for observation in [absent, empty]:
+            output = self.call("msx-observer", binding, [source([observation])])
+            self.assertEqual(output["rows"][0]["fields"]["input_ledger"], observation["input_ledger"])
+        for change in [{"entry_count": -1}, {"entry_count": True}, {"entry_count": 3},
+                       {"format": "unknown"}, {"evidence": None}]:
+            invalid = {**capture, "input_ledger": {**capture["input_ledger"], **change}}
+            self.assertTrue(self.call("msx-observer", binding, [source([invalid])])["isError"])
+        missing = {key: value for key, value in capture.items() if key != "input_ledger"}
+        self.assertTrue(self.call("msx-observer", binding, [source([missing])])["isError"])
 
     def test_foreign_records_are_visible_as_coverage_not_fabricated_frames(self):
         output = self.call("msx-observer", {"machine_id": "game", "incarnation": "load-1"},

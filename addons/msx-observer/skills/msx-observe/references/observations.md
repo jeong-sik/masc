@@ -21,6 +21,20 @@ and detail. A selected row does not prove that all events in a time interval
 were observed. An unavailable source or a partial query remains incomplete;
 it does not establish that the game stopped or that a Keeper failed.
 
+`fields.input_ledger` links the input history captured with this frame. A supplied
+descriptor names `msx-input-jsonl`, the exact entry count and an evidence reference
+whose JSONL records preserve native `frame`, `who`, `key` and `edge`. Its count
+matches `fields.input_cursor`. Read the referenced bytes through existing evidence
+tools and keep the capture's machine incarnation with the entries. A restore can
+include earlier saved inputs in a new machine history; these are retained records,
+not newly issued actions in that incarnation. Null means history was not supplied;
+count zero with an empty blob means the captured input history was empty.
+
+The frame row's unknown actor does not replace each input's recorded `who`.
+The host-owned ledger snapshot remains evidence after new inputs, restore or
+package removal. It is a snapshot through the captured cursor, not a claim that
+no later input occurred or that an action achieved a strategic game outcome.
+
 Evidence references identify stored bytes. A digest comparison can verify those
 bytes; it does not validate an interpretation of the image. Neither this guide
 nor the helper opens an evidence URI or issues a game action. A strategic claim

@@ -240,8 +240,6 @@ let with_server f =
     merge_env_overrides
       [
         ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
-        ("GRAPHQL_API_KEY", "");
-        ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_POST_SSE_KEEPALIVE_SEC", "1.0");
       ]
   in

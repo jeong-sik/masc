@@ -407,8 +407,6 @@ let with_server f =
         ("MASC_BASE_PATH_INPUT", base_path);
         ("MASC_ADMIN_TOKEN", main_eio_test_admin_token);
         ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
-        ("GRAPHQL_API_KEY", "");
-        ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
       ]
   in
   let argv =

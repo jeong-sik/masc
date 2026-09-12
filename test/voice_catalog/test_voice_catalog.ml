@@ -225,6 +225,10 @@ let with_catalogue_processes f =
         {|#!/bin/sh
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/argv"
 /bin/cat > "$MASC_TEST_CATALOGUE_DIR/stdin"
+if [ -f "$MASC_TEST_CATALOGUE_DIR/stt-response" ]; then
+  /bin/cat "$MASC_TEST_CATALOGUE_DIR/stt-response"
+  exit 0
+fi
 printf '%s\n' '{"voices":[{"voice_id":"http-voice"}]}'
 |};
       write "say"
@@ -394,6 +398,56 @@ let test_audio_capabilities_keep_the_generated_format () =
         (Option.is_none (Voice.audio_file_of_token token)))
     [ "../clip.wav"; String.make 31 'a' ^ ".wav"; String.make 32 'g'; "clip.mp3" ]
 
+let test_http_transcription_distinguishes_malformed_and_empty () =
+  with_catalogue_processes (fun ~read:_ ~root ->
+    Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out ->
+      output_string out
+        {|[voice.stt]
+default_model = "fixture-model"
+[[voice.stt.endpoints]]
+id = "listener"
+kind = "elevenlabs_direct"
+api_key_env = "MASC_TEST_CATALOGUE_KEY"
+|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    let respond body =
+      Out_channel.with_open_bin (Filename.concat root "stt-response")
+        (fun out -> output_string out body)
+    in
+    List.iter
+      (fun body ->
+        respond body;
+        (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "an unreadable response must not become a transcript");
+        match Voice.probe_stt ~audio_file:"/fixture/audio.wav" () with
+        | Ok [ { Voice.outcome = Voice.Refused _; _ } ] -> ()
+        | Ok _ -> Alcotest.fail "the probe must refuse an unreadable response"
+        | Error message -> Alcotest.fail message)
+      [ {|{}|}; {|{"text":null}|}; {|{"text":42}|}; {|[]|} ];
+    List.iter
+      (fun text ->
+        respond (Yojson.Safe.to_string (`Assoc [ "text", `String text ]));
+        (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+         | Ok (`Assoc fields) ->
+           Alcotest.(check bool) "the exact valid transcript survives" true
+             (List.assoc_opt "text" fields = Some (`String text));
+           Alcotest.(check bool) "a valid empty transcript is still transcribed" true
+             (List.assoc_opt "status" fields = Some (`String "transcribed"))
+         | Ok _ -> Alcotest.fail "expected a transcription object"
+         | Error message -> Alcotest.fail message);
+        match Voice.probe_stt ~audio_file:"/fixture/audio.wav" () with
+        | Ok [ { Voice.outcome = Voice.Answered message; _ } ] ->
+          Alcotest.(check string) "the probe preserves the same distinction"
+            (if text = "" then "reached, and heard nothing in the audio"
+             else "heard " ^ text)
+            message
+        | Ok _ -> Alcotest.fail "a valid transcript must answer the probe"
+        | Error message -> Alcotest.fail message)
+      [ ""; "명령 음성" ])
+
 let test_command_transcription_honors_endpoint_timeout () =
   with_catalogue_processes (fun ~read:_ ~root ->
     let configure timeout =
@@ -433,6 +487,8 @@ let () =
             test_say_probe_refuses_an_uninstalled_voice_before_synthesis
         ; Alcotest.test_case "normal transcription uses the command transport" `Quick
             test_normal_transcription_uses_the_command_transport
+        ; Alcotest.test_case "HTTP transcription distinguishes malformed and empty" `Quick
+            test_http_transcription_distinguishes_malformed_and_empty
         ; Alcotest.test_case "command transcription honors endpoint timeout" `Quick
             test_command_transcription_honors_endpoint_timeout
         ; Alcotest.test_case "audio capabilities keep the generated format" `Quick

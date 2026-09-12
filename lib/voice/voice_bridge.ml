@@ -26,6 +26,18 @@ let transcriber_of_endpoint endpoint =
      voice_mcp carries a tool call, not audio. *)
   | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Macos_say -> Does_not_transcribe
 
+(* Decode the provider boundary before either normal capture or the probe
+   interprets the transcript. An unreadable body is not a quiet microphone. *)
+let transcript_of_stt_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String transcript) -> Ok transcript
+     | Some _ -> Error "the endpoint answered with a text field that is not a string"
+     | None -> Error "the endpoint answered without a text field")
+  | _ -> Error "the endpoint answered with something that is not an object"
+;;
+
 (* One voice as an endpoint names it. The id is what a configuration stores;
    the name and the language are what let a person pick it. *)
 type catalogue_voice =
@@ -171,13 +183,13 @@ let transcribe_audio ~audio_file ?language_code () =
           | Does_not_transcribe ->
             Error "this endpoint transport does not transcribe"
         in
-        (match transcription with
-         | Ok json ->
-           let text =
-             Option.value
-               (Json_util.get_string json "text")
-               ~default:(Yojson.Safe.to_string json)
-           in
+        let decoded =
+          let* json = transcription in
+          let* text = transcript_of_stt_json json in
+          Ok (json, text)
+        in
+        (match decoded with
+         | Ok (json, text) ->
            let lang =
              match language_code with
              | Some lc -> lc
@@ -503,13 +515,9 @@ let probe_stt ~audio_file () =
                   | Over_http ->
                     (match transcribe_via_http_stt endpoint ~audio_file ~model with
                      | Ok json ->
-                       heard
-                         (match json with
-                          | `Assoc fields ->
-                            (match List.assoc_opt "text" fields with
-                             | Some (`String text) -> text
-                             | Some _ | None -> "")
-                          | _ -> "")
+                       (match transcript_of_stt_json json with
+                        | Ok transcript -> heard transcript
+                        | Error reason -> Refused reason)
                      | Error reason -> Refused reason)
                   | By_command ->
                     (match transcribe_via_command endpoint ~audio_file ~model with

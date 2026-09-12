@@ -105,6 +105,11 @@ val probe_tts
     section -- the same two states {!Voice_config.load_detailed} separates, kept
     apart here for the same reason. *)
 
+val transcript_of_stt_json : Yojson.Safe.t -> (string, string) result
+(** Decode an HTTP transcript. A missing or non-string [text] is an error,
+    whereas an explicitly empty string is a valid transcript. Shared by
+    normal transcription and the endpoint probe. *)
+
 val probe_stt
   :  audio_file:string
   -> unit

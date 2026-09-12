@@ -28,5 +28,10 @@ val apply_commit :
   (commit_application, error) result
 
 val lookup : base_path:string -> (lookup, error) result
+val publish_lane_skills :
+  config:Workspace.config -> Lane_addon_runtime.skill_export list -> (unit, string) result
+(** Compose explicit package Skill sources with the normal workspace source
+    catalog. Missing package sources and absent read policy are local export
+    diagnostics; runtime.toml and Keeper prompts are not modified. *)
 
 val error_to_string : error -> string

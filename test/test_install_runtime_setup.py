@@ -949,5 +949,78 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     self.assertEqual(before, [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')])
 
 
+
+class BrokenWorkspaceJourney(unittest.TestCase):
+    """A workspace setup cannot repair must not restart the journey.
+
+    Saving a selection appends to the existing runtime.toml, so a stale
+    declaration that makes the file unreadable outlives every pass. Restarting
+    the questions here produced an interview that could never finish.
+    """
+
+    def check(self, identifier, condition, message=''):
+        return {'id': identifier, 'condition': condition, 'message': message}
+
+    def state(self, *checks):
+        return {'base_path': '/workspace', 'checks': list(checks)}
+
+    def test_invalid_check_reports_the_reason_and_stops(self):
+        state = self.state(
+            self.check('workspace', 'satisfied', 'Workspace found.'),
+            self.check('model_connection', 'invalid', 'The workspace runtime.toml is unreadable.'),
+            self.check('keeper_persistence', 'satisfied', 'imp has persisted history.'))
+        errors = io.StringIO()
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'pick') as pick, \
+                patch.object(SETUP, 'open_workspace') as open_workspace, \
+                contextlib.redirect_stderr(errors):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertEqual(code, 1)
+        pick.assert_not_called()
+        open_workspace.assert_not_called()
+        self.assertIn('model_connection', errors.getvalue())
+        self.assertIn('unreadable', errors.getvalue())
+
+    def test_explicit_setup_stops_on_the_same_state(self):
+        # `masc setup` reaches the same append-only save, so rerunning the
+        # interview cannot clear the declaration either.
+        state = self.state(
+            self.check('workspace', 'satisfied'),
+            self.check('keeper_persistence', 'invalid', 'imp metadata is not current.'))
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'pick') as pick, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=False)
+        self.assertEqual(code, 1)
+        pick.assert_not_called()
+
+    def test_readable_workspace_still_resumes_into_the_tui(self):
+        state = self.state(
+            self.check('workspace', 'satisfied'),
+            self.check('model_connection', 'needs_verification'),
+            self.check('sandbox', 'needs_verification'),
+            self.check('keeper_persistence', 'satisfied'))
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', return_value=8935), \
+                patch.object(SETUP, 'select_setup_server', return_value=8935), \
+                patch.object(SETUP, 'open_workspace', return_value=0) as open_workspace, \
+                patch.object(SETUP, 'pick') as pick, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertEqual(code, 0)
+        open_workspace.assert_called_once()
+        pick.assert_not_called()
+
+    def test_fresh_workspace_still_opens_the_wizard(self):
+        state = {'base_path': None, 'checks': [
+            self.check('workspace', 'needs_setup'),
+            self.check('model_connection', 'needs_setup')]}
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'pick', return_value=[2]) as pick, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = SETUP.journey('masc', None, None, 30, resume=True)
+        self.assertEqual(code, 0)
+        pick.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()

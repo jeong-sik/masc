@@ -1553,11 +1553,22 @@ def select_sandbox(binary, base_path, port=8945):
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
     conditions = {check['id']: check['condition'] for check in state['checks']}
+    # Saving a selection appends declarations and leaves the existing text
+    # intact (runtime_setup_batch), so a stale declaration that makes the
+    # workspace unreadable survives every pass through this journey. Asking the
+    # same questions again would end in the same state, so report and stop.
+    broken = [check for check in state['checks'] if check['condition'] == 'invalid']
+    if broken:
+        print('\nThis workspace has a configuration error that setup cannot repair.', file=sys.stderr)
+        for check in broken:
+            print('  ' + check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
+        print('Repair the configuration and run masc again. '
+              'masc doctor reports this state at any time.', file=sys.stderr)
+        return 1
     # Persistence permits opening existing history, never a readiness badge.
     # The TUI observes/reconnects the server and reports current execution.
     if (resume and state.get('base_path') and conditions.get('workspace') == 'satisfied'
-            and conditions.get('keeper_persistence') == 'satisfied'
-            and 'invalid' not in conditions.values()):
+            and conditions.get('keeper_persistence') == 'satisfied'):
         base = state['base_path']
         try:
             saved_port = workspace_port(binary, base, port)

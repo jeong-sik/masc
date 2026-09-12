@@ -1,6 +1,6 @@
 name = "masc_fusion_status"
 description = """
-Read Fusion run status and original deliberation evidence without starting a run.
+Read Fusion run status and original deliberation evidence without starting one.
 
 With no argument, lists tracked runs belonging to you. With run_id, reads that
 exact run's original durable Board evidence: full panel answers, judge advice,

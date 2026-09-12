@@ -308,6 +308,29 @@ let test_assignee_rows_capped () =
     (contains output "3 further assignees not listed")
 ;;
 
+(* The ATTENTION card and the Memory & Gate Safety section both draw the gate
+   observation, and the scheduler card names one condition twice. A state with
+   two names is a state the reader has to match up by position. *)
+let test_one_name_per_observation_state () =
+  let state = make_state () in
+  state.metrics_section <- Types.Section_tools;
+  let lines = ref [] in
+  let push line = lines := line :: !lines in
+  Render_metrics.render_metrics_body ~cols:200 ~budget:60 state
+    ~report_scroll:(fun _ -> ())
+    ~push ~push_styled:(fun ~style:_ line -> push line)
+    ~push_selected:push ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  let output = String.concat "\n" (List.rev !lines) in
+  check bool "the card names an unread gate" true
+    (contains output "Gate not observed");
+  check bool "and the section names it the same way" true
+    (contains output "Pending Gate Calls: not observed");
+  check bool "not under a second name" false (contains output "Gate unread");
+  check bool "the scheduler card names one condition once" false
+    (contains output "Probe unavailable")
+;;
+
 let test_overview_pulse_line () =
   let state = make_state () in
   let pulse = Render_metrics.overview_pulse_line ~cols:120 state in
@@ -551,7 +574,10 @@ let () =
         ; test_case "assignee rows capped" `Quick test_assignee_rows_capped
         ] )
     ; ( "overview_pulse"
-      , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line ] )
+      , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line
+        ; test_case "one name per observation state" `Quick
+            test_one_name_per_observation_state
+        ] )
     ; ( "section_pills"
       , [ test_case "section_pills_line" `Quick test_section_pills_line ] )
     ; ( "sections"

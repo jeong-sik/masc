@@ -332,6 +332,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-toml-as-declarative-system-and-vocabulary-authority | # RFC — TOML as Declarative System and Wire Vocabulary Authority | Draft | - |
 | RFC-tool-results-age-out-of-context | 도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다 | Draft | - |
 | RFC-tools-as-shell-commands | 도구를 셸 first-class 커맨드로 — 순차 결합의 provider 왕복을 없앤다 | Draft | - |
+| RFC-tui-chat-boundary-continuity | Keeper 채팅 화면 — 대화는 이어지게, 계기판은 경계 안으로 | Draft | - |
 | RFC-tui-frame-budget | TUI 프레임 예산 — 모든 화면에서 build p99 8ms, 입력→화면 p99 20ms | Draft | - |
 | RFC-tui-operator-ia | TUI 정보 구조 재설계 — 18탭을 숫자 키 10개로 접고, Keeper 워크벤치를 중심 화면으로 | Draft | - |
 | RFC-tui-server-lifecycle | TUI 안에서 서버를 켠다 — opt-in 온디맨드 서버 시작으로 TUI 를 기본 진입점으로 | Draft | - |

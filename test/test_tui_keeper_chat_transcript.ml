@@ -876,6 +876,33 @@ let test_the_open_call_age_sits_with_the_names () =
          | _ -> false)
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
+(* A call that was open when failover moved to another runtime is not running
+   any more -- the runtime that was executing it is the one being abandoned,
+   and nothing is going to return it. The trail keeps it as evidence under its
+   superseded attempt, which is right; the progress row answers a different
+   question ("what is open now") and must not count it.
+
+   Observed 2026-09-12: one screen said "1 never returned: keeper_analyze_image"
+   on a settled turn and "still running: keeper_analyze~" in the progress row
+   at the same time. *)
+let test_a_superseded_attempts_open_call_is_not_still_running () =
+  let t = fresh () in
+  feed t [ Live.Run_started ];
+  feed t [ tool_started "a" "keeper_analyze_image" ];
+  feed ~now:(origin +. 5.) t
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "glm-5.3-flash"; attempt_index = Some 1 }
+    ];
+  feed ~now:(origin +. 6.) t [ tool_started "b" "Read" ];
+  match rows ~now:(origin +. 30.) t with
+  | (Transcript.Progress, text) :: _ ->
+      check bool "the abandoned attempt's call is not reported as running"
+        false
+        (contains ~needle:"still running: keeper_analyze_image" text);
+      check bool "the current attempt's open call still is" true
+        (contains ~needle:"Read" text)
+  | got -> failf "expected a progress row, got %d rows" (List.length got)
+
 (* The prompt. It is the one row an operator has to act on, so what matters is
    that it appears, that it says how to answer, and that it goes away on every
    path -- a prompt left up asks again for a call already decided. *)
@@ -1096,7 +1123,9 @@ let test_runtime_failover_visibility_and_error_attribution () =
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ];
   check bool "failover attempt is indicated" true
-    (contains ~needle:"failover: connecting to [gpt-4o] (attempt 1)" (progress_text t));
+    (* Second attempt: [attempt_index] is 0-based on the wire and the row
+       counts from 1, the way the superseded blocks beside it do. *)
+    (contains ~needle:"failover: connecting to [gpt-4o] (attempt 2)" (progress_text t));
   check (option string) "current runtime updated to failover" (Some "gpt-4o")
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
@@ -2154,6 +2183,8 @@ let () =
             test_progress_row_names_the_calls_still_out
         ; test_case "the open call age sits with the names" `Quick
             test_the_open_call_age_sits_with_the_names
+        ; test_case "a superseded attempt's open call is not still running"
+            `Quick test_a_superseded_attempts_open_call_is_not_still_running
         ; test_case "the wait says why once the server has said" `Quick
             test_the_wait_says_why_once_the_server_has_said
         ; test_case "the queue does not outlive the wait" `Quick

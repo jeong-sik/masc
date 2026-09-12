@@ -66,13 +66,15 @@ val provider_config_with_agent_config
 
 (** {1 Provider turn identity} *)
 
-(** The zero-based identity of the provider turn that runs next on [state].
+(** The zero-based identity of the fresh provider turn that runs next on
+    [state].
 
-    This is the one producer of the ordinal that the pipeline stages, the
-    [BeforeTurn]/[AfterTurn] hooks, the event bus, tracing spans, tool
-    invocations and the agent loop's "turn completed" log line all carry.
-    Every reader must call this rather than re-deriving a number from
-    [turn_count], so no site can drift by one from the others. *)
+    [Pipeline.resolve_turn_frontier] reads it for a fresh turn; a turn resumed
+    from the durable journal takes its persisted ordinal instead. The resolved
+    identity is what the pipeline stages, the [BeforeTurn]/[AfterTurn] hooks,
+    the event bus, tracing spans, tool invocations and the agent loop's
+    "turn completed" log line all carry. No reader derives a number from
+    [turn_count] on its own, so no site can drift by one from the others. *)
 val provider_turn_ordinal : Types.agent_state -> int
 
 (** {1 Usage accumulation} *)

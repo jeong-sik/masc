@@ -549,6 +549,88 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
     (Agent.state agent).turn_count
 ;;
 
+(* Every "turn completed" record agent core emitted, as
+   (level, turn, stop) in emission order. A record missing either field is a
+   contract break, not a filtered row. *)
+let turn_completed_records (records : Log.record list) =
+  List.filter_map
+    (fun (record : Log.record) ->
+       if
+         String.equal record.module_name "agent"
+         && String.equal record.message "turn completed"
+       then (
+         let turn =
+           List.find_map
+             (function
+               | Log.I ("turn", turn) -> Some turn
+               | _ -> None)
+             record.fields
+         in
+         let stop =
+           List.find_map
+             (function
+               | Log.S ("stop", stop) -> Some stop
+               | _ -> None)
+             record.fields
+         in
+         match turn, stop with
+         | Some turn, Some stop -> Some (Log.level_to_string record.level, turn, stop)
+         | None, _ | _, None ->
+           Alcotest.fail "turn completed record without a turn or stop field")
+       else None)
+    records
+;;
+
+(* Run [f] with agent-core log records collected at DEBUG; the global level and
+   sinks are restored afterwards. Returns [f]'s value and the records. *)
+let with_debug_log_records f =
+  let sink, get_records = Log.collector_sink () in
+  Log.clear_sinks ();
+  Log.set_global_level Log.Debug;
+  Log.add_sink sink;
+  Fun.protect
+    ~finally:(fun () ->
+      Log.clear_sinks ();
+      Log.set_global_level Log.Info)
+    (fun () ->
+       let value = f () in
+       value, get_records ())
+;;
+
+(* A tracer that records every span the run opens as (name, turn), in start
+   order, so a test can read the ordinal the [agent_turn] span was opened under. *)
+let recording_tracer () : Tracing.t * (unit -> (string * int) list) =
+  let spans = ref [] in
+  let module Recording : Tracing.TRACER with type span = unit = struct
+    type span = unit
+
+    let start_span (attrs : Tracing.span_attrs) =
+      spans := (attrs.name, attrs.turn) :: !spans
+    ;;
+
+    let end_span () ~ok:_ = ()
+    let add_event () _ = ()
+    let add_attrs () _ = ()
+    let add_link () ~trace_id:_ ~span_id:_ = ()
+    let trace_id () = None
+    let span_id () = None
+    let trace_context_headers () = []
+
+    let with_span attrs f =
+      start_span attrs;
+      f ()
+    ;;
+  end
+  in
+  (module Recording : Tracing.TRACER), fun () -> List.rev !spans
+;;
+
+let agent_turn_span_ordinals spans =
+  List.filter_map
+    (fun (name, turn) -> if String.equal name "agent_turn" then Some turn else None)
+    spans
+;;
+
 let test_turn_completed_log_carries_the_hook_turn_ordinal () =
   Eio_main.run
   @@ fun env ->
@@ -566,54 +648,42 @@ let test_turn_completed_log_carries_the_hook_turn_ordinal () =
             | _ -> Alcotest.fail "expected AfterTurn")
     }
   in
-  let sink, get_records = Log.collector_sink () in
-  Log.clear_sinks ();
-  Log.set_global_level Log.Info;
-  Log.add_sink sink;
-  let logged_turns =
-    Fun.protect
-      ~finally:(fun () ->
-        Log.clear_sinks ();
-        Log.set_global_level Log.Info)
-      (fun () ->
-         let agent =
-           Agent.create
-             ~net:(Eio.Stdenv.net env)
-             ~config:
-               { (Types.default_config ~model:"test-model") with
-                 name = "turn-ordinal-log-test"
-               }
-             ~options:
-               { Agent.default_options with
-                 transport = Some (transport_returning (pipeline_response EndTurn))
-               ; provider_config = Some (Provider_mock.to_provider_config ())
-               ; hooks
-               }
-             ()
-         in
-         (match Agent.run ~sw agent "hello" with
-          | Ok _ -> ()
-          | Error error -> Alcotest.fail (Error.to_string error));
-         get_records ()
-         |> List.filter_map (fun (record : Log.record) ->
-           if
-             String.equal record.module_name "agent"
-             && String.equal record.message "turn completed"
-           then
-             List.find_map
-               (function
-                 | Log.I ("turn", turn) -> Some turn
-                 | _ -> None)
-               record.fields
-           else None))
+  let tracer, spans = recording_tracer () in
+  let (), records =
+    with_debug_log_records (fun () ->
+      let agent =
+        Agent.create
+          ~net:(Eio.Stdenv.net env)
+          ~config:
+            { (Types.default_config ~model:"test-model") with
+              name = "turn-ordinal-log-test"
+            }
+          ~options:
+            { Agent.default_options with
+              transport = Some (transport_returning (pipeline_response EndTurn))
+            ; provider_config = Some (Provider_mock.to_provider_config ())
+            ; hooks
+            ; tracer
+            }
+          ()
+      in
+      match Agent.run ~sw agent "hello" with
+      | Ok _ -> ()
+      | Error error -> Alcotest.fail (Error.to_string error))
   in
-  (* One provider turn: the hook saw the zero-based identity, and the loop's
-     "turn completed" line must name the same turn, not the one after it. *)
+  let turn_records = turn_completed_records records in
+  (* One provider turn: the hook saw the zero-based identity. The host's
+     AfterTurn hook owns the INFO record of that turn, so agent core emits no
+     INFO turn record of its own, and its single DEBUG line names the hook's turn. *)
   Alcotest.(check (list int)) "AfterTurn ordinal" [ 0 ] (List.rev !hook_turns);
+  Alcotest.(check (list (triple string int string)))
+    "agent core emits exactly one turn record, at DEBUG, on the hook's turn"
+    [ "debug", 0, "end_turn" ]
+    turn_records;
   Alcotest.(check (list int))
-    "turn completed log names the hook's turn"
+    "agent_turn span opens under the hook's turn"
     (List.rev !hook_turns)
-    logged_turns
+    (agent_turn_span_ordinals (spans ()))
 ;;
 
 let unwrap_raw_trace = function
@@ -3694,10 +3764,12 @@ let test_agent_run_resume_fires_on_yield () =
               incr effect_count;
               Ok { Types.content = "executed"; content_blocks = None; _meta = None })
        in
+       let tracer, spans = recording_tracer () in
        let options =
          { Agent.default_options with
            transport = Some transport
          ; provider_config = Some (Provider_mock.to_provider_config ())
+         ; tracer
          }
        in
        let agent =
@@ -3730,26 +3802,42 @@ let test_agent_run_resume_fires_on_yield () =
          ; usage = Types.empty_usage
          };
        let execution_store = Agent.execution_store ~runtime ~dir ~resume:locator () in
-       (match
-          Agent.run
-            ~sw:runtime_sw
-            ~on_yield:(fun () -> incr yield_count)
-            ~on_resume:(fun () -> incr resume_count)
-            ~execution_store
-            agent
-            "run the tool"
-        with
-        | Ok response ->
-          Alcotest.(check string)
-            "resume completes"
-            "done-after-restart"
-            (Types.text_of_response response)
-        | Error error -> Alcotest.failf "resume run failed: %s" (Error.to_string error));
+       let (), records =
+         with_debug_log_records (fun () ->
+           match
+             Agent.run
+               ~sw:runtime_sw
+               ~on_yield:(fun () -> incr yield_count)
+               ~on_resume:(fun () -> incr resume_count)
+               ~execution_store
+               agent
+               "run the tool"
+           with
+           | Ok response ->
+             Alcotest.(check string)
+               "resume completes"
+               "done-after-restart"
+               (Types.text_of_response response)
+           | Error error ->
+             Alcotest.failf "resume run failed: %s" (Error.to_string error))
+       in
        Alcotest.(check int) "tool executes once on resume" 1 !effect_count;
        Alcotest.(check int)
          "on_yield fires on the resume turn (fresh/resume parity)"
          1
-         !yield_count)
+         !yield_count;
+       (* The restored counter is 1 while the journal replays durable turn 0.
+          The replayed tool turn and the fresh turn that follows must be logged
+          and traced as 0 then 1: the ordinal comes from the resolved frontier,
+          not from [turn_count], which would name both as 1. *)
+       Alcotest.(check (list (triple string int string)))
+         "replayed turn 0 then fresh turn 1 in the turn log"
+         [ "debug", 0, "tools_executed"; "debug", 1, "end_turn" ]
+         (turn_completed_records records);
+       Alcotest.(check (list int))
+         "agent_turn spans open under the replayed then fresh ordinal"
+         [ 0; 1 ]
+         (agent_turn_span_ordinals (spans ())))
 ;;
 
 (* ── Runner ──────────────────────────────────────────────── *)
@@ -3798,7 +3886,8 @@ let () =
             `Quick
             test_provider_turn_identity_is_shared_across_multiturn_tool_loop
         ; Alcotest.test_case
-            "turn completed log carries the AfterTurn ordinal (audit R1)"
+            "one turn: no INFO turn record from agent core, DEBUG line and span carry the \
+             AfterTurn ordinal (audit R1)"
             `Quick
             test_turn_completed_log_carries_the_hook_turn_ordinal
         ; Alcotest.test_case

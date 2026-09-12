@@ -1497,12 +1497,18 @@ let direct_gate_bindings store =
   let* executions = semantic_rows store.db ~active_only:true in
   List.fold_left (fun result (execution : Semantic.t) ->
     let* rows = result in
-    match Keeper_execution_scope_id.direct_operation_id execution.id, execution.phase with
-    | Some operation_id, Semantic.Recovering {origin=Semantic.Gate_binding binding; _} ->
-      let* operation = operation_or_unknown store.db operation_id in
-      let* _ = direct_execution_with_db store.db operation in
-      Ok ((operation_id, binding) :: rows)
-    | _ -> Ok rows) (Ok []) executions |> Result.map List.rev
+    match Keeper_execution_scope_id.direct_operation_id execution.id with
+    | None -> Ok rows
+    | Some operation_id ->
+      match execution.phase with
+      | Semantic.Recovering {origin=Semantic.Gate_binding binding; _} ->
+        let* operation = operation_or_unknown store.db operation_id in
+        let* _ = direct_execution_with_db store.db operation in
+        Ok ((operation_id, binding) :: rows)
+      | Semantic.Recovering {origin=(Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
+          | Semantic.Checkpointed _ | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _); _}
+      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_runtime_retry _
+      | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _ -> Ok rows) (Ok []) executions |> Result.map List.rev
 
 let direct_gate_obligations store ~operation_id =
   let* () = ensure_open store in
@@ -1680,7 +1686,8 @@ let reconcile_direct_gate_binding store ~now ~operation_id ~binding ~waiting =
          let* next = semantic_transition ~now (Semantic.Reconcile_gate_binding (binding, waiting)) expected in
          expected_commit := Some (next, ());
          update_semantic store.db ~expected next)
-    | _ -> Error (Not_queued operation_id)) in
+    | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ ->
+      Error (Not_queued operation_id)) in
   confirm_semantic_transition store expected_commit result
 
 let settle_direct_semantic_with_db db current command =

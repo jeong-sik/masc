@@ -339,13 +339,18 @@ let apply ~now action current =
              else reject ()
            | Preparing | Ready | Recovering _ | Suspended _ | Settled _ -> reject ())
       | Reconcile_gate_binding (binding, waiting) ->
-          (match current.phase, binding.unconfirmed_wait with
-           | Recovering {origin=Gate_binding expected; _}, Some candidate
-               when expected = binding && equal_gate_wait waiting candidate
-                 && gate_checkpoint_owns waiting.checkpoint (scope current) ->
-             unchanged (Recovering {origin=Gate_wait {waiting; resolution=None};
-               diagnostic="original exact Gate source is durably retained"})
-           | _ -> reject ())
+          (match current.phase with
+           | Recovering {origin=Gate_binding expected; _} ->
+             (match binding.unconfirmed_wait with
+              | Some candidate when expected = binding && equal_gate_wait waiting candidate
+                  && gate_checkpoint_owns waiting.checkpoint (scope current) ->
+                unchanged (Recovering {origin=Gate_wait {waiting; resolution=None};
+                  diagnostic="original exact Gate source is durably retained"})
+              | Some _ | None -> reject ())
+           | Recovering {origin=(Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+               | Interrupted_execution | Runtime_retry _ | Gate_wait _); _}
+           | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
+           | Suspended _ | Settled _ -> reject ())
       | Suspend_gate waiting ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->

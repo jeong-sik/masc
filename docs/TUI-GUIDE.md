@@ -971,7 +971,7 @@ stops are not numbered. `Goals` is the goal lifecycle, judged against the
 goal verification ledger. `Task Review` and `Task Verdicts` are the two
 halves of the Task protocol: what is waiting for a ruling, and what was
 ruled. A goal sitting in `verifying` appears in neither of them, and Task
-Verdicts is the old Harness ledger, not a Goal completion proof. `Schedules`
+Verdicts is the ledger of Gate rulings, not a Goal completion proof. `Schedules`
 and `Fusion` keep their own headers but continue the same `v` walk.
 
 Each side carries its own count on the strip: `Goals·2` is goals with the

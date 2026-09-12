@@ -97,21 +97,34 @@ let test_whisper_offers_a_package_and_a_model () =
        [ [ "brew"; "install"; "whisper-cpp" ] ] steps
    | _ -> fail "the package step must run a command");
   match (find "whisper_model_download" actions).action_effect with
-  | P.Run_commands [ argv ] ->
+  | P.Run_commands [ fetch; publish ] ->
     (* --create-dirs because the cache directory will not exist on a machine
        that has never had one, and the whole path is one argv item: no shell
-       expands a ~ here. *)
+       expands a ~ here.
+
+       -f because without it an HTTP error body is written under the model's
+       name and curl still exits 0, so the plan reports the prerequisite done
+       and leaves an error page where whisper expects 1.6GB of model.
+
+       Fetched beside the final path and moved after: a run that dies part
+       way then leaves nothing at the path the voice configuration names. *)
     check (list string) "the model, fetched to where it was told"
       [ "curl"
-      ; "-L"
+      ; "-fL"
       ; "--create-dirs"
       ; "-o"
-      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin"
+      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin.part"
       ; "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
       ]
-      argv
+      fetch;
+    check (list string) "and published only once it arrived"
+      [ "mv"
+      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin.part"
+      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin"
+      ]
+      publish
   | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
-    fail "the model step must be one download command"
+    fail "the model step must fetch beside the path and then publish"
 
 (* Offering a download with nowhere to write would produce a command that
    fails on a path nobody chose. The page is opened instead. *)
@@ -128,7 +141,11 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
   List.iter
     (fun distribution ->
       let actions = whisper (S.Linux S.X64) distribution in
-      check int "one action, and it is a link" 1 (List.length actions);
+      (* Two now: the binary and the model. The branch named the binary and
+         stopped, so an operator who followed this plan to its end still had
+         nothing for -m. Both are links here because no cache directory was
+         given. *)
+      check int "two actions, and both are links" 2 (List.length actions);
       List.iter
         (fun (action : P.action) ->
           match action.action_effect with
@@ -165,6 +182,34 @@ let test_presentation_install_is_workspace_owned () =
   check int "venv failure cannot install a package into another Python" 1 (List.length !calls);
   check bool "failed environment creation remains failed" true (match outcome with P.Failed _ -> true | _ -> false)
 
+
+(* The model step is written once and used by both hosts. Left per-host, the
+   Linux branch went without one -- which is the gap this pins. *)
+let test_linux_with_a_cache_gets_the_same_download () =
+  let actions =
+    P.catalog ~model_dir:"/var/cache/whisper" ~host:(S.Linux S.X64)
+      ~distribution:P.Other P.Whisper_cli
+  in
+  match (find "whisper_model_download" actions).action_effect with
+  | P.Run_commands [ fetch; publish ] ->
+    check (list string) "the same fetch macOS gets"
+      [ "curl"
+      ; "-fL"
+      ; "--create-dirs"
+      ; "-o"
+      ; "/var/cache/whisper/ggml-large-v3-turbo.bin.part"
+      ; "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+      ]
+      fetch;
+    check (list string) "and the same publish"
+      [ "mv"
+      ; "/var/cache/whisper/ggml-large-v3-turbo.bin.part"
+      ; "/var/cache/whisper/ggml-large-v3-turbo.bin"
+      ]
+      publish
+  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
+    fail "linux with a cache directory must get the download too"
+
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
@@ -179,4 +224,6 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "without a directory the model is a page" `Quick
     test_without_a_directory_the_model_is_a_page_not_a_command;
   test_case "linux gets instructions rather than a guessed package" `Quick
-    test_linux_gets_instructions_rather_than_a_guessed_package]]
+    test_linux_gets_instructions_rather_than_a_guessed_package;
+  test_case "linux with a cache gets the same download" `Quick
+    test_linux_with_a_cache_gets_the_same_download]]

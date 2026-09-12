@@ -23,7 +23,7 @@ let with_store f =
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];image="unused";command=["unused"];
-  directory=dir;skills_directory=None;action_tool=None;
+  directory=dir;skills_directory=None;action_tool=None;outputs=[];
   resources={cpus=0.5;memory_bytes=134217728L;pids=16;max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
   "source_id", `String id; "path", `String path]
@@ -112,7 +112,56 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
     let missing_observation = member "observations" missing |> list |> List.hd in
     check bool "missing document does not become content" true (member "html" missing_observation = `Null)))
 
+let test_named_port_uses_exact_instance_and_keeps_coverage () = with_store (fun dir store ->
+  let row id lane_id : Types.row = {id;lane_id;kind=Types.Value;title="Observed";
+    observed_at=1.;subject_id="subject";clock=None;actor=None;fields=[];evidence=[];related_ids=[]} in
+  let coverage : Types.coverage = {source_id="other-port";incarnation="history";
+    cursor=Some "7";complete=false;detail=Some "another producer input is missing"} in
+  let output : Types.output = {rows=[row "chosen" "owner/msx/frame";
+    row "other-instance" "someone-else/msx/frame"; row "prefix" "owner/msx/frame/details";
+    row "other-port" "owner/msx/state"];coverage=[coverage]} in
+  let captured : Sources.lane_output = {installation_id="producer";instance_id="owner";
+    run_id="run";configuration_revision="configuration";package_revision="package";
+    outputs=["frames",Types.Selected_lanes ["msx/frame"];"empty",Types.Selected_lanes ["absent"];
+      "all",Types.All_lanes];observation_seq=7;output;status={coverage with complete=true;detail=None}} in
+  let read ?(complete=false) selector = require (Sources.acquire ~store ~package:(package dir 16384)
+    ~resolve_lane_output:(fun ~installation_id ->
+      check string "stable declaration requested" "producer" installation_id;
+      Ok {captured with output={output with coverage=[{coverage with complete}]}})
+    ~binding:(binding [`Assoc (["source_id",`String "upstream";"kind",`String "lane_output";
+      "installation_id",`String "producer";"selection",`String "latest_completed"] @ selector)])) |> list |> List.hd in
+  let selected = read ["output_id",`String "frames"] in
+  let observed = member "observations" selected |> list |> List.hd in
+  check (Alcotest.list string) "exact owner and local lane only" ["chosen"]
+    (member "output" observed |> member "rows" |> list |> List.map (fun row -> text (member "id" row)));
+  check bool "unselected port's incomplete coverage remains explicit" true
+    (member "complete" selected = `Bool false);
+  check string "port identity retained beside producer coordinates" "frames"
+    (member "producer" observed |> member "output_id" |> text);
+  check string "raw observation identity is unchanged" "owner/output/7" (member "id" observed |> text);
+  check bool "whole producer coverage survives row selection" true
+    ((member "output" observed |> member "coverage") = `List [Types.coverage_to_json coverage]);
+  let reference = member "evidence" observed |> list |> List.hd |> own_reference in
+  let frozen = require (Store.read_blob store reference) |> Yojson.Safe.from_string in
+  check bool "frozen bytes describe the selection and exactly the delivered rows" true
+    (member "producer" frozen = member "producer" observed && member "output" frozen = member "output" observed);
+  let empty = read ~complete:true ["output_id",`String "empty"] in
+  check bool "a complete known empty selection remains complete" true (member "complete" empty = `Bool true);
+  check int "known port with no matching rows still has a completed observation" 1
+    (member "observations" empty |> list |> List.length);
+  check int "known empty selection returns no fabricated row" 0
+    (member "observations" empty |> list |> List.hd |> member "output" |> member "rows" |> list |> List.length);
+  let unknown = read ["output_id",`String "typo"] in
+  check bool "missing named port never becomes whole output" true
+    (member "complete" unknown = `Bool false && member "observations" unknown = `List []);
+  List.iter (fun selector ->
+    let observed = read selector |> member "observations" |> list |> List.hd in
+    check int "explicit all-lanes and omitted selector retain whole output" 4
+      (member "output" observed |> member "rows" |> list |> List.length))
+    [[];["output_id",`String "all"]])
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "named ports select exact instance lanes and retain whole coverage" `Quick test_named_port_uses_exact_instance_and_keeps_coverage;
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;
   test_case "combined ingress preserves incomplete coverage" `Quick test_combined_ingress_marks_omitted_sources;
   test_case "browser actual identity and unknown coverage" `Quick test_browser_identity_and_unknown_coverage]]

@@ -54,6 +54,36 @@ let install_cli client =
    action_effect=Install_official_cli client}
 let catalog ?model_dir ~host ~distribution dependency =
   let open_ = open_action ~host in
+  (* whisper-cli needs a model as well as a binary, on either host, and -m is
+     a path the voice configuration then names. Written once because the hosts
+     differ only in how the binary arrives: the Linux branch named the binary
+     and stopped, so an operator who followed that plan to its end still had
+     nothing to transcribe with. *)
+  let whisper_model_step () =
+    match model_dir with
+    (* Without somewhere to put it there is no command to offer, so the page
+       is opened instead of a download being faked. *)
+    | None ->
+      open_ ~id:"whisper_model_page"
+        ~label:"Open the whisper.cpp model downloads"
+        ~detail:"Choose a ggml model and note where it lands: the voice configuration names that path."
+        ~source_url:whisper_models_source whisper_models_source
+    | Some dir ->
+      let final = Filename.concat dir whisper_model_file in
+      commands ~id:"whisper_model_download"
+        ~label:"Download the whisper model masc asks for"
+        ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
+        ~source_url:whisper_models_source ~requires_admin:false
+        [ (* -f, or an HTTP error body is written under the model's name and
+             curl still exits 0: the plan then reports the prerequisite done
+             and leaves 1.6GB of error page where whisper expects a model.
+             Fetched beside the final path and moved only after curl
+             succeeded, so a run that dies part way leaves nothing at the path
+             the configuration points at. *)
+          [ "curl"; "-fL"; "--create-dirs"; "-o"; final ^ ".part"; whisper_model_url ]
+        ; [ "mv"; final ^ ".part"; final ]
+        ]
+  in
   match dependency, host with
   | _, Sandbox_readiness.Unsupported -> []
   (* Hearing is the only half of voice a fresh mac cannot already do: say is in
@@ -68,32 +98,17 @@ let catalog ?model_dir ~host ~distribution dependency =
         ~source_url:whisper_formula_source ~requires_admin:false
         [["brew";"install";"whisper-cpp"]]
     in
-    let model =
-      match model_dir with
-      (* Without somewhere to put it there is no command to offer, so the page
-         is opened instead of a download being faked. *)
-      | None ->
-        [open_ ~id:"whisper_model_page"
-           ~label:"Open the whisper.cpp model downloads"
-           ~detail:"Choose a ggml model and note where it lands: the voice configuration names that path."
-           ~source_url:whisper_models_source whisper_models_source]
-      | Some dir ->
-        [commands ~id:"whisper_model_download"
-           ~label:"Download the whisper model masc asks for"
-           ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
-           ~source_url:whisper_models_source ~requires_admin:false
-           [["curl";"-L";"--create-dirs";"-o";Filename.concat dir whisper_model_file;
-             whisper_model_url]]]
-    in
-    (install :: model)
+    [ install; whisper_model_step () ]
   (* Homebrew is the only route this catalog can name a command for. Elsewhere
      the build is the project's own, and guessing a package would install
      something that may not exist. *)
   | Whisper_cli, Linux _ ->
-    [open_ ~id:"whisper_cli_build_instructions"
-       ~label:"Open whisper.cpp build instructions"
-       ~detail:"Build whisper.cpp for this machine, then point the voice configuration at the binary and a ggml model."
-       ~source_url:whisper_source whisper_source]
+    [ open_ ~id:"whisper_cli_build_instructions"
+        ~label:"Open whisper.cpp build instructions"
+        ~detail:"Build whisper.cpp for this machine, then point the voice configuration at the binary and a ggml model."
+        ~source_url:whisper_source whisper_source
+    ; whisper_model_step ()
+    ]
   | Codex_cli, _ -> [install_cli Codex; open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."
       ~source_url:codex_source codex_source]

@@ -64,15 +64,24 @@ val notify_reject_verification :
     carry typed provenance.
     State-free. *)
 
-(** What the completion authority does next with a review that committed no
-    verdict. [Retry_scheduled] means the authority re-arms its own scan after
-    [interval_sec]; [Terminal] means nothing schedules another look and the
-    producer or operator owns the next move. The Board sentence is rendered
-    from this value, so the post cannot claim terminality while a retry is
-    armed. *)
+(** How soon an armed retry fires. [Full_interval] is a timer this stall
+    armed itself: it fires after [seconds]. [Shared_timer] is a timer that
+    was already running when this stall joined its batch; the post names no
+    number it does not hold. *)
+type retry_delay =
+  | Full_interval of { seconds : float }
+  | Shared_timer
+
+(** What the completion authority did with a review that committed no
+    verdict, reported by the scheduling owner after it acted.
+    [Retry_scheduled] means a retry of this verification is armed;
+    [No_retry_armed] means this attempt armed nothing, so the next look
+    comes from the producer resubmitting, an operator verdict, or the
+    authority's whole-backlog sweep. The Board sentence is rendered from
+    this value, so the post cannot describe a timer the lane did not arm. *)
 type stall_disposition =
-  | Retry_scheduled of { interval_sec : float }
-  | Terminal
+  | Retry_scheduled of { delay : retry_delay }
+  | No_retry_armed
 
 val notify_stalled_verification :
   authority:Masc_domain.completion_authority ->
@@ -86,14 +95,21 @@ val notify_stalled_verification :
     verdict was committed, so without this post the only surface is the
     bounded run registry and the task waits invisibly. The post names the
     task, the verification id, the gate, and what happens next. Under
-    [Retry_scheduled] it says when the authority reviews again; under
-    [Terminal] it names the two forward paths that exist today — the
+    [Retry_scheduled] it says a retry is armed and how soon; under
+    [No_retry_armed] it names the two forward paths that exist today — the
     assignee resubmitting through [submit_for_verification] (a legal
     transition from [AwaitingVerification] that supersedes this
-    verification), or an operator HITL verdict. One verification posts once
-    per (gate, detail, disposition). Visibility only: the post schedules
-    nothing. A board write failure is logged and does not affect the review
-    outcome. *)
+    verification), or an operator HITL verdict — and the sweep that reviews
+    it again without either. The caller passes the disposition the
+    scheduling owner reported after recording the run and arming the retry,
+    so the post follows the timer, never the other way round.
+
+    One post per disposition change: for a (task, verification, gate) the
+    notice compares against the disposition of the latest post on the Board
+    (chronological by [created_at]) and posts only when that differs or no
+    post decodes. [detail] travels as evidence and is not part of the
+    comparison. Visibility only: the post schedules nothing. A board write
+    failure is logged and does not affect the review outcome. *)
 
 module For_testing : sig
   val verdict_event_json :
@@ -121,4 +137,8 @@ module For_testing : sig
     detail:string ->
     disposition:stall_disposition ->
     Yojson.Safe.t
+
+  val stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option
+  (** The strict inverse of the [disposition] field [stalled_metadata]
+      writes: [None] for any shape the encoder does not produce. *)
 end

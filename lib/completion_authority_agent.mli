@@ -34,29 +34,58 @@ module For_testing : sig
     authority:Masc_domain.completion_authority ->
     string
 
-  (** How one review attempt ended. [Deferred] carries no payload: a review
-      that did not commit a verdict is reported to the Board and the producer
-      Keeper chooses what happens next. [Retryable_deferred] means the typed
-      evaluator error was retryable and the application-owned lane must
-      re-arm its maintenance scan while the Task stays awaiting verification. *)
+  (** What one review attempt asks of the retry scheduler. A request, not an
+      outcome: whether a retry is armed is known only once the scheduler
+      answers with a [retry_admission]. *)
+  type retry_request =
+    | Retry_requested
+    | No_retry_requested
+
+  (** The scheduler's answer to one request. [Armed_timer]: this request
+      forked the timer, which fires after the lane's full interval.
+      [Joined_running_timer]: the request added keys to a batch whose timer
+      was already running. [Already_pending]: the pending batch already
+      covered every key. *)
+  type retry_admission =
+    | Armed_timer
+    | Joined_running_timer
+    | Already_pending
+
+  (** What happened to the retry after the attempt was recorded; the Board
+      post is projected from this. *)
+  type retry_scheduling =
+    | Retry_not_requested
+    | Retry_admitted of retry_admission
+
+  (** How one review attempt ended. [Deferred] carries no payload: no
+      verdict was committed and no Board stall is raised (operator-routed,
+      infrastructure unavailable, commit failed, or the review raised).
+      [Stalled] is a review that ran and returned no verdict: the run row is
+      recorded, and the caller schedules the retry it asks for and then
+      projects the stall to the Board from the scheduler's answer. *)
   type process_outcome =
     | Committed
     | Deferred
-    | Retryable_deferred
+    | Stalled of
+        { gate : string
+        ; detail : string
+        ; retry : retry_request
+        }
 
-  val stall_disposition_of_evaluator_retryable
+  val retry_request_of_evaluator_retryable : bool option -> retry_request
+  (** [Some true] is the only automatic-retry authority. [Some false] and
+      [None] request nothing, preserving the producer/operator contract. *)
+
+  val stall_disposition_of_scheduling
     :  retry_interval_sec:float
-    -> bool option
+    -> retry_scheduling
     -> Verification_protocol.stall_disposition
-  (** [Some true] is the only automatic-retry authority and yields
-      [Retry_scheduled] with the lane's interval. [Some false] and [None]
-      yield [Terminal], preserving the producer/operator action contract. The
-      Board post is rendered from this value. *)
-
-  val process_outcome_of_stall_disposition
-    : Verification_protocol.stall_disposition -> process_outcome
-  (** The scan-loop outcome derived from the same disposition the Board post
-      was rendered from: [Retry_scheduled] re-arms, [Terminal] settles. *)
+  (** The Board disposition for one stall, from what the scheduler reported.
+      [Retry_not_requested] is [No_retry_armed]; [Armed_timer] is
+      [Retry_scheduled] after the full [retry_interval_sec];
+      [Joined_running_timer] and [Already_pending] are [Retry_scheduled] on
+      the [Shared_timer], since the delay that timer holds is not this
+      request's to name. *)
 
   type review_key =
     { task_id : string
@@ -87,11 +116,13 @@ module For_testing : sig
     -> wait:(unit -> unit)
     -> dispatch:(scan_scope -> unit)
     -> scan_scope
-    -> bool
+    -> retry_admission
   (** The production retry scheduler with a caller-controlled interval and
-      dispatch sink. [true] means new work entered the pending batch; repeated
-      keys return [false]. A whole-backlog request shares the batch and timer
-      with named retries. The switch owns the timer and its cancellation. *)
+      dispatch sink. [Armed_timer] means the request forked the timer;
+      [Joined_running_timer] means new keys entered a batch whose timer was
+      already running; [Already_pending] means the batch already covered every
+      key. A whole-backlog request shares the batch and timer with named
+      retries. The switch owns the timer and its cancellation. *)
 
   (** RFC-0417 §4.1: what the system lane does with one Task, read off its
       status. A completion claim is reviewed; a cancel claim is handed to the

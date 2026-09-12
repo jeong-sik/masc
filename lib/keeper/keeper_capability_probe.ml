@@ -320,7 +320,7 @@ let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
         seen := schema.name :: !seen;
         { Runtime_official_client_tool.success = true
         ; content = "probe acknowledged; no side effect performed"
-        ; abort_turn = None
+        ; content_blocks = None; abort_turn = None
         })
   }
 ;;
@@ -572,6 +572,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                           { Runtime_official_client_mcp_http.outcome =
                               { Runtime_official_client_mcp.success = result.success
                               ; content = result.content
+                              ; content_blocks = result.content_blocks
                               }
                           ; after_response_sent = (fun () -> ())
                           })

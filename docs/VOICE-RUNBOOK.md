@@ -45,6 +45,47 @@ downloads page instead of offering a command with nowhere to write. On Linux
 both steps are a link: whisper.cpp is built rather than packaged, and naming an
 apt package would install something else or nothing.
 
+### Setup asks for a voice on the way past
+
+A fresh install does not have to be told about any of this. The journey asks
+as step 3, between the model connection and the sandbox:
+
+```
+3 · Give imp a voice (optional)
+  Yuna — ko_KR
+  Eddy (한국어(한국)) — ko_KR
+  Flo (한국어(한국)) — ko_KR
+  ...
+  Show every voice on this computer (184)
+  Stay text only
+```
+
+The list leads with the voices in the terminal's own language, read from
+`LC_ALL`/`LC_MESSAGES`/`LANG`. Choosing one runs
+
+```
+masc voice-local-setup --base-path <workspace> --voice "<the whole label>"
+```
+
+which writes the section through the same writer the HTTP route uses — the
+same revision guard, the same refusal to publish a section the loader would
+reject.
+
+Hearing is a second question, asked only after the first is answered, because
+it is the half that needs the 1.6GB download. Saying no to it leaves speaking
+on. The model path is read from the prerequisite action that writes it, so the
+section cannot end up naming a file the download put somewhere else.
+
+It comes before the sandbox on purpose: a reader who stops at the sandbox step
+still leaves with a keeper that can speak.
+
+Outside the journey the same command works on its own:
+
+```
+masc voice-local-setup --list-voices
+masc voice-local-setup --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+```
+
 ### What the configuration then says
 
 ```toml
@@ -78,9 +119,12 @@ that is silently dropped reads as a setting that took.
 
 ### What it costs, measured
 
+The two commands masc runs, verbatim:
+
 ```
-say -v Yuna -o out.aiff "안녕하세요 키퍼입니다"        →  84KB, immediate
-whisper-cli -m ggml-large-v3-turbo -l auto -nt -f out.wav
+say -v Yuna --file-format=WAVE --data-format=LEI16@22050 -o clip.wav
+  "안녕하세요 키퍼입니다"                               →  111KB, immediate
+whisper-cli -m ggml-large-v3-turbo -l auto -nt -f clip.wav
   → auto-detected language: ko (p = 0.998641)
   → " 안녕하세요. 키퍼입니다."                          →  5.1s wall
 ```
@@ -114,6 +158,40 @@ them selects a different language without saying so.
 Two shapes in that list will break a parser written from one example: the
 columns are space-padded rather than tabbed, and the locale is not always two
 letters and two letters — `ar_001` is in it.
+
+### The second trap: a wrong container is silent too
+
+`say` picks its encoder from the output file name, and it has no MP3 one. It
+does not say so:
+
+| Command | Result |
+|---|---|
+| `say -o clip.mp3 "..."` | **exits 0**, 16 bytes — an empty MP3 tag frame |
+| `say -o clip.wav "..."` | exits 1, `Opening output file failed: fmt?` |
+| `say --file-format=WAVE --data-format=LEI16@22050 -o clip.wav "..."` | 111KB of 16-bit mono WAVE |
+
+masc names every clip `<token>.<extension>` where the token is also the HTTP
+capability the dashboard fetches it by, so for a while the whole `macos_say`
+path wrote 16 bytes of silence and reported success. Fixed 2026-09-13: the
+container is named in the argv, `Voice_bridge_core.clip_format` carries which
+one a clip is in, and the serve route answers the content type of the format
+it found rather than `audio/mpeg` for everything.
+
+`masc voice-verify` catches this class on its own — it refuses any clip below
+a believable size rather than counting a 0 exit as success:
+
+```
+{"tts":[{"endpoint_id":"macos-say","kind":"macos_say",
+         "state":"answered","detail":"113528 bytes of audio"}],
+ "stt":[{"endpoint_id":"whisper-local","kind":"whisper_cli",
+         "state":"answered","detail":"heard 오늘 음성 설정을 마쳤습니다."}]}
+```
+
+3.7s wall for both halves on an M3 Max, 2026-09-13.
+
+A failed command reports the **end** of its output, not the start: whisper-cli
+prints nine lines about which Metal library it loaded before it says which
+model file it could not open.
 
 ## Configuration
 

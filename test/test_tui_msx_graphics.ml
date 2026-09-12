@@ -329,6 +329,42 @@ let test_synchronized_batch () =
       check bool "batch ends synchronized" true (String.ends_with ~suffix:"\027[?2026l" out));
     check bool "existing opt out respected" false (mentions ~needle:"?2026" (drawn ())))
 
+
+(* The menu clears the rest of the screen so a shorter list leaves no ghost rows.
+   A newline written on the bottom row scrolls the terminal by one, and the row
+   that scrolls off is the first -- the title, which is the only place this
+   screen says [esc] goes back. Measured at 150x44 with no cartridges: the screen
+   held the sentence about the empty directory and a blank, and nothing said how
+   to leave.
+
+   The written bytes are what can be asserted here; the scroll is the terminal's
+   doing. So this counts the line breaks: one fewer than the rows, which is what
+   leaves the cursor on the last row instead of past it. *)
+let test_the_menu_does_not_scroll_its_title_off () =
+  let rows, _ = Masc_tui_ansi.get_terminal_size () in
+  let written = Buffer.create 4096 in
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  Masc_tui_msx.render_menu ~write:(Buffer.add_string written) state;
+  let text = Buffer.contents written in
+  let breaks =
+    let n = ref 0 in
+    String.iteri
+      (fun i ch ->
+        if Char.equal ch '\n' && i > 0 && Char.equal text.[i - 1] '\r' then incr n)
+      text;
+    !n
+  in
+  Alcotest.(check int) "one line break fewer than the rows it fills"
+    (max 4 rows - 1) breaks;
+  Alcotest.(check bool) "and the title is in the bytes" true
+    (let needle = "pick a game" in
+     let nl = String.length needle in
+     let rec seek i =
+       i + nl <= String.length text
+       && (String.equal (String.sub text i nl) needle || seek (i + 1))
+     in
+     seek 0)
+
 let () =
   run "masc_tui_msx graphics"
     [ ( "retained"
@@ -356,6 +392,10 @@ let () =
             test_the_image_is_kept_inside_the_screen
         ; test_case "no cell size leaves the rows alone" `Quick
             test_no_cell_size_leaves_the_rows_alone
+        ] )
+    ; ( "menu"
+      , [ test_case "the menu does not scroll its title off" `Quick
+            test_the_menu_does_not_scroll_its_title_off
         ] )
     ; ( "empty"
       , [ test_case "a connected server with no machine says so" `Quick

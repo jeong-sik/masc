@@ -8094,6 +8094,15 @@ let test_peer_delegate_schema_reaches_model_wires () =
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
         (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:0.0 ~data:input ()) in
+    let erased = Agent_core.Tool.create ~name:plain.schema.name
+        ~description:plain.schema.description ~parameters:plain.schema.parameters
+        (fun _ -> Ok { Agent_core.Types.content = "unused"; content_blocks = None; _meta = None }) in
+    let fingerprint tool = Masc.Keeper_official_client_session_store.tool_surface_sha256
+        ~native_posture:Runtime_native_tools.Native_read [tool] in
+    check bool "client session identity detects lost nested artifact contract" true
+      (fingerprint plain <> fingerprint erased);
+    check string "same delegate contract has one client session identity"
+      (fingerprint plain) (fingerprint bundled);
     List.iter (fun (label, tool) ->
       let check_schema boundary observed =
         check bool (label ^ " retains full delegate schema at " ^ boundary) true

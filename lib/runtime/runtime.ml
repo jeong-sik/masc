@@ -1785,9 +1785,12 @@ let verifier_cli_slot_admission ~runtime_id =
   then Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
   else match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
   | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
-  | Some { execution = Runtime_execution.Agent_core _; _ } ->
-    Error (runtime_id ^ ": verifier CLI slot must name an official client")
-  | Some runtime -> verifier_runtime_admission runtime
+  | Some runtime ->
+    (match runtime.execution with
+     | Runtime_execution.Agent_core _ ->
+       Error (runtime_id ^ ": verifier CLI slot must name an official client")
+     | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
+     | Runtime_execution.Antigravity_cli _ -> verifier_runtime_admission runtime)
 ;;
 
 let verifier_exact_lane_slot_ids () =

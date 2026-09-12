@@ -1325,8 +1325,14 @@ let run_named
       let verifier_ready = match output_contract with
         | Provider_default -> Ok ()
         | Tool_verdict ->
-          Runtime.verifier_runtime_admission runtime
-          |> Result.map_error (fun detail -> Agent_core.Error.Config
+          let admission = Result.bind (Runtime.verifier_runtime_admission runtime) (fun () ->
+            match Runtime_agent.decide_modality_reroute_for_runtime_candidates
+              ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
+              current_goal_blocks with
+            | Runtime_agent.No_reroute_needed -> Ok ()
+            | Runtime_agent.Reroute _ | Runtime_agent.No_capable_runtime _ ->
+              Error "The admitted verifier slot cannot consume the submitted media; use another admitted slot") in
+          admission |> Result.map_error (fun detail -> Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig { field = "verifier.runtime"; detail })) in
       (match Result.bind verifier_ready (fun () -> Result.bind source_reader_ready (fun () ->
           Keeper_required_tools.check_surface tool_requirement

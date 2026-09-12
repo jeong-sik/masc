@@ -452,6 +452,43 @@ let test_workspace_producer_gets_owned_read_surface () =
          (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
+(* Nothing creates a workspace producer's playground: no boot, no sandbox.
+   Its absence is a fact about the producer, not an unavailable surface, and
+   deferring on it left every Task submitted over MCP awaiting a verdict that
+   never came (nine Tasks, 131 sweep lines on 2026-09-11). The judge gets the
+   fact as its layout and rules on the evidence that is there. *)
+let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "mcp-client" in
+  let bundle =
+    Filename.concat Playground_paths.all_playgrounds_prefix producer_name
+  in
+  match VAT.create ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    let layout = VAT.root_layout surface |> require_layout in
+    Alcotest.(check int) "one line states the absence" 1 (List.length layout);
+    Alcotest.(check bool)
+      "the line names the absent root"
+      true
+      (List.exists (fun entry -> Astring.String.is_infix ~affix:bundle entry) layout);
+    Alcotest.(check bool)
+      "the playground is not created as a side effect of the review"
+      false
+      (Sys.file_exists
+         (Filename.concat
+            (Workspace_verification_store.project_root_of_base_path config.base_path)
+            bundle))
+;;
+
 (* The live PDF and PNG lookups returned binary text slices. Exercise the
    descriptor/owned-file path, then the same observation persistence and API
    projection used by the completion reviewer. No model verdict is simulated. *)
@@ -922,6 +959,10 @@ let () =
             "root_layout fails closed when checkout discovery is partial"
             `Quick
             test_root_layout_fails_closed_when_checkout_discovery_is_partial
+        ; Alcotest.test_case
+            "a workspace producer without a playground gets a stated absence"
+            `Quick
+            test_workspace_producer_without_a_playground_gets_a_stated_absence
         ; Alcotest.test_case
             "prompt states the root instead of implying a repository"
             `Quick

@@ -13370,11 +13370,10 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  (* [at_exit] runs its callbacks in the reverse of this order and stops at
-     the first one that raises, so the terminal restore is registered last
-     and runs first. The frame summary appends to a file and can raise on a
-     write -- registered the other way round it would take the restore with
-     it and leave the terminal in raw mode. *)
+  (* [at_exit] runs its callbacks in the reverse of this order. Restore first
+     so an error writing the frame summary cannot prevent the first restore
+     attempt. An exception interrupts that cleanup pass; OCaml may retry
+     remaining callbacks while reporting an uncaught exception. *)
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -13510,7 +13509,7 @@ let main
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
-  let restore_terminal () =
+  let restore_terminal_outcome () =
     (* No tracking-off here: suspend runs this too, and a terminal that
        re-enters raw mode after Ctrl-Z would silently lose the wheel. The
        off byte is written once, in [cleanup], at real process exit. *)
@@ -13519,18 +13518,12 @@ let main
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    (* [tcsetattr] has no result to ignore: it raises when stdin is no longer
-       a terminal, and at exit that is the ordinary case -- a closed pane, a
-       hangup. This runs first in the [at_exit] chain, so a raise here would
-       take the frame summary and the tracking-off bytes with it. The two
-       restores below already read their refusal as the terminal already
-       gone; ENOTTY and EIO are read the same way here. Anything else still
-       propagates. See [Masc_tui_terminal_restore]. *)
-    (match
-       Terminal_restore.put_back ~set:(fun () ->
-         Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
-     with
-     | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ());
+    (* Keep the known-loss result so exit cleanup does not write a farewell
+       or tracking controls to a terminal that already rejected restoration. *)
+    let outcome =
+      Terminal_restore.put_back ~set:(fun () ->
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
+    in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
        terminal back, and this character is the part it cannot reach.
        [-1] means the descriptor was never a terminal, so there is nothing to
@@ -13541,7 +13534,12 @@ let main
       ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
     if old_discard_output >= 0 then
       (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
-      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool);
+    outcome
+  in
+  let restore_terminal () =
+    match restore_terminal_outcome () with
+    | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ()
   in
 
   (* Cleanup on exit *)
@@ -13549,19 +13547,20 @@ let main
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
-      restore_terminal ();
-      print_endline "Goodbye!";
-      (* Tracking off after Goodbye: a terminal left in report mode keeps
-         swallowing the wheel after this process is gone, and the farewell
-         line is the last thing a reader matches on -- a byte after it cannot
-         disturb that read. *)
-      output_string stdout mouse_tracking_disable;
-      output_string stdout bracketed_paste_disable;
-      (* The mode belongs to this program's screen. A shell that inherited it
-         would see its own keys reported in a form it does not read. *)
-      if Terminal_profile.kitty_keyboard terminal_profile then
-        output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-      flush stdout
+      Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
+        ~finish:(fun () ->
+          print_endline "Goodbye!";
+          (* Tracking off after Goodbye: a terminal left in report mode keeps
+             swallowing the wheel after this process is gone, and the farewell
+             line is the last thing a reader matches on -- a byte after it cannot
+             disturb that read. *)
+          output_string stdout mouse_tracking_disable;
+          output_string stdout bracketed_paste_disable;
+          (* The mode belongs to this program's screen. A shell that inherited it
+             would see its own keys reported in a form it does not read. *)
+          if Terminal_profile.kitty_keyboard terminal_profile then
+            output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+          flush stdout)
     end
   in
 

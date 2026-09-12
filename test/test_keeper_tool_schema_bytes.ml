@@ -1,10 +1,10 @@
-(** A ceiling on the tool schemas every Keeper turn carries.
+(** A ceiling on the complete model-visible tool schema inventory.
 
     [test_keeper_system_prompt_bytes] pins the assembled system prompt, which is
     the smaller half of the fixed per-turn cost. The tool array is the larger
     one and had no measurement at all: a tool added with a generous schema, or a
-    description that grows a paragraph at a time, costs every turn of every
-    Keeper and nothing said so.
+    description that grows a paragraph at a time, enlarges the available surface
+    and nothing said so.
 
     This is a ratchet, not a golden. Shrinking passes and reports the slack, so
     a PR that trims a description is never asked to edit a number to stay green
@@ -12,10 +12,11 @@
     duration. Growth past the ceiling fails and has to be argued for in
     the PR that causes it.
 
-    What is measured is what the model receives: [model_visible_schemas]
-    projects the descriptors a Keeper can call, and each carries the name,
-    description, and input_schema that go on the wire. Serialized as compact
-    JSON, so whitespace in the OCaml source does not move the number. *)
+    [model_visible_schemas] projects the descriptors a Keeper can call, before
+    deferred loading selects a particular turn's tools. Each carries the name,
+    description, and input_schema serialized as compact JSON, so whitespace in
+    the OCaml source does not move the number. This is a development measurement
+    guard, not a runtime budget or a restriction on Keeper activity. *)
 
 open Alcotest
 
@@ -181,8 +182,9 @@ let schema_json (schema : Masc_domain.tool_schema) =
 let measured () =
   let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas () in
   List.iter (fun (schema : Masc_domain.tool_schema) ->
-    if String.equal schema.name "keeper_workspace_memory_read" then
-      Printf.printf "workspace memory reader schema: %d bytes\n%!"
+    if List.mem schema.name
+      ["keeper_workspace_memory_read"; "masc_lane_declaration_read"; "masc_lane_declaration_save"] then
+      Printf.printf "model-visible schema %s: %d bytes\n%!" schema.name
         (String.length (Yojson.Safe.to_string (schema_json schema)))) schemas;
   let bytes =
     List.fold_left
@@ -190,6 +192,8 @@ let measured () =
       0
       schemas
   in
+  Printf.printf "model-visible schema inventory: %d bytes / %d tools; ceiling: %d bytes\n%!"
+    bytes (List.length schemas) ceiling_bytes;
   (List.length schemas, bytes)
 ;;
 
@@ -395,7 +399,8 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
     failf
       "model-visible tool schemas grew to %d bytes across %d tools, over the %d ceiling \
        by %d.\n\
-       Every Keeper turn carries this. Trim the schema or the description, or raise \
+       This inventory includes deferred tools, not just one turn's loaded tools. \
+       Trim the schema or the description, or raise \
        ceiling_bytes in this file with the PR that needs the room and say what it bought."
       bytes
       count

@@ -845,6 +845,18 @@ let validate_continuation ~(checkpoint : Keeper_semantic_execution.official_clie
       && stored_surface = checkpoint.tool_surface_sha256 -> Ok ()
   | Some _ | None -> Error "original official-client Gate session is not resumable with this runtime and tool surface"
 
+
+let validate_completed_continuation
+    ~(checkpoint : Keeper_semantic_execution.official_client_checkpoint) ~expected =
+  match expected with
+  | Some {phase=Settled settled; client_kind; runtime_id; tool_surface_sha256; _}
+    when client_kind = checkpoint.client_kind
+      && runtime_id = checkpoint.runtime_id
+      && settled.session_id = checkpoint.session_id
+      && settled.turn_id <> checkpoint.turn_id
+      && tool_surface_sha256 = checkpoint.tool_surface_sha256 -> Ok ()
+  | Some _ | None -> Error "official-client Gate input has not settled in a later turn of its original session"
+
 let claim ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
   let* () = validate_uuid "owner_epoch" owner_epoch in

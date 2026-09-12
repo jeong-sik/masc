@@ -14130,7 +14130,7 @@ let main
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <-
     Option.value
-      (tui_settings.voice_send_on_stop)
+      (tui_settings.send_on_stop)
       ~default:false;
 
   (* Setup terminal *)

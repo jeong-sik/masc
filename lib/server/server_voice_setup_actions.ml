@@ -266,6 +266,14 @@ let change_of_json json =
     let* () = only ~what [ "voice" ] in
     let* voice = string_field ~what fields "voice" in
     Ok (Voice_setup.Set_tts_default_voice voice)
+  | "set_send_on_stop" ->
+    let what = "set_send_on_stop" in
+    let* () = only ~what [ "send" ] in
+    (match List.assoc_opt "send" fields with
+     | Some (`Bool send) -> Ok (Voice_setup.Set_send_on_stop send)
+     | Some _ | None ->
+       Error
+         (Invalid_request "set_send_on_stop needs \"send\" to be true or false"))
   | "set_agent_voice" ->
     let what = "set_agent_voice" in
     let* () = only ~what [ "agent"; "voice" ] in

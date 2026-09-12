@@ -317,6 +317,8 @@ let change_json = function
       ]
   | Voice_setup.Set_tts_default_voice voice ->
     `Assoc [ "change", `String "set_tts_default_voice"; "voice", `String voice ]
+  | Voice_setup.Set_send_on_stop send ->
+    `Assoc [ "change", `String "set_send_on_stop"; "send", `Bool send ]
   | Voice_setup.Set_agent_voice (agent, voice) ->
     `Assoc
       [ "change", `String "set_agent_voice"

@@ -58,6 +58,11 @@ val edit_table_multiline_array :
 val edit_table_int : string -> path:string -> key:string -> value:int -> string
 (** Set a typed integer while retaining unrelated lines and comments. *)
 
+val edit_table_bool : string -> path:string -> key:string -> value:bool -> string
+(** Set a typed boolean while retaining unrelated lines and comments. Bare
+    [true]/[false], not a quoted string: a reader that expects a boolean
+    refuses ["true"]. *)
+
 (** {1 Array-of-tables entries} *)
 
 type value =

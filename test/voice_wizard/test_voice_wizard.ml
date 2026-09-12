@@ -215,7 +215,8 @@ let test_a_tool_endpoint_carries_its_url_as_mcp_url () =
         (function
           | Voice_setup.Put_endpoint (_, endpoint) -> Some endpoint
           | Voice_setup.Remove_endpoint _ | Voice_setup.Set_default_model _
-          | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_agent_voice _ -> None)
+          | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_send_on_stop _
+          | Voice_setup.Set_agent_voice _ -> None)
         changes
     in
     (match endpoint with

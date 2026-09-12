@@ -259,6 +259,31 @@ let test_an_agent_voice_is_set_and_cleared () =
 (* Moving an endpoint from a hosted provider to a local one has to drop
    api_key_env, or it sends an Authorization header the local server never
    asked for and gets a 401 instead of service. *)
+(* send_on_stop is written as a bare boolean, in the section the voice config
+   defines it in. It was reachable only by hand-editing runtime.toml: the TUI
+   read a [tui] key nothing published, while the one on the wire was read by
+   nothing (#35670). A configuring surface writes this one. *)
+let test_send_on_stop_is_written_as_a_boolean () =
+  with_config fixture (fun path ->
+    (match apply path [ Voice_setup.Set_send_on_stop true ] with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Voice_setup.error_message error));
+    let reads contents =
+      match Voice_config.parse_runtime_toml_text contents with
+      | Ok (Some config) ->
+        Option.map (fun stt -> stt.Voice_config.send_on_stop) config.Voice_config.stt
+      | Ok None | Error _ -> None
+    in
+    Alcotest.(check (option bool)) "on" (Some true) (reads (read path));
+    (* Bare true, not "true": a reader that expects a boolean refuses the
+       quoted form, and the whole [voice] section then fails to load. *)
+    Alcotest.(check bool) "written unquoted" true
+      (Astring.String.is_infix ~affix:"send_on_stop = true" (read path));
+    (match apply path [ Voice_setup.Set_send_on_stop false ] with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Voice_setup.error_message error));
+    Alcotest.(check (option bool)) "and off again" (Some false) (reads (read path)))
+
 let test_a_field_left_none_is_dropped_from_the_endpoint () =
   with_config fixture (fun path ->
     let local =
@@ -426,6 +451,8 @@ let () =
             test_provider_voices_do_not_replace_the_existing_section_voice
         ; Alcotest.test_case "dotted keeper voice can be replaced and removed" `Quick
             test_a_dotted_keeper_voice_can_be_written_replaced_and_removed
+        ; Alcotest.test_case "send_on_stop is written as a boolean" `Quick
+            test_send_on_stop_is_written_as_a_boolean
         ; Alcotest.test_case "a field left None is dropped" `Quick
             test_a_field_left_none_is_dropped_from_the_endpoint
         ; Alcotest.test_case "an endpoint is removed" `Quick test_an_endpoint_is_removed

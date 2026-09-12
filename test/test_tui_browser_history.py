@@ -103,6 +103,12 @@ def run(binary, *, quit_from_history=False, disconnected=False):
                 needle=b"CURRENT PAGE CONTENT", controls=(h.FULL_REDRAW,))
             assert b"URL>" not in h.screen_text(frame), "Escape did not close the URL editor"
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
+            # History leaves Tab to the global ring, including when its
+            # underlying browser pane could otherwise consume focus traversal.
+            h.send_and_wait(process, fd, output, b"\t", b"MASC Overview")
+            h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
+            h.send_and_wait(process, fd, output, b"\x1b[Z", b"MASC Workspace")
             # Global navigation must release the hidden history's key ownership.
             h.palette_go(process, fd, output, b"go Overview", b"MASC Overview")
             os.write(fd, b"q")

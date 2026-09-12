@@ -21,6 +21,11 @@ let base_tools : Masc_domain.tool_schema list =
      into the Memory OS fact store (RFC keeper-memory-consolidation
      Stage 4: the turn-scoped bank is gone). *)
     Tool_shard_types_schemas_base_toml.memory_write
+  ; (* The world's own constitution (RFC-0442). Same layer as the memory
+       writes: a durable write a keeper makes about the world it works in,
+       except every keeper in that world reads it rather than one. *)
+    Tool_shard_types_schemas_base_toml.constitution_write
+  ; Tool_shard_types_schemas_base_toml.constitution_remove
   ; (* Tool self-introspection — lets the keeper enumerate its own capabilities *)
     Tool_shard_types_schemas_base_toml.tools_list
   ; Tool_shard_types_schemas_base_toml.capability_search

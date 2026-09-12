@@ -48,8 +48,15 @@ bash /tmp/masc-install.sh
 | macOS Intel | `macos-x64` | macOS 15 Intel runner |
 
 이 표는 CI 대상입니다. 성공한 해당 릴리스의 `Release` 실행과 실제 자산을
-확인해야 설치 검증이 완료된 것입니다. Alpine/musl, 구형 glibc Linux, 위보다
-오래된 macOS는 이 바이너리의 검증 대상이 아닙니다. Intel Mac은 Apple
+확인해야 설치 검증이 완료된 것입니다.
+
+Linux 바이너리는 Ubuntu 22.04 컨테이너에서 빌드하므로 **glibc 2.35 이상**이
+필요합니다. Ubuntu 22.04, Debian 12, RHEL 10 그리고 그 이후 배포판이 해당합니다.
+더 높은 버전을 요구하는 바이너리가 나오면 릴리스가 실패하므로, 이 기준은
+의도가 아니라 검사 대상입니다(`scripts/check-glibc-floor.sh`). glibc 기준과
+아래 공유 라이브러리 목록은 별개이며, 라이브러리는 배포판마다 따로 갖춰야
+합니다. RHEL 9는 glibc 2.34라서 이 기준에 못 미칩니다. Alpine을 비롯한 musl
+배포판과 위보다 오래된 macOS는 검증 대상이 아닙니다. Intel Mac은 Apple
 Container 기반 microVM을 제공하지 않으므로 Docker 또는 remote SSH를 선택합니다.
 Runner 이름은 [GitHub 공식 목록](https://github.com/actions/runner-images)을 따릅니다.
 
@@ -65,6 +72,14 @@ Ubuntu 24.04:
 sudo apt-get update
 sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
   libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+```
+
+Ubuntu 22.04와 Debian 12는 OpenSSL 패키지 이름이 `libssl3t64`가 아니라 `libssl3`입니다.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl libffi8 libgmp10 libpq5 \
+  libssl3 libzstd1 zlib1g libncurses6 libtinfo6
 ```
 
 macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이상**이 필요합니다. 설치기가 해당 CPU의 Python과 실행 라이브러리를 검증해 릴리스 파일과 함께 설치합니다. Homebrew나 Xcode 명령줄 도구를 설치하지 않습니다.

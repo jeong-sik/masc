@@ -183,7 +183,9 @@ let test_keeper_sensitive_get_permissions_are_exact () =
        part of what raw-trace already holds. Same data, same gate — a lighter
        one here would be a second door onto the first door's content. *)
     [ "raw-traces"; "raw-trace"; "provider-input"; "memory-journal"
-    ; "memory-facts"; "file-changes" ];
+    ; "memory-facts"; "file-changes"; "tool-calls" ];
+  check bool "safe chat history stays on its ordinary read route" true
+    (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true

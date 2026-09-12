@@ -506,7 +506,14 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
             | (Eio.Io _ | Unix.Unix_error _) as exn -> Error (Tcp_failure exn)
           in
           match result with
-          | Ok () -> Result.map_error (fun msg -> Client_failure msg) (create addr)
+          | Ok () ->
+            (* TCP reachability is not client establishment: this address can
+               still fail TLS. The failed client scope has already closed;
+               try the remaining addresses under the same deadline. No HTTP
+               request has been dispatched at this stage. *)
+            (match create addr with
+             | Ok client -> Ok client
+             | Error message -> probe (Client_failure message) rest)
           | Error failure -> probe failure rest
       in
       Result.bind addresses (probe No_addresses))

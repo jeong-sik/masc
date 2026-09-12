@@ -13,6 +13,15 @@ val make_audio_file : format:Voice_bridge_core.clip_format -> string
     [<token><extension>] for the format the caller is about to write. The
     128-bit token is also the HTTP capability the dashboard fetches it by. *)
 
+val endpoint_timeout_sec : Voice_config.endpoint -> float
+(** How long this endpoint is given, in seconds: its own [timeout_seconds]
+    when it names one above zero, otherwise the workspace-wide voice request
+    timeout. Every voice subprocess -- HTTP or command -- is bounded by this
+    and carries it to curl as [--max-time], so the two deadlines agree.
+
+    The field was in the configuration, its writer, the HTTP routes and the
+    wizard before anything read it. *)
+
 val run_voice_status
   :  ?timeout_sec:float
   -> ?stdin_content:string

@@ -141,6 +141,45 @@ let test_the_runtime_loop_can_reach_the_command_transport () =
     (Ast_grep.count_calls_in_value_binding ~module_path:voice_bridge_path
        ~binding_name:"transcribe_audio" ~callee:"transcribe_via_command")
 
+
+(* [timeout_seconds] was in the configuration, its writer, the routes and the
+   wizard, and nothing read it: an operator who asked for a longer wait got
+   the workspace-wide one. whisper-cli on a CPU-only host is the case that
+   makes it matter -- a longer recording does not finish in the HTTP default.
+   (Codex review of #35526 and of #35627.) *)
+let endpoint_with ?timeout_seconds kind id : Voice_config.endpoint =
+  { Voice_config.id
+  ; kind
+  ; base_url = None
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = None
+  ; enabled = true
+  ; timeout_seconds
+  ; default_voice = None
+  ; command = None
+  }
+
+let test_an_endpoint_that_names_a_timeout_is_given_it () =
+  Alcotest.(check (float 0.001)) "the endpoint's own seconds" 600.
+    (Voice_bridge_transport.endpoint_timeout_sec
+       (endpoint_with ~timeout_seconds:600. Voice_config.Whisper_cli "whisper-local"))
+
+let test_without_one_the_workspace_value_stands () =
+  let seconds ?timeout_seconds () =
+    Voice_bridge_transport.endpoint_timeout_sec
+      (endpoint_with ?timeout_seconds Voice_config.Openai_compat "remote")
+  in
+  let unnamed = seconds () in
+  Alcotest.(check bool) "the fallback is a wait, not zero" true (unnamed > 0.);
+  (* A wait of zero or less is not a shorter wait. Until the configuration
+     reader refuses one (#35641) it is read as not having been named. *)
+  Alcotest.(check (float 0.001)) "a value at or below zero is read as unnamed"
+    unnamed
+    (seconds ~timeout_seconds:0. ());
+  Alcotest.(check bool) "and a named one is not the fallback" false
+    (Float.equal unnamed (seconds ~timeout_seconds:600. ()))
+
 let () =
   Alcotest.run
     "voice_probe"
@@ -165,5 +204,11 @@ let () =
             test_the_runtime_loop_routes_by_kind
         ; Alcotest.test_case "the runtime loop can reach the command transport" `Quick
             test_the_runtime_loop_can_reach_the_command_transport
+        ] )
+    ; ( "how long an endpoint is given"
+      , [ Alcotest.test_case "an endpoint that names a timeout is given it" `Quick
+            test_an_endpoint_that_names_a_timeout_is_given_it
+        ; Alcotest.test_case "without one the workspace value stands" `Quick
+            test_without_one_the_workspace_value_stands
         ] )
     ]

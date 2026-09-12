@@ -4491,8 +4491,8 @@ let render_lanes_overview (state : state) =
   let header =
     match state.standalone_lanes with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Lanes · Standalone") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Lanes · Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d lanes)  %s  %s"
@@ -5247,8 +5247,8 @@ let render_clients (state : state) =
   let header =
     match state.clients_surface with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Config / Runtime · Clients") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Config / Runtime · Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
@@ -6574,8 +6574,8 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Activity  [1 Events | 2 Logs*]") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]") (title_missing_reading ~error:state.system_logs_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
@@ -6697,9 +6697,9 @@ let render_verification_list (state : state) =
   let header =
     match state.verification with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
+        Printf.sprintf "%s  %s  %s  %s"
           (planning_workspace_title state ~tab:Planning_task_review ~window:"")
-          timestamp (connection_badge state)
+          (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
@@ -7117,9 +7117,9 @@ let render_harness_list (state : state) =
   let header =
     match state.harness with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
+        Printf.sprintf "%s  %s  %s  %s"
           (planning_workspace_title state ~tab:Planning_verdicts ~window:"")
-          timestamp (connection_badge state)
+          (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
            server was reporting 4,197: the eight are the recent page, and
@@ -7543,8 +7543,8 @@ let render_fusion_list (state : state) =
   let header =
     match state.fusion_runs with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Fusion") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Fusion") (title_missing_reading ~error:state.fusion_error) timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =
@@ -8398,8 +8398,8 @@ let render_repository_list (state : state) =
   let title =
     match state.repositories with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Workspace") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Workspace") (title_missing_reading ~error:state.repositories_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d)  %s  %s"
@@ -8605,8 +8605,8 @@ let render_memory (state : state) =
   let title =
     match state.memory_health with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Memory") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %d keepers · %d need memory · read %s (local)  %s"
@@ -8652,8 +8652,8 @@ let render_memory_facts (state : state) =
   let title =
     match state.memory_facts with
     | None ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s  (not loaded)  %s  %s"
-          (screen_title " MASC Memory") keeper_name timestamp
+        Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s"
+          (screen_title " MASC Memory") keeper_name (title_missing_reading ~error:state.memory_facts_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s · sort: %s%s)  %s  %s"
@@ -8856,8 +8856,8 @@ let render_changes_list (state : state) =
   let header =
     match state.changes with
     | None ->
-        Printf.sprintf "%s %s  (not loaded)  %s  %s"
-          (screen_title " MASC Changes") whose timestamp
+        Printf.sprintf "%s %s  %s  %s  %s"
+          (screen_title " MASC Changes") whose (title_missing_reading ~error:state.changes_error) timestamp
           (connection_badge state)
     | Some s ->
         (* The window and the call count are stated because the list alone
@@ -9254,8 +9254,8 @@ let render_connectors (state : state) =
   let title =
     match state.connectors with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Connectors") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Connectors") (title_missing_reading ~error:state.connectors_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"
@@ -9634,8 +9634,8 @@ let render_runtime (state : state) =
   let header =
     match state.runtime_surface with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Config / Runtime") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Config / Runtime") (title_missing_reading ~error:state.runtime_surface_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -9985,8 +9985,9 @@ let render_keeper_calls (state : state) =
           (Terminal_text.single_line keeper_name)
           timestamp (connection_badge state)
     | None ->
-        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (not loaded yet)  %s  %s"
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  %s  %s  %s"
           (Terminal_text.single_line keeper_name)
+          (title_missing_reading ~error:state.keeper_calls_error)
           timestamp
           (connection_badge state)
     | Some snapshot ->
@@ -12348,7 +12349,9 @@ let render_config_models (state : state) =
   let path_note =
     match state.runtime_config_view with
     | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
+    | None -> Ansi.dim
+        ^ title_missing_reading ~error:state.runtime_config_view_error
+        ^ Ansi.reset
   in
   box_line buf cols
     (Printf.sprintf "%s  %s  %s  %s" (screen_title " MASC Models")
@@ -12549,7 +12552,9 @@ let render_config (state : state) =
   let path_note =
     match state.runtime_config_view with
     | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
+    | None -> Ansi.dim
+        ^ title_missing_reading ~error:state.runtime_config_view_error
+        ^ Ansi.reset
   in
   box_line buf cols
     (Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")

@@ -62,21 +62,10 @@ let run_cmd cli_base_path =
         base_path
     with
     | Server_startup_takeover.Base_path_acquired lease -> lease
-    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-      (* "recorded" rather than "owns": the number is written after the lock
-         is taken, so a refusal can name a process that has already gone. *)
-      Log.Server.error
-        "stdio runtime cannot start because BasePath %s is held (lease \
-         records PID %s, running=%b); stop the holder or choose a different \
-         --base-path"
-        base_path
-        (Option.fold ~none:"unknown" ~some:string_of_int
-           (Server_startup_takeover.base_path_owner_pid owner))
-        (match owner with
-         | Server_startup_takeover.Owner_named_alive _
-         | Server_startup_takeover.Owner_this_process _ -> true
-         | Server_startup_takeover.Owner_named_gone _
-         | Server_startup_takeover.Owner_unnamed -> false);
+    | Server_startup_takeover.Base_path_already_owned { owner; lock_path } ->
+      Log.Server.error "stdio runtime cannot start: %s"
+        (Server_startup_takeover.base_path_contention_message
+           ~base_path ~lock_path owner);
       exit 1
     | Server_startup_takeover.Base_path_rejected rejection ->
       Log.Server.error

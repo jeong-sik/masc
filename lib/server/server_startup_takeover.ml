@@ -93,16 +93,9 @@ type base_path_owner =
       (** This process already holds the lease. A second acquisition in the
           same process would take the same kernel lock, which is why the
           in-process table is consulted first. *)
-  | Owner_named_alive of int
-      (** The lease names this number and the process is running. That is all
-          it says. The number is written after the lock is taken, so a
-          contender inside that window reads the previous owner's -- and that
-          process may still be alive, or its number may have been reused by
-          something unrelated. Do not tell an operator to kill it. *)
-  | Owner_named_gone of int
-      (** The lease names this number and no process has it, so the lock
-          belongs to something the lease does not name. Nothing is gained by
-          killing the recorded number. *)
+  | Owner_recorded of int
+      (** A number recorded in the lease, with no verified PID namespace or
+          current-holder identity. It may be stale or identify another process. *)
   | Owner_unnamed
       (** The lease file carried no readable number. *)
 
@@ -276,17 +269,37 @@ let pid_exists pid =
 ;;
 
 let base_path_owner_pid = function
-  | Owner_this_process pid | Owner_named_alive pid | Owner_named_gone pid ->
+  | Owner_this_process pid | Owner_recorded pid ->
     Some pid
   | Owner_unnamed -> None
 ;;
 
-(* The lease file's number, classified by whether that process is still there.
-   [pid_exists] answers EPERM as alive: a number owned by another uid is a
-   running process this operator cannot signal, which is still not "gone". *)
+(* A shared lease can be written in another PID namespace. Local kill(pid, 0)
+   cannot establish anything about the recorded process or the lock holder. *)
 let base_path_owner_of_recorded = function
   | None -> Owner_unnamed
-  | Some pid -> if pid_exists pid then Owner_named_alive pid else Owner_named_gone pid
+  | Some pid -> Owner_recorded pid
+;;
+
+let base_path_contention_message ~base_path ~lock_path owner =
+  let detail =
+    match owner with
+    | Owner_this_process pid ->
+      Printf.sprintf "This process (PID %d) already owns the lease" pid
+    | Owner_recorded pid ->
+      Printf.sprintf
+        "The lease records PID %d; its namespace and current holder are unverified"
+        pid
+    | Owner_unnamed -> "The lease has no readable recorded PID"
+  in
+  Printf.sprintf
+    "Base path %s is locked. %s. Lock file: %s. Inspect the services or \
+     containers configured to use this base path on the owning host and stop \
+     the confirmed owner there, or choose a different --base-path. Do not \
+     signal the recorded PID or delete the lock file to bypass ownership. \
+     If lsof is installed on the owning host, optional open-file evidence: \
+     lsof %s (open files alone do not prove lock ownership)."
+    base_path detail (Filename.quote lock_path) (Filename.quote lock_path)
 ;;
 
 let sleep_poll seconds = if seconds > 0.0 then ignore (Unix.select [] [] [] seconds)

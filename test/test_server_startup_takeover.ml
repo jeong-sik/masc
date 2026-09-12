@@ -405,12 +405,11 @@ let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
             with
             | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
               Alcotest.(check bool)
-                "a recorded owner that is gone is not offered as a target"
+                "an absent recorded PID remains namespace-unverified"
                 true
                 (match owner with
-                 | Server_startup_takeover.Owner_named_gone pid ->
+                 | Server_startup_takeover.Owner_recorded pid ->
                    pid = absent_pid
-                 | Server_startup_takeover.Owner_named_alive _
                  | Server_startup_takeover.Owner_this_process _
                  | Server_startup_takeover.Owner_unnamed -> false)
             | Server_startup_takeover.Base_path_acquired lease ->
@@ -461,13 +460,12 @@ let test_base_path_lock_rejects_concurrent_lease () =
               Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
             with
             | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-              (* A running child: the refusal names it and says so, which is
-                 what makes "kill it" the right instruction. *)
-              Alcotest.(check bool) "owner is reported as running" true
+              (* Even a locally running PID does not prove the namespace or
+                 identity of the holder of a shared lease. *)
+              Alcotest.(check bool) "running recorded PID remains unverified" true
                 (match owner with
-                 | Server_startup_takeover.Owner_named_alive _ -> true
+                 | Server_startup_takeover.Owner_recorded _ -> true
                  | Server_startup_takeover.Owner_this_process _
-                 | Server_startup_takeover.Owner_named_gone _
                  | Server_startup_takeover.Owner_unnamed -> false);
               Alcotest.(check (option int)) "owner pid is observable"
                 (Some child_pid)
@@ -533,8 +531,7 @@ let test_base_path_lock_rejects_same_process_symlink_alias () =
                "symlink alias names this process, not a killable other" true
                (match owner with
                 | Server_startup_takeover.Owner_this_process _ -> true
-                | Server_startup_takeover.Owner_named_alive _
-                | Server_startup_takeover.Owner_named_gone _
+                | Server_startup_takeover.Owner_recorded _
                 | Server_startup_takeover.Owner_unnamed -> false);
              Alcotest.(check (option int))
                "symlink alias observes the same process-local owner"
@@ -1221,11 +1218,37 @@ let test_base_path_lock_rejects_runtime_retarget_after_establish () =
         Server_startup_takeover.release_base_path_lease lease;
         Alcotest.fail "post-establish runtime replacement acquired ownership")
 
+let test_contention_recovery_guidance () =
+  let lock_path = "/tmp/shared lease/'quoted'/owner.lock" in
+  List.iter
+    (fun owner ->
+      let message =
+        Server_startup_takeover.base_path_contention_message
+          ~base_path:"/workspace" ~lock_path owner
+      in
+      List.iter
+        (fun expected ->
+          Alcotest.(check bool) expected true
+            (String_util.contains_substring message expected))
+        [ Filename.quote lock_path
+        ; "services or containers"
+        ; "owning host"
+        ; "If lsof is installed"
+        ; "open files alone do not prove lock ownership"
+        ; "Do not signal the recorded PID"
+        ])
+    [ Server_startup_takeover.Owner_this_process (Unix.getpid ())
+    ; Server_startup_takeover.Owner_recorded (Unix.getpid ())
+    ; Server_startup_takeover.Owner_unnamed
+    ]
+
 let () =
   Alcotest.run "Server_startup_takeover"
     [
       ( "helpers",
         [
+          Alcotest.test_case "contention recovery includes host and lock evidence"
+            `Quick test_contention_recovery_guidance;
           Alcotest.test_case "status line parser is exact" `Quick
             test_status_line_parser;
           Alcotest.test_case "server command heuristic rejects unrelated processes"

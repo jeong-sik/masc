@@ -152,7 +152,11 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           chmod +x scripts/build-linux-release.sh scripts/check-glibc-floor.sh
-          scripts/build-linux-release.sh --out "$PWD/artifacts/linux-bin"
+          contract_test=""
+          if [ "${{ matrix.arch }}" = "linux-x64" ]; then
+            contract_test="--run-contract-test"
+          fi
+          scripts/build-linux-release.sh --out "$PWD/artifacts/linux-bin" $contract_test
           # Absolute: several release scripts cd to the repo root or to a
           # scratch directory before using the path they were handed.
           echo "MASC_BIN_DIR=$PWD/artifacts/linux-bin" >> "$GITHUB_ENV"
@@ -202,10 +206,10 @@ jobs:
       - name: Keeper creation CLI exits after HTTP response
         run: python3 test/test_keeper_create_cli_exit.py "$MASC_BIN_DIR"/main_eio.exe
 
-      - name: Tool contract truth
-        if: matrix.arch == 'linux-x64'
-        run: |
-          "$MASC_BIN_DIR"/test_tool_contract_truth.exe
+      # "Tool contract truth" used to run here through `dune exec`. It now runs
+      # inside the Linux build container, because it resolves its workspace
+      # through the environment dune sets up and the runner no longer has a
+      # toolchain. Same test, same architecture, one step earlier.
 
       - name: Sandbox image CLI runtime routing
         run: python3 test/test_sandbox_image_cli.py "$MASC_BIN_DIR"/main_eio.exe

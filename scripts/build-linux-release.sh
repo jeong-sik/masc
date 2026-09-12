@@ -38,6 +38,8 @@
 #   --image IMAGE      builder image (default: ocaml/opam:ubuntu-22.04-ocaml-5.5)
 #   --jobs N           dune -j (default: container default)
 #   --keep             leave the build container running for inspection
+#   --run-contract-test  also run test/test_tool_contract_truth.exe in the
+#                      container (release.yml asks for this on one arch)
 #   --print-binaries   list the binaries this script produces, then exit
 #
 # The build runs natively for the host architecture. Cross-building via qemu
@@ -45,7 +47,9 @@
 # and an emulated OCaml build is slow enough to be its own failure mode.
 #
 # The container gets the repo's *tracked* files only (`git ls-files`), so an
-# untracked local file cannot change what a release contains.
+# untracked local file cannot change what a release contains. Content comes
+# from the working tree, so local edits to tracked files are built; a brand
+# new file has to be `git add`ed before this script can see it.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,13 +64,12 @@ release_binaries=(
   bin/deployment_preflight_helper.exe
 )
 
-# Built and exported alongside the release binaries, but not shipped, so the
-# glibc floor does not apply to them: they run on the release runner itself.
-# They are built here so that the Linux job needs no second OCaml toolchain —
-# with these exported, nothing on the runner has to invoke dune at all.
-support_binaries=(
-  test/test_tool_contract_truth.exe
-)
+# Run inside the container with --run-contract-test, not exported and run on
+# the host. The test resolves its workspace through the environment dune sets
+# up for `dune exec`, so the bare executable run from a checkout answers
+# "MASC_BASE_PATH is not set" and exits 1. Keeping it where the toolchain is
+# keeps it running exactly as it did before this script existed.
+contract_test=test/test_tool_contract_truth.exe
 
 # Pinned rather than "latest": ubuntu 22.04 ships protoc 3.12, which rejects
 # this repo's protos ("proto3 optional fields, but
@@ -79,6 +82,7 @@ floor=2.35
 image="ocaml/opam:ubuntu-22.04-ocaml-5.5"
 jobs=""
 keep=0
+run_contract_test=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -87,13 +91,14 @@ while [ "$#" -gt 0 ]; do
     --image) image="${2:?--image needs an image}"; shift 2 ;;
     --jobs) jobs="${2:?--jobs needs a number}"; shift 2 ;;
     --keep) keep=1; shift ;;
+    --run-contract-test) run_contract_test=1; shift ;;
     --print-binaries)
-      for binary in "${release_binaries[@]}" "${support_binaries[@]}"; do
+      for binary in "${release_binaries[@]}"; do
         printf '%s\n' "$(basename "$binary")"
       done
       exit 0
       ;;
-    -h|--help) sed -n '2,45p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "build-linux-release: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -217,7 +222,7 @@ docker exec "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
-  dune build --release '"${release_binaries[*]} ${support_binaries[*]} $jobs_flag"'
+  dune build --release '"${release_binaries[*]} $jobs_flag"'
 '
 
 built_paths=()
@@ -245,9 +250,19 @@ docker exec "$container" bash -lc '
   echo "no binary carries a dynamic sqlite dependency"
 '
 
+if [ "$run_contract_test" -eq 1 ]; then
+  echo "== tool contract truth"
+  docker exec "$container" bash -lc '
+    set -e
+    cd /src
+    eval "$(opam env --switch=masc)"
+    dune exec --release '"$contract_test"'
+  '
+fi
+
 echo "== collect into $out_dir"
 mkdir -p "$out_dir"
-for binary in "${release_binaries[@]}" "${support_binaries[@]}"; do
+for binary in "${release_binaries[@]}"; do
   name="$(basename "$binary")"
   docker cp "$container:/src/_build/default/$binary" "$out_dir/$name"
   chmod +x "$out_dir/$name"
@@ -255,7 +270,7 @@ done
 
 echo
 echo "built at glibc floor $floor for linux-$arch_label:"
-for binary in "${release_binaries[@]}" "${support_binaries[@]}"; do
+for binary in "${release_binaries[@]}"; do
   name="$(basename "$binary")"
   printf '  %s (%s bytes)\n' "$out_dir/$name" "$(wc -c < "$out_dir/$name" | tr -d ' ')"
 done

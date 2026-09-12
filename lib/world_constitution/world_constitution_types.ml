@@ -39,11 +39,14 @@ type t = {
 
 type invalid =
   | Empty_text
+  | Multiline_text
   | Empty_author
   | Empty_evidence_uri of { index : int }
 
 let invalid_to_string = function
   | Empty_text -> "article text is empty"
+  | Multiline_text ->
+    "article text spans more than one line; an article is one sentence"
   | Empty_author -> "article author is empty"
   | Empty_evidence_uri { index } ->
     Printf.sprintf "evidence[%d] has an empty uri" index
@@ -57,8 +60,12 @@ let blank_evidence_index evidence =
   in
   scan 0 evidence
 
+let is_multiline s =
+  String.exists (fun c -> Char.equal c '\n' || Char.equal c '\r') s
+
 let make ~id ~text ~author ~at ~evidence =
   if is_blank text then Error Empty_text
+  else if is_multiline text then Error Multiline_text
   else if is_blank author then Error Empty_author
   else
     match blank_evidence_index evidence with

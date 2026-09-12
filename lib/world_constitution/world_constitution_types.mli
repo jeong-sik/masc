@@ -46,6 +46,11 @@ type t = private {
 
 type invalid =
   | Empty_text
+  | Multiline_text
+      (** An article is one sentence on one line. Text carrying a newline
+          renders as several lines beside the real ones, and a line shaped like
+          [- \[a-...\] ...] is indistinguishable from an article nobody
+          wrote — and cannot be removed, because no such id is held. *)
   | Empty_author
   | Empty_evidence_uri of { index : int }
 

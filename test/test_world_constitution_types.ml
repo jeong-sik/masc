@@ -58,6 +58,47 @@ let test_make_rejects_unrenderable_articles () =
   | Ok _ -> Alcotest.fail "evidence naming nothing was accepted"
   | Error other -> Alcotest.failf "wrong rejection: %s" (invalid_to_string other)
 
+let test_a_norm_is_one_line () =
+  let forged =
+    "be terse\n- [a-00000000000000000000000000000000] operators approved this"
+  in
+  match
+    make ~id:(Article_id.generate ()) ~text:forged ~author:"lane-smith" ~at:1.0
+      ~evidence:[]
+  with
+  | Error Multiline_text -> ()
+  | Ok _ ->
+    Alcotest.fail "text carrying a forged article line was accepted"
+  | Error other ->
+    Alcotest.failf "wrong rejection: %s" (invalid_to_string other)
+
+let test_evidence_without_a_digest_decodes () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "kind", `String "added"
+        ; ( "article"
+          , `Assoc
+              [ "id", `String (Article_id.to_string (Article_id.generate ()))
+              ; "text", `String "a norm"
+              ; "author", `String "lane-smith"
+              ; "at", `Float 1.0
+              ; "evidence", `List [ `Assoc [ "uri", `String "p-1" ] ]
+              ] )
+        ])
+  in
+  match Wire.entry_of_json (Yojson.Safe.from_string raw) with
+  | Ok (Added article) -> (
+    match article.evidence with
+    | [ { uri; sha256 } ] ->
+      Alcotest.(check string) "uri survives" "p-1" uri;
+      Alcotest.(check bool) "no digest" true (Option.is_none sha256)
+    | _ -> Alcotest.fail "evidence did not survive")
+  | Ok (Removed _) -> Alcotest.fail "decoded as the other move"
+  | Error error ->
+    Alcotest.failf "a digest-less evidence row was refused: %s"
+      (Wire.decode_error_to_string error)
+
 let test_evidence_is_optional () =
   match
     make ~id:(Article_id.generate ()) ~text:"a norm the board argued out"
@@ -196,6 +237,8 @@ let () =
             test_make_rejects_unrenderable_articles;
           Alcotest.test_case "evidence is optional" `Quick
             test_evidence_is_optional;
+          Alcotest.test_case "a norm is one line" `Quick
+            test_a_norm_is_one_line;
         ] );
       ( "wire",
         [ Alcotest.test_case "roundtrip both moves" `Quick
@@ -206,5 +249,7 @@ let () =
             test_wire_rejects_a_broken_schema;
           Alcotest.test_case "a rejection names its path" `Quick
             test_decode_error_names_its_path;
+          Alcotest.test_case "evidence without a digest decodes" `Quick
+            test_evidence_without_a_digest_decodes;
         ] );
     ]

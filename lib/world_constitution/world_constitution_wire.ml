@@ -101,12 +101,16 @@ let number_field ~path ~field fields =
   | `Int i -> Ok (float_of_int i)
   | _ -> Error { path = path @ [ Field field ]; reason = Expected_number }
 
+(* Absent and null both mean "no digest". The encoder omits the field, but a
+   line written by hand or by a future producer may spell it either way, and
+   the type this decodes into calls it optional. *)
 let optional_string_field ~path ~field fields =
-  let* value = required ~path ~field fields in
-  match value with
-  | `Null -> Ok None
-  | `String s -> Ok (Some s)
-  | _ -> Error { path = path @ [ Field field ]; reason = Expected_string }
+  match assoc_opt field fields with
+  | None -> Ok None
+  | Some `Null -> Ok None
+  | Some (`String s) -> Ok (Some s)
+  | Some _ ->
+    Error { path = path @ [ Field field ]; reason = Expected_string }
 
 let article_id_field ~path ~field fields =
   let* raw = string_field ~path ~field fields in
@@ -117,10 +121,10 @@ let article_id_field ~path ~field fields =
 
 let evidence_item_to_json { uri; sha256 } =
   `Assoc
-    [ field_uri, `String uri
-    ; ( field_sha256
-      , match sha256 with None -> `Null | Some digest -> `String digest )
-    ]
+    (( field_uri, `String uri )
+     :: (match sha256 with
+         | None -> []
+         | Some digest -> [ field_sha256, `String digest ]))
 
 let evidence_item_of_json ~path json =
   let* fields = object_fields ~path json in

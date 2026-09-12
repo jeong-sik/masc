@@ -160,6 +160,83 @@ let test_the_byte_ceiling_blocks_the_write_that_would_cross_it () =
       Alcotest.(check int) "the blocked write added nothing" written
         (List.length (held ~base_path)))
 
+let test_a_norm_longer_than_one_sentence_is_refused () =
+  with_world (fun base_path ->
+      let execution =
+        write ~base_path
+          (`Assoc [ "text", `String (String.make 600 'x') ])
+      in
+      Alcotest.(check bool) "an overlong norm is refused" true
+        (failed execution);
+      (* The ceiling message would tell a keeper to remove something from an
+         empty world; this one says what the keeper can actually change. *)
+      Alcotest.(check bool)
+        (Printf.sprintf "and says to shorten it (%s)" (output execution))
+        true
+        (contains ~sub:"one sentence" (output execution));
+      Alcotest.(check int) "nothing was written" 0
+        (List.length (held ~base_path)))
+
+let test_evidence_uri_reaches_the_ledger () =
+  with_world (fun base_path ->
+      let execution =
+        write ~base_path
+          (`Assoc
+            [ "text", `String "a norm the board argued out"
+            ; "evidence_uri", `String "c-0123456789abcdef0123456789abcdef"
+            ])
+      in
+      Alcotest.(check bool) "the write succeeded" false (failed execution);
+      (match held ~base_path with
+       | [ article ] -> (
+         match article.Types.evidence with
+         | [ { Types.uri; sha256 } ] ->
+           Alcotest.(check string) "the coordinate survives a round trip"
+             "c-0123456789abcdef0123456789abcdef" uri;
+           Alcotest.(check bool) "no digest for a ledger row" true
+             (Option.is_none sha256)
+         | others ->
+           Alcotest.failf "expected one evidence row, got %d"
+             (List.length others))
+       | others ->
+         Alcotest.failf "expected one article, got %d" (List.length others));
+      (* A blank coordinate is a rejection, not a silently dropped argument. *)
+      Alcotest.(check bool)
+        "a blank evidence_uri fails the write" true
+        (failed
+           (write ~base_path
+              (`Assoc
+                [ "text", `String "another norm"
+                ; "evidence_uri", `String "  "
+                ]))))
+
+let test_unreadable_lines_are_reported_to_the_caller () =
+  with_world (fun base_path ->
+      (* The first write creates the directory; the broken line goes in after
+         it, so the reported line number is the second. *)
+      ignore (write ~base_path (`Assoc [ "text", `String "a readable norm" ]));
+      let channel =
+        open_out_gen [ Open_append; Open_creat; Open_text ] 0o600
+          (Store.ledger_path ~base_path)
+      in
+      output_string channel "{\"kind\":\"added\",\"article\":{}}\n";
+      close_out channel;
+      let execution = write ~base_path (`Assoc [ "text", `String "a norm" ]) in
+      Alcotest.(check bool) "the write still succeeds" false (failed execution);
+      match Yojson.Safe.from_string (output execution) with
+      | `Assoc fields -> (
+        match List.assoc_opt "unreadable_ledger_lines" fields with
+        | Some (`List [ `Assoc row ]) ->
+          Alcotest.(check bool)
+            "the caller is told which line" true
+            (List.assoc_opt "line" row = Some (`Int 2))
+        | Some other ->
+          Alcotest.failf "unexpected shape %s" (Yojson.Safe.to_string other)
+        | None ->
+          Alcotest.failf "the unreadable line was not reported: %s"
+            (output execution))
+      | _ -> Alcotest.failf "unexpected output %s" (output execution))
+
 let test_removing_takes_the_norm_out () =
   with_world (fun base_path ->
       let execution =
@@ -195,6 +272,12 @@ let () =
             test_an_empty_norm_is_refused;
           Alcotest.test_case "the byte ceiling blocks the crossing write" `Quick
             test_the_byte_ceiling_blocks_the_write_that_would_cross_it;
+          Alcotest.test_case "a norm longer than one sentence is refused"
+            `Quick test_a_norm_longer_than_one_sentence_is_refused;
+          Alcotest.test_case "evidence_uri reaches the ledger" `Quick
+            test_evidence_uri_reaches_the_ledger;
+          Alcotest.test_case "unreadable lines are reported to the caller"
+            `Quick test_unreadable_lines_are_reported_to_the_caller;
         ] );
       ( "remove",
         [ Alcotest.test_case "removing takes the norm out" `Quick

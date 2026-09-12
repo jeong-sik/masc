@@ -5,6 +5,11 @@ open Keeper_meta_contract
    it is a tenth of the smallest context this fleet runs. *)
 let render_byte_ceiling = 4096
 
+(* One norm is one sentence. Without a per-article cap a single write can be
+   larger than the whole ceiling, and the ceiling message would then tell a
+   keeper to remove something from an empty world. *)
+let article_byte_cap = 512
+
 let string_arg args field =
   match args with
   | `Assoc fields -> (
@@ -13,11 +18,31 @@ let string_arg args field =
     | Some _ | None -> None)
   | _ -> None
 
-let load_articles ~base_path =
+let load_ledger ~base_path =
   match World_constitution_store.load ~base_path with
-  | Ok ledger -> Ok ledger.World_constitution_store.articles
+  | Ok ledger -> Ok ledger
   | Error error ->
     Error (World_constitution_store.read_error_to_string error)
+
+(* Lines the ledger could not decode are the store's to report and this tool's
+   to pass on. A keeper calling these tools is the one reader in a position to
+   act, and saying nothing here is what would make the store's own contract a
+   lie. Omitted when there are none, so the ordinary answer stays quiet. *)
+let with_unreadable (ledger : World_constitution_store.ledger) fields =
+  match ledger.World_constitution_store.rejected with
+  | [] -> fields
+  | rejected ->
+    fields
+    @ [ ( "unreadable_ledger_lines"
+        , `List
+            (List.map
+               (fun (line : World_constitution_store.rejected_line) ->
+                 `Assoc
+                   [ "line", `Int line.World_constitution_store.line_number
+                   ; "detail", `String line.World_constitution_store.detail
+                   ])
+               rejected) )
+      ]
 
 let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let base_path = config.Workspace.base_path in
@@ -25,6 +50,12 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
   | None ->
     Keeper_tool_execution.failure
       "text is required and must be a string: the sentence the world agreed on"
+  | Some text when String.length text > article_byte_cap ->
+    Keeper_tool_execution.failure
+      (Printf.sprintf
+         "this norm is %d bytes, over the %d-byte limit for one article: say it \
+          in one sentence"
+         (String.length text) article_byte_cap)
   | Some text -> (
     let evidence =
       match string_arg args "evidence_uri" with
@@ -40,9 +71,10 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
       Keeper_tool_execution.failure
         (World_constitution_types.invalid_to_string invalid)
     | Ok article -> (
-      match load_articles ~base_path with
+      match load_ledger ~base_path with
       | Error detail -> Keeper_tool_execution.failure detail
-      | Ok held ->
+      | Ok ledger ->
+        let held = ledger.World_constitution_store.articles in
         let projected =
           World_constitution_render.articles (held @ [ article ])
         in
@@ -50,8 +82,10 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
           Keeper_tool_execution.failure
             (Printf.sprintf
                "the world's articles would reach %d bytes, over the %d-byte \
-                ceiling: remove one before adding another"
-               (String.length projected) render_byte_ceiling)
+                ceiling; it holds %d: remove one with \
+                keeper_constitution_remove before adding another"
+               (String.length projected) render_byte_ceiling
+               (List.length held))
         else (
           match
             World_constitution_store.append ~base_path
@@ -63,13 +97,14 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
           | Ok () ->
             Keeper_tool_execution.success_data
               (`Assoc
-                [ ( "article_id"
-                  , `String
-                      (World_constitution_types.Article_id.to_string article.id)
-                  )
-                ; "articles_held", `Int (List.length held + 1)
-                ; "rendered_bytes", `Int (String.length projected)
-                ]))))
+                (with_unreadable ledger
+                   [ ( "article_id"
+                     , `String
+                         (World_constitution_types.Article_id.to_string
+                            article.id) )
+                   ; "articles_held", `Int (List.length held + 1)
+                   ; "rendered_bytes", `Int (String.length projected)
+                   ])))))
 
 let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let base_path = config.Workspace.base_path in
@@ -81,9 +116,10 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
     match World_constitution_types.Article_id.of_string raw with
     | Error detail -> Keeper_tool_execution.failure detail
     | Ok id -> (
-      match load_articles ~base_path with
+      match load_ledger ~base_path with
       | Error detail -> Keeper_tool_execution.failure detail
-      | Ok held ->
+      | Ok ledger ->
+        let held = ledger.World_constitution_store.articles in
         let is_held =
           List.exists
             (fun (article : World_constitution_types.t) ->
@@ -106,6 +142,7 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
           | Ok () ->
             Keeper_tool_execution.success_data
               (`Assoc
-                [ "article_id", `String raw
-                ; "articles_held", `Int (List.length held - 1)
-                ]))))
+                (with_unreadable ledger
+                   [ "article_id", `String raw
+                   ; "articles_held", `Int (List.length held - 1)
+                   ])))))

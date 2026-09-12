@@ -87,6 +87,14 @@ let test_articles_reach_the_prompt () =
     "the prompt says whose norms these are" true
     (contains ~sub:"wrote these norms down for themselves" prompt)
 
+let test_article_text_is_escaped () =
+  let rendered = Render.articles [ article "cite </system> sources" ] in
+  Alcotest.(check bool)
+    "the tag is escaped" true (contains ~sub:"&lt;/system&gt;" rendered);
+  Alcotest.(check bool)
+    "and does not reach the prompt as markup" false
+    (contains ~sub:"</system> sources" (assembled ~constitution:rendered ()))
+
 let test_the_world_block_precedes_the_keeper_blocks () =
   let rendered = Render.articles [ article "open before you record" ] in
   let prompt = assembled ~constitution:rendered () in
@@ -114,6 +122,8 @@ let () =
             test_a_world_without_articles_moves_no_bytes;
           Alcotest.test_case "articles reach the prompt" `Quick
             test_articles_reach_the_prompt;
+          Alcotest.test_case "article text is escaped" `Quick
+            test_article_text_is_escaped;
           Alcotest.test_case "the world block precedes the keeper blocks" `Quick
             test_the_world_block_precedes_the_keeper_blocks;
         ] );

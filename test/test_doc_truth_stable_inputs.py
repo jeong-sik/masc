@@ -41,7 +41,10 @@ class StableDocumentationInputs(unittest.TestCase):
                          (before.returncode, before.stdout, before.stderr))
 
     def test_candidate_install_pin_requires_explicit_availability_notice(self):
-        names = ("README.md", "README.ko.md", "docs/INSTALL.md", "docs/INSTALL.ko.md")
+        site_docs = ("docs-site/src/content/docs/getting-started/quickstart.md",
+                     "docs-site/src/content/docs/ko/getting-started/quickstart.md")
+        names = ("README.md", "README.ko.md", "docs/INSTALL.md",
+                 "docs/INSTALL.ko.md") + site_docs
         publication_docs = ("ROADMAP.md", "docs/PRODUCT-OPERATING-PLAN.md")
         originals = {name: (self.repo / name).read_text()
                      for name in names + publication_docs}
@@ -62,6 +65,10 @@ class StableDocumentationInputs(unittest.TestCase):
                         lambda match: match.group(1) + "v" + prior_versions[0], text)
                     self.assertEqual(count, 1)
                 text = re.sub(r"(?m)^TAG=v[^ ]+$", "TAG=v" + version, text)
+                if name in site_docs:
+                    # The site pages carry the version in prose and a heading
+                    # as well as the pin, and name only one version.
+                    text = re.sub(r"[0-9]+\.[0-9]+\.[0-9]+", version, text)
                 if name.startswith("README") and notice not in text:
                     text = notice + "\n\n" + text
                 (self.repo / name).write_text(text)

@@ -48,6 +48,7 @@ module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
+module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
@@ -1548,6 +1549,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       state.last_action <-
         Some
           ( "tool calls " ^ tool_visibility_to_string visibility
+          , Unix.gettimeofday () );
+      true
+    end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
+      (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
+         where it starts; this is the key that asks for the rest. Saying what
+         it did matters more here than elsewhere -- the fold changes how many
+         rows the block below the conversation takes, and a reader who does
+         not see a row appear has no other way to tell the key landed. *)
+      state.msg_turn_folded <- not state.msg_turn_folded;
+      state.last_action <-
+        Some
+          ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
           , Unix.gettimeofday () );
       true
     end else if c = Some 6 then begin
@@ -13374,11 +13387,10 @@ let apply_raw_mode new_term =
 
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
-  (* [at_exit] runs its callbacks in the reverse of this order and stops at
-     the first one that raises, so the terminal restore is registered last
-     and runs first. The frame summary appends to a file and can raise on a
-     write -- registered the other way round it would take the restore with
-     it and leave the terminal in raw mode. *)
+  (* [at_exit] runs its callbacks in the reverse of this order. Restore first
+     so an error writing the frame summary cannot prevent the first restore
+     attempt. An exception interrupts that cleanup pass; OCaml may retry
+     remaining callbacks while reporting an uncaught exception. *)
   at_exit Masc_tui_frame_timing.report;
   at_exit cleanup;
   (* SIGINT asks the loop what a Ctrl-C means this time; the rest tell it the
@@ -13494,8 +13506,22 @@ let main
      sends -- and the composer cannot tell "send this" from "start a new line".
      LF still submits below if some terminal sends it for Return, so this only
      ever adds a key. *)
+  (* Flow control off. IXON lives in c_iflag and ICANON in c_lflag, so raw
+     mode did not touch it: the tty was still answering Ctrl-S by stopping
+     output and Ctrl-Q by resuming it, and neither byte ever reached the
+     key layer. Measured on a pty with the TUI running: ixon=True.
+
+     What an operator saw was small, because IXANY is on too -- the next key
+     they pressed released it, so the screen stalled rather than froze. What
+     it cost was a key: Ctrl-S could not be bound to anything, which is the
+     key a reader reaches for to hold a moving surface still. *)
   let new_term =
-    { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
+    { old_term with
+      Unix.c_icanon = false
+    ; c_echo = false
+    ; c_icrnl = false
+    ; c_ixon = false
+    }
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in
@@ -13514,7 +13540,7 @@ let main
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
-  let restore_terminal () =
+  let restore_terminal_outcome () =
     (* No tracking-off here: suspend runs this too, and a terminal that
        re-enters raw mode after Ctrl-Z would silently lose the wheel. The
        off byte is written once, in [cleanup], at real process exit. *)
@@ -13523,7 +13549,12 @@ let main
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
+    (* Keep the known-loss result so exit cleanup does not write a farewell
+       or tracking controls to a terminal that already rejected restoration. *)
+    let outcome =
+      Terminal_restore.put_back ~set:(fun () ->
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
+    in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
        terminal back, and this character is the part it cannot reach.
        [-1] means the descriptor was never a terminal, so there is nothing to
@@ -13534,7 +13565,12 @@ let main
       ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool);
     if old_discard_output >= 0 then
       (* See old_discard_output's guard: only a supported key is restored; a lost tty cannot receive it. *)
-      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool)
+      ignore (Masc_tui_termios.set_discard_output Unix.stdin old_discard_output : bool);
+    outcome
+  in
+  let restore_terminal () =
+    match restore_terminal_outcome () with
+    | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ()
   in
 
   (* Cleanup on exit *)
@@ -13542,19 +13578,25 @@ let main
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
       Console_sink.set_after_write_observer None;
-      restore_terminal ();
-      print_endline "Goodbye!";
-      (* Tracking off after Goodbye: a terminal left in report mode keeps
-         swallowing the wheel after this process is gone, and the farewell
-         line is the last thing a reader matches on -- a byte after it cannot
-         disturb that read. *)
-      output_string stdout mouse_tracking_disable;
-      output_string stdout bracketed_paste_disable;
-      (* The mode belongs to this program's screen. A shell that inherited it
-         would see its own keys reported in a form it does not read. *)
-      if Terminal_profile.kitty_keyboard terminal_profile then
-        output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-      flush stdout
+      (* Bound by name: the AST guard pins this call by listing every
+         labelled argument as an identifier, so the exit writer is a named
+         function rather than an inline closure. *)
+      let finish () =
+        print_endline "Goodbye!";
+        (* Tracking off after Goodbye: a terminal left in report mode keeps
+           swallowing the wheel after this process is gone, and the farewell
+           line is the last thing a reader matches on -- a byte after it cannot
+           disturb that read. *)
+        output_string stdout mouse_tracking_disable;
+        output_string stdout bracketed_paste_disable;
+        (* The mode belongs to this program's screen. A shell that inherited it
+           would see its own keys reported in a form it does not read. *)
+        if Terminal_profile.kitty_keyboard terminal_profile then
+          output_string stdout Masc_tui_csi.disable_kitty_keyboard;
+        flush stdout
+      in
+      Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
+        ~finish
     end
   in
 
@@ -16224,7 +16266,7 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "@" | "esc" -> close ()
             | "j" | "down" | "k" | "up" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 let targets = Masc_tui_answering.target_indexes lines in
                 (match targets with
                  | [] -> ()
@@ -16256,7 +16298,7 @@ and is loaded on demand through keeper_skill.
                      else if cursor >= state.answering_scroll + height then
                        state.answering_scroll <- cursor - height + 1)
             | "\r" ->
-                let lines = Masc_tui_render.answering_lines state in
+                let lines = Masc_tui_render_prim.answering_lines state in
                 (match List.nth_opt lines state.answering_cursor with
                  | Some { Masc_tui_answering.target = Some keeper_name; _ } ->
                      close ();
@@ -17866,7 +17908,7 @@ and is loaded on demand through keeper_skill.
            state.answering_cursor <-
              (match
                 Masc_tui_answering.target_indexes
-                  (Masc_tui_render.answering_lines state)
+                  (Masc_tui_render_prim.answering_lines state)
               with
               | index :: _ -> index
               | [] -> 0)
@@ -18448,8 +18490,14 @@ and is loaded on demand through keeper_skill.
                  | Lanes_overview ->
                      move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
+                 (* Saturating, like every other clamped scroll: the frame
+                    reports the row it drew and until it has, the stored value
+                    may be a row past the end. *)
                  state.metrics_scroll <-
-                   max 0 (state.metrics_scroll + (direction * page))
+                   (if direction > 0 then
+                      Masc_tui_types.scroll_down_from state.metrics_scroll
+                        ~by:page
+                    else max 0 (state.metrics_scroll + (direction * page)))
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
@@ -19377,7 +19425,9 @@ and is loaded on demand through keeper_skill.
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | Metrics -> state.metrics_scroll <- state.metrics_scroll + 1
+            | Metrics ->
+                state.metrics_scroll <-
+                  Masc_tui_types.scroll_down_from state.metrics_scroll ~by:1
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then
                   state.system_logs_detail_scroll <-
@@ -20183,12 +20233,12 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Planning;
             state.planning_mode <- Planning_list;
-            (match change_ctx.Masc_tui_render.ctx_goal_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_goal_id with
              | Some gid ->
                  (match state.planning with
                   | Some snap ->
@@ -20330,11 +20380,11 @@ and is loaded on demand through keeper_skill.
                   | None -> None)
             in
             let change_ctx =
-              Masc_tui_render.resolve_change_context state ~path_opt
+              Masc_tui_render_prim.resolve_change_context state ~path_opt
             in
             close_repository_changes state;
             goto_surface state ~mailbox:async_messages Overview;
-            (match change_ctx.Masc_tui_render.ctx_task_id with
+            (match change_ctx.Masc_tui_render_prim.ctx_task_id with
              | Some tid ->
                  state.task_detail_id <- Some tid;
                  state.task_detail_scroll <- 0;
@@ -20725,7 +20775,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
            in
            let change_ctx =
-             Masc_tui_render.resolve_change_context state ~path_opt
+             Masc_tui_render_prim.resolve_change_context state ~path_opt
            in
            (* Only the scope's own repository names a remote. A project-wide
               scope spans every registered repository, and picking the first
@@ -20745,7 +20795,7 @@ and is loaded on demand through keeper_skill.
                  | None -> None)
              | Some Tui_decode.Repository_change_project | None -> None
            in
-           (match change_ctx.Masc_tui_render.ctx_pr with
+           (match change_ctx.Masc_tui_render_prim.ctx_pr with
             | None ->
                 add_event state "git"
                   "no PR to open: this change names no github.com/…/pull/N link or PR-N token"

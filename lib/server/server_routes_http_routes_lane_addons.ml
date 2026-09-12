@@ -68,6 +68,18 @@ let get_slice request reqd =
     let result = let* args = decode_slice_query (query_fields request) in dispatch state Runtime.Slice args in
     respond request reqd result) request reqd
 
+let get_action request reqd =
+  with_read_auth (fun state _request reqd ->
+    let result =
+      let fields = query_fields request |> List.sort (fun (a, _) (b, _) -> String.compare a b) in
+      let* args = match fields with
+        | ["instance_id", instance_id; "request_id", request_id]
+            when String.trim instance_id <> "" && String.trim request_id <> "" ->
+            Ok (`Assoc ["instance_id", `String instance_id; "request_id", `String request_id])
+        | _ -> Error "action status requires exactly instance_id and request_id" in
+      dispatch state Runtime.Action_status args in
+    respond request reqd result) request reqd
+
 let post ~operation ~tool_name request reqd =
   with_tool_actor_auth ~tool_name (fun state caller _request reqd ->
     Http.Request.read_body_async reqd (fun body ->
@@ -103,6 +115,8 @@ let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/lane-addons" get_inspect
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
+  |> Http.Router.get "/api/v1/lane-addons/actions" get_action
+  |> Http.Router.post "/api/v1/lane-addons/actions" (post ~operation:Runtime.Act ~tool_name:"masc_lane_act")
   |> Http.Router.post "/api/v1/lane-addons/attach" (post ~operation:Runtime.Attach ~tool_name:"masc_lane_attach")
   |> Http.Router.post "/api/v1/lane-addons/observe" (post ~operation:Runtime.Observe ~tool_name:"masc_lane_observe")
   |> Http.Router.post "/api/v1/lane-addons/detach" (post ~operation:Runtime.Detach ~tool_name:"masc_lane_detach")

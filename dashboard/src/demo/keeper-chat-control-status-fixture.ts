@@ -138,6 +138,7 @@ export function ControlStatusFixture() {
           style="background: var(--bg-panel); border-color: var(--border-main);"
         >
           <${ChatTranscript}
+            keeperName=${keeperName}
             entries=${controlStatusFixtureEntries}
             emptyText="No control-status rows"
             variant="messenger"

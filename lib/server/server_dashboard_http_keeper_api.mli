@@ -13,6 +13,19 @@ val tool_calls_fleet_cache_key : masc_root:string -> string
 (** Return the bounded fleet-row cache key after invalidating its cached value
     when the durable tool-call revision has advanced. *)
 
+val keeper_tool_call_lookup_response :
+  config:Workspace.config ->
+  keeper_name:string ->
+  Httpun.Request.t ->
+  ([ `OK | `Bad_request | `Not_found | `Conflict | `Service_unavailable ]
+   * Yojson.Safe.t) option
+(** Exact execution lookup for the existing [GET /tool-calls] surface.
+    [None] means the execution query is absent and the recent-list route must
+    handle the request. Blank or repeated parameters return 400. A unique
+    authoritative row returns 200, absence 404, multiple canonical rows 409,
+    and unavailable storage 503. The request workspace and keeper scope every
+    lookup; the recent-row window is never used. *)
+
 val file_changes_default_window_hours : float
 val file_changes_max_window_hours : float
 (** Shared read-cost bounds for durable file-change projections. The

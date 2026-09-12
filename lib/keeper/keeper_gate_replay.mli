@@ -80,6 +80,7 @@ type model_evidence
 type model_message = private
   { text : string
   ; replay_evidence : model_evidence option
+  ; denied_resolution : Keeper_event_queue.hitl_resolution option
   }
 
 val append_model_evidence :

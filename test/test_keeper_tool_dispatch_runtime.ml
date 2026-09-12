@@ -8169,7 +8169,16 @@ let test_direct_gate_current_history_resume ?(native_blocks=false) ?(native=fals
            ~user_message:prepared_prompt ~hitl_resolution:(Some (Gate.resolution admission))
            ~replay_delivery:!native_replay_delivery in
          (match !native_replay_delivery with
-          | None -> ()
+          | None ->
+            let require_denial_rejected label hitl_resolution =
+              let wrong = Masc.Keeper_gate_replay.compose_model_message ~base_path
+                ~user_message:prepared_prompt ~hitl_resolution ~replay_delivery:None in
+              match Gate.observe_native_input ~prepared:wrong ~config
+                ~user_message:"Finish the original research" admission ~transmitted:wrong.text with
+              | Error _ -> () | Ok () -> fail label in
+            require_denial_rejected "plain input without denial was admitted" None;
+            let wrong_resolution = {(Gate.resolution admission) with approval_id="another-approval"} in
+            require_denial_rejected "unrelated denial identity was admitted" (Some wrong_resolution)
           | Some (_, outcome) ->
             let reread = Masc.Keeper_gate_replay.user_message_with_hitl_resolution ~base_path
               ~user_message:prepared_prompt (Some (Gate.resolution admission)) in

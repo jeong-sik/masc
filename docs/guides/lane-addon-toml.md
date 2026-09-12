@@ -31,7 +31,8 @@ Browser 세션, Keeper의 실행과 도구를 재사용한다. 패키지 하나�
 
 `manifest_path`와 `binding.sources`의 `snapshot_file.path`는 선언 파일이 있는 디렉터리를 기준으로
 해석한다. 그 밖의 package-specific binding 문자열을 파일 경로로 추측하거나 확장하지 않는다.
-현재 source 종류는 `snapshot_file`, `msx_capture`, `browser_document`다. 후자는 이미 열린
+현재 source 종류는 `snapshot_file`, `msx_capture`, `browser_document`, `lane_output`이다.
+`lane_output`은 같은 run의 다른 설치가 완료한 출력을 읽는다. `browser_document`는 이미 열린
 정확한 Browser 대상을 요구하며, 선언을 추가한다고 새 세션이나 탭을 만들지 않는다.
 MSX 예제는 incarnation을 고정하지 않으므로 기존 머신의 load/restore를 구분해서 계속 관측한다.
 
@@ -111,7 +112,8 @@ Keeper는 기존 `keeper_skill`로 본문을 읽고, 같은 reference에 `file`�
 `[skills].resource-read-max-bytes` 설정을 사용한다. 그 설정이 없으면 패키지 source의 이용 불가를
 진단하며 임의의 한도를 만들지 않는다. 기존 Keeper의 Skill 선택과 도구 실행 제어는 그대로 적용된다.
 
-`content_revision`은 정확한 `SKILL.md` bytes의 SHA-256이다. 스크립트·참조 파일은 이 revision에
+`content_revision`은 정확한 `SKILL.md` bytes에서 기존 Skill 규칙으로 만든 불투명한 식별자다.
+도메인 구분을 포함한 해시이므로 원문만의 SHA-256과 같다고 해석하지 않는다. 스크립트·참조 파일은 이 revision에
 포함되지 않고 요청 시 읽은 bytes와 별도의 SHA-256을 돌려준다. 읽기가 스크립트 실행이나 sandbox
 mount 확장을 뜻하지 않는다. 예제 스크립트는 명시적으로 선택한 관측의 좌표만 출력하며 머신을
 생성·조작하지 않는다.
@@ -121,14 +123,20 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 소급해서 지우지 않는다. 이것은 실제 모델의 Skill 활용·게임 플레이를 증명하는 조건과 별개다.
 선언부터 카탈로그·원문 reader까지의 기능 테스트는 CI에서 검증하며, 실제 Keeper 활용은 후속 실측이다.
 
-## 다음 구현 범위
+## 세계와 연결되는 통로
 
-현재 패키지는 TOML 설치와 Skill 본문·스크립트·참조 문서의 읽기를 연결한다. 패키지 실행 스크립트의
-새 lifecycle, environment/world ports, MSX/DOS 실행·제어 환경, 다른 레이어 출력의 입력 연결과
-통계·의미 연결은 후속 단계다. 설치 선언에 `skills`, `scripts`, `environment` 같은 최상위 필드를
-추가해도 그 기능이 생기지 않는다. 지원하는 Skill 선언은 패키지 manifest의 `[world.skills]`다.
-세계에 새로운 활동·판단 레이어를 쉽게 붙인다는 방향은 유지하며, 각 확장은 별도 실행·비간섭·효용
-시험으로 증명한다. 현재 관측 설치를 완성된 세계 구성 엔진이라고 부르지 않는다.
+패키지는 TOML 설치, Skill 본문·스크립트·참조 문서 읽기, Docker 환경, 선택적인 행동 포트를 연결한다.
+[출력 연결](lane-output-composition.md)의 `lane_output` source를 통해 다른 설치의 완료된 관측을
+통계 패키지 입력으로 전달한다. [세계 행동 계약](lane-world-actions.md)의 `[world.actions]`는
+패키지가 광고한 행동을 자신의 worker에서 실행하고 영속 receipt와 근거를 반환한다.
+[DOS 패키지](../../addons/dos-world/README.md)는 자체 환경·프로그램·Skill을 포함하는 예제다.
+관측 전용 MSX·Browser 패키지는 기존 환경의 소유권을 유지한다.
+
+설치 선언에 임의의 `skills`, `scripts`, `environment` 최상위 필드를 추가하는 방식은 지원하지 않는다.
+Skill과 행동은 패키지 manifest의 `world`에, 실행 환경은 image·command에, 입력 연결은 설치의
+binding에 선언한다. 이미지를 준비하는 작업과 TOML 설치는 구분하며, 스크립트를 자동 실행하지 않는다.
+각 패키지의 실행·비간섭·행동 활용은 별도 실측으로 검증한다. 이 계약은 machine checkpoint·fork나
+생산성 향상을 보장하지 않는다.
 
 구현 경계: [선언 loader](../../lib/lane_addon/lane_addon_config.mli),
 [설치 runtime](../../lib/lane_addon/lane_addon_runtime.mli),

@@ -1,0 +1,54 @@
+{
+  "scope": "Product source Activity panel in Chromium with synthetic API fixtures. Not installed MASC acceptance.",
+  "passed": true,
+  "snapshots": [
+    {
+      "codebase": "github.com_owner_a",
+      "file": "src/shared.ml",
+      "anchor_count": 1,
+      "timeline_count": 4,
+      "lens": "CONTEXT LENS\n3/12 linked\nshared.ml\n0 line anchors\n1 anchor\n0 changed rows\nLSP\n0\nLine\n0\nKeeper\n1\nGoal\n0\nTask\n0\nBoard\n0\nGit\n0\nPR\n0\nComment\n0\nLog\n1\nRuntime\n0\nTelemetry\n1\nLog\nnoted tool:read_file\nlog turn-github.com_owner_a-1 / src/shared.ml\nCTX 4\nCode\nLog\nTelemetry\nKeeper\nSK"
+    },
+    {
+      "codebase": "github.com_owner_b",
+      "file": "src/shared.ml",
+      "anchor_count": 1,
+      "timeline_count": 4,
+      "lens": "CONTEXT LENS\n3/12 linked\nshared.ml\n0 line anchors\n1 anchor\n0 changed rows\nLSP\n0\nLine\n0\nKeeper\n1\nGoal\n0\nTask\n0\nBoard\n0\nGit\n0\nPR\n0\nComment\n0\nLog\n1\nRuntime\n0\nTelemetry\n1\nLog\nnoted tool:read_file\nlog turn-github.com_owner_b-1 / src/shared.ml\nCTX 4\nCode\nLog\nTelemetry\nKeeper\nSK"
+    },
+    {
+      "codebase": "github.com_owner_empty",
+      "file": "src/shared.ml",
+      "anchor_count": 0,
+      "timeline_count": 2,
+      "lens": "CONTEXT LENS\n0/12 linked\nshared.ml\n0 line anchors\n0 anchors\n0 changed rows\nLSP\n0\nLine\n0\nKeeper\n0\nGoal\n0\nTask\n0\nBoard\n0\nGit\n0\nPR\n0\nComment\n0\nLog\n0\nRuntime\n0\nTelemetry\n0\nno linked anchors on this file yet"
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/activity/events",
+      "codebase": null
+    },
+    {
+      "path": "/api/v1/ide/events",
+      "codebase": "github.com_owner_a"
+    },
+    {
+      "path": "/api/v1/activity/events",
+      "codebase": null
+    },
+    {
+      "path": "/api/v1/ide/events",
+      "codebase": "github.com_owner_b"
+    },
+    {
+      "path": "/api/v1/activity/events",
+      "codebase": null
+    },
+    {
+      "path": "/api/v1/ide/events",
+      "codebase": "github.com_owner_empty"
+    }
+  ],
+  "errors": []
+}

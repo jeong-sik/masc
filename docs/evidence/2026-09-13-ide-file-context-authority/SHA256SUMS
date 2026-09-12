@@ -1,0 +1,17 @@
+810db94a29b9e292955f0f72dbf305e1168ac5a8ddb9eea4364fb3880ce505fe  docs/evidence/2026-09-13-ide-file-context-authority/README.md
+94323dc188d6d54536d1363c3362819611f111bfad5bc1062e88bc49f9f0eb18  docs/evidence/2026-09-13-ide-file-context-authority/installed-baseline-receipt.json
+564ae1f6f82c1c22e32f42138f55086604d99f2a8ef5aabefec32bc6fd5c2112  docs/evidence/2026-09-13-ide-file-context-authority/installed-baseline.png
+fc70e83d447cd49f3263c2fc7ab9520a70769f183202c16e7e0b3053e03bac49  docs/evidence/2026-09-13-ide-file-context-authority/source-browser-receipt.json
+55b13a087049b40afc41bcbe081e0c631ad1762935187e50fc21153936074586  docs/evidence/2026-09-13-ide-file-context-authority/source-no-file-events.png
+1fa986aaddd589ff7bcd586fec6f5a8453741db90141dc63baa112b8cb7a9dd0  docs/evidence/2026-09-13-ide-file-context-authority/source-repo-a.png
+fbcd93c548b2da54ff2d6b4c618a3bcb397fd5159472545c99ff71facb2fef17  docs/evidence/2026-09-13-ide-file-context-authority/source-repo-b.png
+f54f642318f36ed4f415431858f8c1a98528eae7cb0cf37a66fc331529e361d7  docs/evidence/2026-09-13-ide-file-context-authority/validation.json
+ed200b17d29bec49033ad40b0b194e82c989628cb0597aa59c41bf94185dc236  docs/evidence/2026-09-13-ide-file-context-authority/vitest.txt
+05b002e2519bbcacf1ec5391a806df50bf761f9642b3a13173fdc728e1f6d588  dashboard/src/components/ide/ide-activity-file-context.ts
+0d540e9ad847687b41c4452ee2e97c0232d51fd3c60cdc37df7e31c86220bd9a  dashboard/src/components/ide/ide-activity-panel.ts
+d1ca4df0332fd49f652b91fc6e46fda443ee7f8dd9055e33b809203449476559  dashboard/src/components/ide/ide-context-lens.ts
+fd79f002b5eab45fc8be57bf7d903a023fe2ce286b432c810ab5af42e514a9a5  dashboard/src/components/ide/run-activity-store.ts
+31ec5e2320083a909e9be54c548f9201dd72b143ee5e20090f2144becbc01ff4  dashboard/src/components/ide/ide-activity-panel.test.ts
+84df1556c49e747883a31dd28a7cfba8de8dcdb0b23e85d0862d1778da10e10c  dashboard/src/components/ide/ide-context-lens.test.ts
+750096a56fe5aef61bb46e13d80d6a29e5c2aa14ff326e1006aede54f4146dd9  dashboard/scripts/ide-file-context-browser-fixture.ts
+870e4cba71b6a252807fb9a508e7ca046a1b4b50c20ef9fe902957988f5d12aa  scripts/ide-file-context-browser-probe.mjs

@@ -2272,19 +2272,34 @@ def select_keeper_row(
 
     The roster comes from the fixture plus whatever the live read added, so a
     scenario that presses Enter on the list's first row is asserting an order
-    nothing promises. Walking down until the row reports itself selected makes
-    the scenario say which keeper it means.
+    nothing promises. Read the current completed screen after draining pending
+    bytes: a roster refresh may have selected the target during that drain.
+    Historical highlights do not prove which row is selected now.
     """
     needle = keeper_row_selected(name)
-    if find_needle(output, needle, 0) >= 0:
-        return
     for _ in range(KEEPER_ROW_SCAN_BOUND):
         read_available(master_fd, output)
-        start = len(output)
-        os.write(master_fd, b"\x1b[B")
-        wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
-        if find_needle(output, needle, start) >= 0:
+        last_end = output.rfind(FRAME_END)
+        completed_end = 0 if last_end < 0 else last_end + len(FRAME_END)
+        if output.rfind(FRAME_START) >= completed_end:
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        rows = screen_rows(bytes(output[:completed_end]), preserve_styles=True)
+        if any(find_needle(row, needle) >= 0 for row in rows.values()):
             return
+        selected = [row for row, text in rows.items() if b"\x1b[7m" in text]
+        if not selected:
+            # The list header can arrive before its asynchronous roster. A
+            # Down here would race the first selected row and overshoot it.
+            wait_for_output(process, master_fd, output, FRAME_END,
+                            start=completed_end, timeout=3.0)
+            continue
+        target = screen_row_of(rows, name)
+        key = b"\x1b[A" if 0 <= target < min(selected) else b"\x1b[B"
+        start = len(output)
+        os.write(master_fd, key)
+        wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
     raise AssertionError(
         f"keeper row {name!r} never became selected: {bytes(output[-2000:])!r}"
     )
@@ -4499,7 +4514,7 @@ def frame_row_of(frame: bytes, needle: bytes) -> int:
     return int(positions[-1].group(1))
 
 
-def screen_rows(drawn: bytes) -> dict[int, bytes]:
+def screen_rows(drawn: bytes, *, preserve_styles: bool = False) -> dict[int, bytes]:
     """The screen the pane has painted, as row number to plain text.
 
     A frame is a set of (row, text) pairs, not a picture, so no single frame
@@ -4525,7 +4540,8 @@ def screen_rows(drawn: bytes) -> dict[int, bytes]:
             if index + 1 < len(addresses)
             else len(drawn)
         )
-        rows[int(address.group(1))] = CSI_RE.sub(b"", drawn[address.end() : end])
+        text = drawn[address.end() : end]
+        rows[int(address.group(1))] = text if preserve_styles else CSI_RE.sub(b"", text)
     return rows
 
 
@@ -12313,30 +12329,19 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
-        # Two assertions rather than one line, because the whole line is not
-        # a property of this surface. masc_tui_footer.drop_hint_items drops
-        # hints from the back when they plus the status tail leave the row
-        # too wide, and that tail carries the workspace base path -- a
-        # tempfile path, which is /var/folders/... on macOS and /tmp/... on
-        # Linux. Pinning the whole line pins how many hints that length
-        # leaves room for, so the same footer reads as two different strings
-        # on the two machines that run this.
-        #
-        # What is stable is the direction: drops come off the back, and
-        # never_dropped_keys holds Esc, q and y / n wherever they sit. So the
-        # leading run is asserted whole, and the pinned keys separately.
-        #
-        # The single literal was written 2026-09-07 (#33965) and went stale
-        # when #35324 gave Fusion / and n / N: the row dropped r:refresh and
-        # Tab:next to make room and the literal kept naming them. It had
-        # been failing since, unseen -- no pull request runs this scenario,
-        # because the selector reads only test/test_*.ml (#35561).
+        # Fusion's expanded hint text exceeds 200 columns. fit_body removes
+        # status projections before dropping hints, so workspace path length
+        # does not decide which controls survive. Check the list's navigation,
+        # copy, search and exit controls on the same footer row; the footer
+        # unit suite owns the exact fitting algorithm and omission order.
         footer_head = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
-        footer_pinned = (b"Esc:back", b"q:quit")
+        footer_controls = (
+            b"Y:copy", b"Esc:back", b"/:find", b"n / N:next / previous match", b"q:quit"
+        )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=200,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -12346,17 +12351,18 @@ def fusion_list_detail_interaction(
         # the frames to stop and read the screen.
         drain_until_quiet(process, master_fd, output)
         footer_frame = bytes(output)
-        drawn = screen_text(footer_frame)
-        if footer_head not in drawn:
+        drawn_rows = screen_rows(footer_frame)
+        footer_row = screen_row_of(drawn_rows, footer_head)
+        if footer_row < 0:
             raise AssertionError(
                 "Fusion list footer disagrees with its exercised keys: "
                 f"{footer_head!r} is not in {footer_frame!r}"
             )
-        for pinned in footer_pinned:
-            if pinned not in drawn:
+        for control in footer_controls:
+            if control not in drawn_rows[footer_row]:
                 raise AssertionError(
-                    "Fusion list footer dropped a key that never drops: "
-                    f"{pinned!r} is not in {footer_frame!r}"
+                    "Fusion list footer omitted an exercised control: "
+                    f"{control!r} is not in {drawn_rows[footer_row]!r}"
                 )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=120,

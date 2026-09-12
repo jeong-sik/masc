@@ -3860,6 +3860,15 @@
  (libraries alcotest masc.masc_goal masc_tui_types))
 
 (rule
+ (alias runtest-test_tui_keeper_row_selection)
+ (deps test_tui_keeper_row_selection.py test_tui_keyboard_input.py)
+ (action (run python3 %{dep:test_tui_keeper_row_selection.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keeper_row_selection)))
+
+(rule
  (alias runtest-test_tui_keyboard_input)
  (deps
   test_tui_keyboard_input.py

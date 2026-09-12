@@ -510,16 +510,27 @@ let test_the_window_is_measured_where_the_cursor_lands () =
 let test_no_row_of_a_drawing_loop_walks_a_list () =
   (* Every render module, not only the big one: the tab strip was in
      [render] when this was written and moved to [render_prim] the same day
-     (#35333). A count over one file lets the shape leave by moving. *)
+     (#35333). A count over one file lets the shape leave by moving.
+
+     Read from the tree rather than typed out. The hand-written list had
+     already missed the chat renderer, and a list only records which modules
+     existed the day someone last remembered to edit it. Everything named
+     bin/masc_tui_render*.ml is a render module, and the stanza's deps glob
+     the same shape so a change to any of them reruns this. *)
   let render_modules =
-    [ render
-    ; "bin/masc_tui_render_prim.ml"
-    ; "bin/masc_tui_render_memory.ml"
-    ; "bin/masc_tui_render_metrics.ml"
-    ; "bin/masc_tui_render_schedule.ml"
-    ; "bin/masc_tui_render_tools.ml"
-    ]
+    let dir = Filename.concat (Ast_grep.source_root ()) "bin" in
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+         String.starts_with ~prefix:"masc_tui_render" name
+         && Filename.check_suffix name ".ml")
+    |> List.sort String.compare
+    |> List.map (fun name -> Filename.concat "bin" name)
   in
+  (* A guard that lost its subject passes for the wrong reason. *)
+  Alcotest.(check bool)
+    "the render modules were found" true
+    (List.length render_modules > 1);
   let inside_for callee =
     List.fold_left
       (fun total module_path ->

@@ -112,6 +112,7 @@ let resolve_lane_output m ~run_id ~installation_id =
       (match e.configuration with
        | Some owner -> Ok {Lane_addon_sources.installation_id; instance_id=e.instance_id;
            run_id=e.run_id; configuration_revision=owner.revision; package_revision=e.package.revision;
+           outputs=e.package.outputs;
            observation_seq=e.seq; output=e.output; status=status_coverage e}
        | None -> assert false)
   | [] -> Error "upstream installation is unavailable"

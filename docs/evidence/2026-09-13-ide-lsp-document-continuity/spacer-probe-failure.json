@@ -1,0 +1,34 @@
+{
+  "scope": "Source CodeMirror client in a real browser, real ocamllsp through a test-only adapter. Not installed MASC, Keeper execution, or MASC proxy acceptance.",
+  "passed": false,
+  "initial": {
+    "filePath": "sample.ml",
+    "scope": "[null,null,null]",
+    "language": "ocaml",
+    "version": 1,
+    "command": "/Users/dancer/.opam/5.5.0/bin/ocamllsp",
+    "connection": {
+      "kind": "connected"
+    },
+    "diagnostics": {
+      "kind": "complete",
+      "count": 2
+    }
+  },
+  "error": "TimeoutError: locator.waitFor: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.cm-diagnostic-marker').first() to be visible\u001b[22m\n\u001b[2m    64 × locator resolved to hidden <div title=\"\" class=\"cm-diagnostic-marker\"></div>\u001b[22m\n",
+  "final_document": {
+    "filePath": "sample.ml",
+    "scope": "[null,null,null]",
+    "language": "ocaml",
+    "version": 1,
+    "command": "/Users/dancer/.opam/5.5.0/bin/ocamllsp",
+    "connection": {
+      "kind": "connected"
+    },
+    "diagnostics": {
+      "kind": "complete",
+      "count": 2
+    }
+  },
+  "pageErrors": []
+}

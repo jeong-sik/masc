@@ -232,6 +232,20 @@ let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
 let page_failed_note = "  (load failed; nothing here is a reading)"
 
+(* What a title says where its counts would go. A read nobody has asked for and a
+   read that failed both leave the snapshot empty, and the title is the row on
+   top, so it is the answer that gets read: "not loaded" after a failure sends
+   the operator to [r] while the server's reason sits in red two rows below.
+
+   The same distinction the body makes with {!page_unread_note} and
+   {!page_failed_note}, in the words a title has room for. The Memory header was
+   taught it in #35457; every other surface still said "not loaded" for both. *)
+let title_unread = "(not loaded)"
+let title_failed = "(load failed)"
+
+let title_missing_reading ~error =
+  if Option.is_some error then title_failed else title_unread
+
 
 (* A level meter, only while a capture is running.
 
@@ -2425,27 +2439,13 @@ let runtime_config_status_lines state ~cols =
     |> List.map (fun text -> tone, text)) lines
 
 
-let help_surface_name (surface : surface) =
-  match surface with
-  | Overview -> "Overview"
-  | Acting -> "Activity"
-  | Metrics -> "Metrics"
-  | Keepers _ -> "Keepers"
-  | Memory -> "Memory"
-  | Approvals -> "Approvals"
-  | Board -> "Board"
-  | Planning | Verification | Harness -> "Planning"
-  | Fusion -> "Fusion"
-  | Repositories | Code | Changes -> "Workspace"
-  | Runtime | Lanes | Clients | Config | Resources | Tools -> "Config"
-  | Connectors | Schedules -> "Keepers"
-  | System_logs -> "Activity"
-
-
-let help_ascii_banner ~cols (state : state) =
+(* The sheet's masthead. It carries no keys and no surface name: both scroll
+   away with it, and both are said by rows that do not. The overlay's own title
+   row is fixed chrome -- it draws "hints on/off . [h] toggle . [Esc] close" at
+   every width, above the divider -- and the sheet's first section names the
+   active surface two rows under this. *)
+let help_ascii_banner ~cols (_state : state) =
   let inner_width = max 1 (framed_inner_width cols) in
-  let surface_label = help_surface_name state.view in
-  let hints_status = if state.hints_visible then "on" else "off" in
   let bar_char = "\xe2\x94\x80" in
   let repeat_utf8 str count =
     let buf = Buffer.create (String.length str * count) in
@@ -2459,15 +2459,11 @@ let help_ascii_banner ~cols (state : state) =
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
       ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
-      ^ "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
-      ^ Ansi.dim ^ "  \xc2\xb7  [?] Close  \xc2\xb7  [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
     ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 68 (inner_width - 4)) ^ Ansi.reset
     ; ""
     ]
   else
     [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent Shared Context ]" ^ Ansi.reset
-    ; "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
-      ^ Ansi.dim ^ " · [?] Close · [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
     ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset
     ; ""
     ]

@@ -1,0 +1,20 @@
+{
+  "head": "94e98970f45971d8e9c5d17247e0b5a83a504e0a",
+  "pr": 35462,
+  "base": "test/collaboration-native-ui-20260912",
+  "test_run": 34694177184,
+  "release_run": 34694053454,
+  "test_dispatch_superseded": {
+    "run": 34694052046,
+    "reason": "Two nested OCaml suites needed keeper_chat_operations path; cancellation requested before execution and corrected dispatch submitted."
+  },
+  "local_validation": {
+    "ocaml_parse_only_files": 30,
+    "changed_python_syntax": "passed",
+    "diff_check": "passed",
+    "build_run": false
+  },
+  "independent_review": "native scope write/read finding fixed; no further P1/P2 on exact source/CAS and current-context ordering",
+  "installed": false,
+  "acceptance": "pending"
+}

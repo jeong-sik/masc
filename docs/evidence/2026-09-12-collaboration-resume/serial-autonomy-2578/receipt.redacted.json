@@ -1,0 +1,283 @@
+{
+  "schema": "masc.serial_autonomy_observation.v1",
+  "observed_at": "2026-09-12T11:49:34.992393+00:00",
+  "runtime_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "runtime_pid": 89912,
+  "conclusion": "autonomy_discovered_and_executed_task_without_diagnostic_mutation",
+  "scope": "Task discovery through first story Write/Edit and artifact transfer; no claim of task completion or substantive peer revision",
+  "turn": {
+    "turn_kind": "autonomous",
+    "trace_id": "trace-1789042595401-00001",
+    "absolute_turn": 392,
+    "turn_ref": "trace-1789042595401-00001#392",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "selected_model": "glm-5.3",
+    "finish_reason": "completed",
+    "execution_ids": [
+      "exec-1789213244669-002c",
+      "exec-1789213244673-002d",
+      "exec-1789213244675-002e",
+      "exec-1789213283327-002f",
+      "exec-1789213344310-0030",
+      "exec-1789213421925-0031",
+      "exec-1789213427393-0032",
+      "exec-1789213435858-0033",
+      "exec-1789213449892-0034",
+      "exec-1789213514077-0035",
+      "exec-1789213523174-0036",
+      "exec-1789213523330-0037",
+      "exec-1789213537223-0038",
+      "exec-1789213543176-0039",
+      "exec-1789213554723-003a",
+      "exec-1789213560305-003b",
+      "exec-1789213575248-003c",
+      "exec-1789213589860-003d"
+    ]
+  },
+  "raw_trace": {
+    "worker_run_id": "wr-1a0956b2f9a-5f38-0000",
+    "path": "<runtime_base>/.masc/keepers/exhibit-editor/raw-traces/turn-1789213224843-5f38-000017.jsonl",
+    "start_seq": 1,
+    "end_seq": 155,
+    "agent_name": "agent_core-glm-coding.glm-5.3",
+    "session_id": "trace-1789042595401-00001",
+    "file_digest": {
+      "bytes": 113809,
+      "sha256": "c5ad3528d920333bdbca93b6e0eb1e055ad857acda7cbd4bca960aaeddfcafb1"
+    },
+    "start_prompt_identity": {
+      "bytes": 131,
+      "sha256": "81058d01cb24c4fe34f5f0b0ec32304fd0cd3312867373eef17586addd2049ea"
+    }
+  },
+  "execution_receipt": {
+    "turn_count": 392,
+    "agent_core_turn_count": 694,
+    "current_task_id": "task-003",
+    "outcome": "receipt_done",
+    "terminal_reason_code": "success",
+    "operator_disposition": "pass",
+    "actionable_signal": "has_unclaimed_tasks",
+    "started_at": "2026-09-12T11:40:24Z",
+    "ended_at": "2026-09-12T11:46:29Z"
+  },
+  "discovery": {
+    "execution_id": "exec-1789213283327-002f",
+    "tool_use_id": "call_4b73dc3839cc460297902e01",
+    "provider_tool_turn": 680,
+    "backlog_authority": "primary",
+    "degraded": false,
+    "truncated": false,
+    "revision": "tasks:6fba55d3e243114ea268d840e03c81f5af4437f91735c62c19cc09dc33f33a71",
+    "task": {
+      "id": "task-003",
+      "status": "todo",
+      "created_at": "2026-09-12T11:35:42Z"
+    }
+  },
+  "task_at_capture": {
+    "id": "task-003",
+    "status": "in_progress",
+    "assignee": "exhibit-editor",
+    "started_at": "2026-09-12T11:42:24Z"
+  },
+  "event_queue_at_capture": {
+    "revision": 102,
+    "pending_count": 0,
+    "last_transition_kind": "ack_source_terminal",
+    "last_transition_at": 1789213590.067943
+  },
+  "timeline": [
+    {
+      "ts": 1789213244.675295,
+      "tool": "keeper_tasks_list",
+      "execution_id": "exec-1789213244675-002e",
+      "tool_use_id": "call_400811a4232b42d9b5d7fb46",
+      "keeper_turn_id": 392,
+      "turn": 679,
+      "task_id": null,
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 17,
+        "sha256": "1e6fd0a4dfddbe9a7724c1a024007e34efad70ae07a7cae6861313ac78dc9f34"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213283.327341,
+      "tool": "keeper_tasks_list",
+      "execution_id": "exec-1789213283327-002f",
+      "tool_use_id": "call_4b73dc3839cc460297902e01",
+      "keeper_turn_id": 392,
+      "turn": 680,
+      "task_id": null,
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 37,
+        "sha256": "c27d38fcdb80c3ea40df5bd51664dbb82187f601b5180c92b2ed496bf66c3657"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213344.310438,
+      "tool": "keeper_task_claim",
+      "execution_id": "exec-1789213344310-0030",
+      "tool_use_id": "call_664027349d454360a33dd721",
+      "keeper_turn_id": 392,
+      "turn": 681,
+      "task_id": null,
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 22,
+        "sha256": "fb2b1c270deec205aeda00db21418dc90109798bcba54af592f4f28805ddba12"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213421.925982,
+      "tool": "masc_run_plan",
+      "execution_id": "exec-1789213421925-0031",
+      "tool_use_id": "call_d33e54557bc6498cbb1539de",
+      "keeper_turn_id": 392,
+      "turn": 682,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": false,
+      "disposition": "failed",
+      "input_identity": {
+        "bytes": 2033,
+        "sha256": "0b8b16478b9bd7c105c32806f20e4f774ffed48633376a1313ae14adbf9d587a"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213435.858794,
+      "tool": "masc_run_init",
+      "execution_id": "exec-1789213435858-0033",
+      "tool_use_id": "call_f25e1bc9725742c69d3f19a6",
+      "keeper_turn_id": 392,
+      "turn": 684,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 52,
+        "sha256": "bf743c27cc327cd30a5bf7d2319c87bea08a13109113ee796ff9537ecac092ec"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213449.892149,
+      "tool": "masc_run_plan",
+      "execution_id": "exec-1789213449892-0034",
+      "tool_use_id": "call_fae54a9c53b4461c92e9e40e",
+      "keeper_turn_id": 392,
+      "turn": 685,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 2081,
+        "sha256": "16e514735db24f1c1e95ce3254b3aad5403cf8c3d7bf48c92ff7f679eade5696"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213514.077846,
+      "tool": "Write",
+      "execution_id": "exec-1789213514077-0035",
+      "tool_use_id": "call_c60626be61af4e91a4d58739",
+      "keeper_turn_id": 392,
+      "turn": 686,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 4141,
+        "sha256": "765cfa96558e16f243a049b108020747cad6b923c74d3cddd318d50c97c2affc"
+      },
+      "target": null
+    },
+    {
+      "ts": 1789213537.223654,
+      "tool": "Edit",
+      "execution_id": "exec-1789213537223-0038",
+      "tool_use_id": "call_80c8b4da5a914449b2abf519",
+      "keeper_turn_id": 392,
+      "turn": 688,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 258,
+        "sha256": "31d9f1789de478e14dbe9f8f466bdec9dd3c333b01490c27851f6be9db2b7440"
+      },
+      "target": "serial/story.md"
+    },
+    {
+      "ts": 1789213554.723842,
+      "tool": "keeper_artifact_transfer",
+      "execution_id": "exec-1789213554723-003a",
+      "tool_use_id": "call_d640ac16cdf54513985cfca7",
+      "keeper_turn_id": 392,
+      "turn": 690,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 357,
+        "sha256": "6b6e762c3d04dfd5317aa26e55bd2312cbe5c65282646a4df1d9367916f4b650"
+      },
+      "target": "serial/story.md"
+    },
+    {
+      "ts": 1789213560.305924,
+      "tool": "keeper_artifact_read",
+      "execution_id": "exec-1789213560305-003b",
+      "tool_use_id": "call_c021fa222fc840439384daee",
+      "keeper_turn_id": 392,
+      "turn": 691,
+      "task_id": "task-003",
+      "turn_kind": "autonomous",
+      "lane": "tool_optional",
+      "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+      "success": true,
+      "disposition": "completed",
+      "input_identity": {
+        "bytes": 77,
+        "sha256": "95a754500b16ef49592ee9818ce48b6669e23b58c73bf46fb0d17d636cdc1bce"
+      },
+      "target": null
+    }
+  ],
+  "mutation_by_diagnosis": false
+}

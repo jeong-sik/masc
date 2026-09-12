@@ -1,0 +1,88 @@
+{
+  "observed_at": "2026-09-12T12:06:46.147080+00:00",
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "task": {
+    "id": "task-003",
+    "status": "done",
+    "assignee": "exhibit-editor",
+    "started_at": null,
+    "completed_at": "2026-09-12T11:56:08Z"
+  },
+  "verification": {
+    "verification_request": {
+      "id": "vrf-0267fe2e9d1bbb2fc92a400066af65d8",
+      "task_id": "task-003",
+      "worker": "exhibit-editor",
+      "created_at": 1789213988.224171
+    },
+    "submitted_evidence_metadata": {
+      "access": "available",
+      "request_id": "vrf-0267fe2e9d1bbb2fc92a400066af65d8",
+      "task_id": "task-003",
+      "worker": "exhibit-editor",
+      "created_at": 1789213988.224171,
+      "items": [
+        {
+          "kind": "artifact",
+          "reference": "artifact:serial/continuity.md",
+          "bytes": 4813,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:serial/evidence.json",
+          "bytes": 4461,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:serial/review.md",
+          "bytes": 5014,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:serial/story.md",
+          "bytes": 10891,
+          "truncated": false
+        },
+        {
+          "kind": "note",
+          "bytes": 1114
+        },
+        {
+          "kind": "note",
+          "bytes": 258
+        }
+      ]
+    },
+    "review": {
+      "evaluator_runtime": "codex_subscription.gpt-5.6-sol",
+      "generator_runtime": null,
+      "gate": "structured_tool",
+      "verdict": "approve",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact"
+    }
+  },
+  "independently_checked_artifacts": [
+    {
+      "file": "serial/story.md",
+      "bytes": 10891,
+      "sha256": "29df16a2b90a4d1b84e0b55a92ef3a0c4752b5ef6c2befe6ce68f37aedc0980e"
+    },
+    {
+      "file": "serial/continuity.md",
+      "bytes": 4813,
+      "sha256": "ad0b4886ebc9789a0380f74ec3810c430adde7413fc8bed08aad0d1c0cab115a"
+    },
+    {
+      "file": "serial/review.md",
+      "bytes": 5014,
+      "sha256": "a164f9a0aa1a0db180279d26fee268829ada9a1f540da8153bb446ec3d1b9536"
+    }
+  ],
+  "direct_operator_kickoff": false,
+  "goal_phase": "executing",
+  "scope": "Keeper autonomously discovered task003, authored and transferred a draft, received peer criticism, revised and submitted evidence. Internal Task verifier approved. Goal proof and human confirmation are separate. Earlier direct image work was operator-requested."
+}

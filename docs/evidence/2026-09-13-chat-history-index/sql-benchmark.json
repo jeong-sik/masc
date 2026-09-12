@@ -1,0 +1,18 @@
+{
+  "checked_at": "2026-09-12T18:31:44.121287+00:00",
+  "scope": "read-only SQLite snapshot, SQL-level comparison; modified server not deployed",
+  "sqlite_version": "3.53.2",
+  "keeper": "msx-retro-mania",
+  "sample_execution_ids": 100,
+  "matching_rows": 100,
+  "keeper_rows": 9112,
+  "old_seconds": 1.2468954169889912,
+  "new_seconds": 0.0003146659582853317,
+  "results_equal": true,
+  "old_plan": [
+    "SEARCH rows USING INDEX rows_keeper_ts (keeper_name=?)"
+  ],
+  "new_plan": [
+    "SEARCH rows USING INDEX rows_keeper_execution (keeper_name=? AND execution_id=?)"
+  ]
+}

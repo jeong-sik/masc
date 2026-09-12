@@ -1312,6 +1312,40 @@ let test_runtime_identity_separates_configured_and_observed () =
   check string "an error keeps the failing turn's runtime visible"
     "turn: observed-glm · configured: configured-claude" (identity (Some t))
 
+let test_new_attempt_does_not_inherit_previous_runtime () =
+  List.iter (fun attempt_index ->
+    let t = fresh () in
+    feed t
+      [ Live.Run_started
+      ; Live.Runtime_attempt_started
+          { runtime_id = Some "old-runtime"; attempt_index = Some 0 }
+      ; Live.Text "old attempt text"
+      ; Live.Runtime_attempt_started { runtime_id = None; attempt_index }
+      ];
+    check (option string) "new attempt starts with unknown runtime" None
+      (Transcript.current_runtime_id t);
+    check string "unknown attempt header falls back to labelled configuration"
+      "configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t));
+    feed t [ Live.Stream_model_started { model = "new-model" } ];
+    check (option string) "model event names the new attempt" (Some "new-model")
+      (Transcript.current_runtime_id t);
+    feed t [ Live.Runtime_attempt_started
+      { runtime_id = None; attempt_index = Some 1 } ];
+    check (option string) "same-attempt repeat preserves observed identity"
+      (Some "new-model") (Transcript.current_runtime_id t);
+    (match Transcript.trail t with
+     | [ Transcript.Trail_superseded { attempt = 0; runtime_id; _ } ] ->
+       check (option string) "superseded block retains its old runtime"
+         (Some "old-runtime") runtime_id
+     | _ -> fail "old attempt boundary changed");
+    check string "header reports the newly observed runtime"
+      "turn: new-model · configured: assigned-runtime"
+      (Transcript.runtime_identity_text ~keeper_name:"keeper.one"
+         ~configured_runtime:"assigned-runtime" (Some t)))
+    [ Some 1; None ]
+
 let test_drawn_items_carry_superseded_runtime_id () =
   let t = fresh () in
   feed t
@@ -2432,6 +2466,8 @@ let () =
             test_runtime_failover_visibility_and_error_attribution
         ; test_case "header separates configured and observed runtimes" `Quick
             test_runtime_identity_separates_configured_and_observed
+        ; test_case "new attempt does not inherit previous runtime" `Quick
+            test_new_attempt_does_not_inherit_previous_runtime
         ; test_case "drawn items carry superseded runtime id" `Quick
             test_drawn_items_carry_superseded_runtime_id
         ] )

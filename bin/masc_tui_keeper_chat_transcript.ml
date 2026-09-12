@@ -1465,10 +1465,14 @@ let apply_delta ~now t (delta : Live.delta) =
                ; nodes
                }
              :: older);
-      (match attempt_index with
-       | Some idx -> t.attempt <- idx
-       | None -> t.attempt <- t.attempt + 1);
-      if Option.is_some runtime_id then t.current_runtime_id <- runtime_id;
+      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
+      let new_attempt = next_attempt <> t.attempt in
+      t.attempt <- next_attempt;
+      (* Unknown identity belongs to the new attempt. Keeping the previous
+         runtime here also prevents STREAM_MODEL_STARTED from naming the new
+         one. A repeated event for this same attempt adds no missing fact. *)
+      if new_attempt || Option.is_some runtime_id then
+        t.current_runtime_id <- runtime_id;
       t.endpoint_streaming <- false;
       t.awaiting <- None;
       (match t.phase with

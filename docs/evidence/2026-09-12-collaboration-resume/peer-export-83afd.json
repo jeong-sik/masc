@@ -1,0 +1,263 @@
+{
+  "observed_at": 1789206269.81334,
+  "candidate_build_run": 34685872751,
+  "candidate_manifest": {
+    "commit": "83afd78483aec46789193079f77d6660422850d2",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "c8323a54a6a212468a03bd2ea3610ad6ebf0e67a32ffd5a43b1870322917cfb4",
+      "masc_tui.exe": "deda182616746c842c3a73ae21b8545dc65a0b9c66d80515b1fa5a31804ff58b",
+      "masc_browser_host.exe": "81bd96519f5918fc54c28deccfc7dcfefd12fbb084c7aec8af12015c622030ca"
+    }
+  },
+  "build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "83afd78483aec46789193079f77d6660422850d2",
+    "commit_source": "embedded",
+    "binary_commit": "83afd78483aec46789193079f77d6660422850d2",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "c8323a54a6a212468a03bd2ea3610ad6ebf0e67a32ffd5a43b1870322917cfb4",
+    "binary_commit_unix_ts": 1789205192.0,
+    "binary_commit_age_seconds": 706,
+    "executable_path": "/private/tmp/masc-peer-runtime-83afd/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-peer-runtime-83afd",
+    "runtime_instance_id": "01a094fa-ef72-7000-a1d9-eacd6cff9f30",
+    "started_at": "2026-09-12T09:37:48Z",
+    "uptime_seconds": 30
+  },
+  "startup_phase": "ready",
+  "before_upgrade": {
+    "observed_at": 1789205806.3553548,
+    "files": {
+      "tasks/backlog.json": {
+        "bytes": 8309,
+        "sha256": "b70a56a358f5ff5416834db4d8bd94f81fef0307b39c483d271e32b63f6c45cd"
+      },
+      "tasks/goal_task_links.json": {
+        "bytes": 175,
+        "sha256": "ace0a271672e832a68741f3d6726f37df6b357ca4cfe59f7cc612d9c3e3f2ef3"
+      },
+      "goals.json": {
+        "bytes": 2311,
+        "sha256": "7a6a9b5192fe387a5eab9ed7a171b940db99ef6eb0389918f3a9d76863b1dd17"
+      },
+      "goal_verifications.json": {
+        "bytes": 1497,
+        "sha256": "fe4938dc568d7034238e14ebc6552dbdd46655c11bf9fdc2be6ab02ffd1f2aec"
+      },
+      "config/runtime.toml": {
+        "bytes": 3320,
+        "sha256": "659b11c9632621b855d1e37cdae60f11283f710383fd84631eae8b2abae89ef3"
+      },
+      "config/keepers/exhibit-editor.toml": {
+        "bytes": 612,
+        "sha256": "38c22672c50e3fa982f12cd0b97163985363412a106c88ee6f98ee2512003d24"
+      },
+      "config/keepers/exhibit-designer.toml": {
+        "bytes": 631,
+        "sha256": "30501da7c16f29e7fa5f5f4f0abb91c26ffb0375a7c02237d004299a3bf987c8"
+      },
+      "playground/docker/exhibit-editor/booklet.pdf": {
+        "bytes": 102608,
+        "sha256": "ebabc3f74b44bdd43b3a4aebb2355db7760ab9cb16aa1b785494ac799da6c3eb"
+      },
+      "playground/docker/exhibit-editor/poster.png": {
+        "bytes": 86709,
+        "sha256": "2b2f022a4fd13aeb465230bd687456ba8e7db6d6f22ece9d70400ca73e00c386"
+      },
+      "playground/docker/exhibit-editor/evidence.json": {
+        "bytes": 1637,
+        "sha256": "ca3daad86842e741fde60a67312abb12ca8220cf16fe2c6611cbb2a4df8a9fae"
+      },
+      "playground/docker/exhibit-editor/renders/page1.png": {
+        "bytes": 64091,
+        "sha256": "3db665442ed4dbcef2eafc5a769868ce9772814f9ecc7edd7acf2ba726e1b34c"
+      },
+      "playground/docker/exhibit-editor/renders/page2.png": {
+        "bytes": 81051,
+        "sha256": "c85b181149d6bfd3fec00ad3fbd3e51eb75d2bb48d0a562c1e90cd6620eed731"
+      },
+      "playground/docker/exhibit-editor/renders/page3.png": {
+        "bytes": 80753,
+        "sha256": "9e2d7cd9fc9eca2d54ff9e423779f698420748ac5f0edae212c1031f9bafbe62"
+      },
+      "playground/docker/exhibit-designer/poster.png": {
+        "bytes": 484694,
+        "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16"
+      },
+      "playground/docker/exhibit-designer/multimedia/garden.gif": {
+        "bytes": 588811,
+        "sha256": "da21aa4e6c7f80e88481f49c0c77e864b64e5f7f0ebe7536256b699b35396307"
+      },
+      "playground/docker/exhibit-designer/multimedia/garden.wav": {
+        "bytes": 2116844,
+        "sha256": "2471dc1e9805570267b668e05e05b7138a1e1cac489cebd6f4a2252dad8e96e0"
+      },
+      "playground/docker/exhibit-designer/multimedia/garden.mp3": {
+        "bytes": 289689,
+        "sha256": "1c2eaa4f20e51fdba0534a6fe71c1558c94d6a6dafc50194ab5bc88e397c6f7d"
+      }
+    }
+  },
+  "immediate_after_upgrade_check": {
+    "checked_files": 17,
+    "changed_files": []
+  },
+  "manual_upgrade": true,
+  "automatic_failover_proven": false,
+  "request": {
+    "target": {
+      "kind": "keeper",
+      "name": "exhibit-designer"
+    },
+    "prompt": "The peer export result-manifest bug has now been fixed in the actual isolated server (source83afd78483). Your prior exports stored the blob but returned a model-visible error; the current producer now attaches the required durable result manifest. Continue your existing exhibition handoff once on this corrected server. Your final poster.png should be 484694 bytes, SHA256 1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16. Use keeper_artifact_transfer action export for your own poster.png, then masc_keeper_delegate to exhibit-editor with the returned artifacts object. Ask editor to materialize it as received/designer-poster.png, inspect the actual imported image, and report the received byte count and SHA256 in your existing Board conversation. Preserve the original Goal evidence files and its current verifying attempt; do not overwrite the editor poster.png or evidence.json or request Goal completion again. Report any actual blocker through the existing operator request path. Admission or queued status alone is not completed file delivery."
+  },
+  "admission": {
+    "operation_id": "kmsg-e5f63dd058c494dcfa2991268295c0f9",
+    "state": "queued",
+    "queued_count": 3,
+    "existing": false
+  },
+  "operation": {
+    "schema": "masc.keeper_chat_operation.v1",
+    "operation_id": "kmsg-e5f63dd058c494dcfa2991268295c0f9",
+    "sequence": "7",
+    "created_at": 1789205978.716334,
+    "execution_digest": "d685202e7067f31c2e9642bd88d8a09bb76de8928a07d92805ee80353676a1bb",
+    "source": {
+      "channel": "agent",
+      "channel_user_id": "",
+      "channel_user_name": "",
+      "channel_workspace_id": "",
+      "continuation_channel": {
+        "kind": "dashboard",
+        "thread_id": "keeper:exhibit-designer"
+      },
+      "conversation_id": null,
+      "external_message_id": null,
+      "extra_mentions": [],
+      "schema": "masc.keeper_chat_operation.source.v1",
+      "submitted_by": "admin",
+      "surface": {
+        "kind": "agent"
+      },
+      "thread_id": "keeper:exhibit-designer",
+      "user_row_origin": "needs_append",
+      "workspace_id": null
+    },
+    "input": null,
+    "state": "Succeeded",
+    "completed_at": 1789206052.780806,
+    "outcome_ref": "trace-1789042574909-00000#22"
+  },
+  "tool_calls": [
+    {
+      "ts": 1789205997.171649,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_transfer",
+      "input": {
+        "action": "export",
+        "path": "poster.png",
+        "purpose": "task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일."
+      },
+      "output": {
+        "_blob": {
+          "sha256": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0",
+          "bytes": 1337,
+          "mime": "application/vnd.masc.tool-result-manifest+json",
+          "preview": ""
+        }
+      },
+      "success": true,
+      "duration_ms": 538.0008220672607,
+      "execution_id": "exec-1789205997171-0002",
+      "tool_use_id": "exec-9e7a9dbd-b6c2-4e45-896f-34f0c9cba913",
+      "keeper_turn_id": 22,
+      "runtime_profile": "codex_subscription.gpt-5.6-sol"
+    },
+    {
+      "ts": 1789206001.734562,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_read",
+      "input": {
+        "sha256": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0"
+      },
+      "output": "{\"ok\":true,\"sha256\":\"a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0\",\"offset\":0,\"next_offset\":1337,\"total_bytes\":1337,\"eof\":true,\"encoding\":\"utf-8\",\"content\":\"{\\\"schema\\\":\\\"masc.tool-result-artifact-manifest.v1\\\",\\\"content\\\":\\\"{\\\\\\\"artifact\\\\\\\":{\\\\\\\"blob\\\\\\\":{\\\\\\\"_blob\\\\\\\":{\\\\\\\"sha256\\\\\\\":\\\\\\\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\\\\\\\",\\\\\\\"bytes\\\\\\\":484694,\\\\\\\"mime\\\\\\\":\\\\\\\"application/octet-stream\\\\\\\",\\\\\\\"preview\\\\\\\":\\\\\\\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\\\\\\\"}},\\\\\\\"filename\\\\\\\":\\\\\\\"poster.png\\\\\\\",\\\\\\\"purpose\\\\\\\":\\\\\\\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\\\\\\\"}}\\\",\\\"structured_content\\\":{\\\"artifact\\\":{\\\"blob\\\":{\\\"_blob\\\":{\\\"sha256\\\":\\\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\\\",\\\"bytes\\\":484694,\\\"mime\\\":\\\"application/octet-stream\\\",\\\"preview\\\":\\\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\\\"}},\\\"filename\\\":\\\"poster.png\\\",\\\"purpose\\\":\\\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\\\"}}}\"}",
+      "success": true,
+      "duration_ms": 5.9051513671875,
+      "execution_id": "exec-1789206001734-0003",
+      "tool_use_id": "exec-769340e6-057a-4b67-8a55-92c396af86c8",
+      "keeper_turn_id": 22,
+      "runtime_profile": "codex_subscription.gpt-5.6-sol"
+    },
+    {
+      "ts": 1789206041.675646,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_read",
+      "input": {
+        "sha256": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0"
+      },
+      "output": "{\"ok\":true,\"sha256\":\"a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0\",\"offset\":0,\"next_offset\":1337,\"total_bytes\":1337,\"eof\":true,\"encoding\":\"utf-8\",\"content\":\"{\\\"schema\\\":\\\"masc.tool-result-artifact-manifest.v1\\\",\\\"content\\\":\\\"{\\\\\\\"artifact\\\\\\\":{\\\\\\\"blob\\\\\\\":{\\\\\\\"_blob\\\\\\\":{\\\\\\\"sha256\\\\\\\":\\\\\\\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\\\\\\\",\\\\\\\"bytes\\\\\\\":484694,\\\\\\\"mime\\\\\\\":\\\\\\\"application/octet-stream\\\\\\\",\\\\\\\"preview\\\\\\\":\\\\\\\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\\\\\\\"}},\\\\\\\"filename\\\\\\\":\\\\\\\"poster.png\\\\\\\",\\\\\\\"purpose\\\\\\\":\\\\\\\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\\\\\\\"}}\\\",\\\"structured_content\\\":{\\\"artifact\\\":{\\\"blob\\\":{\\\"_blob\\\":{\\\"sha256\\\":\\\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\\\",\\\"bytes\\\":484694,\\\"mime\\\":\\\"application/octet-stream\\\",\\\"preview\\\":\\\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\\\"}},\\\"filename\\\":\\\"poster.png\\\",\\\"purpose\\\":\\\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\\\"}}}\"}",
+      "success": true,
+      "duration_ms": 1.3589859008789062,
+      "execution_id": "exec-1789206041675-0005",
+      "tool_use_id": "exec-c1afeb5a-23e1-41f5-b28b-38d9b4c3cee2",
+      "keeper_turn_id": 22,
+      "runtime_profile": "codex_subscription.gpt-5.6-sol"
+    },
+    {
+      "ts": 1789206041.691082,
+      "keeper": "exhibit-designer",
+      "tool": "masc_keeper_delegate",
+      "input": {
+        "target": {
+          "kind": "keeper",
+          "name": "exhibit-editor"
+        },
+        "artifacts": [
+          "{\"blob\":{\"_blob\":{\"sha256\":\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\",\"bytes\":484694,\"mime\":\"application/octet-stream\",\"preview\":\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\"}},\"filename\":\"poster.png\",\"purpose\":\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\"}"
+        ],
+        "prompt": "task-001 최종 포스터 바이너리를 전달합니다. 첨부 artifact를 keeper_artifact_transfer action=materialize로 반드시 `received/designer-poster.png`에 저장해 주세요. editor의 기존 `poster.png`, `evidence.json`, 원래 Goal 증거 파일과 현재 verifying attempt는 덮어쓰거나 변경하지 말고, Goal completion도 다시 요청하지 마세요. materialize 뒤 실제 imported image인 `received/designer-poster.png`를 직접 열어 제목·배지·일시·장소·대상·입장료와 한글 누락·겹침·잘림을 검수하세요. 그리고 수신 파일의 정확한 바이트 수와 SHA256을 계산해 기존 task-001 Board 대화에 보고한 뒤, materialize 경로·실이미지 검수 전사·바이트·SHA256·Board post/comment ID를 답장해 주세요. 기대값은 484694 bytes, SHA256 1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16입니다. queued/admitted만으로 완료 처리하지 마세요."
+      },
+      "output": "\"artifacts\": exported artifact references\nfailure_class=policy_rejection — Rejected before running. The message above names the field or permission that failed. A call with that field corrected can succeed; a missing permission does not change with different arguments.",
+      "success": false,
+      "duration_ms": 1.1339187622070312,
+      "execution_id": "exec-1789206041691-0006",
+      "tool_use_id": "exec-52989f4b-90e1-45d5-b057-d00c5350f833",
+      "keeper_turn_id": 22,
+      "runtime_profile": "codex_subscription.gpt-5.6-sol"
+    },
+    {
+      "ts": 1789206052.708942,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_read",
+      "input": {
+        "sha256": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0"
+      },
+      "output": "{\"ok\":true,\"sha256\":\"a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0\",\"offset\":0,\"next_offset\":1337,\"total_bytes\":1337,\"eof\":true,\"encoding\":\"utf-8\",\"content\":\"{\\\"schema\\\":\\\"masc.tool-result-artifact-manifest.v1\\\",\\\"content\\\":\\\"{\\\\\\\"artifact\\\\\\\":{\\\\\\\"blob\\\\\\\":{\\\\\\\"_blob\\\\\\\":{\\\\\\\"sha256\\\\\\\":\\\\\\\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\\\\\\\",\\\\\\\"bytes\\\\\\\":484694,\\\\\\\"mime\\\\\\\":\\\\\\\"application/octet-stream\\\\\\\",\\\\\\\"preview\\\\\\\":\\\\\\\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\\\\\\\"}},\\\\\\\"filename\\\\\\\":\\\\\\\"poster.png\\\\\\\",\\\\\\\"purpose\\\\\\\":\\\\\\\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\\\\\\\"}}\\\",\\\"structured_content\\\":{\\\"artifact\\\":{\\\"blob\\\":{\\\"_blob\\\":{\\\"sha256\\\":\\\"1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16\\\",\\\"bytes\\\":484694,\\\"mime\\\":\\\"application/octet-stream\\\",\\\"preview\\\":\\\"?PNG  ? ??? IHDR???????????????] ??? pHYs?????????g??R????IDATx???i??Xz? >???׻r???$#? c_2#RRj)???*Uۘu??Ʀ?@}???S3֭?TV%eV*??RF.?d,d???]I??w?r????X???8???????q?8???l?????~????????????P?m??????????\\\"}},\\\"filename\\\":\\\"poster.png\\\",\\\"purpose\\\":\\\"task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize하고 실제 이미지를 검수한 뒤, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일.\\\"}}}\"}",
+      "success": true,
+      "duration_ms": 7.627010345458984,
+      "execution_id": "exec-1789206052708-0007",
+      "tool_use_id": "exec-97a5266c-1e84-465e-a19e-c565652d3bf7",
+      "keeper_turn_id": 22,
+      "runtime_profile": "codex_subscription.gpt-5.6-sol"
+    }
+  ],
+  "manifest": {
+    "sha256": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0",
+    "bytes": 1337,
+    "hash_verified": true
+  },
+  "exported_poster": {
+    "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16",
+    "bytes": 484694,
+    "hash_verified": true
+  },
+  "recipient_exists": false,
+  "finding": "Actual export and model manifest read succeed. Delegate sends string artifacts instead of objects and is rejected; recipient delivery remains incomplete. Source investigation found rich JSON schema lost in ToolBridge and official dynamic-tool projection.",
+  "verification_scope": "candidate binary compiled in CI; original target test exposed missing Docker fixture, corrected target did not execute because pnpm setup failed. No overall release or target-suite pass claim."
+}

@@ -1,5 +1,5 @@
 {
-  "README.md": "0a398af85b3eff27fa22efae3776eaf46f5250b0b194ca29f3d26b9c5ba9ffee",
+  "README.md": "47fc6feebe5248bed34fe2228397882a8971aeed999a272aef8a365ced5a1184",
   "REASSESSMENT.md": "42018791db7a00e212ee3d567d9cedd46792cdd7d2586bc6b213e51ae9561d06",
   "before-release-03512.json": "8d75f2297580a9bbd960c5d31fb2d3acb94df47c7ded184fec4c12da97bbb4b7",
   "goal-retry-03512.json": "708920fed74315d59365db14573ae529b560e97e628bd57983b13ff19aeaa44a",
@@ -8,7 +8,9 @@
   "memory-proposal.json": "3ff8db3b3ccf5903919b2abec5573dad8f66929fa8e691313f8ee687c3408c1f",
   "memory-receipt.json": "bcd59e01d4acc03746b9a21bb45bb612b3948d9fc5f27fd6e34ea8d7b701e748",
   "memory-review.json": "96649b27f5ace0fa08aa6480747ffaef7fb34957c1a263de2764bee26f71a488",
+  "peer-export-83afd.json": "4248f2d5e6ad36a06664021adc313a0ef923d2c43367da3b36c93bde3b2d7bb4",
   "peer-export-failure.json": "091f98bb7e04367086aba82f7f4b9d4a9d14fa594f914f28a6d63bbb4928bb58",
+  "peer-export-manifest.json": "a10be8c4aa7d11173244803fa551a1ff1c6c696a47cdcdc39ef307be03a37ba0",
   "peer-handoff-03512.json": "eb1f81d2295203befe508164ad71c02b2234b7d3cdd4950bfb226beeea4b87f0",
   "reassessment-health.json": "f3ddce687134b5f6cade5d20e1c2e33d2424a6bb2a4aee7db824ac7655f1dedf",
   "release-archive-check.json": "daa1832b09131ccce9d8e7d45d7dade51cc71b609c16e3b347497d2699a731b0",

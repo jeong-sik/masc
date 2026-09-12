@@ -13,3 +13,11 @@ The original local27B process completed both Keeper groups and final synthesis (
 ## Product reassessment
 
 [18-item reassessment and next steps](REASSESSMENT.md) separates historical evidence, current blockers, and the next acceptance sequence.
+
+## Actual corrected export, followed by a new delegation failure
+
+The CI-built83afd candidate from run34685872751 replaced the owned isolated server with PID8730. Health identified the exact binary hash and ready state. All17 observed state/config/artifact hashes matched immediately after upgrade. This is a manual candidate experiment; release_validated=false, and the corrected target suite did not execute because its pnpm setup step failed.
+
+The designer's actual operationkmsg-e5f63dd058c494dcfa2991268295c0f9 reached Succeeded. Its export succeeded, then keeper_artifact_read read the durable1337-byte result manifest. Independent hashing verified that manifest and its484694-byte poster blob. The following delegate call supplied artifacts as strings and was rejected; the recipient file remains absent. Source investigation found two rich-schema projections that drop nested array/object details. That repair is separate from the now-exercised export manifest fix. See `peer-export-83afd.json` and `peer-export-manifest.json`. Operation success does not establish handoff success.
+
+Separate product work: PR35372 implements configured official-client verifier routing and a real per-review system/tool context; dynamic image tool responses require a follow-up stack. PR35377 repairs the Tools crash on a nullable installed-binary repository path; TypeScript,23 focused tests, actual desktop search/clipboard and fresh mobile card visibility were verified. Its browser proof uses a Vite development preview, not a deployed or CI-built fix.

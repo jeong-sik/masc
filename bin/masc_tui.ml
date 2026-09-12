@@ -1776,11 +1776,11 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
-  | Voice_wizard_saved of (Yojson.Safe.t, string) result
-  | Voice_wizard_probed of (Yojson.Safe.t, string) result
-  | Voice_wizard_voices of (Yojson.Safe.t, string) result
-  | Voice_agent_voices_loaded of (Yojson.Safe.t, string) result
-  | Voice_agent_voice_saved of (Yojson.Safe.t, string) result
+  | Voice_wizard_saved of unit ref * (Yojson.Safe.t, string) result
+  | Voice_wizard_probed of unit ref * (Yojson.Safe.t, string) result
+  | Voice_wizard_voices of unit ref * (Yojson.Safe.t, string) result
+  | Voice_agent_voices_loaded of unit ref * (Yojson.Safe.t, string) result
+  | Voice_agent_voice_saved of unit ref * (Yojson.Safe.t, string) result
   | Voice_config_loaded of
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
@@ -2590,7 +2590,7 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
    configured endpoint is asked to say one sentence, and each answer is shown --
    including the ones that refused, which is the part a chain hides by stopping
    at the first endpoint that answers. *)
-let launch_voice_wizard_probe state ~mailbox message =
+let launch_voice_wizard_probe state ~mailbox ~identity message =
   let host = server_peer_host in
   let port = state.port in
   let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
@@ -2598,12 +2598,12 @@ let launch_voice_wizard_probe state ~mailbox message =
     let result =
       Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
     in
-    enqueue_async mailbox (Voice_wizard_probed result)
+    enqueue_async mailbox (Voice_wizard_probed (identity, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
-    enqueue_async mailbox (Voice_wizard_probed (Error "Eio switch is unavailable"))
+    enqueue_async mailbox (Voice_wizard_probed (identity, Error "Eio switch is unavailable"))
 ;;
 
 (* The sentence the endpoints are asked to say. In Korean because that is what
@@ -2636,7 +2636,7 @@ let voice_wizard_probe_lines json =
    request names a kind and the variable holding that provider's key -- never a
    key, and never an address: the route resolves the variable in the server's
    own environment and uses the kind's own address. *)
-let launch_voice_wizard_voices state ~mailbox
+let launch_voice_wizard_voices state ~mailbox ~request
     (session : Masc_tui_types.voice_wizard_session) =
   let draft = session.Masc_tui_types.vws_draft in
   let host = server_peer_host in
@@ -2656,12 +2656,12 @@ let launch_voice_wizard_voices state ~mailbox
     let result =
       Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/voices" ~body:payload
     in
-    enqueue_async mailbox (Voice_wizard_voices result)
+    enqueue_async mailbox (Voice_wizard_voices (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
-    enqueue_async mailbox (Voice_wizard_voices (Error "Eio switch is unavailable"))
+    enqueue_async mailbox (Voice_wizard_voices (request, Error "Eio switch is unavailable"))
 ;;
 
 (* One row per voice: the id is what the configuration stores, and the label is
@@ -2701,10 +2701,8 @@ let voice_wizard_voice_rows json =
 (* The voices to choose from when assigning one to a keeper. Asked of the
    section's own first endpoint: the assignment is stored per keeper but read
    per endpoint, so the ids have to be the ones that endpoint answers to. *)
-(* The kind and credential variable of the first endpoint [voice.tts] names, read
-   off the admin setup answer the pane already holds. First rather than chosen:
-   a section's endpoints are a fallback chain for one voice, so the one in front
-   is the one whose vocabulary the assignment has to speak. *)
+(* Use the first enabled endpoint, matching runtime fallback selection.
+   A fixed endpoint voice takes precedence over keeper assignments. *)
 let voice_setup_first_tts_endpoint state =
   let member path json =
     List.fold_left
@@ -2717,20 +2715,30 @@ let voice_setup_first_tts_endpoint state =
   match state.voice_setup with
   | Some json ->
     (match member [ "tts"; "endpoints" ] json with
-     | Some (`List (`Assoc entry :: _)) ->
+     | Some (`List entries) ->
+       let active =
+         List.find_opt
+           (function
+             | `Assoc fields -> List.assoc_opt "enabled" fields = Some (`Bool true)
+             | _ -> false)
+           entries
+       in
+       (match active with
+       | Some (`Assoc entry) ->
        let text key =
          match List.assoc_opt key entry with
          | Some (`String value) when String.trim value <> "" -> Some value
          | Some _ | None -> None
        in
        (match text "kind" with
-        | Some kind -> Some (kind, text "api_key_env")
+        | Some kind -> Some (kind, text "api_key_env", text "default_voice")
         | None -> None)
+       | Some _ | None -> None)
      | Some _ | None -> None)
   | None -> None
 ;;
 
-let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
+let launch_voice_agent_voices state ~mailbox ~identity ~kind ~api_key_env =
   let host = server_peer_host in
   let port = state.port in
   let payload =
@@ -2747,12 +2755,12 @@ let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
     let result =
       Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/voices" ~body:payload
     in
-    enqueue_async mailbox (Voice_agent_voices_loaded result)
+    enqueue_async mailbox (Voice_agent_voices_loaded (identity, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
-    enqueue_async mailbox (Voice_agent_voices_loaded (Error "Eio switch is unavailable"))
+    enqueue_async mailbox (Voice_agent_voices_loaded (identity, Error "Eio switch is unavailable"))
 ;;
 
 let launch_voice_agent_voice_save state ~mailbox
@@ -2787,12 +2795,12 @@ let launch_voice_agent_voice_save state ~mailbox
       let result =
         Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/setup" ~body:payload
       in
-      enqueue_async mailbox (Voice_agent_voice_saved result)
+      enqueue_async mailbox (Voice_agent_voice_saved (session.vas_identity, result))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
      | None ->
-       enqueue_async mailbox (Voice_agent_voice_saved (Error "Eio switch is unavailable")))
+       enqueue_async mailbox (Voice_agent_voice_saved (session.vas_identity, Error "Eio switch is unavailable")))
 ;;
 
 let launch_voice_wizard_save state ~mailbox
@@ -2820,12 +2828,12 @@ let launch_voice_wizard_save state ~mailbox
       let result =
         Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/setup" ~body:payload
       in
-      enqueue_async mailbox (Voice_wizard_saved result)
+      enqueue_async mailbox (Voice_wizard_saved (session.vws_identity, result))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
      | None ->
-       enqueue_async mailbox (Voice_wizard_saved (Error "Eio switch is unavailable")))
+       enqueue_async mailbox (Voice_wizard_saved (session.vws_identity, Error "Eio switch is unavailable")))
 ;;
 
 let launch_voice_config_load state ~mailbox =
@@ -11186,9 +11194,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      each is dropped unless that capture is still the one in flight. An
      operator who moved the cursor, or pressed the key again, has said the
      first capture no longer belongs to this draft. *)
-  | Voice_wizard_saved result ->
+  | Voice_wizard_saved (identity, result) ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
+       | Some session, _ when session.vws_identity != identity -> ()
        | Some session, Ok _ ->
            (* The pane is reloaded: what it was showing is now one revision
               behind. The session stays open to report what answers. *)
@@ -11201,7 +11210,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                          vws_saving = false
                        ; vws_status = Some "saved. asking the endpoints to answer…"
                        };
-                launch_voice_wizard_probe state ~mailbox voice_wizard_probe_sentence
+                launch_voice_wizard_probe state ~mailbox ~identity voice_wizard_probe_sentence
             | Voice_setup.Stt ->
                 (* Transcription needs audio this pane does not have. The CLI
                    takes a file, and the runbook says how to make one. *)
@@ -11220,22 +11229,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
      the step is a plain field then, which is what it was before there was a
      list. The reason is shown so a reader knows why there is nothing to pick
      rather than thinking the list is empty. *)
-  | Voice_wizard_voices result ->
-      (match (state.voice_wizard, result) with
-       | None, _ -> ()
-       | Some session, Error message ->
-           state.voice_wizard <- Some { session with vws_status = Some message }
-       | Some session, Ok json ->
-           state.voice_wizard
-             <- Some
-                  (Masc_tui_types.voice_wizard_with_voices session
-                     (voice_wizard_voice_rows json)))
-  | Voice_agent_voices_loaded result ->
+  | Voice_wizard_voices (request, result) ->
+      Option.iter
+        (fun session ->
+          state.voice_wizard <- Some
+            (Masc_tui_types.voice_wizard_catalogue_result session ~request
+               (Result.map voice_wizard_voice_rows result)))
+        state.voice_wizard
+  | Voice_agent_voices_loaded (identity, result) ->
       (match (state.voice_agent_voices, result) with
        | None, _ -> ()
+       | Some session, _ when session.vas_identity != identity -> ()
        | Some session, Error message ->
            state.voice_agent_voices
-             <- Some { session with vas_status = Some message }
+             <- Some { session with vas_voices = []; vas_status = Some (message ^ "; type a voice ID") }
        | Some session, Ok json ->
            state.voice_agent_voices
              <- Some
@@ -11243,9 +11250,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                     vas_voices = voice_wizard_voice_rows json
                   ; vas_voice_cursor = 0
                   })
-  | Voice_agent_voice_saved result ->
+  | Voice_agent_voice_saved (identity, result) ->
       (match (state.voice_agent_voices, result) with
        | None, _ -> ()
+       | Some session, _ when session.vas_identity != identity -> ()
        | Some session, Error message ->
            state.voice_agent_voices
              <- Some { session with vas_saving = false; vas_status = Some message }
@@ -11270,9 +11278,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   ; vas_revision = revision
                   ; vas_status = Some "saved."
                   })
-  | Voice_wizard_probed result ->
+  | Voice_wizard_probed (identity, result) ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
+       | Some session, _ when session.vws_identity != identity -> ()
        | Some session, Error message ->
            state.voice_wizard <- Some { session with vws_status = Some message }
        | Some session, Ok json ->
@@ -15867,6 +15876,12 @@ and is loaded on demand through keeper_skill.
                     state.voice_wizard <-
                       Some (Masc_tui_types.voice_wizard_append session text))
                   state.voice_wizard
+            | Some Text_voice_agent ->
+                Option.iter
+                  (fun session ->
+                    state.voice_agent_voices <-
+                      Some (Masc_tui_types.voice_agent_append session text))
+                  state.voice_agent_voices
             | Some Text_palette ->
                 state.palette_query <- state.palette_query ^ text;
                 state.palette_cursor <- 0
@@ -16257,9 +16272,8 @@ and is loaded on demand through keeper_skill.
                  set (Masc_tui_types.runtime_param_edit_append edit s);
                  state.runtime_params_notice <- None
                | _ -> ()))
-       (* The assignment picker owns every key while it is open, the way the
-          wizard does. It is not a text field -- both axes are closed lists --
-          so it sits beside the text targets rather than among them. *)
+       (* The assignment picker owns every key, including a manually entered
+          voice ID when the provider has no catalogue. *)
        | Some k when Option.is_some state.voice_agent_voices ->
            (match state.voice_agent_voices with
             | None -> ()
@@ -16278,6 +16292,13 @@ and is loaded on demand through keeper_skill.
                   set (Masc_tui_types.voice_agent_walk_voices session ~ahead:true)
                 | "\r" | "\n" | "enter" ->
                   launch_voice_agent_voice_save state ~mailbox:async_messages session
+                | "\127" | "\b" | "backspace" ->
+                  set (Masc_tui_types.voice_agent_backspace session)
+                | s when String.length s = 1 && Char.code s.[0] = 21 ->
+                  set { session with vas_manual_voice = ""; vas_status = None }
+                | s when (String.length s = 1 && Char.code s.[0] >= 32)
+                         || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                  set (Masc_tui_types.voice_agent_append session s)
                 | _ -> ()))
        | Some k
          when text_input_target state ~compact_viewport = Some Text_voice_wizard ->
@@ -16292,8 +16313,13 @@ and is loaded on demand through keeper_skill.
               let moved next =
                 if next.Masc_tui_types.vws_step = Voice_wizard.Voice
                    && session.vws_step <> Voice_wizard.Voice
-                then launch_voice_wizard_voices state ~mailbox:async_messages next;
-                next
+                then (
+                  let next, request = Masc_tui_types.voice_wizard_begin_catalogue next in
+                  launch_voice_wizard_voices state ~mailbox:async_messages ~request next;
+                  next)
+                else if next.vws_step <> Voice_wizard.Voice then
+                  { next with vws_catalogue_request = None }
+                else next
               in
               (* A save in flight ignores everything but the key that leaves:
                  the draft it is writing is already on its way. *)
@@ -21332,8 +21358,13 @@ and is loaded on demand through keeper_skill.
                               vas_status =
                                 Some "[voice.tts] has no endpoint to ask for voices"
                             }
-                   | Some (kind, api_key_env) ->
-                     launch_voice_agent_voices state ~mailbox:async_messages ~kind
+                   | Some (_, _, Some _) ->
+                     state.voice_agent_voices <- None;
+                     report_action state "error"
+                       "The active endpoint has a fixed default_voice; remove it before assigning keeper voices."
+                   | Some (kind, api_key_env, None) ->
+                     launch_voice_agent_voices state ~mailbox:async_messages
+                       ~identity:session.vas_identity ~kind
                        ~api_key_env)
                | Some _ | None -> ())
             | Some _ | None -> ())

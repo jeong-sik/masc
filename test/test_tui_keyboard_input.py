@@ -14602,7 +14602,7 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 f"the save did not carry the revision the pane read: {body!r}"
             )
         changes = {change.get("change"): change for change in body.get("changes", [])}
-        for wanted in ("put_endpoint", "set_default_model", "set_tts_default_voice"):
+        for wanted in ("put_endpoint", "set_default_model"):
             if wanted not in changes:
                 raise AssertionError(f"the save omitted {wanted}: {body!r}")
         endpoint = changes["put_endpoint"].get("endpoint", {})
@@ -14613,8 +14613,10 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
         # The name of the variable, never its value: runtime.toml is committed.
         if any("sk-" in str(value) for value in endpoint.values()):
             raise AssertionError(f"the save carried something key-shaped: {endpoint!r}")
-        if changes["set_tts_default_voice"].get("voice") != "pty-voice-id":
+        if endpoint.get("default_voice") != "pty-voice-id":
             raise AssertionError(f"the default voice was lost: {changes!r}")
+        if "set_tts_default_voice" in changes:
+            raise AssertionError(f"the wizard replaced the shared voice: {changes!r}")
 
         # Esc leaves. The pane is underneath and no step counter remains.
         closed = press_and_settle(process, master_fd, output, b"\x1b")
@@ -14710,7 +14712,7 @@ def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
             if absent in endpoint:
                 raise AssertionError(f"{absent} was sent for a command: {endpoint!r}")
         # The id from the list, not anything retyped.
-        if changes.get("set_tts_default_voice", {}).get("voice") != "RR11BBccDDeeFFggHHii":
+        if endpoint.get("default_voice") != "RR11BBccDDeeFFggHHii":
             raise AssertionError(f"the picked voice did not reach the save: {changes!r}")
 
         press_and_settle(process, master_fd, output, b"\x1b")

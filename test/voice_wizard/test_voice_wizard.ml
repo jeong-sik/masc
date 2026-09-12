@@ -121,8 +121,9 @@ let test_say_writes_no_model () =
     Alcotest.(check bool) "the voice is written" true
       (List.exists
          (function
-           | Voice_setup.Set_tts_default_voice voice -> voice = "Yuna"
-           | Voice_setup.Put_endpoint _ | Voice_setup.Remove_endpoint _
+           | Voice_setup.Put_endpoint (_, endpoint) ->
+             endpoint.Voice_config.default_voice = Some "Yuna"
+           | Voice_setup.Set_tts_default_voice _ | Voice_setup.Remove_endpoint _
            | Voice_setup.Set_default_model _ | Voice_setup.Set_agent_voice _ -> false)
          changes)
 

@@ -12658,6 +12658,9 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   rows "keeper  (up/down)" session.vas_agents session.vas_agent_cursor (fun agent -> agent);
   box_line buf cols "";
   rows "voice  (left/right)" session.vas_voices session.vas_voice_cursor snd;
+  box_line buf cols
+    (Printf.sprintf "  voice ID (type or paste): %s%s%s"
+       Ansi.bold (Terminal_text.single_line session.vas_manual_voice) Ansi.reset);
   (match session.vas_status with
    | None -> ()
    | Some status ->

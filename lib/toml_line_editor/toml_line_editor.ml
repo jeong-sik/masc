@@ -429,6 +429,7 @@ let with_table content ~path ~on_missing ~edit =
 ;;
 
 let has_key ~key line =
+  let key = Option.value (key_of_line (key ^ " = \"\"")) ~default:key in
   match key_of_line line with
   | Some found -> String.equal found key
   | None -> false

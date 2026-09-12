@@ -167,10 +167,12 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; api_key_env = optional draft.credential_variable
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
-  ; default_voice = None
-  (* The wizard offers the three kinds that have an address. Naming the
-     executable belongs to the two command kinds, which it does not offer yet,
-     and each of those knows the name it is normally installed under. *)
+  ; default_voice =
+      (match draft.section with
+       | Voice_setup.Tts -> optional draft.voice
+       | Voice_setup.Stt -> None)
+  (* Command providers use their installed names. This wizard does not accept
+     an executable path override. *)
   ; command = None
   }
 ;;
@@ -192,13 +194,8 @@ let changes draft =
         [ Voice_setup.Set_default_model (draft.section, String.trim draft.model) ]
       | Macos_say | Mcp_tool -> []
     in
-    let voice =
-      match draft.section with
-      | Voice_setup.Tts -> [ Voice_setup.Set_tts_default_voice (String.trim draft.voice) ]
-      | Voice_setup.Stt -> []
-    in
     Ok
-      ((model @ voice)
+      (model
        @ [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ])
 ;;
 

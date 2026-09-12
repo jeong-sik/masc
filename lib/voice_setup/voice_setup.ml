@@ -116,7 +116,7 @@ let apply_change contents = function
     Toml_line_editor.edit_table_scalar
       contents
       ~path:"voice.tts.agent_voices"
-      ~key:agent
+      ~key:("\"" ^ Toml_line_editor.escape_string agent ^ "\"")
       ~value:voice
 ;;
 
@@ -126,6 +126,24 @@ let apply_change contents = function
    unnoticed for six days. A writer that committed text it had not read back
    would reproduce that. *)
 let checked contents changes =
+  (* The first speaking endpoint seeds the section fallback. Later endpoints
+     retain their own voice vocabulary without replacing an existing fallback. *)
+  let changes =
+    match Voice_config.parse_runtime_toml_text contents with
+    | Ok None | Ok (Some { Voice_config.tts = None; _ }) ->
+      let initial_voice =
+        List.find_map
+          (function
+            | Put_endpoint (Tts, endpoint) -> endpoint.Voice_config.default_voice
+            | Put_endpoint (Stt, _) | Remove_endpoint _ | Set_default_model _
+            | Set_tts_default_voice _ | Set_agent_voice _ -> None)
+          changes
+      in
+      (match initial_voice with
+       | Some voice -> Set_tts_default_voice voice :: changes
+       | None -> changes)
+    | Ok (Some { Voice_config.tts = Some _; _ }) | Error _ -> changes
+  in
   let updated = List.fold_left apply_change contents changes in
   match Voice_config.parse_runtime_toml_text updated with
   | Ok _ -> updated

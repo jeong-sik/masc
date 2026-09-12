@@ -1,0 +1,31 @@
+{
+  "origin": "observer Browser Lane screenshot during the after trial; excluded from Keeper tool-call counts",
+  "server_instance_id": "01a09537-2ec0-7000-bfeb-02ffcb9ac0d8",
+  "request": {
+    "label": "06-firefox-screenshot",
+    "status": 200,
+    "elapsed_ms": 38.55,
+    "request": {
+      "lane": "automation",
+      "tabId": 1
+    }
+  },
+  "response": {
+    "source": "automation",
+    "clientId": null,
+    "tabId": 1,
+    "title": "Browser handoff fixture",
+    "url": "http://127.0.0.1:58103/index.html",
+    "mimeType": "image/png",
+    "viewport": {
+      "documentId": "e8a7bd38ed0ab1d3926908a8c54bd563",
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "elapsed_ms": 36.444834
+  },
+  "file": "firefox-after.png",
+  "sha256": "5c715b04af307478aa7c16a8368c6c6d56afe95dc5fb18d2bf3d71d062a0bee6"
+}

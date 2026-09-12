@@ -27,8 +27,15 @@ claim or proof of which wording change caused the shorter route.
   exact inputs, tool-result bytes/hashes, BrowserRead outputs, final answers,
   server/driver identity, and the after run's Skill activation record.
 - [fixture.html](fixture.html) is the complete synthetic page.
+- [firefox-after.png](firefox-after.png) is the real Firefox page captured during
+  the after trial through Browser Lane. [firefox-after.json](firefox-after.json)
+  retains its request, URL/tab/viewport, server instance and image hash. The
+  screenshot shows Alpha, Beta and the sidebar together; scoped scene reading
+  filters the returned content, not the browser's paint. Alpha-only extraction
+  is established by the recorded scene response. The screenshot is an observer
+  call, so it is excluded from the Keeper call counts above.
 - The after activation has `invocation.kind=instruction`; its delivered body
-  SHA-256 matches the tool result and the current SKILL.md without frontmatter.
+  SHA-256 matches the tool result and SKILL.md at `869a35889a` without frontmatter.
   The following BrowserRead call ID is present in that activation's actions.
 - Both chat operations reached `Succeeded`. The after shutdown record reached
   `finalized`. The before shutdown terminal record was observed but was not

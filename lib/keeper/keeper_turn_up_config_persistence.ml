@@ -65,6 +65,7 @@ type error =
 type 'a publication =
   | Commit of 'a
   | Commit_with_warnings of 'a * warning list
+  | Commit_then_publish of warning list * (unit -> 'a)
   | Rollback of 'a
 
 let revision_to_yojson = function
@@ -591,7 +592,13 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
       let clear_journal () =
         match Keeper_config_journal.clear ~journal_path with
         | Ok () -> Ok ()
-        | Error detail -> Error (Io_error detail)
+        | Error detail ->
+          Error (Composite_reconciliation_required
+            { manifest = Some
+                { path; detail = "journal retirement failed: " ^ detail
+                ; observed = observed_revision_after_failure path }
+            ; runtime_assignment = Some
+                { path = Some runtime_toml; detail = "journal retirement failed: " ^ detail } })
       in
 
       let restore_publication_state () =
@@ -704,21 +711,25 @@ let persist_with_publication_using ?write_manifest ~with_lock ~restore_snapshot 
                       ^ Printexc.raw_backtrace_to_string backtrace
                   })
          in
+         let finish_commit publication_warnings after_commit =
+           match List.find_opt
+               (function Runtime_config_parent_sync_unconfirmed _ -> true | _ -> false)
+               publication_warnings with
+           | Some (Runtime_config_parent_sync_unconfirmed detail) ->
+             rollback (Io_error ("runtime assignment durability unconfirmed: " ^ detail))
+           | Some _ | None ->
+             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+             let* () = clear_journal () in
+             Ok { value = after_commit (); warnings = write_warnings @ publication_warnings }
+         in
          (match publication with
           | Error error -> rollback error
           | Ok (Commit value) ->
-            Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-            (* Both files now carry the request's after-state: the crash
-               window is closed and the journal's authority ends. *)
-            let* () = clear_journal () in
-            Ok { value; warnings = write_warnings }
+            finish_commit [] (fun () -> value)
           | Ok (Commit_with_warnings (value, publication_warnings)) ->
-            Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-            let* () = clear_journal () in
-            Ok
-              { value
-              ; warnings = write_warnings @ publication_warnings
-              }
+            finish_commit publication_warnings (fun () -> value)
+          | Ok (Commit_then_publish (publication_warnings, after_commit)) ->
+            finish_commit publication_warnings after_commit
           | Ok (Rollback value) ->
             let* () = restore_publication_state () in
             let* () = clear_journal () in
@@ -756,6 +767,34 @@ let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish (
     ~meta
     ~publish
     ()
+
+let commit_configuration ~expected_revision ~config
+    ~(parsed : Keeper_turn_up_args.parsed_args) ~meta ~publish () =
+  match persist_with_publication ~expected_revision ~config ~parsed ~meta
+      ~publish:(fun transaction outcome ->
+        let runtime_id = match parsed.runtime_id_opt with
+          | Some runtime_id -> Some runtime_id
+          | None ->
+            match Runtime.keeper_assignment_revision transaction with
+            | Runtime.Runtime_config_missing -> None
+            | Runtime.Runtime_config_present { assignment = Assignment_missing; _ } -> None
+            | Runtime.Runtime_config_present { assignment = Assignment_present runtime_id; _ } ->
+              Some runtime_id
+        in
+        match Runtime.commit_keeper_assignment ?egress_allow:parsed.egress_allow_opt
+                transaction ~runtime_id with
+        | Error detail -> Rollback (Error detail)
+        | Ok write ->
+          let runtime_assignment = match write with
+            | Runtime.Assignment_unchanged revision -> revision
+            | Runtime.Assignment_committed { revision; _ } -> revision in
+          Commit_then_publish
+            (warnings_of_runtime_assignment_write write,
+             fun () -> Ok (publish outcome { manifest = outcome.revision; runtime_assignment }))) () with
+  | Error _ as error -> error
+  | Ok { value = Error detail; _ } -> Error (Io_error detail)
+  | Ok { value = Ok value; warnings } -> Ok { value; warnings }
+;;
 
 let persist ~expected_revision ~config ~parsed ~meta () =
   persist_with_publication ~expected_revision ~config ~parsed ~meta

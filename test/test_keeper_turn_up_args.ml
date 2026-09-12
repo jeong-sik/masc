@@ -822,6 +822,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
       path content
   in
   let commit_revision = current_revision_exn ctx.config name in
+  let actor_published = ref false in
   let uncertain_commit =
     Keeper_turn_up_config_persistence.persist_with_publication
       ~expected_revision:commit_revision
@@ -837,25 +838,23 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
         with
         | Error detail -> fail detail
         | Ok runtime_write ->
-          Keeper_turn_up_config_persistence.Commit_with_warnings
-            ( (),
-              Keeper_turn_up_config_persistence
-              .warnings_of_runtime_assignment_write runtime_write ))
+          Keeper_turn_up_config_persistence.Commit_then_publish
+            (Keeper_turn_up_config_persistence.warnings_of_runtime_assignment_write runtime_write,
+             fun () -> actor_published := true))
       ()
   in
   (match uncertain_commit with
-   | Error error ->
-     fail
-       ("uncertain runtime commit was not preserved: "
-        ^ Keeper_turn_up_config_persistence.error_to_string error)
-   | Ok { warnings; _ } ->
-     check bool "runtime commit durability warning is visible" true
-       (List.exists
-          (function
-            | Keeper_turn_up_config_persistence
-              .Runtime_config_parent_sync_unconfirmed _ -> true
-            | _ -> false)
-          warnings));
+   | Error (Keeper_turn_up_config_persistence.Io_error _) -> ()
+   | Error error -> fail (Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "unconfirmed runtime durability was reported committed");
+  check bool "unconfirmed configuration never publishes actor state" false !actor_published;
+  check string "unconfirmed commit restores manifest before-image"
+    manifest_before (Fs_compat.load_file manifest_path);
+  check string "unconfirmed commit restores runtime before-image"
+    runtime_before (Fs_compat.load_file runtime_path);
+  check bool "confirmed compensation retires journal" false
+    (Sys.file_exists (Keeper_config_journal.journal_path_for_base_path
+       ~base_path:ctx.config.base_path));
   let manifest_before_uncertain_restore = Fs_compat.load_file manifest_path in
   let runtime_before_uncertain_restore = Fs_compat.load_file runtime_path in
   let restore_revision = current_revision_exn ctx.config name in
@@ -1713,6 +1712,47 @@ let test_journal_rejects_foreign_paths_and_unreadable_files () =
   | Error detail -> fail detail
 ;;
 
+let test_actor_publication_starts_after_config_commit () =
+  let exception Interrupted_publication in
+  with_persisting_context @@ fun ctx ->
+  let module P = Keeper_turn_up_config_persistence in
+  let name = "journal-post-commit-fixture" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "instructions", `String "committed"]) with
+    | Ok meta -> meta | Error error -> fail error in
+  let parsed = match parse_stating_a_profile ctx
+      (`Assoc ["name", `String name; "instructions", `String "committed"]) with
+    | Ok parsed -> parsed
+    | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path
+      ~base_path:ctx.config.base_path in
+  let published = ref false in
+  (match P.commit_configuration ~expected_revision:missing_config_revision
+      ~config:ctx.config ~parsed ~meta
+      ~publish:(fun outcome _revision ->
+        check bool "declaration is visible before actor publication" true
+          (Sys.file_exists outcome.path);
+        check bool "journal retired before actor publication" false
+          (Sys.file_exists journal_path);
+        published := true;
+        raise Interrupted_publication) () with
+   | exception Interrupted_publication -> ()
+   | exception exn -> fail (Printexc.to_string exn)
+   | Error error -> fail (P.error_to_string error)
+   | Ok _ -> fail "injected interruption did not propagate");
+  check bool "actor publication was reached" true !published;
+  let committed_revision = current_revision_exn ctx.config name in
+  check bool "interrupted publication preserves committed configuration" false
+    (committed_revision = missing_config_revision);
+  (match Keeper_config_journal.load ~journal_path with
+   | Ok None -> () | _ -> fail "restart would roll back committed actor configuration");
+  match P.commit_configuration ~expected_revision:committed_revision
+      ~config:ctx.config ~parsed ~meta ~publish:(fun _ revision -> revision) () with
+  | Ok {value; _} -> check bool "retry observes committed revision" true
+      (value = committed_revision)
+  | Error error -> fail (P.error_to_string error)
+;;
+
 let test_config_journal_recovery_corrupt_journal_flags_error () =
   with_persisting_context @@ fun ctx ->
   let base_path = ctx.config.Workspace.base_path in
@@ -2553,6 +2593,8 @@ let () =
             test_config_write_failures_compensate_once
         ; test_case "journal rejects foreign paths and preserves read errors" `Quick
             test_journal_rejects_foreign_paths_and_unreadable_files
+        ; test_case "actor publication follows durable configuration commit" `Quick
+            test_actor_publication_starts_after_config_commit
         ; test_case
             "journal recovery recovers interrupted dual-write"
             `Quick

@@ -2177,14 +2177,37 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           stale_parsed
           stale_meta
       in
-      check bool "profile failure is reported as unapplied" true
-        (Option.is_some
-           (Turn_up_update.config_publication_rollback_of_result
-              profile_failure_result));
-      check bool
-        "profile failure before resume leaves pause receipt, meta, manifest, runtime, and checkpoint unchanged"
-        true
-        (authority_snapshot () = before_profile_failure);
+      check bool "owner publication failure is not a created/running success" false
+        (Keeper_types_profile.tool_result_success profile_failure_result);
+      check bool "committed configuration is not reported as rolled back" true
+        (Option.is_none
+           (Turn_up_update.config_publication_rollback_of_result profile_failure_result));
+      let receipt = match Masc.Tool_result.metadata profile_failure_result with
+        | Some json -> Yojson.Safe.Util.member "keeper_config_write" json
+        | None -> fail "missing committed configuration receipt" in
+      check bool "receipt reports committed declaration" true
+        Yojson.Safe.Util.(receipt |> member "applied" |> to_bool);
+      let before_manifest, before_pause, before_runtime, before_checkpoint, before_meta =
+        before_profile_failure in
+      let after_manifest, after_pause, after_runtime, after_checkpoint, after_meta =
+        authority_snapshot () in
+      check bool "new declaration remains authoritative after owner failure" false
+        (before_manifest = after_manifest);
+      check bool "publication failure preserves actor-owned state and pause intent" true
+        ((before_pause, before_runtime, before_checkpoint, before_meta) =
+         (after_pause, after_runtime, after_checkpoint, after_meta));
+      let effective = match Keeper_meta_store.read_effective_meta config stale_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "retained owner disappeared"
+        | Error detail -> fail detail in
+      check string "turn readers project the committed declaration"
+        "stale operator intent" effective.instructions;
+      let published_revision =
+        match Turn_up_config_persistence.config_revision_of_yojson
+                (Yojson.Safe.Util.member "revision" receipt) with
+        | Ok revision -> revision | Error detail -> fail detail in
+      check bool "retry revision matches durable configuration" true
+        (published_revision = config_revision_exn config stale_name);
 
       let stopped_name = "explicit-up-resumes-operator-stop" in
       let stopped_meta =

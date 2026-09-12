@@ -567,7 +567,11 @@ let keeper_message_identity ~max_cells state keeper_name =
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
-           let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+           let runtime_id =
+             Keeper_chat_transcript.runtime_identity_text ~keeper_name
+               ~configured_runtime:row.kr_runtime_id
+               (Option.map (fun live -> live.tl_transcript) state.msg_live)
+           in
            let prefix =
              Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)

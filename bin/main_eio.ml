@@ -368,7 +368,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_quarantine =
+let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -378,7 +378,7 @@ let run_server ~sw ~env ~host ~port ~base_path ~input_base_path ~accept_store_qu
      the 10s force-exit timeout. *)
   try
     Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
-      ~input_base_path ~accept_store_quarantine ~make_routes
+      ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
@@ -589,23 +589,24 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
   Server_base_path_guard.exit_on_violation
     (Server_base_path_guard.enforce
        { resolved_base_path with normalized_base_path = canonical_base_path });
-  (* An explicit start is the operator naming this workspace, so it becomes the
-     default for later commands the same way `masc init` does. Only explicit
-     sources: re-recording what the record itself supplied is a no-op, and the
-     implicit default never reaches here. Off by default: a temporary server
-     workspace must not overwrite the machine's default (#35147). *)
-  if record_default then
+  let on_ready () =
+    if record_default then
     (match resolved_base_path.resolution_source with
      | Server_base_path_guard.Explicit_cli | Server_base_path_guard.Explicit_env ->
        (match Env_config.record_default_base_path canonical_base_path with
         | Env_config.Recorded _ -> ()
-        | Env_config.No_record_location
-        | Env_config.Refused_under_test
-        | Env_config.Record_failed _ ->
-          (* Not fatal, and not worth a line on every boot: the server is
-             starting on a path the operator just supplied. *)
-          ())
-     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ());
+        | Env_config.No_record_location ->
+          Log.Server.warn
+            "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; pass --base-path to later commands"
+        | Env_config.Refused_under_test ->
+          Log.Server.warn
+            "default workspace not recorded: a test executable does not write the operator's default"
+        | Env_config.Record_failed { record; reason } ->
+          Log.Server.warn
+            "default workspace not recorded: could not write %s (%s); pass --base-path to later commands"
+            record reason)
+     | Server_base_path_guard.Persisted_default | Server_base_path_guard.Implicit_default -> ())
+  in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
   let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let _base_path_lease =
@@ -839,6 +840,7 @@ let run_cmd ?(record_default = false) host port cli_base_path accept_store_quara
                 ~port
                 ~base_path:canonical_base_path
                 ~input_base_path:raw_base_path
+                ~on_ready
                 ~accept_store_quarantine)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)

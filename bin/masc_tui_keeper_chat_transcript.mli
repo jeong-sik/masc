@@ -267,7 +267,8 @@ val thinking_lines : t -> string list
     durable transcript does not keep, so the pane is the one place it can
     be read. *)
 val tool_calls : t -> tool_activity list
-(** In the order the stream opened them. *)
+(** In the order the stream opened them. Unresolved calls in a terminal or
+    superseded attempt are [Never_returned]; recorded results are preserved. *)
 val unreadable : t -> unreadable option
 
 (** One stretch of the turn, in arrival order. A tool-call round interleaves
@@ -305,6 +306,11 @@ val attempt : t -> int
 
 val current_runtime_id : t -> string option
 (** Current resolved-runtime identity, if observed. *)
+
+val runtime_identity_text :
+  keeper_name:string -> configured_runtime:string -> t option -> string
+(** Labels the configured runtime separately from the matching turn's observed
+    runtime. Another keeper's transcript cannot supply the turn identity. *)
 
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)

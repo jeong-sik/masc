@@ -182,6 +182,8 @@
   test_eio_context_fiber_local
   test_pool
   test_pool_dead_server_fd
+  test_pool_address_selection
+  test_pool_scope_failure
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -530,6 +532,8 @@
   test_eio_context_fiber_local
   test_pool
   test_pool_dead_server_fd
+  test_pool_address_selection
+  test_pool_scope_failure
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -3801,6 +3805,11 @@
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
  (libraries alcotest masc masc_tui_types))
+
+(test
+ (name test_tui_memory_header_states)
+ (modules test_tui_memory_header_states)
+ (libraries alcotest masc_tui_render_memory masc_tui_types))
 
 (test
  (name test_tui_esc_interrupt)

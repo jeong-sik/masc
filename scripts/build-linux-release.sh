@@ -40,6 +40,8 @@
 #   --keep             leave the build container running for inspection
 #   --run-contract-test  also run test/test_tool_contract_truth.exe in the
 #                      container (release.yml asks for this on one arch)
+#   --lifecycle-out DIR run the full lifecycle matrix in the builder and export
+#                      its source-bound bundle and logs for host verification
 #   --print-binaries   list the binaries this script produces, then exit
 #   --print-floor      print the glibc floor this script builds at, then exit
 #                      (release.yml re-checks the packaged assets at it, so the
@@ -86,9 +88,11 @@ image="ocaml/opam:ubuntu-22.04-ocaml-5.5"
 jobs=""
 keep=0
 run_contract_test=0
+lifecycle_out=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --lifecycle-out) lifecycle_out="${2:?--lifecycle-out needs a directory}"; shift 2 ;;
     --out) out_dir="${2:?--out needs a directory}"; shift 2 ;;
     --floor) floor="${2:?--floor needs a version}"; shift 2 ;;
     --image) image="${2:?--image needs an image}"; shift 2 ;;
@@ -325,6 +329,32 @@ for binary in "${release_binaries[@]}"; do
   docker cp "$container:/src/_build/default/$binary" "$out_dir/$name"
   chmod +x "$out_dir/$name"
 done
+
+# The checked release binaries have already been exported. Dune lifecycle
+# aliases may rebuild their dependencies in the dev profile; those bytes must
+# never replace the release-profile artifacts checked above.
+# The host deliberately has no OCaml toolchain. Run the unchanged lifecycle
+# matrix where its native dependencies live, then verify its exported logs
+# against the checked-out commit before the host installation smoke uses them.
+if [ -n "$lifecycle_out" ]; then
+  lifecycle_status=0
+  docker exec -e MASC_BUILD_COMMIT="$build_commit" \
+    -e MASC_BUILD_COMMIT_UNIX_TS="$build_commit_unix_ts" "$container" bash -lc '
+    set -e
+    cd /src
+    eval "$(opam env --switch=masc)"
+    python3 scripts/keeper-full-lifecycle-evidence.py \
+      --build-source-sha "$MASC_BUILD_COMMIT" --output-dir /tmp/masc-release-lifecycle
+  ' || lifecycle_status=$?
+  mkdir -p "$lifecycle_out"
+  docker cp "$container:/tmp/masc-release-lifecycle/." "$lifecycle_out/"
+  if [ "$lifecycle_status" -ne 0 ]; then
+    exit "$lifecycle_status"
+  fi
+  python3 "$repo_root/scripts/keeper-full-lifecycle-evidence.py" \
+    --verify --output-dir "$lifecycle_out"
+fi
+
 
 echo
 echo "built at glibc floor $floor for linux-$arch_label:"

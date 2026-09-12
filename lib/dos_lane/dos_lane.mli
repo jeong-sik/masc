@@ -80,6 +80,12 @@ type ran = {
   input_requests : int;
       (** empty-ring reads during this call. Zero with [settled] false is a
           program busy with something that is not input. *)
+  keys_pressed : int;
+      (** keys this call delivered. {!step} and {!load} press nothing, so it
+          is zero there. Below the number {!press} or {!type_text} was given,
+          it means the call reached its step ceiling: the rest were not
+          recorded and never reached the ring, so the caller sends them
+          again. *)
 }
 
 val settle_chunk : int

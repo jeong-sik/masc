@@ -7,7 +7,9 @@ in, then the machine runs until it is ready for input again or that key's \
 budget runs out, so ["down", "down", "return"] walks a menu in one call. \
 Keys: up down left right home end pgup pgdn insert delete enter return esc \
 space tab backtab backspace f1-f10, or one character. An unknown name is \
-refused before anything is pressed. Every key is recorded in the ledger."""
+refused before anything is pressed. Every key is recorded in the ledger. The \
+call stops at 4000000 instructions in total; keys_pressed says how many \
+landed, and the rest are unsent."""
 additional_properties = false
 
 defer_loading = true
@@ -18,6 +20,7 @@ type = "array"
 required = true
 items = { type = "string" }
 min_items = 1
+max_items = 64
 description = "Keys in order, e.g. [\"down\", \"return\"] or [\"y\"]."
 
 [[params]]

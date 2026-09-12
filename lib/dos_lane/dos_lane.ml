@@ -41,7 +41,21 @@ let boot_steps = 4_000_000
 
 let peek_max_bytes = 256
 
-type ran = { steps_run : int; settled : bool; input_requests : int }
+(* How many keys one call may name. The ceiling above bounds the machine's
+   time, but not a call's work: a program that has exited runs no
+   instructions, so without this a 100,000-character masc_dos_type would
+   still walk 100,000 keys and write 100,000 ledger lines. A DOS program asks
+   for a name, a number or a path. config/tools/masc_dos_press.toml and
+   masc_dos_type.toml declare the same two numbers to the caller. *)
+let max_keys_per_call = 64
+let max_text_length = 256
+
+type ran = {
+  steps_run : int;
+  settled : bool;
+  input_requests : int;
+  keys_pressed : int;
+}
 
 (* How far the machine runs between two screen readings. Measured on ZZT: the
    repaint that follows a key finishes inside one of these. *)
@@ -133,6 +147,7 @@ let advance_blind st ~budget =
   { steps_run = n
   ; settled = false
   ; input_requests = Dos_machine.input_requests st.m - before
+  ; keys_pressed = 0
   }
 ;;
 
@@ -170,6 +185,7 @@ let advance_until_ready st ~budget =
   { steps_run = !ran
   ; settled = !settled
   ; input_requests = Dos_machine.input_requests m - requests_before
+  ; keys_pressed = 0
   }
 ;;
 
@@ -244,24 +260,46 @@ let resolve_keys names =
   |> Result.map List.rev
 ;;
 
+(* A sequence spends one ceiling, not one per key. [budget] is what a single
+   key may take -- a menu that repaints slowly needs room -- but the call as a
+   whole stops at [max_steps_per_call], the same ceiling one masc_dos_step
+   runs under. Per-key budgets multiply: sixty-four keys at four million each
+   is a quarter of a billion instructions held under the machine's mutex,
+   with every other keeper queued behind it. A sequence that runs out comes
+   back with [keys_pressed] below what was asked, and the caller sends the
+   rest; the keys not pressed are not in the ledger and never reached the
+   ring. *)
 let press_resolved st ~who ~keys ~budget =
-  let total = ref 0 and requests = ref 0 in
+  let total = ref 0 and requests = ref 0 and pressed = ref 0 in
   let last_settled = ref false in
   List.iter
     (fun (name, word) ->
-      append_entry st { at_step = st.steps; who; key_name = name };
-      Dos_machine.push_key st.m word;
-      let ran = advance_until_ready st ~budget in
-      total := !total + ran.steps_run;
-      requests := !requests + ran.input_requests;
-      last_settled := ran.settled)
+      let left = max_steps_per_call - !total in
+      if left > 0 then begin
+        append_entry st { at_step = st.steps; who; key_name = name };
+        Dos_machine.push_key st.m word;
+        let ran = advance_until_ready st ~budget:(min budget left) in
+        total := !total + ran.steps_run;
+        requests := !requests + ran.input_requests;
+        last_settled := ran.settled;
+        incr pressed
+      end)
     keys;
-  { steps_run = !total; settled = !last_settled; input_requests = !requests }
+  { steps_run = !total
+  ; settled = !last_settled
+  ; input_requests = !requests
+  ; keys_pressed = !pressed
+  }
 ;;
 
 let press ~who ~keys ~steps =
   with_machine (fun st ->
     if keys = [] then Error (Invalid_request "keys must name at least one key")
+    else if List.length keys > max_keys_per_call then
+      Error
+        (Invalid_request
+           (Printf.sprintf "keys may name at most %d keys, got %d" max_keys_per_call
+              (List.length keys)))
     else
       match clamp_steps steps with
       | Error e -> Error e
@@ -278,6 +316,11 @@ let press ~who ~keys ~steps =
 let type_text ~who ~text ~steps =
   with_machine (fun st ->
     if String.length text = 0 then Error (Invalid_request "text must not be empty")
+    else if String.length text > max_text_length then
+      Error
+        (Invalid_request
+           (Printf.sprintf "text may be at most %d characters, got %d" max_text_length
+              (String.length text)))
     else
       match clamp_steps steps with
       | Error e -> Error e

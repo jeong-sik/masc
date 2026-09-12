@@ -42,6 +42,12 @@ let string_field name result =
   | _ -> fail (Printf.sprintf "no %s in %s" name (Tool_result.message result))
 ;;
 
+let int_field name result =
+  match member name (Tool_result.data result) with
+  | Some (`Int n) -> n
+  | _ -> fail (Printf.sprintf "no %s in %s" name (Tool_result.message result))
+;;
+
 let bool_field name result =
   match member name (Tool_result.data result) with
   | Some (`Bool b) -> b
@@ -69,6 +75,10 @@ let hello_com =
   "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
 ;;
 
+(* jmp $ -- a program that never asks the BIOS for a key, so a press runs its
+   whole budget instead of settling on the first chunk. *)
+let spinner_com = "\xeb\xfe"
+
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then begin
     mkdir_p (Filename.dirname dir);
@@ -76,14 +86,19 @@ let rec mkdir_p dir =
   end
 ;;
 
+let programs_dir ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
+  |> fun d -> Filename.concat d "programs"
+;;
+
+let write_file path contents =
+  Out_channel.with_open_bin path (fun oc -> output_string oc contents)
+;;
+
 let install_program ~base_path name contents =
-  let dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
-    |> fun d -> Filename.concat d "programs"
-  in
+  let dir = programs_dir ~base_path in
   mkdir_p dir;
-  Out_channel.with_open_bin (Filename.concat dir name) (fun oc ->
-    output_string oc contents)
+  write_file (Filename.concat dir name) contents
 ;;
 
 let load ~base_path name = dispatch ~base_path "masc_dos_load" [ ("program", `String name) ]
@@ -159,6 +174,67 @@ let test_only_inventory_names_resolve () =
         check bool "a host path is refused" false (is_completed by_path);
         let climbing = load ~base_path "../../etc/passwd" in
         check bool "and so is climbing out" false (is_completed climbing)))
+;;
+
+(* The name is checked for separators and dots, but a symbolic link carries a
+   path no name spells. Until the boundary moved onto the resolved path, an
+   entry linked at a host file was loaded into guest memory, where
+   masc_dos_peek hands it back out 256 bytes at a time. *)
+let test_a_link_out_of_the_inventory_is_refused () =
+  with_workspace (fun base_path ->
+    let outside = Filename.temp_file "masc-dos-secret-" ".com" in
+    write_file outside hello_com;
+    Fun.protect
+      ~finally:(fun () -> Sys.remove outside)
+      (fun () ->
+        let dir = programs_dir ~base_path in
+        mkdir_p dir;
+        Unix.symlink outside (Filename.concat dir "secret.com");
+        check bool "a linked host file is refused" false
+          (is_completed (load ~base_path "secret.com"));
+        (* The same link one level down, where the mount list reads it. *)
+        let game = Filename.concat dir "game" in
+        mkdir_p game;
+        write_file (Filename.concat game "game.com") hello_com;
+        Unix.symlink outside (Filename.concat game "data.dat");
+        check bool "and so is a linked file beside the executable" false
+          (is_completed (load ~base_path "game"))))
+;;
+
+(* The step budget is declared per key. Multiplied by a caller-controlled
+   number of keys it stopped bounding anything: sixty-four keys at four
+   million each is a quarter of a billion instructions run under the
+   machine's mutex, with every other keeper waiting. A sequence now spends
+   one ceiling and says how far it got. *)
+let test_a_sequence_spends_one_ceiling_not_one_per_key () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "spin.com" spinner_com;
+    boot ~base_path "spin.com";
+    let result =
+      dispatch ~base_path "masc_dos_press"
+        [ ("keys", `List [ `String "a"; `String "b" ]); ("steps", `Int 4_000_000) ]
+    in
+    check bool "the press is accepted" true (is_completed result);
+    check bool "the call stops at one budget, not two" true
+      (int_field "steps_run" result <= 4_000_000);
+    check int "and says how many keys landed" 1 (int_field "keys_pressed" result))
+;;
+
+(* The ceiling bounds the machine's time, not the call's work: a program that
+   has exited runs no instructions, so a sequence of any length would still
+   walk every key and write every ledger line. *)
+let test_a_sequence_has_a_length () =
+  with_workspace (fun base_path ->
+    install_program ~base_path "hello.com" hello_com;
+    boot ~base_path "hello.com";
+    check bool "65 keys is refused" false
+      (is_completed
+         (dispatch ~base_path "masc_dos_press"
+            [ ("keys", `List (List.init 65 (fun _ -> `String "a"))) ]));
+    check bool "and 257 characters is refused" false
+      (is_completed
+         (dispatch ~base_path "masc_dos_type"
+            [ ("text", `String (String.make 257 'a')) ])))
 ;;
 
 let test_unknown_key_is_refused () =
@@ -243,6 +319,9 @@ let () =
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
         ; test_case "inventory only" `Quick test_only_inventory_names_resolve
+        ; test_case "linked out" `Quick test_a_link_out_of_the_inventory_is_refused
+        ; test_case "one ceiling" `Quick test_a_sequence_spends_one_ceiling_not_one_per_key
+        ; test_case "sequence length" `Quick test_a_sequence_has_a_length
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

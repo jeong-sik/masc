@@ -181,8 +181,18 @@ open Alcotest
    cost about 11.5 KB of every Keeper turn, and a Keeper that never plays a
    game still carries them. Tool sets scoped to the lanes a Keeper has
    attached would give it back; that is a change to how tools are attached,
-   not to this file. *)
-let ceiling_bytes = 113_822
+   not to this file. RFC-0451 proposes it. *)
+
+(* 2026-09-13: 114,500. The same PR, answering review: masc_dos_press and
+   masc_dos_type now declare max_items = 64 and max_length = 256, and their
+   results carry keys_pressed. Together that is 248 bytes, and 113,822 was
+   set to the measured figure with no room, so the ceiling moves with it.
+   What it bought: one call's work is bounded. The step budget is per key, so
+   a thousand-character type call could run a billion instructions holding
+   the machine's mutex; the caps and the ceiling inside Dos_lane.press_resolved
+   bound it, and keys_pressed is how the caller learns the sequence stopped
+   early. 430 bytes of headroom over the measured result. *)
+let ceiling_bytes = 114_500
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

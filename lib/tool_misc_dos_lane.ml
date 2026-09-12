@@ -40,6 +40,7 @@ let ran_fields (r : Dos_lane.ran) =
   [ ("steps_run", `Int r.Dos_lane.steps_run)
   ; ("settled", `Bool r.Dos_lane.settled)
   ; ("input_requests", `Int r.Dos_lane.input_requests)
+  ; ("keys_pressed", `Int r.Dos_lane.keys_pressed)
   ]
 ;;
 
@@ -92,7 +93,8 @@ let is_program_name name =
 (* Inside a directory the executable is the one named after the directory, or
    the only .exe/.com there. Two candidates and no name match is a question
    for the caller, not a guess: DOS game directories carry installers and
-   setup programs beside the game. *)
+   setup programs beside the game. Returns the executable and the rest of the
+   directory beside it, so its caller reads each file exactly once. *)
 let executable_in dir =
   let files =
     List.filter (fun f -> not (Sys.is_directory (Filename.concat dir f))) (entries_of dir)
@@ -103,7 +105,8 @@ let executable_in dir =
     List.filter (fun f -> String.equal (String.lowercase_ascii (Filename.remove_extension f)) stem) programs
   in
   match (named, programs) with
-  | [ one ], _ | [], [ one ] -> Ok (one, files)
+  | [ one ], _ | [], [ one ] ->
+    Ok (one, List.filter (fun f -> not (String.equal f one)) files)
   | [], [] -> Error (Printf.sprintf "%s holds no .exe or .com" (Filename.basename dir))
   | _, many ->
     Error
@@ -127,37 +130,82 @@ let escapes name =
   || String.starts_with ~prefix:"." name
 ;;
 
+(* Spelling the name safely is not the whole boundary. Sys.file_exists and
+   open both follow symbolic links, so an entry linked at a file outside
+   programs/ would be read into guest memory and handed back out 256 bytes at
+   a time by masc_dos_peek. The check is therefore on the resolved path, not
+   on the spelling: everything this lane opens has to really live under
+   programs/. A link inside the inventory still works; one that leaves it is
+   refused. *)
+let within ~root path =
+  match (Unix.realpath root, Unix.realpath path) with
+  | exception Unix.Unix_error _ -> None
+  | root_real, real ->
+    if String.equal real root_real
+       || String.starts_with ~prefix:(root_real ^ Filename.dir_sep) real
+    then Some real
+    else None
+;;
+
+let left_inventory ~root shown =
+  Printf.sprintf "%s leaves the inventory: this lane reads only what lives under %s"
+    shown root
+;;
+
 let resolve_program ~base_path name =
+  let root = programs_dir ~base_path in
   let trimmed = String.trim name in
   if trimmed = "" then Error "name a program"
   else if escapes trimmed then
     Error
       (Printf.sprintf "%S is not a name in the inventory: no paths, and no dots"
          trimmed)
-  else begin
-    let candidate = Filename.concat (programs_dir ~base_path) trimmed in
-    match (if Sys.file_exists candidate then Some candidate else None) with
-    | None ->
-      Error
-        (Printf.sprintf "no program named %S: put it under %s" trimmed
-           (programs_dir ~base_path))
+  else if not (Sys.file_exists (Filename.concat root trimmed)) then
+    Error (Printf.sprintf "no program named %S: put it under %s" trimmed root)
+  else
+    match within ~root (Filename.concat root trimmed) with
+    | None -> Error (left_inventory ~root (Printf.sprintf "%S" trimmed))
     | Some path ->
       if Sys.is_directory path then
-        Result.map
-          (fun (exe, files) ->
-            ( exe
-            , read_file (Filename.concat path exe)
-            , List.map (fun f -> (f, read_file (Filename.concat path f))) files ))
-          (executable_in path)
+        (* Each mounted file is read once, here. Reading the executable again
+           while building the mount list would let a replacement landing
+           between the two reads give the guest one image to run and a
+           different one to open. *)
+        let read_one f =
+          match within ~root (Filename.concat path f) with
+          | Some real -> Ok (f, read_file real)
+          | None -> Error (left_inventory ~root (trimmed ^ "/" ^ f))
+        in
+        let rec gather acc = function
+          | [] -> Ok (List.rev acc)
+          | f :: rest ->
+            (match read_one f with
+             | Error e -> Error e
+             | Ok pair -> gather (pair :: acc) rest)
+        in
+        (match executable_in path with
+         | Error e -> Error e
+         | Ok (exe, others) ->
+           (match read_one exe with
+            | Error e -> Error e
+            | Ok (_, exe_bytes) ->
+              Result.map
+                (fun mounted ->
+                  (* entries_of sorts, so the mount list keeps the order the
+                     inventory is listed in. *)
+                  ( exe
+                  , exe_bytes
+                  , List.sort
+                      (fun (a, _) (b, _) -> String.compare a b)
+                      ((exe, exe_bytes) :: mounted) ))
+                (gather [] others)))
       else begin
         (* One file boots alone, and is mounted under its own name too — a
            program that opens itself (overlays, self-reading installers)
            finds it. *)
         let bytes = read_file path in
-        let base = Filename.basename path in
-        Ok (base, bytes, [ (base, bytes) ])
+        Ok (trimmed, bytes, [ (trimmed, bytes) ])
       end
-  end
 ;;
 
 (* The board hears what happens on the shared machine, the way the MSX lane

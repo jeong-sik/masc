@@ -17,16 +17,15 @@ let keeper_lane_idle_text seconds =
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each
-   fact is written in one place. It used to repeat "N facts" from the title and
-   the title used to repeat the sort from here -- and the title is the one that
-   runs out of room: at 140 columns it was cut mid-timestamp.
+   fact is written in one place. The split runs in this direction because the
+   title is the line with no room to spare: at 140 columns the Activity pane
+   takes 56 of the 136 inner cells, leaving the title 80 for the screen name,
+   the keeper, the total, both filters, the clock and the badge.
 
    [grand_total] is not passed in because it is not drawn here. *)
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
-   for, not how it should be read: the body used to spell it out in a row of its
-   own -- [GLOBAL FLEET KNOWLEDGE BASE - ALL KEEPERS CONSOLIDATED] -- which said
-   nothing this word does not and cost a body row the compact terminals did not
-   have. *)
+   for, not how it should be read, so the title reads it as a phrase. The title
+   is drawn at every terminal size; a body row is not. *)
 let facts_keeper_label = function
   | Some "*" -> "all keepers"
   | Some name -> name
@@ -44,8 +43,9 @@ type facts_reading =
 
 (* The facts title. Here beside the row under it so the two cannot disagree
    about which fact each one carries: the title says the total and the filters,
-   the row says the breakdown and the sort. Spelled in both places the title ran
-   past the column and took the clock and the connection badge with it.
+   the row says the breakdown and the sort. The title is the narrow line and the
+   clock and the connection badge sit at its end, so a fact spelled here and
+   there goes off the right edge.
 
    [screen] and [badge] arrive rendered because colour and the connection
    reading belong to the caller. *)
@@ -527,14 +527,10 @@ let render_memory_facts_body ~cols ~budget (state : state)
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
   let sort_label = memory_sort_order_label state.memory_facts_sort in
   (* The parts of the total the title draws, counted from the rows this screen
-     is about to list. Counting the store instead left a filtered title saying
-     "2 facts" above a breakdown that summed to 285. The store's own totals are
-     the category pills' job, and the All pill carries the grand total.
-
-     The fleet view used to open with a row shouting that it was the fleet view,
-     which the title already says. In a seven-row terminal that row was the only
-     body row the budget had, so the sort -- the one fact nothing else on screen
-     carries -- never got drawn. *)
+     is about to list, so the title's total and this breakdown count the same
+     set. Counting the store instead gives a filtered title saying "2 facts"
+     above a breakdown that sums to 285. The store's own totals are the category
+     pills' job, and the All pill carries the grand total. *)
   let ordinary_count, source_count, dropped_count =
     List.fold_left
       (fun (ordinary, source, dropped) row ->

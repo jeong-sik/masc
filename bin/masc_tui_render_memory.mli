@@ -37,9 +37,9 @@ val facts_title :
   badge:string ->
   string
 (** The facts title row. It carries the total and the filters; the breakdown and
-    the sort belong to the row under it, which this module also draws. Spelled in
-    both places the title ran past the column and took the clock and the
-    connection badge with it. *)
+    the sort belong to the row under it, which this module also draws. The title
+    is the narrow line and the clock and the connection badge sit at its end, so
+    a fact spelled here and there goes off the right edge. *)
 
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string

@@ -392,10 +392,9 @@ let test_rows_and_header_share_one_grid () =
 
 (* The row under the facts title. Each fact on this screen is written in one
    place: the title carries the total and the filters, this row carries the
-   breakdown and the sort. Both used to carry the total and both used to carry
-   the sort, and the title is the row that runs out of width first -- at 140
-   columns against a live server it was cut mid-timestamp, taking the clock and
-   the connection badge with it. *)
+   breakdown and the sort. The title is the row that runs out of width first --
+   at 140 columns against a live server it has 80 cells, and the clock and the
+   connection badge sit at its end. *)
 let facts_body_lines ?(cols = 120) ?(budget = 30) state =
   let lines = ref [] in
   let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
@@ -556,13 +555,13 @@ let test_the_breakdown_counts_the_rows_the_screen_lists () =
   check int "which is the number the title counts" 1
     (List.length (Types.memory_fact_rows state))
 
-let test_the_fleet_view_does_not_shout_before_the_sort () =
-  (* The fleet view is named in the title. A row saying so again was the only
-     body row a seven-row terminal had, and the sort fell off the screen. *)
+let test_the_narrowest_body_spends_its_row_on_the_sort () =
+  (* One body row, and the sort is the one fact nothing else on screen carries:
+     not the title, not the category pills. So the first body row is the row
+     under the title, whatever else the fleet view could say about itself. *)
   let state = three_kinds_state ~keeper:"*" () in
   state.memory_facts_keeper <- Some "*";
   let lines = facts_body_lines ~budget:1 state in
-  check bool "no banner row" false (List.exists (contains "FLEET") lines);
   check string "the first body row is the one carrying the sort"
     (stats_row lines) (List.hd lines)
 
@@ -757,8 +756,8 @@ let () =
             test_the_breakdown_and_the_sort_sit_on_one_row
         ; test_case "the breakdown counts the rows the screen lists" `Quick
             test_the_breakdown_counts_the_rows_the_screen_lists
-        ; test_case "the fleet view does not shout before the sort" `Quick
-            test_the_fleet_view_does_not_shout_before_the_sort
+        ; test_case "the narrowest body spends its row on the sort" `Quick
+            test_the_narrowest_body_spends_its_row_on_the_sort
         ] )
     ]
 ;;

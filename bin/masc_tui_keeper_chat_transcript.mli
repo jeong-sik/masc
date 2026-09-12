@@ -267,7 +267,8 @@ val thinking_lines : t -> string list
     durable transcript does not keep, so the pane is the one place it can
     be read. *)
 val tool_calls : t -> tool_activity list
-(** In the order the stream opened them. *)
+(** In the order the stream opened them. Unresolved calls in a terminal or
+    superseded attempt are [Never_returned]; recorded results are preserved. *)
 val unreadable : t -> unreadable option
 
 (** One stretch of the turn, in arrival order. A tool-call round interleaves

@@ -319,19 +319,28 @@ let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
   ; duration
   }
 
-let activity_of_live_call (call : live_tool_call) =
+let activity_of_live_call (t : t) (call : live_tool_call) =
+  (* An ended attempt cannot still be waiting. Keep recorded results ahead
+     of this projection so late result evidence can complete its own call. *)
+  let attempt_ended =
+    call.attempt <> t.attempt
+    || (match t.phase with
+        | Waiting | Working -> false
+        | Stream_ended | Stream_failed _ -> true)
+  in
   make_tool_activity ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
       (if call.failed then Failed
        else if call.result_ready then Returned
+       else if attempt_ended then Never_returned
        else if call.ended then Awaiting_result
        else Started)
     ~duration:call.duration ()
 
 let tool_calls t =
-  List.rev t.reversed_tool_calls |> List.map activity_of_live_call
+  List.rev t.reversed_tool_calls |> List.map (activity_of_live_call t)
 
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
@@ -438,9 +447,11 @@ let compact_outcome (activities : tool_activity list) =
   else if
     List.exists
       (fun activity ->
-        activity.outcome = Started || activity.outcome = Never_returned)
+        activity.outcome = Started)
       activities
   then Started
+  else if List.exists (fun activity -> activity.outcome = Never_returned) activities
+  then Never_returned
   else if
     List.exists
       (fun activity -> activity.outcome = Outcome_unrecorded)
@@ -673,10 +684,10 @@ let skill_activity_of_tool (activity : tool_activity) =
   | Skill_activity ->
       let state =
         match activity.outcome with
-        | Started | Awaiting_result | Never_returned -> Skill_calling
+        | Started | Awaiting_result -> Skill_calling
         | Returned -> Skill_served_pending
         | Failed -> Skill_failed
-        | Outcome_unrecorded -> Skill_evidence_missing
+        | Never_returned | Outcome_unrecorded -> Skill_evidence_missing
       in
       let skill_name =
         Option.value activity.subject
@@ -967,7 +978,7 @@ let trail t =
               let acc = flush_generic acc generic in
               split (Trail_skill skill :: acc) [] rest)
     in
-    group |> List.rev |> List.map activity_of_live_call |> split acc []
+    group |> List.rev |> List.map (activity_of_live_call t) |> split acc []
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)
@@ -1071,7 +1082,7 @@ let phase_text ~now t =
             (match List.filter
                (fun (call : live_tool_call) ->
                  Option.exists (String.equal awaiting.call_id) call.call_id
-                 && (match (activity_of_live_call call).outcome with
+                 && (match (activity_of_live_call t call).outcome with
                      | Started | Awaiting_result -> true
                      | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
                current_calls with
@@ -1081,7 +1092,7 @@ let phase_text ~now t =
       let activities_now =
         current_calls
         |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> awaiting_call)
-        |> List.map activity_of_live_call
+        |> List.map (activity_of_live_call t)
       in
       let describe_pending label outcome =
         match List.filter (fun activity -> activity.outcome = outcome) activities_now with
@@ -1108,7 +1119,7 @@ let phase_text ~now t =
         match List.filter
           (fun (call : live_tool_call) ->
             Some call.local_id <> awaiting_call
-            && (match (activity_of_live_call call).outcome with
+            && (match (activity_of_live_call t call).outcome with
                 | Started | Awaiting_result -> true
                 | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
           current_calls

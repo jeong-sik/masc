@@ -1,6 +1,6 @@
 type distribution = Debian | Ubuntu | Other
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
-  | Whisper_cli
+  | Pdf_tools | Whisper_cli
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -121,6 +121,23 @@ let catalog ?model_dir ~host ~distribution dependency =
         ~detail:"Follow the vendor instructions, then return to sign in and verify the selected model."
         ~source_url:(Runtime_official_cli_install.source_url Antigravity)
         (Runtime_official_cli_install.source_url Antigravity)]
+  | Pdf_tools, Macos _ ->
+    [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
+       ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."
+       ~source_url:"https://formulae.brew.sh/formula/poppler" ~requires_admin:false
+       [["brew";"install";"poppler"]]]
+  | Pdf_tools, Linux _ ->
+    (match distribution with
+     | Debian | Ubuntu ->
+       let source_url = match distribution with
+         | Debian -> "https://packages.debian.org/stable/poppler-utils"
+         | Ubuntu -> "https://packages.ubuntu.com/noble/poppler-utils"
+         | Other -> "https://poppler.freedesktop.org/" in
+       [commands ~id:"poppler_install" ~label:"Install PDF inspection tools from distribution repositories"
+          ~detail:"Use sudo to refresh signed package indexes and install poppler-utils. Both PDF commands are checked after installation."
+          ~source_url ~requires_admin:true
+          [["sudo";"apt-get";"update"];["sudo";"apt-get";"install";"-y";"poppler-utils"]]]
+     | Other -> [])
   | Sandbox Sandbox_readiness.Apple_container, Macos {architecture=Arm64; major} when major >= 26 ->
     [open_ ~id:"apple_container_official_install" ~label:"Open Apple Container signed installer"
        ~detail:"Choose the signed installer package on Apple's release page and complete the macOS installer. Opening this page does not install or verify the package."

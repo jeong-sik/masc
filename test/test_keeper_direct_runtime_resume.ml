@@ -22,11 +22,15 @@ let test_http_effect_checkpoint_owner_restart_alternate ?(interleave = false) ?(
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   ignore (Server_startup_state.mark_state_ready ());
+  (* Each case declares a fresh primary->alternate scenario. A previous
+     case's successful alternate remains sticky outside Runtime's snapshot. *)
+  Runtime_lane_preference.reset_for_testing ();
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let catalog_snapshot = Llm_provider.Model_catalog.global () in
   let base_path = Filename.temp_file "direct-runtime-resume-" "" in
   Unix.unlink base_path; Unix.mkdir base_path 0o700;
   Eio.Switch.on_release sw (fun () ->
+    Runtime_lane_preference.reset_for_testing ();
     Runtime.For_testing.restore runtime_snapshot;
     (match catalog_snapshot with None -> Llm_provider.Model_catalog.clear_global ()
      | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
@@ -112,6 +116,7 @@ is-default = true
   let seen_operations = ref [] in
   let peer_id = Keeper_chat_operation.Operation_id.of_string "kmsg-peer-after-retry" |> require "peer ID" in
   let terminal_failure = ref None in
+  let expected_terminal_failure = ref None in
   let run_phase ~resume =
     Eio.Switch.run @@ fun owner_sw ->
     let settled, resolve_settled = Eio.Promise.create () in
@@ -137,11 +142,17 @@ is-default = true
         terminal_failure := Some detail;
         Registry.submit_operation ~base_path ~keeper_name ~operation_id:peer_id ~source ~input
           |> require "peer admission while original is claimed" |> ignore;
-        Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
+        let execution = Server_routes_http_keeper_stream.For_testing.operation_execution_of_outcome
           ~operation_state ~pending_continuation:(fun () -> Keeper_direct_gate_continuation.pending
             ~base_path ~keeper_name ~operation_id)
           ~outcome:(Some (Server_routes_http_keeper_stream.Failed {kind=Turn_failed; detail}))
-          ~delivery:(Error detail)
+          ~delivery:(Error detail) in
+        (match execution with
+         | Owner.Operation_failed _ -> ()
+         | Owner.Operation_deferred | Owner.Operation_succeeded _ ->
+           fail "missing retained authority did not become a terminal failure");
+        expected_terminal_failure := Some execution;
+        execution
       | Error detail -> fail detail
       | Ok admission ->
       check bool "restart restores typed pending continuation" resume (Option.is_some admission);
@@ -192,17 +203,21 @@ is-default = true
     in
     let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> !ready); execute;
       on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~execution ->
-        (match execution with
-         | Owner.Operation_failed {detail; _} when not lose_retained -> fail detail
-         | Owner.Operation_failed _ | Owner.Operation_deferred | Owner.Operation_succeeded _ -> ());
-        if not (resume && lose_retained) ||
-           Option.exists (Keeper_chat_operation.Operation_id.equal peer_id) claimed_operation_id
-        then Eio.Promise.resolve resolve_settled ())} in
+        (* The Owner catches hook exceptions. Resolve failures back to the
+           test fiber instead of abandoning its completion promise. *)
+        match execution with
+        | Owner.Operation_failed {detail; _}
+          when Some execution <> !expected_terminal_failure ->
+          Eio.Promise.resolve resolve_settled (Error detail)
+        | Owner.Operation_failed _ | Owner.Operation_deferred | Owner.Operation_succeeded _ ->
+          if not (resume && lose_retained) ||
+             Option.exists (Keeper_chat_operation.Operation_id.equal peer_id) claimed_operation_id
+          then Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
-    Eio.Promise.await settled;
+    (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
     if resume && lose_retained then (
       let fresh = Keeper_chat_operation.Operation_id.of_string "kmsg-new-admission-after-recovery"
         |> require "new admission ID" in

@@ -25,7 +25,7 @@ type error =
 
 let error_to_string = function
   | Dependency_unavailable programs ->
-    "pdf_dependency_unavailable: install Poppler (poppler-utils on Debian/Ubuntu, poppler on macOS); missing "
+    "pdf_dependency_unavailable: open PDF tools in masc setup, or run masc prerequisite-actions pdf-tools; missing "
     ^ String.concat ", " programs
   | Command_failed {program;status;detail} ->
     let status = match status with
@@ -113,8 +113,7 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
   let* () = if String.length bytes > max_source_bytes then
     Error (Payload_budget_exceeded { bytes = String.length bytes; limit = max_source_bytes })
     else Ok () in
-  let missing = List.filter (fun command -> not (Executable_path.command_available command))
-      ["pdftotext"; "pdftoppm"] in
+  let missing = Pdf_runtime_dependencies.missing () in
   if missing <> [] then Error (Dependency_unavailable missing)
   else
     Eio.Switch.run @@ fun sw ->

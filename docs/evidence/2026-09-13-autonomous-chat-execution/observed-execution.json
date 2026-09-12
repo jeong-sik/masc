@@ -1,0 +1,47 @@
+{
+  "execution_id": "exec-1789223431021-0129",
+  "keeper": "exhibit-editor",
+  "tool": "Edit",
+  "tool_use_id": "call_d491c2b69f294f52b940bb6e",
+  "trace_id": "trace-1789042595401-00001",
+  "session_id": "trace-1789042595401-00001",
+  "keeper_turn_id": 428,
+  "turn": 848,
+  "turn_kind": "autonomous",
+  "planned_index": 1,
+  "artifact_refs": [
+    {
+      "_blob": {
+        "sha256": "18e044a0f658da739b69c84a8a7993e9579a13c0ff4becab69071353be14659a",
+        "bytes": 12641,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    },
+    {
+      "_blob": {
+        "sha256": "5237a2dd6de137936ab964ace1c4057a8f9a78f77fb2d5f99e1d7a269c52cbcf",
+        "bytes": 12602,
+        "mime": "application/octet-stream",
+        "preview": ""
+      }
+    }
+  ],
+  "file_change_evidence": {
+    "kind": "edit",
+    "occurrence_count": 1,
+    "occurrences": [
+      {
+        "old_range": {
+          "start_line": 64,
+          "end_line": 64
+        },
+        "new_range": {
+          "start_line": 64,
+          "end_line": 64
+        }
+      }
+    ]
+  },
+  "success": true
+}

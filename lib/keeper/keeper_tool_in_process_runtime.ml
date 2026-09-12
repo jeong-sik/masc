@@ -472,8 +472,8 @@ let handle_browser_tabs_with_outcome ~args =
 
 let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let result =
-    Tool_misc_browser_lane.handle_read ~keeper_name:meta.name
-      ~tool_name:"masc_browser_read" ~start_time:0.0 args
+    Tool_misc_browser_lane.handle_read_with_retention ~base_path:config.base_path
+      ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:0.0 args
   in
   (* Downloads carry normalized references to durable files. The result's
      manifest must be persisted by this producer before provider projection,

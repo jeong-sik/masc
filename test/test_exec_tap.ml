@@ -115,6 +115,51 @@ let test_argv_redaction () =
   must_contain ~tag:"redacted url" line "://[REDACTED]@api.example.com/v1";
   must_contain ~tag:"redacted sk" line "[REDACTED]"
 
+(* The three shapes above are the ones redact_arg was taught. A key shaped
+   like none of them reached the corpus as written -- an ElevenLabs key in
+   [-H "xi-api-key: ..."] does not start with sk- and is not a Bearer. What
+   makes it a credential is where it sits, not what it looks like. *)
+let test_header_values_are_redacted_by_position () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:
+      [ "curl"
+      ; "-H"
+      ; "xi-api-key: 9f3c1d2e4b5a6789"
+      ; "--header"
+      ; "X-Goog-Api-Key: AIzaPlainLookingValue"
+      ; "-H"
+      ; "Content-Type: application/json"
+      ; "https://api.example.com/v1/voices"
+      ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_not_contain ~tag:"elevenlabs key" line "9f3c1d2e4b5a6789";
+  must_not_contain ~tag:"google key" line "AIzaPlainLookingValue";
+  must_contain ~tag:"the header is still named" line "xi-api-key: [REDACTED]";
+  must_contain ~tag:"and so is the other one" line "X-Goog-Api-Key: [REDACTED]";
+  (* A header that carries no credential stays readable: the corpus exists to
+     be read, and hiding a content type helps nobody. *)
+  must_contain ~tag:"content type survives" line "Content-Type: application/json";
+  must_contain ~tag:"the url survives" line "api.example.com/v1/voices"
+
+(* A header argument that is not [name: value] has no name to judge, so it
+   falls back to the shape rules rather than being blanked. *)
+let test_a_header_argument_without_a_name_falls_back_to_shapes () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:[ "curl"; "-H"; "sk-proj-loose-token" ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_not_contain ~tag:"loose sk token" line "sk-proj-loose-token";
+  must_contain ~tag:"still redacted" line "[REDACTED]"
+
 let () =
   test_off_is_noop ();
   test_on_emits_one_line ();
@@ -123,4 +168,6 @@ let () =
   test_writer_exception_is_swallowed ();
   test_multiple_calls_each_line ();
   test_argv_redaction ();
+  test_header_values_are_redacted_by_position ();
+  test_a_header_argument_without_a_name_falls_back_to_shapes ();
   print_endline "[test_exec_tap] all tests passed"

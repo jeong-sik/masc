@@ -5,6 +5,9 @@ contributions = ["derive"]
 image = "masc-lane-output-statistics:0.1.0"
 command = ["python3", "server.py"]
 
+[world.outputs.statistics]
+all_lanes = true
+
 [resources]
 cpus = 0.5
 memory_bytes = 134217728

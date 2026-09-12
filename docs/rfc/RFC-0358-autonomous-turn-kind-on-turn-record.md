@@ -43,7 +43,12 @@ text = ""`를 강제해 caller 실수로도 reasoning text가 이 경계를 넘�
 
 Public `/chat/history`에는 final text, timestamp, `turn_ref`와 exact run의
 content-free activity trace만 투영한다. Activity trace는 thinking 단계의 존재와
-timestamp, tool name/status/duration만 포함한다. Raw thinking, assistant blocks,
+timestamp, tool name/status/duration 및 검증된 canonical `execution_id`를 포함한다.
+`execution_id`는 TurnRecord가 선언한 실행 ID 중 해당 Keeper·session·turn과 exact raw
+start sequence의 invocation turn/planned_index가 일치하는 원장 행으로만 연결한다.
+같은 provider ID를 재사용해도 호출 위치가 다르면 서로 다른 실행이며, 누락·중복·충돌은
+실행 ID를 투영하지 않는다. Dashboard는 이 ID로 기존 원본 파일·편집 증거를 조회한다.
+Raw thinking, assistant blocks,
 tool call id, tool arguments, tool results는 이 surface에 존재하지 않는다.
 
 Raw trace path는 해당 keeper의 `raw-traces` directory에 있는 regular JSONL
@@ -78,7 +83,8 @@ projection이며 keeper prompt 입력이 아니다.
 - 직접 사용자가 wake marker와 같은 text를 보내도 `Direct` record는 제외한다.
 - 한 trace file에 여러 provider run이 있어도 record가 지목한 run만 투영한다.
 - Public autonomous row의 activity trace에는 raw thinking, tool call id,
-  arguments, result가 없다.
+  arguments, result가 없다. Canonical execution ID는 원장의 정확한 호출과 결합할 때만
+  포함하며, 중복 provider ID·서로 다른 호출 순번·외부 Keeper/turn의 행이 섞이지 않는다.
 - Raw row와 run ref의 agent_core runtime/session identity mismatch 및 keeper trace
   directory 밖 path를 거부한다.
 - Autonomous row volume은 200개의 direct conversation slot을 소비하지 않는다.

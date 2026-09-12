@@ -113,6 +113,7 @@ let one_dynamic_tool
   let terminal_error = ref None in
   let projected =
     Host.dynamic_tools
+        ~content_transport:Runtime_official_client_tool.Codex
       ~tool_approval
       ~runtime_label
       ~keeper_name:"keeper-raw-authority"
@@ -682,6 +683,36 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
     | Some (Repeated_tool_call _)
     | None ->
       fail "post-effect terminal failure did not close the official-client loop")
+;;
+
+let test_terminal_media_delivery_failure_keeps_applied_effect () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
+    let handoff = ref None in
+    let tool, _terminal_error = one_dynamic_tool
+      ~descriptor:(Agent_core.Tool.terminal_descriptor Agent_core.Tool_contract.Effect_outcome_unknown)
+      ~terminal_effect_state:(fun () -> !state)
+      ~on_result_handoff:(fun ~invocation:_ ~content -> handoff := Some content)
+      ~active (fun _ ->
+        state := Masc.Keeper_tools_agent_core.Terminal_effect_completed
+          (Masc.Keeper_tool_execution.Surface_post_completed
+            (Masc.Keeper_surface_post.To_discord {channel_id="fixture-destination"}));
+        Ok { Agent_core.Types.content="already-applied receipt"
+           ; content_blocks=Some [Agent_core.Types.Document
+               {media_type="application/pdf";data="Zml4dHVyZQ==";source_type=Base64}]
+           ; _meta=None }) in
+    let result = tool.call ~call_id:"terminal-media" (`Assoc []) in
+    check bool "failed delivery is settled as failure" false result.success;
+    check (option string) "handoff retains delivery error and original receipt"
+      (Some "official-client tool result cannot deliver document content\nalready-applied receipt") !handoff;
+    match result.abort_turn with
+    | Some (Terminal_tool_boundary
+        {outcome=Terminal_failed {effect_disposition=Tool_result.Proven_post_effect; _}; _} as stop) ->
+      (match Host.host_stop_result ~runtime_id:"official-fixture" ~model:"fixture"
+        ~session_id:"session-media" ~turn_id:"turn-media" ~turns_used:1
+        ~latency_ms:None ~usage:None stop with
+       | Error _ -> () | Ok _ -> fail "failed media delivery completed the runtime")
+    | _ -> fail "completed producer effect hid failed media delivery")
 ;;
 
 let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
@@ -1989,6 +2020,8 @@ let () =
             "terminal post-effect failure aborts official-client turn"
             `Quick
             test_terminal_post_effect_failure_aborts_the_official_client_turn
+        ; test_case "terminal media delivery failure retains applied effect" `Quick
+            test_terminal_media_delivery_failure_keeps_applied_effect
         ; test_case
             "ordinary post-effect failure aborts official-client turn"
             `Quick

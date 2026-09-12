@@ -30,6 +30,11 @@ let error_to_string = function
 let ( let* ) = Result.bind
 let container_id t = t.id
 let container_name t = t.name
+let owned_name instance_id =
+  "masc-lane-" ^ Digestif.SHA256.(to_hex (digest_string instance_id))
+let valid_container_id id =
+  String.length id = 64 && String.for_all (function
+    | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id
 
 exception Control_reply_too_large
 
@@ -146,7 +151,7 @@ let find_named_container ~run name =
   if String.trim raw = "" then Ok None
   else
     try match Yojson.Safe.from_string raw with
-      | `String id when String.length id = 64 -> Ok (Some id)
+      | `String id when valid_container_id id -> Ok (Some id)
       | _ -> Error (Docker_failed { operation = "resolve owned container";
           detail = "unexpected container identity" })
     with Yojson.Json_error detail ->
@@ -161,39 +166,53 @@ let remove_container ~run id =
   | Error verify_error ->
       (match removal with Error error -> Error error | Ok _ -> Error verify_error)
 
-let recover_stop ~mgr ~instance_id ~container_id:id ~max_reply_bytes
+let inspect_owned_container ~run ~instance_id ~name id =
+  let* raw = run ~operation:"recover inspect" [ "container"; "inspect"; id ] in
+  let refusal () = Error (Docker_failed { operation = "recover ownership";
+    detail = "container identity and masc.lane.instance label must match the persisted binding" }) in
+  try match Yojson.Safe.from_string raw with
+    | `List [ `Assoc fields ] ->
+        let name_matches = match name with
+          | None -> true
+          | Some expected -> List.assoc_opt "Name" fields = Some (`String ("/" ^ expected)) in
+        (match List.assoc_opt "Id" fields, List.assoc_opt "Config" fields with
+         | Some (`String actual_id), Some (`Assoc config)
+           when String.equal id actual_id && name_matches ->
+             (match List.assoc_opt "Labels" config with
+              | Some (`Assoc labels) ->
+                  (match List.assoc_opt "masc.lane.instance" labels with
+                   | Some (`String owner) when String.equal owner instance_id -> Ok ()
+                   | _ -> refusal ())
+              | _ -> refusal ())
+         | _ -> refusal ())
+    | _ -> refusal ()
+  with Yojson.Json_error detail ->
+    Error (Docker_failed { operation = "recover ownership"; detail })
+
+let recover_stop ~mgr ~instance_id ~container_id ~max_reply_bytes
     ?(docker_command = "docker") () =
   if max_reply_bytes <= 0 then Error (Invalid_package "max_reply_bytes must be positive")
-  else if String.length id <> 64 || not (String.for_all (function
-      | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id) then
+  else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
+  else if Option.exists (fun id -> not (valid_container_id id)) container_id then
     Error (Docker_failed { operation = "recover ownership"; detail = "invalid container ID" })
   else
     let run = run_control ~mgr ~docker_command ~max_bytes:max_reply_bytes in
-    let* visible = run ~operation:"recover existence"
-        [ "container"; "ls"; "--all"; "--no-trunc";
-          "--filter"; "id=" ^ id; "--format"; "{{json .ID}}" ] in
-    if String.trim visible = "" then Ok ()
-    else
-      let* raw = run ~operation:"recover inspect" [ "container"; "inspect"; id ] in
-      let* () =
-        let refusal () = Error (Docker_failed { operation = "recover ownership";
-          detail = "container ID and masc.lane.instance label must match the persisted binding" }) in
-        try match Yojson.Safe.from_string raw with
-          | `List [ `Assoc fields ] ->
-              (match List.assoc_opt "Id" fields, List.assoc_opt "Config" fields with
-               | Some (`String actual_id), Some (`Assoc config) when String.equal id actual_id ->
-                   (match List.assoc_opt "Labels" config with
-                    | Some (`Assoc labels) ->
-                        (match List.assoc_opt "masc.lane.instance" labels with
-                         | Some (`String owner) when String.equal owner instance_id -> Ok ()
-                         | _ -> refusal ())
-                    | _ -> refusal ())
-               | _ -> refusal ())
-          | _ -> refusal ()
-        with Yojson.Json_error detail ->
-          Error (Docker_failed { operation = "recover ownership"; detail })
-      in
-      remove_container ~run id
+    let* found, name = match container_id with
+      | None ->
+          let name = owned_name instance_id in
+          let* id = find_named_container ~run name in
+          Ok (id, Some name)
+      | Some id ->
+          let* visible = run ~operation:"recover existence"
+              [ "container"; "ls"; "--all"; "--no-trunc";
+                "--filter"; "id=" ^ id; "--format"; "{{json .ID}}" ] in
+          Ok ((if String.trim visible = "" then None else Some id), None)
+    in
+    match found with
+    | None -> Ok ()
+    | Some id ->
+        let* () = inspect_owned_container ~run ~instance_id ~name id in
+        remove_container ~run id
 
 let stop t =
   (* Never take the observation mutex: an unresponsive observation is a
@@ -209,6 +228,8 @@ let stop t =
 
 let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     ?(docker_command = "docker") ?(on_created = fun _ -> ()) () =
+  let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
+    else Ok () in
   let* () = validate_package package in
   let* package_mount = mount_argument
       { source = package.directory; destination = "/addon" } in
@@ -216,7 +237,11 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
       let* paths = acc in
       let* path = mount_argument mount in
       Ok (paths @ [ "--mount"; path ])) (Ok []) mounts in
-  let name = "masc-lane-" ^ Random_id.uuid_v7 () in
+  (* The binding is persisted before create. Its instance ID therefore also
+     identifies a container when the process dies before receiving create's
+     stdout or persisting [on_created]. Domain labels are checked before any
+     recovered container is removed. *)
+  let name = owned_name instance_id in
   let run = run_control ~mgr ~docker_command
       ~max_bytes:package.resources.max_reply_bytes in
   let identity = ref None in
@@ -226,18 +251,12 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     else match !identity with
       | None ->
           (* create can take effect before its stdout is received (or exceed
-             a tiny reply limit). The generated exact name is already owned;
-             remove it first rather than requiring an ID response to fit. *)
-          let removal = run ~operation:"remove partially created container"
-              [ "container"; "rm"; "--force"; "--volumes"; name ] in
-          (match find_named_container ~run name with
-           | Ok None -> cleanup_finished := true; Ok ()
-           | Ok (Some _) ->
-               (match removal with
-                | Error error -> Error error
-                | Ok _ -> Error (Docker_failed { operation = "verify removal";
-                    detail = "partially created container remains visible" }))
-           | Error error -> Error error)
+             a tiny reply limit). Verify the binding's deterministic name
+             and label instead of removing an unverified name collision. *)
+          let* () = recover_stop ~mgr ~instance_id ~container_id:None
+              ~max_reply_bytes:package.resources.max_reply_bytes ~docker_command () in
+          cleanup_finished := true;
+          Ok ()
       | Some id ->
           let* () = remove_container ~run id in
           cleanup_finished := true;
@@ -270,8 +289,7 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
     | Error error -> fail_start error
   in
   let id = String.trim created in
-  if String.length id <> 64 || not (String.for_all (function
-      | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id) then
+  if not (valid_container_id id) then
     fail_start (Docker_failed { operation = "create"; detail = "invalid container ID" })
   else begin
     identity := Some id;

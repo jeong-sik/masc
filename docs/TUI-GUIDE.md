@@ -979,7 +979,7 @@ completion judge, `Task Review·7` is tasks waiting for an operator.
 
 ```
  MASC Planning  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
-   show executing + verifying · order phase order, then P1→P5
+   sort:phase/P1-P5  filter:active
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
  >   [dropped ] P1  Reduce all exampleorg service backlogs to 0

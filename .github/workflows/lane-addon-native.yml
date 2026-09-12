@@ -48,6 +48,7 @@ jobs:
             test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe \
             test/test_lane_addon_resource_events.exe \
             test/test_lane_addon_config.exe test/test_lane_addon_reconcile.exe \
+            test/test_lane_addon_declaration.exe test/test_keeper_tool_schema_bytes.exe \
             test/test_lane_addon_skills.exe test/test_lane_addon_composition.exe \
             test/test_lane_addon_actions.exe \
             addons/msx-observer/lane.toml \
@@ -56,11 +57,24 @@ jobs:
             addons/msx-observer/skills/msx-observe/references/observations.md \
             addons/protocol.py addons/output-statistics/server.py \
             test/test_tui_palette_matching.exe 2>&1 | tee proof/build.log
-          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_tui_palette_matching; do
-            "_build/default/test/$test.exe" 2>&1 | tee "proof/$test.log"
+          failed_tests=()
+          run_proof_test() {
+            local name="$1"
+            shift
+            if "$@" 2>&1 | tee "proof/$name.log"; then
+              return 0
+            fi
+            failed_tests+=("$name")
+          }
+          for test in test_lane_addon test_lane_addon_worker test_lane_addon_sources test_lane_addon_surface test_lane_addon_store_query test_lane_addon_resource_events test_lane_addon_config test_lane_addon_reconcile test_lane_addon_declaration test_keeper_tool_schema_bytes test_lane_addon_skills test_lane_addon_composition test_lane_addon_actions test_tui_palette_matching; do
+            run_proof_test "$test" "_build/default/test/$test.exe"
           done
-          python3 -m unittest discover -s addons/tests -p test_skill_resources.py -v 2>&1 | tee proof/lane-skill-resources.log
-          python3 -m unittest discover -s addons/tests -p test_output_statistics.py -v 2>&1 | tee proof/output-statistics.log
+          run_proof_test lane-skill-resources python3 -m unittest discover -s addons/tests -p test_skill_resources.py -v
+          run_proof_test output-statistics python3 -m unittest discover -s addons/tests -p test_output_statistics.py -v
+          if (( ${#failed_tests[@]} > 0 )); then
+            printf 'Failed qualification test: %s\n' "${failed_tests[@]}"
+            exit 1
+          fi
       - name: Package using the release runtime bundler
         run: |
           set -euo pipefail

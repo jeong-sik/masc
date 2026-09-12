@@ -3504,6 +3504,11 @@
  (libraries alcotest masc_tui_frame))
 
 (test
+ (name test_tui_render_tools)
+ (modules test_tui_render_tools)
+ (libraries alcotest masc_tui_keys masc_tui_render_tools masc_tui_types))
+
+(test
  (name test_tui_keeper_legend)
  (modules test_tui_keeper_legend)
  (libraries
@@ -5775,6 +5780,11 @@
  (name test_lane_addon_config)
  (modules test_lane_addon_config)
  (libraries alcotest masc yojson unix))
+
+(test
+ (name test_lane_addon_declaration)
+ (modules test_lane_addon_declaration)
+ (libraries masc_test_deps eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_composition)

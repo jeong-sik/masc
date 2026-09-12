@@ -20,6 +20,7 @@ depends: [
   "ws-direct-gluten" {>= "0.1.0"}
   "ws-direct-eio" {>= "0.1.0"}
   "ocaml-msx"
+  "ocaml-dos"
   "conf-ncurses" {build}
   "re" {>= "1.10"}
   "ptime" {>= "1.2"}

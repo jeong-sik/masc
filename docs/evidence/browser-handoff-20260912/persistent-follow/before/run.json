@@ -1,0 +1,1469 @@
+{
+  "scope": "Persistent TUI baseline: Keeper reads three synthetic channels while TUI remains at index; lazy instruction composition",
+  "instruction_file_sha256": "dff25891c9c85f49cc37caf3f0e9ac7732f4056cf43e1fde172172827f3467ef",
+  "instruction_source_commit": "fa93323a14c32eb8c56ceca4871b01ed519f53e8",
+  "site_instruction_file_sha256": "bfc580e2aac29117abc961239120630b6657b138ab1031801b56394c6681aca7",
+  "server": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "4e9eafa7b6cdc64d5b5e5a6d311e202b121ba386",
+    "commit_source": "embedded",
+    "binary_commit": "4e9eafa7b6cdc64d5b5e5a6d311e202b121ba386",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "624e492c150b23b5368581aa029a6975667065db0f7dda04115d3820fe4b89c9",
+    "binary_commit_unix_ts": 1789215568.0,
+    "binary_commit_age_seconds": 1966,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "runtime_instance_id": "01a095ac-eed9-7000-a90a-1ce9bcf790bb",
+    "started_at": "2026-09-12T12:52:13Z",
+    "uptime_seconds": 0
+  },
+  "runtime_id": "glm-coding.glm-5.3-flash",
+  "tui": {
+    "tui_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
+    "clipboard_bytes": 526,
+    "clipboard_sha256": "f22c2f235733e774e862337a686d16c8e7e3e8aeaf4571bb4df84f85f567165a",
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 0,
+    "lifetime": {
+      "columns": 130,
+      "rows": 35,
+      "navigation_inputs_after_copy": [],
+      "refresh_interval": "unmodified product default",
+      "pid": 15662,
+      "started_monotonic": 960989.15823175,
+      "binary_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
+      "copied_monotonic": 960991.238517458,
+      "copy_offset": 20001,
+      "alive_at_copy": true,
+      "keeper_observation_finished_monotonic": 961123.540091416,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 961123.550716625
+    },
+    "source_commit": "39ab9c606f9120d3439ea4792d73f589558e9661",
+    "ci_run": 34692738628
+  },
+  "keeper": "browser-handoff-proof-34673000",
+  "trace_id": "trace-1789217540975-00000",
+  "operation_id": "kmsg-6fafde4ca84e1c58c302f03237e92a04",
+  "operation_state": "Succeeded",
+  "user_message": "Team Channels의 Alpha, Beta, Gamma 세 채널에서 현재 결정, 담당자, Mina에게 온 멘션 요청, 세 채널의 공통 작업을 간단히 정리해줘. 근거가 되는 메시지 링크와 읽은 범위도 알려줘. 현재 Browser Lane 관측은 아래와 같아.\n{\n  \"context\": \"Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.\",\n  \"lane\": \"automation\",\n  \"clientId\": null,\n  \"tabId\": 1,\n  \"url\": \"http://127.0.0.1:64697/index.html\",\n  \"documentId\": \"e9f1dfbc2356a5eb412fd6829177ef00\",\n  \"nodeId\": \"n1\",\n  \"view\": \"regions\",\n  \"scope\": null,\n  \"viewport\": {\n    \"width\": 1366.0,\n    \"height\": 683.0,\n    \"scrollX\": 0.0,\n    \"scrollY\": 0.0\n  },\n  \"truncated\": false,\n  \"tag\": \"nav\",\n  \"text\": \"Channels\",\n  \"source\": null\n}",
+  "clipboard": {
+    "context": "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.",
+    "lane": "automation",
+    "clientId": null,
+    "tabId": 1,
+    "url": "http://127.0.0.1:64697/index.html",
+    "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+    "nodeId": "n1",
+    "view": "regions",
+    "scope": null,
+    "viewport": {
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "truncated": false,
+    "tag": "nav",
+    "text": "Channels",
+    "source": null
+  },
+  "clipboard_base64": "ewogICJjb250ZXh0IjogIkJyb3dzZXIgZWxlbWVudCBvYnNlcnZhdGlvbjsgcGFnZS1wcm92aWRlZCBzb3VyY2UgaGludC4gVmVyaWZ5IHRoZSBjaG9zZW4gY2hlY2tvdXQgYW5kIGZpbGUgU0hBLTI1NiBiZWZvcmUgZWRpdGluZy4iLAogICJsYW5lIjogImF1dG9tYXRpb24iLAogICJjbGllbnRJZCI6IG51bGwsCiAgInRhYklkIjogMSwKICAidXJsIjogImh0dHA6Ly8xMjcuMC4wLjE6NjQ2OTcvaW5kZXguaHRtbCIsCiAgImRvY3VtZW50SWQiOiAiZTlmMWRmYmMyMzU2YTVlYjQxMmZkNjgyOTE3N2VmMDAiLAogICJub2RlSWQiOiAibjEiLAogICJ2aWV3IjogInJlZ2lvbnMiLAogICJzY29wZSI6IG51bGwsCiAgInZpZXdwb3J0IjogewogICAgIndpZHRoIjogMTM2Ni4wLAogICAgImhlaWdodCI6IDY4My4wLAogICAgInNjcm9sbFgiOiAwLjAsCiAgICAic2Nyb2xsWSI6IDAuMAogIH0sCiAgInRydW5jYXRlZCI6IGZhbHNlLAogICJ0YWciOiAibmF2IiwKICAidGV4dCI6ICJDaGFubmVscyIsCiAgInNvdXJjZSI6IG51bGwKfQ==",
+  "calls": [
+    {
+      "id": "call_0a8c9ef075434dc7aba3678c",
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "name": "browser-lanes",
+          "package_id": "browser-lanes",
+          "source_id": "project-masc"
+        }
+      },
+      "output_bytes": 12380,
+      "output_sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872",
+      "is_error": false
+    },
+    {
+      "id": "call_2d910542dbce419584b5b8fc",
+      "tool": "keeper_skill",
+      "input": {
+        "identity": {
+          "name": "team-channels-fixture",
+          "package_id": "team-channels-fixture",
+          "source_id": "project-masc"
+        }
+      },
+      "output_bytes": 1067,
+      "output_sha256": "b8e3f36342cd814c09652ab9f6bfdbeaddc6a2f8c674391e7a6a50ee96433a9a",
+      "is_error": false
+    },
+    {
+      "id": "call_a52753cb347143e6a819ed09",
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:64697/index.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+          "nodeId": "n1"
+        },
+        "tabId": 1
+      },
+      "output_bytes": 1827,
+      "output_sha256": "806458387fc7f3f4db21743d154d72d9f9d34c86ade67a530bc8ee72fbf7efaf",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 22,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 27,
+            "fontWeight": "700",
+            "kind": "text",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 28,
+                "width": 121.5500030517578,
+                "x": 39,
+                "y": 61.41667175292969
+              }
+            ],
+            "sourceContext": null,
+            "tag": "h2",
+            "text": "Channels",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/alpha.html",
+            "kind": "control",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 19,
+                "width": 46.05000305175781,
+                "x": 39,
+                "y": 111.83332824707033
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Alpha",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/beta.html",
+            "kind": "control",
+            "nodeId": "n6",
+            "rects": [
+              {
+                "height": 19,
+                "width": 37.03334045410156,
+                "x": 39,
+                "y": 130.8333282470703
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Beta",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/gamma.html",
+            "kind": "control",
+            "nodeId": "n7",
+            "rects": [
+              {
+                "height": 19,
+                "width": 64.03334045410156,
+                "x": 39,
+                "y": 149.8333282470703
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Gamma",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "e9f1dfbc2356a5eb412fd6829177ef00",
+          "nodeId": "n1"
+        },
+        "title": "Overview · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/index.html",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 11.791917
+      }
+    },
+    {
+      "id": "call_090d4bc958564525ab76187f",
+      "tool": "BrowserGoto",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:64697/alpha.html"
+      },
+      "output_bytes": 76,
+      "output_sha256": "b29c512f271f098dfe786ab51597d9095ae5a72c5d7bf247233a41d424d98800",
+      "is_error": false,
+      "output": {
+        "title": "Alpha · Team Channels",
+        "url": "http://127.0.0.1:64697/alpha.html"
+      }
+    },
+    {
+      "id": "call_1b0b06f5400d479fab90fedb",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "output_bytes": 2490,
+      "output_sha256": "6645b0abbbd7439b49bda03a565b3e971ed25193ffe2c8573e71db22fcf140d9",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 87,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "8e5a4b853039b7ad52474749adab1beb",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n1",
+            "rects": [
+              {
+                "height": 421.23333740234375,
+                "width": 190,
+                "x": 20,
+                "y": 20
+              }
+            ],
+            "role": "nav",
+            "sourceContext": null,
+            "tag": "nav",
+            "text": "Channels",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n2",
+            "rects": [
+              {
+                "height": 421.23333740234375,
+                "width": 848,
+                "x": 234,
+                "y": 20
+              }
+            ],
+            "role": "main",
+            "sourceContext": null,
+            "tag": "main",
+            "text": "Alpha channel",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 243,
+                "width": 810,
+                "x": 253,
+                "y": 124.23333740234376
+              }
+            ],
+            "role": "article",
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Visible messages",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 106,
+                "width": 810,
+                "x": 253,
+                "y": 124.23333740234376
+              }
+            ],
+            "role": "section",
+            "sourceContext": null,
+            "tag": "section",
+            "text": "Message a1",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 19,
+                "width": 810,
+                "x": 253,
+                "y": 137.23333740234375
+              }
+            ],
+            "role": "header",
+            "sourceContext": null,
+            "tag": "header",
+            "text": "header",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n6",
+            "rects": [
+              {
+                "height": 125,
+                "width": 810,
+                "x": 253,
+                "y": 242.23333740234375
+              }
+            ],
+            "role": "section",
+            "sourceContext": null,
+            "tag": "section",
+            "text": "Message a2",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n7",
+            "rects": [
+              {
+                "height": 19,
+                "width": 810,
+                "x": 253,
+                "y": 255.23333740234375
+              }
+            ],
+            "role": "header",
+            "sourceContext": null,
+            "tag": "header",
+            "text": "header",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n8",
+            "rects": [
+              {
+                "height": 421.23333740234375,
+                "width": 240,
+                "x": 1106,
+                "y": 20
+              }
+            ],
+            "role": "aside",
+            "sourceContext": null,
+            "tag": "aside",
+            "text": "Navigation summary",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": null,
+        "title": "Alpha · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/alpha.html",
+        "view": "regions",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 10.727167
+      }
+    },
+    {
+      "id": "call_4074a076a2094ae68dde158f",
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:64697/alpha.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "8e5a4b853039b7ad52474749adab1beb",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "output_bytes": 2980,
+      "output_sha256": "275db8fc0ee9f43bf2cc72bae339805ea80287dc96a47bb0b9b567d5db4c23f6",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 255,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "8e5a4b853039b7ad52474749adab1beb",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "700",
+            "kind": "text",
+            "nodeId": "n9",
+            "rects": [
+              {
+                "height": 19,
+                "width": 41.01666259765625,
+                "x": 253,
+                "y": 137.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "strong",
+            "text": "Mina",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(82, 96, 109)",
+            "fontSize": 14,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n10",
+            "rects": [
+              {
+                "height": 15,
+                "width": 110.5,
+                "x": 299.01666259765625,
+                "y": 140.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "time",
+            "text": "2026-09-12 09:00",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n11",
+            "rects": [
+              {
+                "height": 19,
+                "width": 316.98333740234375,
+                "x": 253,
+                "y": 174.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "p",
+            "text": "Superseded plan: ship Cedar on Friday.",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/alpha.html#a1",
+            "kind": "control",
+            "nodeId": "n12",
+            "rects": [
+              {
+                "height": 19,
+                "width": 105.08332824707033,
+                "x": 253,
+                "y": 211.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Message link",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "700",
+            "kind": "text",
+            "nodeId": "n13",
+            "rects": [
+              {
+                "height": 19,
+                "width": 44.03334045410156,
+                "x": 253,
+                "y": 255.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "strong",
+            "text": "Hana",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(82, 96, 109)",
+            "fontSize": 14,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n14",
+            "rects": [
+              {
+                "height": 15,
+                "width": 110.5,
+                "x": 302.0333251953125,
+                "y": 258.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "time",
+            "text": "2026-09-12 10:00",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n15",
+            "rects": [
+              {
+                "height": 19,
+                "width": 743.25,
+                "x": 253,
+                "y": 292.23333740234375
+              },
+              {
+                "height": 19,
+                "width": 511.0833129882813,
+                "x": 253,
+                "y": 311.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "p",
+            "text": "Current decision: ship Cedar Tuesday after accessibility approval. @Mina please approve the accessibility checklist Monday. Shared dependency: schema v4.",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/alpha.html#a2",
+            "kind": "control",
+            "nodeId": "n16",
+            "rects": [
+              {
+                "height": 19,
+                "width": 105.08332824707033,
+                "x": 253,
+                "y": 348.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Message link",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "8e5a4b853039b7ad52474749adab1beb",
+          "nodeId": "n3"
+        },
+        "title": "Alpha · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/alpha.html",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 29.589792
+      }
+    },
+    {
+      "id": "call_bc352acbbd76423bbae0abe2",
+      "tool": "BrowserGoto",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:64697/beta.html"
+      },
+      "output_bytes": 74,
+      "output_sha256": "6edfbd68587f3c531dcf0afa8c5ea1fe4990f8b8cc5c7fce6689459bc5bb52b4",
+      "is_error": false,
+      "output": {
+        "title": "Beta · Team Channels",
+        "url": "http://127.0.0.1:64697/beta.html"
+      }
+    },
+    {
+      "id": "call_99a8a6017bee4baaad2ef0df",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "output_bytes": 1980,
+      "output_sha256": "e348adbb6012667520f3fa17052d619569c46349dca6fd30952a1e21dbde37c6",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 70,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n1",
+            "rects": [
+              {
+                "height": 303.23333740234375,
+                "width": 190,
+                "x": 20,
+                "y": 20
+              }
+            ],
+            "role": "nav",
+            "sourceContext": null,
+            "tag": "nav",
+            "text": "Channels",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n2",
+            "rects": [
+              {
+                "height": 303.23333740234375,
+                "width": 848,
+                "x": 234,
+                "y": 20
+              }
+            ],
+            "role": "main",
+            "sourceContext": null,
+            "tag": "main",
+            "text": "Beta channel",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 125,
+                "width": 810,
+                "x": 253,
+                "y": 124.23333740234376
+              }
+            ],
+            "role": "article",
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Visible messages",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 125,
+                "width": 810,
+                "x": 253,
+                "y": 124.23333740234376
+              }
+            ],
+            "role": "section",
+            "sourceContext": null,
+            "tag": "section",
+            "text": "Message b1",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 19,
+                "width": 810,
+                "x": 253,
+                "y": 137.23333740234375
+              }
+            ],
+            "role": "header",
+            "sourceContext": null,
+            "tag": "header",
+            "text": "header",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n6",
+            "rects": [
+              {
+                "height": 303.23333740234375,
+                "width": 240,
+                "x": 1106,
+                "y": 20
+              }
+            ],
+            "role": "aside",
+            "sourceContext": null,
+            "tag": "aside",
+            "text": "Navigation summary",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": null,
+        "title": "Beta · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/beta.html",
+        "view": "regions",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 12.45
+      }
+    },
+    {
+      "id": "call_bd56eaa6ce7b43fc91b01171",
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:64697/beta.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "output_bytes": 1836,
+      "output_sha256": "4abecb41a6dafecb218297b7b018ff56279949c9a7114bfd1d772059a6b679ec",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 172,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "700",
+            "kind": "text",
+            "nodeId": "n7",
+            "rects": [
+              {
+                "height": 19,
+                "width": 43.01666259765625,
+                "x": 253,
+                "y": 137.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "strong",
+            "text": "Joon",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(82, 96, 109)",
+            "fontSize": 14,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n8",
+            "rects": [
+              {
+                "height": 15,
+                "width": 110.5,
+                "x": 301.01666259765625,
+                "y": 140.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "time",
+            "text": "2026-09-12 09:30",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n9",
+            "rects": [
+              {
+                "height": 19,
+                "width": 803.9166870117188,
+                "x": 253,
+                "y": 174.23333740234375
+              },
+              {
+                "height": 19,
+                "width": 329.29998779296875,
+                "x": 253,
+                "y": 193.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "p",
+            "text": "Current decision: finish schema v4 migration Monday for Cedar. Owner: Joon. @Mina please confirm the client payload before migration starts.",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/beta.html#b1",
+            "kind": "control",
+            "nodeId": "n10",
+            "rects": [
+              {
+                "height": 19,
+                "width": 105.08332824707033,
+                "x": 253,
+                "y": 230.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Message link",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "89af61bb3ab8ed9b7e7fd79eefaf7a9c",
+          "nodeId": "n3"
+        },
+        "title": "Beta · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/beta.html",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 21.901958
+      }
+    },
+    {
+      "id": "call_b3a9a7818618430db89d4f12",
+      "tool": "BrowserGoto",
+      "input": {
+        "tabId": 1,
+        "url": "http://127.0.0.1:64697/gamma.html"
+      },
+      "output_bytes": 76,
+      "output_sha256": "54221a336914fe97a1e2d75349a4d1b09e1fb81d5fee2e6845fb84fa3f157ff1",
+      "is_error": false,
+      "output": {
+        "title": "Gamma · Team Channels",
+        "url": "http://127.0.0.1:64697/gamma.html"
+      }
+    },
+    {
+      "id": "call_82dbeff362d44595a80ef3f6",
+      "tool": "BrowserRead",
+      "input": {
+        "lane": "automation",
+        "mode": "regions",
+        "tabId": 1
+      },
+      "output_bytes": 1987,
+      "output_sha256": "aff6968f71c9c14f99b077a956b83279660e082e630fe563ea043ddf637c0a0c",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 71,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n1",
+            "rects": [
+              {
+                "height": 303.23333740234375,
+                "width": 190,
+                "x": 20,
+                "y": 20
+              }
+            ],
+            "role": "nav",
+            "sourceContext": null,
+            "tag": "nav",
+            "text": "Channels",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n2",
+            "rects": [
+              {
+                "height": 303.23333740234375,
+                "width": 848,
+                "x": 234,
+                "y": 20
+              }
+            ],
+            "role": "main",
+            "sourceContext": null,
+            "tag": "main",
+            "text": "Gamma channel",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n3",
+            "rects": [
+              {
+                "height": 125,
+                "width": 810,
+                "x": 253,
+                "y": 124.23333740234376
+              }
+            ],
+            "role": "article",
+            "sourceContext": null,
+            "tag": "article",
+            "text": "Visible messages",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n4",
+            "rects": [
+              {
+                "height": 125,
+                "width": 810,
+                "x": 253,
+                "y": 124.23333740234376
+              }
+            ],
+            "role": "section",
+            "sourceContext": null,
+            "tag": "section",
+            "text": "Message g1",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n5",
+            "rects": [
+              {
+                "height": 19,
+                "width": 810,
+                "x": 253,
+                "y": 137.23333740234375
+              }
+            ],
+            "role": "header",
+            "sourceContext": null,
+            "tag": "header",
+            "text": "header",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "region",
+            "nodeId": "n6",
+            "rects": [
+              {
+                "height": 303.23333740234375,
+                "width": 240,
+                "x": 1106,
+                "y": 20
+              }
+            ],
+            "role": "aside",
+            "sourceContext": null,
+            "tag": "aside",
+            "text": "Navigation summary",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": null,
+        "title": "Gamma · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/gamma.html",
+        "view": "regions",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 60.317042
+      }
+    },
+    {
+      "id": "call_02e7d18a0e46456d9e48b879",
+      "tool": "BrowserRead",
+      "input": {
+        "expectedUrl": "http://127.0.0.1:64697/gamma.html",
+        "lane": "automation",
+        "mode": "scene",
+        "scope": {
+          "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+          "nodeId": "n3"
+        },
+        "tabId": 1
+      },
+      "output_bytes": 1830,
+      "output_sha256": "46e4493d2f0bd6f2fd4a38d17876865b3a37e6fba0a21616381fe7b7e107594b",
+      "is_error": false,
+      "output": {
+        "tabId": 1,
+        "chars": 163,
+        "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness",
+        "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+        "nodes": [
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "700",
+            "kind": "text",
+            "nodeId": "n7",
+            "rects": [
+              {
+                "height": 19,
+                "width": 40.01666259765625,
+                "x": 253,
+                "y": 137.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "strong",
+            "text": "Sora",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(82, 96, 109)",
+            "fontSize": 14,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n8",
+            "rects": [
+              {
+                "height": 15,
+                "width": 110.5,
+                "x": 298.01666259765625,
+                "y": 140.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "time",
+            "text": "2026-09-12 10:15",
+            "whiteSpace": "normal"
+          },
+          {
+            "color": "rgb(21, 32, 43)",
+            "fontSize": 18,
+            "fontWeight": "400",
+            "kind": "text",
+            "nodeId": "n9",
+            "rects": [
+              {
+                "height": 19,
+                "width": 743.2999877929688,
+                "x": 253,
+                "y": 174.23333740234375
+              },
+              {
+                "height": 19,
+                "width": 337.33331298828125,
+                "x": 253,
+                "y": 193.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "p",
+            "text": "Current decision: run Cedar end-to-end QA Wednesday against schema v4. Owner: Sora. No additional request for Mina in this channel.",
+            "whiteSpace": "normal"
+          },
+          {
+            "clickable": true,
+            "color": "rgb(22, 82, 166)",
+            "controlType": "a",
+            "disabled": false,
+            "editable": false,
+            "fontSize": 18,
+            "fontWeight": "400",
+            "href": "http://127.0.0.1:64697/gamma.html#g1",
+            "kind": "control",
+            "nodeId": "n10",
+            "rects": [
+              {
+                "height": 19,
+                "width": 105.08332824707033,
+                "x": 253,
+                "y": 230.23333740234375
+              }
+            ],
+            "sourceContext": null,
+            "tag": "a",
+            "text": "Message link",
+            "whiteSpace": "normal"
+          }
+        ],
+        "schema": "masc.browser.scene.v1",
+        "scope": {
+          "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+          "nodeId": "n3"
+        },
+        "title": "Gamma · Team Channels",
+        "truncated": false,
+        "url": "http://127.0.0.1:64697/gamma.html",
+        "view": "content",
+        "viewport": {
+          "height": 683,
+          "scrollX": 0,
+          "scrollY": 0,
+          "width": 1366
+        },
+        "source": "automation",
+        "clientId": null,
+        "elapsed_ms": 36.630708
+      }
+    }
+  ],
+  "answer": "세 채널의 메시지 목록을 모두 직접 읽었습니다. 요약은 아래와 같습니다.\n\n## 채널별 정리\n\n| 채널 | 현재 결정 | 담당자 | 근거 링크 |\n|---|---|---|---|\n| Alpha | Cedar를 화요일에 출시 (접근성 승인 완료 후) | 메시지에 소유자 명시 없음 (작성자 Hana) | http://127.0.0.1:64697/alpha.html#a2 |\n| Beta | Cedar용 schema v4 마이그레이션을 월요일까지 완료 | Joon | http://127.0.0.1:64697/beta.html#b1 |\n| Gamma | schema v4 기준으로 Cedar 전체 QA를 수요일에 실행 | Sora | http://127.0.0.1:64697/gamma.html#g1 |\n\n- Alpha에는 대체된 이전 결정도 있습니다: a1(Mina, 09:00) \"Superseded plan: ship Cedar on Friday\" — 현재 결정(a2)이 우선하므로 제외했습니다 (http://127.0.0.1:64697/alpha.html#a1).\n\n## Mina에게 온 멘션 요청 (2건)\n\n1. **Alpha a2** (Hana, 2026-09-12 10:00): \"accessibility checklist를 월요일까지 승인해 달라\" — http://127.0.0.1:64697/alpha.html#a2\n2. **Beta b1** (Joon, 2026-09-12 09:30): \"마이그레이션 시작 전에 client payload를 확인해 달라\" — http://127.0.0.1:64697/beta.html#b1\n3. Gamma에는 Mina 멘션이 없습니다. g1 메시지에 \"No additional request for Mina in this channel\"이라고 명시돼 있습니다.\n\n## 세 채널 공통 작업\n\n**schema v4**가 공통 의존작업입니다. Alpha a2가 \"Shared dependency: schema v4\"로 명시하고, Beta b1(월요일 마이그레이션, 담당 Joon)이 선행되며, Gamma g1(수요일 QA, 담당 Sora)이 그 위에서 실행됩니다. Cedar 출시라는 같은 일정 축(Alpha 화요일 출시 → Gamma 수요일 QA)도 세 채널에 걸쳐 있습니다.\n\n## 읽은 범위와 방법\n\n- 전달받은 관측(automation lane, tabId 1, overview index)에서 nav 링크 대상(alpha/beta/gamma.html)을 관측해 그대로 이동했고, 각 채널에서 제목(Alpha·Beta·Gamma · Team Channels)과 URL을 확인했습니다.\n- 각 채널에서 메시지 목록 역할의 `article`(label \"Visible messages\")을 scope로 지정해 읽었고, 네 번의 본문 읽기 모두 `truncated=false`로 잘림 없이 읽었습니다.\n- 각 채널의 aside \"Navigation summary\"는 메시지 근거가 아니므로 읽지 않았고, overview index도 nav 영역만 읽었습니다.\n- 관측된 메시지는 총 4건(Alpha 2, Beta 1, Gamma 1), 기간 2026-09-12 09:00~10:15입니다. 표시된 메시지 기준이며 숨겨진 이력 여부는 이 화면에서 확인할 수 없습니다.",
+  "activations": [
+    {
+      "identity": {
+        "source_id": "project-masc",
+        "package_id": "browser-lanes",
+        "name": "browser-lanes"
+      },
+      "content_revision": "c49d5e8c50caebf781170d0dbf2b051dfb422530c1db56bca251f7fe80712ab8",
+      "snapshot_revision": "b7c871ccb94ec13b36bc7db459d7f1bde19d8c0ce3c57ee7d8d28303d3f6ea34",
+      "turn_ref": "trace-1789217540975-00000#1",
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "skill_tool_use_id": "call_0a8c9ef075434dc7aba3678c",
+      "agent_core_turn": 0,
+      "invocation": {
+        "kind": "instruction",
+        "origin": {
+          "kind": "session_instruction"
+        },
+        "served_content": {
+          "kind": "skill_body",
+          "bytes": 12380,
+          "sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+        }
+      },
+      "delivery": {
+        "boundary": {
+          "kind": "model_response",
+          "agent_core_turn": 1
+        },
+        "runtime_id": "glm-coding.glm-5.3-flash",
+        "delivered_at": "2026-09-12T12:52:49Z",
+        "content_bytes": 12380,
+        "content_sha256": "4327a477c69d053b387d3b539e4defe99150f85b3c083e0f36e2bb3cdf6d0872"
+      },
+      "actions": [
+        {
+          "identity": {
+            "kind": "call_id",
+            "call_id": "call_a52753cb347143e6a819ed09"
+          },
+          "tool_name": "BrowserRead",
+          "runtime_id": "glm-coding.glm-5.3-flash",
+          "agent_core_turn": 1,
+          "observed_at": "2026-09-12T12:52:49Z"
+        }
+      ],
+      "activated_at": "2026-09-12T12:52:29Z"
+    },
+    {
+      "identity": {
+        "source_id": "project-masc",
+        "package_id": "team-channels-fixture",
+        "name": "team-channels-fixture"
+      },
+      "content_revision": "296f7a7375cfa869777995591eb15bbeaf4e09e3069f9e2e007f22452c887e28",
+      "snapshot_revision": "b7c871ccb94ec13b36bc7db459d7f1bde19d8c0ce3c57ee7d8d28303d3f6ea34",
+      "turn_ref": "trace-1789217540975-00000#1",
+      "runtime_id": "glm-coding.glm-5.3-flash",
+      "skill_tool_use_id": "call_2d910542dbce419584b5b8fc",
+      "agent_core_turn": 0,
+      "invocation": {
+        "kind": "instruction",
+        "origin": {
+          "kind": "session_instruction"
+        },
+        "served_content": {
+          "kind": "skill_body",
+          "bytes": 1067,
+          "sha256": "b8e3f36342cd814c09652ab9f6bfdbeaddc6a2f8c674391e7a6a50ee96433a9a"
+        }
+      },
+      "delivery": {
+        "boundary": {
+          "kind": "model_response",
+          "agent_core_turn": 1
+        },
+        "runtime_id": "glm-coding.glm-5.3-flash",
+        "delivered_at": "2026-09-12T12:52:49Z",
+        "content_bytes": 1067,
+        "content_sha256": "b8e3f36342cd814c09652ab9f6bfdbeaddc6a2f8c674391e7a6a50ee96433a9a"
+      },
+      "actions": [
+        {
+          "identity": {
+            "kind": "call_id",
+            "call_id": "call_a52753cb347143e6a819ed09"
+          },
+          "tool_name": "BrowserRead",
+          "runtime_id": "glm-coding.glm-5.3-flash",
+          "agent_core_turn": 1,
+          "observed_at": "2026-09-12T12:52:49Z"
+        }
+      ],
+      "activated_at": "2026-09-12T12:52:29Z"
+    }
+  ],
+  "measurements": {
+    "total_tool_calls": 12,
+    "instruction_loads": 2,
+    "BrowserGoto": 3,
+    "BrowserRead": 7,
+    "regions_reads": 3,
+    "scoped_scene_reads": 4,
+    "tool_errors": 0,
+    "browser_output_bytes": 15156,
+    "observed_turn_seconds": 131.065,
+    "observation_interval_seconds": 5,
+    "usage": {
+      "total_input_tokens": 274950,
+      "total_output_tokens": 4184,
+      "total_cache_creation_input_tokens": 0,
+      "total_cache_read_input_tokens": 244288,
+      "api_calls": 12,
+      "estimated_cost_usd": 0.09290840000000003,
+      "pricing_gap": null
+    }
+  },
+  "final_screenshot": {
+    "source": "automation",
+    "clientId": null,
+    "tabId": 1,
+    "title": "Gamma · Team Channels",
+    "url": "http://127.0.0.1:64697/gamma.html",
+    "mimeType": "image/png",
+    "viewport": {
+      "documentId": "e0bf971c7978dacc5e4f4291dcae09ce",
+      "width": 1366.0,
+      "height": 683.0,
+      "scrollX": 0.0,
+      "scrollY": 0.0
+    },
+    "elapsed_ms": 28.96875
+  },
+  "cleanup": {
+    "keeper_shutdown": {
+      "kind": "finalized",
+      "evidence": {
+        "cleanup": {
+          "settled_task_ids": [],
+          "pending_confirms_removed": 0,
+          "meta_snapshot_digest": "c42675c6d3dec05b828d8a99daefa89027a43caef97e95f93ca17a6a0d216f7f"
+        },
+        "meta_removed": false,
+        "session_removed": false,
+        "registry_unregistered": true,
+        "accumulator_dropped": true,
+        "completion": {
+          "kind": "not_requested"
+        }
+      }
+    },
+    "tui": {
+      "columns": 130,
+      "rows": 35,
+      "navigation_inputs_after_copy": [],
+      "refresh_interval": "unmodified product default",
+      "pid": 15662,
+      "started_monotonic": 960989.15823175,
+      "binary_sha256": "df30addff6cb202469d663baf88643727b0ca4c49c2917a7b60516f0e7b9b6d6",
+      "copied_monotonic": 960991.238517458,
+      "copy_offset": 20001,
+      "alive_at_copy": true,
+      "keeper_observation_finished_monotonic": 961123.540091416,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 961123.550716625
+    },
+    "owned_processes": [
+      {
+        "name": "server",
+        "pid": 15301,
+        "exit": 0
+      },
+      {
+        "name": "driver",
+        "pid": 15285,
+        "exit": 0
+      }
+    ]
+  },
+  "limitations": [
+    "One synthetic fixture; browser speed or general fastest-path superiority is not established",
+    "Elapsed time includes model work, the five-second polling cadence and status-request latency",
+    "No real target-channel or Slack data",
+    "TUI remains alive through the turn but shows none of the three current URL plus channel heading pairs across 136 complete replayed frames",
+    "Baseline capture predates explicit input-event/error logging; no post-copy navigation input is supported by harness source inspection, not a write-event ledger",
+    "Replay timestamps are terminal byte arrival, not browser navigation timestamps",
+    "Answer distinguishes Alpha author from unspecified owner; its causal migration ordering is an inference",
+    "Instruction composition was observed; a keeper_compose workflow tool was not invoked"
+  ],
+  "artifacts": {
+    "tui-follow.pty": "83fb64637ea18b407dd3d7dfad47f4f6136a1b59c1db8db30c79031b8e374c55",
+    "tui-follow-audit.json": "b1bf1e99d0414b1c8474135e5f7c3acc9781c3aaeb17b4bd66ad5b454921ba36",
+    "clipboard-osc52.bin": "6ee6826e7e49f5f75ef5bb639f4939f947db80a446fafa595bf69b1b1630fd7d",
+    "site-skill.md": "bfc580e2aac29117abc961239120630b6657b138ab1031801b56394c6681aca7",
+    "firefox-gamma.png": "30305149495ee4b91aa6d3691c3127680994c0b915868fca5bbc5a4a00d53abd",
+    "tui-timeline.json": "c030de3f612517fa53c774dd5cf0de5eb0043aa5de26cacdaa3d28da78f6932d",
+    "clipboard-context.json": "f22c2f235733e774e862337a686d16c8e7e3e8aeaf4571bb4df84f85f567165a",
+    "firefox-index.png": "a0571f75d69c86f58bd9eec6b0c7ee4c9ae756aa86008f925d91e8b709922322",
+    "tui-lifetime.json": "af812556362ea2232bb53e5c42df166aceb37ace1cdfca8fc28e8b1d93890ff7",
+    "tui-final.png": "5ca1f921c49b461cd5c1abd16dff5d544a158eee5852cd39a2b29929d67e59aa",
+    "fixture/index.html": "4ce016c955f439d8fb2d6cf64df3eae679fada7d39afd8a0913510a22dd0c008",
+    "fixture/alpha.html": "df29145d43372a19322edbf72dc779cd5729cf9ae4ba9f81c21a6d84f01c6f88",
+    "fixture/gamma.html": "29ec65723377d9e7cdd72f20492452d7168a0d900f587a29535b0f831c466b98",
+    "fixture/beta.html": "6e1ed01bdc0e78856033b7dd43b78924b3ea1249b6b5edd9c05fa03ce121a930"
+  }
+}

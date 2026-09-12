@@ -125,6 +125,36 @@ val masc_base_dir : unit -> string
 val ensure_audio_dir : unit -> unit
 (** [mkdir -p <masc_base_dir>/audio]. *)
 
+type clip_format =
+  | Mp3
+  | Wav
+(** The container a synthesized clip is written in.
+
+    The filename is [<token><extension>] and that extension is what the
+    writer hands to its encoder, so it has to be true. Measured 2026-09-13
+    on macOS 26: [say -o clip.mp3] exits 0 and writes a 16-byte empty MP3
+    tag frame -- silence with no error and no log -- while [say -o clip.wav]
+    with no format flag fails loudly instead. Say writes WAVE; the HTTP
+    providers answer MP3. *)
+
+val clip_formats : clip_format list
+(** Every format a clip can be stored in, so a reader resolving a token
+    covers all of them rather than assuming one. *)
+
+val clip_extension : clip_format -> string
+val clip_content_type : clip_format -> string
+
+val audio_dir : unit -> string
+(** [<masc_base_dir>/audio] -- where clips are written and served from. *)
+
+val find_clip : dir:string -> token:string -> (string * clip_format) option
+(** The clip [token] names under [dir], and the format it is stored in.
+    [None] when no format has it: never synthesized, or reaped. *)
+
+val clip_token_of_path : string -> string option
+(** The token a clip path carries, for building the URL the dashboard
+    fetches it by. [None] when the path is not a clip. *)
+
 (** {1 Structured logging helpers} *)
 
 val log_info : string -> unit

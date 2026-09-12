@@ -143,6 +143,25 @@ let peek_file_change_artifact_refs ~invocation () =
     | None -> [])
 ;;
 
+(* Complete observation artifacts must outlive their truncated log preview.
+   Keep this carrier until the owning hook commits the exact invocation row. *)
+let pending_retained_artifacts : Tool_output.artifact_ref list Invocation_table.t =
+  Invocation_table.create 8
+let retained_artifacts_mu = Stdlib.Mutex.create ()
+let with_retained_artifacts_lock f =
+  Stdlib.Mutex.lock retained_artifacts_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock retained_artifacts_mu) f
+let set_retained_artifacts ~invocation references =
+  with_retained_artifacts_lock (fun () ->
+    Invocation_table.replace pending_retained_artifacts invocation references)
+let peek_retained_artifacts ~invocation () =
+  with_retained_artifacts_lock (fun () ->
+    (* DET-OK: the invocation carrier is optional; ordinary results own no
+       retained roots. Absence does not manufacture a successful receipt. *)
+    Option.value ~default:[] (Invocation_table.find_opt pending_retained_artifacts invocation))
+let clear_retained_artifacts ~invocation () =
+  with_retained_artifacts_lock (fun () -> Invocation_table.remove pending_retained_artifacts invocation)
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 
 let create_turn_ctx_cell = Keeper_tool_call_log_context.create_cell
@@ -353,7 +372,8 @@ let reset_for_testing () =
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
   with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation);
   with_pending_file_change_evidence_lock (fun () ->
-    Invocation_table.reset pending_file_change_evidence)
+    Invocation_table.reset pending_file_change_evidence);
+  with_retained_artifacts_lock (fun () -> Invocation_table.reset pending_retained_artifacts)
 ;;
 
 let pending_truncation_count_for_testing () =
@@ -673,12 +693,14 @@ let log_call
       ?on_committed
       ()
   =
+  let requires_commit =
+    Option.is_some on_committed || artifact_refs <> []
+    || Option.exists (fun result -> Tool_result.retained_artifacts result <> []) typed_result
+  in
   match (Atomic.get store_state).store with
     | None ->
       record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ();
-      (match on_committed with
-       | None -> ()
-       | Some _ -> raise Commit_required_but_store_unavailable)
+      if requires_commit then raise Commit_required_but_store_unavailable
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
          callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
@@ -808,7 +830,8 @@ let log_call
       let artifact_ref_fields =
         let typed_refs =
           match typed_result with
-          | Some result -> Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
+          | Some result -> Tool_result.retained_artifacts result
+              @ Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
           | None -> []
         in
         let refs =
@@ -1002,12 +1025,11 @@ let log_call
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
       let entry = { store; keeper_name; tool_name; trace_id; json = safe_json } in
-      (match on_committed with
-       | None -> append_or_enqueue entry
-       | Some notify ->
-         (match append_to_store_result entry with
-          | Ok () -> notify ()
-          | Error exn -> raise exn))
+      if requires_commit then
+        (match append_to_store_result entry with
+         | Ok () -> Option.iter (fun notify -> notify ()) on_committed
+         | Error exn -> raise exn)
+      else append_or_enqueue entry
 ;;
 
 (* Scan multiplier applied before the keeper filter: [read_recent] reads

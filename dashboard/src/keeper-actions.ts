@@ -5,7 +5,7 @@ import {
   sameDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import { callMcpTool } from './api/mcp'
-import { runOperatorAction } from './api/core'
+import { currentStoredTokenRevision, runOperatorAction } from './api/core'
 import {
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
@@ -426,9 +426,11 @@ function toolOutputCoveredSinceMs(entries: readonly { ts: number }[]): number {
  *  Failures are swallowed (logged): the transcript must render with or without
  *  tool outputs. */
 export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+  const authRevision = currentStoredTokenRevision()
   const coveredThroughMs = markToolCallOutputsHydrating(keeperName)
   try {
     const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
+    if (authRevision !== currentStoredTokenRevision()) return
     recordToolCallOutputs(response.entries)
     markToolCallOutputsHydrated(
       keeperName,
@@ -436,6 +438,7 @@ export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void
       toolOutputCoveredSinceMs(response.entries),
     )
   } catch (err) {
+    if (authRevision !== currentStoredTokenRevision()) return
     const message = err instanceof Error ? err.message : String(err)
     markToolCallOutputsHydrationFailed(keeperName, message)
     console.warn(`[keeper] tool-call output hydration failed for ${keeperName}:`, message)

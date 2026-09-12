@@ -17,3 +17,25 @@ The next native Test run, 34700788141 at `ebab73c4ddd8a5ad85a749b5df6d20abc9cc51
 This source audit also corrected the malformed-pagination assertions: descriptor validation can reject a call before the source reader and returns a diagnostic message rather than source-error JSON. The tests now assert workflow rejection at dispatch and separately require typed `Invalid_request` from the reader for the same malformed input. Successful pagination still runs through actual Task and Goal dispatch.
 
 Native Test 34701696883 at `cb51e87d719afffb171fbcc3faccb1572db9d400` compiled successfully: five of six collaboration cases and both other target suites passed. The last collaboration case stopped while creating a Direct Fusion fixture without its required explicit target. That fixture now explicitly addresses `@producer`, like the other Direct fixtures; Task and Goal access-denial assertions remain in place. Board post fixture creation now prints the typed Board error instead of discarding it as "post". The product's Direct audience and review-authority policies are unchanged. The repaired case still requires a new native CI result.
+
+Native Test [34702739701](https://github.com/jeong-sik/masc/actions/runs/34702739701)
+at `206c447685d97b27b09f0f7001c7e79be4846738` exposed a real workspace-authority
+defect. Creating the second workspace config updated the test environment, so
+`Board.persist_path ()` named the second workspace while the active Board backend
+still held the first workspace's original posts. The reader compared two paths
+derived from the same new environment and incorrectly allowed the foreign Goal.
+
+The active store now carries the canonical directory captured before global
+loading. All five persisted loaders use that captured directory. Standalone
+in-memory `create_store ()` remains unbound and does not require workspace
+configuration. Verification compares the requested workspace against the active
+store's captured identity, and rejects an unbound store. The feature case now
+checks both Task and Goal denial for Board and Fusion, verifies the original
+workspace still reads its sources, and reloads the original post and comment
+after the environment has moved to the other workspace.
+
+Nine changed OCaml source/interface files passed parse-only checks, and
+`git diff --check` passed. These are source checks; corrected native behavior
+still requires CI. Existing Board writer path helpers remain environment-derived;
+this repair does not establish full Board isolation during live workspace
+reconfiguration. No runtime was changed.

@@ -177,7 +177,9 @@ let test_fusion_original_and_separate_decision () = with_fixture (fun config tas
 
 let test_fusion_foreign_wrong_origin_and_no_write () = with_fixture (fun config task goal ->
   let id = "foreign-opaque-source" in
-  ignore (fusion ~author:"peer" ~visibility:Board.Internal ~source:"fusion" id);
+  let source = fusion ~author:"peer" ~visibility:Board.Internal ~source:"fusion" id in
+  let source_comment = Board_dispatch.add_comment ~post_id:(Board.Post_id.to_string source.id)
+      ~author:"producer" ~content:"Original workspace comment" ~ttl_hours:0 () |> require "source comment" in
   denied task "masc_fusion_status" (run_args id) "verification_source_access_denied";
   ignore (read goal "masc_fusion_status" (run_args id));
   ignore (fusion ~author:"peer" ~visibility:Board.Direct ~source:"fusion"
@@ -194,8 +196,29 @@ let test_fusion_foreign_wrong_origin_and_no_write () = with_fixture (fun config 
   check int "lookup did not record a decision" 0
     (List.length (Fusion_decision.read ~config ~run_id:id |> require "read decisions"));
   let different = Workspace.default_config (Filename.concat config.base_path "different-workspace") in
+  check bool "fixture selects a genuinely different workspace" false
+    (String.equal (Fs_compat.realpath_lenient (Workspace.masc_dir config))
+       (Fs_compat.realpath_lenient (Workspace.masc_dir different)));
+  let Board_dispatch.Jsonl active_store = Board_dispatch.backend () in
+  check (option string) "active store retains its original workspace after config resolution"
+    (Some (Fs_compat.realpath_lenient (Workspace.masc_dir config))) active_store.Board.workspace_masc_dir;
+  let reloaded = { (Board.create_store ()) with workspace_masc_dir = active_store.workspace_masc_dir } in
+  ignore (Masc_board_handlers.Board_votes_json.load_persisted_posts reloaded |> require "bound post reload");
+  ignore (Masc_board_handlers.Board_votes_json.load_persisted_comments reloaded |> require "bound comment reload");
+  let loaded_source = Board.get_post reloaded ~post_id:(Board.Post_id.to_string source.id) |> require "bound original post" in
+  check string "store loads the original workspace source despite changed environment"
+    (Board.Post_id.to_string source.id) (Board.Post_id.to_string loaded_source.id);
+  check bool "store loads the original workspace comment despite changed environment" true
+    (Hashtbl.mem reloaded.comments (Board.Comment_id.to_string source_comment.id));
+  let other_task = VAT.create ~config:different ~producer:"peer" |> require "other Task" in
   let other_goal = VAT.create_goal_proof ~config:different |> require "other Goal" in
-  denied other_goal "masc_fusion_status" (run_args id) "verification_source_access_denied")
+  List.iter (fun surface ->
+    denied surface "masc_board_post_get" (post_args source) "verification_source_access_denied";
+    denied surface "masc_fusion_status" (run_args id) "verification_source_access_denied")
+    [other_task; other_goal];
+  ignore (read task "masc_board_post_get" (post_args source));
+  ignore (read goal "masc_board_post_get" (post_args source));
+  ignore (read goal "masc_fusion_status" (run_args id)))
 
 let test_corrupt_decision_storage () = with_fixture (fun config task _goal ->
   ignore (fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion" "corrupt-events");

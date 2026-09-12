@@ -24,11 +24,12 @@ let protect f =
 (* Board is the process's active workspace store. Do not join it to task/Goal
    state belonging to another config, nor expose its directory as a file root. *)
 let require_workspace config =
-  if String.equal
-       (Fs_compat.realpath_lenient (Filename.dirname (Board.persist_path ())))
-       (Fs_compat.realpath_lenient (Workspace.masc_dir config))
-  then Ok ()
-  else Error (Access_denied "review workspace does not own the active Board store")
+  let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+  match store.Board.workspace_masc_dir with
+  | Some workspace when String.equal workspace
+      (Fs_compat.realpath_lenient (Workspace.masc_dir config)) -> Ok ()
+  | Some _ | None ->
+    Error (Access_denied "review workspace does not own the active Board store")
 
 let require_visible authority (post : Board.post) =
   match post.visibility, authority with

@@ -272,6 +272,11 @@ type flusher_msg =
   | Sweep
 
 type store = {
+  workspace_masc_dir : string option;
+  (** Canonical workspace directory captured before the global store is loaded.
+      Unlike environment-derived path helpers, this identity does not change
+      when a later config resolution selects another workspace. [None] denotes
+      a standalone in-memory store with no workspace review authority. *)
   posts : (string, post) Hashtbl.t;
   comments : (string, comment) Hashtbl.t;
   vote_log : (string, vote_direction * float) Hashtbl.t;

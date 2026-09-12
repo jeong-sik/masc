@@ -332,6 +332,7 @@ type karma_event = {
 }
 
 type store = {
+  workspace_masc_dir: string option;
   posts: (string, post) Hashtbl.t;
   comments: (string, comment) Hashtbl.t;
   (* #10086: value carries [(direction, cast_ts)] so

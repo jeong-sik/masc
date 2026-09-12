@@ -6,6 +6,7 @@ type lane_output = {
   run_id : string;
   configuration_revision : string;
   package_revision : string;
+  outputs : Lane_addon_types.output_ports;
   observation_seq : int;
   output : Lane_addon_types.output;
   status : Lane_addon_types.coverage;
@@ -13,7 +14,7 @@ type lane_output = {
 type source =
   | Snapshot_file of { id : string; path : string }
   | Msx_capture of { id : string }
-  | Lane_output of { id : string; installation_id : string }
+  | Lane_output of { id : string; installation_id : string; output_id : string option }
   | Browser_document of { id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
 let text fields key = match List.assoc_opt key fields with
@@ -28,9 +29,17 @@ let parse_source = function
            else Ok (Snapshot_file {id;path})
        | Some (`String "msx_capture") -> Ok (Msx_capture {id})
        | Some (`String "lane_output") ->
+           let names = List.map fst fields in
+           let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
+             || List.exists (fun name -> not (List.mem name
+                 ["source_id"; "kind"; "installation_id"; "selection"; "output_id"])) names
+             then Error "lane_output contains duplicate or unknown fields" else Ok () in
            let* installation_id = text fields "installation_id" in
+           let* output_id = match List.assoc_opt "output_id" fields with
+             | None -> Ok None
+             | Some _ -> text fields "output_id" |> Result.map Option.some in
            (match List.assoc_opt "selection" fields with
-            | Some (`String "latest_completed") -> Ok (Lane_output {id;installation_id})
+            | Some (`String "latest_completed") -> Ok (Lane_output {id;installation_id;output_id})
             | _ -> Error "lane_output selection must be latest_completed")
        | Some (`String "browser_document") ->
            let* client_id = match List.assoc_opt "client_id" fields with
@@ -204,14 +213,28 @@ let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~enviro
   Ok (envelope ~id ~incarnation:(client ^ "/" ^ document_id)
     ~cursor:(`String evidence.uri) ~complete
     ~detail [observation])
-let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id =
+let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~output_id =
   let* captured = resolve_lane_output ~installation_id in
+  let* selection = match output_id with
+    | None -> Ok Lane_addon_types.All_lanes
+    | Some name -> (match List.assoc_opt name captured.outputs with
+        | Some selection -> Ok selection
+        | None -> Error ("upstream package does not expose output_id: " ^ name)) in
+  let selected = match selection with
+    | Lane_addon_types.All_lanes -> captured.output
+    | Lane_addon_types.Selected_lanes lanes ->
+        let identities = List.map (fun lane -> captured.instance_id ^ "/" ^ lane) lanes in
+        { captured.output with rows = List.filter (fun (row : Lane_addon_types.row) ->
+            List.mem row.lane_id identities) captured.output.rows } in
   let producer = `Assoc ["installation_id", `String captured.installation_id;
     "instance_id", `String captured.instance_id; "run_id", `String captured.run_id;
     "configuration_revision", `String captured.configuration_revision;
     "package_revision", `String captured.package_revision;
-    "observation_seq", `Int captured.observation_seq] in
-  let output = Lane_addon_types.output_to_json captured.output in
+    "observation_seq", `Int captured.observation_seq;
+    "output_id", Option.fold ~none:`Null ~some:(fun name -> `String name) output_id;
+    "output_selection", Lane_addon_types.output_selection_to_json selection;
+    "coverage_scope", `String "whole_producer"] in
+  let output = Lane_addon_types.output_to_json selected in
   let bytes = Yojson.Safe.to_string (`Assoc ["producer", producer; "output", output]) in
   if String.length bytes > max_bytes then Error "upstream output exceeds the remaining ingress envelope"
   else
@@ -235,8 +258,8 @@ let acquire ~store ~(package : Lane_addon_types.package) ~resolve_lane_output ~b
     let result = match source with
       | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
       | Msx_capture {id} -> msx_capture ~store ~id
-      | Lane_output {id;installation_id} ->
-          lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id
+      | Lane_output {id;installation_id;output_id} ->
+          lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~output_id
       | Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
           browser_document ~store ~max_bytes ~id ~selection
             ~tab_id ~target_id ~environment ~request_id in

@@ -28,6 +28,21 @@ let transcriber_of_kind = function
      voice_mcp carries a tool call, not audio. *)
   | Voice_config.Voice_mcp | Voice_config.Macos_say -> Does_not_transcribe
 
+(* What an endpoint reached over HTTP answered. A body carrying no [text]
+   string is not a silent microphone -- it is an answer this code does not
+   read -- and the probe reports the empty transcript as having heard nothing.
+   Kept apart here so that the one distinction the probe exists to draw is not
+   erased by a body it did not understand. *)
+let transcript_of_stt_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String transcript) -> Ok transcript
+     | Some _ -> Error "the endpoint answered with a text field that is not a string"
+     | None -> Error "the endpoint answered without a text field")
+  | _ -> Error "the endpoint answered with something that is not an object"
+;;
+
 (* One voice as an endpoint names it. The id is what a configuration stores;
    the name and the language are what let a person pick it. *)
 type catalogue_voice =
@@ -90,11 +105,24 @@ let list_voices endpoint =
   | Ok output -> Ok (say_catalogue_of_output output)
 ;;
 
+(* The container each kind writes. say encodes WAVE and cannot encode MP3
+   at all; everything reached over a wire answers MP3, which is what the
+   OpenAI-compatible /audio/speech and ElevenLabs both default to and what
+   the MCP bridge relays. Whisper_cli never speaks -- the branch that names
+   it refuses before a file is opened -- so its answer is never written. *)
+let clip_format_for_kind (kind : Voice_config.endpoint_kind) =
+  match kind with
+  | Voice_config.Macos_say -> Voice_bridge_core.Wav
+  | Voice_config.Openai_compat
+  | Voice_config.Elevenlabs_direct
+  | Voice_config.Voice_mcp
+  | Voice_config.Whisper_cli -> Voice_bridge_core.Mp3
+;;
+
 let audio_url_of_file audio_file =
-  match Filename.chop_suffix_opt ~suffix:".mp3" (Filename.basename audio_file) with
-  | Some token when token <> "" ->
-    Some (Masc_network_defaults.voice_audio_path token)
-  | _ -> None
+  match Voice_bridge_core.clip_token_of_path audio_file with
+  | Some token -> Some (Masc_network_defaults.voice_audio_path token)
+  | None -> None
 ;;
 
 let audio_payload_fields ~audio_file ~audio_device =
@@ -221,7 +249,9 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
       if Voice_runtime_overlay.transport_supports_http_tts adapter
       then (
-        let audio_file = make_audio_file () in
+        let audio_file =
+          make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+        in
         match
           speak_via_http_tts_to_file
             endpoint
@@ -309,7 +339,9 @@ let probe_tts ?(agent_id = "probe") ~message () =
                        (Voice_runtime_overlay.adapter_for_endpoint endpoint))
                 then Skipped "this endpoint kind does not synthesize over HTTP"
                 else (
-                  let output_file = make_audio_file () in
+                  let output_file =
+                    make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+                  in
                   (* The voice is resolved per endpoint: an id is provider
                      vocabulary, so the one that suits this endpoint is the one
                      to ask it for (#24068). *)
@@ -381,13 +413,9 @@ let probe_stt ~audio_file () =
                   | Over_http ->
                     (match transcribe_via_http_stt endpoint ~audio_file ~model with
                      | Ok json ->
-                       heard
-                         (match json with
-                          | `Assoc fields ->
-                            (match List.assoc_opt "text" fields with
-                             | Some (`String text) -> text
-                             | Some _ | None -> "")
-                          | _ -> "")
+                       (match transcript_of_stt_json json with
+                        | Ok transcript -> heard transcript
+                        | Error reason -> Refused reason)
                      | Error reason -> Refused reason)
                   | By_command ->
                     (match transcribe_via_command endpoint ~audio_file ~model with
@@ -643,7 +671,7 @@ let attempt_tts_endpoint
   | Voice_runtime_overlay.Openai_compat
   | Voice_runtime_overlay.Elevenlabs_direct
   | Voice_runtime_overlay.Macos_say ->
-    let audio_file = make_audio_file () in
+    let audio_file = make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind) in
     (match
        (match adapter.transport with
         | Voice_runtime_overlay.Macos_say ->
@@ -817,7 +845,9 @@ let try_http_tts_for_browser_audio
   let rec try_endpoints = function
     | [] -> None
     | endpoint :: rest ->
-      let audio_file = make_audio_file () in
+      let audio_file =
+        make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+      in
       (match
          speak_via_http_tts_to_file
            endpoint

@@ -7294,6 +7294,7 @@ let probe ?(needs_sandbox = false) tool_name args =
 
 let composable_output_probes =
   [ probe "BrowserRead" (`Assoc ["lane",`String "automation";"tabId",`Int 1])
+  ; probe "BrowserGoto" (`Assoc ["url", `String "https://example.org/probe"])
   ; probe "BrowserInteract" (`Assoc ["lane",`String "automation";"tabId",`Int 1;
       "action",`String "scroll";"x",`Int 0;"y",`Int 100;
       "expectedUrl",`String "https://example.org/probe"])
@@ -7581,6 +7582,9 @@ let test_composable_outputs_satisfy_declared_schema () =
          | `GET, "/session/owned/window" -> Ok (`String "fixture")
          | `POST, "/session/owned/window"
          | `POST, "/session/owned/frame"
+         (* Navigation: WebDriver answers null and the landing page is read
+            back through execute/sync, which the node fixture already serves. *)
+         | `POST, "/session/owned/url"
          | `DELETE, "/session/owned" -> Ok `Null
          | `POST, "/session/owned/execute/sync" ->
            let input = match body with

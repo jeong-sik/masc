@@ -408,15 +408,88 @@ let notify_reject_verification
    authenticated operator or typed system-LLM judge commits a verdict. Long-waiting
    obligations are surfaced from the activity-event stream, not a poll-timer. *)
 
-let stalled_board_content ~task_id ~verification_id ~gate ~detail =
-  Printf.sprintf
-    "Stalled task %s (vrf:%s) — review will not retry. gate=%s: %s. Forward \
-     path: the assignee resubmits with submit_for_verification (supersedes \
-     this verification), or an operator commits a HITL verdict."
-    task_id
-    verification_id
-    gate
-    detail
+type retry_delay =
+  | Full_interval of { seconds : float }
+  | Shared_timer
+
+type stall_disposition =
+  | Retry_scheduled of { delay : retry_delay }
+  | No_retry_armed
+
+(* The metadata spelling of the disposition and its inverse. The Board post
+   is the durable record the dedupe reads back, so the decoder lives next to
+   the encoder and returns [None] for any shape the encoder does not
+   produce. *)
+let retry_delay_to_json = function
+  | Full_interval { seconds } ->
+    `Assoc [ ("kind", `String "full_interval"); ("seconds", `Float seconds) ]
+  | Shared_timer -> `Assoc [ ("kind", `String "shared_timer") ]
+
+let stall_disposition_to_json = function
+  | Retry_scheduled { delay } ->
+    `Assoc
+      [ ("kind", `String "retry_scheduled")
+      ; ("retry_delay", retry_delay_to_json delay)
+      ]
+  | No_retry_armed -> `Assoc [ ("kind", `String "no_retry_armed") ]
+
+let retry_delay_of_json : Yojson.Safe.t -> retry_delay option = function
+  | `Assoc [ ("kind", `String "full_interval"); ("seconds", `Float seconds) ] ->
+    Some (Full_interval { seconds })
+  | `Assoc [ ("kind", `String "shared_timer") ] -> Some Shared_timer
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+  | `List _ -> None
+
+let stall_disposition_of_json : Yojson.Safe.t -> stall_disposition option = function
+  | `Assoc [ ("kind", `String "retry_scheduled"); ("retry_delay", delay) ] ->
+    (match retry_delay_of_json delay with
+     | Some delay -> Some (Retry_scheduled { delay })
+     | None -> None)
+  | `Assoc [ ("kind", `String "no_retry_armed") ] -> Some No_retry_armed
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+  | `List _ -> None
+
+(* Two dispositions are the same news when they agree on whether a retry is
+   armed. The delay is how soon, not whether. *)
+let same_disposition left right =
+  match left, right with
+  | Retry_scheduled _, Retry_scheduled _ -> true
+  | No_retry_armed, No_retry_armed -> true
+  | Retry_scheduled _, No_retry_armed | No_retry_armed, Retry_scheduled _ -> false
+
+(* A timer this stall armed fires after the full interval. A timer that was
+   already running fires when it fires; the post promises no number it does
+   not hold. *)
+let retry_delay_sentence = function
+  | Full_interval { seconds } -> Printf.sprintf "retry scheduled in %.0f s" seconds
+  | Shared_timer -> "retry scheduled when the shared retry timer fires"
+
+(* The sentence is rendered from the disposition the scheduling owner
+   reported after it acted, so the post cannot say one thing while the lane
+   armed another. *)
+let stalled_board_content ~task_id ~verification_id ~gate ~detail ~disposition =
+  match disposition with
+  | Retry_scheduled { delay } ->
+    Printf.sprintf
+      "Stalled task %s (vrf:%s) — %s. gate=%s: %s. The authority reviews \
+       this verification again on its own; resubmitting now would supersede \
+       that review."
+      task_id
+      verification_id
+      (retry_delay_sentence delay)
+      gate
+      detail
+  | No_retry_armed ->
+    Printf.sprintf
+      "Stalled task %s (vrf:%s) — no retry armed. gate=%s: %s. Forward path: \
+       the assignee resubmits with submit_for_verification (supersedes this \
+       verification), or an operator commits a HITL verdict. The authority's \
+       whole-backlog sweep (at boot, or after a failed backlog read) reviews \
+       it again without either."
+      task_id
+      verification_id
+      gate
+      detail
 
 let stalled_metadata
       ~(authority : Masc_domain.completion_authority)
@@ -424,6 +497,7 @@ let stalled_metadata
       ~verification_id
       ~gate
       ~detail
+      ~disposition
   =
   `Assoc
     ([ ("type", `String "verification_stalled")
@@ -433,6 +507,7 @@ let stalled_metadata
      @ completion_authority_fields authority
      @ [ ("gate", `String gate)
        ; ("detail", `String detail)
+       ; ("disposition", stall_disposition_to_json disposition)
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
 
@@ -447,37 +522,58 @@ let stalled_metadata
    answer that far out. *)
 let stall_lookback_posts = 200
 
-(* Whether this exact stall is already on the Board.
+(* The disposition the Board last told readers for this stall, or [None]
+   when it has told them nothing.
 
    The Board is what the repeat is about, so the Board is what decides. The
-   post carries its identity in typed metadata — [type], [verification_id],
-   [gate], [detail] — so this reads those fields rather than matching the
-   rendered sentence, and it asks the same question the metadata answers.
+   post carries its identity in typed metadata — [type], [task_id],
+   [verification_id], [gate] — and its news in [disposition]; this reads
+   those fields rather than matching the rendered sentence. [detail] is
+   evidence the post carries, not identity: a diagnostic that changes
+   wording while the disposition stands is not news.
 
-   A post that failed to land leaves nothing to find, so a stall whose notice
-   never reached anyone is reported again on the next sweep. *)
-let stall_already_on_the_board ~verification_id ~gate ~detail =
-  let same_stall (post : Board.post) =
+   The Board's default listing is ranked, not chronological, so the order is
+   taken here, by [created_at], newest first. A post whose [disposition] does
+   not decode to the closed type is not this contract's post and is skipped,
+   so it can neither silence a notice nor force one. A post that failed to
+   land leaves nothing to find, so a stall whose notice never reached anyone
+   is reported again on the next sweep. *)
+let latest_stall_disposition_on_the_board ~task_id ~verification_id ~gate =
+  let published (post : Board.post) =
     match post.meta_json with
-    | None -> false
+    | None -> None
     | Some (`Assoc fields) ->
-      let field name =
+      let text name =
         match List.assoc_opt name fields with
         | Some (`String value) -> Some value
         | Some _ | None -> None
       in
-      field "type" = Some "verification_stalled"
-      && field "verification_id" = Some verification_id
-      && field "gate" = Some gate
-      && field "detail" = Some detail
-    | Some _ -> false
+      let is name expected = Option.equal String.equal (text name) (Some expected) in
+      if is "type" "verification_stalled"
+         && is "task_id" task_id
+         && is "verification_id" verification_id
+         && is "gate" gate
+      then (
+        match List.assoc_opt "disposition" fields with
+        | None -> None
+        | Some disposition ->
+          (match stall_disposition_of_json disposition with
+           | None -> None
+           | Some disposition -> Some (post.created_at, disposition)))
+      else None
+    | Some _ -> None
   in
   Board_dispatch.list_posts
     ~hearth:"verification"
     ~post_kind_filter:Board.System_post
+    ~sort_by:Board_dispatch.Recent
     ~limit:stall_lookback_posts
     ()
-  |> List.exists same_stall
+  |> List.filter_map published
+  |> List.stable_sort (fun (left, _) (right, _) -> Float.compare right left)
+  |> function
+  | [] -> None
+  | (_, latest) :: _ -> Some latest
 
 let notify_stalled_verification
       ~(authority : Masc_domain.completion_authority)
@@ -485,17 +581,26 @@ let notify_stalled_verification
       ~verification_id
       ~gate
       ~detail
+      ~disposition
   =
-  if stall_already_on_the_board ~verification_id ~gate ~detail
+  let already_told =
+    match latest_stall_disposition_on_the_board ~task_id ~verification_id ~gate with
+    | None -> false
+    | Some latest -> same_disposition latest disposition
+  in
+  if already_told
   then ()
   else
   match
     Board_dispatch.create_post
       ~author:(Masc_domain.completion_authority_actor authority)
-      ~content:(stalled_board_content ~task_id ~verification_id ~gate ~detail)
+      ~content:
+        (stalled_board_content
+           ~task_id ~verification_id ~gate ~detail ~disposition)
       ~post_kind:Board.System_post
       ~meta_json:
-        (stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail)
+        (stalled_metadata
+           ~authority ~task_id ~verification_id ~gate ~detail ~disposition)
       ~visibility:Board.Internal
       ~hearth:"verification"
       ()
@@ -510,7 +615,12 @@ let notify_stalled_verification
 module For_testing = struct
   let verdict_event_json = verdict_event_json
   let stalled_board_content = stalled_board_content
+  let stall_disposition_of_json = stall_disposition_of_json
 
-  let stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail =
-    stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail
+  let stalled_metadata
+        ~authority ~task_id ~verification_id ~gate ~detail ~disposition
+    =
+    stalled_metadata
+      ~authority ~task_id ~verification_id ~gate ~detail ~disposition
+  ;;
 end

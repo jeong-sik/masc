@@ -129,7 +129,7 @@ let with_fixture f =
 let package directory mode : Types.package = {
   id = "worker-test"; revision = "fixture-1"; title = "Worker test";
   contributions = [ Types.Observe ]; image = "fixture/image";
-  command = [ "observer"; mode ]; directory;
+  command = [ "observer"; mode ]; directory; skills_directory = None;
   resources = { cpus = 0.5; memory_bytes = 67_108_864L;
                 pids = 16; max_reply_bytes = 4096 };
 }

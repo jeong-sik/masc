@@ -16,6 +16,13 @@ type backend = {
     (unit, string) result;
 }
 type configuration_owner = { id : string; source_path : string; revision : string }
+type skill_export_owner = Declaration of string | Instance of string
+type skill_export = { owner : skill_export_owner; instance_id : string; package : package }
+let skill_source_id = function
+  | Declaration id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("declaration\x00" ^ id)))
+  | Instance id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("instance\x00" ^ id)))
+let skill_export_handler = ref None
+let register_skill_export_handler handler = skill_export_handler := Some handler
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable phase : phase; mutable seq : int; mutable output : output;
@@ -608,6 +615,20 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations
      | Ok _ -> ());
     let nullable_string = function None -> `Null | Some s -> `String s in
+    let exports = entries m |> List.filter_map (fun e ->
+      match e.package.skills_directory, e.phase with
+      | None, _ | Some _, Detached -> None
+      | Some _, (Attached | Observing | Failed _ | Detaching) ->
+          let owner = match e.configuration with
+            | Some owner -> Declaration owner.id | None -> Instance e.instance_id in
+          Some {owner; instance_id=e.instance_id; package=e.package})
+      |> List.sort (fun a b -> String.compare (skill_source_id a.owner) (skill_source_id b.owner)) in
+    (match !skill_export_handler with
+     | None when exports <> [] -> add_issue directory "package Skill publisher is unavailable"
+     | None -> ()
+     | Some publish ->
+         (match publish ~config exports with
+          | Ok () -> () | Error message -> add_issue directory message));
     let declarations = List.map (fun (d : Lane_addon_config.declaration) ->
       let active = match live_for d.id with [e] -> Some e | _ -> None in
       let applied_revision = Option.bind active (fun e -> Option.map (fun o -> o.revision) e.configuration) in
@@ -676,5 +697,6 @@ module For_testing = struct
     Fun.protect ~finally:(fun () -> override := previous) f
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
-    Hashtbl.clear configuration_services; Hashtbl.clear managers; delivery_handler := None
+    Hashtbl.clear configuration_services; Hashtbl.clear managers;
+    delivery_handler := None; skill_export_handler := None
 end

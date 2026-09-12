@@ -327,6 +327,83 @@ let test_breadcrumb_written_when_takeover_kills () =
           | Server_startup_takeover.Already_running _ ->
               Alcotest.fail "unresponsive holder should be reclaimed"))
 
+(* The refusal an operator actually met (2026-09-13): the path was held, the
+   lease file named PID 14427, and `kill 14427` answered "no such process".
+   The number is written after the kernel lock is taken, so a refusal that
+   lands in that window reads whoever wrote it last -- and that writer can be
+   gone. Reported as a bare number it reads as "kill this", which is the one
+   thing that cannot work here.
+
+   Held by a live child, with a number nothing is running under: the refusal
+   has to say the number is stale rather than hand it over as a target. *)
+let test_base_path_lock_reports_a_recorded_owner_that_is_gone () =
+  with_base_and_run "startup-takeover-base-path-stale-owner"
+    (fun ~base_path ~run_dir ->
+    let ready_read, ready_write = Unix.pipe () in
+    let release_read, release_write = Unix.pipe () in
+    match Unix.fork () with
+    | 0 ->
+      close_quietly ready_read;
+      close_quietly release_write;
+      (match
+         Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+       with
+       | Server_startup_takeover.Base_path_acquired lease ->
+         ignore (Unix.write_substring ready_write "1" 0 1 : int);
+         let buffer = Bytes.create 1 in
+         ignore (Unix.read release_read buffer 0 1 : int);
+         Server_startup_takeover.release_base_path_lease lease;
+         exit 0
+       | Server_startup_takeover.Base_path_already_owned _ -> exit 2
+       | Server_startup_takeover.Base_path_rejected _ -> exit 3)
+    | child_pid ->
+      close_quietly ready_write;
+      close_quietly release_read;
+      Fun.protect
+        ~finally:(fun () ->
+          close_quietly ready_read;
+          close_quietly release_write;
+          if process_alive child_pid then stop_process child_pid)
+        (fun () ->
+           let buffer = Bytes.create 1 in
+           Alcotest.(check int) "child acquired lease" 1
+             (Unix.read ready_read buffer 0 1);
+           (* Advisory locks do not stop a write, which is exactly how the
+              file comes to disagree with the holder. Above the platform's
+              pid ceiling, so nothing can be running under it. *)
+           let absent_pid = 2_000_000 in
+           Alcotest.(check bool) "the planted number is not a live process"
+             false (process_alive absent_pid);
+           let lease_path = base_path_lock_path ~run_dir base_path in
+           let fd = Unix.openfile lease_path [ Unix.O_WRONLY ] 0o600 in
+           Unix.ftruncate fd 0;
+           let payload = Printf.sprintf "%d\n" absent_pid in
+           ignore
+             (Unix.write_substring fd payload 0 (String.length payload) : int);
+           close_quietly fd;
+           (match
+              Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+            with
+            | Server_startup_takeover.Base_path_already_owned { owner } ->
+              Alcotest.(check bool)
+                "a recorded owner that is gone is not offered as a target"
+                true
+                (match owner with
+                 | Server_startup_takeover.Owner_recorded_but_gone pid ->
+                   pid = absent_pid
+                 | Server_startup_takeover.Owner_running _
+                 | Server_startup_takeover.Owner_this_process _
+                 | Server_startup_takeover.Owner_unnamed -> false)
+            | Server_startup_takeover.Base_path_acquired lease ->
+              Server_startup_takeover.release_base_path_lease lease;
+              Alcotest.fail "a held BasePath lease was acquired twice"
+            | Server_startup_takeover.Base_path_rejected rejection ->
+              Alcotest.failf "valid BasePath was rejected: %s"
+                (Server_startup_takeover.base_path_lock_rejection_to_string
+                   rejection));
+           ignore (Unix.write_substring release_write "1" 0 1 : int);
+           ignore (Unix.waitpid [] child_pid : int * Unix.process_status)))
+
 let test_base_path_lock_rejects_concurrent_lease () =
   with_base_and_run "startup-takeover-base-path-live"
     (fun ~base_path ~run_dir ->
@@ -364,9 +441,18 @@ let test_base_path_lock_rejects_concurrent_lease () =
            (match
               Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
             with
-            | Server_startup_takeover.Base_path_already_owned { pid } ->
+            | Server_startup_takeover.Base_path_already_owned { owner } ->
+              (* A running child: the refusal names it and says so, which is
+                 what makes "kill it" the right instruction. *)
+              Alcotest.(check bool) "owner is reported as running" true
+                (match owner with
+                 | Server_startup_takeover.Owner_running _ -> true
+                 | Server_startup_takeover.Owner_this_process _
+                 | Server_startup_takeover.Owner_recorded_but_gone _
+                 | Server_startup_takeover.Owner_unnamed -> false);
               Alcotest.(check (option int)) "owner pid is observable"
-                (Some child_pid) pid
+                (Some child_pid)
+                (Server_startup_takeover.base_path_owner_pid owner)
             | Server_startup_takeover.Base_path_acquired lease ->
               Server_startup_takeover.release_base_path_lease lease;
               Alcotest.fail "concurrent BasePath lease was acquired twice"
@@ -423,11 +509,18 @@ let test_base_path_lock_rejects_same_process_symlink_alias () =
            match
              Server_startup_takeover.acquire_base_path_lock ~run_dir alias_base
            with
-           | Server_startup_takeover.Base_path_already_owned { pid } ->
+           | Server_startup_takeover.Base_path_already_owned { owner } ->
+             Alcotest.(check bool)
+               "symlink alias names this process, not a killable other" true
+               (match owner with
+                | Server_startup_takeover.Owner_this_process _ -> true
+                | Server_startup_takeover.Owner_running _
+                | Server_startup_takeover.Owner_recorded_but_gone _
+                | Server_startup_takeover.Owner_unnamed -> false);
              Alcotest.(check (option int))
                "symlink alias observes the same process-local owner"
                (Some (Unix.getpid ()))
-               pid
+               (Server_startup_takeover.base_path_owner_pid owner)
            | Server_startup_takeover.Base_path_acquired alias_lease ->
              Server_startup_takeover.release_base_path_lease alias_lease;
              Alcotest.fail
@@ -1135,6 +1228,8 @@ let () =
             test_breadcrumb_written_when_takeover_kills;
           Alcotest.test_case "concurrent BasePath lease blocks takeover" `Quick
             test_base_path_lock_rejects_concurrent_lease;
+          Alcotest.test_case "a recorded owner that is gone is named as stale"
+            `Quick test_base_path_lock_reports_a_recorded_owner_that_is_gone;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick
             test_base_path_lock_reclaims_stale_pid_file;
           Alcotest.test_case "same-process symlink alias is rejected" `Quick

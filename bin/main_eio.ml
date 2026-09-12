@@ -541,12 +541,40 @@ let acquire_pid_lock port =
 let acquire_base_path_lock ~run_dir base_path =
   match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
   | Server_startup_takeover.Base_path_acquired lease -> lease
-  | Server_startup_takeover.Base_path_already_owned { pid } ->
-      let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
+  | Server_startup_takeover.Base_path_already_owned { owner } ->
+      (* Each case gets its own instruction because only one of them is
+         "kill it". The lease writes its number after it takes the lock, so a
+         refusal can read the previous owner's number -- and telling an
+         operator to kill a process that is not there leaves them with a
+         failed kill and no next step. *)
+      let detail =
+        match owner with
+        | Server_startup_takeover.Owner_running pid ->
+            Printf.sprintf
+              "Another MASC runtime (PID %d) already owns base path %s. Kill \
+               it first: kill %d"
+              pid base_path pid
+        | Server_startup_takeover.Owner_this_process pid ->
+            Printf.sprintf
+              "This process (PID %d) already owns base path %s; it cannot \
+               take the path twice"
+              pid base_path
+        | Server_startup_takeover.Owner_recorded_but_gone pid ->
+            Printf.sprintf
+              "Base path %s is locked, but the lease names PID %d, which is \
+               not running. The lock belongs to a process the lease does not \
+               name -- the number is written after the lock is taken, so a \
+               refusal during that window reads the previous owner. Find the \
+               holder: ps -eo pid,command | grep 'masc start'"
+              base_path pid
+        | Server_startup_takeover.Owner_unnamed ->
+            Printf.sprintf
+              "Base path %s is locked and the lease names no process. Find \
+               the holder: ps -eo pid,command | grep 'masc start'"
+              base_path
+      in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
-        (Printf.sprintf
-           "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
-           owner base_path);
+        ("[FATAL] " ^ detail);
       exit 1
   | Server_startup_takeover.Base_path_rejected rejection ->
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"

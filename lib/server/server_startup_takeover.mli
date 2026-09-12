@@ -73,12 +73,44 @@ type base_path_lock_rejection =
       ; reason : string
       }
 
+(* Who holds the base path, as far as the contender could establish it.
+
+   The lease file's number is written after the kernel lock is taken and the
+   lease file's identity is verified, so a contender that reads it in that
+   window reads the previous owner's number -- and that owner may be gone. The
+   refusal used to carry the number alone, so the operator was told to kill a
+   process that did not exist and had nothing to go on when the kill failed
+   (observed 2026-09-13: seven refusals naming PID 14427, which `kill` reported
+   as "no such process", while PID 83338 held the path).
+
+   The liveness check is what separates the two, and it belongs here rather
+   than at each caller: the number alone cannot say which case it is. *)
+type base_path_owner =
+  | Owner_this_process of int
+      (** This process already holds the lease. A second acquisition in the
+          same process would take the same kernel lock, which is why the
+          in-process table is consulted first. *)
+  | Owner_running of int
+      (** The lease names a process that is running. Killing it releases the
+          path. *)
+  | Owner_recorded_but_gone of int
+      (** The lease names a process that is not running, so the lock belongs
+          to a process the lease does not name. Nothing is gained by killing
+          the recorded number. *)
+  | Owner_unnamed
+      (** The lease file carried no readable number. *)
+
 type base_path_acquire_result =
   | Base_path_acquired of base_path_lease
-  | Base_path_already_owned of { pid : int option }
+  | Base_path_already_owned of { owner : base_path_owner }
   | Base_path_rejected of base_path_lock_rejection
 
 val base_path_lock_rejection_to_string : base_path_lock_rejection -> string
+
+val base_path_owner_pid : base_path_owner -> int option
+(** The number the lease file carried, whatever became of that process. For a
+    caller that only reports or compares it; a caller that tells an operator
+    what to do must match on the variant instead. *)
 
 val pid_lock_path : int -> string
 

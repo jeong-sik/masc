@@ -76,9 +76,36 @@ type base_path_lock_rejection =
       ; reason : string
       }
 
+(* Who holds the base path, as far as the contender could establish it.
+
+   The lease file's number is written after the kernel lock is taken and the
+   lease file's identity is verified, so a contender that reads it in that
+   window reads the previous owner's number -- and that owner may be gone. The
+   refusal used to carry the number alone, so the operator was told to kill a
+   process that did not exist and had nothing to go on when the kill failed
+   (observed 2026-09-13: seven refusals naming PID 14427, which `kill` reported
+   as "no such process", while PID 83338 held the path).
+
+   The liveness check is what separates the two, and it belongs here rather
+   than at each caller: the number alone cannot say which case it is. *)
+type base_path_owner =
+  | Owner_this_process of int
+      (** This process already holds the lease. A second acquisition in the
+          same process would take the same kernel lock, which is why the
+          in-process table is consulted first. *)
+  | Owner_running of int
+      (** The lease names a process that is running. Killing it releases the
+          path. *)
+  | Owner_recorded_but_gone of int
+      (** The lease names a process that is not running, so the lock belongs
+          to a process the lease does not name. Nothing is gained by killing
+          the recorded number. *)
+  | Owner_unnamed
+      (** The lease file carried no readable number. *)
+
 type base_path_acquire_result =
   | Base_path_acquired of base_path_lease
-  | Base_path_already_owned of { pid : int option }
+  | Base_path_already_owned of { owner : base_path_owner }
   | Base_path_rejected of base_path_lock_rejection
 
 let base_path_lock_rejection_to_string = function
@@ -243,6 +270,20 @@ let pid_exists pid =
   with
   | Unix.Unix_error (Unix.ESRCH, _, _) -> false
   | Unix.Unix_error (Unix.EPERM, _, _) -> true
+;;
+
+let base_path_owner_pid = function
+  | Owner_this_process pid | Owner_running pid | Owner_recorded_but_gone pid ->
+    Some pid
+  | Owner_unnamed -> None
+;;
+
+(* The lease file's number, classified by whether that process is still there.
+   [pid_exists] answers EPERM as alive: a number owned by another uid is a
+   running process this operator cannot signal, which is still not "gone". *)
+let base_path_owner_of_recorded = function
+  | None -> Owner_unnamed
+  | Some pid -> if pid_exists pid then Owner_running pid else Owner_recorded_but_gone pid
 ;;
 
 let sleep_poll seconds = if seconds > 0.0 then ignore (Unix.select [] [] [] seconds)
@@ -1197,7 +1238,7 @@ let acquire_base_path_lock_with
       match Hashtbl.find_opt base_path_leases prepared.path with
       | Some (Active_lease _) ->
         (* NDT-OK: the OS process id is the observed owner identity. *)
-        Base_path_already_owned { pid = Some (Unix.getpid ()) }
+        Base_path_already_owned { owner = Owner_this_process (Unix.getpid ()) }
       | Some (Failed_close (_, rejection)) -> Base_path_rejected rejection
       | None ->
         (match open_lease_file prepared with
@@ -1272,7 +1313,9 @@ let acquire_base_path_lock_with
                    ~context:"kernel lease is owned by another process"
                    fd
                with
-               | Ok () -> Base_path_already_owned { pid }
+               | Ok () ->
+                 Base_path_already_owned
+                   { owner = base_path_owner_of_recorded pid }
                | Error rejection -> Base_path_rejected rejection)
             | exn ->
               let commit_rejection =

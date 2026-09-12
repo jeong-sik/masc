@@ -327,10 +327,10 @@ let observe_node_result
       (result : Executor.node_result)
   =
   let observed_result = node_observation_result result in
+  let committed = ref false in
   let observe () =
     let context = turn_context in
     let schedule = result.schedule in
-    let committed = ref false in
     Keeper_tool_call_log.log_call
       ~keeper_name:meta.Keeper_meta_contract.name
       ~tool_name:result.tool_name
@@ -429,7 +429,9 @@ let observe_node_result
       composition_tool
       (Keeper_tool_plan.Node_id.to_string result.node_id)
       (Printexc.to_string exn);
-    Ok ()
+    if not !committed && Tool_result.retained_artifacts result.result <> [] then
+      Error ("retained composition observation receipt failed: " ^ Printexc.to_string exn)
+    else Ok ()
 ;;
 
 let observe_composition_run_summary

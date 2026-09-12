@@ -5328,6 +5328,16 @@ type row_list = {
       (** put the cursor on a row and move the window to show it *)
 }
 
+(* The task whose detail is on screen, which is not the same as a detail id
+   being set: [render_surface] falls back to the list when the id names a row
+   the backlog no longer holds -- after an archived task link, or a refresh
+   that removed it. Asking the renderer's own question here keeps Home and End
+   on the surface the reader is looking at; a stale id used to send both keys
+   into a scroll nothing was drawing while the visible list refused them. *)
+let task_detail_on_screen (state : state) =
+  Masc_tui_task_selection.detail_row ~detail_id:state.task_detail_id
+    ~tasks:state.tasks_domain
+
 let row_list (state : state) : row_list option =
   (* The window follows a named row the same way it follows a step, through
      [surface_body_height] rather than [rows - sc_chrome]: a surface that
@@ -5552,9 +5562,31 @@ let row_list (state : state) : row_list option =
      it. The events column beside it and an open detail are readings rather
      than lists; [reading_pane] has those. *)
   | Overview
-    when state.task_focus = Right_pane && Option.is_none state.task_detail_id ->
+    when state.task_focus = Right_pane
+         && Option.is_none (task_detail_on_screen state) ->
       windowed ~count:(List.length state.tasks) ~cursor:state.task_cursor
         (fun index -> state.task_cursor <- index)
+  (* Under the Actions and Everything filters the ring is read by a cursor,
+     not by a scroll: [render_acting] recomputes the scroll from
+     [acting_cursor] every frame and reports both back, so a key that moved
+     only the scroll was undone before it was drawn. The Turns filter has no
+     cursor and stays a reading. *)
+  | Acting
+    when Option.is_none state.acting_detail
+         && state.acting_filter <> Masc_tui_acting.Turns ->
+      windowed
+        ~count:(List.length (acting_flat_entries state))
+        ~cursor:state.acting_cursor
+        (fun index -> state.acting_cursor <- index)
+  (* Same shape on the Runs tab: the drawing pulls [detail_scroll] to whatever
+     [keeper_run_cursor] names, which is why j and k move the cursor and set
+     the scroll to it. An edge jump has to name a run for the same reason. *)
+  | Keepers Keeper_detail
+    when state.detail_tab = Detail_runs && not state.context_inspector_open ->
+      let runs = List.length (selected_keeper_runs state) in
+      windowed ~count:runs ~cursor:state.keeper_run_cursor (fun index ->
+        state.keeper_run_cursor <- index;
+        state.detail_scroll <- index)
   (* Named rather than caught. A surface that grows a row cursor is added
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
@@ -5593,7 +5625,9 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
        | Some _ -> pane (fun v -> Repository_changes_diff_scroll v)
        | None -> None)
   | Overview ->
-      if Option.is_some state.task_detail_id then
+      (* The id alone is not the screen: one that names a task the backlog
+         dropped draws the list, and [row_list] owns that. *)
+      if Option.is_some (task_detail_on_screen state) then
         pane (fun v -> Task_detail v)
       else if state.task_focus = Left_pane then
         pane (fun v -> Overview_events v)
@@ -5602,11 +5636,17 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
       (match state.acting_detail with
        | Some _ -> pane (fun v -> Acting_detail_scroll v)
        (* The ring itself reads newest first, so Home is now. [g] already
-          says that; this gives the key every other reader uses. *)
-       | None -> pane (fun v -> Acting v))
+          says that; this gives the key every other reader uses. Only under
+          the Turns filter: the other two are read by a cursor and [row_list]
+          has them. *)
+       | None when state.acting_filter = Masc_tui_acting.Turns ->
+           pane (fun v -> Acting v)
+       | None -> None)
   (* Except with the context inspector open, where the body is that tab's
-     item list and [row_list] owns the cursor. *)
-  | Keepers Keeper_detail when not state.context_inspector_open ->
+     item list and [row_list] owns the cursor -- and except on the Runs tab,
+     where the drawing follows [keeper_run_cursor] and [row_list] has it. *)
+  | Keepers Keeper_detail
+    when (not state.context_inspector_open) && state.detail_tab <> Detail_runs ->
       pane (fun v -> Keeper_detail v)
   | Keepers Keeper_calls -> pane (fun v -> Keeper_calls v)
   | Approvals ->
@@ -18658,6 +18698,12 @@ and is loaded on demand through keeper_skill.
                   (if direction > 0 then
                      Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:page
                    else max 0 (state.system_logs_detail_scroll + (direction * page)))
+            (* The Runs tab is read by a cursor, so its page key names a run
+               the way Home and End do. Scrolling it instead wrote a value the
+               drawing pulled straight back to the selected run, which is the
+               same reason the edge keys had to move the cursor. *)
+            | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
+                move_list_by_rows state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
                 state.detail_scroll <-
                   (if direction > 0 then
@@ -19437,7 +19483,13 @@ and is loaded on demand through keeper_skill.
                     (state.runtime_params_cursor + 1);
                 state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
-                state.approval_detail_scroll <- state.approval_detail_scroll + 1
+                (* End writes a row past the end and the frame reports the
+                   real one back. A j pressed before that frame carries the
+                   sentinel into the addition, which wraps negative and throws
+                   the reader to the top -- the saturating step every other
+                   reading pane already uses. *)
+                state.approval_detail_scroll <-
+                  Masc_tui_types.scroll_down_from state.approval_detail_scroll ~by:1
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -20502,13 +20554,6 @@ and is loaded on demand through keeper_skill.
            state.acting_cursor <- 0;
            state.acting_scroll <- 0;
            state.acting_unseen <- 0
-       (* The footer has named g / G as newest / oldest since the surface was
-          written and only g answered. The ring's rows are built by the
-          drawing, so the oldest is a row past the end that the frame reports
-          back -- the same answer End gives, which is why both are spelled
-          once here. *)
-       | Some "G" when state.view = Acting ->
-           state.acting_scroll <- Masc_tui_types.clamped_scroll_end
        | Some "g"
          when (match state.view with
                | Keepers Keeper_list | Keepers Keeper_detail -> true

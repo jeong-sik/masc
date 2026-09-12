@@ -1,0 +1,88 @@
+name: Lane Add-on package images
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'addons/**'
+      - '.github/workflows/lane-addon-images.yml'
+permissions:
+  contents: read
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - id: discover
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          packages = [p.parent.name for p in sorted(Path('addons').glob('*/lane.toml'))
+                      if (p.parent / 'Dockerfile').is_file()]
+          matrix = {'include': [dict(package=package, arch=arch, runner=runner)
+              for package in packages for arch, runner in
+              [('amd64', 'ubuntu-24.04'), ('arm64', 'ubuntu-24.04-arm')]]}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('matrix=' + json.dumps(matrix) + '\n')
+          PY
+  image:
+    needs: packages
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.packages.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Build package image and retain identity
+        env:
+          PACKAGE_NAME: ${{ matrix.package }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          python3 - <<'PY'
+          import gzip, hashlib, json, os, shutil, subprocess, tomllib
+          from pathlib import Path
+          package = Path('addons') / os.environ['PACKAGE_NAME']
+          manifest_bytes = (package / 'lane.toml').read_bytes()
+          manifest = tomllib.loads(manifest_bytes.decode())
+          image = manifest['image']
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          proof = Path('image-proof'); proof.mkdir()
+          subprocess.run(['docker', 'build', '--label', 'org.opencontainers.image.revision=' + commit,
+              '-f', str(package / 'Dockerfile'), '-t', image, 'addons'], check=True)
+          raw = subprocess.check_output(['docker', 'image', 'inspect', image])
+          (proof / 'image-inspect.json').write_bytes(raw)
+          inspected, = json.loads(raw)
+          assert inspected['Architecture'] == os.environ['PACKAGE_ARCH']
+          archive = proof / 'image.tar.gz'
+          with gzip.open(archive, 'wb') as output:
+              process = subprocess.Popen(['docker', 'save', image], stdout=subprocess.PIPE)
+              try:
+                  shutil.copyfileobj(process.stdout, output)
+              finally:
+                  process.stdout.close()
+                  exit_code = process.wait()
+              if exit_code != 0:
+                  raise RuntimeError('docker save failed')
+          with archive.open('rb') as archived:
+              archive_sha256 = hashlib.file_digest(archived, 'sha256').hexdigest()
+          receipt = {'source_commit': commit, 'package': manifest['id'], 'image': image,
+              'image_id': inspected['Id'], 'architecture': inspected['Architecture'],
+              'manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
+              'archive_sha256': archive_sha256,
+              'workflow_run_id': os.environ['GITHUB_RUN_ID']}
+          (proof / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lane-addon-image-${{ matrix.package }}-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: image-proof/
+          compression-level: 0
+          if-no-files-found: error

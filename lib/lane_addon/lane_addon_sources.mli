@@ -2,7 +2,19 @@
     packages decide what those observations mean. Files are explicitly bound by
     the installer, never dereferenced from package output. *)
 val validate : Yojson.Safe.t -> (unit, string) result
+type lane_output = {
+  installation_id : string;
+  instance_id : string;
+  run_id : string;
+  configuration_revision : string;
+  package_revision : string;
+  observation_seq : int;
+  output : Lane_addon_types.output;
+  status : Lane_addon_types.coverage;
+}
+val dependencies : Yojson.Safe.t -> (string list, string) result
 val acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+  resolve_lane_output:(installation_id:string -> (lane_output, string) result) ->
   binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** The complete returned source array fits the package's ingress envelope.
     Unavailable sources retain explicit coverage entries. Bound file snapshots

@@ -10,7 +10,9 @@ type connection = {
 type backend = {
   start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
     on_created:(connection -> unit) -> (connection, string) result;
-  acquire : store:Lane_addon_store.t -> package:package -> binding:Yojson.Safe.t ->
+  acquire : store:Lane_addon_store.t -> package:package ->
+    resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+    binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
   recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
     (unit, string) result;
@@ -33,6 +35,7 @@ type entry = {
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
   mutable configuration : configuration_owner option;
+  input_installations : string list;
 }
 type manager = { store : Lane_addon_store.t; entries : (string, entry) Hashtbl.t;
   recovering : (string, unit) Hashtbl.t;
@@ -77,6 +80,8 @@ let wake e =
 let clear_wake e =
   let promise, resolver = Eio.Promise.create () in
   e.wake <- promise; e.resolver <- resolver; e.pending <- false
+let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
+  |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
 let status_coverage e = {
   source_id = e.instance_id; incarnation = e.instance_id;
   cursor = Some (string_of_int e.seq);
@@ -88,9 +93,30 @@ let status_coverage e = {
     | Failed message -> Some message
     | Detaching -> Some "cleanup pending; environment owners continue"
     | Detached -> Some "detached; history retained") }
+let resolve_lane_output m ~run_id ~installation_id =
+  let producers = entries m |> List.filter (fun e -> match e.configuration with
+    | Some owner -> owner.id = installation_id | None -> false) in
+  match producers with
+  | [e] when e.run_id <> run_id -> Error "upstream installation belongs to another run"
+  | [e] when e.stopping -> Error "upstream installation is being replaced or removed"
+  | [e] when e.seq = 0 -> Error "upstream installation has no completed output"
+  | [e] ->
+      (match e.configuration with
+       | Some owner -> Ok {Lane_addon_sources.installation_id; instance_id=e.instance_id;
+           run_id=e.run_id; configuration_revision=owner.revision; package_revision=e.package.revision;
+           observation_seq=e.seq; output=e.output; status=status_coverage e}
+       | None -> assert false)
+  | [] -> Error "upstream installation is unavailable"
+  | _ -> Error "multiple workers claim the upstream installation"
+let wake_dependents m producer =
+  match producer.configuration with
+  | None -> ()
+  | Some owner -> entries m |> List.iter (fun e ->
+      if e.running && not e.stopping && e.run_id = producer.run_id
+        && List.mem owner.id e.input_installations then wake e)
 let failed m e message =
   if not e.stopping then e.phase <- Failed message;
-  match persist m e with Ok () -> () | Error error ->
+  match persist m e with Ok () -> wake_dependents m e | Error error ->
     if not e.stopping then e.phase <- Failed (message ^ "; binding persistence: " ^ error)
     else Log.Misc.error "Lane stopped binding persistence: %s" error
 let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
@@ -99,7 +125,7 @@ let fork_isolated ~sw f = Eio.Fiber.fork ~sw (fun () ->
   | exn -> Log.Misc.error "Lane Add-on background boundary: %s" (Printexc.to_string exn))
 let release_detached m e =
   if e.phase = Detached && not e.running && not e.cleanup_running
-  then (Hashtbl.remove m.entries e.instance_id; m.configuration_nudge ())
+  then (Hashtbl.remove m.entries e.instance_id; wake_dependents m e; m.configuration_nudge ())
 let publish_resource lifecycle e container_id detail =
   Lane_addon_resource_events.publish lifecycle
     { instance_id = e.instance_id; run_id = e.run_id;
@@ -137,6 +163,7 @@ let stop_entry ~sw ~backend m e =
                  container_id (Some message));
           (match persist m e with Ok () -> () | Error message ->
             e.phase <- Failed ("cleanup state persistence: " ^ message));
+          wake_dependents m e;
           e.cleanup_running <- false;
           release_detached m e)
 let namespace e seq output =
@@ -176,7 +203,8 @@ let run ~sw backend m e =
                 if e.stopping then loop () else (
                   e.phase <- Observing;
                   let result =
-                    let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding in
+                    let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding
+                      ~resolve_lane_output:(resolve_lane_output m ~run_id:e.run_id) in
                     let* output = c.observe ~binding:e.binding ~sources in
                     let seq = e.seq + 1 in
                     let output = namespace e seq output in
@@ -190,7 +218,8 @@ let run ~sw backend m e =
                   (match result with
                    | Ok (seq, output) -> e.seq <- seq; e.output <- output;
                        if not e.stopping then e.phase <- Attached;
-                       (match persist m e with Ok () -> () | Error message -> failed m e message)
+                       (match persist m e with Ok () -> wake_dependents m e
+                        | Error message -> failed m e message)
                    | Error message -> failed m e message);
                   loop ()))
             in loop ());
@@ -230,8 +259,6 @@ let manager config =
                      recovering = Hashtbl.create 4; configuration_mutex = Eio.Mutex.create ();
                      configuration_status = `Null; configuration_nudge = (fun () -> ()) } in
       Hashtbl.add managers root m; m
-let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
-  |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
 let notify_activity ~config =
   if Eio_context.root_switch_on_current_domain () then
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
@@ -381,13 +408,31 @@ let slice m args =
   | `Assoc fields -> Ok (`Assoc (("complete", `Bool complete) :: fields))
   | _ -> assert false
 
+let validate_connection m ~run_id ~configuration_id ~binding =
+  let* input_installations = Lane_addon_sources.dependencies binding in
+  let graph = entries m |> List.filter_map (fun e -> match e.configuration with
+    | Some o when not e.stopping && e.run_id = run_id -> Some (o.id, e.input_installations)
+    | _ -> None) in
+  let graph = (configuration_id, input_installations) :: List.remove_assoc configuration_id graph in
+  let rec visit trail id =
+    if List.mem id trail then Error ("cyclic lane_output connection: " ^ String.concat " -> " (List.rev (id :: trail)))
+    else match List.assoc_opt id graph with
+      | None -> Ok () (* An unavailable upstream has no active dependency edges. *)
+      | Some dependencies -> List.fold_left (fun result dependency ->
+          let* () = result in visit (id :: trail) dependency) (Ok ()) dependencies in
+  let* () = visit [] configuration_id in
+  Ok input_installations
+
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
+  let* input_installations = match configuration with
+    | None -> Lane_addon_sources.dependencies binding
+    | Some owner -> validate_connection m ~run_id ~configuration_id:owner.id ~binding in
   let promise, resolver = Eio.Promise.create () in
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
     phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
     stopping = false; cleanup_running = false; wake = promise; resolver; pending = false;
     running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
-    cancel_worker = None; configuration } in
+    cancel_worker = None; configuration; input_installations } in
   let* () = persist m e in
   Hashtbl.add m.entries e.instance_id e;
   wake e; run ~sw (backend ()) m e;
@@ -396,6 +441,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
 let detach_entry ~sw m e =
   (match e.phase with Detached -> () | _ ->
     e.stopping <- true; e.phase <- Detaching; wake e;
+    wake_dependents m e;
     stop_entry ~sw ~backend:(backend ()) m e);
   let* () = persist m e in Ok (entry_json e)
 
@@ -595,7 +641,9 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Error _ -> ()
      | Ok sw when can_apply ->
          List.iter (fun (d : Lane_addon_config.declaration) ->
-           match live_for d.id with
+           match validate_connection m ~run_id:d.run_id ~configuration_id:d.id ~binding:d.binding with
+           | Error message -> add_issue ~id:d.id d.source_path message
+           | Ok _ -> match live_for d.id with
            | [e] ->
                let owner = {id=d.id; source_path=d.source_path; revision=d.revision} in
                (match e.configuration with
@@ -688,7 +736,9 @@ module For_testing = struct
   type nonrec backend = backend = {
     start : sw:Eio.Switch.t -> instance_id:string -> package:package ->
       on_created:(connection -> unit) -> (connection, string) result;
-    acquire : store:Lane_addon_store.t -> package:package -> binding:Yojson.Safe.t ->
+    acquire : store:Lane_addon_store.t -> package:package ->
+      resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
+      binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
       (unit, string) result;

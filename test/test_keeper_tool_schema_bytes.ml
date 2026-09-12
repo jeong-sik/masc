@@ -157,7 +157,18 @@ open Alcotest
    (+979 bytes). What it bought: a Keeper hands a generated binary to a peer
    through the workspace blob store, without either side touching the other's
    host paths. *)
-let ceiling_bytes = 106_394
+(* 2026-09-12: 107,631 across 124 tools. PR adds keeper_constitution_write and
+   keeper_constitution_remove (+1,237 bytes). What it bought: the keepers of a
+   world write the norms they agreed on into the one place every keeper there
+   reads, instead of an operator pasting them into a prompt override from the
+   dashboard -- the only path that existed (RFC-0442). *)
+(* Generic package action submission and receipt reading add two deferred
+   tools. CI 34698460831 measured 109,254 bytes / 126 tools at ff6f80564b.
+   Shortening the action summary by 18 ASCII bytes gives 109,236, with no
+   added headroom. These tools connect optional package environments through
+   one domain-independent path; package installation adds no per-domain tool.
+   CI verifies the production renderer; this is not a Keeper behavior gate. *)
+let ceiling_bytes = 109_236
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -236,6 +247,8 @@ let all_surface_golden_names =
   ; "keeper_memory_search"
   ; "keeper_memory_retract"
   ; "keeper_memory_write"
+  ; "keeper_constitution_write"
+  ; "keeper_constitution_remove"
   ; "keeper_person_note_set"
   ; "keeper_spawn"
   ; "keeper_spawn_read"
@@ -311,6 +324,8 @@ let all_surface_golden_names =
   ; "masc_library_add"
   ; "masc_library_list"
   ; "masc_lane_attach"
+  ; "masc_lane_act"
+  ; "masc_lane_action_status"
   ; "masc_lane_detach"
   ; "masc_lane_evidence"
   ; "masc_lane_inspect"

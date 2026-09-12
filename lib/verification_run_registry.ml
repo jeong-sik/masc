@@ -395,6 +395,8 @@ let status_label = function
   | Completed { outcome; _ } -> outcome_label outcome
 ;;
 
+let infrastructure_stage_label = Payload.infrastructure_stage_to_string
+
 let outcome_detail_fields = function
   | Approved { reason } | Rejected { reason } -> [ "reason", `String reason ]
   | Commit_failed { detail }

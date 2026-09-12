@@ -443,6 +443,14 @@ let handle_memory_write_with_outcome
     ~args
 ;;
 
+let handle_constitution_write_with_outcome ~config ~(meta : keeper_meta) ~args =
+  Keeper_tool_constitution_runtime.write_with_outcome ~config ~meta ~args
+;;
+
+let handle_constitution_remove_with_outcome ~config ~(meta : keeper_meta) ~args =
+  Keeper_tool_constitution_runtime.remove_with_outcome ~config ~meta ~args
+;;
+
 let handle_memory_retract_with_outcome
       ~config
       ~(meta : keeper_meta)

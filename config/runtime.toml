@@ -538,6 +538,35 @@ supports-image-input = true
 supports-audio-input = true
 supports-multimodal-inputs = true
 
+[models.qwen3-8-27b]
+# Local Ollama model already resident on this machine. Measured 2026-09-12 with
+# `/api/show` and `/api/chat`: 27.3B Q4_K_M, 262144 context, capabilities
+# tools/thinking/vision, 7.2 tok/s generate over a 298-token answer.
+api-name = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen3-8-27b.capabilities]
+# Same transport constraint as the gemma4 rows above: AGENT_CORE native Ollama
+# /api/chat does not serialize tool_choice (agent_core backend_ollama.ml:24), so
+# a forced tool choice would be dropped without an error.
+supports-tool-choice = false
+# Qwen3.8 answers the generic Ollama top-level `think` field rather than a
+# chat-template token. Probed 2026-09-12: `"think": false` suppressed the
+# reasoning block, and a tools request returned get_weather(city="Seoul").
+thinking-control-format = "ollama_think"
+supports-top-k = true
+supports-seed = true
+# `/api/show` reports vision, and a 64x64 PNG answered in 9.3s end to end
+# (2026-09-12). Latency on full-size screenshots is NOT measured, which is why
+# this runtime is deliberately left out of [runtime] media_failover.
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama.qwen3-8-27b]
+
 [ollama_cloud.deepseek-v4-flash]
 
 [deepseek.deepseek-v4-pro]

@@ -79,15 +79,17 @@ candidates = ["native.no_tools", "binding.sample"]
       ~base_path:root ~system_prompt:"Tool requirement dispatch fixture."
       ~goal:"Answer the request." ~tools ~agent_core_tools:tools ~tool_requirement
       ?provider_config_transform ?output_contract
-      ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ error -> errors := (runtime_id,error) :: !errors)
+      ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch error -> errors := (runtime_id,dispatch,error) :: !errors)
       ~sw ~net:env#net () in
   (match run ~tool_requirement:Required.Required ~tools:[tool] "required_tools_fixture" with
    | Ok result -> check string "declared supported candidate selected" "good.sample" result.selected_runtime_id
    | Error e -> fail (Agent_core.Error.to_string e));
-  let classified = List.rev !errors |> List.map (fun (runtime_id,error) ->
+  let classified = List.rev !errors |> List.map (fun (runtime_id,_dispatch,error) ->
     match Required.of_core_error error with
     | Some failure -> runtime_id, failure.Required.reason
     | None -> fail "candidate lost typed tool support reason") in
+  check bool "tool-surface refusals are reported as rejected before dispatch, never as the candidate's answer" true
+    (List.for_all (fun (_,dispatch,_) -> dispatch = Keeper_attempt_dispatch.Rejected_before_dispatch) !errors);
   check bool "execution-owner and binding refusals remain distinct" true
     (classified=["native.no_tools",Required.Model_tools_disabled;"binding.sample",Required.Binding_tools_unsupported]);
   check bool "unsupported native owner never launched" false (Sys.file_exists native_marker);

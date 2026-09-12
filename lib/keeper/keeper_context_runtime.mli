@@ -143,6 +143,7 @@ val build_keeper_system_prompt
   :  instructions:string
   -> ?keeper_name:string
   -> ?workspace_root:string
+  -> ?constitution:string
   -> unit
   -> string
 

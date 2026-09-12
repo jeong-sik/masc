@@ -72,6 +72,12 @@ let chat_markdown_cache_capacity = 1024
 
 
 
+(* What makes one rendered entry distinct from another, as the cache sees it.
+   The cache is polymorphic in its identity, so it compares whole records --
+   no field is ever named on the way out. The observed time and the entry
+   index are here because two entries from the same keeper and the same
+   request differ only in those. The comparison reads them; no projection
+   does, which is the difference the unused-field warning cannot see. *)
 type chat_markdown_identity = {
   cmi_style : Message_layout.style;
   cmi_keeper_name : string;
@@ -79,6 +85,7 @@ type chat_markdown_identity = {
   cmi_observed_at : float option;
   cmi_entry_index : int;
 }
+[@@warning "-69"]
 
 let chat_markdown_cache =
   Markdown_cache.create ~capacity:chat_markdown_cache_capacity
@@ -560,7 +567,11 @@ let keeper_message_identity ~max_cells state keeper_name =
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
-           let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+           let runtime_id =
+             Keeper_chat_transcript.runtime_identity_text ~keeper_name
+               ~configured_runtime:row.kr_runtime_id
+               (Option.map (fun live -> live.tl_transcript) state.msg_live)
+           in
            let prefix =
              Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)

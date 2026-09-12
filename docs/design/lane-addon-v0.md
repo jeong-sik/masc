@@ -40,6 +40,9 @@ observe와 derive는 역할이며 성숙도 순서가 아니다. v0는 state/act
 worker의 MCP는 전송 규약이다. 제품의 추가 단위는 도구 목록이 아니라 관측·관계·시간·표현이다.
 코어가 도메인 의미를 해석하지 않고 공통 row/coverage를 검사하고 표시한다.
 
+파일로 설치할 때는 별도의 `<resolved-config-root>/lane-addons/*.toml` 선언이 패키지와 binding을
+연결한다. 지원하는 예제, 반영 시점, 설정 오류와 제거의 의미는 [TOML 설치 안내](../guides/lane-addon-toml.md)를 따른다.
+
 run_id는 관측 묶음의 식별자다. 별도의 MASC 실행기나 격리된 기억·inbox를 뜻하지 않는다.
 각 설치 instance_id는 패키지와 binding, namespace, worker 소유권을 식별한다.
 같은 패키지를 두 번 붙여도 행과 증거 선택이 충돌하지 않는다.
@@ -83,6 +86,11 @@ Slice는 질의다. 저장하는 것은 원천 관측과 파생 출력, 설치 �
 질의는 source별 incarnation/cursor/누락·지연을 반환한다. 미래의 모든 과거 질의를 복구할 수
 있다고 약속하지 않는다. 이미 Keeper가 사용한 선택 근거는 detach와 원천 교체 뒤에도 읽혀야 한다.
 
+이력 질의는 선택한 사건을 응답 공간에 먼저 담고, 남은 공간에는 선택한 기록의 source coverage를
+우선 담는다. 나머지 coverage를 다 담지 못하면 누락을 표시하고 partial로 반환한다.
+coverage에는 독립적인 시각이 없으므로 시간창 밖이라고 추정해 버리거나 완전함을 주장하지 않는다.
+선택한 사건과 coverage를 분리해 읽는 두 번의 스캔은 같은 highwater에서 멈춘다.
+
 ## 진행과 장애 경계
 
 한 instance에 독립 Docker container와 server-owned fiber를 둔다. Keeper 턴 switch를 쓰지 않는다.
@@ -95,7 +103,9 @@ CPU·memory·pids·응답 크기는 TOML 자원 계약이며 실제 Docker 적�
 detach는 정확한 container ID의 제거와 부재를 확인한다. Docker CLI 종료를 container 종료로 대체하지 않는다.
 daemon 장애로 제거를 확인하지 못하면 cleanup incomplete다. 다른 Lane은 진행한다.
 특히 Docker create 응답 이전에 daemon이 멈추면 아직 컨테이너 ID를 확보하지 못한 상태다.
-그 구간의 detach를 완료로 표시하지 않으며, 프로세스 재시작 후 자동 복구를 보장하지 않는다.
+그 구간의 detach를 완료로 표시하지 않는다. 재시작 후 ID가 없는 설치는 해당 인스턴스의
+정확한 container 이름으로 찾고 이름·소유권 label·실제 ID를 확인한 뒤 제거한다. Docker 조회와
+제거 후 부재 확인이 성공해야 정리가 완료된다. 조회 실패나 소유권 불일치를 정상 제거로 바꾸지 않는다.
 플러그인의 initialize/observe hang과 Docker daemon 자체의 장애를 별도 결과로 기록한다.
 
 근거 전달은 기존 Keeper 메시지 경로를 사용한다. 전달 영수증과 Keeper의 실제 읽기·조치,

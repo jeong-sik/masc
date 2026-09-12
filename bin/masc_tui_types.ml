@@ -2009,13 +2009,18 @@ let identity_filter_rows ~providers filter =
     ; ""
     ]
 
-(* Each block above the list brings its own trailing blank, so two of them
-   do not stack two blanks and none of them leaves the list flush against
-   the hint. *)
-let identity_preamble ~keeper ~notice =
-  ("  Move with arrows, enter to connect " ^ keeper
-   ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
-  :: "" :: notice
+(* What sits between the divider and the provider list. Only the notice now:
+   the keys were spelled out here in a sentence that the tab's own hint row
+   already carries -- [ ]:tab, arrows+enter:connect, T:toggle, A:app, /:filter,
+   R:refresh -- and of the two copies this was the one that got cut, at
+   eighty columns and at a hundred and fifty. The keeper it connects to is
+   named in the title row two lines above. What only the sentence said, that A
+   asks for a Client ID, moved into that binding's help.
+
+   Still a function rather than the notice itself: [identity_provider_line]
+   reads it to know which row the list starts on, so a block added here moves
+   the cursor's target with it instead of drifting from a count written twice. *)
+let identity_preamble ~notice = notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -2024,7 +2029,7 @@ let identity_preamble ~keeper ~notice =
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
 let identity_provider_line ~notice ~index =
-  List.length (identity_preamble ~keeper:"" ~notice) + index
+  List.length (identity_preamble ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no

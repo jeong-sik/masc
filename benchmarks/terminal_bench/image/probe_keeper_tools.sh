@@ -38,10 +38,6 @@ key="$(eval printf '%s' "\${${key_env}:-}")"
 [[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
 [[ -x "${BENCH_DIR}/dist/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
 
-# Render under the bench directory, not mktemp: Docker Desktop shares the
-# checkout but not /var/folders, and an unshared bind mount arrives as an
-# empty directory rather than an error. That silently cost a run — masc seeded
-# a default config over the empty mount and answered "Model setup required".
 cfg="${BENCH_DIR}/configs/out-probe"
 rm -rf "${cfg}"
 cleanup() {
@@ -60,22 +56,24 @@ print(render_arm('k', '${RUNTIME_ID}', 'high', out_root=Path('${cfg}')))
 
 echo "== boot container ${IMAGE}"
 docker run -d --name "${NAME}" --platform "${PLATFORM}" \
-  -v "${BENCH_DIR}/dist:/opt/masc-bench/bin:ro" \
-  -v "${BENCH_DIR}/driver:/opt/masc-bench/driver:ro" \
-  -v "${cfg}/k:/opt/masc-bench/config:ro" \
   -e "${key_env}=${key}" \
   -e "BENCH_RUNTIME_ID=${RUNTIME_ID}" \
   -e "BENCH_KEEPER_POOL=${POOL}" \
   ${GH_TOKEN:+-e "GH_TOKEN=${GH_TOKEN}"} \
   "${IMAGE}" sleep infinity >/dev/null || { echo "STAGE_FAIL docker-run" >&2; exit 1; }
 
-# An unshared bind mount is empty, not an error, so check before spending a
-# bootstrap on it.
-mounted="$(docker exec "${NAME}" sh -c 'ls /opt/masc-bench/config | wc -l')"
-if [[ "${mounted//[[:space:]]/}" = "0" ]]; then
-  echo "STAGE_FAIL config-mount-empty (is ${cfg} shared with Docker?)" >&2
-  exit 1
-fi
+# Copy rather than bind-mount, for the same reason harbor uploads: a bind
+# mount ties the run to the host path staying put and shared. Docker Desktop
+# does not share /var/folders (an unshared mount arrives empty, not as an
+# error), and a git operation in this worktree mid-run swaps the directory
+# inode out from under a live mount. Both cost a run before this changed.
+docker exec "${NAME}" mkdir -p /opt/masc-bench/bin || { echo "STAGE_FAIL mkdir" >&2; exit 1; }
+for f in masc masc-exec-shim gh; do
+  [[ -f "${BENCH_DIR}/dist/${f}" ]] && docker cp "${BENCH_DIR}/dist/${f}" "${NAME}:/opt/masc-bench/bin/${f}"
+done
+docker cp "${BENCH_DIR}/driver" "${NAME}:/opt/masc-bench/driver"
+docker cp "${cfg}/k" "${NAME}:/opt/masc-bench/config"
+docker exec "${NAME}" chmod -R +x /opt/masc-bench/bin /opt/masc-bench/driver
 
 echo "== bootstrap"
 if ! docker exec \
@@ -94,11 +92,16 @@ fi
 # the same client the episode driver uses, rather than a second hand-rolled
 # one. Nothing keeper-specific goes through REST, because an MCP client cannot
 # reach REST.
+# mcp.sh keeps MCP_SESSION_ID in a shell variable, and every docker exec is a
+# fresh shell, so each call initializes its own session before using it.
+# Skipping that answers "Mcp-Session-Id header required".
 mcp() {
   local id="$1" tool="$2" args="$3" secs="${4:-120}"
   docker exec "${NAME}" bash -c '
+    set -o pipefail
     export MCP_TOKEN="$(cat /opt/masc-bench/token)"
     source /opt/masc-bench/driver/mcp.sh
+    mcp_init >/dev/null || { echo "mcp_init failed" >&2; exit 1; }
     mcp_call "$1" "$2" "$3" "$4"' _ "${id}" "${tool}" "${args}" "${secs}"
 }
 

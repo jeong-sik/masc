@@ -62,12 +62,37 @@ let test_a_background_read_does_not_reset_the_visible_one () =
   check (option int) "a tab nobody asked for measures nothing" None
     (Types.pending_elapsed_s ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_sandbox ~keeper:"analyst"));
-  (* Asking again replaces that tab's start rather than stacking a second. *)
+  (* Asking again does not restart the count. The Identity tab polls while an
+     OAuth attachment settles, and the wait being measured is the operator's,
+     which those polls do not interrupt. *)
   Types.mark_detail_read_started state ~tab:Types.Detail_instructions
     ~keeper:"analyst" ~now_ns:(ns 96);
-  check (option int) "R restarts the count for that tab" (Some 4)
+  check (option int) "asking again keeps the first start" (Some 90)
     (Types.pending_elapsed_s ~now_ns:(ns 100)
        (Types.detail_read_started state ~tab:Types.Detail_instructions
+          ~keeper:"analyst"))
+
+let test_the_wait_ends_when_the_answer_arrives () =
+  (* A poll that completes with nothing to show has not ended the wait; the view
+     being populated has. So the stamp is cleared where the view is set, and the
+     next wait starts from the next ask. *)
+  let state = fresh () in
+  Types.mark_detail_read_started state ~tab:Types.Detail_identity
+    ~keeper:"analyst" ~now_ns:(ns 10);
+  check (option int) "waiting" (Some 90)
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state ~tab:Types.Detail_identity
+          ~keeper:"analyst"));
+  Types.clear_detail_read state ~tab:Types.Detail_identity ~keeper:"analyst";
+  check (option int) "answered, so nothing is being waited for" None
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state ~tab:Types.Detail_identity
+          ~keeper:"analyst"));
+  Types.mark_detail_read_started state ~tab:Types.Detail_identity
+    ~keeper:"analyst" ~now_ns:(ns 100);
+  check (option int) "and the next wait starts from the next ask" (Some 0)
+    (Types.pending_elapsed_s ~now_ns:(ns 100)
+       (Types.detail_read_started state ~tab:Types.Detail_identity
           ~keeper:"analyst"))
 
 let test_the_same_tab_for_two_keepers_is_timed_apart () =
@@ -133,5 +158,7 @@ let () =
             test_a_background_read_does_not_reset_the_visible_one
         ; test_case "the same tab for two keepers is timed apart" `Quick
             test_the_same_tab_for_two_keepers_is_timed_apart
+        ; test_case "the wait ends when the answer arrives" `Quick
+            test_the_wait_ends_when_the_answer_arrives
         ] )
     ]

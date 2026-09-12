@@ -4993,10 +4993,22 @@ let pending_elapsed_s ~now_ns started_ns =
 let detail_read_started (state : state) ~tab ~keeper =
   List.assoc_opt (tab, keeper) state.detail_read_started_at
 
+(* The first ask wins. What this stamp answers is how long the operator has been
+   looking at a tab with nothing on it, and that wait does not restart when the
+   TUI asks again: the Identity tab polls while an OAuth attachment settles, so a
+   stamp replaced on every ask sat at zero for as long as the polling lasted.
+   {!clear_detail_read} is what ends a wait -- the answer arriving. *)
 let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
   let key = (tab, keeper) in
+  if not (List.mem_assoc key state.detail_read_started_at) then
+    state.detail_read_started_at <- (key, now_ns) :: state.detail_read_started_at
+
+(* The wait is over: this tab has its answer for this Keeper. Called where the
+   view is populated, not where a request completes -- a poll that completes
+   with nothing to show has not ended the operator's wait. *)
+let clear_detail_read (state : state) ~tab ~keeper =
   state.detail_read_started_at <-
-    (key, now_ns) :: List.remove_assoc key state.detail_read_started_at
+    List.remove_assoc (tab, keeper) state.detail_read_started_at
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor

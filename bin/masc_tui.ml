@@ -11486,6 +11486,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok lines ->
             state.keeper_config_view <- Some (keeper_name, lines);
+            Masc_tui_types.clear_detail_read state ~tab:Detail_instructions ~keeper:keeper_name;
             state.keeper_config_view_error <- None
         | Error detail -> state.keeper_config_view_error <- Some detail)
   | Keeper_sandbox_view_loaded (keeper_name, result) -> (
@@ -11498,6 +11499,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok reading ->
             state.keeper_sandbox_view <- Some (keeper_name, reading);
+            Masc_tui_types.clear_detail_read state ~tab:Detail_sandbox ~keeper:keeper_name;
             state.keeper_sandbox_view_error <- None
         | Error detail -> state.keeper_sandbox_view_error <- Some detail)
   | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
@@ -11919,6 +11921,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok lines ->
             state.github_identity_view <- Some (keeper_name, lines);
+            Masc_tui_types.clear_detail_read state ~tab:Detail_github ~keeper:keeper_name;
             state.github_identity_view_error <- None
         | Error detail -> state.github_identity_view_error <- Some detail)
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
@@ -11945,6 +11948,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         match result with
         | Ok providers ->
             state.identity_view <- Some (keeper_name, providers);
+            Masc_tui_types.clear_detail_read state ~tab:Detail_identity ~keeper:keeper_name;
             state.identity_view_error <- None;
             (* The login this TUI started has landed once the service it was
                for reports tools. Clearing it is what stops the tick from

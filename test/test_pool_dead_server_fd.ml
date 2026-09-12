@@ -190,7 +190,31 @@ let test_establishment_errors () =
       ~connect:(fun succeeds -> if not succeeds then raise resource_error)
       ~create:(fun selected ->
         Alcotest.(check bool) "client receives reachable address" true selected;
-        Ok "created"))
+        Ok "created"));
+  (* A TCP connect that lands says the address answers, not that the endpoint
+     on it works. A host on both families with a broken TLS listener on the
+     first address accepted the probe and failed in [create]; the walk ended
+     there and the whole host went into cooldown with one healthy address
+     unused. *)
+  let tried = ref [] in
+  Alcotest.(check (result string string)) "a client failure walks on"
+    (Ok "created on the second")
+    (establish ~resolve:(fun () -> [ "first"; "second" ])
+      ~connect:(fun _ -> ())
+      ~create:(fun addr ->
+        tried := addr :: !tried;
+        if String.equal addr "first" then Error "TLS failure" else Ok "created on the second"));
+  Alcotest.(check (list string)) "and both addresses were offered a client"
+    [ "first"; "second" ] (List.rev !tried);
+  (* The last thing that went wrong is what the caller is told, so a host whose
+     addresses all fail establishment reports establishment, not the probe. *)
+  Alcotest.(check string) "the final client failure is the reported one"
+    "second failure"
+    (error_message
+       (establish ~resolve:(fun () -> [ "first"; "second" ])
+          ~connect:(fun _ -> ())
+          ~create:(fun addr ->
+            Error (if String.equal addr "first" then "first failure" else "second failure"))))
 
 let test_establishment_deadline () =
   Eio_main.run @@ fun env ->

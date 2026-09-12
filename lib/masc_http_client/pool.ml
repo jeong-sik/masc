@@ -506,7 +506,17 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
             | (Eio.Io _ | Unix.Unix_error _) as exn -> Error (Tcp_failure exn)
           in
           match result with
-          | Ok () -> Result.map_error (fun msg -> Client_failure msg) (create addr)
+          (* A TCP connect that lands says the address answers, not that the
+             endpoint on it works. A host resolving to both families with a
+             broken TLS listener on the first one accepted the probe and then
+             failed in [create], and the walk ended there -- so a provider with
+             one healthy address was recorded as unreachable and the whole host
+             went into cooldown. Establishment failure carries on down the list
+             the same way a refused connect does. *)
+          | Ok () ->
+            (match create addr with
+             | Ok client -> Ok client
+             | Error msg -> probe (Client_failure msg) rest)
           | Error failure -> probe failure rest
       in
       Result.bind addresses (probe No_addresses))

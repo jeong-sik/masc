@@ -2487,6 +2487,12 @@ type file_activity_snapshot = {
   fas_unattributed_malformed : int;
 }
 
+val file_change_address : file_change -> string
+(** The address the change is listed and searched under: [repo_id:path] for a
+    file in a clone, and the path itself for a scratch file or an absolute
+    one. One spelling, so a row cannot be drawn under one address and found
+    under another. *)
+
 val file_change_target_line : file_change -> int
 (** Exact producer-recorded line to open. A deletion opens at its old start,
     which is the post-edit position of the following line. Historical,

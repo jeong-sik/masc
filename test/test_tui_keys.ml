@@ -768,17 +768,6 @@ let test_visible_surface_ring_declutter () =
   Alcotest.(check bool) "Approvals shown when pending items exist" true
     (List.exists (fun (s, _) -> s = Approvals) ring_with_pending)
 
-let test_braille_sparkline () =
-  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
-    (braille_sparkline []);
-  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
-  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
-
-let test_fleet_total_cost () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
-  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
-    (fleet_total_cost_usd state)
-
 (* The sheet is the only place the eight keeper marks are named where a reader
    can read all eight at once: the Keepers rows pair each glyph with its word
    but show only the states the fleet is in, and the 34-cell roster pane beside
@@ -802,6 +791,17 @@ let test_the_sheet_names_every_keeper_mark () =
           Alcotest.(check bool) ("mark " ^ glyph ^ " is named") true
             (String.length meaning > 0))
         entries
+
+let test_braille_sparkline () =
+  Alcotest.(check string) "empty list gives base line" "⣀⡠⠤⠶"
+    (braille_sparkline []);
+  let spark = braille_sparkline [ 0.0; 0.5; 1.0 ] in
+  Alcotest.(check bool) "sparkline non-empty" true (String.length spark > 0)
+
+let test_fleet_total_cost () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  Alcotest.(check (float 0.001)) "fleet cost initially 0" 0.0
+    (fleet_total_cost_usd state)
 
 let test_config_footer_names_child_hops () =
   check str "Config names its three off-ring children"

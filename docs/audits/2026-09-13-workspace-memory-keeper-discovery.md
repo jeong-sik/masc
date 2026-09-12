@@ -4,6 +4,7 @@ The curator's immutable archive was reachable only through an explicit discovery
 call. That call lists every historical proposal, including all claims and snapshot
 metadata. The new publication descriptor gives each autonomous Keeper turn a
 single exact read target without injecting model-written claims into the briefing.
+Direct-message turns use the same publication observation and rendering path.
 
 ## Publication and interpretation
 
@@ -44,8 +45,10 @@ read the same publication path and use the same renderer.
 
 This does not wake a sleeping Keeper, require a read every turn, select semantic
 relevance mechanically, or claim that a Keeper adopted or verified the contents.
-Direct-message prompt assembly is outside this slice. The existing history-list
-tool behavior remains available, but the briefing points directly to one ID.
+Direct-message prompt assembly captures the publication before its prompt callback
+and adds the same read target only to transient dynamic context. Existing owner
+conversation, task, approval and channel context are preserved. The existing
+history-list tool remains available, but the briefing points directly to one ID.
 
 ## Validation scope
 

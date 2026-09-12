@@ -71,6 +71,7 @@ let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
+      ~(workspace_memory : Workspace_memory_publication.observation)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
@@ -79,6 +80,8 @@ let direct_turn_dynamic_context
   : string
   =
   [ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces
+  ; Option.value ~default:""
+      (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
   ; approval_authority_text
   ; recent_direct_conversation_text
   ; worktree_text
@@ -602,6 +605,12 @@ let run_keeper_invocation_turn_admitted_inner
             let world_observation =
               direct_turn_observation ~config:ctx.config meta
             in
+            let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Workspace_memory_publication.observe ~base_path:ctx.config.base_path) in
+            (match workspace_memory with
+             | Workspace_memory_publication.Unavailable detail ->
+               Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
+             | Missing | Available _ -> ());
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -660,6 +669,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
+                  ~workspace_memory
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
                        world_observation.approval_authority)

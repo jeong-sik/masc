@@ -1,0 +1,139 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "browser-handoff-proof-75200000",
+    "count": 1,
+    "skipped_rows": 0,
+    "source": "turn_record",
+    "producer": "keeper_agent_run.run_turn|keeper_turn_record_writer",
+    "durable_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/keepers/browser-handoff-proof-75200000/turn-records",
+    "dashboard_surface": "/api/v1/keepers/:name/turn-records",
+    "freshness_slo_s": 420.0,
+    "live_turn_in_progress": false,
+    "live_turn_started_at_unix": null,
+    "live_turn_last_progress_at_unix": null,
+    "latest_ts_unix": 1789238368.828193,
+    "latest_ts_iso": "2026-09-12T18:39:28Z",
+    "latest_age_s": 1.9843740463256836,
+    "health": "ok",
+    "stale_reason": null,
+    "memory_os": {
+      "keeper": "browser-handoff-proof-75200000",
+      "snapshot_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/config/keepers/browser-handoff-proof-75200000.memory-current.json",
+      "recall_enabled": true,
+      "revision": 0,
+      "updated_at": null,
+      "update_source": null,
+      "read_errors": [],
+      "facts": {
+        "shown": 0,
+        "current": 0,
+        "items": []
+      },
+      "change": {
+        "added": [],
+        "removed": [],
+        "retained": 0,
+        "invalidated": []
+      }
+    },
+    "entries": [
+      {
+        "record": {
+          "execution_ids": [
+            "exec-1789238324170-0001",
+            "exec-1789238327539-0002",
+            "exec-1789238329240-0003",
+            "exec-1789238332069-0004",
+            "exec-1789238334496-0005",
+            "exec-1789238338567-0007",
+            "exec-1789238341838-0008",
+            "exec-1789238344903-0009",
+            "exec-1789238347738-000a",
+            "exec-1789238351280-000b",
+            "exec-1789238353697-000c",
+            "exec-1789238356318-000d",
+            "exec-1789238359028-000e"
+          ],
+          "keeper": "browser-handoff-proof-75200000",
+          "agent_name": "browser-handoff-proof-75200000",
+          "turn_kind": "direct",
+          "trace_id": "trace-1789238315247-00000",
+          "absolute_turn": 1,
+          "turn_ref": "trace-1789238315247-00000#1",
+          "blocks": [
+            {
+              "block": "keeper_instructions",
+              "bytes": 8225,
+              "digest": "44c3f6b412575737a69d748f4d4bf560affaa9f83c53de0b2b9e43fcc94a6cb0"
+            },
+            {
+              "block": "skill_compositions",
+              "bytes": 133,
+              "digest": "fffb01cbd8228da727c34ed1bcdd3694667a5a4339333f3c4aec40eb959b8158"
+            },
+            {
+              "block": "dynamic_context",
+              "bytes": 188,
+              "digest": "287b150e8680674181677655f708cee297c25ef12fc10fc4be198990751507d0"
+            },
+            {
+              "block": "temporal_summary",
+              "bytes": 36,
+              "digest": "3e89e2496aa7b95a2d097f9a57adeda84004d622c0ee6ab35e03a4ae87965b28"
+            }
+          ],
+          "input_components": [
+            {
+              "component": "prompt.dynamic_context",
+              "bytes": 188
+            },
+            {
+              "component": "prompt.keeper_instructions",
+              "bytes": 8225
+            },
+            {
+              "component": "prompt.skill_compositions",
+              "bytes": 133
+            },
+            {
+              "component": "prompt.temporal_summary",
+              "bytes": 36
+            },
+            {
+              "component": "tool_schemas",
+              "bytes": 113368
+            }
+          ],
+          "runtime_profile": "codex_subscription.gpt-5.6-luna",
+          "request_runtime_profile": null,
+          "request_body_bytes": null,
+          "transmitted_atoms": 1,
+          "total_atoms": 1,
+          "model_input_measurement": "durable_shape",
+          "raw_trace_run_ref": {
+            "worker_run_id": "wr-1a096ea0929-8114-0000",
+            "path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/keepers/browser-handoff-proof-75200000/raw-traces/turn-1789238315300-8114-000000.jsonl",
+            "start_seq": 1,
+            "end_seq": 29,
+            "agent_name": "browser-handoff-proof-75200000",
+            "session_id": "trace-1789238315247-00000"
+          },
+          "selected_model": "gpt-5.6-luna",
+          "finish_reason": "completed",
+          "tool_surface_ref": "[masc:blob sha256=a6b0e2babfcfa96eceaeada4e020c5bf8c251eb29f91488285e735d405ee77e8 bytes=6312 mime=application/json preview=\"[{\\\"name\\\":\\\"Execute\\\",\\\"schema_bytes\\\":1977},{\\\"name\\\":\\\"Grep\\\",\\\"schema_bytes\\\":909},{\\\"name\\\":\\\"Read\\\",\\\"schema_bytes\\\":1993},{\\\"name\\\":\\\"Edit\\\",\\\"schema_bytes\\\":1242},{\\\"name\\\":\\\"Write\\\",\\\"schema_bytes\\\":731},{\\\"name\\\":\\\"WebSearc\"]",
+          "context_window": 1050000,
+          "request_latency_ms": 53504,
+          "temperature": 0.4,
+          "input_tokens": 41356,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 38656,
+          "output_tokens": 487,
+          "usage_scope": "per_request",
+          "ts": 1789238368.828193
+        },
+        "diff_vs_prev": null
+      }
+    ]
+  }
+}

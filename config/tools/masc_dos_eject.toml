@@ -2,9 +2,9 @@ name = "masc_dos_eject"
 description = """
 Turn off the shared DOS machine.
 
-Whatever was running is gone, along with any files it wrote that nobody \
-read back with masc_dos_load's mounted names. The next masc_dos_load starts \
-a new machine and a new input ledger."""
+Whatever was running is gone, along with any files it wrote that nobody read \
+back through masc_dos_load's mounted names. The next masc_dos_load starts a \
+new machine and a new input ledger."""
 additional_properties = false
 
 defer_loading = true

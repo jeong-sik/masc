@@ -2,16 +2,12 @@ name = "masc_dos_press"
 description = """
 Press keys on the shared DOS machine.
 
-DOS reads the keyboard through a BIOS ring buffer, so there is no hold time \
-— a key goes in the ring and the program takes it out. Each key is put in, \
-then the machine runs until it is ready for input again — the program asked \
-for a key and the screen stopped changing — or the step budget for that key \
-runs out. So ["down", "down", "return"] \
-walks a menu in one call. Keys: up down left right home end pgup pgdn insert \
-delete enter return esc space tab backtab backspace f1-f10, or one \
-character. A name the machine has no key for is refused before anything is \
-pressed. Every key is recorded in the ledger with your name and the step \
-count."""
+Keys go into the BIOS ring buffer, so there is no hold time. Each key is put \
+in, then the machine runs until it is ready for input again or that key's \
+budget runs out, so ["down", "down", "return"] walks a menu in one call. \
+Keys: up down left right home end pgup pgdn insert delete enter return esc \
+space tab backtab backspace f1-f10, or one character. An unknown name is \
+refused before anything is pressed. Every key is recorded in the ledger."""
 additional_properties = false
 
 defer_loading = true

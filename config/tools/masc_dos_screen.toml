@@ -5,9 +5,8 @@ Read the DOS screen without advancing time.
 Returns the text page as UTF-8 with code page 437 kept, so box drawing and \
 game glyphs survive, plus the video mode, CS:IP, timer ticks and \
 waiting_for_key. waiting_for_key means the program asked the BIOS for a key \
-and found none. On real hardware it would be blocked there — but a game in \
-its own loop asks constantly, so treat it as "it read the keyboard", not as \
-"it is done". masc_dos_step's settled is the one that means your turn."""
+and found none -- it read the keyboard, not that it is done. masc_dos_step's \
+settled is the one that means your turn."""
 additional_properties = false
 
 defer_loading = true

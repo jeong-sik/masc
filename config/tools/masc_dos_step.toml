@@ -2,16 +2,12 @@ name = "masc_dos_step"
 description = """
 Let the DOS machine run, with no key pressed.
 
-Time here is 8086 instructions, not frames — a DOS program has no frame \
-clock. By default this stops as soon as the machine is ready for input, which is \
-the normal way to hand a turn back: the program asked the BIOS for a key AND \
-the screen stopped changing. Both halves matter — a game in its own loop asks \
-for the next key a few hundred instructions after taking one, while the \
-screen it is drawing in response is half-written, so asking alone would hand \
-you the picture from before your key. Set until_ready=false to burn the whole \
-budget instead, which is what a program that is computing rather than asking \
-needs. Returns the observation with settled, steps_run and input_requests; \
-settled=false with the budget spent means it is still busy."""
+Time is 8086 instructions, not frames. Returns when the machine is ready for \
+input: it asked the BIOS for a key AND the screen stopped changing. Asking \
+alone is too early -- a game asks again a few hundred instructions after \
+taking a key, mid-repaint. until_ready=false spends the whole budget instead, \
+for a program that is computing rather than asking. Returns settled, \
+steps_run and input_requests."""
 additional_properties = false
 
 defer_loading = true
@@ -19,7 +15,7 @@ defer_loading = true
 [[params]]
 name = "steps"
 type = "integer"
-description = "Instruction budget for this call. Default 1000000 (about 40 ms of emulation)."
+description = "Instruction budget. Default 1000000, about 40 ms."
 minimum = 1
 maximum = 4000000
 default = 1000000
@@ -27,5 +23,5 @@ default = 1000000
 [[params]]
 name = "until_ready"
 type = "boolean"
-description = "Stop as soon as the machine is ready for input: it asked for a key and the screen stopped changing. Default true."
+description = "Stop when ready for input, as described above. Default true."
 default = true

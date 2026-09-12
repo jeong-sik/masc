@@ -15833,6 +15833,15 @@ and is loaded on demand through keeper_skill.
                 state.ask_question_scroll <- max 0
                   (min (Masc_tui_render.ask_question_scroll_limit state)
                      (state.ask_question_scroll + delta))
+            (* This arm takes every key while a question is open, so the
+               surface Home and End below never reach it -- and reaching it
+               would be worse than nothing, moving the approvals cursor under
+               a reader that is drawing something else. The question's own
+               ends, against the same limit the page keys clamp to. *)
+            | "home" -> state.ask_question_scroll <- 0
+            | "end" ->
+                state.ask_question_scroll <-
+                  Masc_tui_render.ask_question_scroll_limit state
             | "[" -> move_ask_cursor state (-1)
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state

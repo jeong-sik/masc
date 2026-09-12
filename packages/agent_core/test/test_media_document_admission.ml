@@ -8,12 +8,16 @@
     - a document bound for a wire/row that cannot carry one is a typed, visible
       outcome, never an image part;
     - wires that do carry documents still emit their own native form;
-    - image and audio payloads are byte-identical to the pre-fix serializer on
-      every wire.
+    - image and audio payloads are byte-identical to the pre-fix serializer
+      on every wire, except that since #35252 user-direct media degrade to
+      the omission placeholder on models that do not declare the input
+      capability (audio like images — pinned on gpt-5.2, which declares
+      image but not audio input).
 
     The image/audio cases are the permanent form of the temporary
-    baseline-vs-change probe used while developing the fix: the expected JSON
-    below was copied from the pre-change binary's output. *)
+    baseline-vs-change probe used while developing the fix: the expected
+    JSON below was copied from the pre-change binary's output and updated
+    for the audio degrade in #35252. *)
 
 open Alcotest
 open Llm_provider
@@ -358,39 +362,51 @@ let test_openai_chat_image_and_audio_unchanged () =
 ;;
 
 let test_openai_chat_request_image_and_audio_unchanged () =
-  List.iter
-    (fun (block, expected_part) ->
-       let config = openai_config "gpt-5.2" in
-       let messages = [ user_message [ Types.Text "prefix"; block ] ] in
-       check
-         json
-         "request body unchanged"
-         (`Assoc
-             [ "model", `String "gpt-5.2"
-             ; ( "messages"
-               , `List
-                   [ `Assoc
-                       [ "role", `String "user"
-                       ; ( "content"
-                         , `List
-                             [ `Assoc [ "type", `String "text"; "text", `String "prefix" ]
-                             ; expected_part
-                             ] )
-                       ]
-                   ] )
-             ])
-         (Backend_openai_request.build_request_assoc ~config ~messages ()))
-    [ ( image_block
-      , `Assoc
-          [ "type", `String "image_url"
-          ; "image_url", `Assoc [ "url", `String "data:image/png;base64,SU1H" ]
-          ] )
-    ; ( audio_block
-      , `Assoc
-          [ "type", `String "input_audio"
-          ; "input_audio", `Assoc [ "data", `String "QVVE"; "format", `String "wav" ]
-          ] )
-    ]
+  (* The image case pins a model that declares image input, so the part
+     must pass through byte-identical. The audio case pins a model
+     (gpt-5.2) that declares no audio input: since #35252 the serializer
+     degrades user-direct audio exactly like user-direct images for such
+     models, so the honest expectation is the omission placeholder, not
+     the input_audio part. *)
+  let config = openai_config "gpt-5.2" in
+  let messages = [ user_message [ Types.Text "prefix"; image_block ] ] in
+  check
+    json
+    "request body unchanged (image, capability declared)"
+    (`Assoc
+        [ "model", `String "gpt-5.2"
+        ; ( "messages"
+          , `List
+              [ `Assoc
+                  [ "role", `String "user"
+                  ; ( "content"
+                    , `List
+                        [ `Assoc [ "type", `String "text"; "text", `String "prefix" ]
+                        ; `Assoc
+                            [ "type", `String "image_url"
+                            ; "image_url", `Assoc [ "url", `String "data:image/png;base64,SU1H" ]
+                            ]
+                        ] )
+                  ]
+              ] )
+        ])
+    (Backend_openai_request.build_request_assoc ~config ~messages ());
+  let messages = [ user_message [ Types.Text "prefix"; audio_block ] ] in
+  check
+    json
+    "request body degraded (audio, no capability declared)"
+    (`Assoc
+        [ "model", `String "gpt-5.2"
+        ; ( "messages"
+          , `List
+              [ `Assoc
+                  [ "role", `String "user"
+                  ; ( "content"
+                    , `String "prefix\n[audio omitted: this model does not accept audio input (media_type wav)]" )
+                  ]
+              ] )
+        ])
+    (Backend_openai_request.build_request_assoc ~config ~messages ())
 ;;
 
 let test_ollama_native_image_unchanged () =

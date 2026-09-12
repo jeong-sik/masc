@@ -1,0 +1,6 @@
+{
+  "scope": "Source CodeMirror client in a real browser, real ocamllsp through a test-only adapter. Not installed MASC, Keeper execution, or MASC proxy acceptance.",
+  "passed": false,
+  "error": "TimeoutError: page.waitForFunction: Timeout 30000ms exceeded.",
+  "pageErrors": []
+}

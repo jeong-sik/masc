@@ -1379,7 +1379,13 @@ let render_approvals (state : state) =
            (match Masc.Keeper_gate_mode.of_string modes.Tui_decode.glm_external with
             | Some mode -> gate_mode_label mode | None -> "Unknown mode")
            Ansi.reset
-     | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
+     (* No prefix: [data_unreliable_row] already opens "(data unreliable: "
+        and the loader's message already opens "gate load failed:", so a third
+        "gate:" in front read as a stutter -- "(data unreliable: gate: gate
+        load failed: ...)". Same rule the schedule warning is written to. The
+        two rows below keep their prefixes because the detail there is the
+        server's own sentence about the store, which does not name itself. *)
+     | None, Some err -> data_unreliable_row ~cols err
      | None, None ->
          Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset);
   (* Standing always-allow rules, on the row under the lanes. A rule answers
@@ -1715,12 +1721,16 @@ let board_title_width ~cols =
   Render_schedule.board_title_width
     ~inner_width:(max 0 (framed_inner_width cols - board_table_lead))
 
-let board_kind_mark = function
-  | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ "@" ^ Ansi.reset
-  | Some Post_by_automation -> (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset
-  | Some Post_by_system -> " "
-  | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ "?" ^ Ansi.reset
-  | None -> " "
+(* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
+   reads from the same function. Nothing explained these marks anywhere before:
+   a reader met "@" in the first column and had to guess. *)
+let board_kind_mark kind =
+  let mark = Masc_tui_board_kind_mark.glyph kind in
+  match kind with
+  | Some Post_by_person -> Ansi.bold ^ (Theme.info ()) ^ mark ^ Ansi.reset
+  | Some Post_by_automation -> (Theme.warn ()) ^ mark ^ Ansi.reset
+  | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ mark ^ Ansi.reset
+  | Some Post_by_system | None -> mark
 
 (** The draft pane. For a new post the commit-message convention is stated
     on screen rather than assumed: first line is the title, the rest is the
@@ -1849,7 +1859,12 @@ let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
       Ansi.dim
-      ^ "  H:choose hearth · f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
+      (* The row above this one always names H, so the empty census says
+         only what is its own to say: that nothing is counted yet, and
+         that f walks hearths once something is. It used to open with
+         "H:choose hearth" too, which put that key on two adjacent rows
+         whenever the board had no counted hearth. *)
+      ^ "  f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -1913,14 +1928,23 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let header = Printf.sprintf "%s (%d)  order:%s%s  %s  %s"
+  (* No sort here. The row under this one says it in the words that answer
+     what the order is -- "latest changed first" rather than "updated" -- and
+     it is the row with space for them. "updated" is the token the board list
+     is asked for (the request's sort_by) and the token the workspace config
+     keeps, so a title that spelled it showed the operator a protocol value. *)
+  let header = Printf.sprintf "%s (%d)%s  %s  %s"
     (screen_title " MASC Board")
-    count (board_sort_label state.board_sort) hearth timestamp
+    count hearth timestamp
     (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
+    (* The sort first. It has no other home on this surface now, and this row
+       is cut to the frame's inner width: at 34 columns the key hint alone
+       spent all 30 cells, so the order the rows are in was invisible while
+       the key to change it was not. H is in the sheet under [?]. *)
     (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
@@ -2538,19 +2562,23 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
-    (planning_workspace_title state ~tab:Planning_goals ~window:"")
+  let title = planning_workspace_title state ~tab:Planning_goals ~window:"" in
+  let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
-    (planning_filter_label state.planning_filter)
-    timestamp
-    (connection_badge state) in
+    (planning_filter_label state.planning_filter) in
+  let modes_fit_header =
+    (* The timestamp can overflow and require a truncation cell after modes. *)
+    Message_layout.display_width (title ^ "  " ^ modes) < framed_inner_width cols
+  in
+  let header = Printf.sprintf "%s%s  %s  %s" title
+    (if modes_fit_header then "  " ^ modes else "")
+    timestamp (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  Sort [s]: %s · Filter [f]: %s"
-       (planning_sort_label state.planning_sort)
-       (planning_filter_label state.planning_filter));
+  (* Show the modes once, but do not hide them behind a clipped title. *)
+  if not modes_fit_header then
+    box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ modes);
   (* The list below can only show goals the store still holds. A goal that
      completed and left goals.json left every planning surface with it, so
      "what did we finish" had no answer here at all. These two lines are what
@@ -2702,16 +2730,24 @@ let render_planning_list (state : state) =
          ("  " ^ Render_schedule.planning_header_row ~phase_width ~title_width);
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
-          read straight off, and every one of them changes what to do next. *)
+          read straight off, and every one of them changes what to do next --
+          which is why the legend says the marks this list draws and only those.
+          Wrap complete explanations within the frame's cell width: a clipped
+          legend would lose a verdict and add a truncation mark identical to
+          the stale-proof glyph. *)
        (* Reserve the divider, a goal (or empty note), and the selected
-          verdict before spending a row on the legend. At the minimum
+          verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
        let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
-       if count_frame_lines buf + 1 + rows_after_legend <= rows then
-         box_line_styled buf cols ~style:Ansi.dim
-           ("  JUDGE  \xe2\x80\xa6 waiting  \xe2\x9c\x93 proven  \xe2\x9c\x97 refused, back in executing  ! unreadable");
+       let judge_legend =
+         Masc_tui_planning_proof_mark.legend_rows
+           ~max_cells:(framed_inner_width cols)
+           ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
+           (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
+       in
+       List.iter (box_line_styled buf cols ~style:Ansi.dim) judge_legend;
        box_divider buf cols;
 
        if count = 0 then begin
@@ -4491,8 +4527,8 @@ let render_lanes_overview (state : state) =
   let header =
     match state.standalone_lanes with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Lanes · Standalone") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Lanes · Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d lanes)  %s  %s"
@@ -5120,7 +5156,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
-        | Some _ -> Ansi.dim, "  (load failed; nothing here is a reading)"
+        | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
       for _ = 2 to content_height do
@@ -5247,8 +5283,8 @@ let render_clients (state : state) =
   let header =
     match state.clients_surface with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Config / Runtime · Clients") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Config / Runtime · Clients") (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d attached)  %s  %s"
@@ -6574,8 +6610,8 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Activity  [1 Events | 2 Logs*]") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Activity  [1 Events | 2 Logs*]") (title_missing_reading ~error:state.system_logs_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
@@ -6697,9 +6733,9 @@ let render_verification_list (state : state) =
   let header =
     match state.verification with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
+        Printf.sprintf "%s  %s  %s  %s"
           (planning_workspace_title state ~tab:Planning_task_review ~window:"")
-          timestamp (connection_badge state)
+          (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
@@ -7117,9 +7153,9 @@ let render_harness_list (state : state) =
   let header =
     match state.harness with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
+        Printf.sprintf "%s  %s  %s  %s"
           (planning_workspace_title state ~tab:Planning_verdicts ~window:"")
-          timestamp (connection_badge state)
+          (title_missing_reading ~error:state.harness_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* The page and the ledger, apart. This read "(8 verdicts)" while the
            server was reporting 4,197: the eight are the recent page, and
@@ -7152,7 +7188,7 @@ let render_harness_list (state : state) =
      by whom, and where a fallback answered instead of the evaluator the Gate
      names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Task Verdicts = automatic Gate rulings on Tasks (old Harness); not Goal proof.";
+    "  Task Verdicts = automatic Gate rulings on Tasks; not Goal proof.";
   List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows
@@ -7543,8 +7579,8 @@ let render_fusion_list (state : state) =
   let header =
     match state.fusion_runs with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Fusion") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Fusion") (title_missing_reading ~error:state.fusion_error) timestamp
           (connection_badge state)
     | Some _ ->
         let completed_count =
@@ -8236,7 +8272,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-         | None, Some _ -> [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+         | None, Some _ -> [ Ansi.dim, page_failed_note ]
          | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (cols - 8)) detail)
   in
   let total = List.length lines in
@@ -8398,8 +8434,8 @@ let render_repository_list (state : state) =
   let title =
     match state.repositories with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Workspace") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Workspace") (title_missing_reading ~error:state.repositories_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d)  %s  %s"
@@ -8605,8 +8641,8 @@ let render_memory (state : state) =
   let title =
     match state.memory_health with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Memory") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %d keepers · %d need memory · read %s (local)  %s"
@@ -8652,8 +8688,8 @@ let render_memory_facts (state : state) =
   let title =
     match state.memory_facts with
     | None ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s  (not loaded)  %s  %s"
-          (screen_title " MASC Memory") keeper_name timestamp
+        Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s"
+          (screen_title " MASC Memory") keeper_name (title_missing_reading ~error:state.memory_facts_error) timestamp
           (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s · sort: %s%s)  %s  %s"
@@ -8856,8 +8892,8 @@ let render_changes_list (state : state) =
   let header =
     match state.changes with
     | None ->
-        Printf.sprintf "%s %s  (not loaded)  %s  %s"
-          (screen_title " MASC Changes") whose timestamp
+        Printf.sprintf "%s %s  %s  %s  %s"
+          (screen_title " MASC Changes") whose (title_missing_reading ~error:state.changes_error) timestamp
           (connection_badge state)
     | Some s ->
         (* The window and the call count are stated because the list alone
@@ -9254,8 +9290,8 @@ let render_connectors (state : state) =
   let title =
     match state.connectors with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Connectors") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Connectors") (title_missing_reading ~error:state.connectors_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"
@@ -9634,8 +9670,8 @@ let render_runtime (state : state) =
   let header =
     match state.runtime_surface with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Config / Runtime") timestamp
+        Printf.sprintf "%s  %s  %s  %s"
+          (screen_title " MASC Config / Runtime") (title_missing_reading ~error:state.runtime_surface_error) timestamp
           (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
@@ -9985,8 +10021,9 @@ let render_keeper_calls (state : state) =
           (Terminal_text.single_line keeper_name)
           timestamp (connection_badge state)
     | None ->
-        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (not loaded yet)  %s  %s"
+        Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  %s  %s  %s"
           (Terminal_text.single_line keeper_name)
+          (title_missing_reading ~error:state.keeper_calls_error)
           timestamp
           (connection_badge state)
     | Some snapshot ->
@@ -12348,7 +12385,9 @@ let render_config_models (state : state) =
   let path_note =
     match state.runtime_config_view with
     | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
+    | None -> Ansi.dim
+        ^ title_missing_reading ~error:state.runtime_config_view_error
+        ^ Ansi.reset
   in
   box_line buf cols
     (Printf.sprintf "%s  %s  %s  %s" (screen_title " MASC Models")
@@ -12549,7 +12588,9 @@ let render_config (state : state) =
   let path_note =
     match state.runtime_config_view with
     | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
-    | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
+    | None -> Ansi.dim
+        ^ title_missing_reading ~error:state.runtime_config_view_error
+        ^ Ansi.reset
   in
   box_line buf cols
     (Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")
@@ -12939,13 +12980,15 @@ let render_palette (state : state) =
      prompt is a filter over those names, not a jump query. *)
   let title, prompt, action =
     match state.palette_mode with
-    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "Jump")
+    (* The action reads as a footer label now, so it is spelled like one:
+       lower case, the way every other [key:label] item is. *)
+    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "jump")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
             (if names = 1 then "" else "s") choice_line
         , "filter:"
-        , "Ask" )
+        , "ask" )
   in
   framed_shadow_line buf cols
     (screen_title title ^ "  "
@@ -12972,8 +13015,16 @@ let render_palette (state : state) =
   framed_shadow_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
+       (* [key:label] items, two spaces apart, the way every other footer is
+          written. In the dotted form this row was one item with no colon, so
+          {!Masc_tui_footer} could shed no whole key and keep no door: it fell
+          through to the cell cut, where [Esc] survived only when the budget
+          happened to reach it. test_a_row_in_another_grammar_loses_its_door
+          measures that across widths. The count keeps no colon on purpose --
+          it is not a key, and it is the first thing a narrow row should give
+          up. *)
        ~hints:
-         (Printf.sprintf "%d/%d · [Enter] %s · [Up/Down] Navigate · [Esc] Close"
+         (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
             (if total = 0 then 0 else cursor + 1)
             total action));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
@@ -13188,7 +13239,13 @@ let render_help (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  h:hints  Esc:close");
+       (* The sheet that names every other surface's keys did not name its own.
+          It is longer than any terminal -- at 150x78 the later sections are
+          still off screen -- so [G] is the difference between reading them and
+          pressing [j] forty times, and nothing said [G] exists. The keys are
+          handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
+       ~hints:
+         "j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds

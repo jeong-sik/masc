@@ -24,7 +24,7 @@ async function start() {
   render(html`<main class="mx-auto max-w-5xl p-4">
     <h1>Keeper 편집 diff — CI 브라우저 시나리오</h1>
     <p>합성 편집 기록으로 화면과 실제 worker를 검증합니다. 런타임 배포 증거가 아닙니다.</p>
-    ${receipts.map((receipt, index) => html`<div data-scenario=${index}><${ChatTranscript} entries=${transcript(receipt, index)} emptyText="No edit records" variant="messenger" size="primary" /></div>`)}
+    ${receipts.map((receipt, index) => html`<div data-scenario=${index}><${ChatTranscript} keeperName=${receipt.keeper} entries=${transcript(receipt, index)} emptyText="No edit records" variant="messenger" size="primary" /></div>`)}
   </main>`, document.getElementById('app')!)
 }
 void start()

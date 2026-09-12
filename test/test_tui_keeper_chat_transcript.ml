@@ -1261,8 +1261,8 @@ let test_status_rows_grow_only_with_what_they_report () =
    busy with something else, and a run that should already have begun. The
    server says which; before it does, the row can only say the request went
    out. *)
-let progress_text t =
-  match rows t with
+let progress_text ?(now = origin) t =
+  match rows ~now t with
   | (Transcript.Progress, text) :: _ -> text
   | rows -> failf "expected a progress row, got %d rows" (List.length rows)
 
@@ -1273,8 +1273,11 @@ let test_runtime_failover_visibility_and_error_attribution () =
     ; Live.Runtime_attempt_started
         { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 0 }
     ];
-  check bool "connecting to runtime endpoint" true
-    (contains ~needle:"connecting to [claude-3-7-sonnet]" (progress_text t));
+  (* "waiting on", not "connecting to": a named runtime that has sent nothing
+     is all the screen observed, and the wait may be a process still starting,
+     an endpoint still authenticating, a provider queue or a model thinking. *)
+  check bool "the row names the runtime it is waiting on" true
+    (contains ~needle:"waiting on [claude-3-7-sonnet]" (progress_text t));
   check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
     (Transcript.current_runtime_id t);
   feed t [ Live.Text "streaming token" ];
@@ -1287,13 +1290,41 @@ let test_runtime_failover_visibility_and_error_attribution () =
   check bool "failover attempt is indicated" true
     (* Second attempt: [attempt_index] is 0-based on the wire and the row
        counts from 1, the way the superseded blocks beside it do. *)
-    (contains ~needle:"failover: connecting to [gpt-4o] (attempt 2)" (progress_text t));
+    (contains ~needle:"failover: waiting on [gpt-4o] (attempt 2)" (progress_text t));
   check (option string) "current runtime updated to failover" (Some "gpt-4o")
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
   check phase "error is attributed to active runtime"
     (Transcript.Stream_failed "[gpt-4o] RateLimitExceeded (429)")
     (Transcript.phase t)
+
+(* The number this row ends with is the turn's age, which counts every round
+   that already finished. What tells a slow start from a stuck one is how long
+   the named runtime has been silent, and on a failover the two are different
+   numbers from the moment the first attempt spends any time. *)
+let test_runtime_silence_is_timed_from_the_attempt_not_the_turn () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Runtime_attempt_started
+        { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 0 }
+    ];
+  check bool "a fresh attempt reports its silence" true
+    (contains ~needle:"nothing back for 12s"
+       (progress_text ~now:(origin +. 12.) t));
+  feed ~now:(origin +. 100.) t
+    [ Live.Runtime_attempt_started
+        { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
+    ];
+  check bool "the second attempt is timed from itself" true
+    (contains ~needle:"nothing back for 10s"
+       (progress_text ~now:(origin +. 110.) t));
+  (* Anything arriving ends the silence: the row moves to "streaming from",
+     where the question is no longer whether the endpoint is there. *)
+  feed ~now:(origin +. 111.) t [ Live.Text "first token" ];
+  check bool "a token takes the silence off the row" false
+    (contains ~needle:"nothing back for"
+       (progress_text ~now:(origin +. 300.) t))
 
 let test_runtime_identity_separates_configured_and_observed () =
   let identity ?(keeper_name = "keeper.one") transcript =
@@ -2468,6 +2499,8 @@ let () =
             test_unreadable_lines_are_counted_with_their_last_reason
         ; test_case "runtime failover visibility and error attribution" `Quick
             test_runtime_failover_visibility_and_error_attribution
+        ; test_case "runtime silence is timed from the attempt" `Quick
+            test_runtime_silence_is_timed_from_the_attempt_not_the_turn
         ; test_case "header separates configured and observed runtimes" `Quick
             test_runtime_identity_separates_configured_and_observed
         ; test_case "new attempt does not inherit previous runtime" `Quick

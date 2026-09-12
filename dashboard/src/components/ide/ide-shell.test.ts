@@ -59,7 +59,8 @@ import {
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 import { resetIdeDataWorkspaceStoreForTest } from './ide-workspace-singleton'
-import { EMPTY_LSP_STATUS_SNAPSHOT, lspStatusRejected, lspStatusSnapshot } from './ide-lsp-client'
+import { EMPTY_LSP_STATUS_SNAPSHOT, lspScopeKey, lspScopeSnapshot, lspStatusRejected, lspStatusSnapshot } from './ide-lsp-client'
+import type { LspDocumentStatus } from './ide-lsp-document-status'
 import { DEFAULT_MOBILE_BREAKPOINT } from '../../hooks/use-is-mobile'
 
 function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
@@ -449,6 +450,7 @@ describe('IdeShell', () => {
       'SPLIT DIFF',
       'ide/ide-shell.ts',
       'Trace +1',
+      'LSP not attempted',
       'terminal',
       'find',
       'rails hidden',
@@ -548,6 +550,7 @@ describe('IdeShell', () => {
     expect(model.chips.map(chip => chip.label)).toEqual([
       'SOURCE',
       'lib/runtime.ml',
+      'LSP not attempted',
       'Task L42 task task-runtime',
       'Goal goal-runtime',
       'Task task-runtime',
@@ -592,6 +595,7 @@ describe('IdeShell', () => {
     expect(chipLabels).toEqual([
       'SOURCE',
       'lib/runtime.ml',
+      'LSP ocaml connecting',
       'PR L42 Runtime review',
       'Task task-runtime',
       'PR #15035',
@@ -1228,4 +1232,27 @@ describe('IdeShell', () => {
       }),
     )
   })
+})
+
+
+it('shows selected-document diagnostic truth separately from dashboard transport and other files', () => {
+  const source: LspDocumentStatus = {
+    filePath: 'lib/current.ml', scope: lspScopeKey(lspScopeSnapshot()), language: 'ocaml',
+    version: 2, command: 'ocamllsp', connection: { kind: 'connected' },
+    diagnostics: { kind: 'complete', count: 0 },
+  }
+  const status = (lspDocument: LspDocumentStatus) => deriveIdeStatusbarModel({
+    activeView: 'unified', activeLayers: new Set(), activeFilePath: 'lib/current.ml',
+    findOpen: false, terminalOpen: false, railsCollapsed: false, reviewFocusActive: false,
+    routeParams: {}, dashboardConnected: true, lspDocument,
+  }).chips.find(chip => chip.id === 'lsp-document')!
+  expect(status(source).label).toBe('LSP ocaml 0 diagnostics')
+  expect(status(source).title).toContain('document version 2')
+  expect(status(source).title).toContain('Keeper tool usage is recorded separately')
+  expect(status({ ...source, diagnostics: { kind: 'failed', reason: 'language server rejected pull' } }).label)
+    .toBe('LSP ocaml diagnostics failed')
+  expect(status({ ...source, connection: { kind: 'disconnected', reason: 'socket closed' } }).label)
+    .toBe('LSP ocaml disconnected')
+  expect(status({ ...source, filePath: 'lib/other.ml' }).label).toBe('LSP not attempted')
+  expect(status({ ...source, scope: 'different workspace' }).label).toBe('LSP not attempted')
 })

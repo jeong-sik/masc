@@ -1,0 +1,41 @@
+{
+  "schema": "masc.reliable_change.roadmap_activation.v2",
+  "recorded_at": "2026-09-12T14:13:43Z",
+  "goal_id": "goal-reliable-change-g1-20260909",
+  "contract": {
+    "path": "docs/roadmaps/reliable-change-g1.json",
+    "schema": "masc.reliable_change.g1_contract.v2",
+    "criterion_revision": 2,
+    "sha256": "c2cf0a679e0b15e86e5cf74a814e49727fb1310bf0f76dc5b59b09a1195b4588",
+    "merged_pr": "https://github.com/jeong-sik/masc/pull/35485"
+  },
+  "runtime_registration": {
+    "tool": "masc_goal_upsert",
+    "action": "created",
+    "runtime_criterion_revision": "0d6f97736949a9bac5e47b31a3c87891",
+    "goal_phase_at_readback": "executing",
+    "priority": 1,
+    "created_at": "2026-09-12T14:13:42Z",
+    "readback": "masc_goal_list count=4; goals.json record id/criterion_revision/title/metric/target_value match the submitted values",
+    "durability_caveat": "lib/goal/goal_store.ml read_state still folds Undecodable to default_state (); the registration is not durable against a future undecodable store until goal-store-typed-unavailable (RFC-0444, PR #35479) is implemented. This snapshot exists so the registration can be reconstructed."
+  },
+  "first_task": {
+    "task_id": "task-1478",
+    "status_at_readback": "todo",
+    "owner": null,
+    "created_by": "codex-mcp-client",
+    "link_tool": "masc_task_set_goal",
+    "link_result": "ok",
+    "goal_task_links_entry_present": true,
+    "ownership_note": "the re-registration step claims nothing; the implementer claims with masc_transition(claim)"
+  },
+  "measurement_state": "not_run",
+  "evidence_location": "<goal verifier playground root>/reliable-change-evidence/g1/",
+  "supersedes": {
+    "snapshot": "docs/evidence/reliable-change-roadmap/activation.json",
+    "contract_sha256": "7e701e3bf6087037f3ede2c457cb70b790db2ac752348fa9fe17a7c4120af18d",
+    "runtime_registration_state": "lost",
+    "kept_as_history": true
+  },
+  "recorded_by": "codex-mcp-client (Claude Fable 5.1 session 11a7525b)"
+}

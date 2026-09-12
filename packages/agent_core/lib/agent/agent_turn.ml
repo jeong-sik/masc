@@ -10,6 +10,11 @@ open Types
 
 let _log = Log.create ~module_name:"agent_turn" ()
 
+(* [turn_count] is advanced by the collect stage at the end of a provider
+   turn, so before a fresh turn starts it is exactly the zero-based ordinal of
+   the turn about to run. Read here only, by the turn frontier resolution. *)
+let provider_turn_ordinal (state : agent_state) : int = state.turn_count
+
 (* ── Turn preparation ─────────────────────────────────────────── *)
 
 type turn_preparation =

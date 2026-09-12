@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name voice_wizard)
+ (public_name masc.voice_wizard)
+ (wrapped false)
+ (modules voice_wizard)
+ (libraries yojson masc.voice_config masc.voice_setup))

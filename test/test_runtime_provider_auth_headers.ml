@@ -371,8 +371,9 @@ max-concurrent = 1
             && String.equal err.message
                  "unknown protocol \"future-wire\": expected one of \
                   messages-cli, messages-http, openai-compatible-cli, \
-                  openai-compatible-http, ollama-http, codex-app-server, \
-                  claude-code, antigravity-cli")
+                  openai-compatible-http, ollama-http, gemini-http, \
+                  vertex-gemini, codex-app-server, claude-code, \
+                  antigravity-cli")
          errors)
 
 let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
@@ -409,6 +410,8 @@ let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
     [ "messages-http:endpoint:http_provider:optional:false::"
     ; "openai-compatible-http:endpoint:http_provider:optional:false::"
     ; "ollama-http:endpoint:http_provider:optional:false::"
+    ; "gemini-http:endpoint:http_provider:optional:false::"
+    ; "vertex-gemini:endpoint:http_provider:optional:false::"
     ; "codex-app-server:command:official_client:forbidden:true::"
     ; "claude-code:command:official_client:forbidden:true::"
     ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"

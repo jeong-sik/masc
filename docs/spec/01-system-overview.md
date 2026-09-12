@@ -77,7 +77,6 @@ MASC가 명시적으로 **하지 않는 것**:
 | HTTP/2 | h2-eio (h2c) | `MASC_USE_H2=1`로 활성화. SSE 멀티플렉싱 (브라우저 6-conn 제한 회피). |
 | TLS | mirage-crypto + tls-eio | 인증서: `SSL_CERT_FILE` 환경변수. |
 | JSON | yojson | JSON 파싱/생성. `Yojson.Safe.t` 표준 사용. |
-| Supabase pgvector | external service | Vector/knowledge integration. Board/session runtime state lives under the workspace `.masc` directory. |
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |
 | Protocol | MCP JSON-RPC | `tools/call`, `tools/list` over SSE + POST. |
 | gRPC | grpc-direct (h2-eio) | Agent-to-Agent 통신. proto 정의: `proto/`. |
@@ -156,9 +155,7 @@ MASC의 현재 canonical front door는 3가지다.
 
 | Service | Location | Protocol | 용도 | 비고 |
 |---------|----------|----------|------|------|
-| Supabase pgvector | Supabase Cloud | PostgreSQL | Vector search (wiki, retrospectives) | `$SUPABASE_DB_URL` |
 | agent core Agent SDK | In-process (OCaml library) | Function call | Finite Agent.run, typed providers, tools, reasoning, multimodal values | MASC는 Keeper lifecycle과 durable product operation을 소유한다. |
-| Langfuse | Cloud API | HTTP | LLM 호출 tracing, cost attribution | 선택적 활성화. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTP -> HTTPS | 원격 dashboard 접근 | Origin HTTP/1.1. Cloudflare가 HTTP/2 변환. |
 | local runtime | configured local endpoint | Provider-D-compatible API | 로컬 LLM 추론 (Runtime 1순위) | agent core discovery endpoint. |
 | GLM Cloud / Coding Plan | Z.AI API | HTTP | Cloud LLM 추론 (Runtime 2순위) | `sb glm-text` 또는 `glm-coding` runtime 경로. |

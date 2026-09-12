@@ -580,7 +580,15 @@ evidence_row() {
       input_tokens: $input_tokens,
       output_tokens: $output_tokens,
       cost_usd: $cost_usd,
-      error: $error
+      error: $error,
+      usage_scope: (if $input_tokens != null then "cumulative-request-snapshot" else null end),
+      request_or_task_identity: ("task-" + $run_id),
+      run_turn_attempt_identity: ($run_id + "-" + ($run_index | tostring)),
+      target_revision: $model,
+      requested_revision: $model,
+      verdict_run_identity: ("verdict-" + $run_id),
+      artifact_references: $edited_target_files,
+      execution_mode: "live"
     }'
 }
 
@@ -912,6 +920,20 @@ run_one() {
   fi
 
   tool_calls_json="$(keeper_tool_call_names "${keeper_name}")"
+
+  local config_resp
+  config_resp="$(curl -fsS -m 10 "http://127.0.0.1:${PORT}/api/v1/keepers/${keeper_name}/config" \
+    -H "Authorization: Bearer ${MCP_TOKEN}" 2>/dev/null || true)"
+  if [[ -n "${config_resp}" ]]; then
+    local has_usage
+    has_usage="$(jq -r '.metrics.last_usage_reported_at // empty' <<< "${config_resp}")"
+    if [[ -n "${has_usage}" && "${has_usage}" != "null" ]]; then
+      input_tokens_json="$(jq -r '.metrics.total_input_tokens // null' <<< "${config_resp}")"
+      output_tokens_json="$(jq -r '.metrics.total_output_tokens // null' <<< "${config_resp}")"
+      cost_usd_json="$(jq -r '.metrics.total_cost_usd // null' <<< "${config_resp}")"
+    fi
+  fi
+
   stop_keeper_best_effort "${keeper_name}"
 
   end_epoch="$(date +%s)"

@@ -100,6 +100,19 @@ let host_root_abs_of_agent ~base_path ~agent_name =
     base_path
     (host_root_rel_of_agent ~base_path ~agent_name)
 
+(* A producer is whoever submits evidence: a Keeper, whose declared profile
+   places its tree, or a workspace agent that joined over MCP and declares
+   nothing. The profile resolver raises for the second kind, since #32078
+   made the declaration mandatory for Keepers, and the two readers of a
+   producer's tree (the submit-time snapshot and the review-time judge) each
+   answered the undeclared case on their own. One answer, here: an undeclared
+   producer owns the playground bundle, whether or not anything has been
+   written there yet. *)
+let host_root_abs_of_producer ~base_path ~agent_name =
+  if Sys.file_exists (keeper_toml_path ~base_path ~agent_name)
+  then host_root_abs_of_agent ~base_path ~agent_name
+  else Filename.concat base_path (Playground_paths.bundle_root agent_name)
+
 let container_root_of_agent ~agent_name =
   Filename.concat
     (Env_config_sandbox.Runtime.docker_playground_container_root ())

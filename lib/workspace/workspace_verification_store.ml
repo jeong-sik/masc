@@ -966,7 +966,7 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
     | None -> (
     let project_root = project_root_of_base_path base_path in
     let ownership_root =
-      Keeper_sandbox_config.host_root_abs_of_agent
+      Keeper_sandbox_config.host_root_abs_of_producer
         ~base_path:project_root
         ~agent_name:worker
       |> Env_config_core.strip_trailing_slashes

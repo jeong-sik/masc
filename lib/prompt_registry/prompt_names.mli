@@ -28,6 +28,7 @@ val goal_verification_lookup : string
 val verification_lookup_none : string
 val verification_lookup_producer_tree : string
 val verification_lookup_root_layout_empty : string
+val verification_lookup_root_layout_absent : string
 (** The line a readable-but-empty lookup root produces in the root layout. *)
 val verification_contract : string
 val verification_required_evidence : string

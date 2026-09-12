@@ -62,11 +62,13 @@ def run(binary):
         assert request.get("tabId", 2) == 2
         with lock:
             channel = state["channel"]
+        text = "\n".join([channel.upper() + " TEXT READY"] +
+                         [f"{channel.upper()} RAW LINE {i}" for i in range(1, 81)])
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "elapsed_ms": 1, "tabs": [{"id": 2, "title": channel.title(),
                 "url": f"https://example.org/{channel}", "active": True}],
             "page": {"tabId": 2, "title": channel.title(), "url": f"https://example.org/{channel}",
-                "text": channel.upper() + " TEXT READY", "chars": 16, "truncated": False}}}
+                "text": text, "chars": len(text), "truncated": False}}}
 
     def scene(body):
         request = json.loads(body)
@@ -155,6 +157,24 @@ def run(binary):
         h.send_and_wait(process, fd, output, b"\r", b"BETA FOCUSED VERSION 1")
         # Plain text is a new read of Beta, never the cached initial Alpha.
         h.send_and_wait(process, fd, output, b"s", b"BETA TEXT READY")
+        h.send_and_wait(process, fd, output, b"jjjjj", b"BETA RAW LINE 5")
+        h.resize_and_wait(process, fd, output, rows=30, columns=101,
+            needle=b"BETA RAW LINE 5", controls=(h.FULL_REDRAW,))
+        frame = h.resize_and_wait(process, fd, output, rows=30, columns=100,
+            needle=b"BETA RAW LINE 5", controls=(h.FULL_REDRAW,))
+        assert b"BETA TEXT READY" not in h.screen_text(frame), "raw text did not scroll"
+        start = len(output)
+        with lock:
+            state["channel"] = "gamma"
+        h.wait_for_output(process, fd, output, b"GAMMA TEXT READY", start=start, timeout=3.0)
+        h.resize_and_wait(process, fd, output, rows=30, columns=101,
+            needle=b"GAMMA TEXT READY", controls=(h.FULL_REDRAW,))
+        frame = h.resize_and_wait(process, fd, output, rows=30, columns=100,
+            needle=b"GAMMA TEXT READY", controls=(h.FULL_REDRAW,))
+        text = h.screen_text(frame)
+        assert b"https://example.org/gamma" in text and b"GAMMA TEXT READY" in text
+        assert b"BETA RAW LINE" not in text
+        record("external-raw-navigation-resets-scroll", output)
         with lock:
             assert any(r.get("scope") == {"documentId": "alpha", "nodeId": "alpha-messages"} for r in requests)
             assert any(r.get("scope") == {"documentId": "beta", "nodeId": "beta-messages"} for r in requests)

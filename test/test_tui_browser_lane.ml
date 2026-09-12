@@ -29,6 +29,28 @@ let test_read_and_selection () =
     (request_body moved = `Assoc ["lane", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 1]);
   expect "previous tab wraps" ((select_tab (-1) moved).selected_tab = Some 2)
 
+let test_raw_refresh_scroll_identity () =
+  let initial = loaded () in
+  let reading = success (decode (response ())) in
+  let refresh previous returned =
+    accept ~generation:20 (Ok returned)
+      {initial with reading=previous;scroll=37;load=Loading (20,Read_refresh)} in
+  expect "same raw page retains operator scroll"
+    ((refresh (Some reading) reading).scroll=37);
+  let changed_page = {reading with page=Option.map
+    (fun (page : page) -> {page with url="https://example.org/new"}) reading.page} in
+  expect "external navigation resets raw scroll"
+    ((refresh (Some reading) changed_page).scroll=0);
+  List.iter (fun previous ->
+    expect "changed or absent prior identity resets raw scroll"
+      ((refresh previous reading).scroll=0))
+    [None;Some {reading with page=None};
+     Some {reading with source=Automation;client_id=None};
+     Some {reading with client_id=Some zen.client_id};
+     Some {reading with page=Option.map (fun (page : page) -> {page with tab_id=1}) reading.page}];
+  expect "missing returned page resets raw scroll"
+    ((refresh (Some reading) {reading with page=None;tabs=[]}).scroll=0)
+
 let test_refresh_rediscovers_tabs () =
   let previous = { (loaded ()) with load = Failed "selected tab closed" } in
   let retry = refresh previous in
@@ -277,7 +299,8 @@ let test_scoped_refresh_failure_retains_read_intent () =
 
 let () =
   List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
-    ["scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;
+    ["raw refresh scroll identity", test_raw_refresh_scroll_identity;
+     "scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;
      "visual pointer navigation", test_visual_pointer_navigation;
      "visual scroll ownership", test_visual_scroll_ownership;
      "client connection ownership", test_client_connection_ownership;

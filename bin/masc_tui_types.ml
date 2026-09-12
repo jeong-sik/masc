@@ -3262,7 +3262,16 @@ module Browser_lane_view = struct
     | Loading (current, (Read | Read_refresh)) when current = generation ->
         (match result with
          | Ok reading when reading.source = t.source && reading.client_id = client_id t ->
+             let same_page = match t.reading, reading.page with
+               | Some previous, Some page ->
+                   previous.source = reading.source
+                   && previous.client_id = reading.client_id
+                   && (match previous.page with
+                       | Some prior -> prior.tab_id = page.tab_id && prior.url = page.url
+                       | None -> false)
+               | _ -> false in
              { t with reading = Some reading; load = Idle; read_view = Text_view;
+               scroll = (if same_page then t.scroll else 0);
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })

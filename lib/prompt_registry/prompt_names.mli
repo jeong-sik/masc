@@ -14,6 +14,9 @@ val judge_board : string
 val judge_effect : string
 (** Approve, deny, or escalate one exact Keeper external effect. *)
 
+val verification_system : string
+(** Shared managed system contract for Task and Goal completion authorities. *)
+
 val verification : string
 (** Task completion review against the submitted evidence snapshot. *)
 

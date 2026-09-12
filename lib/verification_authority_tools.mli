@@ -50,10 +50,12 @@ val schemas : t -> Types_core.tool_schema list
 
 val image_delivery_note : string
 (** The sentence [schemas] appends to the read_file descriptor: this surface
-    reads images as visual input. Exposed so the schema-parity test asserts
+    reads images and inspected PDF pages as visual input. Exposed so the schema-parity test asserts
     against the same spelling the surface publishes. *)
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> Tool_result.result
 (** Observations are UTF-8 text. Read delivers admitted image bytes as canonical
     model content, with path, media type, size and SHA-256 in the text receipt.
+    PDFs are inspected from complete captured source bytes using Poppler: source
+    identity, parsed page metadata/text and all rendered PNG pages are returned.
     Other binary output is a stated lookup failure, never text or visual proof. *)

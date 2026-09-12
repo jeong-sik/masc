@@ -10,7 +10,7 @@ import {
   sameIdeWorkspaceIdentity,
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
-import { publishLspScope } from './ide-lsp-client'
+import { lspScopeKey, publishLspScope } from './ide-lsp-client'
 import { activeKeeperName } from '../../keeper-state'
 import { route } from '../../router'
 import {
@@ -460,7 +460,8 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
     const codebase = selectedCodebase
-    publishLspScope({ repoId: repoId ?? null, codebase, keeper: keeperParam ?? null })
+    const lspScope = { repoId: repoId ?? null, codebase, keeper: keeperParam ?? null }
+    publishLspScope(lspScope)
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,
       keeper: keeperParam ?? null,
@@ -524,6 +525,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
               file_path: pendingFocus.path,
               language: response.language ?? DEFAULT_LANGUAGE_ID,
               content: response.content,
+              lsp_scope: lspScopeKey(lspScope),
             })
             if (!loaded) {
               documentStore.invalidate()
@@ -642,6 +644,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           file_path: filePath,
           language: response.language ?? DEFAULT_LANGUAGE_ID,
           content: response.content,
+          lsp_scope: lspScopeKey(lspScope),
         })
         if (!loaded) {
           documentStore.invalidate()

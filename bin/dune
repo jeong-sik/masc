@@ -533,6 +533,16 @@
  (wrapped false)
  (modules masc_tui_exit_signals))
 
+;; The exit-time tcsetattr on a descriptor that is no longer a terminal:
+;; ENOTTY and EIO mean the terminal is gone and the rest of the at_exit chain
+;; still runs; any other refusal propagates. Own library so the rule runs
+;; under a test with no terminal.
+(library
+ (name masc_tui_terminal_restore)
+ (wrapped false)
+ (modules masc_tui_terminal_restore)
+ (libraries unix))
+
 (library
  (name masc_tui_file_icon)
  (wrapped false)
@@ -1289,6 +1299,7 @@
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
+  masc_tui_terminal_restore
   masc.runtime
   masc.keeper_registry
   masc_skill_reference

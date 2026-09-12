@@ -47,6 +47,7 @@ module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
+module Terminal_restore = Masc_tui_terminal_restore
 
 (* Tools rows are the exact projection the renderer draws, so their scroll
    bound belongs to that projection rather than a second reconstruction in
@@ -13514,7 +13515,18 @@ let main
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
+    (* [tcsetattr] has no result to ignore: it raises when stdin is no longer
+       a terminal, and at exit that is the ordinary case -- a closed pane, a
+       hangup. This runs first in the [at_exit] chain, so a raise here would
+       take the frame summary and the tracking-off bytes with it. The two
+       restores below already read their refusal as the terminal already
+       gone; ENOTTY and EIO are read the same way here. Anything else still
+       propagates. See [Masc_tui_terminal_restore]. *)
+    (match
+       Terminal_restore.put_back ~set:(fun () ->
+         Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
+     with
+     | Terminal_restore.Restored | Terminal_restore.Terminal_gone _ -> ());
     (* After the record, not before: [tcsetattr] is what puts the rest of the
        terminal back, and this character is the part it cannot reach.
        [-1] means the descriptor was never a terminal, so there is nothing to

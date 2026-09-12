@@ -33,13 +33,16 @@ type t
     closed and dropped.
 
     [connect_timeout_seconds]: max wait when establishing a fresh
-    connection. Surfaces as [Error "connect timeout ..."] to the
-    caller.
+    connection, shared by DNS resolution, every TCP probe address, and
+    Piaf client creation (including TLS). Surfaces as
+    [Error "connect timeout ..."] to the caller.
 
     [connect_failure_cooldown_seconds]: after a connect to a host fails,
     requests to that host fast-fail without opening a socket for this
     long. Bounds both the probe traffic against a dead server and any
-    residual fd growth from the create path. *)
+    residual fd growth from the create path. Zero disables backoff.
+    Expired failures are removed by lookup and the idle eviction fiber;
+    successful creation and shutdown also clear failure state. *)
 type config = {
   max_idle_per_host : int;
   max_total_idle    : int;
@@ -218,6 +221,19 @@ val stats : t -> stats
     config defaults) without requiring piaf integration. Do not call
     from production code. *)
 module For_testing : sig
+  (** Drive the real establishment sequence with controlled DNS, TCP and
+      client stages, without fabricating a Piaf client. *)
+  val establish_connection :
+    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+    timeout_seconds:float ->
+    resolve:(unit -> 'addr list) ->
+    connect:('addr -> unit) ->
+    create:(unit -> ('client, string) result) ->
+    ('client, string) result
+
+  val connect_failure_count : t -> int
+  val evict_expired_entries : t -> float -> unit
+
   module Host_key : sig
     type t = {
       scheme : string;

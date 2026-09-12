@@ -59,6 +59,10 @@ let test_original_presentation () =
            (String_util.contains_substring (member "text" slide |> to_string) (List.nth titles i));
          Alcotest.(check string) "actual speaker note" (List.nth notes i)
            (member "speaker_notes" slide |> to_string)) slides;
+       Alcotest.(check bool) "first slide visible" true (member "visible" (List.hd slides) |> to_bool);
+       Alcotest.(check bool) "hidden slide explicit" false (member "visible" (List.nth slides 1) |> to_bool);
+       Alcotest.(check (list string)) "hyperlink destination" ["https://example.invalid/reference"]
+         (member "hyperlinks" (List.hd slides) |> to_list |> List.map to_string);
        let second = List.nth slides 1 |> member "text" |> to_string in
        Alcotest.(check bool) "table text is included" true
          (String_util.contains_substring second "Leave" && String_util.contains_substring second "Take");
@@ -79,8 +83,8 @@ let test_original_presentation () =
            List.length (List.filter (function Agent_core.Types.Image _ -> true | _ -> false) blocks) = 2
           | None -> false)
      | _ -> Alcotest.fail (Tool_result.message result));
-    Alcotest.(check bool) "malformed PPTX is never metadata success" true
-      (Tool_result.is_failed (dispatch surface (prefix ^ "broken.pptx") []));
+    Alcotest.(check bool) "malformed PPTX is a producer rejection" true
+      (Tool_result.failure_class (dispatch surface (prefix ^ "broken.pptx") []) = Some Tool_result.Workflow_rejection);
     Alcotest.(check bool) "external auto-loaded media is refused" true
       (Tool_result.failure_class (dispatch surface (prefix ^ "external.pptx") []) = Some Tool_result.Policy_rejection);
     Alcotest.(check bool) "line windows cannot claim complete presentation" true
@@ -100,10 +104,18 @@ let test_original_presentation () =
   Fun.protect ~finally:(fun () -> Unix.rename parked parser) (fun () ->
     let missing = dispatch task "presentation.pptx" [] in
     Alcotest.(check bool) "missing managed parser is an explicit failure" true
-      (Tool_result.failure_class missing = Some Tool_result.Runtime_failure));
+      (Tool_result.failure_class missing = Some Tool_result.Dependency_unavailable));
   Alcotest.(check string) "original source remains byte-for-byte unchanged" original
     (read (Filename.concat root "presentation.pptx"))
 
-let () = Alcotest.run "independent presentation verification"
+let () =
+  let temporary = Option.value ~default:(Filename.get_temp_dir_name ()) (Sys.getenv_opt "RUNNER_TEMP") in
+  let base = Filename.concat temporary "masc-presentation-verifier" in
+  let ready = List.for_all Sys.file_exists (List.map (Filename.concat (Filename.concat base "inputs"))
+      ["presentation.pptx"; "expected.json"; "broken.pptx"; "external.pptx"])
+    && Executable_path.command_available "soffice"
+    && Sys.file_exists (Presentation_runtime_dependencies.parser_python ~base_path:base) in
+  if not ready then Printf.eprintf "SKIP presentation integration: run scripts/ci/prepare-presentation-verifier.py and install LibreOffice\n%!"
+  else Alcotest.run "independent presentation verification"
   ["Task and Goal",[Alcotest.test_case "parse original slides and notes, render every slide, preserve authority"
     `Quick test_original_presentation]]

@@ -3,7 +3,9 @@
     either program. Every slide, including hidden slides, is rendered to PDF and
     inspected with Poppler. Static rendering does not inspect animation, embedded
     media playback, chart data, or accessibility. *)
-type slide = { number : int; text : string; speaker_notes : string option }
+(** [visible] records slideshow visibility, even though hidden slides are rendered.
+    [hyperlinks] contains targets belonging to the slide part, without following them. *)
+type slide = { number : int; text : string; speaker_notes : string option; visible : bool; hyperlinks : string list }
 
 type t =
   { source_bytes : int
@@ -17,6 +19,7 @@ type error =
   | Dependency_unavailable of string list
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
+  | Invalid_document of string
   | Policy_rejected of string
   | Storage_failed of string
   | Pdf_inspection_failed of Verification_pdf_inspection.error

@@ -22,29 +22,35 @@ def main():
         subprocess.run([str(python), "-I", "-m", "pip", "--isolated", "install",
                         "--require-virtualenv", "--only-binary=:all:", "python-pptx"], check=True)
         subprocess.run([str(python), "-I", "-B", str(Path(__file__).resolve()), "generate"], check=True)
+        subprocess.run([str(python), "-I", "-B", str(Path(__file__).resolve().parents[1] / "tests/test_presentation_inspection_parser.py")], check=True)
         return
     if sys.argv[1:] != ["generate"]:
         raise SystemExit("expected no arguments, or generate under the managed interpreter")
     from pptx import Presentation
     from pptx.util import Inches
+    from pptx.shapes.autoshape import Shape
     deck = Presentation()
     for title, note in [("First: leave a memory", "Speaker note one"),
                         ("Second: keep your choice", "Speaker note two")]:
         slide = deck.slides.add_slide(deck.slide_layouts[6])
         slide.shapes.add_textbox(Inches(1), Inches(1), Inches(8), Inches(1)).text = title
-        slide.notes_slide.notes_text_frame.text = note
+        notes = slide.notes_slide.notes_text_frame
+        assert notes is not None
+        notes.text = note
     # Hidden slides must still be represented in the independent inspection.
     deck.slides[1]._element.set("show", "0")
     table = deck.slides[1].shapes.add_table(1, 2, Inches(1), Inches(3), Inches(6), Inches(1)).table
     table.cell(0, 0).text = "Leave"
     table.cell(0, 1).text = "Take"
     # Normal clickable references should not require the renderer to fetch a URL.
-    paragraph = deck.slides[0].shapes[0].text_frame.paragraphs[0]
+    shape = deck.slides[0].shapes[0]
+    assert isinstance(shape, Shape)
+    paragraph = shape.text_frame.paragraphs[0]
     paragraph.runs[0].hyperlink.address = "https://example.invalid/reference"
     fixture = base / "inputs"
     fixture.mkdir(parents=True, exist_ok=True)
     source = fixture / "presentation.pptx"
-    deck.save(source)
+    deck.save(str(source))
     original = source.read_bytes()
     (fixture / "expected.json").write_text(json.dumps({
         "bytes": len(original), "sha256": hashlib.sha256(original).hexdigest(),
@@ -53,7 +59,7 @@ def main():
     }) + "\n")
     (fixture / "broken.pptx").write_bytes(original[:len(original) // 2])
     # An auto-loaded external image is a different relationship from a hyperlink.
-    from lxml import etree
+    from xml.etree import ElementTree as etree
     with zipfile.ZipFile(source) as src, zipfile.ZipFile(fixture / "external.pptx", "w") as dst:
         for entry in src.infolist():
             data = src.read(entry)

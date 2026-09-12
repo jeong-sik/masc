@@ -17,7 +17,9 @@ def inspect(source, environment):
     expected = pathlib.Path(environment).resolve()
     if pathlib.Path(sys.prefix).resolve() != expected or sys.prefix == sys.base_prefix:
         raise ImportError("managed presentation virtual environment required")
-    if not pathlib.Path(pptx.__file__).resolve().is_relative_to(expected):
+    try:
+        pathlib.Path(pptx.__file__).resolve().relative_to(expected)
+    except ValueError:
         raise ImportError("python-pptx must belong to the managed environment")
     data = pathlib.Path(source).read_bytes()
     relation_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -33,9 +35,16 @@ def inspect(source, environment):
         "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
         "image/svg+xml",
     }
-    hyperlink_count = 0
+    hyperlink_targets = {}
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = archive.namelist()
+        entries = archive.infolist()
+        # Input safety limits apply before any decompression (including CRC checks).
+        if len(entries) > 4096 or sum(entry.file_size for entry in entries) > 128 * 1024 * 1024:
+            raise PolicyError("package expansion exceeds inspection limits")
+        for entry in entries:
+            if entry.file_size > 16 * 1024 * 1024 or entry.file_size > max(1, entry.compress_size) * 1000:
+                raise PolicyError("package member expansion exceeds inspection limits")
+        names = [entry.filename for entry in entries]
         if len(names) != len(set(names)):
             raise ValueError("duplicate package member names")
         corrupt = archive.testzip()
@@ -81,9 +90,11 @@ def inspect(source, environment):
                 if kind in active_relations:
                     raise PolicyError("embedded active documents are not inspected: " + name)
                 mode = relationship.get("TargetMode", "Internal")
+                if kind in hyperlinks:
+                    source_part = posixpath.join(posixpath.dirname(posixpath.dirname(name)), posixpath.basename(name)[:-5])
+                    hyperlink_targets.setdefault(source_part, []).append(target)
                 if mode == "External":
                     if kind in hyperlinks:
-                        hyperlink_count += 1
                         continue
                     raise PolicyError("external loading relationship is unsupported: " + name + " (" + kind + ")")
                 if mode != "Internal":
@@ -113,20 +124,25 @@ def inspect(source, environment):
 
     slides = []
     for number, slide in enumerate(presentation.slides, start=1):
+        show = slide._element.get("show", "1")
+        if show not in ("0", "1", "true", "false"):
+            raise ValueError("invalid slide visibility")
         notes = None
         if slide.has_notes_slide:
             frame = slide.notes_slide.notes_text_frame
             if frame is not None:
                 notes = frame.text
         slides.append({"number": number, "text": "\n".join(shape_text(slide.shapes)),
-                       "speaker_notes": notes})
+                       "speaker_notes": notes,
+                       "visible": show in ("1", "true"),
+                       "hyperlinks": hyperlink_targets.get(str(slide.part.partname).lstrip("/"), [])})
     if not slides:
         raise ValueError("presentation contains no slides")
     return {"schema": "masc.presentation-inspection.v1", "ok": True,
             "source_bytes": len(data), "source_sha256": hashlib.sha256(data).hexdigest(),
             "slides": slides,
             "diagnostics": ["python-pptx " + pptx.__version__,
-                            str(hyperlink_count) + " external hyperlinks preserved without following",
+                            str(sum(map(len, hyperlink_targets.values()))) + " hyperlinks preserved without following",
                             "Text follows slide order and shape z-order; tables include cell text.",
                             "Static inspection does not inspect animation, media playback, chart data, or accessibility."]}
 

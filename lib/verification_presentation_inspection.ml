@@ -1,4 +1,4 @@
-type slide = { number : int; text : string; speaker_notes : string option }
+type slide = { number : int; text : string; speaker_notes : string option; visible : bool; hyperlinks : string list }
 
 type t =
   { source_bytes : int
@@ -12,6 +12,7 @@ type error =
   | Dependency_unavailable of string list
   | Command_failed of { program : string; status : Unix.process_status; detail : string }
   | Invalid_output of string
+  | Invalid_document of string
   | Policy_rejected of string
   | Storage_failed of string
   | Pdf_inspection_failed of Verification_pdf_inspection.error
@@ -26,6 +27,7 @@ let error_to_string = function
       | Unix.WSIGNALED signal -> Printf.sprintf "signal=%d" signal
       | Unix.WSTOPPED signal -> Printf.sprintf "stopped=%d" signal in
     Printf.sprintf "presentation_inspection_failed: %s %s: %s" program status detail
+  | Invalid_document detail -> "presentation_invalid_document: " ^ detail
   | Invalid_output detail -> "presentation_inspection_invalid_output: " ^ detail
   | Policy_rejected detail -> "presentation_inspection_policy_rejected: " ^ detail
   | Storage_failed detail -> "presentation_inspection_storage_failed: " ^ detail
@@ -41,18 +43,27 @@ let read_owned root path =
 
 let field key fields = List.assoc_opt key fields
 
+let parse_hyperlinks = function
+  | `List rows ->
+    List.fold_right (fun row result ->
+      let* rest = result in
+      match row with `String target -> Ok (target :: rest)
+      | _ -> Error (Invalid_output "invalid hyperlink")) rows (Ok [])
+  | _ -> Error (Invalid_output "invalid hyperlinks")
+
 let parse_slides = function
   | `List (_ :: _ as rows) ->
     let rec loop number acc = function
       | [] -> Ok (List.rev acc)
       | `Assoc fields :: rest ->
-        (match field "number" fields, field "text" fields, field "speaker_notes" fields with
-         | Some (`Int actual), Some (`String text), Some notes when actual = number ->
+        (match field "number" fields, field "text" fields, field "speaker_notes" fields, field "visible" fields, field "hyperlinks" fields with
+         | Some (`Int actual), Some (`String text), Some notes, Some (`Bool visible), Some links when actual = number ->
+           let* hyperlinks = parse_hyperlinks links in
            let* speaker_notes = match notes with
              | `Null -> Ok None
              | `String text -> Ok (Some text)
              | _ -> Error (Invalid_output "invalid speaker notes") in
-           loop (number + 1) ({number;text;speaker_notes} :: acc) rest
+           loop (number + 1) ({number;text;speaker_notes;visible;hyperlinks} :: acc) rest
          | _ -> Error (Invalid_output "invalid or out-of-order slide"))
       | _ -> Error (Invalid_output "invalid slide object") in
     loop 1 [] rows
@@ -86,7 +97,7 @@ let parse_result ~bytes ~sha256 content =
        (match field "kind" fields, field "detail" fields with
         | Some (`String "dependency"), Some (`String detail) -> Error (Dependency_unavailable [detail])
         | Some (`String "policy"), Some (`String detail) -> Error (Policy_rejected detail)
-        | Some (`String "invalid_document"), Some (`String detail) -> Error (Invalid_output detail)
+        | Some (`String "invalid_document"), Some (`String detail) -> Error (Invalid_document detail)
         | _ -> Error (Invalid_output "invalid parser failure"))
      | _ -> Error (Invalid_output "invalid parser envelope"))
   | _ -> Error (Invalid_output "parser response is not an object")
@@ -114,10 +125,12 @@ let inspect ~base_path ~max_image_bytes ~bytes =
       Auth.save_private_text_file source bytes;
       Unix.chmod source 0o400;
       let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
+      (* Untrusted document decoders have a per-process safety deadline; this
+         does not expire the verification task or its evidence. *)
       let run program arguments =
         match Process_eio.run_argv_with_status_split_or_refusal
             ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-            ~cwd:root (program :: arguments) with
+            ~timeout_sec:120. ~cwd:root (program :: arguments) with
         | Error (Process_eio.Executable_not_found missing) -> Error (Dependency_unavailable [missing])
         | Error refusal -> Error (Storage_failed (Process_eio.spawn_refusal_to_string refusal))
         | Ok (status,stdout,stderr) ->

@@ -421,16 +421,22 @@ let presentation_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
   | Error error ->
     let failure_class = match error with
       | Verification_presentation_inspection.Policy_rejected _
-      | Pdf_inspection_failed (Verification_pdf_inspection.Image_policy_rejected _) ->
+      | Pdf_inspection_failed (Verification_pdf_inspection.Image_policy_rejected _
+          | Page_budget_exceeded _ | Payload_budget_exceeded _) ->
         Tool_result.Policy_rejection
-      | Dependency_unavailable _ | Command_failed _ | Invalid_output _
+      | Dependency_unavailable _
+      | Pdf_inspection_failed (Verification_pdf_inspection.Dependency_unavailable _) ->
+        Tool_result.Dependency_unavailable
+      | Invalid_document _ -> Tool_result.Workflow_rejection
+      | Command_failed _ | Invalid_output _
       | Storage_failed _ | Pdf_inspection_failed _ -> Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_presentation_inspection.error_to_string error)
   | Ok inspection ->
     let slides = List.map (fun (slide : Verification_presentation_inspection.slide) ->
       `Assoc ["slide",`Int slide.number; "text",`String slide.text;
-        "speaker_notes",(match slide.speaker_notes with None -> `Null | Some notes -> `String notes)])
+        "speaker_notes",(match slide.speaker_notes with None -> `Null | Some notes -> `String notes);
+        "visible",`Bool slide.visible; "hyperlinks",`List (List.map (fun target -> `String target) slide.hyperlinks)])
       inspection.slides in
     let pages = List.map (fun (page : Verification_pdf_inspection.page) ->
       `Assoc ["slide",`Int page.number;"width_points",`Float page.width_points;

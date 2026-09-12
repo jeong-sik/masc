@@ -955,7 +955,7 @@ let gate_state = function
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _); _}); _}
   | None -> None
 
-let claimable_queued_with_db db ~now =
+let blocked_queued_scopes db ~now =
   let* executions = semantic_rows db ~active_only:true in
   let blocked = List.filter_map (fun (execution : Semantic.t) ->
     match gate_state (Some execution) with
@@ -973,6 +973,11 @@ let claimable_queued_with_db db ~now =
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
         | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _
             | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
+  Ok blocked
+;;
+
+let claimable_queued_with_db db ~now =
+  let* blocked = blocked_queued_scopes db ~now in
   with_statement db ~operation:"read claimable original operations"
     ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
     (fun statement ->
@@ -1215,13 +1220,18 @@ let move_queued_to_end store ~operation_id =
        _ -> Error error)
 ;;
 
-let move_queued_to_front store ~operation_id =
+let move_queued_to_front store ~now ~operation_id =
   let* () = ensure_open store in
   let* () = with_transaction store (fun () ->
     let* target = operation_or_unknown store.db operation_id in
     let* () = match target.state with
       | Operation.Queued -> Ok ()
       | _ -> Error (Not_queued operation_id) in
+    let* blocked = blocked_queued_scopes store.db ~now in
+    let* () = if List.exists (Keeper_execution_scope_id.equal
+        (Keeper_execution_scope_id.direct_operation operation_id)) blocked then
+      Error (Invalid_input "message is waiting for approval, reconciliation, or provider retry; priority cannot make it runnable")
+      else Ok () in
     let* queued = with_statement store.db ~operation:"read queue order"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' ORDER BY sequence")
       (fun stmt ->

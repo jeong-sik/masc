@@ -447,14 +447,14 @@ let test_priority_keeps_other_producers_and_survives_reopen () =
       ~source:(source producer) ~input:(input producer) |> store_ok |> accepted)
     ["keeper-a"; "operator"; "keeper-b"; "operator-later"] in
   let target = List.nth submitted 1 in
-  ignore (store_ok (Store.move_queued_to_front store ~operation_id:target.operation_id));
+  ignore (store_ok (Store.move_queued_to_front store ~now:5. ~operation_id:target.operation_id));
   let rows () = store_ok (Store.list_queued store ~after_sequence:None ~limit:10) in
   let check_order () = check (list string) "only requested operation moves ahead"
     ["priority-operator";"priority-keeper-a";"priority-keeper-b";"priority-operator-later"]
     (List.map (fun (o:Operation.t) -> Id.to_string o.operation_id) (rows ())) in
   check_order ();
   let before = List.map (fun (o:Operation.t) -> o.sequence) (rows ()) in
-  ignore (store_ok (Store.move_queued_to_front store ~operation_id:target.operation_id));
+  ignore (store_ok (Store.move_queued_to_front store ~now:5. ~operation_id:target.operation_id));
   check bool "repeated promotion is idempotent" true
     (before = List.map (fun (o:Operation.t) -> o.sequence) (rows ()));
   List.iter (fun (original:Operation.t) ->
@@ -467,7 +467,7 @@ let test_priority_keeps_other_producers_and_survives_reopen () =
   Fun.protect ~finally:(fun () -> ignore (Store.close reopened)) (fun () ->
     let claimed = Option.get (store_ok (Store.claim_next reopened ~now:10.)) in
     check bool "priority survives restart and is actually claimed first" true (Id.equal target.operation_id claimed.operation_id);
-    (match Store.move_queued_to_front reopened ~operation_id:target.operation_id with
+    (match Store.move_queued_to_front reopened ~now:11. ~operation_id:target.operation_id with
      | Error (Store.Not_queued _) -> () | _ -> fail "already running operation was promoted"))
 ;;
 

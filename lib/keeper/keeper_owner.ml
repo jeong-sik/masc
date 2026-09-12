@@ -1133,7 +1133,7 @@ let start
         | Command (Move_queued_operation_to_front operation_id, resolve) ->
           let response = reject_if_stopping state (fun () ->
             run_operation_command t ~label:"prioritize queued Keeper chat operation" (fun () ->
-              Chat_operation_store.move_queued_to_front t.operation_store ~operation_id)
+              Chat_operation_store.move_queued_to_front t.operation_store ~now:(t.now ()) ~operation_id)
             |> Result.map fst) in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id

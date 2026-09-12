@@ -37,7 +37,8 @@ let action ~now_ns (interrupt : Masc_tui_keeper_chat_transcript.interrupt) =
    disappeared or the next turn was published while the response travelled. *)
 let observed_action ~now_ns ~current_token ~previous =
   match previous with
-  | Some (_, _, true) -> Some Leave
+  | Some (token, _, true) when current_token = None || current_token = Some token -> Some Leave
+  | Some (_, _, true) -> Option.map (fun _ -> Launch_interrupt) current_token
   | Some (_, sent_ns, false) when Int64.sub now_ns sent_ns <= grace_window_ns -> Some Swallow
   | Some (token, _, false) when current_token = Some token || current_token = None -> Some Leave
   | Some _ | None -> Option.map (fun _ -> Launch_interrupt) current_token

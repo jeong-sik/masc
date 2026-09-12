@@ -88,6 +88,9 @@ let test_observed_turn_changes_during_double_escape () =
   check bool "fresh explicit key can stop successor after grace" true
     (Esc.observed_action ~now_ns:(Int64.add t0 (secs 3L))
       ~current_token:(Some "successor") ~previous = Some Esc.Launch_interrupt);
+  check bool "a past failure cannot disable successor cancellation" true
+    (Esc.observed_action ~now_ns:t0 ~current_token:(Some "successor")
+      ~previous:(Some ("old",t0,true)) = Some Esc.Launch_interrupt);
   check bool "failed request lets Escape leave immediately" true
     (Esc.observed_action ~now_ns:t0 ~current_token:(Some "old")
       ~previous:(Some ("old",t0,true)) = Some Esc.Leave)

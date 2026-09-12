@@ -486,6 +486,10 @@ The exact approved input remains only in the durable Gate store. Operator repair
 ### capability_probe (vars: tool)
 Call the tool named {{tool}} exactly once, with any arguments that satisfy its schema. Reply with the tool call only — no explanation, no preamble.
 
+### constitution (vars: articles)
+This world's keepers wrote these norms down for themselves. Each carries the id you need to take one back.
+{{articles}}
+
 ### instructions.custom (vars: instructions)
 Custom instructions:
 {{instructions}}

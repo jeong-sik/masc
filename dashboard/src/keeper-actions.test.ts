@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ApiCore from './api/core'
 
 const { callMcpTool } = vi.hoisted(() => ({ callMcpTool: vi.fn() }))
 const { runOperatorAction } = vi.hoisted(() => ({ runOperatorAction: vi.fn() }))
@@ -23,7 +24,10 @@ const { fetchKeeperToolCalls } = vi.hoisted(() => ({
 }))
 
 vi.mock('./api/mcp', () => ({ callMcpTool }))
-vi.mock('./api/core', () => ({ runOperatorAction }))
+vi.mock('./api/core', async importOriginal => ({
+  ...await importOriginal<typeof ApiCore>(),
+  runOperatorAction,
+}))
 vi.mock('./api/keeper', () => ({
   cancelKeeperChatOperation,
   fetchKeeperChatOperation,
@@ -54,6 +58,7 @@ import {
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
   hydrateKeeperStatus,
+  hydrateKeeperToolOutputs,
   loadFullKeeperHistory,
   noteKeeperChatAppended,
   probeKeeperRuntime,
@@ -66,7 +71,9 @@ import {
   _clearTrackedKeeperChatOperationsForTests,
 } from './keeper-chat-operations-local'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
+import { clearStoredToken, setStoredToken } from './api/core'
 import {
+  lookupToolCallOutput,
   resetToolCallOutputs,
   toolCallOutputHydrationContract,
   toolCallOutputHydrationFailureReason,
@@ -80,11 +87,43 @@ import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperStatusDetail } from './types'
 
 beforeEach(() => {
+  clearStoredToken()
   shellAuthSummary.value = { effective_role: 'admin' }
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
   resetToolCallOutputs()
   _resetKeeperStreamBuffersForTests()
+})
+
+describe('tool-output hydration credential scope', () => {
+  afterEach(() => clearStoredToken())
+
+  it('discards an Admin tail response after the credentials change', async () => {
+    setStoredToken('fixture-admin')
+    let complete!: (value: { entries: ToolCallEntry[] }) => void
+    fetchKeeperToolCalls.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const hydration = hydrateKeeperToolOutputs('echo')
+    setStoredToken('fixture-worker')
+    complete({ entries: [{
+      ts: 1, keeper: 'echo', tool: 'Read', input: {}, output: 'private',
+      success: true, duration_ms: 1, execution_id: 'late-admin',
+    }] })
+    await hydration
+    expect(lookupToolCallOutput('echo', 'late-admin')).toBeNull()
+    expect(toolCallOutputHydrationStatus('echo')).toBe('idle')
+  })
+
+  it('does not mark the new credential scope failed when an older request rejects', async () => {
+    setStoredToken('fixture-admin')
+    let fail!: (reason: Error) => void
+    fetchKeeperToolCalls.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject }))
+    const hydration = hydrateKeeperToolOutputs('echo')
+    clearStoredToken()
+    fail(new Error('old request failed'))
+    await hydration
+    expect(toolCallOutputHydrationStatus('echo')).toBe('idle')
+    expect(toolCallOutputHydrationFailureReason('echo')).toBeNull()
+  })
 })
 
 describe('noteKeeperChatAppended', () => {

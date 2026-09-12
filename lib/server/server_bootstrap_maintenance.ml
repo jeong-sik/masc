@@ -213,7 +213,12 @@ let recover_keeper_config_journal_on_startup ~base_path =
             try
               Sys.remove path;
               Ok ()
-            with exn -> Error (Printexc.to_string exn))
+            with
+            | Sys_error message -> Error ("remove failed: " ^ message)
+            | Unix.Unix_error (error, action, _) ->
+              Error
+                (Printf.sprintf "remove failed: %s (%s)" action
+                   (Unix.error_message error)))
           else Ok ()
         | Keeper_config_journal.Manifest_bytes bytes ->
           Fs_compat.save_file_atomic_strict_staged path bytes
@@ -272,7 +277,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       : Keeper_msg_async.recovery_report);
   ignore
     (recover_keeper_config_journal_on_startup ~base_path:config.base_path
-      : Keeper_config_journal.report);
+      : Keeper_config_journal.report)
+  (* fire-and-forget: the typed report is retained in
+     latest_keeper_config_journal_recovery for readback; recovery is
+     idempotent and re-runs on next boot if it failed. *);
   let recovery_ctx : _ Keeper_types_profile.context =
     { config
     ; agent_name = "keeper-maintenance-recovery"

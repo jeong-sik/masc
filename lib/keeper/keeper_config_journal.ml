@@ -189,39 +189,37 @@ let clear ~journal_path =
 ;;
 
 let apply_rollback record ~manifest_restore ~runtime_restore =
-  let restore_result =
+  let manifest_failures = ref [] in
+  let manifest_restored =
     match record.manifest_before with
     | Manifest_absent ->
       (match manifest_restore record.manifest_path Manifest_absent with
        | Ok () -> true
        | Error detail ->
-         Printf.sprintf "manifest restore failed: %s" detail |> ignore;
+         manifest_failures := detail :: !manifest_failures;
          false)
     | Manifest_bytes bytes ->
       (match manifest_restore record.manifest_path (Manifest_bytes bytes) with
        | Ok () -> true
        | Error detail ->
-         Printf.sprintf "manifest restore failed: %s" detail |> ignore;
+         manifest_failures := detail :: !manifest_failures;
          false)
   in
+  let runtime_failures = ref [] in
   let runtime_restored =
     match record.runtime_before, record.runtime_path with
     | Some source_text, Some path ->
       (match runtime_restore path source_text with
        | Ok () -> true
        | Error detail ->
-         Printf.sprintf "runtime restore failed: %s" detail |> ignore;
+         runtime_failures := detail :: !runtime_failures;
          false)
     | _ -> true
   in
-  if (not restore_result) || not runtime_restored
-  then
-    Error
-      ( "recovery left files unrestored"
-      , [ if not restore_result then "manifest restore failed" else ""
-        ; if not runtime_restored then "runtime restore failed" else ""
-        ] )
-  else Ok { manifest_restored = restore_result; runtime_restored }
+  let failures = !manifest_failures @ !runtime_failures in
+  if not manifest_restored || not runtime_restored
+  then Error ("recovery left files unrestored", failures)
+  else Ok { manifest_restored; runtime_restored }
 ;;
 
 let recover_interrupted ~base_path ~manifest_restore ~runtime_restore =

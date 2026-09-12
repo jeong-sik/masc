@@ -1765,6 +1765,7 @@ type async_msg =
      arrives. *)
   | Voice_wizard_saved of (Yojson.Safe.t, string) result
   | Voice_wizard_probed of (Yojson.Safe.t, string) result
+  | Voice_wizard_voices of (Yojson.Safe.t, string) result
   | Voice_config_loaded of
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
@@ -2608,6 +2609,72 @@ let voice_wizard_probe_lines json =
               | _ -> None)
             items
       | Some _ | None -> [])
+  | _ -> []
+;;
+
+(* The voices the draft's provider has, asked as the voice step opens. The
+   request names a kind and the variable holding that provider's key -- never a
+   key, and never an address: the route resolves the variable in the server's
+   own environment and uses the kind's own address. *)
+let launch_voice_wizard_voices state ~mailbox
+    (session : Masc_tui_types.voice_wizard_session) =
+  let draft = session.Masc_tui_types.vws_draft in
+  let host = server_peer_host in
+  let port = state.port in
+  let payload =
+    Yojson.Safe.to_string
+      (`Assoc
+        ([ "kind"
+         , `String (Voice_wizard.provider_kind_label draft.Voice_wizard.provider)
+         ]
+         @
+         match String.trim draft.Voice_wizard.credential_variable with
+         | "" -> []
+         | variable -> [ "api_key_env", `String variable ]))
+  in
+  let run () =
+    let result =
+      Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/voices" ~body:payload
+    in
+    enqueue_async mailbox (Voice_wizard_voices result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async mailbox (Voice_wizard_voices (Error "Eio switch is unavailable"))
+;;
+
+(* One row per voice: the id is what the configuration stores, and the label is
+   what makes it pickable. A row with no id is dropped -- it cannot be chosen,
+   and a list offering unchoosable rows is worse than a shorter one. *)
+let voice_wizard_voice_rows json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "voices" fields with
+     | Some (`List items) ->
+       List.filter_map
+         (fun item ->
+           match item with
+           | `Assoc entry ->
+             let text key =
+               match List.assoc_opt key entry with
+               | Some (`String value) when String.trim value <> "" -> Some value
+               | Some _ | None -> None
+             in
+             (match text "id" with
+              | None -> None
+              | Some id ->
+                let label =
+                  match text "name", text "language" with
+                  | Some name, Some language -> Printf.sprintf "%s  (%s)" name language
+                  | Some name, None -> name
+                  | None, Some language -> Printf.sprintf "%s  (%s)" id language
+                  | None, None -> id
+                in
+                Some (id, label))
+           | _ -> None)
+         items
+     | Some _ | None -> [])
   | _ -> []
 ;;
 
@@ -10958,6 +11025,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
        | Some session, Error message ->
            state.voice_wizard
              <- Some { session with vws_saving = false; vws_status = Some message })
+  (* A catalogue that did not answer is not an error the operator has to clear:
+     the step is a plain field then, which is what it was before there was a
+     list. The reason is shown so a reader knows why there is nothing to pick
+     rather than thinking the list is empty. *)
+  | Voice_wizard_voices result ->
+      (match (state.voice_wizard, result) with
+       | None, _ -> ()
+       | Some session, Error message ->
+           state.voice_wizard <- Some { session with vws_status = Some message }
+       | Some session, Ok json ->
+           state.voice_wizard
+             <- Some
+                  (Masc_tui_types.voice_wizard_with_voices session
+                     (voice_wizard_voice_rows json)))
   | Voice_wizard_probed result ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
@@ -15914,6 +15995,16 @@ and is loaded on demand through keeper_skill.
             | None -> ()
             | Some session ->
               let set value = state.voice_wizard <- Some value in
+              (* Landing on the voice step asks the endpoint what it has. Asked
+                 on arrival rather than when the wizard opens: the provider can
+                 still change before then, and the answer belongs to the
+                 provider that is current. *)
+              let moved next =
+                if next.Masc_tui_types.vws_step = Voice_wizard.Voice
+                   && session.vws_step <> Voice_wizard.Voice
+                then launch_voice_wizard_voices state ~mailbox:async_messages next;
+                next
+              in
               (* A save in flight ignores everything but the key that leaves:
                  the draft it is writing is already on its way. *)
               if session.vws_saving && not (String.equal k "esc")
@@ -15932,9 +16023,10 @@ and is loaded on demand through keeper_skill.
                    | Voice_wizard.Address
                    | Voice_wizard.Credential
                    | Voice_wizard.Model
-                   | Voice_wizard.Voice -> set (Masc_tui_types.voice_wizard_next session))
-                | "up" -> set (Masc_tui_types.voice_wizard_previous session)
-                | "down" -> set (Masc_tui_types.voice_wizard_next session)
+                   | Voice_wizard.Voice ->
+                     set (moved (Masc_tui_types.voice_wizard_next session)))
+                | "up" -> set (moved (Masc_tui_types.voice_wizard_previous session))
+                | "down" -> set (moved (Masc_tui_types.voice_wizard_next session))
                 (* The provider is a closed set, so it walks under the same keys
                    a bool toggles under elsewhere in this pane. *)
                 | "left" | "right" | " "
@@ -15943,6 +16035,15 @@ and is loaded on demand through keeper_skill.
                 | "left" | "right" | " "
                   when session.vws_step = Voice_wizard.Provider ->
                   set (Masc_tui_types.voice_wizard_cycle_provider session)
+                (* The offered voices walk under the same keys the closed sets
+                   do. Typing still works and is what a reader falls back to
+                   when the endpoint published no list. *)
+                | ("left" | "right")
+                  when session.vws_step = Voice_wizard.Voice
+                       && session.vws_voices <> [] ->
+                  set
+                    (Masc_tui_types.voice_wizard_walk_voices session
+                       ~ahead:(String.equal k "right"))
                 | "\127" | "\b" | "backspace" ->
                   set (Masc_tui_types.voice_wizard_backspace session)
                 | s when String.length s = 1 && Char.code s.[0] = 21 ->

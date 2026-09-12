@@ -14321,9 +14321,19 @@ VOICE_CONFIG_FIXTURE = {
 }
 
 
+VOICE_CATALOGUE_FIXTURE = {
+    "voices": [
+        {"id": "QQ00AAbbCCddEEffGGhh", "name": "Korean Bright Voice", "language": "ko"},
+        {"id": "RR11BBccDDeeFFggHHii", "name": "Han Aim", "language": "ko"},
+        {"id": "SS22CCddEEffGGhhIIjj", "name": "English Narrator"},
+    ]
+}
+
+
 def voice_wizard_http_fixtures() -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
     fixtures["/api/v1/voice/config"] = (200, VOICE_CONFIG_FIXTURE)
+    fixtures["/api/v1/voice/voices"] = (200, VOICE_CATALOGUE_FIXTURE)
     # One path, two meanings: the pane reads it and the wizard writes to it.
     # The fixture table is keyed by path alone, so the body tells them apart --
     # a read arrives with none.
@@ -14589,7 +14599,18 @@ def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
         voice_step = press_and_settle(process, master_fd, output, b"\r")
         expect(voice_step, b"step 4/5", "enter did not reach the voice step")
         expect(voice_step, b"voice", "the fourth question is not about the voice")
-        press_and_settle(process, master_fd, output, b"Yuna", cap=15.0)
+
+        # The voices the endpoint published, on screen rather than left to
+        # typing: say does not fail on a name it does not have, so a name typed
+        # from memory is wrong silently.
+        expect(voice_step, b"Korean Bright Voice", "the offered voices did not draw")
+        expect(voice_step, b"to walk, or type an id", "the list said how to walk it")
+
+        # Walking commits the id the endpoint named. The second row is picked
+        # so the assertion cannot pass on the list simply defaulting to its
+        # first.
+        walked = press_and_settle(process, master_fd, output, b"\x1b[C")
+        expect(walked, b"Han Aim", "the right arrow did not walk the offered voices")
 
         review = press_and_settle(process, master_fd, output, b"\r")
         expect(review, b"step 5/5", "enter did not reach the review")
@@ -14614,8 +14635,9 @@ def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
         for absent in ("base_url", "api_key_env"):
             if absent in endpoint:
                 raise AssertionError(f"{absent} was sent for a command: {endpoint!r}")
-        if changes.get("set_tts_default_voice", {}).get("voice") != "Yuna":
-            raise AssertionError(f"the voice was lost: {changes!r}")
+        # The id from the list, not anything retyped.
+        if changes.get("set_tts_default_voice", {}).get("voice") != "RR11BBccDDeeFFggHHii":
+            raise AssertionError(f"the picked voice did not reach the save: {changes!r}")
 
         press_and_settle(process, master_fd, output, b"\x1b")
         read_available(master_fd, output)

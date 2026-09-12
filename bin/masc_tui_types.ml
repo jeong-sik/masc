@@ -2673,6 +2673,14 @@ type voice_wizard_session =
             told rather than overwriting it. *)
   ; vws_status : string option
   ; vws_saving : bool
+  ; vws_voices : (string * string) list
+        (** The voices the endpoint says it has, as (id, what to show).
+            Offered on the voice step rather than left to typing, because say
+            does not fail on a name it does not have -- it speaks in the system
+            voice, so a name typed from memory is wrong silently. Empty when
+            the kind publishes no catalogue, and the step is a plain field
+            then. *)
+  ; vws_voice_cursor : int
   ; vws_probe : string list
         (** What each endpoint answered after the save, one line each. The
             wizard writes a configuration; whether anything on the other end
@@ -2722,8 +2730,31 @@ let voice_wizard_open ~section ~revision =
   ; vws_revision = revision
   ; vws_status = None
   ; vws_saving = false
+  ; vws_voices = []
+  ; vws_voice_cursor = 0
   ; vws_probe = []
   }
+
+(* The list the endpoint answered with, and the cursor reset to its start: a
+   cursor kept across a reload would point into a list that changed. *)
+let voice_wizard_with_voices session voices =
+  { session with vws_voices = voices; vws_voice_cursor = 0 }
+
+(* Walking the offered voices. The chosen row becomes the input, so leaving the
+   step commits the id the endpoint named rather than anything retyped. *)
+let voice_wizard_walk_voices session ~ahead =
+  match session.vws_voices with
+  | [] -> session
+  | voices ->
+    let count = List.length voices in
+    let cursor = ((session.vws_voice_cursor + (if ahead then 1 else -1)) + count) mod count in
+    let id = match List.nth_opt voices cursor with Some (id, _) -> id | None -> "" in
+    { session with
+      vws_voice_cursor = cursor
+    ; vws_input = id
+    ; vws_replace_on_type = false
+    ; vws_status = None
+    }
 
 let voice_wizard_append session text =
   { session with

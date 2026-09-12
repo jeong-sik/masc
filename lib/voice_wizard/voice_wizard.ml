@@ -45,6 +45,13 @@ let kind_of_provider = function
   | Whisper_cli -> Voice_config.Whisper_cli
 ;;
 
+(* The wire name of the kind a provider becomes. One place, so a caller that
+   has to name a kind over HTTP does not restate the mapping and drift from
+   it. *)
+let provider_kind_label provider =
+  Voice_config.string_of_endpoint_kind (kind_of_provider provider)
+;;
+
 type draft =
   { section : Voice_setup.section
   ; provider : provider

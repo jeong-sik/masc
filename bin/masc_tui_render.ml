@@ -13664,6 +13664,25 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Credential when String.trim session.vws_input = "" ->
      box_line buf cols
        (Printf.sprintf "    %sblank sends no Authorization header%s" Ansi.dim Ansi.reset)
+   (* The offered voices, with the one under the cursor marked. Shown rather
+      than left to typing because say does not fail on a name it does not have:
+      it speaks in the system voice, so a wrong name is silent. *)
+   | Voice_wizard.Voice when session.vws_voices <> [] ->
+     let count = List.length session.vws_voices in
+     let window = 5 in
+     let first = max 0 (min (session.vws_voice_cursor - (window / 2)) (count - window)) in
+     List.iteri
+       (fun index (_id, label) ->
+         if index >= first && index < first + window
+         then
+           box_line buf cols
+             (if index = session.vws_voice_cursor
+              then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold label Ansi.reset
+              else Printf.sprintf "    %s  %s%s" Ansi.dim label Ansi.reset))
+       session.vws_voices;
+     box_line buf cols
+       (Printf.sprintf "    %s%d of %d  \xe2\x86\x90/\xe2\x86\x92 to walk, or type an id%s"
+          Ansi.dim (session.vws_voice_cursor + 1) count Ansi.reset)
    | Voice_wizard.Address when String.trim session.vws_input = "" ->
      List.iter
        (fun (what, address) ->

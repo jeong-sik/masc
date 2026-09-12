@@ -42,8 +42,9 @@ def run(binary):
                 "color": "rgb(0,0,0)", "fontSize": 16, "fontWeight": "400",
                 "whiteSpace": "normal", **fields}
 
-    def control(identity, text, disabled=False):
-        return node(identity, "control", text, clickable=True, editable=False, disabled=disabled)
+    def control(identity, text, disabled=False, source=None):
+        return node(identity, "control", text, clickable=True, editable=False, disabled=disabled,
+                    sourceContext=source)
 
     def read(_body):
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
@@ -68,7 +69,9 @@ def run(binary):
             nodes = [node("intro", "text", "LONG ARTICLE " + ("wrapped article content " * 180)),
                      control("first", "FIRST LINK"), control("disabled", "DISABLED LINK", True),
                      node("middle", "text", "Intervening text " * 180),
-                     control("second", "SECOND LINK")]
+                     control("second", "SECOND LINK", source={
+                         "schema": "masc.source.v1", "file": "src/article.tsx", "line": 7,
+                         "column": 3, "kind": "element", "digest": "a" * 64})]
             if actions:
                 nodes = [node("done", "text", "CLICK RESULT VERIFIED")]
         return 200, {"ok": True, "data": {"source": "live", "clientId": client, "tabId": 2,
@@ -102,8 +105,11 @@ def run(binary):
             h.wait_for_output(process, fd, output, b"LONG ARTICLE", start=0, timeout=3)
             # Each marker must reach the body, not only the selected-element title.
             h.send_and_wait(process, fd, output, b"\t", b"[>2 button/link] FIRST LINK")
+            assert b"Source unavailable" not in h.screen_text(output)
             h.send_and_wait(process, fd, output, b"\t", b"[>5 button/link] SECOND LINK")
+            assert b"src/article.tsx:7:3" in h.screen_text(output)
             h.send_and_wait(process, fd, output, b"\x1b[Z", b"[>2 button/link] FIRST LINK")
+            assert b"src/article.tsx:7:3" not in h.screen_text(output)
             h.send_and_wait(process, fd, output, b"n", b"[>3 disabled] DISABLED LINK")
             h.send_and_wait(process, fd, output, b"\t", b"[>5 button/link] SECOND LINK")
             # Forward/backward action traversal wraps without losing the scene.

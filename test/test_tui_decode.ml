@@ -3268,6 +3268,26 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     ; "text snapshot timestamp rejects",
       map_keeper 1 (replace_field "updated_at" (`String "1700000000")) json
     ];
+  (* Rejecting is half the job. A nine-kilobyte payload with one key out of
+     place used to come back as "unknown, duplicate, or missing fields", and
+     that sentence is the whole of what the Memory surface drew -- nothing in
+     it says which key, so the operator diffs the payload against the decoder
+     by hand. These pin the named groups. *)
+  (match Tui_decode.decode_memory_health_snapshot unknown_field with
+   | Ok _ -> Alcotest.fail "an unknown root field has to be refused"
+   | Error detail ->
+       Alcotest.(check string) "the refusal names the unknown field"
+         "memory health snapshot fields mismatch (unknown=[unexpected])" detail);
+  (let duplicated_root =
+     match json with
+     | `Assoc fields -> `Assoc (("schema", `String "twice") :: fields)
+     | json -> json
+   in
+   match Tui_decode.decode_memory_health_snapshot duplicated_root with
+   | Ok _ -> Alcotest.fail "a duplicated root field has to be refused"
+   | Error detail ->
+       Alcotest.(check string) "the refusal names the duplicated field"
+         "memory health snapshot fields mismatch (duplicates=[schema])" detail);
   match Tui_decode.decode_memory_health_snapshot json with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok snapshot ->

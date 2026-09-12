@@ -463,6 +463,10 @@ let for_surface = function
       ; b Meta "Tab" "next"
       ]
   | Resources ->
+      (* Two panes with two meanings, and the keys below say so once rather
+         than per row: with the list focused the cursor moves and [/] lands
+         it on a match; with the text focused the same keys move the reading.
+         Both ends answer to Home and End. *)
       [ b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
@@ -470,9 +474,16 @@ let for_surface = function
       ; b Navigate "J / K" "scroll text"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while the detail is focused, read the adjacent resource"
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"a page of the list, or of the text when it is focused"
+      ; b Navigate "Home/End" "top/bottom"
+          ~help:"the first or last resource, or the ends of the text when it                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "back"
           ~help:"the text hands back to the list; the list leaves for Config"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching resource name; the list has to                  be focused for there to be a cursor to land"
+      ; b Search "n / N" "next / previous match"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
@@ -637,6 +648,12 @@ let footer_hints_code ~pane =
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources
+  (* The row search needs a cursor to land on, and with the text focused
+     there is none -- [surface_row_texts] says so too. Dropped here rather
+     than listed and silent. *)
+  |> List.filter (fun binding ->
+         (not detail_focus)
+         || not (String.equal binding.key "/" || String.equal binding.key "n / N"))
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            { binding with label = (if detail_focus then "scroll text" else "move") }
@@ -875,7 +892,22 @@ let help_sections ?current () =
   in
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
-    :: List.map (fun (_, section) -> section) rest
+    :: (List.map (fun (_, section) -> section) rest
+        (* The marks last, as reference, the way the slash commands read as
+           reference. One reader of them has no words beside it: the Keepers
+           rows draw each glyph with its status word and so does the chat
+           header, but the roster pane beside the chat is 34 cells wide and
+           draws the glyph alone (masc_tui_render_prim.ml: "Without it the pane
+           says a keeper exists and nothing else"). Selecting keepers until
+           every state has been seen was the only way that reader could learn
+           the eight, and two of them -- stale and zombie -- may never be
+           selected.
+
+           Masc_tui_keeper_mark carried this list for exactly this and nothing
+           read it. Its shape is already the sheet's: a mark, and what it
+           means. Last rather than beside Global because the section order up
+           to there is asserted. *)
+        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend) ])
 
 let footer_hints_browser_lane =
   hints_of_bindings

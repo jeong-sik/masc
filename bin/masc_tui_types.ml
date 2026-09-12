@@ -5792,6 +5792,32 @@ type clamped_scroll =
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
 
+(* What End names on a surface whose rows the drawing counts: a row past any
+   real end, so the frame's own clamp reports the last one back. The keypress
+   cannot work the number out -- that is what a {!clamped_scroll} is -- and a
+   value it can name has to be larger than any surface's rows.
+
+   [max_int] rather than a number someone judged large enough. An MCP resource
+   reading carries whatever text the server sent and the frame wraps it, so
+   the row count has no ceiling to sit above; a finite sentinel is a row the
+   reader can be left at, and it would be left there silently.
+
+   Arithmetic on this value is safe because it does not survive a frame. The
+   drawing clamps with [min state.resource_scroll max_scroll] and reports the
+   result back through [Resource_scroll], so by the time a page key adds to
+   [resource_scroll] it holds the real last row, not this. *)
+let clamped_scroll_end = max_int
+
+(* Moving down from [clamped_scroll_end]. The sentinel waits for a frame to
+   count the real rows and report them back, and some frames pass without
+   counting: a reading that has not arrived, and -- on a narrow terminal with
+   the list focused -- a frame that draws no reading at all. A key pressed
+   in between would carry the sentinel into [+], so the addition stops here
+   instead of wrapping negative and throwing the reader to the top. Moving up
+   needs no such care: [max 0] already holds that end. *)
+let scroll_down_from scroll ~by =
+  if scroll > max_int - by then max_int else scroll + by
+
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
@@ -6850,6 +6876,12 @@ let surface_row_texts (state : state) : surface -> string list option = function
                 (List.map
                    (fun change -> Tui_decode.file_change_address change)
                    changes)))
+  (* The list pane only. With the text focused j/k scrolls the reading and
+     there is no row cursor for a match to land on, so the same condition the
+     cursor arm reads answers here: a search offered on one focus and silent
+     on the other would be the drift this pairing exists to prevent. *)
+  | Resources when state.resource_focus = Left_pane ->
+      Option.map (List.map Masc_tui_mcp.display_name) state.resources_list
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
   | Resources | Config | Tools ->
       None

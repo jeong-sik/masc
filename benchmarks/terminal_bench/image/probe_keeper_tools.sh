@@ -23,6 +23,12 @@ PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
 RUNTIME_ID="${BENCH_RUNTIME_ID:-anthropic.claude-sonnet-5}"
 POOL="${BENCH_KEEPER_POOL:-bench-1}"
 KEEPER="${POOL%%,*}"
+# The witness has to be producible by a single argv, because the keeper's
+# Execute tool runs argv directly with no shell. Asking for
+# `printf x > /tmp/marker` got argv ["printf";"x";">";"/tmp/marker"], which
+# exits 0 having printed the redirect as text — masc reported that faithfully
+# (the warning was right there in the output), but no file appeared and the
+# probe read it as "the keeper did nothing".
 MARKER="/tmp/arm-k-keeper-was-here"
 NAME="masc-armk-probe-$$"
 
@@ -47,17 +53,22 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== render arm k config for ${RUNTIME_ID}"
-python3 -c "
+# Rendering takes the wire model id; masc resolves the slugged binding id, and
+# BENCH_RUNTIME_ID is what bootstrap hands to masc_keeper_up. Ask the renderer
+# for the effective id rather than reimplementing the slug rule in shell.
+EFFECTIVE_RUNTIME_ID="$(python3 -c "
 import sys; sys.path.insert(0, '${BENCH_DIR}/configs')
 from pathlib import Path
-from render_configs import render_arm
-print(render_arm('k', '${RUNTIME_ID}', 'high', out_root=Path('${cfg}')))
-" || { echo "STAGE_FAIL render" >&2; exit 1; }
+from render_configs import render_arm, effective_runtime_id
+render_arm('k', '${RUNTIME_ID}', 'high', out_root=Path('${cfg}'))
+print(effective_runtime_id('${RUNTIME_ID}'))
+")" || { echo "STAGE_FAIL render" >&2; exit 1; }
+echo "   binding: ${EFFECTIVE_RUNTIME_ID}"
 
 echo "== boot container ${IMAGE}"
 docker run -d --name "${NAME}" --platform "${PLATFORM}" \
   -e "${key_env}=${key}" \
-  -e "BENCH_RUNTIME_ID=${RUNTIME_ID}" \
+  -e "BENCH_RUNTIME_ID=${EFFECTIVE_RUNTIME_ID}" \
   -e "BENCH_KEEPER_POOL=${POOL}" \
   ${GH_TOKEN:+-e "GH_TOKEN=${GH_TOKEN}"} \
   "${IMAGE}" sleep infinity >/dev/null || { echo "STAGE_FAIL docker-run" >&2; exit 1; }
@@ -78,7 +89,7 @@ docker exec "${NAME}" chmod -R +x /opt/masc-bench/bin /opt/masc-bench/driver
 echo "== bootstrap"
 if ! docker exec \
     -e "${key_env}=${key}" \
-    -e "BENCH_RUNTIME_ID=${RUNTIME_ID}" \
+    -e "BENCH_RUNTIME_ID=${EFFECTIVE_RUNTIME_ID}" \
     -e "BENCH_KEEPER_POOL=${POOL}" \
     ${GH_TOKEN:+-e "GH_TOKEN=${GH_TOKEN}"} \
     "${NAME}" bash /opt/masc-bench/driver/bootstrap.sh; then
@@ -106,12 +117,12 @@ mcp() {
 }
 
 echo "== masc_keeper_up ${KEEPER}"
-up="$(mcp 10 masc_keeper_up "$(printf '{"name":"%s","runtime_id":"%s","activation_mode":"manual","instructions":"You run shell commands in this container. Do exactly what you are asked, then stop."}' "${KEEPER}" "${RUNTIME_ID}")" 180)"
+up="$(mcp 10 masc_keeper_up "$(printf '{"name":"%s","runtime_id":"%s","activation_mode":"manual","instructions":"You run shell commands in this container. Do exactly what you are asked, then stop."}' "${KEEPER}" "${EFFECTIVE_RUNTIME_ID}")" 180)"
 echo "${up}" | head -c 600; echo
 grep -q '"isError":true' <<<"${up}" && { echo "STAGE_FAIL keeper_up" >&2; exit 1; }
 
 echo "== masc_keeper_msg -> write ${MARKER}"
-msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run this one shell command and nothing else: printf arm-k-ok > %s"}' "${KEEPER}" "${MARKER}")" 300)"
+msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run exactly one command and then stop: touch %s . Your Execute tool takes an argv list and runs it without a shell, so do not use redirection, pipes, or any shell syntax."}' "${KEEPER}" "${MARKER}")" 300)"
 echo "${msg}" | head -c 600; echo
 
 echo "== wait for the marker the keeper was asked to write"
@@ -144,4 +155,14 @@ if [[ -z "${found}" ]]; then
   exit 1
 fi
 
-echo "PROBE_OK marker=$(docker exec "${NAME}" cat "${MARKER}")"
+echo "PROBE_OK marker=${MARKER} written by the keeper"
+# The marker proves a file appeared; the receipt proves where the command ran.
+docker exec "${NAME}" sh -c \
+  'find /opt/masc-bench/base/.masc/tool_calls -name "*.jsonl" -exec tail -1 {} \;' \
+  | python3 -c "
+import json, sys
+d = json.loads(sys.stdin.readline())
+o = json.loads(d['"'"'output'"'"'])
+print('   argv:', (d.get('"'"'input'"'"') or {}).get('"'"'argv'"'"'))
+print('   via:', o.get('"'"'via'"'"'), '"'"'|'"'"' host:', o.get('"'"'remote_host'"'"'), '"'"'|'"'"' exit:', o.get('"'"'status'"'"'))
+" 2>/dev/null || true

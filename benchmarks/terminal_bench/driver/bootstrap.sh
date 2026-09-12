@@ -6,6 +6,10 @@
 #   /opt/masc-bench/config/       (rendered arm config: runtime.toml, keepers/, ...)
 set -euo pipefail
 
+# BENCH_RUNTIME_ID must be the id masc resolves, `<provider>.<binding id>` —
+# not the wire model. They differ whenever the wire name carries a slash, as
+# every OpenRouter id does; the renderer's effective_runtime_id() is the one
+# source of that rule and the caller applies it before setting this.
 BENCH=/opt/masc-bench
 export MASC_BASE_PATH=$BENCH/base
 export MASC_CONFIG_DIR=$BENCH/config

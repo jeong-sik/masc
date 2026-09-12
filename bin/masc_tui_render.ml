@@ -3717,12 +3717,16 @@ let schedule_delivery_summary (row : schedule_row) =
       row.sch_status
   , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
+(* Both readers draw this through [data_unreliable_row], which already opens
+   "(data unreliable: ". So each branch says only what that frame cannot:
+   nothing, when there is no snapshot and the error is the whole story; and
+   that the rows on screen are the previous read, when there is one. *)
 let schedule_source_warning (state : state) =
   Terminal_text.optional_single_line state.schedules_error
   |> Option.map (fun err ->
          match state.schedules with
-         | None -> "조회 실패: " ^ err
-         | Some _ -> "이전 조회 유지 · 갱신 실패: " ^ err)
+         | None -> err
+         | Some _ -> "이전 조회 유지 · " ^ err)
 
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the

@@ -302,7 +302,12 @@ let test_voice_assignment_owns_typing_and_paste () =
   state.Tui_types.voice_agent_voices <-
     Some (Tui_types.voice_agent_open ~agents:[ "alpha" ] ~revision:"r");
   state.Tui_types.palette_open <- true;
-  check target "assignment receives voice IDs" (Some Tui_types.Text_voice_agent) (resolved state)
+  check target "assignment receives voice IDs" (Some Tui_types.Text_voice_agent) (resolved state);
+  state.Tui_types.palette_open <- false;
+  check target "hidden compact assignment cannot receive typing or paste" None
+    (resolved ~compact_viewport:true state);
+  check target "visible assignment owns input again" (Some Tui_types.Text_voice_agent)
+    (resolved state)
 
 let () =
   Alcotest.run

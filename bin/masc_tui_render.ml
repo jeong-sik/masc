@@ -12809,6 +12809,11 @@ let render_voice (state : state) =
                       | Some (`Bool false) -> "  (disabled)"
                       | Some _ | None -> ""
                     in
+                    (* runtime.toml is an operator's file, not this pane's
+                       output. box_line's fit_width keeps ANSI, so an id, kind
+                       or address carrying control bytes rewrote the screen the
+                       moment the voice pane opened. The probe rows below
+                       already pass through the same filter. *)
                     Some
                       (Printf.sprintf "    %-20s %s%-18s%s %s%s"
                          (Terminal_text.single_line id) Ansi.dim
@@ -12829,6 +12834,18 @@ let render_voice (state : state) =
        (config_pane_strip state)
        (connection_badge state));
   box_line buf cols "";
+  (* Two independent reads feed this pane: the public config says what loaded,
+     and the setup read says which endpoints are declared. They used to share
+     one match, so a failed config read also erased the endpoint identities the
+     other read had returned. Each section now draws whatever it has. *)
+  let loaded_config =
+    match (state.voice_config, state.voice_config_error) with
+    | Some json, None -> Some json
+    | Some _, Some _ | None, Some _ | None, None -> None
+  in
+  let from_config render =
+    match loaded_config with Some json -> render json | None -> ()
+  in
   (match (state.voice_config, state.voice_config_error) with
    | _, Some message ->
        (* The distinction the pane exists for, said in words rather than drawn
@@ -12840,27 +12857,29 @@ let render_voice (state : state) =
    | None, None ->
        box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
-       field "status" (Option.value (string_of [ "status" ] json) ~default:"?");
-       box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
-       field "voice"
-         (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
-       show_endpoints "tts";
-       box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
-       field "endpoint"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
-            ~default:"—");
-       field "fallback"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
-            ~default:"—");
-       show_endpoints "stt");
+       field "status" (Option.value (string_of [ "status" ] json) ~default:"?"));
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+  from_config (fun json ->
+    field "model"
+      (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
+    field "voice"
+      (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—"));
+  show_endpoints "tts";
+  box_line buf cols "";
+  box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+  from_config (fun json ->
+    field "model"
+      (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
+    field "endpoint"
+      (Option.value
+         (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
+         ~default:"—");
+    field "fallback"
+      (Option.value
+         (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
+         ~default:"—"));
+  show_endpoints "stt";
   (* Said once, not per section: the endpoints are missing from both when this
      read fails, and repeating it twice would read as two faults. *)
   (match state.voice_setup_error with

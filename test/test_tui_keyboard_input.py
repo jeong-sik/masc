@@ -14784,6 +14784,25 @@ def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
         expect(opened, b"alpha", "the keepers did not draw")
         expect(opened, b"Korean Bright Voice", "the voices did not draw")
 
+        # The hidden assignment must not edit or save while the viewport only
+        # shows its size warning. Restore it before exercising ordinary keys.
+        resize_and_wait(
+            process, master_fd, output, rows=8, columns=100,
+            needle=b"terminal too small", controls=(FULL_REDRAW,),
+        )
+        request_start = len(requests)
+        os.write(master_fd, b"hidden-voice\x1b[200~hidden-paste\x1b[201~\r")
+        wait_for_terminal_input_consumed(_slave_fd)
+        restored = resize_and_wait(
+            process, master_fd, output, rows=30, columns=120,
+            needle=b"keeper voices", controls=(FULL_REDRAW,),
+        )
+        if any(path == "/api/v1/voice/setup" and body
+               for path, body in requests[request_start:]):
+            raise AssertionError("the hidden compact assignment saved a voice")
+        if b"hidden-voice" in restored or b"hidden-paste" in restored:
+            raise AssertionError("the hidden compact assignment accepted input")
+
         # Both axes move, and they move independently: the voice walks under
         # the arrows and the keeper under up and down, so an assignment cannot
         # be made by moving one and hoping the other followed.

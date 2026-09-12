@@ -12,6 +12,14 @@ type row_error =
       physical_index : int;
       detail : string;
     }
+  | Other_keeper_row of {
+      (** Same one-based position as above. *)
+      physical_index : int;
+      actual_keeper : string;
+    }
+      (** A row the shared metrics file holds for someone else. Counted because
+          it consumes the physical window, kept apart from the rows that could
+          not be read so a single one of those cannot hide among them. *)
 
 type load_error =
   | Storage_error of Dated_jsonl.read_error

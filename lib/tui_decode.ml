@@ -2247,6 +2247,9 @@ type runtime_option = {
   ro_dispatchable : bool;
   ro_blocked_reason : string option;
   ro_is_default : bool;
+  ro_quota_exhausted : bool;
+  ro_quota_resets_at : float option;
+  ro_quota_scope : string option;
 }
 
 type runtime_resolved_lane = {
@@ -4118,6 +4121,19 @@ let decode_runtime_option ~default_id json =
   let* ro_blocked_reason =
     required_nullable_string_field json "keeper_dispatch_blocked_reason"
   in
+  (* Quota life state (2026-09-12): optional because the document grew these
+     fields -- an older server's rows simply lack them, and absence reads as
+     unknown, not healthy. *)
+  let* ro_quota_exhausted =
+    match optional_bool_field json "quota_exhausted" with
+    | Ok (Some value) -> Ok value
+    (* Absent on an older server's document: the badge then answers ready,
+       which is the reading every pre-quota surface already gave. *)
+    | Ok None -> Ok false
+    | Error detail -> Error detail
+  in
+  let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
+  let* ro_quota_scope = optional_string_field json "quota_scope" in
   let* () =
     match ro_dispatchable, ro_blocked_reason with
     | true, None | false, Some _ -> Ok ()
@@ -4139,6 +4155,9 @@ let decode_runtime_option ~default_id json =
     ; ro_dispatchable
     ; ro_blocked_reason
     ; ro_is_default
+    ; ro_quota_exhausted
+    ; ro_quota_resets_at
+    ; ro_quota_scope
     }
 
 let decode_runtime_default_member json =

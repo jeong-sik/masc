@@ -87,6 +87,11 @@ let demote_order ~now ~quota_scope_of candidates =
   in
   match demoted with [] -> candidates | _ -> kept @ demoted
 
+let scope_to_string = function
+  | Provider_row row -> "provider:" ^ row
+  | Credential_env name -> "env:" ^ name
+  | Credential_file path -> "file:" ^ path
+
 let scope_of_credential ~provider_id (credential : Runtime_schema.credential option) =
   match credential with
   | Some (Runtime_schema.Env key) -> Credential_env key

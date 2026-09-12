@@ -14248,9 +14248,30 @@ let runtime_overall_badge status =
   in
   style ^ runtime_probe_status_to_string status ^ Ansi.reset
 
+(* Quota life state beside dispatchability: a dispatchable runtime whose
+   provider side is refusing work for quota is "alive on paper" and the
+   operator asked to see that distinction (2026-09-12). [resets_at] is the
+   provider-stated deadline; its absence means a hard-quota rejection that
+   claimed no reset -- cleared by the next success on the scope. *)
+let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
+  if not runtime.ro_quota_exhausted then None
+  else
+    Some
+      ( (Theme.warn ())
+        ^ (match runtime.ro_quota_resets_at with
+           | Some resets_at ->
+             let tm = Unix.localtime resets_at in
+             Printf.sprintf "quota exhausted (resets %02d:%02d)"
+               tm.Unix.tm_hour tm.Unix.tm_min
+           | None -> "quota exhausted (no reset stated)")
+        ^ Ansi.reset )
+
 let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
-  if runtime.ro_dispatchable then (Theme.info ()) ^ "ready" ^ Ansi.reset
-  else (Theme.bad ()) ^ "blocked" ^ Ansi.reset
+  if not runtime.ro_dispatchable then (Theme.bad ()) ^ "blocked" ^ Ansi.reset
+  else
+    (match runtime_quota_badge runtime with
+     | Some badge -> badge
+     | None -> (Theme.info ()) ^ "ready" ^ Ansi.reset)
 
 let runtime_probe_badge = function
   | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
@@ -14419,6 +14440,22 @@ let runtime_detail_lines state target ~width =
             runtime_detail_field ~width ~style:Ansi.dim "Last successful at"
               (Masc_domain.iso8601_of_unix_seconds at)
       in
+      let quota =
+        match runtime_quota_badge runtime with
+        | None -> []
+        | Some _ ->
+            (match runtime.ro_quota_scope with
+             | None -> []
+             | Some scope ->
+               runtime_detail_field ~width ~style:(Theme.warn ()) "Quota"
+                 (match runtime.ro_quota_resets_at with
+                  | Some resets_at ->
+                    let tm = Unix.localtime resets_at in
+                    Printf.sprintf "exhausted, resets %02d:%02d (%s)"
+                      tm.Unix.tm_hour tm.Unix.tm_min scope
+                  | None ->
+                    Printf.sprintf "exhausted, no reset stated (%s)" scope))
+      in
       let probe_lines =
         match probe with
         | None -> [ Ansi.dim, "  Probe: unobserved" ]
@@ -14454,7 +14491,7 @@ let runtime_detail_lines state target ~width =
                | Some (Runtime_probe_failure error) ->
                    runtime_detail_field ~width ~style:(Theme.bad ()) "Probe error" error)
       in
-      fields @ candidate @ blocker @ sticky @ probe_lines
+      fields @ candidate @ blocker @ sticky @ quota @ probe_lines
 
 let render_runtime_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in

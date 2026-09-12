@@ -10,6 +10,68 @@ let run_voice_status = Voice_bridge_transport.run_voice_status
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
 
+(* One voice as an endpoint names it. The id is what a configuration stores;
+   the name and the language are what let a person pick it. *)
+type catalogue_voice =
+  { voice_id : string
+  ; voice_name : string option
+  ; voice_language : string option
+  }
+
+let catalogue_voice_json voice =
+  `Assoc
+    ([ "id", `String voice.voice_id ]
+     @ (match voice.voice_name with
+        | Some name -> [ "name", `String name ]
+        | None -> [])
+     @
+     match voice.voice_language with
+     | Some language -> [ "language", `String language ]
+     | None -> [])
+;;
+
+(* Parsing what say answers to -v ?, measured 2026-09-12 on macOS 26: 184 lines
+   shaped
+
+     Yuna                     ko_KR    # 안녕하세요. 제 이름은 유나입니다.
+     Eddy (...)               ko_KR    # ...
+     Majed                    ar_001   # ...
+
+   The columns are space-padded, not tabs. The locale is not always two letters
+   and two letters -- ar_001 is in that list -- so it is taken as the last field
+   before the hash rather than matched by shape.
+
+   Everything before the locale is the id, parentheses included: say adds them
+   to names that exist in several languages, and passing the bare name then
+   picks a different language without saying so. *)
+let say_catalogue_of_output output =
+  String.split_on_char '\n' output
+  |> List.filter_map (fun line ->
+       match String.index_opt line '#' with
+       | None -> None
+       | Some hash ->
+         let head = String.trim (String.sub line 0 hash) in
+         let fields = String.split_on_char ' ' head |> List.filter (fun p -> p <> "") in
+         (match List.rev fields with
+          | locale :: (_ :: _ as name_reversed) ->
+            let name = String.concat " " (List.rev name_reversed) in
+            Some
+              { voice_id = name; voice_name = Some name; voice_language = Some locale }
+          (* A line carrying a hash and nothing else names no voice. Dropped
+             rather than offered: a row that cannot be chosen is worse than a
+             shorter list. *)
+          | [ _ ] | [] -> None))
+;;
+
+(* Which voices an endpoint has. Only the kinds that publish a catalogue
+   answer; the rest say why there is nothing to ask, because the reader is
+   about to type the name instead. *)
+let list_voices endpoint =
+  match Voice_bridge_transport.list_voices_via_command endpoint with
+  | Error message -> Error message
+  | Ok output -> Ok (say_catalogue_of_output output)
+;;
+
 let audio_url_of_file audio_file =
   match Filename.chop_suffix_opt ~suffix:".mp3" (Filename.basename audio_file) with
   | Some token when token <> "" ->
@@ -556,16 +618,32 @@ let attempt_tts_endpoint
   =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   match adapter.transport with
-  | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct ->
+  (* One branch for every way of producing the audio, because everything after
+     it -- playing the file, the dedup record, what gets reported -- is the
+     same. Which of the two ways is used is the endpoint's kind, not a guess. *)
+  | Voice_runtime_overlay.Openai_compat
+  | Voice_runtime_overlay.Elevenlabs_direct
+  | Voice_runtime_overlay.Macos_say ->
     let audio_file = make_audio_file () in
     (match
-       speak_via_http_tts_to_file
-         endpoint
-         ~message
-         ~voice
-         ~model
-         ~agent_id
-         ~output_file:audio_file
+       (match adapter.transport with
+        | Voice_runtime_overlay.Macos_say ->
+          Voice_bridge_transport.speak_via_command_to_file
+            endpoint
+            ~message
+            ~voice
+            ~output_file:audio_file
+        | Voice_runtime_overlay.Openai_compat
+        | Voice_runtime_overlay.Elevenlabs_direct
+        | Voice_runtime_overlay.Voice_mcp
+        | Voice_runtime_overlay.Whisper_cli ->
+          speak_via_http_tts_to_file
+            endpoint
+            ~message
+            ~voice
+            ~model
+            ~agent_id
+            ~output_file:audio_file)
      with
      | Ok file_size ->
        (* run_local_playback now owns the dedup record inside its mutex to
@@ -634,6 +712,14 @@ let attempt_tts_endpoint
        (try Sys.remove audio_file with
         | Sys_error _ -> ());
        Error (`Proven_pre_effect error))
+  (* An endpoint that transcribes is not a fallback for one that speaks: a
+     chain that quietly used it would report success for a turn nobody heard. *)
+  | Voice_runtime_overlay.Whisper_cli ->
+    Error
+      (`Proven_pre_effect
+        (Printf.sprintf
+           "voice config endpoint %s transcribes and does not speak"
+           endpoint.Voice_config.id))
   | Voice_runtime_overlay.Voice_mcp ->
     let args =
       `Assoc

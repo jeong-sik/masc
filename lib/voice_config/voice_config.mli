@@ -17,6 +17,8 @@ type endpoint_kind =
   | Openai_compat
   | Elevenlabs_direct
   | Voice_mcp
+  | Macos_say
+  | Whisper_cli
 
 val string_of_endpoint_kind : endpoint_kind -> string
 (** [string_of_endpoint_kind k] returns the canonical lowercase
@@ -35,6 +37,7 @@ type endpoint = {
   enabled : bool;
   timeout_seconds : float option;
   default_voice : string option;
+  command : string option;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the

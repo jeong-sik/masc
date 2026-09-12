@@ -7079,6 +7079,7 @@ type keeper_turn_state =
   | Keeper_turn_running of {
       lane : keeper_turn_lane;
       started_at_unix : float;
+      interrupt_token : string option;
       preview : keeper_turn_preview option;
     }
   | Keeper_turn_unavailable of string
@@ -7119,6 +7120,7 @@ let decode_keeper_turn_row json =
                      (Json_util.kind_name other))
             | None -> Error "turn is missing required field 'started_at_unix'"
           in
+          let* interrupt_token = required_nullable_string_field turn_json "interrupt_token" in
           let* preview =
             match Json_util.assoc_member_opt "preview" turn_json with
             | None | Some `Null -> Ok None
@@ -7140,7 +7142,7 @@ let decode_keeper_turn_row json =
           Ok
             {
               ktr_keeper_name;
-              ktr_state = Keeper_turn_running { lane; started_at_unix; preview };
+              ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
             }
       | Some other ->
           Error

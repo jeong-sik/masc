@@ -1310,14 +1310,60 @@ let mark_turn_runtime_done ~base_path name =
     (Packed Turn_finalizing)
 ;;
 
+(* Fresh identity belongs to the switch, including interrupted turns which
+   never increment the durable turn counter. It is not a scheduling policy. *)
+let turn_switch_rng = Random.State.make_self_init ()
+let turn_switch_rng_mutex = Stdlib.Mutex.create ()
+let fresh_interrupt_token () =
+  Stdlib.Mutex.protect turn_switch_rng_mutex (fun () ->
+    Uuidm.to_string (Uuidm.v4_gen turn_switch_rng ()))
+
 let set_turn_switch ~base_path name sw_opt =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> Atomic.set entry.current_turn_switch sw_opt
+  | Some entry -> Atomic.set entry.current_turn_switch
+      (Option.map (fun switch -> { interrupt_token = fresh_interrupt_token (); switch }) sw_opt)
   | None -> ()
 ;;
 
 let clear_turn_switch ~base_path name =
   set_turn_switch ~base_path name None
+;;
+
+let clear_turn_switch_if_current ~base_path name switch =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> ()
+  | Some entry ->
+    let observed = Atomic.get entry.current_turn_switch in
+    (match observed with
+     | Some current when current.switch == switch ->
+       ignore (Atomic.compare_and_set entry.current_turn_switch observed None)
+     | Some _ | None -> ())
+;;
+
+let current_turn_interrupt_token ~base_path name =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> None
+  | Some entry -> Option.map (fun turn -> turn.interrupt_token)
+      (Atomic.get entry.current_turn_switch)
+;;
+
+type observed_turn_interrupt_result =
+  | Observed_turn_signalled
+  | Observed_turn_changed
+  | Observed_turn_signal_failed of string
+
+let interrupt_observed_turn ~base_path name ~interrupt_token =
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> Observed_turn_changed
+  | Some entry ->
+    let observed = Atomic.get entry.current_turn_switch in
+    (match observed with
+     | Some turn when String.equal turn.interrupt_token interrupt_token ->
+       if Atomic.compare_and_set entry.current_turn_switch observed None then
+         (try Eio.Switch.fail turn.switch Operator_interrupt; Observed_turn_signalled
+          with exn -> Observed_turn_signal_failed (Printexc.to_string exn))
+       else Observed_turn_changed
+     | Some _ | None -> Observed_turn_changed)
 ;;
 
 type exact_turn_interrupt_result =
@@ -1362,7 +1408,7 @@ let interrupt_current_turn_exact observed_entry =
          }
     | Some turn_sw, observed_turn_id ->
       (try
-         Eio.Switch.fail turn_sw Operator_interrupt;
+         Eio.Switch.fail turn_sw.switch Operator_interrupt;
          match observed_turn_id with
          | Some turn_id -> Exact_turn_cancelled turn_id
          | None ->

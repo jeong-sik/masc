@@ -1190,6 +1190,15 @@ let post_keeper_turn_interrupt ~(host : string) ~(port : int)
     Masc_tui_interrupt_signal.decode_interrupt_signal
       ~expected_request_id:request_id json
 
+let post_keeper_observed_turn_interrupt ~host ~port ~keeper_name ~interrupt_token =
+  let body = Yojson.Safe.to_string (`Assoc
+    ["name", `String keeper_name; "interrupt_token", `String interrupt_token]) in
+  match post_json ~host ~port ~path:keeper_turn_interrupt_path ~body with
+  | Error detail -> Error detail
+  | Ok json -> Masc_tui_interrupt_signal.decode_observed_interrupt_signal
+      ~expected_token:interrupt_token json
+;;
+
 let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
     ( Masc_tui_keeper_chat_projection.operation_reconciliation

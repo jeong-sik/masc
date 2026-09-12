@@ -1816,6 +1816,8 @@ type async_msg =
   | Keeper_chat_stream_deltas of
       Keeper_chat.request * (int option * Keeper_chat_live.delta) list
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
+  | Keeper_observed_interrupt_done of
+      string * string * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
@@ -6248,6 +6250,41 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
       enqueue_async mailbox
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
 
+let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token =
+  match keeper_observed_interrupt state keeper_name started_at with
+  | Some _ -> false
+  | None ->
+    let item = { oi_keeper = keeper_name; oi_token = interrupt_token; oi_started_at = started_at
+      ; oi_sent_ns = Mtime_clock.elapsed_ns (); oi_status = Interrupt_sending } in
+    state.keeper_observed_interrupts <- item ::
+      List.filter (fun old -> old.oi_keeper <> keeper_name) state.keeper_observed_interrupts;
+    let run () =
+      let result =
+        try Masc_tui_http.post_keeper_observed_turn_interrupt ~host:server_peer_host
+          ~port:state.port ~keeper_name ~interrupt_token
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_observed_interrupt_done (keeper_name, interrupt_token, result))
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None -> enqueue_async mailbox
+         (Keeper_observed_interrupt_done (keeper_name, interrupt_token, Error "Eio switch is unavailable")));
+    true
+;;
+
+let interrupt_observed_keeper state ~mailbox keeper_name =
+  match keeper_observed_turn state keeper_name with
+  | None -> None
+  | Some (started_at, interrupt_token) ->
+    Some (match keeper_observed_interrupt state keeper_name started_at with
+    | Some item -> Int64.sub (Mtime_clock.elapsed_ns ()) item.oi_sent_ns
+        <= Masc_tui_esc_interrupt.grace_window_ns
+    | None -> launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
+;;
+
 (* Fetch the runtime catalogue and assignments for the picker. *)
 (* Append one runtime to a lane's candidate order. Appending rather than
    replacing is the whole point: a lane whose two slots share a provider has
@@ -8038,7 +8075,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
             (Printf.sprintf "no keeper named %S on the roster" name))
   | Masc_tui_command.Interrupt_turn -> (
       Buffer.clear state.msg_input;
-      match state.msg_live with
+      match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper state ~mailbox) with
+      | Some _ -> ()
+      | None -> match state.msg_live with
       | Some live
         when Keeper_chat_transcript.interrupt live.tl_transcript
              = Keeper_chat_transcript.Not_requested -> (
@@ -8062,7 +8101,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
 
          Matched by the name the row prints, so what the operator types is
          what they just read. *)
-      match Masc_tui_types.inflight_for_keeper state name with
+      match interrupt_observed_keeper state ~mailbox name with
+      | Some _ -> ()
+      | None -> match Masc_tui_types.inflight_for_keeper state name with
       | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
       | None ->
           notice ~role:Message_local
@@ -12400,6 +12441,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Keeper_chat.compact_request_id tool_call_id)
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
+  | Keeper_observed_interrupt_done (keeper_name, interrupt_token, result) ->
+      state.keeper_observed_interrupts <- List.map (fun item ->
+        if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item
+        else { item with oi_status = match result with
+          | Ok (Masc_tui_interrupt_signal.Signalled _) -> Interrupt_signalled
+          | Ok (Not_signalled { reason; detail }) ->
+            Interrupt_declined (Option.value ~default:reason detail)
+          | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
   | Keeper_chat_interrupt_done (request, result) ->
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
@@ -17754,7 +17803,10 @@ and is loaded on demand through keeper_skill.
                         parked in an uncancellable section keeps streaming
                         after its signal (masc #29229), so holding Esc until
                         the stream settles could hold it forever. *)
-                     match state.msg_live with
+                     match Option.bind state.msg_target_keeper_name
+                       (interrupt_observed_keeper state ~mailbox:async_messages) with
+                     | Some handled -> handled
+                     | None -> match state.msg_live with
                      | Some live
                        when state.msg_target_keeper_name
                             = Some (turn_log_keeper_name live) ->

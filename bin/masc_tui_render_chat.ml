@@ -2531,6 +2531,8 @@ let render_keeper_message (state : state) =
       (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
         ("  " ^ text))
       (Masc_tui_types.keeper_message_activity_rows state);
+    List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
+      (Masc_tui_types.keeper_observed_interrupt_rows state);
     (match state.msg_loaded_error with
      | Some detail ->
          (* Cause first. The consequence -- this session only -- is the same
@@ -2877,7 +2879,9 @@ let render_keeper_message (state : state) =
        interrupt Esc will not spend itself on, nor say "interrupt sent" after
        the grace window when Esc would leave. *)
     let escape_hint =
-      match state.msg_live with
+      match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_turn state) with
+      | Some _ -> "Esc:stop current turn"
+      | None -> match state.msg_live with
       | Some live ->
           (match
              Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())

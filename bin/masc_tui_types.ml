@@ -3415,6 +3415,19 @@ type msx_frame = {
   msx_players : string list;  (* who pressed within the server's window, newest first *)
 }
 
+type observed_interrupt_status =
+  | Interrupt_sending
+  | Interrupt_signalled
+  | Interrupt_declined of string
+  | Interrupt_failed of string
+
+type observed_interrupt =
+  { oi_keeper : string
+  ; oi_token : string
+  ; oi_started_at : float
+  ; oi_sent_ns : int64
+  ; oi_status : observed_interrupt_status }
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3873,6 +3886,7 @@ type state = {
   mutable keeper_turns: Tui_decode.keeper_turn_row list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  mutable keeper_observed_interrupts: observed_interrupt list;
   (* The durable Gate: approvals that survive nobody watching (external
      service writes among them), plus both lane modes. Refreshed with the
      same surface; answered through the dashboard resolve route. *)
@@ -5332,6 +5346,7 @@ let create_state
   keeper_turns = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_observed_interrupts = [];
   gate_pending = [];
   gate_modes = None;
   gate_queue_unavailable = None;
@@ -7115,6 +7130,41 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
+let keeper_observed_turn (state : state) keeper_name =
+  if Option.is_some state.keeper_turns_error then None
+  else List.find_map (fun (row : Tui_decode.keeper_turn_row) ->
+    if row.ktr_keeper_name <> keeper_name then None
+    else match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token = Some token; _ } ->
+        Some (started_at_unix, token)
+      | _ -> None) state.keeper_turns
+;;
+
+let keeper_observed_interrupt (state : state) keeper_name started_at =
+  List.find_opt (fun item -> item.oi_keeper = keeper_name && item.oi_started_at = started_at)
+    state.keeper_observed_interrupts
+;;
+
+let keeper_observed_interrupt_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    List.filter_map (fun (row : Tui_decode.keeper_turn_row) ->
+      if row.ktr_keeper_name <> keeper_name then None else
+      match row.ktr_state with
+      | Tui_decode.Keeper_turn_running { started_at_unix; interrupt_token; _ } ->
+        (match keeper_observed_interrupt state keeper_name started_at_unix with
+         | Some item -> Some (match item.oi_status with
+           | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
+           | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
+           | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
+           | Interrupt_failed detail -> "Interrupt request failed: " ^ detail)
+         | None when Option.is_some interrupt_token ->
+           Some "Esc: stop this turn · queued messages run after it settles · /steer <text>: replace my active request"
+         | None -> Some "This turn has no interrupt target yet; queued messages remain queued")
+      | _ -> None) state.keeper_turns
+;;
+
 let keeper_message_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
@@ -7170,6 +7220,7 @@ let keeper_message_status_rows (state : state) =
   in
   List.length state.msg_inflight
   + List.length (keeper_message_activity_rows state)
+  + List.length (keeper_observed_interrupt_rows state)
   + unavailable_target
   + (match state.msg_live with
      | None -> 0

@@ -418,6 +418,8 @@ let handle_keeper_turns_list state request reqd =
           ; ("turn", `Null)
           ]
       | Ok owner ->
+        let interrupt_token = Keeper_registry.current_turn_interrupt_token
+          ~base_path:config.base_path keeper_name in
         let turn_json =
           match Keeper_owner.turn_in_flight owner with
           | None -> `Null
@@ -443,6 +445,11 @@ let handle_keeper_turns_list state request reqd =
             `Assoc
               [ ("lane", `String (Keeper_owner.turn_lane_to_string turn.lane))
               ; ("started_at_unix", `Float turn.started_at)
+              ; ("interrupt_token",
+                  if interrupt_token = Keeper_registry.current_turn_interrupt_token
+                    ~base_path:config.base_path keeper_name then
+                    Option.fold ~none:`Null ~some:(fun token -> `String token) interrupt_token
+                  else `Null)
               ; ("preview", preview_json)
               ]
         in
@@ -551,9 +558,16 @@ let handle_keeper_turn_interrupt state request reqd =
                | Some (`String _) -> Error "request_id must be non-blank"
                | Some _ -> Error "request_id must be a string when present"
              in
-             Result.map
-               (fun request_id -> String.trim s, request_id)
-               request_id_result
+             let interrupt_token_result =
+               match List.assoc_opt "interrupt_token" fields with
+               | None -> Ok None
+               | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Some token)
+               | Some _ -> Error "interrupt_token must be a UUID"
+             in
+             (match request_id_result, interrupt_token_result with
+              | Ok (Some _), Ok (Some _) -> Error "choose request_id or interrupt_token, not both"
+              | Ok request_id, Ok interrupt_token -> Ok (String.trim s, request_id, interrupt_token)
+              | Error error, _ | _, Error error -> Error error)
            (* A blank name trims to "" and then reads as an unregistered
               keeper, so the caller saw 404 for what is a bad request. The
               request_id check below already worked this way. *)
@@ -567,11 +581,21 @@ let handle_keeper_turn_interrupt state request reqd =
     | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (keeper_chat_stream_error_json msg)
-    | Ok (keeper_name, request_id) ->
+    | Ok (keeper_name, request_id, interrupt_token) ->
       if not (Keeper_registry.is_registered ~base_path keeper_name)
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
+      else if Option.is_some interrupt_token then
+        let token = Option.get interrupt_token in
+        let fields = match Keeper_registry.interrupt_observed_turn ~base_path keeper_name ~interrupt_token:token with
+          | Keeper_registry.Observed_turn_signalled -> ["signalled", `Bool true]
+          | Observed_turn_changed -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
+          | Observed_turn_signal_failed detail ->
+            ["signalled", `Bool false; "reason", `String "cancel_failed"; "detail", `String detail]
+        in
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc (("interrupt_token", `String token) :: fields))
       else
         match request_id with
         | Some request_id ->

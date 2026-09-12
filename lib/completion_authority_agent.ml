@@ -483,19 +483,35 @@ type process_outcome =
   | Deferred
   | Retryable_deferred
 
-let process_outcome_of_evaluator_retryable = function
-  | Some true -> Retryable_deferred
-  | Some false | None -> Deferred
+(* The one place that reads the evaluator's retryability. [Some true] is the
+   only automatic-retry authority; [Some false] and [None] leave the next move
+   to the producer or operator. The Board post and the scan loop both derive
+   from the value this returns, so the sentence a reader sees and the timer
+   the lane arms cannot disagree (audit U2: 18 of 21 "will not retry" posts
+   since 2026-09-07 were retried within 60 s and later committed). *)
+let stall_disposition_of_evaluator_retryable ~retry_interval_sec
+  : bool option -> Verification_protocol.stall_disposition
+  = function
+  | Some true ->
+    Verification_protocol.Retry_scheduled { interval_sec = retry_interval_sec }
+  | Some false | None -> Verification_protocol.Terminal
 ;;
 
-let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~reason () =
+let process_outcome_of_stall_disposition
+  : Verification_protocol.stall_disposition -> process_outcome
+  = function
+  | Verification_protocol.Retry_scheduled _ -> Retryable_deferred
+  | Verification_protocol.Terminal -> Deferred
+;;
+
+let defer ~disposition ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
     "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
     reason;
-  process_outcome_of_evaluator_retryable evaluator_retryable
+  process_outcome_of_stall_disposition disposition
 ;;
 
 (* Returns the control-flow outcome the scan loop acts on, paired with the
@@ -535,7 +551,13 @@ let commit_verdict
     Committed, on_commit
   | Error error ->
     let detail = Masc_domain.masc_error_to_string error in
-    ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+    ( defer
+          ~disposition:Verification_protocol.Terminal
+          ~task_id:task.id
+          ~verification_id
+          ~authority
+          ~reason:detail
+          ()
     , Verification_run_registry.Commit_failed { detail } )
 ;;
 
@@ -613,7 +635,13 @@ let process_task_once
   in
   let defer_unavailable ~stage ~detail =
     complete
-      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+      ( defer
+          ~disposition:Verification_protocol.Terminal
+          ~task_id:task.id
+          ~verification_id
+          ~authority
+          ~reason:detail
+          ()
       , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
   in
   try
@@ -717,17 +745,25 @@ let process_task_once
             alone reaches no one, so the outcome is always promoted to the
             Board, where the producer Keeper and the operator both read it and
             decide whether to resubmit. The authority does not decide that on
-            their behalf. *)
+            their behalf. The post and [process_task]'s retry arm read the
+            same [disposition], so the Board says "retry scheduled" exactly
+            when a retry is armed. *)
+         let disposition =
+           stall_disposition_of_evaluator_retryable
+             ~retry_interval_sec:runtime.retry_interval_sec
+             result.evaluator_error_retryable
+         in
          Verification_protocol.notify_stalled_verification
            ~authority
            ~task_id:task.id
            ~verification_id
            ~gate
-           ~detail;
+           ~detail
+           ~disposition;
          complete
            ~evaluator_runtime
            ( defer
-               ~evaluator_retryable:result.evaluator_error_retryable
+               ~disposition
                ~task_id:task.id
                ~verification_id
                ~authority
@@ -784,7 +820,13 @@ let process_task_once
   | exn ->
     let detail = Printexc.to_string exn in
     complete
-      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+      ( defer
+          ~disposition:Verification_protocol.Terminal
+          ~task_id:task.id
+          ~verification_id
+          ~authority
+          ~reason:detail
+          ()
       , Verification_run_registry.Raised { detail } )
 ;;
 
@@ -1083,8 +1125,10 @@ module For_testing = struct
     | Deferred
     | Retryable_deferred
 
-  let process_outcome_of_evaluator_retryable =
-    process_outcome_of_evaluator_retryable
+  let stall_disposition_of_evaluator_retryable =
+    stall_disposition_of_evaluator_retryable
+
+  let process_outcome_of_stall_disposition = process_outcome_of_stall_disposition
 
   type nonrec review_key = review_key =
     { task_id : string

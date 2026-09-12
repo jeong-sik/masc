@@ -64,23 +64,36 @@ val notify_reject_verification :
     carry typed provenance.
     State-free. *)
 
+(** What the completion authority does next with a review that committed no
+    verdict. [Retry_scheduled] means the authority re-arms its own scan after
+    [interval_sec]; [Terminal] means nothing schedules another look and the
+    producer or operator owns the next move. The Board sentence is rendered
+    from this value, so the post cannot claim terminality while a retry is
+    armed. *)
+type stall_disposition =
+  | Retry_scheduled of { interval_sec : float }
+  | Terminal
+
 val notify_stalled_verification :
   authority:Masc_domain.completion_authority ->
   task_id:string ->
   verification_id:string ->
   gate:string ->
   detail:string ->
+  disposition:stall_disposition ->
   unit
 (** Board projection for every review that completed [Not_reviewed]: no
-    verdict was committed and the authority schedules no further attempt, so
-    without this post the only surface is the bounded run registry and the
-    task waits invisibly. The post names the task, the
-    verification id, the gate, and the two forward paths that exist today —
-    the assignee resubmitting through [submit_for_verification] (a legal
+    verdict was committed, so without this post the only surface is the
+    bounded run registry and the task waits invisibly. The post names the
+    task, the verification id, the gate, and what happens next. Under
+    [Retry_scheduled] it says when the authority reviews again; under
+    [Terminal] it names the two forward paths that exist today — the
+    assignee resubmitting through [submit_for_verification] (a legal
     transition from [AwaitingVerification] that supersedes this
-    verification), or an operator HITL verdict. Visibility only: no
-    scheduling state, no retry obligation. A board write failure is logged
-    and does not affect the review outcome. *)
+    verification), or an operator HITL verdict. One verification posts once
+    per (gate, detail, disposition). Visibility only: the post schedules
+    nothing. A board write failure is logged and does not affect the review
+    outcome. *)
 
 module For_testing : sig
   val verdict_event_json :
@@ -93,7 +106,12 @@ module For_testing : sig
     Yojson.Safe.t
 
   val stalled_board_content :
-    task_id:string -> verification_id:string -> gate:string -> detail:string -> string
+    task_id:string ->
+    verification_id:string ->
+    gate:string ->
+    detail:string ->
+    disposition:stall_disposition ->
+    string
 
   val stalled_metadata :
     authority:Masc_domain.completion_authority ->
@@ -101,5 +119,6 @@ module For_testing : sig
     verification_id:string ->
     gate:string ->
     detail:string ->
+    disposition:stall_disposition ->
     Yojson.Safe.t
 end

@@ -44,9 +44,19 @@ module For_testing : sig
     | Deferred
     | Retryable_deferred
 
-  val process_outcome_of_evaluator_retryable : bool option -> process_outcome
-  (** [Some true] is the only automatic-retry authority. [Some false] and
-      [None] preserve the producer/operator action contract. *)
+  val stall_disposition_of_evaluator_retryable
+    :  retry_interval_sec:float
+    -> bool option
+    -> Verification_protocol.stall_disposition
+  (** [Some true] is the only automatic-retry authority and yields
+      [Retry_scheduled] with the lane's interval. [Some false] and [None]
+      yield [Terminal], preserving the producer/operator action contract. The
+      Board post is rendered from this value. *)
+
+  val process_outcome_of_stall_disposition
+    : Verification_protocol.stall_disposition -> process_outcome
+  (** The scan-loop outcome derived from the same disposition the Board post
+      was rendered from: [Retry_scheduled] re-arms, [Terminal] settles. *)
 
   type review_key =
     { task_id : string

@@ -143,8 +143,37 @@ let test_verdict_event_preserves_typed_authority () =
      | `Assoc fields -> List.mem_assoc "verifier" fields
      | _ -> Alcotest.fail "verdict event must be an object")
 
+let content_contains content needle =
+  let nl = String.length needle and hl = String.length content in
+  let rec loop i =
+    i + nl <= hl
+    && (String.equal (String.sub content i nl) needle || loop (i + 1))
+  in
+  nl = 0 || loop 0
+;;
+
+let check_names content needles =
+  List.iter
+    (fun needle ->
+       Alcotest.(check bool)
+         (Printf.sprintf "content names %S" needle)
+         true
+         (content_contains content needle))
+    needles
+;;
+
+let check_omits content needles =
+  List.iter
+    (fun needle ->
+       Alcotest.(check bool)
+         (Printf.sprintf "content omits %S" needle)
+         false
+         (content_contains content needle))
+    needles
+;;
+
 (* The stalled-review board projection is the only surface that tells the
-   assignee a non-retryable deferral happened and how to move forward.
+   assignee a terminal deferral happened and how to move forward.
    Pin the content naming both forward paths and the typed metadata. *)
 let test_stalled_projection_names_forward_paths () =
   let content =
@@ -153,28 +182,43 @@ let test_stalled_projection_names_forward_paths () =
       ~verification_id:"vrf-101"
       ~gate:"artifact_unreadable"
       ~detail:"evidence path escapes the playground"
+      ~disposition:VP.Terminal
   in
-  let contains needle =
-    let nl = String.length needle and hl = String.length content in
-    let rec loop i =
-      i + nl <= hl
-      && (String.equal (String.sub content i nl) needle || loop (i + 1))
-    in
-    nl = 0 || loop 0
-  in
-  List.iter
-    (fun needle ->
-       Alcotest.(check bool)
-         (Printf.sprintf "content names %S" needle)
-         true
-         (contains needle))
+  check_names content
     [ "task-101"
     ; "vrf:vrf-101"
     ; "artifact_unreadable"
     ; "evidence path escapes the playground"
+    ; "will not retry"
     ; "submit_for_verification"
     ; "HITL"
-    ]
+    ];
+  check_omits content [ "retry scheduled" ]
+;;
+
+(* Audit U2 (2026-09-12): since 09-07, 18 of 21 "will not retry" posts were
+   retried by the authority within 60 s and later committed; readers who
+   followed the post resubmitted and superseded a review about to pass. A
+   scheduled retry must say so and must not name the forward paths that
+   supersede it. *)
+let test_stalled_projection_says_retry_when_one_is_scheduled () =
+  let content =
+    VP.For_testing.stalled_board_content
+      ~task_id:"task-101"
+      ~verification_id:"vrf-101"
+      ~gate:"evaluator_unavailable"
+      ~detail:"requested runtime or lane not found"
+      ~disposition:(VP.Retry_scheduled { interval_sec = 60.0 })
+  in
+  check_names content
+    [ "task-101"
+    ; "vrf:vrf-101"
+    ; "evaluator_unavailable"
+    ; "requested runtime or lane not found"
+    ; "retry scheduled in 60 s"
+    ];
+  check_omits content [ "will not retry"; "Forward path"; "HITL" ]
+;;
 
 let test_stalled_metadata_preserves_typed_authority () =
   let metadata =
@@ -184,12 +228,17 @@ let test_stalled_metadata_preserves_typed_authority () =
       ~verification_id:"vrf-102"
       ~gate:"review_preparation"
       ~detail:"required artifact list is empty"
+      ~disposition:(VP.Retry_scheduled { interval_sec = 60.0 })
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
     "metadata type"
     "verification_stalled"
     (metadata |> member "type" |> to_string);
+  Alcotest.(check string)
+    "disposition"
+    "retry_scheduled"
+    (metadata |> member "disposition" |> to_string);
   Alcotest.(check string)
     "task id"
     "task-102"
@@ -239,6 +288,7 @@ let test_the_same_stall_is_posted_once () =
       ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
       ~gate:"evaluator_unavailable"
       ~detail:"requested runtime or lane not found"
+      ~disposition:VP.Terminal
   done;
   Alcotest.(check int) "three rediscoveries, one post" 1
     (stalled_posts_for ~verification_id:"vrf-stall-1")
@@ -250,18 +300,44 @@ let test_a_different_stall_still_reaches_the_board () =
   VP.notify_stalled_verification ~authority:stall_authority
     ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
     ~gate:"evaluator_unavailable"
-    ~detail:"requested runtime or lane not found";
+    ~detail:"requested runtime or lane not found"
+    ~disposition:VP.Terminal;
   VP.notify_stalled_verification ~authority:stall_authority
     ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
     ~gate:"review_preparation"
-    ~detail:"requested runtime or lane not found";
+    ~detail:"requested runtime or lane not found"
+    ~disposition:VP.Terminal;
   VP.notify_stalled_verification ~authority:stall_authority
     ~task_id:"task-stall" ~verification_id:"vrf-stall-1"
     ~gate:"evaluator_unavailable"
-    ~detail:"the evaluator answered with an empty verdict";
+    ~detail:"the evaluator answered with an empty verdict"
+    ~disposition:VP.Terminal;
   Alcotest.(check int)
     "a new gate and a new detail are each their own stall" 3
     (stalled_posts_for ~verification_id:"vrf-stall-1")
+;;
+
+(* The same gate and detail, first while a retry is armed and then once the
+   authority settles, are two pieces of news: the reader who saw "retry
+   scheduled" has not yet been told the forward path. A repeat of the same
+   disposition is still one post. *)
+let test_a_disposition_change_is_its_own_stall () =
+  Eio_main.run @@ fun _env ->
+  Masc.Board_dispatch.reset_for_test ();
+  let notify ~disposition =
+    VP.notify_stalled_verification ~authority:stall_authority
+      ~task_id:"task-stall" ~verification_id:"vrf-stall-2"
+      ~gate:"evaluator_unavailable"
+      ~detail:"requested runtime or lane not found"
+      ~disposition
+  in
+  notify ~disposition:(VP.Retry_scheduled { interval_sec = 60.0 });
+  notify ~disposition:(VP.Retry_scheduled { interval_sec = 60.0 });
+  notify ~disposition:VP.Terminal;
+  notify ~disposition:VP.Terminal;
+  Alcotest.(check int)
+    "one post per disposition, not per rediscovery" 2
+    (stalled_posts_for ~verification_id:"vrf-stall-2")
 ;;
 
 let test_rejected_verdict_event_preserves_wire_type () =
@@ -391,13 +467,25 @@ let test_system_llm_authority_helpers_are_typed () =
 
 let test_system_llm_retry_disposition_is_typed () =
   let module For_testing = Masc.Completion_authority_agent.For_testing in
-  (match For_testing.process_outcome_of_evaluator_retryable (Some true) with
+  let of_retryable =
+    For_testing.stall_disposition_of_evaluator_retryable ~retry_interval_sec:60.0
+  in
+  (match of_retryable (Some true) with
+   | VP.Retry_scheduled { interval_sec } ->
+     Alcotest.(check (float 0.0)) "the post carries the lane interval" 60.0 interval_sec
+   | VP.Terminal ->
+     Alcotest.fail "typed retryable evaluator failure must schedule a retry");
+  (match For_testing.process_outcome_of_stall_disposition (of_retryable (Some true)) with
    | For_testing.Retryable_deferred -> ()
    | For_testing.Committed | For_testing.Deferred ->
      Alcotest.fail "typed retryable evaluator failure must re-arm the lane");
   List.iter
     (fun retryable ->
-       match For_testing.process_outcome_of_evaluator_retryable retryable with
+       (match of_retryable retryable with
+        | VP.Terminal -> ()
+        | VP.Retry_scheduled _ ->
+          Alcotest.fail "non-retryable or unclassified deferral must post as terminal");
+       match For_testing.process_outcome_of_stall_disposition (of_retryable retryable) with
        | For_testing.Deferred -> ()
        | For_testing.Committed | For_testing.Retryable_deferred ->
          Alcotest.fail "non-retryable or unclassified deferral must await action")
@@ -3742,12 +3830,16 @@ let () =
         test_rejected_verdict_event_preserves_wire_type;
       Alcotest.test_case "stalled projection names forward paths" `Quick
         test_stalled_projection_names_forward_paths;
+      Alcotest.test_case "stalled projection says retry when one is scheduled" `Quick
+        test_stalled_projection_says_retry_when_one_is_scheduled;
       Alcotest.test_case "stalled metadata keeps typed authority" `Quick
         test_stalled_metadata_preserves_typed_authority;
       Alcotest.test_case "the same stall is posted once" `Quick
         test_the_same_stall_is_posted_once;
       Alcotest.test_case "a different stall still reaches the board" `Quick
         test_a_different_stall_still_reaches_the_board;
+      Alcotest.test_case "a disposition change is its own stall" `Quick
+        test_a_disposition_change_is_its_own_stall;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

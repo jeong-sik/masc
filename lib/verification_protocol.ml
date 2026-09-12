@@ -406,15 +406,43 @@ let notify_reject_verification
    authenticated operator or typed system-LLM judge commits a verdict. Long-waiting
    obligations are surfaced from the activity-event stream, not a poll-timer. *)
 
-let stalled_board_content ~task_id ~verification_id ~gate ~detail =
-  Printf.sprintf
-    "Stalled task %s (vrf:%s) — review will not retry. gate=%s: %s. Forward \
-     path: the assignee resubmits with submit_for_verification (supersedes \
-     this verification), or an operator commits a HITL verdict."
-    task_id
-    verification_id
-    gate
-    detail
+type stall_disposition =
+  | Retry_scheduled of { interval_sec : float }
+  | Terminal
+
+(* The metadata spelling of the disposition. The dedupe reads this field, so
+   the same verification posts again exactly when its disposition changes. *)
+let stall_disposition_key = function
+  | Retry_scheduled _ -> "retry_scheduled"
+  | Terminal -> "terminal"
+
+(* The sentence follows the disposition the authority acts on. Before this
+   branched, every stall said "will not retry" while the authority armed a
+   60 s retry of the same verification and committed a verdict minutes later
+   (since 2026-09-07: 18 of 21 such posts were retried and later committed);
+   readers who followed the post resubmitted and superseded a review about to
+   pass. *)
+let stalled_board_content ~task_id ~verification_id ~gate ~detail ~disposition =
+  match disposition with
+  | Retry_scheduled { interval_sec } ->
+    Printf.sprintf
+      "Stalled task %s (vrf:%s) — retry scheduled in %.0f s. gate=%s: %s. The \
+       authority reviews this verification again on its own; resubmitting \
+       now would supersede that review."
+      task_id
+      verification_id
+      interval_sec
+      gate
+      detail
+  | Terminal ->
+    Printf.sprintf
+      "Stalled task %s (vrf:%s) — review will not retry. gate=%s: %s. Forward \
+       path: the assignee resubmits with submit_for_verification (supersedes \
+       this verification), or an operator commits a HITL verdict."
+      task_id
+      verification_id
+      gate
+      detail
 
 let stalled_metadata
       ~(authority : Masc_domain.completion_authority)
@@ -422,6 +450,7 @@ let stalled_metadata
       ~verification_id
       ~gate
       ~detail
+      ~disposition
   =
   `Assoc
     ([ ("type", `String "verification_stalled")
@@ -431,6 +460,7 @@ let stalled_metadata
      @ completion_authority_fields authority
      @ [ ("gate", `String gate)
        ; ("detail", `String detail)
+       ; ("disposition", `String (stall_disposition_key disposition))
        ; ("timestamp", `Float (Time_compat.now ()))
        ])
 
@@ -449,12 +479,14 @@ let stall_lookback_posts = 200
 
    The Board is what the repeat is about, so the Board is what decides. The
    post carries its identity in typed metadata — [type], [verification_id],
-   [gate], [detail] — so this reads those fields rather than matching the
-   rendered sentence, and it asks the same question the metadata answers.
+   [gate], [detail], [disposition] — so this reads those fields rather than
+   matching the rendered sentence, and it asks the same question the metadata
+   answers. The disposition is part of the identity: a retry that later
+   settles as terminal is news the reader has not seen.
 
    A post that failed to land leaves nothing to find, so a stall whose notice
    never reached anyone is reported again on the next sweep. *)
-let stall_already_on_the_board ~verification_id ~gate ~detail =
+let stall_already_on_the_board ~verification_id ~gate ~detail ~disposition =
   let same_stall (post : Board.post) =
     match post.meta_json with
     | None -> false
@@ -468,6 +500,7 @@ let stall_already_on_the_board ~verification_id ~gate ~detail =
       && field "verification_id" = Some verification_id
       && field "gate" = Some gate
       && field "detail" = Some detail
+      && field "disposition" = Some (stall_disposition_key disposition)
     | Some _ -> false
   in
   Board_dispatch.list_posts
@@ -483,17 +516,21 @@ let notify_stalled_verification
       ~verification_id
       ~gate
       ~detail
+      ~disposition
   =
-  if stall_already_on_the_board ~verification_id ~gate ~detail
+  if stall_already_on_the_board ~verification_id ~gate ~detail ~disposition
   then ()
   else
   match
     Board_dispatch.create_post
       ~author:(Masc_domain.completion_authority_actor authority)
-      ~content:(stalled_board_content ~task_id ~verification_id ~gate ~detail)
+      ~content:
+        (stalled_board_content
+           ~task_id ~verification_id ~gate ~detail ~disposition)
       ~post_kind:Board.System_post
       ~meta_json:
-        (stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail)
+        (stalled_metadata
+           ~authority ~task_id ~verification_id ~gate ~detail ~disposition)
       ~visibility:Board.Internal
       ~hearth:"verification"
       ()
@@ -509,6 +546,10 @@ module For_testing = struct
   let verdict_event_json = verdict_event_json
   let stalled_board_content = stalled_board_content
 
-  let stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail =
-    stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail
+  let stalled_metadata
+        ~authority ~task_id ~verification_id ~gate ~detail ~disposition
+    =
+    stalled_metadata
+      ~authority ~task_id ~verification_id ~gate ~detail ~disposition
+  ;;
 end

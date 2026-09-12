@@ -26,8 +26,12 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 기존 scope가 null이거나 없으면 생략한다. regions의 선택 영역 참조는 scope=null이어도
 존재한다. content의 임의 텍스트·버튼을 영역 scope로 승격하지 않는다.
 
-- 읽기에는 `url`을 `expectedUrl`로 사용하고, 실제 도구 스키마의 필드만 골라 전달한다.
-  복사된 JSON 전체나 없는 필드를 요청 인자로 넣지 않는다.
+- `expectedUrl`과 `scope`는 최상위 문서의 `mode=scene`·`mode=regions` 읽기에서만 받는다.
+  스크린샷·텍스트·요소·다운로드 읽기나 `framePath`로 프레임 안쪽을 읽을 때 넣으면 도구가
+  `expectedUrl supports top-document scene or regions only`로 거절한다. 그런 읽기에는
+  받은 `url`을 결과가 맞는지 확인하는 데만 쓰고 요청 인자로는 넣지 않는다.
+- 실제 도구 스키마의 필드만 골라 전달한다. 복사된 JSON 전체나 없는 필드를 요청 인자로
+  넣지 않는다.
 - `viewport`와 `truncated`는 당시 관측의 범위다. 선택한 요소의 `text`를 영역 전체나
   화면 밖의 기록으로 확대하지 않는다. 복사된 좌표만으로 현재 화면에 클릭·드래그하지 않는다.
 

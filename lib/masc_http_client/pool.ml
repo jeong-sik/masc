@@ -89,6 +89,61 @@ type client = {
 
 exception Client_scope_closed
 
+(* Piaf 0.2.0 resolves again and connects only the first address. Keep the
+   successful probe address for construction, without replacing the URI
+   hostname used for Host and TLS verification. Later reconnects/redirects
+   resolve normally: Piaf retains this environment in the client. *)
+module Selected_address_net = struct
+  type tag = [ `Generic | `Unix ]
+  type t = {
+    net : tag Eio.Net.ty Eio.Resource.t;
+    host : string;
+    service : string;
+    address : Eio.Net.Sockaddr.stream;
+    selecting : bool ref;
+  }
+
+  let getaddrinfo t ~service host =
+    if !(t.selecting) && String.equal service t.service
+       && String.equal (String.lowercase_ascii host) t.host then
+      [ (t.address :> Eio.Net.Sockaddr.t) ]
+    else Eio.Net.getaddrinfo t.net ~service host
+
+  let connect t ~sw address = Eio.Net.connect t.net ~sw address
+  let getnameinfo t = Eio.Net.getnameinfo t.net
+  let listen t ~reuse_addr ~reuse_port ~backlog ~sw address =
+    Eio.Net.listen t.net ~reuse_addr ~reuse_port ~backlog ~sw address
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw address =
+    Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
+end
+
+let with_selected_address (env : Eio_unix.Stdenv.base) uri address f =
+  let key = Host_key.of_uri (Uri.canonicalize uri) in
+  let selecting = ref true in
+  let net = Eio.Resource.T
+    ({ Selected_address_net.net = env#net;
+       host = String.lowercase_ascii key.host;
+       service = string_of_int key.port;
+       address; selecting },
+     Eio.Net.Pi.network (module Selected_address_net)) in
+  let selected_env = object
+    method net = net
+    method stdin = env#stdin
+    method stdout = env#stdout
+    method stderr = env#stderr
+    method domain_mgr = env#domain_mgr
+    method process_mgr = env#process_mgr
+    method clock = env#clock
+    method mono_clock = env#mono_clock
+    method fs = env#fs
+    method cwd = env#cwd
+    method secure_random = env#secure_random
+    method debug = env#debug
+    method backend_id = env#backend_id
+  end in
+  Fun.protect ~finally:(fun () -> selecting := false)
+    (fun () -> f selected_env)
+
 let reraise_after_close close exn =
   let bt = Printexc.get_raw_backtrace () in
   Eio.Cancel.protect (fun () ->
@@ -440,7 +495,7 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
             | (Eio.Io _ | Unix.Unix_error _) as exn -> Error (Tcp_failure exn)
           in
           match result with
-          | Ok () -> Result.map_error (fun msg -> Client_failure msg) (create ())
+          | Ok () -> Result.map_error (fun msg -> Client_failure msg) (create addr)
           | Error failure -> probe failure rest
       in
       Result.bind addresses (probe No_addresses))
@@ -476,8 +531,9 @@ let create_probed_client t key uri =
         Eio.Switch.run (fun probe_sw ->
           let flow = Eio.Net.connect ~sw:probe_sw net addr in
           Eio.Flow.close flow))
-      ~create:(fun () ->
-        match create_scoped_client ~sw:t.sw t.env uri with
+      ~create:(fun address ->
+        match with_selected_address t.env uri address (fun env ->
+          create_scoped_client ~sw:t.sw env uri) with
         | Ok client -> pending := Some client; Ok client
         | Error err -> Error (Piaf.Error.to_string (err :> Piaf.Error.t)))
     in

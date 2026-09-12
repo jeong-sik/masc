@@ -188,7 +188,9 @@ let test_establishment_errors () =
     (Ok "created")
     (establish ~resolve:(fun () -> [false; true])
       ~connect:(fun succeeds -> if not succeeds then raise resource_error)
-      ~create:(fun () -> Ok "created"))
+      ~create:(fun selected ->
+        Alcotest.(check bool) "client receives reachable address" true selected;
+        Ok "created"))
 
 let test_establishment_deadline () =
   Eio_main.run @@ fun env ->
@@ -210,7 +212,7 @@ let test_establishment_deadline () =
         incr attempts;
         Eio.Time.sleep clock 0.01;
         raise (Unix.Unix_error (Unix.ECONNREFUSED, "connect", "")))
-      ~create:(fun () -> Alcotest.fail "all addresses fail"));
+      ~create:(fun _ -> Alcotest.fail "all addresses fail"));
   Alcotest.(check bool) "deadline stops before all addresses are exhausted"
     true (!attempts < 50);
   check_timeout "Piaf creation uses remaining establishment deadline"

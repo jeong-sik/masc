@@ -231,7 +231,7 @@ module For_testing : sig
     timeout_seconds:float ->
     resolve:(unit -> 'addr list) ->
     connect:('addr -> unit) ->
-    create:(unit -> ('client, string) result) ->
+    create:('addr -> ('client, string) result) ->
     ('client, string) result
 
   val connect_failure_count : t -> int

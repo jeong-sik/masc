@@ -1,0 +1,6 @@
+; The voice section writer: a config-lock write against a temporary
+; runtime.toml. Links the writer and what it writes through.
+
+(test
+ (name test_voice_setup)
+ (libraries alcotest masc.voice_setup masc.runtime masc.voice_config unix))

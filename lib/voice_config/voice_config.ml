@@ -606,34 +606,54 @@ let runtime_toml_path () : string option =
     if Sys.file_exists path then Some path else None
   else None
 
-(** Try loading voice config from the [\[voice\]] section of
-    runtime.toml.  Returns:
+(** Parse the [\[voice\]] section out of runtime.toml source text.
+    Returns:
     - [Ok (Some config)] when the section exists and parses cleanly;
-    - [Ok None] when runtime.toml or the [\[voice\]] section is
-      absent (expected — caller falls back to JSON);
-    - [Error _] when the section exists but is broken (TOML parse
-      error, read failure, or schema error) — surfaced to the
-      caller, NOT silently swallowed, so the operator knows the
-      TOML is broken. *)
+    - [Ok None] when the [\[voice\]] section is absent (expected —
+      caller falls back to JSON);
+    - [Error _] when the text does not parse as TOML, or the section
+      exists but is broken — surfaced to the caller, NOT silently
+      swallowed, so the operator knows the TOML is broken.
+
+    Taking text rather than a path is what lets a writer check its own
+    edit before committing it. The parser that will load the file is
+    the one that answers whether the edit is loadable, so a voice
+    section cannot reach disk in a shape that only fails later, at the
+    first speak or transcribe. *)
+let parse_runtime_toml_text text =
+  match Otoml.Parser.from_string text with
+  | exception Otoml.Parse_error (_, msg) ->
+    Error (Printf.sprintf "runtime.toml parse error: %s" msg)
+  | toml -> (
+    match Otoml.find_opt toml Fun.id [ "voice" ] with
+    | None -> Ok None
+    | Some voice_value -> (
+      (* Fun.id returns the raw Otoml.t value; toml_to_json
+         pattern-matches on its constructors. *)
+      match parse_json (toml_to_json voice_value) with
+      | Ok config -> Ok (Some config)
+      | Error msg -> Error (Printf.sprintf "runtime.toml [voice]: %s" msg)))
+
+(** Try loading voice config from the [\[voice\]] section of
+    runtime.toml.  An absent runtime.toml reads as [Ok None], the same
+    as an absent section: neither is a fault, and the caller falls back
+    to the standalone JSON. *)
 let load_from_runtime_toml () =
   match runtime_toml_path () with
   | None -> Ok None
   | Some path -> (
-    try
-      let toml = Otoml.Parser.from_file path in
-      match Otoml.find_opt toml Fun.id [ "voice" ] with
-      | None -> Ok None
-      | Some voice_value -> (
-        (* Fun.id returns the raw Otoml.t value; toml_to_json
-           pattern-matches on its constructors. *)
-        match parse_json (toml_to_json voice_value) with
-        | Ok config -> Ok (Some config)
-        | Error msg -> Error (Printf.sprintf "runtime.toml [voice]: %s" msg))
+    match
+      try Ok (Fs_compat.load_file path) with
+      | Sys_error error ->
+        Error (Printf.sprintf "runtime.toml read failed: %s" error)
+      | Eio.Io _ as exn ->
+        Error
+          (Printf.sprintf
+             "runtime.toml Eio read failed: %s"
+             (Printexc.to_string exn))
     with
-    | Otoml.Parse_error (_, msg) ->
-      Error (Printf.sprintf "runtime.toml parse error: %s" msg)
-    | Sys_error msg ->
-      Error (Printf.sprintf "runtime.toml read failed: %s" msg))
+    | Error msg -> Error msg
+    | Ok text -> parse_runtime_toml_text text)
 
 let load_detailed () =
   (* Prefer runtime.toml [voice] section over standalone JSON.

@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name voice_setup)
+ (public_name masc.voice_setup)
+ (wrapped false)
+ (modules voice_setup)
+ (libraries masc.runtime masc.toml_line_editor masc.voice_config))

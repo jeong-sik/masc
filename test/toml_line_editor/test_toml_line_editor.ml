@@ -683,6 +683,47 @@ let test_a_control_character_is_escaped () =
      | Some read -> Alcotest.(check string) "the value reads back as written" value read
      | None -> Alcotest.fail "the key did not survive the round trip")
 
+(* A comment directly above a header describes that header. An entry appended
+   below it inherits a description written for something else, and removing that
+   entry would carry the description away. *)
+let test_a_new_entry_lands_above_a_comment_documenting_the_next_table () =
+  let note = "# documents the section below, not the entry above it" in
+  let source =
+    String.concat "\n"
+      [ "[[voice.stt.endpoints]]"; {|id = "whisper-local"|}; ""; note; "[voice.session]"
+      ; "endpoints = []"; "" ]
+  in
+  let out = upsert source ~path:endpoints ~id_key:"id" ~id:"added" ~fields:[] in
+  check_loads "appending before a comment that documents the next table" out;
+  Alcotest.(check bool) "the new entry sits above the comment" true
+    (index_of out {|id = "added"|} < index_of out note);
+  let back =
+    Toml_line_editor.remove_table_array_entry out ~path:endpoints ~id_key:"id" ~id:"added"
+  in
+  Alcotest.(check string) "and removing it restores the file" source back
+
+(* Two entries claiming one id is already a broken configuration, and this
+   editor cannot choose between them. Applying to every match keeps the call
+   meaning what it says -- the entry named by this id -- rather than picking one
+   silently and leaving the other to be found later. *)
+let test_a_duplicated_id_addresses_every_match () =
+  let source =
+    String.concat "\n"
+      [ "[[voice.stt.endpoints]]"; {|id = "whisper-local"|}; "port = 1"; ""
+      ; "[[voice.stt.endpoints]]"; {|id = "whisper-local"|}; "port = 2"; "" ]
+  in
+  let out =
+    upsert source ~path:endpoints ~id_key:"id" ~id:"whisper-local"
+      ~fields:[ "port", Some (Toml_line_editor.Int 9) ]
+  in
+  check_loads "editing a duplicated id" out;
+  Alcotest.(check int) "every entry carrying the id took the field" 2 (count_line out "port = 9");
+  let removed =
+    Toml_line_editor.remove_table_array_entry source ~path:endpoints ~id_key:"id"
+      ~id:"whisper-local"
+  in
+  Alcotest.(check (list string)) "and every one of them is removed" [] (ids removed)
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
@@ -769,5 +810,9 @@ let () =
             test_a_crlf_file_still_finds_its_entries
         ; Alcotest.test_case "a control character is escaped" `Quick
             test_a_control_character_is_escaped
+        ; Alcotest.test_case "a new entry lands above a comment for the next table" `Quick
+            test_a_new_entry_lands_above_a_comment_documenting_the_next_table
+        ; Alcotest.test_case "a duplicated id addresses every match" `Quick
+            test_a_duplicated_id_addresses_every_match
         ] )
     ]

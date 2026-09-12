@@ -26,8 +26,13 @@ SPEC.loader.exec_module(SETUP)
 
 
 def observation(base=None, checks=()):
+    # doctor always emits a message per check, so the fixture does too: the
+    # journey reads it for any invalid condition. Each check is (id, condition)
+    # or (id, condition, message).
+    rows = [dict(id=name, condition=condition, message=(rest[0] if rest else ''))
+            for name, condition, *rest in checks]
     return dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
-                base_path=base, checks=[dict(id=name, condition=value) for name, value in checks])
+                base_path=base, checks=rows)
 
 class Journey(unittest.TestCase):
     def setUp(self):
@@ -664,6 +669,76 @@ class Journey(unittest.TestCase):
             with self.assertRaises(SETUP.SetupError):
                 SETUP.onboarding_status('/bin/masc')
 
+
+class InvalidWorkspaceDiagnostic(unittest.TestCase):
+    """An invalid check is named on screen, and every exit stays open.
+
+    `invalid` is not one condition. A dangling assignment is repaired by saving
+    a selection — runtime-default-set rewrites the staged file and that rewrite
+    is what publishes — while a dangling binding is refused ahead of it, because
+    validate_no_dangling_bindings is materialize_config's first check. Both
+    reach this journey as the same string, so blocking on it would strand the
+    repairable ones and close the only way to leave a broken workspace.
+    """
+
+    def broken(self):
+        return observation('/workspace', (
+            ('workspace', 'satisfied', 'Workspace found.'),
+            ('model_connection', 'invalid', 'The workspace runtime.toml is unreadable.'),
+            ('keeper_persistence', 'satisfied', 'imp has persisted history.')))
+
+    def test_invalid_check_is_named_with_its_reason(self):
+        errors = io.StringIO()
+        with patch.object(SETUP, 'onboarding_status', return_value=self.broken()), \
+                patch.object(SETUP, 'pick', return_value=[2]), \
+                contextlib.redirect_stderr(errors):
+            SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertIn('model_connection', errors.getvalue())
+        self.assertIn('unreadable', errors.getvalue())
+
+    def test_invalid_check_still_offers_another_workspace(self):
+        # Leaving a broken workspace behind is only possible through question 1,
+        # which test_native_setup_can_leave_remembered_workspace_with_invalid_port
+        # pins for the invalid-port path.
+        with patch.object(SETUP, 'onboarding_status', return_value=self.broken()), \
+                patch.object(SETUP, 'pick', return_value=[2]) as pick, \
+                patch.object(SETUP, 'open_workspace') as open_workspace, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertEqual(code, 0)
+        open_workspace.assert_not_called()
+        self.assertEqual(pick.call_args[0][0], '1 \u00b7 Your workspace')
+        self.assertIn('Choose another directory', pick.call_args[0][1])
+
+    def test_readable_workspace_resumes_without_a_diagnostic(self):
+        state = observation('/workspace', (
+            ('workspace', 'satisfied'),
+            ('model_connection', 'needs_verification'),
+            ('sandbox', 'needs_verification'),
+            ('keeper_persistence', 'satisfied')))
+        errors = io.StringIO()
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'workspace_port', return_value=8935), \
+                patch.object(SETUP, 'select_setup_server', return_value=8935), \
+                patch.object(SETUP, 'open_workspace', return_value=0) as open_workspace, \
+                patch.object(SETUP, 'pick') as pick, \
+                contextlib.redirect_stderr(errors):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        self.assertEqual(code, 0)
+        open_workspace.assert_called_once()
+        pick.assert_not_called()
+        self.assertEqual(errors.getvalue(), '')
+
+    def test_fresh_workspace_still_opens_the_wizard(self):
+        state = observation(None, (
+            ('workspace', 'needs_setup'),
+            ('model_connection', 'needs_setup')))
+        with patch.object(SETUP, 'onboarding_status', return_value=state), \
+                patch.object(SETUP, 'pick', return_value=[2]) as pick, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = SETUP.journey('masc', None, None, 30, resume=True)
+        self.assertEqual(code, 0)
+        pick.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()

@@ -50,10 +50,17 @@ val gate_binding : approval_ids:string list -> obligations:gate_obligation list 
 type session_scope
 val session_scope : string list -> (session_scope, string) result
 val session_scope_components : session_scope -> string list
+type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_checkpoint =
+  { client_kind : official_client_kind; runtime_id : string; session_id : string;
+    turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
+type gate_checkpoint = Agent_core of Keeper_checkpoint_ref.t | Official_client of official_client_checkpoint
 type gate_wait = private
-  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
+  { checkpoint : gate_checkpoint; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
 val gate_wait : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
   (gate_wait, string) result
+val official_client_gate_wait : checkpoint:official_client_checkpoint -> session_scope:session_scope ->
+  obligations:gate_obligation list -> (gate_wait, string) result
 val gate_wait_with_runtime_retry : checkpoint:Keeper_checkpoint_ref.t -> session_scope:session_scope -> obligations:gate_obligation list ->
   runtime_retry:runtime_retry -> (gate_wait, string) result
 type gate_decision = Gate_approved | Gate_denied of string

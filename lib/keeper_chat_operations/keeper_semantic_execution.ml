@@ -86,13 +86,39 @@ let session_scope components =
   then Error "invalid relative session scope"
   else Ok (Session_scope components)
 let session_scope_components (Session_scope components) = components
+type official_client_kind = Codex | Claude_code | Antigravity
+type official_client_checkpoint =
+  { client_kind : official_client_kind; runtime_id : string; session_id : string;
+    turn_id : string; tool_surface_sha256 : string; frame : Keeper_repetition_snapshot.t }
+type gate_checkpoint = Agent_core of Keeper_checkpoint_ref.t | Official_client of official_client_checkpoint
 type gate_wait =
-  { checkpoint : Keeper_checkpoint_ref.t; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
+  { checkpoint : gate_checkpoint; session_scope : session_scope; obligations : gate_obligation list; runtime_retry : runtime_retry option }
 let gate_wait ~checkpoint ~session_scope ~obligations =
   if obligations = [] then Error "Gate waiting requires an obligation"
   else if List.length (List.sort_uniq String.compare (List.map (fun row -> row.approval_id) obligations))
           <> List.length obligations then Error "duplicate Gate obligation"
-  else Ok {checkpoint; session_scope; obligations; runtime_retry=None}
+  else Ok {checkpoint=Agent_core checkpoint; session_scope; obligations; runtime_retry=None}
+let official_client_gate_wait ~(checkpoint : official_client_checkpoint) ~session_scope ~obligations =
+  if List.exists (fun value -> String.trim value = "")
+      [checkpoint.runtime_id; checkpoint.session_id; checkpoint.turn_id]
+     || not (canonical_sha checkpoint.tool_surface_sha256)
+  then Error "invalid official-client Gate session identity"
+  else if obligations = [] || List.length (List.sort_uniq String.compare
+      (List.map (fun row -> row.approval_id) obligations)) <> List.length obligations
+  then Error "invalid official-client Gate obligations"
+  else match Snapshot.active checkpoint.frame with
+    | None -> Error "official-client Gate has no original execution scope"
+    | Some _ -> Ok {checkpoint=Official_client checkpoint; session_scope; obligations; runtime_retry=None}
+let gate_checkpoint_owns checkpoint scope = match checkpoint with
+  | Agent_core _ -> true
+  | Official_client checkpoint -> (match Snapshot.active checkpoint.frame with Some active -> Keeper_execution_scope_id.equal scope active | None -> false)
+let equal_gate_checkpoint left right = match left, right with
+  | Agent_core left, Agent_core right -> Keeper_checkpoint_ref.equal left right
+  | Official_client left, Official_client right ->
+    left.client_kind = right.client_kind && left.runtime_id = right.runtime_id
+    && left.session_id = right.session_id && left.turn_id = right.turn_id
+    && left.tool_surface_sha256 = right.tool_surface_sha256 && Snapshot.equal left.frame right.frame
+  | Agent_core _, Official_client _ | Official_client _, Agent_core _ -> false
 let gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~(runtime_retry : runtime_retry) =
   match gate_wait ~checkpoint ~session_scope ~obligations with
   | Error _ as error -> error
@@ -103,7 +129,7 @@ let gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~(runti
 type gate_decision = Gate_approved | Gate_denied of string
 type gate_resolution = { obligation : gate_obligation; decision : gate_decision }
 type gate_wait_state = { waiting : gate_wait; resolution : gate_resolution option }
-let equal_gate_wait left right = Keeper_checkpoint_ref.equal left.checkpoint right.checkpoint
+let equal_gate_wait left right = equal_gate_checkpoint left.checkpoint right.checkpoint
   && left.session_scope = right.session_scope && left.obligations = right.obligations
   && Option.equal equal_runtime_retry left.runtime_retry right.runtime_retry
 type terminal = Completed | Cancelled | Failed of string
@@ -299,7 +325,8 @@ let apply ~now action current =
       | Suspend_gate waiting ->
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
-             if List.for_all (fun prior -> List.mem prior waiting.obligations) current.gate_obligations
+             if gate_checkpoint_owns waiting.checkpoint (scope current)
+                && List.for_all (fun prior -> List.mem prior waiting.obligations) current.gate_obligations
              then unchanged (Recovering {origin=Gate_wait {waiting; resolution=None}; diagnostic="waiting for durable Gate resolution"})
              else reject ()
            | Recovering {origin=Gate_wait state; _} when equal_gate_wait state.waiting waiting ->
@@ -402,7 +429,14 @@ let gate_binding_json binding = `Assoc [
   "approval_ids", `List (List.map (fun id -> `String id) binding.approval_ids);
   "obligations", `List (List.map gate_obligation_json binding.obligations);
   "runtime_suffix", Option.fold ~none:`Null ~some:runtime_suffix_json binding.runtime_suffix]
-let gate_wait_json value = `Assoc (["checkpoint", checkpoint_json value.checkpoint;
+let official_client_checkpoint_json value = `Assoc [
+  "client_kind", `String (match value.client_kind with Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity");
+  "runtime_id", `String value.runtime_id; "session_id", `String value.session_id;
+  "turn_id", `String value.turn_id; "tool_surface_sha256", `String value.tool_surface_sha256;
+  "frame", Snapshot.to_json value.frame]
+let gate_wait_json value = `Assoc ([(match value.checkpoint with
+  | Agent_core checkpoint -> "checkpoint", checkpoint_json checkpoint
+  | Official_client checkpoint -> "official_client", official_client_checkpoint_json checkpoint);
   "session_scope", `List (List.map (fun value -> `String value) (session_scope_components value.session_scope));
   "obligations", `List (List.map gate_obligation_json value.obligations)] @
   (match value.runtime_retry with None -> [] | Some retry -> ["runtime_retry", runtime_retry_json retry]))
@@ -532,7 +566,7 @@ let runtime_retry_of_json json =
         | Some (`Float _ | `Int _) -> let* value = time "not_before" fields in Ok (Some value)
         | Some _ -> Error "not_before must be a finite nonnegative time" in
       runtime_retry ~not_before ~checkpoint ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids
-let gate_wait_of_json json =
+let agent_core_gate_wait_of_json json =
   let json = match json with
     | `Assoc fields when not (List.mem_assoc "runtime_retry" fields) -> `Assoc (("runtime_retry", `Null) :: fields)
     | json -> json in
@@ -550,6 +584,27 @@ let gate_wait_of_json json =
   | `Null -> gate_wait ~checkpoint ~session_scope ~obligations
   | json -> let* runtime_retry = runtime_retry_of_json json in
       gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~runtime_retry
+let gate_wait_of_json json = match json with
+  | `Assoc fields when List.mem_assoc "official_client" fields ->
+    let* fields = exact ["official_client"; "session_scope"; "obligations"] json in
+    let* native = exact ["client_kind"; "runtime_id"; "session_id"; "turn_id"; "tool_surface_sha256"; "frame"] (field "official_client" fields) in
+    let* kind = string "client_kind" native in
+    let* client_kind = match kind with "codex" -> Ok Codex | "claude_code" -> Ok Claude_code
+      | "antigravity" -> Ok Antigravity | _ -> Error "invalid official-client kind" in
+    let* runtime_id = string "runtime_id" native in
+    let* session_id = string "session_id" native in
+    let* turn_id = string "turn_id" native in
+    let* tool_surface_sha256 = string "tool_surface_sha256" native in
+    let* frame = Snapshot.of_json (field "frame" native) |> Result.map_error Snapshot.error_to_string in
+    let* components = match field "session_scope" fields with
+      | `List rows -> decode_list (function `String value -> Ok value | _ -> Error "invalid session component") rows
+      | _ -> Error "Gate session scope must be a list" in
+    let* session_scope = session_scope components in
+    let* obligations = match field "obligations" fields with
+      | `List rows -> decode_list gate_obligation_of_json rows | _ -> Error "Gate obligations must be a list" in
+    official_client_gate_wait ~checkpoint:{client_kind; runtime_id; session_id; turn_id; tool_surface_sha256; frame}
+      ~session_scope ~obligations
+  | _ -> agent_core_gate_wait_of_json json
 let gate_resolution_of_json json =
   let* fields = exact ["obligation";"decision"] json in
   let* obligation = gate_obligation_of_json (field "obligation" fields) in
@@ -680,10 +735,10 @@ let of_json json =
       | Recovering {origin=Gate_binding binding; _} ->
         if gate_obligations = binding.obligations then Ok () else Error "Gate binding lost prior obligations"
       | Recovering {origin=Gate_wait state; _} ->
-        if gate_obligations = state.waiting.obligations then Ok ()
+        if gate_checkpoint_owns state.waiting.checkpoint expected && gate_obligations = state.waiting.obligations then Ok ()
         else Error "Gate wait lost its owned obligations"
       | Resuming_gate (waiting, _) ->
-        if List.for_all (fun obligation -> List.mem obligation waiting.obligations) gate_obligations then Ok ()
+        if gate_checkpoint_owns waiting.checkpoint expected && List.for_all (fun obligation -> List.mem obligation waiting.obligations) gate_obligations then Ok ()
         else Error "resumed Gate obligations changed identity"
       | Preparing | Ready | Running | Resuming_runtime_retry _ | Suspended _ | Settled _
       | Recovering {origin=(Runtime_retry _ | Checkpointed _ | Interrupted_execution

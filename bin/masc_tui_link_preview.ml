@@ -57,30 +57,59 @@ let mosaic_refusal_text = function
    miss simply draws no preview. Refusals are retained for display, not treated
    as permanent: only an explicit modal retry consumes them. *)
 let mosaic_cache_mu = Stdlib.Mutex.create ()
-let mosaic_cache : (string, mosaic_entry) Hashtbl.t = Hashtbl.create 64
+type mosaic_pending = { mutable discard_result : bool }
+type mosaic_state = Decided of mosaic_entry | Pending of mosaic_pending
+type mosaic_request = Load_missing | Retry_refused
+let mosaic_cache : (string, mosaic_state) Hashtbl.t = Hashtbl.create 64
 
 (* The entry for an image URL, or [None] if the background fetch has not
    decided it yet. *)
 let mosaic_lookup url =
-  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.find_opt mosaic_cache url)
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+    match Hashtbl.find_opt mosaic_cache url with
+    | Some (Decided entry) -> Some entry
+    | Some (Pending _) | None -> None)
 
-let mosaic_store url entry =
-  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.replace mosaic_cache url entry)
-
-let retry_mosaic ~retry url =
-  let requested =
+let compute_mosaic request ~compute url =
+  let claimed =
     Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
-      match Hashtbl.find_opt mosaic_cache url with
-      | Some (Refused _) -> Hashtbl.remove mosaic_cache url; true
-      | Some (Mosaic _) | None -> false)
+      let previous = Hashtbl.find_opt mosaic_cache url in
+      match request, previous with
+      | Load_missing, None | Retry_refused, Some (Decided (Refused _)) ->
+        let pending = { discard_result = false } in
+        Hashtbl.replace mosaic_cache url (Pending pending);
+        Some (pending, previous)
+      | Load_missing, Some _ | Retry_refused, (None | Some (Decided (Mosaic _) | Pending _)) ->
+        None)
   in
-  if requested then retry ();
-  requested
+  match claimed with
+  | None -> ()
+  | Some (pending, previous) ->
+    let finish outcome =
+      Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+        match outcome with
+        | Some state when not pending.discard_result -> Hashtbl.replace mosaic_cache url state
+        | Some _ | None -> Hashtbl.remove mosaic_cache url)
+    in
+    match compute () with
+    | entry -> finish (Some (Decided entry))
+    | exception exn ->
+      (* Cleanup is non-yielding; propagate every exception, including cancellation. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      finish previous;
+      Printexc.raise_with_backtrace exn backtrace
+
+let load_mosaic ~compute url = compute_mosaic Load_missing ~compute url
+let retry_mosaic ~retry url = compute_mosaic Retry_refused ~compute:retry url
 
 let clear_cache () =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
       preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity);
-  Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.clear mosaic_cache)
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+    Hashtbl.filter_map_inplace (fun _ -> function
+      | Decided _ -> None
+      | Pending pending -> pending.discard_result <- true; Some (Pending pending))
+      mosaic_cache)
 
 let path_segments uri =
   Uri.path uri

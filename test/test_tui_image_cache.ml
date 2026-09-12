@@ -232,8 +232,7 @@ let test_explicit_retry_recovers_without_background_loop () =
     let attempts = ref 0 in
     let compute () =
       incr attempts;
-      let outcome =
-        match Cache.download ~run ~cache_dir url with
+      match Cache.download ~run ~cache_dir url with
         | Error failure ->
           Preview.Refused (Preview.Fetch_failed { detail = Cache.download_error_text failure })
         | Ok input ->
@@ -245,11 +244,9 @@ let test_explicit_retry_recovers_without_background_loop () =
             Preview.Refused (Preview.Decode_failed { detail = Cache.decode_failure_text failure })
           | Ok path ->
             Preview.Mosaic (Masc_tui_image_mosaic.render ~cols:1 ~rows:2 (read_file path))
-      in
-      Preview.mosaic_store url outcome
     in
     executable cache_dir "curl" "exit 28";
-    compute ();
+    Preview.load_mosaic url ~compute;
     ignore (Preview.mosaic_lookup url);
     ignore (Preview.mosaic_lookup url);
     check int "reads do not retry a timeout" 1 !attempts;
@@ -259,14 +256,93 @@ let test_explicit_retry_recovers_without_background_loop () =
       Cache.invalidate_download ~cache_dir url;
       compute ()
     in
-    check bool "keypress consumes refusal" true (Preview.retry_mosaic ~retry url);
+    Preview.retry_mosaic ~retry url;
     (match Preview.mosaic_lookup url with
      | Some (Preview.Mosaic (_ :: _)) -> ()
      | Some (Preview.Mosaic [] | Preview.Refused _) | None -> fail "retry produced no mosaic");
     check int "one explicit retry" 2 !attempts;
-    check bool "ready preview does not retry" false (Preview.retry_mosaic ~retry url);
+    Preview.retry_mosaic ~retry url;
     check int "no extra attempt" 2 !attempts;
     Preview.clear_cache ())
+
+let test_overlapping_load_and_retry_share_one_claim () =
+  let module Preview = Masc_tui_link_preview in
+  Preview.clear_cache ();
+  let url = "https://fixture.invalid/overlap.png" in
+  let unexpected_compute () = fail "a pending URL was computed twice" in
+  Preview.load_mosaic url ~compute:(fun () ->
+    Preview.load_mosaic url ~compute:unexpected_compute;
+    Preview.retry_mosaic url ~retry:unexpected_compute;
+    Preview.Refused Preview.Empty_body);
+  Preview.retry_mosaic url ~retry:(fun () ->
+    Preview.load_mosaic url ~compute:unexpected_compute;
+    Preview.retry_mosaic url ~retry:unexpected_compute;
+    Preview.Mosaic [ "recovered" ]);
+  Preview.load_mosaic url ~compute:unexpected_compute;
+  Preview.retry_mosaic url ~retry:unexpected_compute;
+  (match Preview.mosaic_lookup url with
+   | Some (Preview.Mosaic [ "recovered" ]) -> ()
+   | _ -> fail "retry outcome was not retained");
+  Preview.clear_cache ()
+
+exception Compute_interrupted
+
+let test_failed_computation_releases_claim () =
+  let module Preview = Masc_tui_link_preview in
+  Preview.clear_cache ();
+  let url = "https://fixture.invalid/interrupted.png" in
+  let interrupted () = raise Compute_interrupted in
+  check_raises "initial exception propagates" Compute_interrupted (fun () ->
+    Preview.load_mosaic url ~compute:interrupted);
+  Preview.load_mosaic url ~compute:(fun () -> Preview.Refused Preview.Empty_body);
+  check_raises "retry exception propagates" Compute_interrupted (fun () ->
+    Preview.retry_mosaic url ~retry:interrupted);
+  (match Preview.mosaic_lookup url with
+   | Some (Preview.Refused Preview.Empty_body) -> ()
+   | _ -> fail "interrupted retry lost its refusal");
+  Preview.retry_mosaic url ~retry:(fun () -> Preview.Mosaic [ "recovered" ]);
+  (match Preview.mosaic_lookup url with
+   | Some (Preview.Mosaic [ "recovered" ]) -> ()
+   | _ -> fail "interrupted claim was not released");
+  Preview.clear_cache ()
+
+let test_clear_pending_keeps_claim_and_discards_completion () =
+  let module Preview = Masc_tui_link_preview in
+  List.iter (fun fail_compute ->
+    Preview.clear_cache ();
+    let url = "https://fixture.invalid/cleared.png" in
+    let unexpected_compute () = fail "clear released an active worker" in
+    Preview.load_mosaic url ~compute:(fun () -> Preview.Refused Preview.Empty_body);
+    let retry () =
+      Preview.clear_cache ();
+      Preview.load_mosaic url ~compute:unexpected_compute;
+      Preview.retry_mosaic url ~retry:unexpected_compute;
+      if fail_compute then raise Compute_interrupted;
+      Preview.Mosaic [ "stale" ]
+    in
+    if fail_compute then
+      check_raises "cleared retry exception propagates" Compute_interrupted
+        (fun () -> Preview.retry_mosaic url ~retry)
+    else Preview.retry_mosaic url ~retry;
+    check bool "cleared callback cannot restore an old outcome" true
+      (Option.is_none (Preview.mosaic_lookup url));
+    Preview.load_mosaic url ~compute:(fun () -> Preview.Mosaic [ "fresh" ]);
+    (match Preview.mosaic_lookup url with
+     | Some (Preview.Mosaic [ "fresh" ]) -> ()
+     | _ -> fail "completed cleared worker left a reservation");
+    Preview.clear_cache ()) [ false; true ]
+
+let test_partial_converter_failure_uses_next_converter () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/fallback.jpg" in
+    serve cache_dir jpeg_header;
+    executable cache_dir "sips"
+      "for output do :; done\nprintf partial > \"$output\"\nexit 1";
+    converter_succeeds cache_dir "convert" png_header;
+    check string "partial failed output is replaced by next converter" png_header
+      (unwrap (Cache.prepare_png ~run ~cache_dir url));
+    check string "fallback retains source without refetch" "x"
+      (read_file (Filename.concat cache_dir "fetches")))
 
 let test_explicit_refresh_replaces_a_refused_body () =
   with_cache (fun cache_dir run ->
@@ -294,6 +370,14 @@ let () =
             test_v_missing_converters_retains_input
         ; test_case "explicit retry recovers without background loop" `Quick
             test_explicit_retry_recovers_without_background_loop
+        ; test_case "overlapping initial load and retry share one claim" `Quick
+            test_overlapping_load_and_retry_share_one_claim
+        ; test_case "failed computation releases its claim" `Quick
+            test_failed_computation_releases_claim
+        ; test_case "clear retains pending ownership and discards completion" `Quick
+            test_clear_pending_keeps_claim_and_discards_completion
+        ; test_case "partial converter failure uses next converter" `Quick
+            test_partial_converter_failure_uses_next_converter
         ; test_case "explicit refresh replaces refused body" `Quick
             test_explicit_refresh_replaces_a_refused_body
         ] )

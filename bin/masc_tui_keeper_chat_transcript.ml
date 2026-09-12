@@ -87,6 +87,12 @@ type live_tool_call =
       (** When TOOL_CALL_START arrived. A turn age says how long the turn has
           run; only this says whether the thing it is in right now has been
           running that whole time. *)
+  ; attempt : int
+      (** The runtime attempt that opened this call. The trail keeps every
+          attempt's calls as evidence, so a question about what is open *now*
+          has to say which attempt it means: a call left open on the runtime
+          failover walked away from is never going to return, and counting it
+          as running says the new attempt is waiting on something it is not. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
@@ -1020,7 +1026,8 @@ let approval_outcome_to_string = function
    is the one a watcher is waiting on. *)
 let oldest_open_call t =
   t.reversed_tool_calls
-  |> List.filter (fun (call : live_tool_call) -> not call.ended)
+  |> List.filter (fun (call : live_tool_call) ->
+       (not call.ended) && call.attempt = t.attempt)
   |> List.fold_left
        (fun acc (call : live_tool_call) ->
          match acc with
@@ -1062,13 +1069,34 @@ let phase_text ~now t =
          Named rather than counted, and placed before the mix: the question is
          which call is still out, the names are few -- a round holds a handful
          -- and a long tool mix is what a narrow row loses first. *)
+      (* What is open *now*, which is not the same list as what this turn has
+         called. A call the failover walked away from keeps its place in the
+         trail as evidence, and reporting it here said the new attempt was
+         waiting on a runtime it had already left (observed 2026-09-12, where
+         one screen called the same tool "never returned" and "still running"
+         at once). The count and the mix below stay on the whole turn: those
+         answer "what has this turn done", and that does include the
+         abandoned attempts.
+
+         The trail's own glyphs are deliberately not narrowed. An abandoned
+         call keeps the running mark inside its superseded block, and that
+         block says which attempt and which runtime it belonged to -- read
+         there, the mark is "this was open when we left", not a claim about
+         now. What is left unanswered is one step up: [compact_outcome]
+         promotes a whole block to [Started] on a single open call, so a block
+         holding nothing but abandoned calls still summarises as running.
+         Fixing that needs [tool_activity] to carry the attempt, which it does
+         not, so it is not in this change. *)
       let still_running =
-        List.filter
-          (fun activity ->
-            match activity.outcome with
-            | Started | Awaiting_result -> true
-            | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
-          activities
+        t.reversed_tool_calls
+        |> List.filter (fun (call : live_tool_call) ->
+             call.attempt = t.attempt)
+        |> List.rev
+        |> List.map activity_of_live_call
+        |> List.filter (fun activity ->
+             match activity.outcome with
+             | Started | Awaiting_result -> true
+             | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
       in
       let running =
         match still_running with
@@ -1082,8 +1110,15 @@ let phase_text ~now t =
          stops moving when something is stuck.
 
          Beside the names rather than after the mix (#32955 put it there before
-         the names existed): the two describe the same open calls, and the mix
-         is long enough to push whatever follows it off a narrow row. *)
+         the names existed): the two describe nearly the same calls, and the
+         mix is long enough to push whatever follows it off a narrow row.
+
+         Nearly, not exactly. [still_running] takes [Started | Awaiting_result]
+         and [oldest_open_call] takes [not ended], so a call whose request has
+         ended while its result has not arrived is named here without an age.
+         [Tool_ended] sets [ended] without setting [result_ready], so that
+         window is real. Both now also require the current attempt, which
+         makes them look more alike than they are. *)
       let in_this_call =
         match oldest_open_call t with
         | None -> ""
@@ -1092,6 +1127,13 @@ let phase_text ~now t =
           | None -> ""
           | Some age -> Printf.sprintf " · in this call %s" age)
       in
+      (* Counted from 0 internally, shown from 1 -- the superseded blocks on
+         the same screen label themselves [attempt + 1] (render.ml), so a
+         0-based number here put "attempt 1" on screen twice for two
+         different attempts: once on the block the failover left behind, and
+         once on the one now running. The word "failover" used to be the only
+         thing telling them apart, and it is no longer on this row. *)
+      let attempt_shown = t.attempt + 1 in
       let work =
         if calls = 0 then
           match t.current_runtime_id, t.endpoint_streaming with
@@ -1099,21 +1141,29 @@ let phase_text ~now t =
               Printf.sprintf "streaming from [%s]%s" rid in_this_call
           | Some rid, false when t.attempt > 0 ->
               Printf.sprintf "failover: connecting to [%s] (attempt %d)%s"
-                rid t.attempt in_this_call
+                rid attempt_shown in_this_call
           | Some rid, false ->
               Printf.sprintf "connecting to [%s]%s" rid in_this_call
           | None, _ when t.attempt > 0 ->
-              Printf.sprintf "failover working (attempt %d)%s" t.attempt in_this_call
+              Printf.sprintf "failover working (attempt %d)%s" attempt_shown
+                in_this_call
           | None, _ -> "working" ^ in_this_call
         else
+          (* The heading above this row already says which of the two states
+             it is ("IN PROGRESS" / "FAILOVER IN PROGRESS", render.ml). Saying
+             it again here spent forty-eight cells on "failover [rid] (attempt
+             1) · " before the row reached its first fact, and what fell off
+             the far end was the open call's age -- the one number that tells
+             a slow call from a stuck one. The tag now carries only what the
+             heading cannot: which runtime, and which attempt. *)
           let runtime_tag =
             match t.current_runtime_id with
             | Some rid when t.attempt > 0 ->
-                Printf.sprintf "failover [%s] (attempt %d) · " rid t.attempt
-            | Some rid -> Printf.sprintf "working [%s] · " rid
+                Printf.sprintf "[%s] attempt %d · " rid attempt_shown
+            | Some rid -> Printf.sprintf "[%s] · " rid
             | None when t.attempt > 0 ->
-                Printf.sprintf "failover (attempt %d) · " t.attempt
-            | None -> "working · "
+                Printf.sprintf "attempt %d · " attempt_shown
+            | None -> ""
           in
           Printf.sprintf "%s%s%s%s · %s"
             runtime_tag (plural calls "tool") running in_this_call
@@ -1446,6 +1496,7 @@ let apply_delta ~now t (delta : Live.delta) =
          t.reversed_tool_calls <-
            { local_id
            ; started_at = now
+           ; attempt = t.attempt
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

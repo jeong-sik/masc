@@ -168,7 +168,17 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
-let ceiling_bytes = 109_236
+(* 2026-09-13: 109,734 across 126 tools (CI at 2370dcea). This branch carries
+   both Fusion description changes and adds no tool: masc_fusion_status gains
+   +336 (what a run_id read returns -- original durable Board evidence, panel
+   answers, judge advice, evidence hash -- and that missing evidence is
+   reported rather than read as an expired post), masc_fusion's task_id gains
+   +162 (that an absent task_id selects the caller's active Task, and that the
+   captured contract is separate from the caller's summary). Both tools
+   declare defer_loading = true; this figure counts them because
+   model_visible_schemas reads the descriptor, not the loading declaration.
+   Set to the measurement with no added headroom. *)
+let ceiling_bytes = 109_734
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

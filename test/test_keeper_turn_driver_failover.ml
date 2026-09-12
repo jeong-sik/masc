@@ -100,8 +100,25 @@ let retryable_network_error message =
     (Agent_core.Retry.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
 
+let dispatch_disposition : Masc.Keeper_attempt_dispatch.t Alcotest.testable =
+  Alcotest.testable
+    (fun fmt d -> Format.pp_print_string fmt (Masc.Keeper_attempt_dispatch.to_string d))
+    ( = )
+
 let attempt_without_effect result checkpoint =
-  result, checkpoint, Masc.Keeper_provider_attempt_effect.No_effect_observed
+  ( result
+  , checkpoint
+  , Masc.Keeper_provider_attempt_effect.No_effect_observed
+  , Masc.Keeper_attempt_dispatch.Dispatched )
+;;
+
+(* A candidate the walk refuses before invoking anything: its error is the
+   walk's own verdict, not the candidate's answer. *)
+let attempt_rejected_before_dispatch error =
+  ( Error error
+  , None
+  , Masc.Keeper_provider_attempt_effect.No_effect_observed
+  , Masc.Keeper_attempt_dispatch.Rejected_before_dispatch )
 ;;
 
 let accept_empty_no_progress_error scope =
@@ -1949,7 +1966,7 @@ let test_failed_lane_receipt_counts_missing_tail () =
       ~runtime_id:"resilient"
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~on_attempt_error:(fun ~runtime_id:_ ~attempt _error ->
+      ~on_attempt_error:(fun ~runtime_id:_ ~attempt ~dispatch:_ _error ->
         Run_tools_setup.record_lane_attempt_index last_attempt_index attempt)
       ~run_attempt:(fun ~idx ~runtime_id:_ candidate ->
         match candidate with
@@ -2179,7 +2196,8 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
         | "primary.test_model" ->
           ( Error (retryable_network_error "primary failed after possible effect")
           , None
-          , effect_disposition )
+          , effect_disposition
+          , Masc.Keeper_attempt_dispatch.Dispatched )
         | "fallback.test_model" ->
           Alcotest.failf "%s allowed duplicate-capable fallback" label
         | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -2246,7 +2264,8 @@ let test_effect_fence_outranks_an_earlier_overflow () =
         | "effect-owner.test_model" ->
           ( Error (retryable_network_error "failed after an effect")
           , None
-          , Masc.Keeper_provider_attempt_effect.Effect_attempted )
+          , Masc.Keeper_provider_attempt_effect.Effect_attempted
+          , Masc.Keeper_attempt_dispatch.Dispatched )
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "effect-owner.test_model" ]
   in
@@ -2848,7 +2867,7 @@ let test_attempt_loop_preserves_last_core_error () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~on_attempt_error:(fun ~runtime_id ~attempt error ->
+      ~on_attempt_error:(fun ~runtime_id ~attempt ~dispatch:_ error ->
         observed_errors := (runtime_id, attempt, error) :: !observed_errors)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempt_without_effect
@@ -3024,11 +3043,16 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
    replayed the same oversized checkpoint. *)
 let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
   let attempts = ref [] in
+  let attempt_errors = ref [] in
+  let lane_terminal = ref None in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_attempt_error:(fun ~runtime_id ~attempt ~dispatch _error ->
+        attempt_errors := !attempt_errors @ [ runtime_id, attempt, dispatch ])
+      ~on_lane_terminal_error:(fun terminal -> lane_terminal := Some terminal)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -3056,18 +3080,42 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
   Alcotest.(check (list string))
     "both candidates attempted"
     [ "small.test_model"; "fallback.test_model" ]
-    !attempts
+    !attempts;
+  (* The last candidate the walk dispatched and the candidate whose error the
+     lane returned are two facts: the fallback was dispatched last, the
+     overflow came from the first candidate. *)
+  Alcotest.(check (list (triple string int dispatch_disposition)))
+    "every candidate's own error is observed with its dispatch disposition"
+    [ "small.test_model", 0, Masc.Keeper_attempt_dispatch.Dispatched
+    ; "fallback.test_model", 1, Masc.Keeper_attempt_dispatch.Dispatched
+    ]
+    !attempt_errors;
+  match !lane_terminal with
+  | None -> Alcotest.fail "exhausted lane must report which candidate's error it returned"
+  | Some (terminal : Driver.lane_terminal_error) ->
+    Alcotest.(check string)
+      "the lane error originates from the overflowed first candidate, not \
+       the last dispatched fallback"
+      "small.test_model"
+      terminal.origin_runtime_id;
+    Alcotest.(check int) "origin attempt index is the first walk index" 0 terminal.origin_attempt;
+    Alcotest.(check bool)
+      "the reported lane error is the overflow itself"
+      true
+      (Masc.Keeper_error_classify.is_context_overflow terminal.lane_error)
 
 (* Overflow precedence applies only to an exhausted lane: a walk stopped
    mid-lane by a non-retryable error keeps that stopping error, which is the
    immediate operator signal. *)
 let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
   let attempts = ref [] in
+  let lane_terminal = ref None in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_lane_terminal_error:(fun terminal -> lane_terminal := Some terminal)
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
@@ -3097,7 +3145,60 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
   Alcotest.(check (list string))
     "walk stopped at the terminal candidate"
     [ "small.test_model"; "broken.test_model" ]
-    !attempts
+    !attempts;
+  match !lane_terminal with
+  | None -> Alcotest.fail "a mid-lane stop must report which candidate's error it returned"
+  | Some (terminal : Driver.lane_terminal_error) ->
+    Alcotest.(check (pair string int))
+      "the lane error originates from the candidate the walk stopped on"
+      ("broken.test_model", 1)
+      (terminal.origin_runtime_id, terminal.origin_attempt)
+
+(* A candidate the walk refuses before dispatch is still an attempt error,
+   but it reaches the observer as [Rejected_before_dispatch] so a consumer
+   can keep it as evidence without naming it as the runtime that answered. *)
+let test_attempt_loop_reports_pre_dispatch_refusal_disposition () =
+  let attempt_errors = ref [] in
+  let lane_terminal = ref None in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~on_attempt_error:(fun ~runtime_id ~attempt ~dispatch _error ->
+        attempt_errors := !attempt_errors @ [ runtime_id, attempt, dispatch ])
+      ~on_lane_terminal_error:(fun terminal -> lane_terminal := Some terminal)
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        match candidate with
+        | "resolved.test_model" ->
+          attempt_without_effect
+            (Error (retryable_network_error "resolved candidate failed"))
+            None
+        | "missing.test_model" ->
+          attempt_rejected_before_dispatch
+            (Agent_core.Error.Internal "runtime candidate missing")
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "resolved.test_model"; "missing.test_model" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected the refused tail to end the lane"
+   | Error (Agent_core.Error.Internal msg) ->
+     Alcotest.(check string) "refusal error preserved" "runtime candidate missing" msg
+   | Error e ->
+     Alcotest.failf "expected the refusal error, got %s" (Agent_core.Error.to_string e));
+  Alcotest.(check (list (triple string int dispatch_disposition)))
+    "the dispatched candidate and the refused tail carry distinct dispositions"
+    [ "resolved.test_model", 0, Masc.Keeper_attempt_dispatch.Dispatched
+    ; "missing.test_model", 1, Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    ]
+    !attempt_errors;
+  match !lane_terminal with
+  | None -> Alcotest.fail "the lane must report which candidate's error it returned"
+  | Some (terminal : Driver.lane_terminal_error) ->
+    Alcotest.(check (pair string int))
+      "the lane error originates from the refused tail"
+      ("missing.test_model", 1)
+      (terminal.origin_runtime_id, terminal.origin_attempt)
 
 let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let attempts = ref [] in
@@ -3389,7 +3490,10 @@ let test_access_failover_preserves_effect_and_caller_authority () =
         ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
           incr attempts;
           if runtime_id <> "denied" then Alcotest.fail "possible effect was replayed";
-          Error (access_error_from_http code), None, disposition)
+          ( Error (access_error_from_http code)
+          , None
+          , disposition
+          , Masc.Keeper_attempt_dispatch.Dispatched ))
         ["denied"; "available"] in
       Alcotest.(check int) "effect owner attempted once" 1 !attempts;
       match result with
@@ -3657,6 +3761,10 @@ let () =
             "mid-lane terminal outranks observed overflow"
             `Quick
             test_attempt_loop_midwalk_terminal_outranks_observed_overflow;
+          Alcotest.test_case
+            "pre-dispatch refusal reaches the observer as rejected_before_dispatch"
+            `Quick
+            test_attempt_loop_reports_pre_dispatch_refusal_disposition;
           Alcotest.test_case
             "checkpoint denial defers exact frozen suffix once"
             `Quick

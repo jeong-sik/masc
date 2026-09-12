@@ -21,3 +21,14 @@ val open_url : string -> (string, string) result
 (** [Ok opener] names the command that took it. [Error] says what was tried,
     because "the browser did not open" with no list is not something an
     operator can act on. *)
+
+type undrawn_image = { title : string; page_url : string; image_url : string }
+(** A web image the TUI could not, or does not, draw inline. [title] is the
+    display line, indented for the screen, and is never a location.
+    [page_url] is the link the operator chose. [image_url] is the preview
+    picture fetched for that link -- the thing that failed. *)
+
+val browser_url : undrawn_image -> string
+(** The one URL a browser gets for an [undrawn_image]: [page_url]. The
+    picture that could not be drawn is not what the operator asked for, and
+    the display title is not a URL at all. *)

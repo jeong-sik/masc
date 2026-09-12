@@ -1,0 +1,7 @@
+id = "dos-demo"
+run_id = "dos-demo"
+# Relative to this declaration. Change when copying to config/lane-addons/.
+manifest_path = "lane.toml"
+
+[binding]
+sources = []

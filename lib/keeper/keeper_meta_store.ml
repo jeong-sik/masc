@@ -209,7 +209,12 @@ let decode_current_meta_with_repair json : (decoded_meta, string) result =
                  redecode_detail)))
 ;;
 
-let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta option, string) result =
+type meta_presence =
+  | Meta_absent
+  | Meta_present of Keeper_meta_contract.keeper_meta
+  | Meta_not_current of string
+
+let read_meta_file_path_presence ?ownership_root path : (meta_presence, string) result =
   (* Fail open. A meta this binary cannot read is an absent meta, not a dead
      keeper: the TOML declaration carries the whole setup, so the boot path
      re-materialises one. Refusing instead took the fleet down three times on
@@ -233,12 +238,12 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
     (* main took the recovery decision (#29610: unreadable is absent, not fatal);
        this branch keeps its own contribution, which is that the loss shows
        up in the unreadable-store registry instead of only in a log line. *)
-    Ok None
+    Ok (Meta_not_current detail)
   in
   if not (Fs_compat.file_exists path)
   then (
     Problem_report_state.clear ~site:Meta_read ~path;
-    Ok None)
+    Ok Meta_absent)
   else (
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
@@ -248,7 +253,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
          Problem_report_state.clear ~site:Meta_repair ~path;
-              Ok (Some meta)
+              Ok (Meta_present meta)
        | Ok (Repaired { meta = repaired_meta; decode_error; repair_detail }) ->
          (* Issue #28844: a non-canonical enumerated field used to brick every
             reader until something external rewrote the file.  When the
@@ -270,7 +275,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
                 "keeper meta auto-repaired %s: %s"
                 path
                 repair_detail;
-            Ok (Some repaired_meta)
+            Ok (Meta_present repaired_meta)
           | Error write_detail ->
             fail_open
               (Printf.sprintf
@@ -279,6 +284,13 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
                  repair_detail
                  write_detail))
        | Error detail -> fail_open detail))
+;;
+
+let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta option, string) result =
+  read_meta_file_path_presence ?ownership_root path
+  |> Result.map (function
+    | Meta_present meta -> Some meta
+    | Meta_absent | Meta_not_current _ -> None)
 ;;
 
 type current_meta_rejection =
@@ -675,6 +687,25 @@ let read_effective_meta config name
   | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
   | Ok None -> Ok None
   | Error _ as err -> err
+;;
+
+let read_effective_meta_presence config name : (meta_presence, string) result =
+  let requested_name = String.trim name in
+  if requested_name = ""
+  then Error "keeper name is empty"
+  else (
+    match
+      read_meta_file_path_presence
+        ~ownership_root:config.Workspace.base_path
+        (keeper_meta_path config requested_name)
+    with
+    | Error _ as err -> err
+    | Ok (Meta_absent | Meta_not_current _) as presence -> presence
+    | Ok (Meta_present meta) ->
+      Keeper_meta_contract.effective_meta_result
+        ~base_path:config.Workspace.base_path
+        meta
+      |> Result.map (fun meta -> Meta_present meta))
 ;;
 
 let replace_snapshot config (persisted : Keeper_meta_contract.keeper_meta) =

@@ -72,6 +72,8 @@ let lane_addon_schemas : tool_schema list =
   ; Tool_schemas_misc_toml.lane_slice
   ; Tool_schemas_misc_toml.lane_detach
   ; Tool_schemas_misc_toml.lane_evidence
+  ; Tool_schemas_misc_toml.lane_act
+  ; Tool_schemas_misc_toml.lane_action_status
   ]
 
 let schemas : tool_schema list =
@@ -132,6 +134,8 @@ type misc_operation =
   | Misc_lane_slice
   | Misc_lane_detach
   | Misc_lane_evidence
+  | Misc_lane_act
+  | Misc_lane_action_status
   | Misc_ask
   | Misc_ask_status
   | Misc_ask_withdraw
@@ -170,6 +174,8 @@ let misc_tool_name = function
   | Misc_lane_slice -> "masc_lane_slice"
   | Misc_lane_detach -> "masc_lane_detach"
   | Misc_lane_evidence -> "masc_lane_evidence"
+  | Misc_lane_act -> "masc_lane_act"
+  | Misc_lane_action_status -> "masc_lane_action_status"
   | Misc_ask -> "masc_ask"
   | Misc_ask_status -> "masc_ask_status"
   | Misc_ask_withdraw -> "masc_ask_withdraw"
@@ -223,6 +229,8 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_lane_slice
   | Misc_lane_detach
   | Misc_lane_evidence
+  | Misc_lane_act
+  | Misc_lane_action_status
   | Misc_msx_load
   | Misc_msx_eject
   | Misc_msx_save

@@ -50,6 +50,7 @@ To revisit what a Keeper read, select that Keeper, open Browser Lane, and press
 `[` / `]` choose a saved page, `j` / `k` scroll it, and `y` copies its receipt
 and artifact reference. `h` or `Esc` returns to the browser. Saved pages remain
 readable after the browser closes; `h` also works from the browser picker.
+`Tab` / `Shift-Tab` leave the reader for the next / previous MASC surface.
 The MASC server must be running to fetch these records.
 
 ## MSX

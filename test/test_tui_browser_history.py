@@ -63,12 +63,25 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             "page": {"tabId": 2, "title": "Current page", "url": current,
                      "text": "CURRENT PAGE CONTENT", "chars": 20, "truncated": False}}}
 
+    def read_scene(body):
+        request = json.loads(body)
+        requests.append(("scene", request))
+        assert request["lane"] == "live" and request["tabId"] == 2
+        assert request["view"] == "content"
+        current_scene = scene("Current")
+        current_scene["title"] = "Current scene"
+        current_scene["elapsed_ms"] = 1.
+        current_scene["nodes"] = [dict(node("CURRENT SCENE CONTROL"),
+            kind="control", tag="button", clickable=True, editable=False, disabled=False)]
+        return 200, {"ok": True, "data": current_scene}
+
     def effect(body):
         requests.append(("unexpected effect", json.loads(body)))
         return 500, {"error": "history must never send a browser action"}
 
     fixtures["/api/v1/dashboard/browser-lane/read"] = h.RequestHttpResponse(read)
-    for suffix in ["scene", "interact", "act", "screenshot", "session", "goto"]:
+    fixtures["/api/v1/dashboard/browser-lane/scene"] = h.RequestHttpResponse(read_scene)
+    for suffix in ["interact", "act", "screenshot", "session", "goto"]:
         fixtures["/api/v1/dashboard/browser-lane/" + suffix] = h.RequestHttpResponse(effect)
 
     def interact(process, fd, _slave, output, _base):
@@ -102,11 +115,15 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
                 needle=b"CURRENT PAGE CONTENT", controls=(h.FULL_REDRAW,))
             assert b"URL>" not in h.screen_text(frame), "Escape did not close the URL editor"
+            h.send_and_wait(process, fd, output, b"l", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"s", b"CURRENT SCENE CONTROL")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             # History leaves Tab to the global ring, including when its
             # underlying browser pane could otherwise consume focus traversal.
             h.send_and_wait(process, fd, output, b"\t", b"MASC Overview")
             h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"l", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"s", b"CURRENT SCENE CONTROL")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             h.send_and_wait(process, fd, output, b"\x1b[Z", b"MASC Workspace")
             # Global navigation must release the hidden history's key ownership.

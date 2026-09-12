@@ -9,8 +9,9 @@ commercial game or downloaded ROM.
 The package depends on the generic Lane `act`/`world.actions` and artifact-ingress
 host slice. Those interfaces are required before installation; this package's CI
 alone does not prove a frozen MASC host, Keeper continuity, or Dashboard behavior.
-Actual DOS verification is pending CI until the workflow has passed for the exact
-source commit.
+Package CI and separate isolated host probes have passed for the fixed candidate
+revisions recorded under [qualification scope](#qualification-scope). Those
+results are distinct from later source revisions and production deployment.
 
 ## Install
 
@@ -94,11 +95,49 @@ accepting a success label or merely comparing screenshot hashes. One initial
 observation must return verified data without polling. The outer test timeout is
 a CI control, not a production readiness rule.
 
-The next host-level proof must install this package after fixing the host revision,
-call the generic action through existing Keeper authority, verify the retained
-artifacts through host APIs, and remove it while unrelated activity continues.
-This package proof does not establish strategic gameplay, productivity gains,
-machine checkpoints, fork, DOS compatibility beyond this program, or a new scheduler.
+The qualified DOS package source is
+`e0d4e0c35ae9b550d53a952c3340709f2deac4c6`; its
+[package CI run](https://github.com/jeong-sik/masc/actions/runs/34699775204)
+exercised the actual guest on amd64 and arm64. Two separate local host probes used
+host and Dashboard source `4218e1c05e2029e7b63d8847aa857a18dd6db084`, from
+[native CI](https://github.com/jeong-sik/masc/actions/runs/34699821571) and
+[Dashboard CI](https://github.com/jeong-sik/masc/actions/runs/34699823363).
+The running native binary SHA-256 was
+`9f7f6896946c51dcf0fc3bad3ef847f62dd1cd0ef5560cef5e306d070d939a0c`.
+These CI links identify the tested package and host inputs; the following host
+results came from isolated local executions, with retained raw API responses,
+Dashboard screenshots, guest bytes, hashes and cleanup records.
+
+The first host probe installed DOS and an independent controlled-capture observer
+through TOML, with no Attach request or DOS-specific host/UI change. It read the
+package's exact SKILL.md through the existing catalog/editor, then used the
+common Dashboard to submit one increment request. The receipt progressed from
+queued to confirmed. Independent decoding of host-retained STATE.BIN and every
+VGA pixel established guest counter 0→1. The companion observer progressed through
+sequences 2→3→4 and stayed active after DOS removal. DOS evidence remained readable
+after detach; both owned containers and the server shut down normally. This
+measured companion progress during the workflow, not a Keeper model turn or a
+latency guarantee. See the [host action contract](../../docs/guides/lane-world-actions.md#qualification-boundary).
+
+The second probe connected DOS to the generic
+[output-statistics package](../output-statistics/README.md), using statistics
+source `a534bd96e36106df1a2bfc6a8a352ff342b27e98` and its verified
+[CI image](https://github.com/jeong-sik/masc/actions/runs/34697003041).
+TOML selected the same-run producer's whole `latest_completed` output. The actual
+guest changed 0→1 while the supplied-row gauge remained 1; two additional reads of
+producer sequence 3 did not accumulate counts. After DOS removal, the same
+statistics worker stayed active with unavailable input and no current count row.
+Original DOS and statistics evidence remained hash-correct, and both workers
+were removed normally. This is a gauge of supplied rows, not the guest counter
+or a cumulative event statistic. See [output composition](../../docs/guides/lane-output-composition.md)
+and the [DOS statistics declaration](../../docs/examples/lane-addons/dos-statistics.toml).
+
+Both probes ran the actual DOS guest without a replacement capture fixture;
+only the first probe's companion source was controlled data. They establish
+bounded behavior of those frozen candidate combinations, not every later merged
+head. No Keeper inference, production runtime change, strategic gameplay,
+productivity gain, long-duration continuity, performance SLO, machine checkpoint,
+fork or DOS compatibility beyond this program was established.
 
 Primary API references: [js-dos command interface](https://js-dos.com/command-interface.html),
 [Node implementation](https://github.com/caiiiycuk/emulators/blob/8.xx/src/impl/emulators-impl.ts),

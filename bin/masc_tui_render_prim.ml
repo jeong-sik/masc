@@ -1832,23 +1832,23 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
       if Keeper_control.requires_confirmation action then (Theme.bad ()) else (Masc_tui_theme.tone Masc_tui_theme.Accent)
     in
     if List.mem action available then
-      Printf.sprintf "%s%s%s %s" key_color (Keeper_control.action_key action)
+      Printf.sprintf "%s%s%s:%s" key_color (Keeper_control.action_key action)
         Ansi.reset label
     else
-      Printf.sprintf "%s%s %s%s" Ansi.dim (Keeper_control.action_key action)
+      Printf.sprintf "%s%s:%s%s" Ansi.dim (Keeper_control.action_key action)
         label Ansi.reset
   in
   let toggle =
     match Option.bind reading Keeper_control.primary with
     | Some action -> hint action (Keeper_control.action_label action)
-    | None -> Printf.sprintf "%sp pause%s" Ansi.dim Ansi.reset
+    | None -> Printf.sprintf "%sp:pause%s" Ansi.dim Ansi.reset
   in
   let gate_hint =
     match reading with
     | Some reading
       when List.mem reading.Keeper_control.name state.keeper_yolo_names ->
-        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ " auto"
-    | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ " yolo"
+        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
+    | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
@@ -1863,16 +1863,22 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
         (Terminal_text.single_line pending.Keeper_control.pending_keeper)
         Ansi.reset
   | None, None ->
+      (* [key:label] items, two spaces apart: the shape every other footer
+         uses, so Masc_tui_footer can split the row, drop the lowest priority
+         item when the row is tight, and keep the keys it never drops. Written
+         "key label" and joined with a middle dot, the whole legend was one
+         item nothing could split -- at 60 columns the row cut mid-word and
+         "q quit", last in the list, went first. The two keys the footer pins
+         lead with a plain key so it can read them past the colour. *)
       "  "
-      ^ String.concat
-          (Ansi.dim ^ " \xc2\xb7 " ^ Ansi.reset)
-          [ Ansi.dim ^ "j/k move" ^ Ansi.reset
+      ^ String.concat "  "
+          [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
           ; (match state.connection_status with
-             | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ " start server"
+             | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
              | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
             (* Delete is the only action a keeper whose configuration failed to
@@ -1881,27 +1887,27 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
           ; hint Keeper_control.Delete "delete"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ " settings"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ " new"
+          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
+          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
           ; (if state.view = Keepers Keeper_detail then
                if state.detail_tab = Detail_sandbox then
-                 (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ " container logs"
-               else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ " logs"
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ " logs")
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ " calls"
+                 (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":container logs"
+               else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
+             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
+          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
           ; gate_hint
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent)
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
-            ^ Ansi.reset ^ " runtime"
+            ^ Ansi.reset ^ ":runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ " chat"
-             else Ansi.dim ^ "c chat" ^ Ansi.reset)
-          ; (if offers_back then Ansi.dim ^ "left/esc back" ^ Ansi.reset
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ " detail")
-          ; Ansi.dim ^ "r refresh" ^ Ansi.reset
-          ; Ansi.dim ^ "q quit" ^ Ansi.reset
+          ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
+             else Ansi.dim ^ "c:chat" ^ Ansi.reset)
+          ; (if offers_back then "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
+             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
+          ; Ansi.dim ^ "r:refresh" ^ Ansi.reset
+          ; "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
           ]
 
 

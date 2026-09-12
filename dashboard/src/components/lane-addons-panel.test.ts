@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneAddonSnapshot, parseLaneAddonSlice } from '../api/lane-addons'
 
@@ -21,8 +21,10 @@ const row = {
 }
 const coverage = [{ source_id: 'opaque-input', incarnation: 'run-2', cursor: '7', complete: false, detail: 'Source gap' }]
 const snapshot = {
+  configuration: null,
   instances: [{ instance_id: 'instance-1', run_id: 'run-2', addon_id: 'unregistered-package',
     title: 'User supplied layer', revision: 'digest-1', phase: { kind: 'observing' },
+    configuration: null,
     observation_seq: 1, rows_count: 1 }], rows: [row], coverage,
 }
 afterEach(() => { cleanup(); vi.resetAllMocks() })
@@ -36,7 +38,73 @@ describe('optional Lane Add-on surface', () => {
     expect(screen.getByText(/actor unknown/)).toBeTruthy()
     expect(screen.getByText(/Source gap/)).toBeTruthy()
     expect(screen.getByText(/World time: frame 1234/)).toBeTruthy()
+    expect(screen.getByText('Configuration service has not started.')).toBeTruthy()
+    expect(screen.getByText('Not managed by TOML')).toBeTruthy()
     expect(api.preserveLaneAddonEvidence).not.toHaveBeenCalled()
+  })
+  it('shows installed and pending TOML declarations independently of observation health', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, issues: [],
+        declarations: [
+          { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml',
+            desired_revision: 'configuration-1', applied_revision: 'configuration-1', instance_id: 'instance-1' },
+          { id: 'game', source_path: '/workspace/.masc/config/lane-addons/game.toml',
+            desired_revision: 'configuration-2', applied_revision: null, instance_id: null },
+        ] },
+      instances: [{ ...snapshot.instances[0], phase: { kind: 'failed', message: 'Browser owner is busy' },
+        configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const declarations = within(await screen.findByRole('table', { name: 'TOML declarations' }))
+    expect(screen.getByText('/workspace/.masc/config/lane-addons')).toBeTruthy()
+    expect(screen.getByText('Configuration read: complete')).toBeTruthy()
+    expect(declarations.getByText('Desired revision applied')).toBeTruthy()
+    expect(declarations.getByText('Not yet applied')).toBeTruthy()
+    expect(declarations.getByText('No instance')).toBeTruthy()
+    expect(screen.getByText('failed')).toBeTruthy()
+    expect(screen.getByText('Browser owner is busy')).toBeTruthy()
+    expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
+    expect(api.attachLaneAddon).not.toHaveBeenCalled()
+    expect(api.observeLaneAddon).not.toHaveBeenCalled()
+  })
+  it('keeps the previous instance visible while a changed declaration and parse errors remain unresolved', async () => {
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true,
+        issues: [
+          { source_path: '/workspace/.masc/config/lane-addons/site.toml', id: 'website', message: 'Replacement binding could not be applied' },
+          { source_path: '/workspace/.masc/config/lane-addons/broken.toml', id: null, message: 'Expected a closing quote' },
+        ],
+        declarations: [{ id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml',
+          desired_revision: 'configuration-2', applied_revision: 'configuration-1', instance_id: 'instance-1' }] },
+      instances: [{ ...snapshot.instances[0],
+        configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    const declarations = within(await screen.findByRole('table', { name: 'TOML declarations' }))
+    expect(screen.getByText('Configuration read: complete')).toBeTruthy()
+    expect(declarations.getByText('configuration-2')).toBeTruthy()
+    expect(declarations.getByText('configuration-1')).toBeTruthy()
+    expect(declarations.getByText('Revision change pending')).toBeTruthy()
+    expect(screen.getAllByRole('alert').map(alert => alert.textContent)).toEqual([
+      expect.stringContaining('/workspace/.masc/config/lane-addons/site.toml · website — Replacement binding could not be applied'),
+      expect.stringContaining('/workspace/.masc/config/lane-addons/broken.toml — Expected a closing quote'),
+    ])
+    expect(screen.getByText('observing')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Detach' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
+
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory: '/workspace/.masc/config/lane-addons', complete: true, declarations: [],
+        issues: [{ source_path: '/workspace/.masc/config/lane-addons/site.toml', id: null, message: 'Invalid TOML string' }] },
+      instances: [{ ...snapshot.instances[0],
+        configuration: { id: 'website', source_path: '/workspace/.masc/config/lane-addons/site.toml', revision: 'configuration-1' } }],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+    await screen.findByText('No readable TOML declarations.')
+    expect(screen.getByRole('alert').textContent).toContain('/workspace/.masc/config/lane-addons/site.toml — Invalid TOML string')
+    expect(screen.getByText('observing')).toBeTruthy()
+    expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
+    expect(api.detachLaneAddon).not.toHaveBeenCalled()
   })
   it('allows detaching while observation is in progress without waiting for observe', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))
@@ -104,7 +172,7 @@ describe('optional Lane Add-on surface', () => {
     expect(signal.aborted).toBe(true)
   })
   it('attaches a user package with the supplied binding through the common contract', async () => {
-    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ instances: [], rows: [], coverage: [] }))
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ configuration: null, instances: [], rows: [], coverage: [] }))
     api.attachLaneAddon.mockResolvedValue({ instance_id: 'new-instance' })
     const screen = render(html`<${LaneAddonsPanel} />`)
     await screen.findByText('No attached packages.')
@@ -150,5 +218,7 @@ describe('optional Lane Add-on surface', () => {
   it('rejects unknown control states and malformed common rows instead of inventing defaults', () => {
     expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], phase: { kind: 'mystery' } }] })).toThrow()
     expect(() => parseLaneAddonSnapshot({ ...snapshot, rows: [{ ...row, observed_at: 'yesterday' }] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ instances: [], rows: [], coverage: [] })).toThrow()
+    expect(() => parseLaneAddonSnapshot({ ...snapshot, instances: [{ ...snapshot.instances[0], configuration: undefined }] })).toThrow()
   })
 })

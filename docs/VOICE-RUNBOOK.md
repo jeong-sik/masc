@@ -452,10 +452,18 @@ What stands in for that, and what it is worth:
 | step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
 | the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
 | the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
+| the wizard drawn and walked in a real terminal | `dune build @test/runtest-test_tui_keyboard_input-voice-wizard` | that a live server answers the save |
 
-So: the rules, the session and the call sites are measured. **Whether the box
-draws where you expect it to is not.** Read the first live run as the check
-that is still outstanding.
+The last row is the one that found something. Everything above it was green
+while typing an endpoint name containing `i` put the `i` into a keeper message
+and sent the rest of the word after it: the composer sees every key before the
+field does, and the list of places it must not do that named six fields by hand
+and did not name this one. `whisper` reached the screen as `wh`.
+
+What is still not measured is the save against a running server. The scenario
+answers the two reads from fixtures and leaves on Esc, so nothing is written;
+the save path is covered by `save_request` → `apply` → loader instead, which is
+the shape, not the round trip.
 
 ## Incident: voice was down for six days and said nothing
 

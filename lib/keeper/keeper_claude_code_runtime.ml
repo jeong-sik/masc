@@ -596,6 +596,7 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
     let terminal_error = ref None in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~content_transport:Runtime_official_client_tool.Mcp
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -688,6 +689,7 @@ let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
     in
     let* host_dynamic_tools =
       Host.dynamic_tools
+        ~content_transport:Runtime_official_client_tool.Mcp
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)

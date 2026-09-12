@@ -82,7 +82,7 @@ jobs:
         run: |
           # ripgrep 은 evidence 번들의 Grep 도구 시나리오가 요구한다.
           # Linux 는 별도 스텝에서 apt 로 넣는다.
-          brew install flock gmp libpq openssl@3 zstd ripgrep
+          brew install flock gmp libpq openssl@3 zstd ripgrep poppler
 
           libpq_prefix="$(brew --prefix libpq)"
           openssl_prefix="$(brew --prefix openssl@3)"
@@ -118,7 +118,7 @@ jobs:
       # 러너 이미지에 rg 가 없으면 "rg executable not found" 로 번들이 깨진다.
       - name: Install ripgrep
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y -qq ripgrep
+        run: sudo apt-get install -y -qq ripgrep poppler-utils
 
       - name: Install dependencies
         if: runner.os == 'macOS'

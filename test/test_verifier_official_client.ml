@@ -32,7 +32,7 @@ def read():
     record(value)
     return value
 record({'kind':'launch','argv':sys.argv,'cwd':os.getcwd()})
-if mode in ('failed-candidate', 'api-lane-exhausted', 'api-lane-explicit-default'):
+if mode == 'failed-candidate':
     sys.exit(17)
 request = read()
 emit({'type':'control_response','response':{'subtype':'success','request_id':request['request_id'],'response':{}}})
@@ -48,6 +48,8 @@ emit({'type':'control_request','request_id':'mcp-ready','request':{
         'jsonrpc':'2.0','method':'notifications/initialized','params':{}}}})
 read()
 mcp(1, 'tools/call', {'name':'tool_read_file','arguments':{'file_path':'proof.txt'}})
+if mode == 'image-read':
+    mcp(4, 'tools/call', {'name':'tool_read_file','arguments':{'file_path':'proof.png'}})
 if mode != 'missing':
     mcp(2, 'tools/call', {'name':'report_review_verdict','arguments':{'verdict':'APPROVE','reason':'read-only fixture receipt'}})
 if mode == 'duplicate':
@@ -62,18 +64,19 @@ for line in sys.stdin:
   Unix.chmod path 0o700;
   path, capture
 
-let runtime_config ?(protocol = "claude-code") ?(tools_support = true)
+let runtime_config ?endpoint ?(protocol = "claude-code") ?(tools_support = true)
     ?(default = "official.verifier")
     ?(slots = [])
     ?(cli_slots = ["official.verifier"]) command = Printf.sprintf {|
 [providers.official]
 protocol = %S
-command = %S
+%s
 is-non-interactive = true
 [models.verifier]
 api-name = "verifier-fixture"
 max-context = 400000
 tools-support = %b
+streaming = false
 [models.verifier.capabilities]
 supports-image-input = true
 [official.verifier]
@@ -82,13 +85,38 @@ default = %S
 [runtime.exact_output_lanes.verifier_exact]
 slots = [%s]
 cli_slots = [%s]
-|} protocol command tools_support default
+|} protocol
+  (match endpoint with
+   | None -> Printf.sprintf "command = %S" command
+   | Some endpoint -> Printf.sprintf "endpoint = %S" endpoint)
+  tools_support default
   (String.concat ", " (List.map (Printf.sprintf "%S") slots))
   (String.concat ", " (List.map (Printf.sprintf "%S") cli_slots))
 
 let records path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
 let member = Yojson.Safe.Util.member
+
+(* A closed CLI stdout supplies no effect observation, so that failure must
+   stop the lane. These API-lane cases instead observe a real HTTP refusal
+   before any tool call, which is the safe boundary for walking the next
+   declared candidate. Every request remains on loopback. *)
+let refusing_http_server ~sw ~net =
+  let requests = ref [] in
+  let callback _connection request body =
+    let body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    requests := (Uri.path (Cohttp.Request.uri request), Yojson.Safe.from_string body) :: !requests;
+    Cohttp_eio.Server.respond_string ~status:`Too_many_requests
+      ~body:{|{"error":{"message":"fixture refusal before tool dispatch","type":"rate_limit_error"}}|} ()
+  in
+  let socket = Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | `Unix _ -> fail "expected a loopback TCP listener" in
+  let server = Cohttp_eio.Server.make ~callback () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:raise);
+  Printf.sprintf "http://127.0.0.1:%d" port, requests
 
 let test_lane_authority_views () =
   let lane = Runtime_lane.make ~id:"judge" ["a";"b"]
@@ -107,25 +135,41 @@ let test_lane_authority_views () =
 
 let test_review mode =
   let api_lane = List.mem mode
-    ["api-lane"; "api-lane-exhausted"; "api-lane-explicit-default"; "api-lane-tools-disabled"] in
+    ["api-lane"; "api-lane-exhausted"; "api-lane-explicit-default"; "api-lane-tools-disabled";
+     "api-lane-uncertain-cli"] in
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
   let saved = Runtime.For_testing.snapshot () in
+  let saved_catalog = Llm_provider.Model_catalog.global () in
   let root = Filename.temp_file "verifier-official-" "" in
   Unix.unlink root; Unix.mkdir root 0o700;
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore saved;
+    (match saved_catalog with
+     | None -> Llm_provider.Model_catalog.clear_global ()
+     | Some catalog -> Llm_provider.Model_catalog.set_global catalog);
     Fs_compat.remove_tree root);
   let config = Workspace.default_config root in
+  let http = if api_lane then Some (refusing_http_server ~sw ~net:env#net) else None in
+  if api_lane then (
+    let catalog_path = Filename.concat root "provider-models.toml" in
+    write catalog_path
+      (String.concat "\n" (List.map (fun provider -> Printf.sprintf
+        "[[models]]\nid_prefix=\"verifier-fixture\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=400000\nmax_output_tokens=1024\nsupports_tools=%b\nsupports_image_input=true\nsupports_native_streaming=false\n"
+        provider (mode <> "api-lane-tools-disabled")) ["first"; "official"]));
+    match Llm_provider.Model_catalog.load_file catalog_path with
+    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog
+    | Error detail -> fail detail);
   let proof_root = Filename.concat root Playground_paths.all_playgrounds_prefix in
   Fs_compat.mkdir_p proof_root;
   let proof = if mode = "large-read" then
       "verified-file-receipt\n" ^ String.make 18000 'x' ^ "\nlast-readable-proof-byte"
     else "verified-file-receipt" in
   write (Filename.concat proof_root "proof.txt") proof;
+  write (Filename.concat proof_root "proof.png") (Base64.decode_exn png);
   let lookup_tools = match VAT.create_goal_proof ~config with
     | Ok tools -> tools | Error detail -> fail detail in
   let lookup = AR.Lookup_tools
@@ -182,12 +226,28 @@ command = %S
 is-non-interactive = true
 [unconfined.verifier]
 |} command
-    | "exact-order" | "api-lane" | "api-lane-exhausted"
-    | "api-lane-explicit-default" | "api-lane-tools-disabled" ->
+    | "api-lane" | "api-lane-exhausted"
+    | "api-lane-explicit-default" | "api-lane-tools-disabled" | "api-lane-uncertain-cli" ->
+      let url, _ = Option.get http in
+      let second_refuses = List.mem mode ["api-lane-exhausted"; "api-lane-explicit-default"] in
       runtime_config ~default:outside_id
         ~tools_support:(mode <> "api-lane-tools-disabled")
-        ~slots:(if api_lane then ["judge.lane"] else [])
-        ~cli_slots:(if api_lane then [] else ["first.verifier";"official.verifier"]) command
+        ~slots:["judge.lane"] ~cli_slots:[]
+        ?endpoint:(if second_refuses then Some (url ^ "/second") else None)
+        ~protocol:(if second_refuses then "openai-compatible-http" else "claude-code") command
+      ^ outside_runtime ^ Printf.sprintf {|
+[providers.first]
+%s
+[first.verifier]
+[runtime.lanes."judge.lane"]
+candidates = ["first.verifier", "official.verifier"%s]
+|} (if mode = "api-lane-uncertain-cli" then
+      Printf.sprintf "protocol = \"claude-code\"\ncommand = %S\nis-non-interactive = true" first_command
+    else Printf.sprintf "protocol = \"openai-compatible-http\"\nendpoint = %S" (url ^ "/first"))
+        (if mode = "api-lane-explicit-default" then ", \"outside.verifier\"" else "")
+    | "exact-order" ->
+      runtime_config ~default:outside_id
+        ~cli_slots:["first.verifier";"official.verifier"] command
       ^ outside_runtime ^ Printf.sprintf {|
 [providers.first]
 protocol = "claude-code"
@@ -195,10 +255,6 @@ command = %S
 is-non-interactive = true
 [first.verifier]
 |} first_command
-      ^ (if api_lane then Printf.sprintf {|
-[runtime.lanes."judge.lane"]
-candidates = ["first.verifier", "official.verifier"%s]
-|} (if mode = "api-lane-explicit-default" then ", \"outside.verifier\"" else "") else "")
     | "api-tools-disabled" ->
       runtime_config ~tools_support:false ~slots:["api.verifier"] ~cli_slots:[] command ^ {|
 [providers.api]
@@ -314,22 +370,45 @@ model_id = "verifier-fixture"
     List.iter (fun launch ->
       let cwd = member "cwd" launch |> Yojson.Safe.Util.to_string in
       check bool "failed candidate session root is removed" false (Sys.file_exists cwd)) rows in
+  let check_http_refusals expected =
+    let _, requests = Option.get http in
+    let requests = List.rev !requests in
+    (* Provider transport retry may repeat a request; each candidate's first
+       appearance still proves the declared order across actual HTTP calls. *)
+    let order = List.fold_left (fun seen (path, _) ->
+      let candidate = match String.split_on_char '/' path with
+        | "" :: candidate :: _ -> candidate | _ -> fail "unexpected fixture path" in
+      if List.mem candidate seen then seen else seen @ [candidate]) [] requests in
+    check (list string) "real pre-effect HTTP attempts follow declared order" expected order;
+    List.iter (fun (_, body) ->
+      let tools = member "tools" body |> Yojson.Safe.Util.to_list in
+      check bool "failed API candidate was offered the verdict tool" true
+        (List.exists (fun tool -> member "function" tool |> member "name"
+           = `String "report_review_verdict") tools)) requests
+  in
   if unavailable then (
     check bool "unavailable verifier is reported before dispatch" true
       (result.gate = AR.Evaluator_unavailable && result.verdict = None);
     check bool "unavailable verifier never spawns an official client" false (Sys.file_exists capture);
     check bool "capable ordinary default cannot make the exact lane available" false
       (Sys.file_exists outside_capture))
+  else if mode = "api-lane-uncertain-cli" then (
+    check bool "unobserved official-client exit remains effect fenced" true
+      (result.gate = AR.Evaluator_unavailable && result.verdict = None);
+    check_failed_launch first_capture;
+    check bool "effect fence prevents next declared client and default" false
+      (Sys.file_exists capture || Sys.file_exists outside_capture))
   else if mode = "api-lane-exhausted" then (
     check bool "exhausted declared candidates produce no verdict" true
       (result.gate = AR.Evaluator_unavailable && result.verdict = None);
-    check_failed_launch first_capture;
-    check_failed_launch capture;
+    check_http_refusals ["first"; "second"];
+    check bool "HTTP failures do not launch placeholder CLI fixtures" false
+      (Sys.file_exists first_capture || Sys.file_exists capture);
     check bool "all declared candidates failing never dispatches implicit default" false
       (Sys.file_exists outside_capture))
   else (
   (match mode, result.AR.verdict, result.gate with
-   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first" | "large-read" | "api-lane" | "api-lane-explicit-default"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
+   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first" | "large-read" | "image-read" | "api-lane" | "api-lane-explicit-default"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
    | "duplicate", None, AR.Evaluator_unavailable -> ()
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
@@ -341,8 +420,13 @@ model_id = "verifier-fixture"
     result.evaluator_runtime;
   check bool "default dispatch requires explicit declaration" explicit_default
     (Sys.file_exists outside_capture);
-  if mode = "exact-order" || api_lane then check_failed_launch first_capture;
-  if explicit_default then check_failed_launch capture;
+  if mode = "exact-order" then check_failed_launch first_capture;
+  if api_lane then (
+    check_http_refusals (if explicit_default then ["first"; "second"] else ["first"]);
+    check bool "API lane never launches a failed CLI placeholder" false
+      (Sys.file_exists first_capture));
+  if explicit_default then
+    check bool "second refusal came from HTTP, not a failed CLI" false (Sys.file_exists capture);
   let launch = List.hd (launches rows) in
   let argv = member "argv" launch |> Yojson.Safe.Util.to_list
     |> List.map Yojson.Safe.Util.to_string in
@@ -372,6 +456,14 @@ model_id = "verifier-fixture"
     check bool "large read does not become an inaccessible session-local marker" false
       (List.exists (fun row -> String_util.contains_substring
          (Yojson.Safe.to_string row) Tool_output.marker_prefix) rows));
+  if mode = "image-read" then (
+    let response = List.find (fun row ->
+      member "type" row = `String "control_response"
+      && member "request_id" (member "response" row) = `String "mcp-4") rows in
+    check bool "actual image lookup carries the exact PNG on the client wire" true
+      (String_util.contains_substring (Yojson.Safe.to_string response) png);
+    check string "image lookup does not change the producer file" (Base64.decode_exn png)
+      (In_channel.with_open_bin (Filename.concat proof_root "proof.png") In_channel.input_all));
   List.iter (fun launch ->
     let cwd = member "cwd" launch |> Yojson.Safe.Util.to_string in
     check bool "review never uses producer workspace as cwd" false (cwd = root);
@@ -379,7 +471,7 @@ model_id = "verifier-fixture"
     (launches rows);
   check string "producer runtime configuration is unchanged" runtime_text
     (In_channel.with_open_bin config_path In_channel.input_all);
-  check int "each tool result observed" (if mode = "missing" then 1 else if mode = "duplicate" then 3 else 2)
+  check int "each tool result observed" (if mode = "missing" then 1 else if mode = "duplicate" || mode = "image-read" then 3 else 2)
     (List.length !calls);
   if mode = "valid" then (
     (* A second independent review of the same workspace/runtime must start a
@@ -404,6 +496,6 @@ let () =
     ["lane authority", [test_case "declared and effective views" `Quick test_lane_authority_views];
      "actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
-       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"; "large-read";
+       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"; "large-read"; "image-read";
        "api-lane"; "api-tools-disabled"; "api-lane-exhausted";
-       "api-lane-explicit-default"; "api-lane-tools-disabled"]]
+       "api-lane-explicit-default"; "api-lane-tools-disabled"; "api-lane-uncertain-cli"]]

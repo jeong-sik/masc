@@ -1248,6 +1248,7 @@ let run_named
      signature and its mutable state out of the delegation. *)
   let project_images =
     let project = Keeper_vision_ingest.fallback_projector
+      ~base_path
       ~exclude_runtime_ids:lane_candidate_ids
       ~keeper_name
       () in

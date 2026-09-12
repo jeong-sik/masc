@@ -528,6 +528,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
   }
 
@@ -579,6 +580,13 @@ let dynamic_tool_fingerprint ~tool_name ~input result =
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = feed_string context result.content in
+  let context = match result.content_blocks with
+    | None -> feed_string context "text-only"
+    | Some blocks ->
+      feed_string context
+        (`List (List.map Llm_provider.Api_common.content_block_to_json blocks)
+         |> Yojson.Safe.to_string)
+  in
   get context |> to_hex
 ;;
 
@@ -793,7 +801,7 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
+let dynamic_tool_of_agent_core ~content_transport ~tool_approval ~runtime_label ~keeper_name
     ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
@@ -873,7 +881,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
             pre_tool_rejects
             := { call_id; tool_name = tool.schema.name; input; detail }
                :: !pre_tool_rejects;
-            { success = false; content = detail; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None }
           | Agent_core.Agent_tool_pre_execution_gate.Reject { stage; detail } ->
             (* A hook that failed, or a decision illegal at this stage. Both
                are turn-level faults rather than something the model can
@@ -886,7 +894,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                 detail
             in
             record_terminal_error terminal_error detail;
-            { success = false; content = detail; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None }
           | Agent_core.Agent_tool_pre_execution_gate.Admit ->
             (match
                Agent_core.Agent_tools.find_and_execute_tool
@@ -913,6 +921,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                { success =
                    not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
+               ; content_blocks = result.content_blocks
                ; abort_turn = None
                }
              | Error error ->
@@ -924,13 +933,24 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                   { success = true
                   ; content =
                       Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
-                  ; abort_turn = None
+                  ; content_blocks = None; abort_turn = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed _ ->
-                  { success = false; content = detail; abort_turn = None }))
+                  { success = false; content = detail; content_blocks = None; abort_turn = None }))
         in
         match execute () with
         | result ->
+          let result, delivery_error =
+            match Runtime_official_client_tool.project_content content_transport
+              ~content:result.content ~content_blocks:result.content_blocks with
+            | Ok _ -> result, None
+            | Error detail ->
+              (* Execution may already have committed. Delivery failure must
+                 reach settlement and the terminal outcome while retaining the
+                 producer's receipt; never present missing media as success. *)
+              { result with success = false; content_blocks = None
+              ; content = detail ^ "\n" ^ result.content }, Some detail
+          in
           let result = settle result in
           let terminal_boundary =
             match terminal_effect_state () with
@@ -995,6 +1015,20 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                    ; _
                    } ->
                  assert false))
+          in
+          let terminal_boundary =
+            match delivery_error, terminal_boundary with
+            | Some diagnostic,
+              Some (Terminal_tool_boundary {tool_name; outcome = Terminal_completed}) ->
+              Some (Terminal_tool_boundary
+                { tool_name
+                ; outcome = Terminal_failed
+                    { failure_class = Tool_result.Runtime_failure
+                    ; effect_disposition = Tool_result.Proven_post_effect
+                    ; diagnostic
+                    }
+                })
+            | None, _ | Some _, _ -> terminal_boundary
           in
           let result =
             match terminal_boundary with
@@ -1070,13 +1104,13 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
               (settle
                  { success = false
                  ; content = "dynamic tool call exited without an authoritative result"
-                 ; abort_turn = None
+                 ; content_blocks = None; abort_turn = None
                  }));
           Printexc.raise_with_backtrace exn backtrace)
   }
 ;;
 
-let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
+let dynamic_tools ~content_transport ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
     ?on_tool_boundary
@@ -1094,6 +1128,7 @@ let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ~content_transport
             ~tool_approval
             ~runtime_label
             ~keeper_name

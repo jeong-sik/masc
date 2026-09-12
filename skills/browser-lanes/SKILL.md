@@ -23,10 +23,21 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 - `viewport`와 `truncated`는 당시 관측의 범위다. 선택한 요소의 `text`를 영역 전체나
   화면 밖의 기록으로 확대하지 않는다. 복사된 좌표만으로 현재 화면에 클릭·드래그하지 않는다.
 
-이 관측은 현재도 유효하다는 보증이나 새 작업 권한이 아니다. URL·문서·요소 검사가
-거절되면 같은 탭을 다시 관측해 참조를 갱신한다. scope가 만료되면 그 scope를 반복하지 말고
-같은 연결·탭에서 scope 없이 `regions`를 읽어 현재 영역을 다시 고른다. URL이 달라졌다면
-현재 URL과 내용이 요청한 대상인지 확인한 뒤 새 expectedUrl을 사용한다.
+이 관측은 현재도 유효하다는 보증이나 새 작업 권한이 아니다. 정상적인 후속 읽기는
+expectedUrl과 scope를 유지한다. 검사가 거절됐을 때만 같은 lane·clientId·tabId에 고정한
+읽기 전용 재관측으로 현재 상태를 확인한다.
+
+- URL 불일치이면 거절된 `expectedUrl`을 생략하고 BrowserRead로 실제 URL과 내용을 읽는다.
+  문서·영역 참조도 만료됐다면 그 `scope`까지 생략해 `mode=regions`로 읽는다.
+- 문서·영역 참조 만료이면 거절된 `scope` 없이 `mode=regions`로 영역 목록을 다시 읽는다.
+  URL 검사가 유효하면 expectedUrl은 유지하고, URL도 불일치하면 위의 URL 복구를 따른다.
+- follow_link 응답의 `navigationSource`가 있다면 이 재관측에도 그대로 전달한다.
+  원래 URL의 이전 문서를 새 목적지로 받아들이기 위해 이 검사를 없애지 않는다.
+
+재관측한 URL·제목·본문과 사이트별 대상 정보가 요청과 맞는지 확인한 뒤에만 새 expectedUrl과
+관측된 영역 scope를 사용한다. 아직 전환 중이거나 다른 대상이면 미확인으로 남긴다.
+이 예외는 읽기 전용 복구에만 적용한다. 클릭·이동·입력의 검사를 생략하거나,
+이미 실행한 조작을 재관측 실패 때문에 반복하지 않는다.
 탭이 사라졌거나 다른 탭이 요청되면 같은 연결의 탭 목록을 확인하고, 연결이 사라졌거나
 다른 연결이 요청됐다면 연결 선택으로 돌아간다.
 

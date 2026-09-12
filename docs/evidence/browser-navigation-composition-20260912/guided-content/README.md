@@ -9,7 +9,7 @@ distinction introduced in the preceding experiment.
 The typed execution-ID audit finds **6 outer calls, 0 failed calls and 3 successful
 content compositions**: load browser-lanes, load the site instruction, read the
 observed navigation region, then navigate/read Alpha, Beta and Gamma. Complete
-outer result strings total 35,416 UTF-8 bytes, including the newly loaded base
+outer result strings total 35,417 UTF-8 bytes, including the newly loaded base
 Skill; this is not provider wire input size. Observed completion was 35.537 seconds.
 One run is not proof of deterministic skill selection or causal latency improvement.
 
@@ -32,3 +32,13 @@ IDs are retained for joining. Larger previews are truncated in the receipt store
 full results come from exact tool_use_id-matched native trace events. The actual
 Firefox screenshot and xterm replays of captured TUI bytes retain their separate
 provenance. User binaries and live services were not changed.
+
+Byte audit correction: every outer output, including untruncated previews, is
+joined to its raw `tool_execution_finished` event by exact `tool_use_id`.
+Durable previews can normalize trailing newlines. `raw_result_bytes` records
+the UTF-8 raw string length; `declared_result_bytes` preserves the producer
+receipt value or null when absent. Comparisons and any mismatches are retained
+in the audit. The first two runs each have a failed result whose raw string is
+257 bytes while its producer receipt declares 55 bytes; the raw failure includes
+a bridge-added failure-class explanation. This is not provider wire input size.
+Original durable receipts are unchanged.

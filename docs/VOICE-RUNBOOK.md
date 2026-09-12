@@ -468,10 +468,9 @@ voice-verify` is still how an operator checks an endpoint.
 Both are admin-gated, for the reason `/voice/transcribe` is: a TTS probe
 spends a credit on a metered provider.
 
-Both are registered on the HTTP/1.1 router only, so a client that selects
-h2c gets 404. That holds for every `/api/v1/voice` route except
-`/voice/config`, and #35592 tracks it. `curl` speaks HTTP/1.1 unless told
-otherwise, so the commands below reach them.
+Both answer over HTTP/1.1 and over h2c. The rest of `/api/v1/voice` is
+HTTP/1.1 only -- `/voice/transcribe` and `/voice/audio/<token>` return 404
+to an h2c client, which #35592 tracks.
 
 ```sh
 TOKEN=$(cat "${MASC_BASE_PATH:?}/.masc/auth/admin.token")

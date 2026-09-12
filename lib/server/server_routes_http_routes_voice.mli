@@ -8,6 +8,10 @@ val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 
     - [GET /api/v1/voice/audio/:token] for capability-token TTS clip fetches.
     - [POST /api/v1/voice/transcribe] for admin-gated browser STT uploads.
+    - [POST /api/v1/voice/probe/tts] and [POST /api/v1/voice/probe/stt] for
+      admin-gated endpoint probes. {!Server_h2_gateway} answers those two
+      paths as well, and both tables read the request and shape the report
+      through {!Server_voice_probe}.
 
     Plugged into the router assembly in {!Server_routes_http} alongside the
     artifacts route. *)

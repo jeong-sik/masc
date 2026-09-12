@@ -238,8 +238,9 @@ let test_every_frame_is_one_cell () =
 (* The overlay draws the same mark as the table, so one running turn does not
    wear two different marks depending on which key the reader pressed. *)
 let test_the_overlay_wears_the_same_mark () =
+  List.iter (fun frame ->
   let lines =
-    Masc_tui_answering.overlay ~frame:2 ~now:100. ~chat_target:None ~error:None
+    Masc_tui_answering.overlay ~frame ~now:100. ~chat_target:None ~error:None
       ~finishes:[]
       [ running ~lane:Tui_decode.Turn_lane_chat_operation ~started:40. "echo" ]
   in
@@ -247,10 +248,11 @@ let test_the_overlay_wears_the_same_mark () =
     List.find (fun (line : Masc_tui_answering.line) -> line.tone = Masc_tui_answering.Running) lines
   in
   Alcotest.(check bool)
-    "the overlay row starts with frame 2's mark" true
+    (Printf.sprintf "overlay uses the shared mark for frame %d" frame) true
     (String.starts_with
-       ~prefix:(Masc_tui_answering.running_glyph ~frame:2)
-       running_line.text)
+       ~prefix:(Masc_tui_answering.running_glyph ~frame)
+       running_line.text))
+    [-1; 0; 1; 2; 3]
 ;;
 
 (* The span a surface hands over already measured. A Gate row drew

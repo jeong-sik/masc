@@ -1895,6 +1895,10 @@ let test_page_navigation_uses_the_reserved_scrollback_budget () =
   check int "PgUp and PgDn share the support-reserved row budget" 1 calls
 ;;
 
+(* The chat surface is its own file. Naming it once keeps the guards below
+   and the messages they print from drifting apart. *)
+let chat_path = "bin/masc_tui_render_chat.ml"
+
 let layout_binding = "keeper_message_layout_entries"
 
 (* Drawing and scroll-pin compensation must consume the same physical layout.
@@ -1912,9 +1916,16 @@ let test_the_pane_builds_one_full_message_layout () =
 ;;
 
 let test_pending_input_is_not_mixed_into_the_transcript () =
+  (* A count of zero is the answer this wants, and it is also what a binding
+     that is not in the file returns. Say the binding is there first, or the
+     zero below means nothing. *)
+  if
+    Ast_grep.count_value_bindings ~module_path:chat_path ~name:layout_binding
+    <> 1
+  then failf "%s is not in %s" layout_binding chat_path;
   let transcript_reads =
     Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui_render.ml"
+      ~module_path:chat_path
       ~binding_name:layout_binding
       ~callee:"Masc_tui_keeper_chat_queue.holds"
   in
@@ -2230,7 +2241,7 @@ let test_cancel_and_edit_take_the_row_with_them () =
    bottom. Nothing failed — the rows were drawn, just into the wrong pane. *)
 let test_the_pane_draws_every_row_into_its_own_buffer () =
   let source =
-    let path = Ast_grep.resolve_module_path "bin/masc_tui_render.ml" in
+    let path = Ast_grep.resolve_module_path chat_path in
     let channel = open_in_bin path in
     let length = in_channel_length channel in
     let text = really_input_string channel length in
@@ -2239,13 +2250,17 @@ let test_the_pane_draws_every_row_into_its_own_buffer () =
   in
   let lines = String.split_on_char '\n' source in
   let in_renderer = ref false in
+  let renderer_seen = ref false in
   let offenders = ref [] in
   List.iteri
     (fun index line ->
        if
          String.length line > 26
          && String.sub line 0 26 = "let render_keeper_message "
-       then in_renderer := true
+       then begin
+         in_renderer := true;
+         renderer_seen := true
+       end
        else if
          String.length line > 4
          && String.sub line 0 4 = "let "
@@ -2268,6 +2283,12 @@ let test_the_pane_draws_every_row_into_its_own_buffer () =
               search 0)
            [ "box_top"; "box_line"; "box_line_styled"; "box_divider"; "box_empty" ])
     lines;
+  (* The scan walks text, so a renderer that is not in this file leaves the
+     flag false and the list empty -- which reads exactly like a clean pass.
+     Say the binding was found, or the guard is answering about nothing. *)
+  if not !renderer_seen then
+    failf "render_keeper_message is not in %s; this guard read the wrong file"
+      chat_path;
   match !offenders with
   | [] -> ()
   | rows ->

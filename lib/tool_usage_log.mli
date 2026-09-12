@@ -32,6 +32,13 @@ val log_call :
     entry to the JSONL store. Primarily used by the dispatch observer; exposed
     for testing. [on_io_failure] receives the append exception (if any). *)
 
+val source_metadata_json : masc_root:string -> Yojson.Safe.t
+(** [source_metadata_json ~masc_root] reports the durable store's location,
+    entry count, freshness and coverage gaps as one standalone object.
+    Callers that nest it under a key of their own need this;
+    {!attach_source_metadata} merges the same fields into an existing
+    object instead. *)
+
 val attach_source_metadata : masc_root:string -> Yojson.Safe.t -> Yojson.Safe.t
 (** [attach_source_metadata ~masc_root json] overlays {!source_metadata_json}
     fields onto an existing tool usage summary object. *)

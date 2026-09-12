@@ -5445,7 +5445,7 @@ let row_list (state : state) : row_list option =
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
              Some
-               { rl_count = List.length rows
+               { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
                ; rl_place =
                    (fun index ->
@@ -11606,9 +11606,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
+          (* [rows] stays a list for the memo scan and the width fold just
+             below, both of which read it once front to back. The pane keeps
+             the array. *)
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok rows);
+              (Ok (Array.of_list rows));
           (* The jump that asked for this file may have named a line; the
              reset and the jump live together so neither overwrites the
              other. Consumed once -- the next plain open starts at the top. *)
@@ -11690,7 +11693,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                when String.equal open_path location.ll_path ->
                  let cursor =
                    max 0
-                     (min (location.ll_line - 1) (List.length rows - 1))
+                     (min (location.ll_line - 1) (Array.length rows - 1))
                  in
                  state.code_file_cursor <- cursor;
                  (* Follow the jump: a definition past the fold is a cursor
@@ -19075,7 +19078,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19447,7 +19450,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19836,7 +19839,7 @@ and is loaded on demand through keeper_skill.
                                 (min
                                    (Masc.Tui_decode.file_change_target_line change
                                     - 1)
-                                   (List.length rows - 1))
+                                   (Array.length rows - 1))
                             in
                             state.code_file_cursor <- cursor;
                             state.code_file_scroll <-

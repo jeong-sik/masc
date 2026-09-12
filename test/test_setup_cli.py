@@ -73,6 +73,25 @@ class Setup(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in config.iterdir()),
                              ['default-base-path', 'default-base-path.partial'])
 
+    def test_failed_record_publication_cleans_only_its_own_temporary_file(self):
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-default-publish-') as tmp:
+            root = Path(tmp)
+            config = root / 'config/masc'
+            record = config / 'default-base-path'
+            record.mkdir(parents=True)
+            sentinel = record / 'operator-file'
+            sentinel.write_text('preserve me\n')
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp,
+                   'XDG_CONFIG_HOME': str(root / 'config')}
+            initialized = subprocess.run(
+                [BINARY, 'init', '--base-path', str(root / 'workspace'), '--record-default'],
+                env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            self.assertIn('default workspace not recorded: could not write', initialized.stdout)
+            self.assertEqual(sentinel.read_text(), 'preserve me\n')
+            self.assertEqual([path.name for path in config.iterdir()], ['default-base-path'])
+
     def test_old_state_is_reported_before_any_setup_changes(self):
         old_goal = {'id':'old-goal','title':'Old goal','phase':'executing','priority':3,
                     'created_at':'2020-01-01T00:00:00Z','updated_at':'2020-01-01T00:00:00Z'}

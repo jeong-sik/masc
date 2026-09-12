@@ -437,6 +437,26 @@ checks whether something answers on it. Starting a local server is still
 `scripts/whisper-server.sh start` in the `me` repo, or whatever that server's own
 command is.
 
+### How much of this was measured
+
+The CLI numbers above came from real runs against the real endpoints. The
+screen did not: nobody has opened this wizard in a terminal yet, because doing
+so needs a server booted from this branch and a stray `--base-path` boot has
+rewritten the recorded default workspace before (#35101).
+
+What stands in for that, and what it is worth:
+
+| Claim | Held by | What it cannot tell you |
+|---|---|---|
+| the questions, their order, and when a draft is enough | `test/voice_wizard` | nothing about the terminal |
+| step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
+| the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
+| the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
+
+So: the rules, the session and the call sites are measured. **Whether the box
+draws where you expect it to is not.** Read the first live run as the check
+that is still outstanding.
+
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.

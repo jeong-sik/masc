@@ -17,10 +17,16 @@ let stop_reason_label : Types.stop_reason -> string = function
   | Unknown s -> "unknown:" ^ s
 ;;
 
+(* The host's AfterTurn hook owns the INFO record of a completed provider
+   turn. The "turn completed" lines below are the agent loop's per-turn timing
+   at DEBUG: one line per provider turn or tool round, carrying the same
+   zero-based [turn_index] the hook, the event bus and the tracing span carry
+   for that turn (the identity resolved by [Pipeline.resolve_turn_frontier]).
+   A one-turn run therefore emits no INFO turn record from this module. *)
 let log_turn ~run_start ~turn_start ~turn_index ~model ~stop =
   let now = Unix.gettimeofday () in
   let model_field = if String.length model = 0 then "-" else model in
-  Log.info
+  Log.debug
     _log
     "turn completed"
     [ Log.I ("turn", turn_index)
@@ -38,7 +44,7 @@ let log_turn ~run_start ~turn_start ~turn_index ~model ~stop =
 let log_tool_round ~run_start ~turn_start ~turn_index ~model ~rounds ~ceiling =
   let now = Unix.gettimeofday () in
   let model_field = if String.length model = 0 then "-" else model in
-  Log.info
+  Log.debug
     _log
     "turn completed"
     [ Log.I ("turn", turn_index)

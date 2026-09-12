@@ -78,6 +78,7 @@ let run_turn_core_detailed
       ~api_strategy
       ?raw_trace_run
       ?before_tool_execution
+      ~frontier
       agent
   =
   let provider_failure = ref None in
@@ -86,7 +87,7 @@ let run_turn_core_detailed
     { kind = Agent_run
     ; name = "agent_turn"
     ; agent_name = agent.state.config.name
-    ; turn = agent.state.turn_count
+    ; turn = Pipeline.turn_frontier_ordinal frontier
     ; extra = []
     ; links =
         (match agent.options.trace_link with
@@ -107,6 +108,7 @@ let run_turn_core_detailed
            ?raw_trace_run
            ?before_tool_execution
            ~on_provider_failure:(fun attribution -> provider_failure := attribution)
+           ~frontier
            agent
        with
        | Ok (Pipeline.Complete response) -> Ok (`Complete response)
@@ -165,62 +167,66 @@ let run_loop_turns_detailed
   let rec loop lease =
     let lease = acquire_provider_lease ~yield_enabled ~on_resume lease in
     let release = plan_provider_lease_release ~yield_enabled ~on_yield lease in
-    let turn_index = agent.state.turn_count + 1 in
-    let turn_start = Unix.gettimeofday () in
-    let result =
-      run_turn_core_detailed
-        ~sw
-        ?clock
-        ~api_strategy
-        ?raw_trace_run
-        ?before_tool_execution:release.before_tool_execution
-        agent
-    in
-    match result with
-    | Error e ->
-      log_turn
-        ~run_start
-        ~turn_start
-        ~turn_index
-        ~model:agent.state.config.model
-        ~stop:("error:" ^ Error.to_string e.error);
-      Error e
-    | Ok (`Complete response) ->
-      log_turn
-        ~run_start
-        ~turn_start
-        ~turn_index
-        ~model:response.model
-        ~stop:(stop_reason_label response.stop_reason);
-      Ok response
-    | Ok (`ToolsExecuted _) ->
-      incr tool_rounds;
-      log_tool_round
-        ~run_start
-        ~turn_start
-        ~turn_index
-        ~model:agent.state.config.model
-        ~rounds:!tool_rounds
-        ~ceiling:agent.state.config.max_tool_rounds;
-      (match agent.state.config.max_tool_rounds with
-       | Some limit when !tool_rounds >= limit ->
-         log_tool_round_ceiling_reached
-           ~turn_index
-           ~model:agent.state.config.model
-           ~rounds:!tool_rounds
-           ~limit;
-         Error
-           (detailed_error_of_core_error
-              (Error.Agent (Error.ToolRoundLimitExceeded { rounds = !tool_rounds; limit })))
-       | Some _ | None -> loop (release.after ()))
-    | Ok (`TerminalToolCompleted completion) ->
-      log_turn
-        ~run_start
-        ~turn_start
-        ~turn_index
-        ~model:completion.response.model
-        ~stop:"terminal_tool_completed";
-      Ok completion.response
+    match Pipeline.resolve_turn_frontier agent with
+    | Error error -> Error (detailed_error_of_core_error error)
+    | Ok frontier ->
+      let turn_index = Pipeline.turn_frontier_ordinal frontier in
+      let turn_start = Unix.gettimeofday () in
+      let result =
+        run_turn_core_detailed
+          ~sw
+          ?clock
+          ~api_strategy
+          ?raw_trace_run
+          ?before_tool_execution:release.before_tool_execution
+          ~frontier
+          agent
+      in
+      (match result with
+      | Error e ->
+        log_turn
+          ~run_start
+          ~turn_start
+          ~turn_index
+          ~model:agent.state.config.model
+          ~stop:("error:" ^ Error.to_string e.error);
+        Error e
+      | Ok (`Complete response) ->
+        log_turn
+          ~run_start
+          ~turn_start
+          ~turn_index
+          ~model:response.model
+          ~stop:(stop_reason_label response.stop_reason);
+        Ok response
+      | Ok (`ToolsExecuted _) ->
+        incr tool_rounds;
+        log_tool_round
+          ~run_start
+          ~turn_start
+          ~turn_index
+          ~model:agent.state.config.model
+          ~rounds:!tool_rounds
+          ~ceiling:agent.state.config.max_tool_rounds;
+        (match agent.state.config.max_tool_rounds with
+         | Some limit when !tool_rounds >= limit ->
+           log_tool_round_ceiling_reached
+             ~turn_index
+             ~model:agent.state.config.model
+             ~rounds:!tool_rounds
+             ~limit;
+           Error
+             (detailed_error_of_core_error
+                (Error.Agent (Error.ToolRoundLimitExceeded { rounds = !tool_rounds; limit })))
+         | Some _ | None -> loop (release.after ()))
+      | Ok (`TerminalToolCompleted completion) ->
+        log_turn
+          ~run_start
+          ~turn_start
+          ~turn_index
+          ~model:completion.response.model
+          ~stop:"terminal_tool_completed";
+        Ok completion.response)
   in
   loop Held
 ;;
@@ -791,61 +797,65 @@ module Advanced = struct
     let rec loop lease =
       let lease = acquire_provider_lease ~yield_enabled ~on_resume lease in
       let release = plan_provider_lease_release ~yield_enabled ~on_yield lease in
-      let turn_index = agent.state.turn_count + 1 in
-      let turn_start = Unix.gettimeofday () in
-      match
-        run_turn_core_detailed
-          ~sw
-          ?clock
-          ~api_strategy
-          ?raw_trace_run
-          ?before_tool_execution:release.before_tool_execution
-          agent
-      with
-      | Error error ->
-        log_turn
-          ~run_start
-          ~turn_start
-          ~turn_index
-          ~model:agent.state.config.model
-          ~stop:("error:" ^ Error.to_string error.error);
-        Error error
-      | Ok (`Complete response) ->
-        log_turn
-          ~run_start
-          ~turn_start
-          ~turn_index
-          ~model:response.model
-          ~stop:(stop_reason_label response.stop_reason);
-        Ok (Completed response)
-      | Ok (`ToolsExecuted checkpoint_stage) ->
-        log_turn
-          ~run_start
-          ~turn_start
-          ~turn_index
-          ~model:agent.state.config.model
-          ~stop:"tools_executed";
-        let boundary = completed_tool_boundary agent checkpoint_stage in
-        (match on_tool_boundary boundary with
-         | Continue -> loop (release.after ())
-         | Yield ->
-           let checkpoint = checkpoint agent in
-           Ok
-             (Yielded
-                { turn = boundary.turn
-                ; checkpoint_stage = boundary.checkpoint_stage
-                ; checkpoint
-                }))
-      | Ok (`TerminalToolCompleted receipt) ->
-        log_turn
-          ~run_start
-          ~turn_start
-          ~turn_index
-          ~model:receipt.response.model
-          ~stop:"terminal_tool_completed";
-        Ok
-          (Terminal_tool_completed
-             { turn = agent.state.turn_count; receipt; checkpoint = checkpoint agent })
+      match Pipeline.resolve_turn_frontier agent with
+      | Error error -> Error (detailed_error_of_core_error error)
+      | Ok frontier ->
+        let turn_index = Pipeline.turn_frontier_ordinal frontier in
+        let turn_start = Unix.gettimeofday () in
+        (match
+          run_turn_core_detailed
+            ~sw
+            ?clock
+            ~api_strategy
+            ?raw_trace_run
+            ?before_tool_execution:release.before_tool_execution
+            ~frontier
+            agent
+        with
+        | Error error ->
+          log_turn
+            ~run_start
+            ~turn_start
+            ~turn_index
+            ~model:agent.state.config.model
+            ~stop:("error:" ^ Error.to_string error.error);
+          Error error
+        | Ok (`Complete response) ->
+          log_turn
+            ~run_start
+            ~turn_start
+            ~turn_index
+            ~model:response.model
+            ~stop:(stop_reason_label response.stop_reason);
+          Ok (Completed response)
+        | Ok (`ToolsExecuted checkpoint_stage) ->
+          log_turn
+            ~run_start
+            ~turn_start
+            ~turn_index
+            ~model:agent.state.config.model
+            ~stop:"tools_executed";
+          let boundary = completed_tool_boundary agent checkpoint_stage in
+          (match on_tool_boundary boundary with
+           | Continue -> loop (release.after ())
+           | Yield ->
+             let checkpoint = checkpoint agent in
+             Ok
+               (Yielded
+                  { turn = boundary.turn
+                  ; checkpoint_stage = boundary.checkpoint_stage
+                  ; checkpoint
+                  }))
+        | Ok (`TerminalToolCompleted receipt) ->
+          log_turn
+            ~run_start
+            ~turn_start
+            ~turn_index
+            ~model:receipt.response.model
+            ~stop:"terminal_tool_completed";
+          Ok
+            (Terminal_tool_completed
+               { turn = agent.state.turn_count; receipt; checkpoint = checkpoint agent }))
     in
     loop Held
   ;;
@@ -1047,11 +1057,15 @@ end
 
 let run_turn_stream_detailed ~sw ?clock ~on_event ?on_telemetry ?execution_store agent =
   let run ~sw () =
-    run_turn_core_detailed
-      ~sw
-      ?clock
-      ~api_strategy:(Stream { on_event; on_telemetry })
-      agent
+    match Pipeline.resolve_turn_frontier agent with
+    | Error error -> Error (detailed_error_of_core_error error)
+    | Ok frontier ->
+      run_turn_core_detailed
+        ~sw
+        ?clock
+        ~api_strategy:(Stream { on_event; on_telemetry })
+        ~frontier
+        agent
   in
   run_with_execution_scope ~sw ?execution_store agent (fun ~sw -> run ~sw ())
   |> Result.map (function

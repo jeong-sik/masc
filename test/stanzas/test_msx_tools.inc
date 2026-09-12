@@ -5,5 +5,5 @@
  (name test_msx_tools)
  (modules test_msx_tools)
  (libraries
-  alcotest yojson fs_compat masc masc.msx_lane
+  alcotest yojson unix eio_main fs_compat masc masc.msx_lane masc.board_handlers
   masc.tool_types masc.masc_tool_dispatch masc.tool_schemas masc.masc_types))

@@ -16,8 +16,12 @@ val query_observations : t -> instance_id:string -> expected_seq:int -> max_byte
   since:float option -> until:float option -> lane_id:string option ->
   (Lane_addon_types.output, string) result
 (** Streams retained sequence files with bounded response and per-record reads.
-    Coverage records the scan cursor and an explicit incomplete result when the
-    response bound is reached or a retained interval cannot be read. *)
+    Matching rows have priority over source coverage. A second pass over the
+    inspected prefix returns coverage for selected records first, then other
+    source coverage, including observations without rows. Each coverage buffer
+    is bounded by the space remaining after rows. The query receipt identifies
+    the inspected prefix and explicitly reports omitted rows, omitted coverage,
+    or unreadable observations; source coverage is not a chronological ledger. *)
 val freeze : t -> instance_id:string -> binding:Yojson.Safe.t ->
   row_ids:string list -> (Yojson.Safe.t, string) result
 val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->

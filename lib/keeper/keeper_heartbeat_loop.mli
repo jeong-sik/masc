@@ -113,6 +113,15 @@ val decide_keepalive_cycle_action :
     while preserving the existing lease, and busy cycles retain their typed
     admission block without recording a turn. *)
 
+val owner_turn_rejection_cycle_status :
+  Keeper_owner_registry.command_error -> keepalive_cycle_status
+(** Total: the cycle status an Owner-registry rejection of the autonomous
+    turn records. [Command_rejected Owner_stopping] and
+    [Command_lookup_failed Inventory_stopping] are the shutdown boundary and
+    yield [Turn_cycle_completed]; every other rejection yields
+    [Turn_cycle_crashed]. Never [Turn_cycle_interrupted] or
+    [Turn_cycle_busy]. *)
+
 (** Outcome of one keepalive cycle evaluation.
 
     [Turn_cycle_interrupted] is an expected operator cancellation: it does not

@@ -1,66 +1,76 @@
-# Keeper reuse of a Browser Lane region
+# Browser Lane TUI observation delivered to Keeper
 
-Two isolated runs used real Firefox, the same synthetic page and declared
-`glm-coding.glm-5.3-flash` runtime, and a fresh manual Keeper for each request.
-The first could not load the instruction; the second received the smaller
-instruction and read the selected article directly.
+The current instruction body was exercised with an actual TUI `y` copy from a
+real Firefox page. The captured 535-byte JSON was delivered unchanged after
+the natural request prefix through `masc_keeper_msg`. The model received that
+same input, loaded the 12,380-byte instruction body, then made one scoped
+BrowserRead with the observed URL/document/node and correctly answered Mina,
+Tuesday, and accessibility review.
 
-| Observed result | Before | After |
-|---|---:|---:|
-| Main SKILL.md bytes, including frontmatter | 17,140 | 11,930 |
-| Instruction body bytes at the provider boundary | 16,908, rejected | 11,698, delivered |
-| Keeper BrowserRead calls | 5 | 1 |
-| Total Keeper tool calls, including keeper_skill | 6 | 2 |
-| Failed tool calls | 2 | 0 |
+This final-body run uses SKILL.md from `c4cfc5369c`: 12,612 file bytes,
+12,380 body bytes. Its delivered hash and subsequent BrowserRead call ID join
+to an activation with `invocation.kind=instruction`. The response contains
+only the selected Alpha article, excluding Beta and the sidebar.
 
-The before run tried regions, whole-page text, unsupported scoped elements,
-whole-page elements, then scoped scene. The after run called `keeper_skill`,
-then `BrowserRead mode=scene` with the observed tab, URL and selected region
-reference. Both eventually answered Mina, Tuesday, and accessibility review.
-The after scene contains only the selected Alpha article, excluding Beta and
-the sidebar. These are observations from one pair, not a general performance
-claim or proof of which wording change caused the shorter route.
+## Current-body evidence
 
-## Evidence
+- [clipboard-run.json](clipboard-run.json): actual user input, source/runtime
+  identities, tool calls and outputs, answer, activation and cleanup receipts.
+- [clipboard-context.json](clipboard-context.json) and
+  [clipboard-osc52.bin](clipboard-osc52.bin): captured payload and original
+  terminal clipboard sequence. Decoding the sequence yields the exact payload;
+  the payload is the unchanged suffix of the recorded model user message.
+- [clipboard-tui.png](clipboard-tui.png): **replay of recorded PTY output at
+  130 columns × 35 rows**, showing Alpha selected before copying.
+  [clipboard-tui.pty](clipboard-tui.pty) contains the rendering up to the copy;
+  the following OSC52 sequence is retained separately above.
+- [clipboard-firefox.png](clipboard-firefox.png): actual Firefox screenshot
+  from the same run. The observer capture receipt in clipboard-run.json ties
+  its URL/tab to the copied observation. Screenshot and browser setup calls
+  are excluded from Keeper call counts.
+- [fixture.html](fixture.html): complete synthetic page used in the runs.
 
-- [keeper-pair.json](keeper-pair.json) retains the natural input, tool call IDs,
-  exact inputs, tool-result bytes/hashes, BrowserRead outputs, final answers,
-  server/driver identity, and the after run's Skill activation record.
-- [fixture.html](fixture.html) is the complete synthetic page.
-- [firefox-after.png](firefox-after.png) is the real Firefox page captured during
-  the after trial through Browser Lane. [firefox-after.json](firefox-after.json)
-  retains its request, URL/tab/viewport, server instance and image hash. The
-  screenshot shows Alpha, Beta and the sidebar together; scoped scene reading
-  filters the returned content, not the browser's paint. Alpha-only extraction
-  is established by the recorded scene response. The screenshot is an observer
-  call, so it is excluded from the Keeper call counts above.
-- The after activation has `invocation.kind=instruction`; its delivered body
-  SHA-256 matches the tool result and SKILL.md at `869a35889a` without frontmatter.
-  The following BrowserRead call ID is present in that activation's actions.
-- Both chat operations reached `Succeeded`. The after shutdown record reached
-  `finalized`. The before shutdown terminal record was observed but was not
-  retained in this bundle before startup pruned it; admission alone is not
-  presented as shutdown proof.
+The TUI artifact was built from source `ba6b3a73e9` (CI run 34689504282, artifact
+10297022201); its TUI source files are unchanged through `c4cfc5369c`. The
+measured server is `d5fd7f3453`, with executable SHA-256 recorded in the JSON.
+The candidate instruction package was copied only to the experiment's own
+scratch skill source. The experiment used its own skill source and a fresh browser profile.
+The Keeper shutdown finalized and the owned TUI/server/driver exited.
 
-## Setup and limits
+## Earlier comparison
 
-The installed server embeds `d568ba7ffcb35555cba5d07c4a87c3871ac67db8`;
-this experiment supplies the instruction package from the worktree to its own
-scratch skill source. It does not claim a newly deployed server. Before file
-SHA-256 is from PR head `637efb0f25`; after content is from `869a35889a`.
+The original comparison remains in [keeper-pair.json](keeper-pair.json).
+These are three individual observations on fresh Keepers, not a controlled
+benchmark or a general performance guarantee.
 
-Each profile made only `browser-lanes` eligible, and each natural user message
-asked for the selected area's owner and decision without naming a tool or
-skill. The TUI-shaped payload was constructed from the actual regions response;
-it was not captured from the new TUI clipboard exporter. The payload contains
-only the region label and references, not the requested answer. Browser setup
-and observer calls were the same in both runs and are excluded from Keeper
-call counts. No Slack workspace or other real target channels were accessed.
+| Observed instruction | Served body | Keeper BrowserRead calls | Total Keeper tool calls |
+|---|---:|---:|---:|
+| Original `637efb0f25` | 16,908 bytes, rejected | 5 | 6 |
+| Lazy split `869a35889a` | 11,698 bytes, delivered | 1 | 2 |
+| Current guards `c4cfc5369c`, actual TUI copy | 12,380 bytes, delivered | 1 | 2 |
 
-To repeat, use a separate initialized scratch workspace, a configured model,
-a fresh Firefox session serving the fixture, and the candidate instruction
-package. Read regions, construct the same payload shape from the selected
-Alpha article, and submit the recorded natural request to a fresh Keeper.
-Record the operation, final answer, tool I/O and Skill activation ledger before
-shutting down the owned Keeper/session. Compare returned scope and content;
-operation success alone does not establish correct browsing or Skill use.
+The original run tried regions, whole-page text, unsupported scoped elements,
+whole-page elements, then scoped scene. Both later runs loaded the instruction
+and directly read the selected article. All eventually returned the correct
+owner and decision. The first pair used a constructed TUI-shaped payload and
+server `d568ba7ffc`; it is historical evidence, not the current-body delivery
+proof. Its [Firefox image](firefox-after.png) and
+[capture receipt](firefox-after.json) are retained. Its before shutdown terminal
+record was observed but was not preserved before startup pruned it; admission
+alone is not presented as shutdown proof.
+
+## Repetition and limits
+
+Use a separate initialized scratch workspace, a configured model, a fresh
+Firefox session serving the fixture, and the candidate instruction package.
+Select Alpha in the TUI region view and capture its actual `y` output. Send
+the natural request plus those exact bytes to a fresh Keeper whose profile
+makes browser-lanes eligible. Record model input, operation, final answer,
+tool I/O and activation ledger before closing owned resources. Verify the
+scope and returned content, not only the operation's terminal status.
+
+This proves TUI OSC52 output → masc_keeper_msg → instruction delivery → scoped
+BrowserRead. It does not exercise OS clipboard readback or pasting into the
+TUI chat composer. Each run used one synthetic page; real target channels and
+site-specific collection remain unmeasured. The native screenshot shows all
+articles together: scope filters scene output, not browser paint.

@@ -94,6 +94,9 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config
   ; enabled = true
   ; timeout_seconds
   ; default_voice = None
+  (* These fixtures describe endpoints reached over HTTP or a tool. A
+     command-run kind needs its own fixture, with the command it runs. *)
+  ; command = None
   }
 
 let apply path changes =

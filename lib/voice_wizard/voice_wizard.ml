@@ -136,6 +136,9 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
   ; default_voice = None
+  (* Every provider this wizard offers is reached over HTTP or through a tool,
+     so none of them runs a command. A kind that does is configured by hand. *)
+  ; command = None
   }
 ;;
 

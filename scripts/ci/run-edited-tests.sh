@@ -340,8 +340,12 @@ self_test() {
   # test_tui_http_ast watches it through 52 ~module_path declarations, and the
   # name mapping looks for test_tui_render_* instead. Both mappings answer
   # here, and the guard is in the answer.
+  # test_tui_chat_gate_row left when the chat surface became its own file: it
+  # watches the pane that draws the Gate row, and that pane is now in
+  # bin/masc_tui_render_chat.ml, which it names instead. It is a move, not a
+  # loss -- an edit to the chat surface still reaches it.
   check "a watched source reaches the guard that declares it" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_gate_row.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_row_wiring.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_config_highlight_wiring.ml test/test_tui_http_ast.ml test/test_tui_render_memory.ml test/test_tui_render_metrics.ml test/test_tui_render_schedule.ml test/test_tui_row_wiring.ml" \
     "bin/masc_tui_render.ml"
   # A guard that reads its input with open_in instead of Ast_grep is watching
   # it just the same. test_blocker_class_mirror pulls the blocker class list

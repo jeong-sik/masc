@@ -487,12 +487,10 @@ let test_checker_deep_manifest_validation () =
 ;;
 
 let test_manifest_and_observations_file_io () =
-  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "g1-test-%d" (Random.int 1000000)) in
-  (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error _ -> ());
-  let manifest_file = Filename.concat tmp_dir "manifest.json" in
-  let runs_file = Filename.concat tmp_dir "runs.jsonl" in
-  let checker_file = Filename.concat tmp_dir "checker.json" in
-  let summary_file = Filename.concat tmp_dir "summary.json" in
+  let manifest_file = Filename.temp_file "g1-manifest" ".json" in
+  let runs_file = Filename.temp_file "g1-runs" ".jsonl" in
+  let checker_file = Filename.temp_file "g1-checker" ".json" in
+  let summary_file = Filename.temp_file "g1-summary" ".json" in
 
   let manifest =
     make_manifest
@@ -548,8 +546,7 @@ let test_manifest_and_observations_file_io () =
   (try Sys.remove checker_file with Sys_error _ -> ());
   (try Sys.remove summary_file with Sys_error _ -> ());
   (try Sys.remove runs_file with Sys_error _ -> ());
-  (try Sys.remove manifest_file with Sys_error _ -> ());
-  (try Unix.rmdir tmp_dir with Unix.Unix_error _ -> ())
+  (try Sys.remove manifest_file with Sys_error _ -> ())
 ;;
 
 let test_strict_parsing_rejects_unknown_scope () =

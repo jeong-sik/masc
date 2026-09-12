@@ -18,7 +18,8 @@ let () =
   in
   Arg.parse spec (fun anon -> raise (Arg.Bad ("unexpected argument: " ^ anon))) usage;
   let fail msg =
-    prerr_endline ("masc_reliable_change_g1_check: " ^ msg);
+    output_string stderr ("masc_reliable_change_g1_check: " ^ msg ^ "\n");
+    flush stderr;
     exit 1
   in
   if !manifest_path = "" || !runs_path = "" then fail usage;

@@ -1550,6 +1550,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
           ( "tool calls " ^ tool_visibility_to_string visibility
           , Unix.gettimeofday () );
       true
+    end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
+      (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
+         where it starts; this is the key that asks for the rest. Saying what
+         it did matters more here than elsewhere -- the fold changes how many
+         rows the block below the conversation takes, and a reader who does
+         not see a row appear has no other way to tell the key landed. *)
+      state.msg_turn_folded <- not state.msg_turn_folded;
+      state.last_action <-
+        Some
+          ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
+          , Unix.gettimeofday () );
+      true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
          then gives full timestamp/request metadata a row of its own. *)

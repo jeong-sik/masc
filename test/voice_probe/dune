@@ -3,4 +3,11 @@
 
 (test
  (name test_voice_probe)
+ (modules test_voice_probe)
  (libraries alcotest yojson masc masc.voice_config))
+
+; What the route tables read out of a request, shared by HTTP/1 and HTTP/2.
+(test
+ (name test_voice_probe_request)
+ (modules test_voice_probe_request)
+ (libraries alcotest masc.server))

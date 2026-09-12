@@ -13,4 +13,3 @@ val proposal_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Bind a model proposal to this exact inventory. The proposal store still
     validates coverage; this operation does not establish semantic truth. *)
 val http_json : base_path:string -> Yojson.Safe.t
-

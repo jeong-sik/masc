@@ -92,7 +92,12 @@ exception Client_scope_closed
 let reraise_after_close close exn =
   let bt = Printexc.get_raw_backtrace () in
   Eio.Cancel.protect (fun () ->
-    try close () with cleanup_exn ->
+    try close () with
+    | Eio.Cancel.Cancelled _ ->
+      (* Cleanup cannot replace the caller's original exception, including
+         its cancellation. Preserve that exception and its backtrace. *)
+      Printexc.raise_with_backtrace exn bt
+    | cleanup_exn ->
       Log.Http.warn "HTTP client scope cleanup: %s"
         (Printexc.to_string cleanup_exn));
   Printexc.raise_with_backtrace exn bt
@@ -145,7 +150,9 @@ let create_scoped_client ~sw env uri =
       close ();
       Eio.Fiber.check ();
       Error err
-  with exn -> reraise_after_close close exn
+  with
+  | Eio.Cancel.Cancelled _ as exn -> reraise_after_close close exn
+  | exn -> reraise_after_close close exn
 
 let close_client client = client.close ()
 let client_is_live client =
@@ -477,7 +484,10 @@ let create_probed_client t key uri =
      | Error _ -> Option.iter close_client !pending
      | Ok _ -> ());
     result
-  with exn -> reraise_after_close (fun () -> Option.iter close_client !pending) exn
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    reraise_after_close (fun () -> Option.iter close_client !pending) exn
+  | exn -> reraise_after_close (fun () -> Option.iter close_client !pending) exn
 
 (* Build a fresh piaf client for [key], gated on the per-host
    connect-failure backoff and a TCP reachability probe (see
@@ -499,7 +509,10 @@ let create_fresh t key uri =
            t.connect_failures <- Host_map.remove key t.connect_failures);
          t.counters.create_count_total <- t.counters.create_count_total + 1;
          Ok c
-       with exn -> reraise_after_close (fun () -> close_client c) exn)
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         reraise_after_close (fun () -> close_client c) exn
+       | exn -> reraise_after_close (fun () -> close_client c) exn)
     | Error err ->
       record_connect_failure t key ~now:(now_ts t);
       Error (Printf.sprintf "%s: %s"

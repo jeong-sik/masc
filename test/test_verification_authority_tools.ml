@@ -1053,6 +1053,31 @@ let test_goal_and_task_inspect_real_mp4 () =
     Alcotest.(check bool) "missing decoder is stated" true
       (Tool_result.is_failed result && String_util.contains_substring
         (Tool_result.message result) "video_dependency_unavailable"));
+  (* The process runner's deadline result must not reject the producer's
+     evidence as a policy violation. Exercise the public dispatch projection. *)
+  let fake_bin = Filename.concat dir "timeout-bin" in
+  Unix.mkdir fake_bin 0o700;
+  List.iter (fun program ->
+    let executable = Filename.concat fake_bin program in
+    Out_channel.with_open_bin executable (fun out -> output_string out "#!/bin/sh\nexit 124\n");
+    Unix.chmod executable 0o700) ["ffmpeg"; "ffprobe"];
+  with_env "PATH" fake_bin (fun () ->
+    let result = read task "clip.mp4" in
+    Alcotest.(check bool) "command deadline is a runtime failure" true
+      (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
+    Alcotest.(check bool) "timeout diagnostic explicit" true
+      (String_util.contains_substring (Tool_result.message result) "video_inspection_timeout"));
+  let oversized = Filename.concat root "oversized.mp4" in
+  Out_channel.with_open_bin oversized (fun out ->
+    seek_out out (64 * 1024 * 1024);
+    output_char out '\000');
+  with_env "PATH" (Filename.concat dir "no-ffmpeg") (fun () ->
+    List.iter (fun (surface,path) ->
+      let result = read surface path in
+      Alcotest.(check bool) "oversized source rejected before decoder lookup" true
+        (Tool_result.failure_class result = Some Tool_result.Policy_rejection
+         && String_util.contains_substring (Tool_result.message result) "media_source_too_large"))
+      [task,"oversized.mp4";goal,producer_name ^ "/oversized.mp4"]);
   Alcotest.(check string) "inspection preserves source" bytes
     (In_channel.with_open_bin source In_channel.input_all)
 ;;
@@ -1077,11 +1102,12 @@ let test_a_capture_without_the_mp4_extension_is_still_inspected () =
     "test/fixtures/verifier-video.mp4" in
   let bytes = In_channel.with_open_bin fixture In_channel.input_all in
   let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
-  Out_channel.with_open_bin (Filename.concat root "capture")
+  List.iter (fun filename ->
+  Out_channel.with_open_bin (Filename.concat root filename)
     (fun out -> output_string out bytes);
   let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
   let result = VAT.dispatch task ~name:"tool_read_file"
-    ~args:(`Assoc ["file_path",`String "capture"]) in
+    ~args:(`Assoc ["file_path",`String filename]) in
   (match result with
    | Tool_result.Completed {data;_} ->
      let open Yojson.Safe.Util in
@@ -1091,7 +1117,7 @@ let test_a_capture_without_the_mp4_extension_is_still_inspected () =
      Alcotest.(check string) "exact video SHA" sha (member "sha256" data |> to_string);
      Alcotest.(check bool) "no visual inspection invented" true
        (member "visual_input" data = `Bool false)
-   | _ -> Alcotest.fail (Tool_result.message result))
+   | _ -> Alcotest.fail (Tool_result.message result))) ["capture"; "capture.m4v"]
 ;;
 
 let () =

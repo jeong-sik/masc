@@ -400,13 +400,7 @@ let max_media_source_bytes = 64 * 1024 * 1024
 let video_result t ~name ~path ~bytes ~start_time =
   match Verification_video_inspection.inspect ~base_path:t.config.base_path ~bytes with
   | Error error ->
-    let failure_class = match error with
-      (* A recording that outlasts the command budget is the submitter's to
-         shorten, the same as a PDF refused for its page count. *)
-      | Verification_video_inspection.Budget_spent _ -> Tool_result.Policy_rejection
-      | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
-        Tool_result.Runtime_failure in
-    Tool_result.error ~failure_class
+    Tool_result.error ~failure_class:Tool_result.Runtime_failure
       ~tool_name:name ~start_time (Verification_video_inspection.error_to_string error)
   | Ok inspection ->
     let data = `Assoc ["path",`String path; "inspection",Verification_video_inspection.to_yojson inspection] in
@@ -458,22 +452,18 @@ let media_result t tool ~name ~args ~start_time =
        let bytes =
          match t.producer_scope with
          | Keeper_producer meta ->
-           (* The bounded probe identifies the format only. Its potentially
-              text-projected body never becomes image input or hash evidence. *)
-           (match Keeper_tool_filesystem_runtime.read_sandbox_bytes
+           (* Probe exact bytes so non-UTF-8 box sizes cannot shift the
+              signature before format detection. *)
+           (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                     ~config:t.config ~meta ~path ?cwd
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
               (match (is_pdf path probe || is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               (* Still unbounded: the sandbox backend's complete read takes no
-                  byte limit, and the bounded read beside it may text-project
-                  the body, so its length cannot stand in for the file's.
-                  Bounding this one needs a limit threaded through
-                  [Keeper_sandbox_read_backend.read_complete_file] -- masc#35673. *)
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_complete_sandbox_bytes
-                   ~config:t.config ~meta ~path ?cwd ()))
+               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd
+                   ~max_bytes:(max_media_source_bytes + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with

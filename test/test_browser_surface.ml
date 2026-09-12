@@ -5,6 +5,76 @@ let test_strict_input () =
       | Error _ -> () | Ok _ -> fail "invalid read request accepted")
     [`Assoc ["lane", `Bool true]; `Assoc ["app",`String "unknown"];
      `Assoc ["tabId",`Int (-1)]; `Assoc ["tabID",`Int 1]]
+
+let test_tool_input_recovery () =
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Eio.Switch.run (fun sw ->
+      let module Tools = Masc.Tool_misc_browser_lane in
+      let valid_id = "10000000-0000-4000-8000-000000000001" in
+      let invalid_id = valid_id ^ "1" in
+      let client_id = match Browser_lane.client_id_of_string valid_id with
+        | Ok id -> id | Error detail -> fail detail in
+      let info : Browser_lane.client_info =
+        {client_id;browser=Browser_lane.Firefox;version="fixture";engine_version="fixture"} in
+      Eio.Switch.on_release sw (fun () -> ignore (Browser_lane.disconnect_client ~client_id));
+      ignore (Browser_lane.take_command ~client_info:info ~window_sec:0.001);
+      let input_id id = `Assoc ["lane",`String "live";"clientId",`String id] in
+      let interact id = `Assoc ["lane",`String "live";"clientId",`String id;
+        "tabId",`Int 1;"action",`String "follow_link";"expectedUrl",`String "https://example.org/";
+        "documentId",`String "observed";"nodeId",`String "link"] in
+      let read fields = Tools.handle_read ~tool_name:"BrowserRead" ~start_time:0.
+        (`Assoc (["tabId",`Int 1] @ fields)) in
+      let cases = [
+        "malformed connection in tabs", (fun () -> Tools.handle_tabs ~tool_name:"BrowserTabs"
+          ~start_time:0. (input_id invalid_id));
+        "malformed connection in read", (fun () -> read ["clientId",`String invalid_id]);
+        "malformed connection in follow", (fun () ->
+          let result, phase = Tools.handle_interact_with_phase ~tool_name:"BrowserInteract"
+            ~start_time:0. (interact invalid_id) in
+          check bool "argument failure happens before interaction effects" true
+            (phase = Tool_result.Proven_pre_effect); result);
+        "navigation guard on text read", (fun () -> read ["mode",`String "text";
+          "navigationSource",`Assoc ["url",`String "https://example.org/";"documentId",`String "observed"]]);
+        "malformed scene source", (fun () -> read ["mode",`String "scene";"navigationSource",`Assoc []]);
+        "malformed scene scope", (fun () -> read ["mode",`String "scene";"scope",`Assoc []]);
+        "malformed scene URL", (fun () -> read ["mode",`String "scene";"expectedUrl",`Int 1]);
+        "missing scene tab", (fun () -> Tools.handle_read ~tool_name:"BrowserRead"
+          ~start_time:0. (`Assoc ["mode",`String "scene"]));
+        "malformed act", (fun () -> Tools.handle_act ~tool_name:"BrowserAct"
+          ~start_time:0. (`Assoc []));
+        "unknown session action", (fun () -> Tools.handle_session ~tool_name:"BrowserOpen"
+          ~start_time:0. (`Assoc ["action",`String "unknown"]));
+        "malformed navigation URL", (fun () -> Tools.handle_goto ~tool_name:"BrowserGoto"
+          ~start_time:0. (`Assoc ["url",`Int 1]))] in
+      List.iter (fun (name, run) ->
+        match run () with
+        | Tool_result.Failed failure ->
+          check bool (name ^ " is caller validation, not changed-state rejection") true
+            (failure.class_ = Tool_result.Policy_rejection);
+          check bool (name ^ " has no dispatched effect") true
+            (failure.effect_disposition = Tool_result.Proven_pre_effect);
+          check string (name ^ " carries typed invalid-input detail") "invalid_input"
+            Yojson.Safe.Util.(failure.data |> member "kind" |> to_string)
+        | _ -> fail (name ^ " was accepted")) cases;
+      check bool "malformed requests queued no command to the connected browser" true
+        (Browser_lane.take_command ~client_info:info ~window_sec:0.001 = Ok None);
+      let unavailable, phase = Tools.handle_interact_with_phase ~tool_name:"BrowserInteract"
+        ~start_time:0. (interact "10000000-0000-4000-8000-000000000002") in
+      check bool "valid identity of an absent browser remains a state rejection" true
+        (Tool_result.failure_class unavailable = Some Tool_result.Workflow_rejection
+         && phase = Tool_result.Proven_pre_effect);
+      let corrected = Eio.Fiber.fork_promise ~sw (fun () ->
+        Tools.handle_tabs ~tool_name:"BrowserTabs" ~start_time:0. (input_id valid_id)) in
+      let command = match Browser_lane.take_command ~client_info:info ~window_sec:1. with
+        | Ok (Some command) -> command | _ -> fail "corrected request did not reach the same browser" in
+      ignore (Browser_lane.deliver_result ~client_id ~id:command.id
+        ~payload:(`Assoc ["ok",`Bool true;"data",`List []]));
+      let result = Eio.Promise.await_exn corrected in
+      check bool "correcting the argument succeeds without reconnecting or changing the page" true
+        (match result with Tool_result.Completed _ -> true | _ -> false);
+      check string "corrected response retains the observed connection" valid_id
+        Yojson.Safe.Util.(Tool_result.data result |> member "clientId" |> to_string)))
 let test_remote_failure () =
   match Surface.decode_answer (Browser_lane.Answered
     (`Assoc ["ok",`Bool false;"error",`String "tab closed"])) with
@@ -209,6 +279,7 @@ let test_scoped_scene_acknowledgement () =
         (`Assoc ["documentId",`String "fixture";"nodeId",`String "a";"nodeId",`String "b"])))))
 
 let () = run "browser surface" ["behavior",[
+  test_case "input correction resumes on the same connected browser" `Quick test_tool_input_recovery;
   test_case "scoped scene acknowledgement" `Quick test_scoped_scene_acknowledgement;
   test_case "read any website by active or explicit tab" `Quick test_any_website_selection;
   test_case "empty browser has no page" `Quick test_empty_browser;

@@ -253,7 +253,7 @@ let decision_entries =
 
 let docker_playground_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_DOCKER_PLAYGROUND"
+    entry ~default:"false" "MASC_KEEPER_DOCKER_PLAYGROUND"
       "Route Execute through Docker container (feature flag)";
   ]
 
@@ -413,7 +413,7 @@ let worker_entries =
   [
     entry ~default:"(none)" "MASC_LOCAL_RUNTIME_COOLDOWN_SEC"
       "Local runtime cooldown (seconds); None when unset";
-    entry ~default:"(none)" "MASC_LOCAL_RUNTIME_DEBUG"
+    entry ~default:"false" "MASC_LOCAL_RUNTIME_DEBUG"
       "Local runtime debug logging (feature flag)";
   ]
 

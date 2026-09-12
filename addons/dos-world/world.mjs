@@ -74,6 +74,7 @@ export class DosWorld {
   failure = null;
   closed = false;
   latestFrame = null;
+  lastGuestBytes = null;
   snapshot = null;
   captureSequence = 0;
   probing = false;
@@ -169,6 +170,7 @@ export class DosWorld {
         examined = frame.sequence;
         // Serial reads: js-dos does not allow simultaneous reads of one file.
         const state = Buffer.from(await this.ci.fsReadFile('STATE.BIN'));
+        this.lastGuestBytes = state;
         const counter = counterOf(state);
         if (counter !== null && matchesGuest(frame, counter)) {
           this.snapshot = { frame, state, counter };
@@ -276,6 +278,15 @@ export class DosWorld {
     if (this.closePromise !== null) return this.closePromise;
     this.closed = true;
     this.notify();
+    // Preserve actual unverified captures on shutdown as diagnostics. This does
+    // not promote them to a Lane observation or claim successful guest output.
+    const frame = this.latestFrame;
+    console.error(JSON.stringify({ event: 'dos_shutdown', failure: this.failure,
+      verified_counter: this.snapshot?.counter ?? null, probe_pending: this.probing,
+      capture: frame === null ? null : { width: frame.width, height: frame.height,
+        sequence: frame.sequence, png_base64: PNG.sync.write({ width: frame.width,
+          height: frame.height, data: frame.rgba }).toString('base64') },
+      state_base64: this.lastGuestBytes?.toString('base64') ?? null }));
     this.closePromise = (async () => {
       await this.boot;
       if (this.ci !== null) await this.ci.exit();

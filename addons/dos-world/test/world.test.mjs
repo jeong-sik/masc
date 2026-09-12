@@ -65,6 +65,16 @@ test('real DOS input, receipts, read-only observation, incarnation and independe
   t.after(async () => {
     await client.close();
     await writeFile(join(proof, 'server.stderr.log'), stderr);
+    for (const line of stderr.split('\n')) {
+      let diagnostic;
+      try { diagnostic = JSON.parse(line); } catch { continue; }
+      if (diagnostic.event !== 'dos_shutdown') continue;
+      await writeFile(join(proof, 'shutdown-diagnostics.json'), JSON.stringify(diagnostic, null, 2));
+      if (diagnostic.capture !== null) await writeFile(join(proof, 'unverified-capture.png'),
+        Buffer.from(diagnostic.capture.png_base64, 'base64'));
+      if (diagnostic.state_base64 !== null) await writeFile(join(proof, 'unverified-STATE.BIN'),
+        Buffer.from(diagnostic.state_base64, 'base64'));
+    }
   });
   await client.connect(transport);
   const tools = await client.listTools();

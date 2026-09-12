@@ -24,11 +24,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build the owned DOS environment and homebrew program
+        id: build
         run: |
           set -euo pipefail
           mkdir -p proof
           git rev-parse HEAD > proof/SOURCE_COMMIT
-          docker build --tag masc-lane-dos-world:0.1.0 addons/dos-world 2>&1 | tee proof/build.log
+          docker build --file addons/dos-world/Dockerfile --tag masc-lane-dos-world:0.1.0 addons 2>&1 | tee proof/build.log
           docker image inspect masc-lane-dos-world:0.1.0 > proof/image.json
       - name: Prove actual DOS input and artifacts through MCP
         run: |
@@ -39,6 +40,7 @@ jobs:
             --workdir /verification masc-lane-dos-world:0.1.0 \
             node --test /opt/dos-world/test/world.test.mjs 2>&1 | tee proof/package-test.log
       - name: Retain the exact worker image for host qualification
+        if: ${{ always() && steps.build.outcome == 'success' }}
         run: docker save masc-lane-dos-world:0.1.0 | gzip > proof/dos-world-image.tar.gz
       - uses: actions/upload-artifact@v7
         if: always()

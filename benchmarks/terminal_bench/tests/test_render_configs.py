@@ -5,6 +5,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "configs"))
 
 from render_configs import (  # noqa: E402
     ARMS,
+    COMPOSITION_FENCE,
+    REPO_ROOT,
     composition_skill_names,
     instruction_skill_names,
     keeper_toml,
@@ -12,15 +14,36 @@ from render_configs import (  # noqa: E402
 )
 
 
-def test_skill_classification_matches_repo():
-    # skills/ 아래 10개 중 composition skill은 ```toml composition 블록을
-    # 가진 2개뿐이다 (2026-09-10 repo 사실 확인).
-    assert composition_skill_names() == ["browser-live-click-regions", "msx-observe"]
-    assert instruction_skill_names() == [
-        "browser-design", "browser-lanes", "evidence-review",
-        "frontend-implement", "frontend-verify", "msx-play",
-        "observe-act-verify", "slack-web",
-    ]
+def test_skill_classification_agrees_with_the_files():
+    # This used to pin the exact skill names as of 2026-09-10. That made it a
+    # change detector: two skills landing on main (sangokushi-2 and
+    # sangokushi-2-end-command, one of them a composition skill) broke it
+    # without saying anything about whether the classifier is right. What arm
+    # c actually depends on is the invariant — a skill is a composition skill
+    # exactly when its SKILL.md carries the fenced composition block — so
+    # assert that against an independent read of the files.
+    composition = composition_skill_names()
+    instruction = instruction_skill_names()
+    all_skills = sorted(p.parent.name for p in (REPO_ROOT / "skills").glob("*/SKILL.md"))
+
+    assert all_skills, "no skills found; the renderer would silently restrict nothing"
+    # A partition: nothing lost, nothing counted twice.
+    assert sorted(composition + instruction) == all_skills
+    assert not (set(composition) & set(instruction))
+    # Both sides non-empty, or arm c's restriction is a no-op in one direction.
+    assert composition and instruction
+
+    expected_composition = sorted(
+        name
+        for name in all_skills
+        if any(
+            line.startswith(COMPOSITION_FENCE)
+            for line in (REPO_ROOT / "skills" / name / "SKILL.md")
+            .read_text()
+            .splitlines()
+        )
+    )
+    assert composition == expected_composition
 
 
 def test_arms_cover_spec():

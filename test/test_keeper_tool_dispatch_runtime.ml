@@ -8029,6 +8029,54 @@ let test_peer_artifact_materializes_exact_binary () =
     check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))
 
 
+let test_peer_delegate_schema_reaches_model_wires () =
+  with_exec_fixture "peer-delegate-schema" (fun ~config ~meta ~publication_recovery ~ctx_work ->
+    let descriptor = match Masc.Keeper_tool_descriptor.descriptors_for_internal "masc_keeper_delegate" with
+      | [descriptor] -> descriptor | _ -> fail "canonical delegate descriptor is missing" in
+    let expected = descriptor.input_schema in
+    let member = Yojson.Safe.Util.member in
+    let properties = member "properties" expected in
+    check string "artifact items are objects in the declared tool contract" "object"
+      (properties |> member "artifacts" |> member "items" |> member "type" |> Yojson.Safe.Util.to_string);
+    check bool "target keeper kind constraint is declared" true
+      (properties |> member "target" |> member "properties" |> member "kind" |> member "enum"
+       = `List [`String "keeper"]);
+    let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work () in
+    Fun.protect ~finally:bundle.cleanup @@ fun () ->
+    let bundled = List.find (fun (tool : Agent_core.Tool.t) ->
+        String.equal tool.schema.name "masc_keeper_delegate") bundle.tools in
+    let plain = Masc.Tool_bridge.agent_core_tool_of_masc
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+        ~name:"masc_keeper_delegate" ~description:descriptor.description ~input_schema:expected
+        (fun input -> Tool_result.make_ok ~tool_name:"masc_keeper_delegate" ~start_time:0.0 ~data:input ()) in
+    List.iter (fun (label, tool) ->
+      let check_schema boundary observed =
+        check bool (label ^ " retains full delegate schema at " ^ boundary) true
+          (Yojson.Safe.equal expected observed) in
+      check_schema "Agent Core tool" (member "input_schema" (Agent_core.Tool.schema_to_json tool));
+      let provider = Llm_provider.Provider_config.make
+          ~kind:Llm_provider.Provider_config.OpenAI_compat ~model_id:"delegate-schema-fixture"
+          ~base_url:"https://fixture.invalid"
+          ~model_capabilities_override:Llm_provider.Capabilities.openai_compat_chat_capabilities () in
+      let request = Llm_provider.Backend_openai.build_request ~config:provider
+          ~messages:[Agent_core.Types.user_msg "Delegate the exported file"]
+          ~tools:[Agent_core.Tool.schema_to_json tool] () |> Yojson.Safe.from_string in
+      let api_tool = request |> member "tools" |> Yojson.Safe.Util.to_list |> List.hd in
+      check_schema "OpenAI request" (api_tool |> member "function" |> member "parameters");
+      let dynamic = Masc.Keeper_official_client_host.dynamic_tools
+          ~tool_approval:None ~runtime_label:"schema-fixture" ~keeper_name:meta.name
+          ~turn_count:1 ~tools:[tool] ~hooks:Agent_core.Hooks.empty
+          ~event_bus:None ~context_injector:None
+          ~context:(Some (Agent_core.Context.create_sync ()))
+          ~terminal_effect_state:bundle.terminal_effect_state
+          ~terminal_error:(ref None) ~pre_tool_rejects:(ref []) ~raw_trace_run:None () in
+      match dynamic with
+      | Ok [dynamic] -> check_schema "official-client dynamic definition" dynamic.input_schema
+      | Ok _ -> fail "expected one official-client delegate definition"
+      | Error error -> fail (Agent_core.Error.to_string error))
+      ["actual Keeper bundle", bundled; "plain MASC bridge", plain])
+
 let test_binary_write_reference_survives_replay () =
   with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
@@ -8086,6 +8134,7 @@ let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
     ("peer_artifacts", [test_case "materializes exact binary through recipient write" `Quick test_peer_artifact_materializes_exact_binary]);
+    ("peer_delegate_schema", [test_case "nested artifact and target schemas reach API and official clients" `Quick test_peer_delegate_schema_reaches_model_wires]);
     ("binary_write", [test_case "reference persists and replays exact bytes" `Quick test_binary_write_reference_survives_replay]);
     ("direct_gate_resume", [
       test_case "unavailable Gate authority retains original input and runtime suffix" `Quick

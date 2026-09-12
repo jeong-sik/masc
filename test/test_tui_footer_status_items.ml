@@ -661,10 +661,84 @@ let test_a_row_in_another_grammar_loses_its_door () =
     (survives "j/k:move  Enter:open chat  Esc:close"
      > survives "[j/k] Move · [Enter] Open Chat · [Esc] Close")
 
+let test_conflict_paths_remain_atomic () =
+  let path = "/work/my  repo" in
+  let notice = "MISMATCH local " ^ path ^ " (r:retry)" in
+  for max_cells = 8 to 120 do
+    let row =
+      Masc_tui_footer.line ~status:[ Masc_tui_footer.Workspace_mismatch path ]
+        ~dim:"" ~reset:"" ~max_cells ~port:8935
+        ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+    in
+    check_at_most_cells "atomic path row stays within cells" max_cells row;
+    check_bool "a displayed conflict keeps its whole path and action" true
+      (not (contains ~needle:"MISMATCH" row) || contains ~needle:notice row);
+    check_bool "a dropped conflict leaves no detached path suffix" true
+      (not (contains ~needle:"repo" row) || contains ~needle:notice row);
+    if max_cells >= 60 then
+      check_bool "whole conflict survives where it fits" true
+        (contains ~needle:notice row)
+  done
+
+let test_actionable_conflicts_outrank_worktree_provenance () =
+  let build = Masc_tui_footer.Tui_build_mismatch
+    { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server } in
+  let worktree = Masc_tui_footer.Server_worktree_binary in
+  let render status =
+    Masc_tui_footer.line ~status ~dim:"" ~reset:"" ~max_cells:80 ~port:8935
+      ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+  in
+  let row = render [ worktree; build ] in
+  check_string "caller order does not choose the surviving diagnosis"
+    row (render [ build; worktree ]);
+  check_at_most_cells "both conflicts respect width" 80 row;
+  check_bool "actionable mismatch remains" true (contains ~needle:"redeploy)" row);
+  check_bool "generic provenance yields first" false (contains ~needle:"WORKTREE" row);
+  check_bool "exit remains" true (contains ~needle:"q:quit" row);
+  let workspace = Masc_tui_footer.Workspace_mismatch "/other" in
+  let three = render [ worktree; build; workspace ] in
+  check_string "all conflict priorities are independent of caller order"
+    three (render [ workspace; build; worktree ]);
+  check_bool "wrong-workspace diagnosis has first claim" true
+    (contains ~needle:"MISMATCH local /other (r:retry)" three)
+
+let test_ansi_keeper_keys_remain_individually_droppable () =
+  (* The key:label/two-space grammar supplied by #35401, including colour
+     resets between a key and its colon and dimmed whole exit items. *)
+  let dim = "\x1b[2m" and accent = "\x1b[36m" and reset = "\x1b[0m" in
+  let hints = String.concat "  "
+    [ dim ^ "j/k:move" ^ reset
+    ; accent ^ "p" ^ reset ^ ":pause"
+    ; accent ^ "w" ^ reset ^ ":wake"
+    ; accent ^ "s" ^ reset ^ ":shutdown"
+    ; accent ^ "d" ^ reset ^ ":delete"
+    ; dim ^ "r:refresh" ^ reset
+    ; dim ^ "q:quit" ^ reset ] in
+  for max_cells = 60 to 150 do
+    let row =
+      Masc_tui_footer.line
+        ~status:[ Masc_tui_footer.Workspace_mismatch "/work/masc" ]
+        ~dim ~reset ~max_cells ~port:8935 ~hints ()
+    in
+    check_at_most_cells "coloured Keeper row respects cells" max_cells row;
+    check_bool "coloured exit is pinned" true (contains ~needle:"q:quit" row);
+    check_bool "some navigation survives alongside the conflict" true
+      (contains ~needle:"j/k:move" row);
+    if max_cells = 80 then
+      check_bool "individual later controls were omitted" false
+        (contains ~needle:":delete" row)
+  done
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "port closes every footer" `Quick
           test_port_closes_every_footer
+      ; Alcotest.test_case "conflict paths stay atomic through fitting" `Quick
+          test_conflict_paths_remain_atomic
+      ; Alcotest.test_case "actionable conflicts outrank provenance" `Quick
+          test_actionable_conflicts_outrank_worktree_provenance
+      ; Alcotest.test_case "ANSI Keeper controls drop individually and keep q" `Quick
+          test_ansi_keeper_keys_remain_individually_droppable
       ; Alcotest.test_case "extra facts precede port" `Quick
           test_extra_facts_precede_port
       ; Alcotest.test_case "build reads before the port" `Quick

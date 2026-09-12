@@ -540,6 +540,17 @@ let fetch_keeper_calls ~(host : string) ~(port : int) ~(keeper_name : string)
       | exception Yojson.Json_error detail ->
           Error ("tool calls were not JSON: " ^ detail))
 
+(** Fetch exact, previously retained bytes. This never talks to the browser. *)
+let fetch_browser_observation ~host ~port (reference : Tool_output.artifact_ref) =
+  match http_get ~host ~port ~path:("/api/v1/artifacts/" ^ reference.sha256) with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "Retained observation returned %d: %s" status body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_types.Browser_history.decode_artifact reference json
+       | exception Yojson.Json_error detail -> Error detail)
+
 (** Fetch the files a keeper wrote
     ([GET /api/v1/keepers/:name/file-changes]).
 

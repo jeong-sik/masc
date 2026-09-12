@@ -1834,6 +1834,7 @@ type keeper_call = {
   kc_tool : string;
   kc_input : string;
   kc_output : string option;
+  kc_artifact_refs : Tool_output.artifact_ref list;
   kc_success : bool;
   kc_duration_ms : float option;
   kc_turn : int option;
@@ -5223,6 +5224,14 @@ let decode_verification_snapshot json =
   Ok { vs_requests; vs_total }
 
 let decode_keeper_call json =
+  let* kc_artifact_refs = match member "artifact_refs" json with
+    | `Null -> Ok []
+    | `List refs -> decode_list "artifact_refs" (fun json ->
+        match Tool_output.normalized_artifact_ref_of_json json with
+        | Decoded_normalized_artifact_ref reference -> Ok reference
+        | Invalid_normalized_artifact_ref {detail} -> Error detail
+        | Not_normalized_artifact_ref -> Error "keeper call artifact reference is not normalized") refs
+    | _ -> Error "keeper call artifact_refs is not an array" in
   let* kc_at = require_float_field json "ts" in
   let* kc_tool = required_string_field json "tool" in
   let* keeper = required_string_field json "keeper" in
@@ -5318,6 +5327,7 @@ let decode_keeper_call json =
       ; kc_tool
       ; kc_input
       ; kc_output
+      ; kc_artifact_refs
       ; kc_success
       ; kc_duration_ms
       ; kc_turn

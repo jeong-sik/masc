@@ -350,6 +350,11 @@ type operation_wire_stream = Wire_started | Wire_terminal_sent
     settle hook after the child switch unwinds (#28811). *)
 
 module For_testing : sig
+  val operation_execution_of_outcome :
+    operation_state:(unit -> (Keeper_chat_operation.state, string) result) ->
+    pending_continuation:(unit -> (Keeper_direct_gate_continuation.pending option, string) result) ->
+    outcome:queued_turn_outcome option -> delivery:(unit, string) result ->
+    Keeper_owner.operation_execution
   val parse_request : string -> (keeper_chat_stream_request, string) result
 
   (** Reconnect dedup: [false] only for a seq the replay already wrote. *)

@@ -390,6 +390,182 @@ let test_rows_and_header_share_one_grid () =
     check string "header names the text from cell 22" "CLAIM" (String.sub header 22 5)
 ;;
 
+(* The row under the facts title. Each fact on this screen is written in one
+   place: the title carries the total and the filters, this row carries the
+   breakdown and the sort. The title is the row that runs out of width first --
+   at 140 columns against a live server it has 80 cells, and the clock and the
+   connection badge sit at its end. *)
+let facts_body_lines ?(cols = 120) ?(budget = 30) state =
+  let lines = ref [] in
+  let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
+  Render_memory.render_memory_facts_body ~cols ~budget state
+    ~push:keep
+    ~push_styled:(fun ~style:_ line -> keep line)
+    ~push_selected:keep
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  List.rev !lines
+
+let three_kinds_state ?(keeper = "alpha") () =
+  let state = make_state () in
+  let fact category claim : Decode.memory_fact =
+    { mf_claim = claim
+    ; mf_category = category
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-" ^ claim
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let ordinary : Decode.memory_ordinary_store =
+    { mos_revision = 1
+    ; mos_updated_at = 1000.0
+    ; mos_facts =
+        [ fact "architecture" "The renderer draws the board"
+        ; fact "persona" "Roger reads for the tester"
+        ]
+    }
+  in
+  let source : Decode.memory_source_store =
+    { mss_revision = 1
+    ; mss_updated_at = 1000.0
+    ; mss_facts =
+        [ { msf_claim = "Config points at runtime.toml"
+          ; msf_first_seen = 150.0
+          ; msf_path = "config/rt.toml"
+          ; msf_sha256 = "abc123sha"
+          }
+        ]
+    ; mss_invalidations =
+        [ { mi_source_path = "legacy_docs.md"
+          ; mi_invalidated_at = 300.0
+          ; mi_reason = "superseded"
+          }
+        ]
+    }
+  in
+  state.memory_facts
+  <- Some
+       { mfs_keeper = keeper
+       ; mfs_ordinary = Decode.Memory_store_present ordinary
+       ; mfs_source = Decode.Memory_store_present source
+       };
+  state.memory_facts_cursor <- 0;
+  state
+
+let stats_row lines =
+  match List.filter (contains "Sort [s]:") lines with
+  | [ row ] -> row
+  | [] -> fail "no row on the facts body names the sort"
+  | _ :: _ -> fail "the sort is named on more than one row"
+
+(* What the facts title actually has to spend. A terminal is not a surface: the
+   Activity pane keeps its own columns beside every surface that is not Activity,
+   and the frame spends its border and its padding on what is left. Counting the
+   terminal gave 136 at 140 columns; the title really has 80. *)
+let facts_title_cells ~terminal_cols =
+  let pane =
+    if Masc_tui_acting_pane.shown ~hidden:false ~cols:terminal_cols
+    then Masc_tui_acting_pane.pane_cols
+    else 0
+  in
+  Masc_tui_frame.inner_width ~cols:(terminal_cols - pane)
+
+let live_title ?(keeper = Some "*") ?(total = 2316) ?(filter_label = "All")
+    ?(query_label = "") () =
+  Render_memory.facts_title ~screen:" MASC Memory"
+    ~keeper:(Render_memory.facts_keeper_label keeper)
+    ~reading:(Render_memory.Facts_loaded { total; filter_label; query_label })
+    ~timestamp:"23:41:50" ~badge:"HTTP [refresh failed]"
+
+let test_the_title_and_the_row_each_say_one_fact () =
+  (* The two rows of the facts header, asserted together: the title carries the
+     total and the filters, the row under it the breakdown and the sort. Each
+     fact on one of them, never both. *)
+  let title = live_title () in
+  let rows = facts_body_lines (three_kinds_state ~keeper:"*" ()) in
+  check bool "the title counts what is listed" true (contains "2316 facts" title);
+  check bool "and reads the fleet view as words" true
+    (contains "all keepers" title);
+  check bool "the sort is not on the title" false (contains "Sort" title);
+  check bool "nor is the breakdown" false (contains " ord " title);
+  check bool "the clock survives to the end" true (contains "23:41:50" title);
+  check bool "and so does the connection badge" true
+    (contains "HTTP [refresh failed]" title);
+  check int "the title fits what a 140-column terminal leaves it" 0
+    (max 0 (Masc_tui_message_layout.display_width title
+            - facts_title_cells ~terminal_cols:140));
+  let row = stats_row rows in
+  check bool "the row carries the sort" true (contains "Sort [s]:" row);
+  check bool "and the total is not repeated on it" false (contains "facts" row)
+
+let test_a_read_in_flight_says_so_and_keeps_the_clock () =
+  let title =
+    Render_memory.facts_title ~screen:" MASC Memory"
+      ~keeper:(Render_memory.facts_keeper_label (Some "analyst"))
+      ~reading:(Render_memory.Facts_unread { reading = "(not loaded)" })
+      ~timestamp:"23:41:50"
+      ~badge:"HTTP [refresh failed]"
+  in
+  check bool "it carries the reading the caller handed it" true
+    (contains "(not loaded)" title);
+  check bool "it does not invent a total" false (contains "facts" title);
+  check bool "the clock and the badge are still last" true
+    (contains "23:41:50  HTTP [refresh failed]" title)
+
+let test_the_clock_and_the_badge_keep_a_fixed_tail () =
+  (* The title's last two fields are a fixed cost, so what the counts and the
+     filters may spend is the rest. 80 cells at a 140-column terminal, of which
+     the clock and the badge take 33 -- which is why the sort, spelled here as
+     well as on the row below, was what pushed them off the screen.
+
+     A filter long enough to pass that budget still cuts the tail, and the tail
+     is the badge. The title is not the one that has to carry the query: the body
+     draws it again under [Filter [/]:]. The remaining defect is #35575. *)
+  let tail = "  00:41:00  HTTP [refresh failed]" in
+  check int "the clock and the badge cost the same whatever is read" 33
+    (Masc_tui_message_layout.display_width tail);
+  let room = facts_title_cells ~terminal_cols:140 in
+  check int "a live fleet reading fits it" 0
+    (max 0 (Masc_tui_message_layout.display_width (live_title ()) - room));
+  check bool "and a query long enough does not" true
+    (Masc_tui_message_layout.display_width
+       (live_title ~query_label:" \xc2\xb7 filter \"a phrase long enough to crowd the row\"" ())
+     > room)
+
+let test_the_breakdown_and_the_sort_sit_on_one_row () =
+  let state = three_kinds_state () in
+  let lines = facts_body_lines state in
+  check string "the breakdown, then the sort that ordered it"
+    "  (2 ord \xc2\xb7 1 src \xc2\xb7 1 drop) \xc2\xb7 Sort [s]: Recency (Newest)"
+    (stats_row lines);
+  check bool "and the total the title already draws is not repeated" false
+    (List.exists (contains "Total:") lines)
+
+let test_the_breakdown_counts_the_rows_the_screen_lists () =
+  (* A filter narrows the rows; the title then says how many are left. A
+     breakdown taken from the store would sum to four under a title saying
+     one. *)
+  let state = three_kinds_state () in
+  state.search_last <- "Roger";
+  let lines = facts_body_lines state in
+  check string "one ordinary fact matched, and nothing else"
+    "  (1 ord \xc2\xb7 0 src \xc2\xb7 0 drop) \xc2\xb7 Sort [s]: Recency (Newest)"
+    (stats_row lines);
+  check int "which is the number the title counts" 1
+    (List.length (Types.memory_fact_rows state))
+
+let test_the_narrowest_body_spends_its_row_on_the_sort () =
+  (* One body row, and the sort is the one fact nothing else on screen carries:
+     not the title, not the category pills. So the first body row is the row
+     under the title, whatever else the fleet view could say about itself. *)
+  let state = three_kinds_state ~keeper:"*" () in
+  state.memory_facts_keeper <- Some "*";
+  let lines = facts_body_lines ~budget:1 state in
+  check string "the first body row is the one carrying the sort"
+    (stats_row lines) (List.hd lines)
+
 let test_fleet_fact_row_line () =
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
@@ -569,6 +745,20 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ] )
+    ; ( "one place per fact"
+      , [ test_case "the title and the row each say one fact" `Quick
+            test_the_title_and_the_row_each_say_one_fact
+        ; test_case "a read in flight says so and keeps the clock" `Quick
+            test_a_read_in_flight_says_so_and_keeps_the_clock
+        ; test_case "the clock and the badge keep a fixed tail" `Quick
+            test_the_clock_and_the_badge_keep_a_fixed_tail
+        ; test_case "the breakdown and the sort sit on one row" `Quick
+            test_the_breakdown_and_the_sort_sit_on_one_row
+        ; test_case "the breakdown counts the rows the screen lists" `Quick
+            test_the_breakdown_counts_the_rows_the_screen_lists
+        ; test_case "the narrowest body spends its row on the sort" `Quick
+            test_the_narrowest_body_spends_its_row_on_the_sort
         ] )
     ]
 ;;

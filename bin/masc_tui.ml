@@ -13489,8 +13489,22 @@ let main
      sends -- and the composer cannot tell "send this" from "start a new line".
      LF still submits below if some terminal sends it for Return, so this only
      ever adds a key. *)
+  (* Flow control off. IXON lives in c_iflag and ICANON in c_lflag, so raw
+     mode did not touch it: the tty was still answering Ctrl-S by stopping
+     output and Ctrl-Q by resuming it, and neither byte ever reached the
+     key layer. Measured on a pty with the TUI running: ixon=True.
+
+     What an operator saw was small, because IXANY is on too -- the next key
+     they pressed released it, so the screen stalled rather than froze. What
+     it cost was a key: Ctrl-S could not be bound to anything, which is the
+     key a reader reaches for to hold a moving surface still. *)
   let new_term =
-    { old_term with Unix.c_icanon = false; c_echo = false; c_icrnl = false }
+    { old_term with
+      Unix.c_icanon = false
+    ; c_echo = false
+    ; c_icrnl = false
+    ; c_ixon = false
+    }
   in
 
   let terminal_profile = Terminal_profile.detect ~getenv:Sys.getenv_opt in

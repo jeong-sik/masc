@@ -50,6 +50,8 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+type output_contract = Provider_default | Tool_verdict
+
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
@@ -962,6 +964,7 @@ let run_named
     ?on_runtime_retry_deferred
     ?on_runtime_attempt_error
     ?on_deferred_runtime_consumed
+    ?(output_contract = Provider_default)
     ?provider_config_transform
     ?sw
     ?net
@@ -1684,6 +1687,13 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed
       | Ok provider_config ->
+        let provider_config =
+          match output_contract with
+          | Provider_default -> provider_config
+          | Tool_verdict ->
+            Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
+              provider_config
+        in
         (match Keeper_required_tools.check_provider
             (match recovery_view with Some _ -> Keeper_required_tools.Required | None -> tool_requirement)
             ~runtime_id:attempt_runtime_id provider_config with

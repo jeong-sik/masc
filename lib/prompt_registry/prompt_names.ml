@@ -7,6 +7,7 @@
 let keeper = "keeper"
 let judge_board = "judge.board"
 let judge_effect = "judge.effect"
+let verification_system = "verification.system"
 let verification = "verification"
 let goal_verification_proof = "goal_verification.proof"
 let goal_verification_lookup = "goal_verification.lookup"

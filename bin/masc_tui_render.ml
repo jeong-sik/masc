@@ -2142,10 +2142,12 @@ let render_overview (state : state) =
     let task_scroll_offset =
       max 0 (state.task_cursor - row_budget.task_rows + 1)
     in
+    let tasks_window = Rows.of_list ~first:task_scroll_offset ~height:row_budget.task_rows state.tasks in
     for i = 0 to row_budget.task_rows - 1 do
       let idx = i + task_scroll_offset in
-      if idx < List.length state.tasks then begin
-        let t = List.nth state.tasks idx in
+      match Rows.at tasks_window idx with
+      | None -> ()
+      | Some t -> begin
         let is_selected = state.task_focus = Right_pane && idx = state.task_cursor in
         if is_selected then
           box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ task_line t))
@@ -3776,10 +3778,12 @@ let render_board_list (state : state) =
     (* One clock read for the whole page, so two rows drawn in the same frame
        cannot report ages a tick apart. *)
     let now_unix = Unix.gettimeofday () in
+    let board_posts_window = Rows.of_list ~first:scroll_offset ~height:content_height state.board_posts in
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
-      if idx < count then begin
-        let p = List.nth state.board_posts idx in
+      match Rows.at board_posts_window idx with
+      | None -> box_empty buf cols
+      | Some p -> begin
         let is_selected = idx = state.board_cursor in
         (* The age is since the post or one of its comments last moved. A
            board's list had no timestamp at all, so "what is still alive" --
@@ -3831,8 +3835,7 @@ let render_board_list (state : state) =
           box_line_selected buf cols (Masc_tui_theme.strip_sgr content)
         else
           box_line buf cols content
-      end else
-        box_empty buf cols
+      end
     done
   end;
 
@@ -4655,10 +4658,12 @@ let render_planning_list (state : state) =
              state.planning_cursor - content_height + 1
            else 0
          in
+         let goals_window = Rows.of_list ~first:scroll_offset ~height:content_height goals in
          for i = 0 to content_height - 1 do
            let idx = i + scroll_offset in
-           if idx < count then begin
-             let g = List.nth goals idx in
+           match Rows.at goals_window idx with
+           | None -> box_empty buf cols
+           | Some g -> begin
              let is_selected = idx = state.planning_cursor in
              let status_color = planning_phase_color g.pg_phase in
              let status_label = planning_phase_label g.pg_phase in
@@ -4745,8 +4750,7 @@ let render_planning_list (state : state) =
                box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
              else
                box_line buf cols line
-           end else
-             box_empty buf cols
+           end
          done;
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
@@ -5209,10 +5213,12 @@ let render_schedule_list (state : state) =
                state.schedule_cursor - content_height + 1
              else 0
            in
+           let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
-             if idx < count then begin
-               let row = List.nth snapshot.scs_rows idx in
+             match Rows.at scs_rows_window idx with
+             | None -> box_empty buf cols
+             | Some row -> begin
                let is_selected = idx = state.schedule_cursor in
                let due =
                  match row.sch_due_at_iso with
@@ -5269,7 +5275,6 @@ let render_schedule_list (state : state) =
                in
                box_line buf cols content
              end
-             else box_empty buf cols
            done;
            (match List.nth_opt snapshot.scs_rows state.schedule_cursor with
             | None ->

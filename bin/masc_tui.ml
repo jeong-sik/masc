@@ -4271,19 +4271,23 @@ let launch_browser_lane state ~mailbox operation =
   match state.browser_lane with
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
-      (* Scene geometry belongs to its observation. Browser effects and fresh
+      (* Scene geometry belongs to its observation. Browser effects and explicit
          reads withdraw it before dispatch; a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
          Scene_click retains its exact reference in [operation], and the
-         matching completion can install the newly observed scene. *)
+         matching completion can install the newly observed scene. A cadence
+         refresh keeps its frame visible so periodic observations do not erase
+         the operator's reading position. Operator input supersedes a cadence
+         result; effects still use the observed document/URL checks. Failed
+         refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
@@ -4292,6 +4296,8 @@ let launch_browser_lane state ~mailbox operation =
       let generation = state.browser_lane_generation in
       let image_generation = state.image_request_generation in
       state.browser_lane <- Some { view with load = Loading (generation, operation);
+        read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4305,13 +4311,16 @@ let launch_browser_lane state ~mailbox operation =
         match operation with
         | Discover _ -> Browser_lane_clients_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
-        | Read -> Browser_lane_loaded
+        | Read | Read_refresh -> Browser_lane_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
         | Scene_read tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ()))
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
+              ~host ~port ~view ~tab_id ~scene_view ~scope))
         | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scope:target ~host ~port ~view ~tab_id ()))
@@ -15613,6 +15622,10 @@ and is loaded on demand through keeper_skill.
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
         | None -> false
       in
+      (match key, browser_lane_on_screen state with
+       | Some _, Some view ->
+           state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
+       | None, _ | Some _, None -> ());
       (match key with
        | Some _ when composer_claimed -> ()
        | Some key when Option.is_some state.lane_addons ->
@@ -16973,7 +16986,7 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
-                      | Some _, _ -> state.browser_lane <- Some {view with scene = None; scroll = 0}
+                      | Some _, _ -> read {view with scene = None; scroll = 0}
                       | None, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
                       | None, None -> ())
                  | "r" ->
@@ -21287,6 +21300,9 @@ and is loaded on demand through keeper_skill.
          | Connectors ->
              (match browser_lane_on_screen state with
               | None -> launch_connectors_load state ~mailbox:async_messages
+              | Some view when not state.image_open ->
+                  Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                    (Browser_lane_view.cadence_operation view)
               | Some _ -> ())
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps

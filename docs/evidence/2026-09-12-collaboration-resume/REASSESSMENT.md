@@ -2,7 +2,16 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
-## 현재 판단과 다음 작업 (2026-09-12 23:52 KST)
+## 현재 구현 진척 (2026-09-13 00:18 KST)
+
+- Chat 실패의 구체적인 원인을 실제 API 원문에서 확인했다. 자율턴428의 raw activity는 Edit2건의 이름·시간·성공만 전달하고 canonical execution_id를 버렸다. 원장에는 실행 ID와 전후 원본이 보존돼 있었다. 단순 접힘 재시도를 중단하고 원천 projection을 수정했다.
+- 별도 main 기반 PR #35547, head `ae1290d076800ad02e12bd2f96926acfcc9ae0f7`를 제출했다. exact raw start sequence와 invocation turn/planned_index를 보존하고 TurnRecord가 선언한 실행 ID를 원장 전체에서 조회·검증해 Chat에 연결한다. 같은 provider ID의 병렬 호출·역순 완료·중복 시작·중복 원장 ID가 서로 다른 증거로 오귀속되지 않도록 수정했다. Raw reasoning·도구 입력/결과·provider ID는 이 Chat projection에 싣지 않는다.
+- 파싱 검사, DET gate, 자율 Edit를 실제로 펼치는 컴포넌트 테스트(1 passed/165 skipped)와 독립 리뷰를 통과했다. Test34701476206은 exact head에서 진행 중이며 네이티브 통과·설치·실제 브라우저 성공은 아직 아니다. 기존 설치본은 aad94다. 최근200건 밖 출력 hydration은 별도 남은 문제이며, 다음 의존 worktree `/tmp/masc-autonomous-chat-output-lookup-20260913`를 해당 head에서 준비했다.
+- Board/Fusion #35536은 `ebab73c4`로 pagination과 첫 타입 오류를 수정·push했고 lint는 통과했다. 하지만 native Test34700788141이 추가 테스트 fixture의 `origin.turn_ref` 문자열/Ids.Turn_ref.t 타입 불일치로 실패했다. 이 오류도 후속 수정 대상이며 검증 도구 완료로 세지 않는다. MP4 #35532의 PR-check FFmpeg 의존성 수정은 병렬 대응 중이다.
+
+전체18개 목표는 진행 중이다. 원래 전시·연작의 사람 확인, task004 독립 재검증, 장기runtime·통합IDE·기억 품질 조건은 유지한다. 관련 소스·실측 기록은 #35547의 `docs/evidence/2026-09-13-autonomous-chat-execution/`에 있다.
+
+## 이전 판단과 다음 작업 (2026-09-12 23:52 KST)
 
 이번 요청은 기존 목표·실제 진행·다음 방향의 재점검이다. 루트 체크아웃은 읽기만 했고, 증거와 검사 스크립트는 기존 worktree `/tmp/masc-collaboration-resume-20260912`에서 정리했다. 아래 최신 판단이 이전 시점의 상태 설명보다 우선한다.
 

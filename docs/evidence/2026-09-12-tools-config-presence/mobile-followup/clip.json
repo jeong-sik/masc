@@ -1,0 +1,17 @@
+{
+  "article": {
+    "left": 29.5,
+    "top": 365.734375,
+    "right": 360.5,
+    "bottom": 521.390625
+  },
+  "intersection": {
+    "left": 29.5,
+    "top": 365.734375,
+    "right": 360.5,
+    "bottom": 521.390625
+  },
+  "area": 51522.21875,
+  "centerHit": true,
+  "text": "masc_goal_list\nList shared planning goals, optionally filtered by explicit lifecycle phase.\npublic_mcp\nspawned_agent_mcp\nkeeper\ndefault\nactive\nreal\n카테고리: 미분류 (서버 미지정)\n직접 호출: 허용\n권한: 없음"
+}

@@ -169,6 +169,12 @@ val tmp_dir : base_path:string -> string
 val locks_dir : base_path:string -> string
 (** [<base_path>/.masc/locks/]. Process and build lock files. *)
 
+val constitution_dir : base_path:string -> string
+(** [<base_path>/.masc/constitution/]. Ledger of the articles this world's
+    keepers ratified for themselves (RFC-0442). One world's norms never reach
+    another, so the path is base-path scoped like every other state directory
+    here. *)
+
 val run_ssh_dir : base_path:string -> string
 (** [<base_path>/.masc/run/ssh/]. SSH ControlMaster sockets for the remote
     execution lane. *)

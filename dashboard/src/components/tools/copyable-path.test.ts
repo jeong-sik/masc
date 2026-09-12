@@ -15,6 +15,15 @@ describe('copyablePath (pure)', () => {
     expect(copyablePath({ path: '' })).toBe('')
   })
 
+  it('absent path → null, kept distinct from the empty string', () => {
+    // The server sends path: null when its installed binary sits outside a
+    // repository (docs/evidence/2026-09-12-tools-config-presence). Folding
+    // that into '' would make "there is no path" and "the path is empty"
+    // the same value, and the row decides from this whether to offer a copy
+    // button at all -- an empty string would offer one that copies nothing.
+    expect(copyablePath({ path: null })).toBeNull()
+  })
+
   it('preserves trailing slashes — directory semantics matter to operators', () => {
     // Regression guard: a future \"cleanup\" that trims trailing slashes
     // would break operators who rely on \"/var/log/\" meaning a directory

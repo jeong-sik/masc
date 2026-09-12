@@ -20,6 +20,8 @@ let of_list ~first ~height rows =
     { first; rows = Array.of_list (List.rev (walk 0 0 [] rows)) }
   end
 
+let of_array rows = { first = 0; rows }
+
 let at window index =
   let offset = index - window.first in
   if offset >= 0 && offset < Array.length window.rows then

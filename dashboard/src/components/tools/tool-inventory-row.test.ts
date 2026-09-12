@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
 import { render, h } from 'preact'
+import { act } from 'preact/test-utils'
 import { InventoryRow } from './tool-inventory-row'
 import type { DashboardToolInventoryItem } from '../../api'
 
@@ -24,6 +25,33 @@ function makeItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dashboar
 }
 
 describe('InventoryRow', () => {
+  it('expands and collapses the exact description in the same card', () => {
+    const description = '첫 번째 줄: 원문입니다.\n\n  들여쓰기와 공백도 유지합니다.\n마지막 조건까지 확인하세요.'
+    const container = document.createElement('div')
+    render(h(InventoryRow, { item: makeItem({ description }) }), container)
+    const button = container.querySelector('button')!
+    const content = container.querySelector(`[id="${button.getAttribute('aria-controls')}"]`)!
+    expect(content.textContent).toBe(description)
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(content.classList.contains('tool-inventory-desc')).toBe(true)
+    act(() => button.click())
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(button.getAttribute('aria-label')).toBe('Test Tool 설명 접기')
+    expect(content.classList.contains('tool-inventory-desc')).toBe(false)
+    expect(content.classList.contains('whitespace-pre-wrap')).toBe(true)
+    expect(content.textContent).toBe(description)
+    expect(container.querySelectorAll('article')).toHaveLength(1)
+    act(() => button.click())
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(content.classList.contains('tool-inventory-desc')).toBe(true)
+  })
+
+  it('does not offer an empty description to expand', () => {
+    const container = document.createElement('div')
+    render(h(InventoryRow, { item: makeItem({ description: '' }) }), container)
+    expect(container.querySelector('button')).toBeNull()
+  })
+
   it('renders name and description', () => {
     const container = document.createElement('div')
     render(h(InventoryRow, { item: makeItem() }), container)

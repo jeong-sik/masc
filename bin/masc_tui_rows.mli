@@ -27,6 +27,13 @@ val of_list : first:int -> height:int -> 'a list -> 'a t
     as no rows: both are read off state a keypress moved, and a window is not
     where a missing clamp should first be noticed. *)
 
+val of_array : 'a array -> 'a t
+(** Every row, as a window over the whole thing. For a surface that already
+    holds its rows in an array and asks for scattered indices rather than a
+    run -- the Code diff pane resolves a drawn row's colouring by that row's
+    line number in the file -- so that it reads rows through [at] like every
+    other listing. The array is shared, not copied. *)
+
 val at : 'a t -> int -> 'a option
 (** The row at that index {i in the whole list}. [None] outside the window,
     which is the blank row the listings already draw past the end -- and is

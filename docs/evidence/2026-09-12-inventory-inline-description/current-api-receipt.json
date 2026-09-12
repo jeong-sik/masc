@@ -1,0 +1,79 @@
+{
+  "observed_at": "2026-09-12T10:00:11.617Z",
+  "backend_build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "83afd78483aec46789193079f77d6660422850d2",
+    "commit_source": "embedded",
+    "binary_commit": "83afd78483aec46789193079f77d6660422850d2",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "c8323a54a6a212468a03bd2ea3610ad6ebf0e67a32ffd5a43b1870322917cfb4",
+    "binary_commit_unix_ts": 1789205192,
+    "binary_commit_age_seconds": 2018,
+    "executable_path": "/private/tmp/masc-peer-runtime-83afd/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-peer-runtime-83afd",
+    "runtime_instance_id": "01a094fa-ef72-7000-a1d9-eacd6cff9f30",
+    "started_at": "2026-09-12T09:37:48Z",
+    "uptime_seconds": 1341
+  },
+  "frontend_worktree": "/tmp/masc-inventory-inline-description",
+  "frontend_base": "4fa05d6545",
+  "preview_composition": [
+    "inline-description working diff",
+    "PR35377 source only: config-resolution-panel.ts and dashboard-execution.ts from7bbb65db2d"
+  ],
+  "tool": {
+    "name": "masc_board_list",
+    "description": "List MASC internal board posts and return post_id values for follow-up masc_board_post_get, masc_board_comment, or masc…."
+  },
+  "checks": [
+    "keyboard_enter_expands",
+    "exact_full_description",
+    "no_clamp_or_vertical_overflow_when_expanded",
+    "keyboard_space_collapses",
+    "pointer_click_expands",
+    "more_than_40_inventory_rows_measured_without_overlap"
+  ],
+  "expanded": {
+    "height": 43.96875,
+    "clientHeight": 44,
+    "scrollHeight": 44,
+    "width": 293,
+    "whiteSpace": "pre-wrap",
+    "lineClamp": "none"
+  },
+  "adjacent": [
+    {
+      "top": 465.96875,
+      "bottom": 622.59375,
+      "height": 156.625
+    },
+    {
+      "top": 622.59375,
+      "bottom": 779.21875,
+      "height": 156.625
+    },
+    {
+      "top": 779.21875,
+      "bottom": 935.84375,
+      "height": 156.625
+    }
+  ],
+  "errors": [],
+  "blocked": [
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "method": "POST",
+      "path": "/mcp"
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/dashboard/logs/tool-host-failures"
+    }
+  ],
+  "deployed": false
+}

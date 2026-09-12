@@ -2,6 +2,7 @@
 import argparse
 import base64
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,10 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    'presentation_fixture', ROOT / 'scripts/ci/presentation_fixture.py')
+FIXTURE = importlib.util.module_from_spec(FIXTURE_SPEC)
+FIXTURE_SPEC.loader.exec_module(FIXTURE)
 BINARY = None
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -31,12 +36,17 @@ class OperatorInspection(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.base = self.root / 'workspace'
         self.base.mkdir()
+        # This is the actual Task store location (Workspace_utils.backlog_path).
+        backlog = self.base / '.masc/tasks/backlog.json'
+        backlog.parent.mkdir(parents=True)
+        backlog.write_text('{"tasks":[],"last_updated":"inspection-sentinel"}\n')
 
     def invoke(self, path, *, base=None, env=None, expected=0):
         base = base or self.base
         original = path.read_bytes() if path.is_file() else None
         state = base / '.masc'
-        watched = ['tasks', 'goals.json', 'verification-runs.jsonl', 'goal-verification-runs.jsonl', 'config']
+        watched = ['tasks/backlog.json', 'tasks', 'tasks-archive.json', 'goals.json',
+                   'verification-runs.jsonl', 'goal-verification-runs.jsonl', 'config']
         def snapshot():
             files = []
             for name in watched:
@@ -96,7 +106,7 @@ class OperatorInspection(unittest.TestCase):
         self.assertFalse(data['visual_input'])
 
     def test_pptx_uses_managed_parser_and_returns_every_slide(self):
-        base = Path(tempfile.gettempdir()) / 'masc-presentation-verifier'
+        base = FIXTURE.read_base()
         path = self.root / 'original.pptx'
         path.write_bytes((base / 'inputs/presentation.pptx').read_bytes())
         expected = json.loads((base / 'inputs/expected.json').read_text())

@@ -4,6 +4,7 @@ Run explicitly by CI; product Read never installs software. All files belong to
 the runner's temporary directory, including the python-pptx installation.
 """
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -13,19 +14,29 @@ import zipfile
 
 
 def main():
-    # RUNNER_TEMP can be inside HOME, where native workspace tests reject writes.
-    # Match Filename.get_temp_dir_name() in the OCaml consumer.
-    base = Path(tempfile.gettempdir()) / "masc-presentation-verifier"
+    contract_spec = importlib.util.spec_from_file_location(
+        "presentation_fixture", Path(__file__).with_name("presentation_fixture.py"))
+    contract = importlib.util.module_from_spec(contract_spec)
+    contract_spec.loader.exec_module(contract)
+    contract.descriptor_path()  # Fail clearly outside CI before installing anything.
+    if len(sys.argv) == 1:
+        # RUNNER_TEMP can be inside HOME; only the descriptor belongs there.
+        base = (Path(tempfile.gettempdir()) / "masc-presentation-verifier").resolve()
+    elif len(sys.argv) == 3 and sys.argv[1] == "generate":
+        base = Path(sys.argv[2])
+    else:
+        raise SystemExit("expected no arguments, or generate BASE under the managed interpreter")
+    if not base.is_absolute() or base.resolve().is_relative_to(Path.home().resolve()):
+        raise SystemExit("presentation fixture workspace must be absolute and outside HOME")
     environment = base / ".masc/runtime-tools/presentation"
     python = environment / "bin/python3"
     if len(sys.argv) == 1:
         subprocess.run([sys.executable, "-I", "-m", "venv", "--copies", str(environment)], check=True)
         subprocess.run([str(python), "-I", "-m", "pip", "--isolated", "install",
                         "--require-virtualenv", "--only-binary=:all:", "python-pptx"], check=True)
-        subprocess.run([str(python), "-I", "-B", str(Path(__file__).resolve()), "generate"], check=True)
+        subprocess.run([str(python), "-I", "-B", str(Path(__file__).resolve()), "generate", str(base)], check=True)
+        contract.publish(base)
         return
-    if sys.argv[1:] != ["generate"]:
-        raise SystemExit("expected no arguments, or generate under the managed interpreter")
     from pptx import Presentation
     from pptx.util import Inches
     deck = Presentation()

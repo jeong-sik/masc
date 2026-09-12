@@ -6,12 +6,29 @@ let read path = In_channel.with_open_bin path In_channel.input_all
 let write path bytes = Out_channel.with_open_bin path (fun out -> output_string out bytes)
 let sha bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
 
+let fixture_base () =
+  let runner = match Sys.getenv_opt "RUNNER_TEMP" with
+    | Some path when path <> "" && not (Filename.is_relative path) -> path
+    | _ -> Alcotest.fail "presentation fixtures require an absolute RUNNER_TEMP containing the prepared descriptor" in
+  let descriptor = Yojson.Safe.from_file (Filename.concat runner "masc-presentation-verifier.json") in
+  match descriptor with
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["base_path"; "schema"] ->
+    (match List.assoc "schema" fields, List.assoc "base_path" fields with
+     | `String "masc.presentation_fixture.v1", `String base
+         when base <> "" && not (Filename.is_relative base) && Sys.is_directory base
+              && String.equal base (Unix.realpath base) ->
+       let home = Unix.realpath (Sys.getenv "HOME") in
+       if String.equal base home || String.starts_with ~prefix:(home ^ "/") base then
+         Alcotest.fail "presentation fixture workspace must be outside HOME";
+       base
+     | _ -> Alcotest.fail "invalid presentation fixture descriptor schema or canonical base_path")
+  | _ -> Alcotest.fail "invalid presentation fixture descriptor fields"
+
 let test_original_presentation () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs env#fs;
   Masc_test_deps.init_eio_clock ~sw env;
-  let temporary = Filename.get_temp_dir_name () in
-  let base = Filename.concat temporary "masc-presentation-verifier" in
+  let base = fixture_base () in
   let inputs = Filename.concat base "inputs" in
   let original = read (Filename.concat inputs "presentation.pptx") in
   let expected = Yojson.Safe.from_string (read (Filename.concat inputs "expected.json")) in

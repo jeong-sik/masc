@@ -21,7 +21,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
             if not (String.equal name tool.name) then None else
             let result = tool.call ~call_id arguments in
             Some { Runtime_official_client_mcp_http.outcome =
-              { Runtime_official_client_mcp.success = result.success; content = result.content };
+              { Runtime_official_client_mcp.success = result.success; content = result.content; content_blocks = result.content_blocks };
               after_response_sent = (fun () -> ()) }) () in
         match Runtime_antigravity_home.publish_mcp_config home
           (Runtime_official_client_mcp_http.mcp_config_json bridge) with

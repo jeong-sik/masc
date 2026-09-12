@@ -6,6 +6,7 @@ type error =
 type tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   }
 
 type dispatch =
@@ -194,17 +195,19 @@ let protocol_version params =
 ;;
 
 let tool_result_json ~id (result : tool_result) =
+  let success, content =
+    match Runtime_official_client_tool.mcp_content
+      ~content:result.content ~content_blocks:result.content_blocks with
+    | Ok content -> result.success, content
+    | Error detail -> false,
+        [ `Assoc [ "type", `String "text"; "text", `String detail ]
+        ; `Assoc [ "type", `String "text"; "text", `String result.content ] ]
+  in
   Mcp_transport_protocol.make_response
     ~id
     (`Assoc
-       ([ ( "content"
-          , `List
-              [ `Assoc
-                  [ "type", `String "text"
-                  ; "text", `String result.content
-                  ] ] )
-        ]
-        @ if result.success then [] else [ "isError", `Bool true ]))
+       ([ "content", `List content ]
+        @ if success then [] else [ "isError", `Bool true ]))
 ;;
 
 let tools_call ~id ~params ~call_tool =

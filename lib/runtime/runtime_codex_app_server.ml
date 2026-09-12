@@ -118,6 +118,7 @@ type host_stop = Runtime_official_client_tool.host_stop =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
   }
 
@@ -472,20 +473,19 @@ let find_dynamic_tool tools name =
 ;;
 
 let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
+  let success, content_items =
+    match Runtime_official_client_tool.codex_content_items
+      ~content:result.content ~content_blocks:result.content_blocks with
+    | Ok items -> result.success, items
+    | Error detail -> false,
+        [ `Assoc [ "type", `String "inputText"; "text", `String detail ]
+        ; `Assoc [ "type", `String "inputText"; "text", `String result.content ] ]
+  in
   io.send
     (`Assoc
        [ "id", id
-       ; ( "result"
-         , `Assoc
-             [ "success", `Bool result.success
-             ; ( "contentItems"
-               , `List
-                   [ `Assoc
-                       [ "type", `String "inputText"
-                       ; "text", `String result.content
-                       ]
-                   ] )
-             ] )
+       ; "result", `Assoc
+           [ "success", `Bool success; "contentItems", `List content_items ]
        ])
 ;;
 
@@ -533,7 +533,7 @@ let handle_dynamic_tool_call io ~tools ~thread_id ~turn_id ~tool_call_count
             (Printexc.to_string exn);
           { success = false
           ; content = "dynamic tool handler raised"
-          ; abort_turn = None
+          ; content_blocks = None; abort_turn = None
           }
       in
       incr tool_call_count;

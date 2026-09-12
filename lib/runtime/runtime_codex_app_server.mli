@@ -123,6 +123,7 @@ type host_stop = Runtime_official_client_tool.host_stop =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
   }
 

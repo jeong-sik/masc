@@ -375,6 +375,35 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+### Speaking without touching the keyboard
+
+`Ctrl-Y` records one sentence and appends the transcript to the draft. The
+mode that lets a conversation run is a different key:
+
+| Key | What it does |
+|---|---|
+| `Ctrl-Y` | start a capture; press again to stop and keep what was said |
+| `Ctrl-A` | continuous mode on/off — after each capture settles, the next one starts |
+| `Esc` | discard a running capture (the draft keeps what was there before) |
+
+Continuous mode measures the room's noise floor **once** when it turns on,
+which is what keeps the gap between sentences short enough to speak across; it
+measures again if the mode is turned off and on in a different room. Silence
+re-arms too, so a pause longer than the trailing-silence window does not end
+the mode. Only the key that started it ends it.
+
+Both are control codes rather than letters because every printable key in a
+focused composer row is draft text.
+
+That still leaves an Enter per sentence. `[tui] voice_send_on_stop = true`
+removes it: ending a capture hands the draft to the same send path Enter uses.
+Off by default — the draft is also where a spoken half-sentence waits for
+typing, so sending without a confirmation step is something to ask for.
+
+Note the section: `[tui]`, not `[voice.stt]`. A `send_on_stop` under
+`[voice.stt]` parses, is published by `GET /api/v1/voice/config`, and is read
+by nothing — issue #35670.
+
 ## External devices
 
 Any device that can make two HTTP calls can speak to a keeper. No MASC change

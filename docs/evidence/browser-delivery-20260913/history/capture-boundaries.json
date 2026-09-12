@@ -1,0 +1,26 @@
+[
+  {
+    "observation": 0,
+    "partial_bytes": 45458,
+    "completed_frame_bytes": 50113,
+    "terminator_hex": "1b5b3f3768"
+  },
+  {
+    "observation": 1,
+    "partial_bytes": 64418,
+    "completed_frame_bytes": 69073,
+    "terminator_hex": "1b5b3f3768"
+  },
+  {
+    "observation": 2,
+    "partial_bytes": 85012,
+    "completed_frame_bytes": 89699,
+    "terminator_hex": "1b5b3f3768"
+  },
+  {
+    "observation": 3,
+    "partial_bytes": 105302,
+    "completed_frame_bytes": 109877,
+    "terminator_hex": "1b5b3f3768"
+  }
+]

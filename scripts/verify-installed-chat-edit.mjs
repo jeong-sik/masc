@@ -138,7 +138,6 @@ try {
   await page.getByTestId('tweaks-panel-toggle').click()
   const id = expected.execution_id
   const row = page.locator(`[data-chat-tool-execution-id="${id}"], [data-chat-trace-execution-id="${id}"]`)
-    .filter({ has: page.locator('[data-edit-snapshot-view]') })
   // Each autonomous group keeps its own closed state independently of Tweaks.
   // Walk the actual loaded history controls until the target is rendered.
   while (await row.count() === 0) {
@@ -152,6 +151,12 @@ try {
   }
   await row.first().waitFor({ timeout: 45000 })
   assert.equal(await row.count(), 1, 'The real execution must join to one rendered Edit record')
+  // Historical output loads only when its execution row enters the viewport.
+  // Find that identity first; waiting for a snapshot child before scrolling
+  // would wait on the very lookup that bringing the row into view triggers.
+  await row.scrollIntoViewIfNeeded()
+  navigation.push({ action: 'reveal_execution', execution_id: id })
+  await row.locator('[data-edit-snapshot-view]').waitFor({ timeout: 45000 })
   await row.getByRole('button', { name: '편집 전후 원본 보기', exact: true }).click()
   const diff = row.getByLabel('편집 원본의 Unified diff', { exact: true })
   await diff.waitFor({ timeout: 45000 })

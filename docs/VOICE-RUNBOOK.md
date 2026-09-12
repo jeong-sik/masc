@@ -486,6 +486,30 @@ A TTS probe with no `"message"` is a 400 that says so rather than a probe of
 an empty sentence, and an empty STT body is a 400 rather than a transcript of
 silence: those two are different answers and the report keeps them apart.
 
+### Asking an endpoint which voices it has
+
+```
+curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/voices \
+  -H "authorization: Bearer $MASC_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"kind":"macos_say"}'
+```
+
+```json
+{"voices":[{"id":"Albert","name":"Albert","language":"en_US"},
+           {"id":"Yuna","name":"Yuna","language":"ko_KR"}]}
+```
+
+184 rows on a stock macOS 26, nine of them `ko_KR`. For `elevenlabs_direct`
+pass `{"kind":"elevenlabs_direct","api_key_env":"ELEVENLABS_API_KEY"}` — the
+**name** of the variable, never the value, the same rule the setup routes
+follow because `runtime.toml` is committed.
+
+The request carries no address and no command path. A route cannot check
+where one points, so the read uses the kind's own destination; asking for a
+kind that publishes no catalogue is refused by name rather than answered with
+an empty list, which would read as "this endpoint has no voices".
+
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.

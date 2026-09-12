@@ -12,7 +12,7 @@ module Surface = Standalone_skill_tools
 let get = function Ok value -> value | Error _ -> fail "fixture operation failed"
 let unwrap = function Ok value -> value | Error message -> fail message
 let member = Yojson.Safe.Util.member
-let string key value = member key value |> Yojson.Safe.Util.to_string
+let json_string key value = member key value |> Yojson.Safe.Util.to_string
 let values key value = member key value |> Yojson.Safe.Util.to_list
 let digest bytes = Digestif.SHA256.(digest_string bytes |> to_hex)
 let read path = In_channel.with_open_bin path In_channel.input_all
@@ -110,7 +110,7 @@ let checked_read tool id input expected =
   | Ok (output : Agent_core.Llm_provider.Types.tool_output) ->
       check string "exact resource/body bytes" expected output.content;
       let metadata = match output._meta with Some value -> value | None -> fail "Skill read metadata missing" in
-      check string "actual read SHA-256" (digest expected) (string "sha256" metadata);
+      check string "actual read SHA-256" (digest expected) (json_string "sha256" metadata);
       check int "actual read byte count" (String.length expected)
         (member "bytes" metadata |> Yojson.Safe.Util.to_int)
 let with_file reference file =
@@ -122,11 +122,11 @@ let await clock predicate =
   loop ()
 let installed fixture =
   inspect fixture |> values "instances"
-  |> List.find (fun row -> member "configuration" row |> string "id" = "msx-installation")
+  |> List.find (fun row -> member "configuration" row |> json_string "id" = "msx-installation")
 let await_observer clock fixture =
   await clock (fun () -> installed fixture |> member "observation_seq" |> Yojson.Safe.Util.to_int |> fun seq -> seq > 0)
 let detach clock fixture =
-  let id = installed fixture |> string "instance_id" in
+  let id = installed fixture |> json_string "instance_id" in
   ignore (dispatch fixture Lane.Detach ["instance_id", `String id]);
   await clock (fun () -> !(fixture.stops) = 1);
   await clock (fun () -> absent (snapshot fixture) "msx-observe")

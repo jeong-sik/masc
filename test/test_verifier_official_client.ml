@@ -1,4 +1,4 @@
-(* Actual managed verifier -> named-runtime -> Codex app-server process boundary.
+(* Actual managed verifier -> named-runtime -> Claude Code process boundary.
    The fixture supplies model responses, never the reviewer callback. This proves
    typed verdict delivery, initial images and actual Read image tool results, not model judgement quality. *)
 open Alcotest
@@ -11,55 +11,54 @@ let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBA
 
 let fixture_script root ~mode =
   let capture = Filename.concat root (mode ^ "-requests.jsonl") in
-  let path = Filename.concat root (mode ^ "-codex") in
+  let path = Filename.concat root (mode ^ "-claude") in
   write path (Printf.sprintf {|#!/usr/bin/env python3
-import json, sys
-if '--masc-warmup' in sys.argv:
-    sys.exit(0)
+import json, os, sys
 capture = %S
 mode = %S
-pending = []
+def record(value):
+    with open(capture, 'a') as out:
+        out.write(json.dumps(value)+'\n')
 def emit(value):
     print(json.dumps(value), flush=True)
-def finish():
-    item = {'type':'agentMessage','id':'final','text':'APPROVE (free text is not a verdict)','phase':'final_answer'}
-    emit({'method':'item/completed','params':{'threadId':'thread-1','turnId':'turn-1','completedAtMs':1,'item':item}})
-    emit({'method':'turn/completed','params':{'threadId':'thread-1','turn':{'id':'turn-1','items':[item],'status':'completed'}}})
-def advance():
-    if pending:
-        name, args, index = pending.pop(0)
-        emit({'id':'call-'+str(index),'method':'item/tool/call','params':{'threadId':'thread-1','turnId':'turn-1','callId':'call-'+str(index),'tool':name,'namespace':None,'arguments':args}})
-    else:
-        finish()
+def receive():
+    value = json.loads(sys.stdin.readline())
+    record(value)
+    return value
+if 'auth' in sys.argv:
+    emit({'loggedIn':True,'authMethod':'claude.ai','subscriptionType':'team','apiProvider':'firstParty'})
+    sys.exit(0)
+record({'argv':sys.argv,'cwd':os.getcwd()})
+assert sys.argv[sys.argv.index('--tools')+1] == ''
+assert '--setting-sources=' in sys.argv
+session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id='))
+request = receive()
+emit({'type':'control_response','response':{'subtype':'success','request_id':request['request_id'],'response':{}}})
+receive()
+def mcp(ident, method, params):
+    emit({'type':'control_request','request_id':str(ident),'request':{'subtype':'mcp_message','server_name':'masc','message':{'jsonrpc':'2.0','id':ident,'method':method,'params':params}}})
+    return receive()
+mcp(1,'initialize',{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'fixture','version':'1'}})
+emit({'type':'control_request','request_id':'initialized','request':{'subtype':'mcp_message','server_name':'masc','message':{'jsonrpc':'2.0','method':'notifications/initialized','params':{}}}})
+receive()
+mcp(2,'tools/list',{})
+mcp(3,'tools/call',{'name':'tool_read_file','arguments':{'file_path':'proof.txt'}})
+mcp(4,'tools/call',{'name':'tool_read_file','arguments':{'file_path':'proof.png'}})
+if mode != 'missing':
+    mcp(5,'tools/call',{'name':'report_review_verdict','arguments':{'verdict':'APPROVE','reason':'read-only fixture receipt'}})
+if mode == 'duplicate':
+    mcp(6,'tools/call',{'name':'report_review_verdict','arguments':{'verdict':'REJECT','reason':'duplicate'}})
+emit({'type':'assistant','session_id':session,'uuid':'assistant','message':{'role':'assistant','model':'verifier-fixture','content':[{'type':'text','text':'APPROVE (prose is not a verdict)'}]}})
+emit({'type':'result','subtype':'success','is_error':False,'session_id':session,'uuid':'result','result':'APPROVE (prose is not a verdict)','api_error_status':None})
 for line in sys.stdin:
-    request = json.loads(line)
-    with open(capture, 'a') as out:
-        out.write(json.dumps(request)+'\n')
-    method = request.get('method')
-    ident = request.get('id')
-    if method == 'initialize':
-        emit({'id':ident,'result':{'userAgent':'fixture/0.147.0','codexHome':'/tmp/codex','platformFamily':'unix','platformOs':'linux'}})
-    elif method == 'account/read':
-        emit({'id':ident,'result':{'account':{'type':'chatgpt','email':'fixture@example.test','planType':'pro'},'requiresOpenaiAuth':True}})
-    elif method == 'thread/start':
-        emit({'id':ident,'result':{'thread':{'id':'thread-1'},'model':'verifier-fixture'}})
-    elif method == 'turn/start':
-        emit({'id':ident,'result':{'turn':{'id':'turn-1'}}})
-        pending = [('tool_read_file',{'file_path':'proof.txt'},0), ('tool_read_file',{'file_path':'proof.png'},1)]
-        if mode != 'missing':
-            pending.append(('report_review_verdict',{'verdict':'APPROVE','reason':'read-only fixture receipt'},2))
-        if mode == 'duplicate':
-            pending.append(('report_review_verdict',{'verdict':'REJECT','reason':'second verdict must invalidate review'},3))
-        advance()
-    elif method is None and isinstance(ident,str) and ident.startswith('call-'):
-        advance()
+    pass
 |} capture mode);
   Unix.chmod path 0o700;
   path, capture
 
 let runtime_config command = Printf.sprintf {|
 [providers.official]
-protocol = "codex-app-server"
+protocol = "claude-code"
 command = %S
 is-non-interactive = true
 [models.verifier]
@@ -78,8 +77,6 @@ cli_slots = ["official.verifier"]
 
 let records path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
-let method_request method_name rows =
-  List.find (fun row -> Yojson.Safe.Util.member "method" row = `String method_name) rows
 let member = Yojson.Safe.Util.member
 
 let test_review mode =
@@ -109,17 +106,6 @@ let test_review mode =
   let runtime_text = runtime_config command in
   write config_path runtime_text;
   (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
-  if mode = "valid" then (
-    let refused = Keeper_turn_driver.run_named ~runtime_id:"official.verifier"
-      ~keeper_name:"arbitrary-transform-probe" ~base_path:root
-      ~goal:"This request must be refused before spawn." ~system_prompt:"Explicit contract."
-      ~tools:[] ~agent_core_tools:[] ~output_contract:Keeper_turn_driver.Tool_verdict
-      ~provider_config_transform:(fun cfg -> Ok cfg) ~sw () in
-    (match refused with
-     | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="provider_config_transform"; _})) -> ()
-     | Error e -> fail (Agent_core.Error.to_string e)
-     | Ok _ -> fail "arbitrary provider transform was silently dropped");
-    check bool "unsupported arbitrary transform never spawned client" false (Sys.file_exists capture));
   let declarations = match Runtime_toml.parse_string runtime_text with
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
@@ -148,47 +134,75 @@ let test_review mode =
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
       (AR.gate_to_string result.gate) (Option.value ~default:"none" result.fallback_reason));
   let rows = records capture in
-  let thread = method_request "thread/start" rows |> member "params" in
-  let instructions = member "developerInstructions" thread |> Yojson.Safe.Util.to_string in
+  let invocation = List.find (fun row -> member "argv" row <> `Null) rows in
+  let argv = member "argv" invocation |> Yojson.Safe.Util.to_list in
   let managed = Prompt_registry.render_prompt_template Prompt_names.verification_system [] |> Result.get_ok in
-  check string "managed verifier contract reaches official client"
-    (String.concat "\n\n" (managed :: Keeper_codex_runtime.For_testing.native_posture_note Runtime_native_tools.codex_default))
-    instructions;
-  let turn = method_request "turn/start" rows |> member "params" in
-  let images = member "input" turn |> Yojson.Safe.Util.to_list
-    |> List.filter (fun item -> member "type" item = `String "image") in
-  check int "one actual initial image" 1 (List.length images);
-  check string "exact initial image bytes" ("data:image/png;base64," ^ png)
-    (List.hd images |> member "url" |> Yojson.Safe.Util.to_string);
-  let read_response = List.find (fun row -> member "id" row = `String "call-0") rows in
-  check bool "read-only authority result reaches model" true
-    (member "success" (member "result" read_response) = `Bool true);
-  check bool "real filesystem content survives tool bridge" true
-    (String_util.contains_substring (Yojson.Safe.to_string read_response) "verified-file-receipt");
-  let image_response = List.find (fun row -> member "id" row = `String "call-1") rows
-    |> member "result" in
-  check bool "actual image lookup delivered successfully" true
-    (member "success" image_response = `Bool true);
-  let image_items = member "contentItems" image_response |> Yojson.Safe.Util.to_list
-    |> List.filter (fun item -> member "type" item = `String "inputImage") in
-  check int "Read retains its visual content" 1 (List.length image_items);
-  check string "Read exact PNG reaches client tool-result wire" ("data:image/png;base64," ^ png)
-    (List.hd image_items |> member "imageUrl" |> Yojson.Safe.Util.to_string);
-  check string "image read leaves source unchanged" (Base64.decode_exn png)
-    (In_channel.with_open_bin (Filename.concat proof_root "proof.png") In_channel.input_all);
+  check bool "managed verifier contract reaches client" true (List.mem (`String managed) argv);
+  let client_root = member "cwd" invocation |> Yojson.Safe.Util.to_string in
+  check bool "client does not run in workspace" false (String.equal root client_root);
+  check bool "private session root reclaimed after terminal result" false (Sys.file_exists client_root);
+  let serialized = Yojson.Safe.to_string (`List rows) in
+  check bool "real contained text reaches tool response" true
+    (String_util.contains_substring serialized "verified-file-receipt");
+  check bool "exact initial and lookup image reaches client" true
+    (String_util.contains_substring serialized png);
+  check bool "workspace Skills not exposed" false
+    (String_util.contains_substring serialized "masc_skill");
   check int "each tool result observed" (if mode = "missing" then 2 else if mode = "duplicate" then 4 else 3)
     (List.length !calls);
   if mode = "valid" then (
-    (* A second independent review of the same workspace/runtime must start a
-       new client thread, not resume the previous review's persisted session. *)
     let second = review () in
-    check bool "second review has its own successful session" true
+    check bool "second independent review succeeds" true
       (second.verdict = Some (AR.Approve "read-only fixture receipt"));
-    let rows = records capture in
-    check int "both reviews started fresh threads" 2
-      (List.length (List.filter (fun row -> member "method" row = `String "thread/start") rows));
-    check int "no previous review thread resumed" 0
-      (List.length (List.filter (fun row -> member "method" row = `String "thread/resume") rows)))
+    let invocations = records capture |> List.filter (fun row -> member "argv" row <> `Null) in
+    check int "two fresh client launches" 2 (List.length invocations);
+    List.iter (fun row ->
+      check bool "every client directory reclaimed" false
+        (Sys.file_exists (member "cwd" row |> Yojson.Safe.Util.to_string))) invocations)
+
+let test_unsafe_slots_refused_before_spawn () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Eio_context.set_env env;
+  Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let saved = Runtime.For_testing.snapshot () in
+  let root = Filename.temp_file "verifier-refusal-" "" in
+  Unix.unlink root; Unix.mkdir root 0o700;
+  Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
+  let command, capture = fixture_script root ~mode:"must-not-run" in
+  let config_path = Filename.concat root "runtime.toml" in
+  let replace needle replacement text =
+    let length = String.length needle in
+    let rec scan offset =
+      if offset + length > String.length text then text
+      else if String.sub text offset length = needle then
+        String.sub text 0 offset ^ replacement
+        ^ String.sub text (offset + length) (String.length text - offset - length)
+      else scan (offset + 1)
+    in scan 0 in
+  let cases =
+    [ "Codex", replace "claude-code" "codex-app-server" (runtime_config command), "official.verifier"
+    ; "Antigravity", replace "claude-code" "antigravity-cli" (runtime_config command), "official.verifier"
+    ; "disabled tools", replace "tools-support = true" "tools-support = false" (runtime_config command), "official.verifier"
+    ; "unsupported media", replace "supports-image-input = true" "supports-image-input = false" (runtime_config command), "official.verifier"
+    ; "missing runtime", runtime_config command, "missing.runtime"
+    ; "lane", runtime_config command ^ "\n[runtime.lanes.verifier_lane]\ncandidates = [\"official.verifier\"]\n", "verifier_lane"
+    ] in
+  List.iter (fun (label,text,slot) ->
+    write config_path text;
+    (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
+    check bool (label ^ " CLI admission") (label <> "unsupported media")
+      (Result.is_error (Runtime.verifier_cli_slot_admission ~runtime_id:slot));
+    let result = AR.run ~evaluator_runtime:slot ~sw:(Some sw)
+      ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
+      ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
+      ~goal_blocks:[Agent_core.Types.Image
+        { media_type="image/png"; data=png; source_type=Base64 }]
+      ~lookup:AR.No_lookup_surface ~base_path:root () in
+    check bool (label ^ " explicit override cannot bypass admission") true
+      (result.verdict = None && result.gate = AR.Evaluator_unavailable);
+    check bool (label ^ " no client invocation") false (Sys.file_exists capture)) cases
 
 let () =
   Prompt_registry.set_markdown_dir
@@ -196,4 +210,6 @@ let () =
   Workspace_metric_hooks.install ();
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
-      ["valid"; "missing"; "duplicate"]]
+      ["valid"; "missing"; "duplicate"];
+     "admission", [test_case "unsafe direct clients and lanes never spawn" `Quick
+       test_unsafe_slots_refused_before_spawn]]

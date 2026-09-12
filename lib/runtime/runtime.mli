@@ -466,6 +466,26 @@ val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_sna
 (** Capture every value consumed by the dashboard runtime-defaults endpoint from
     one immutable loaded-state snapshot. *)
 
+type exact_lane =
+  | Librarian
+  | Hitl_auto_judge
+  | Board_attention
+  | Verifier
+
+val all_exact_lanes : exact_lane list
+(** Every exact-output lane. *)
+
+val exact_lane_id : exact_lane -> string
+(** The lane table key under [\[runtime.exact_output_lanes\]]. *)
+
+val exact_lane_of_id : string -> exact_lane option
+(** Parse a lane table key into the closed exact-output lane variant. *)
+
+val exact_lane_supports_cli_tail : exact_lane -> bool
+(** Whether this exact lane has a CLI oneshot runner to walk [cli_slots]
+    when HTTP provider slots are absent or exhausted. [Verifier] does not
+    have a CLI runner and requires provider slots. *)
+
 val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
     lane id (RFC-0361 D7(a)). *)

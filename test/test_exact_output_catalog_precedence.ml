@@ -485,8 +485,11 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
    | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
    | Ok _ ->
      (match Runtime.verifier_exact_lane_slot_ids () with
-      | Ok slots -> Alcotest.(check (list string)) "completion authority receives CLI runtimes" cli slots
-      | Error detail -> Alcotest.fail detail));
+      | Ok slots ->
+        Alcotest.failf
+          "completion authority must reject CLI runtimes, but got: %s"
+          (String.concat ", " slots)
+      | Error _ -> ()));
   (match Registry.publish
       ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with
    | Error (Registry.Empty_lane _) -> ()
@@ -796,7 +799,17 @@ require_lane_slots
             | Ok _ -> Alcotest.fail "CLI bootstrap fabricated an HTTP slot"
             | Error error -> Alcotest.failf "CLI bootstrap lane failed: %s"
                 (Registry.lane_resolution_error_to_string error))
-         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact"; "verifier_exact" ])
+         [ "hitl_auto_judge"; "board_attention_exact"; "librarian_exact" ];
+       (match Registry.resolve_lane registry ~lane_id:"verifier_exact" with
+        | Error (Registry.Exact_lane_unconfigured _)
+        | Error (Registry.No_admitted_lane_slots _) -> ()
+        | Ok _ -> Alcotest.fail "CLI bootstrap must not populate CLI slots for verifier_exact");
+       (match Runtime.verifier_exact_lane_slot_ids () with
+        | Error _ -> ()
+        | Ok slots ->
+          Alcotest.failf
+            "verifier_exact must have no admitted slots on CLI-only bootstrap, got: %s"
+            (String.concat ", " slots)))
     [ "codex-app-server", "codex"; "claude-code", "claude" ]
 ;;
 

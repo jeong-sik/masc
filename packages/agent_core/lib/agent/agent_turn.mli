@@ -64,6 +64,19 @@ val provider_config_with_agent_config
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 
+(** {1 Provider turn identity} *)
+
+(** The zero-based identity of the fresh provider turn that runs next on
+    [state].
+
+    [Pipeline.resolve_turn_frontier] reads it for a fresh turn; a turn resumed
+    from the durable journal takes its persisted ordinal instead. The resolved
+    identity is what the pipeline stages, the [BeforeTurn]/[AfterTurn] hooks,
+    the event bus, tracing spans, tool invocations and the agent loop's
+    "turn completed" log line all carry. No reader derives a number from
+    [turn_count] on its own, so no site can drift by one from the others. *)
+val provider_turn_ordinal : Types.agent_state -> int
+
 (** {1 Usage accumulation} *)
 
 (** Accumulate response usage into running totals, including observational cost

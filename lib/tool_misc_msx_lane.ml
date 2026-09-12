@@ -161,6 +161,30 @@ let relay_to_board ~author content =
       (Printexc.to_string e)
 ;;
 
+(* The board hears about a change of medium, not about a load: a keeper that
+   reloads the disk already in the drive says nothing, and every post is a
+   board_signal to the whole fleet. The decision reads only the transition
+   the lane captured under its lock, so two loads that serialised there
+   announce the medium once between them. A BIOS-only boot announces
+   nothing. *)
+let arcade_announcement ~agent_name
+    ({ Msx_lane.before; after } : Msx_lane.transition) =
+  if before = after then None
+  else
+    match after with
+    | None -> None
+    | Some medium ->
+      let name, kind =
+        match medium with
+        | Msx_lane.Disk name -> (name, "디스크")
+        | Msx_lane.Cartridge name -> (name, "카트리지")
+      in
+      Some
+        (Printf.sprintf
+           "%s 님이 %s (%s) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요"
+           agent_name name kind)
+;;
+
 let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
   let roms_dir = resolve_roms_dir ~base_path args in
   let media =
@@ -168,37 +192,39 @@ let handle_load ~tool_name ~start_time ~base_path ~agent_name args =
     | Some n when String.trim n <> "" -> Some (resolve_cart ~base_path n)
     | Some _ | None -> None
   in
-  let result =
-    match media with
-    | Some (Error message) -> reject ~tool_name ~start_time message
-    | Some (Ok path) when is_dsk_path path ->
-      of_lane ~tool_name ~start_time
-        (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-           ~cart_path:None ~disk_path:(Some path))
-    | Some (Ok path) ->
-      of_lane ~tool_name ~start_time
-        (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-           ~cart_path:(Some path) ~disk_path:None)
-    | None ->
-      (* BIOS only, and the inventory so the next call can name a game. *)
-      of_lane ~tool_name ~start_time
-        ~extra:
-          [ ( "carts_available"
-            , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
-          ; ("bios", `Bool (roms_dir <> ""))
-          ]
-        (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
-           ~cart_path:None ~disk_path:None)
+  (* A rejected boot keeps the previous machine and carries no transition,
+     so it has nothing to announce. *)
+  let relayed (loaded : (Msx_lane.loaded, Msx_lane.error) result) =
+    (match loaded with
+     | Ok { Msx_lane.transition; _ } ->
+       Option.iter (relay_to_board ~author:agent_name)
+         (arcade_announcement ~agent_name transition)
+     | Error _ -> ());
+    Result.map (fun (l : Msx_lane.loaded) -> l.Msx_lane.observation) loaded
   in
-  (match (media, Tool_result.is_success result) with
-   | Some (Ok path), true ->
-     let medium = if is_dsk_path path then "디스크" else "카트리지" in
-     relay_to_board ~author:agent_name
-       (Printf.sprintf
-          "%s 님이 %s (%s) 를 아케이드에 올렸습니다 — MSX 화면에서 관전하세요"
-          agent_name (Filename.basename path) medium)
-   | _ -> ());
-  result
+  match media with
+  | Some (Error message) -> reject ~tool_name ~start_time message
+  | Some (Ok path) when is_dsk_path path ->
+    of_lane ~tool_name ~start_time
+      (relayed
+         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+            ~cart_path:None ~disk_path:(Some path)))
+  | Some (Ok path) ->
+    of_lane ~tool_name ~start_time
+      (relayed
+         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+            ~cart_path:(Some path) ~disk_path:None))
+  | None ->
+    (* BIOS only, and the inventory so the next call can name a game. *)
+    of_lane ~tool_name ~start_time
+      ~extra:
+        [ ( "carts_available"
+          , `List (List.map (fun n -> `String n) (carts_available ~base_path)) )
+        ; ("bios", `Bool (roms_dir <> ""))
+        ]
+      (relayed
+         (Msx_lane.load ~ledger_dir:(msx_dir ~base_path) ~roms_dir
+            ~cart_path:None ~disk_path:None))
 ;;
 
 let handle_eject ~tool_name ~start_time ~agent_name _args =

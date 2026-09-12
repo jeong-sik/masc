@@ -1,4 +1,4 @@
-(** JSON wire form for constitution articles (RFC-0442).
+(** JSON wire form for constitution ledger entries (RFC-0442).
 
     The schema is closed: an unknown or duplicated field is a rejection, not a
     field to ignore. A decoder that answers [None] tells its caller only that
@@ -16,8 +16,7 @@ type decode_reason =
   | Missing_field of string
   | Unknown_field of string
   | Duplicate_field of string
-  | Unknown_state of string
-  | Empty_list
+  | Unknown_entry of string
   | Invalid_id of string
   | Invalid_article of World_constitution_types.invalid
 
@@ -27,10 +26,10 @@ type decode_error = {
 }
 
 val decode_error_to_string : decode_error -> string
-val to_json : World_constitution_types.t -> Yojson.Safe.t
+val entry_to_json : World_constitution_types.entry -> Yojson.Safe.t
 
-val of_json :
-  Yojson.Safe.t -> (World_constitution_types.t, decode_error) result
+val entry_of_json :
+  Yojson.Safe.t -> (World_constitution_types.entry, decode_error) result
 (** Decoding runs the same {!World_constitution_types.make} checks a fresh
     article passes, so a hand-edited ledger line cannot introduce an article
     the constructor would have refused. *)

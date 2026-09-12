@@ -1,12 +1,11 @@
 (** Article ledger for one world (RFC-0442).
 
     The ledger is an append-only JSONL file under
-    [<base_path>/.masc/constitution/]. Each line is the complete article as it
-    stood after one move, so the last line carrying an id is that article's
-    current state and the lines before it are how it got there. Article counts
-    are bounded by the byte ceiling RFC-0442 puts on the prompt slot, so
-    reading the whole file is the read path; there is no derived snapshot to
-    keep in step.
+    [<base_path>/.masc/constitution/]. Each line is one move — a norm written
+    down, or one taken back — and the norms a world currently holds are those
+    lines folded in order. Article counts are bounded by the byte ceiling the
+    prompt slot puts on them, so reading the whole file is the read path; there
+    is no derived snapshot to keep in step.
 
     A world with no ledger has no articles. That is the fresh-state contract,
     not an error: nothing here reads a legacy layout or converts one. *)
@@ -14,8 +13,6 @@
 val ledger_path : base_path:string -> string
 (** [<base_path>/.masc/constitution/articles.jsonl]. The file need not
     exist. *)
-
-(** {1 Appending} *)
 
 type append_error =
   | Directory_unavailable of {
@@ -30,12 +27,11 @@ type append_error =
 val append_error_to_string : append_error -> string
 
 val append :
-  base_path:string -> World_constitution_types.t -> (unit, append_error) result
-(** Record the article as it now stands. The caller decided the move was legal
-    through {!World_constitution_types.transition}; this writes what that
-    produced and judges nothing. *)
-
-(** {1 Reading} *)
+  base_path:string ->
+  World_constitution_types.entry ->
+  (unit, append_error) result
+(** Record one move. Whether the world agreed is settled on the board before
+    anyone calls this; the ledger writes what it is told and judges nothing. *)
 
 type rejected_line = {
   line_number : int;  (** 1-based, counting every line including blanks. *)
@@ -44,12 +40,13 @@ type rejected_line = {
 
 type ledger = {
   articles : World_constitution_types.t list;
-      (** One entry per article id, in order of first appearance, each at its
-          latest recorded state. *)
+      (** The norms the world currently holds, in the order they were first
+          written. An article written, removed and written again returns at the
+          end, because that is when the world decided to keep it. *)
   rejected : rejected_line list;
       (** Lines that did not decode, in file order. They stay in the file: a
           reader reports them rather than dropping them silently, because a
-          line nobody can read is a norm nobody can see. *)
+          line nobody can read is a norm somebody wrote. *)
 }
 
 type read_error =
@@ -61,8 +58,4 @@ type read_error =
 val read_error_to_string : read_error -> string
 
 val load : base_path:string -> (ledger, read_error) result
-(** Read the whole ledger. A missing file is an empty ledger. *)
-
-val in_force : ledger -> World_constitution_types.t list
-(** The articles a world ratified and has neither superseded nor repealed —
-    the only ones RFC-0442 renders into the system prompt. *)
+(** Read the whole ledger and fold it. A missing file is an empty ledger. *)

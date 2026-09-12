@@ -24,45 +24,27 @@ module Article_id = struct
   let equal = String.equal
 end
 
-module Non_empty = struct
-  type 'a t = { head : 'a; tail : 'a list }
-
-  let of_list = function
-    | [] -> Error `Empty
-    | head :: tail -> Ok { head; tail }
-
-  let to_list { head; tail } = head :: tail
-  let length { tail; _ } = 1 + List.length tail
-end
-
 type evidence = {
   uri : string;
   sha256 : string option;
 }
 
-type state =
-  | Proposed of { post_id : string }
-  | Ratified of { at : float; ratifiers : string Non_empty.t }
-  | Superseded of { by : Article_id.t; at : float }
-  | Repealed of { at : float; post_id : string }
-
 type t = {
   id : Article_id.t;
   text : string;
-  evidence : evidence Non_empty.t;
-  proposer : string;
-  state : state;
-  last_cited_at : float option;
+  author : string;
+  at : float;
+  evidence : evidence list;
 }
 
 type invalid =
   | Empty_text
-  | Empty_proposer
+  | Empty_author
   | Empty_evidence_uri of { index : int }
 
 let invalid_to_string = function
   | Empty_text -> "article text is empty"
-  | Empty_proposer -> "article proposer is empty"
+  | Empty_author -> "article author is empty"
   | Empty_evidence_uri { index } ->
     Printf.sprintf "evidence[%d] has an empty uri" index
 
@@ -73,61 +55,20 @@ let blank_evidence_index evidence =
     | [] -> None
     | item :: rest -> if is_blank item.uri then Some index else scan (index + 1) rest
   in
-  scan 0 (Non_empty.to_list evidence)
+  scan 0 evidence
 
-let make ~id ~text ~evidence ~proposer ~state ~last_cited_at =
+let make ~id ~text ~author ~at ~evidence =
   if is_blank text then Error Empty_text
-  else if is_blank proposer then Error Empty_proposer
+  else if is_blank author then Error Empty_author
   else
     match blank_evidence_index evidence with
     | Some index -> Error (Empty_evidence_uri { index })
-    | None -> Ok { id; text; evidence; proposer; state; last_cited_at }
+    | None -> Ok { id; text; author; at; evidence }
 
-let cite article ~at =
-  match article.last_cited_at with
-  | Some existing when Float.compare existing at >= 0 -> article
-  | Some _ | None -> { article with last_cited_at = Some at }
-
-type transition_error = Illegal_transition of { from_ : state; to_ : state }
-
-let state_name = function
-  | Proposed _ -> "proposed"
-  | Ratified _ -> "ratified"
-  | Superseded _ -> "superseded"
-  | Repealed _ -> "repealed"
-
-let transition_error_to_string (Illegal_transition { from_; to_ }) =
-  Printf.sprintf "illegal article transition %s -> %s" (state_name from_)
-    (state_name to_)
-
-let transition article ~to_ =
-  let illegal = Error (Illegal_transition { from_ = article.state; to_ }) in
-  let move () = Ok { article with state = to_ } in
-  match article.state, to_ with
-  (* A proposal that reached quorum, or one its author withdrew. *)
-  | Proposed _, Ratified _ -> move ()
-  | Proposed _, Repealed _ -> move ()
-  (* Nothing supersedes a norm that never took force, and re-proposing is a
-     new article, not a move. *)
-  | Proposed _, Superseded _ -> illegal
-  | Proposed _, Proposed _ -> illegal
-  (* In force: replaced by a successor, or withdrawn at the cost that put it
-     here (RFC-0442 3.2). *)
-  | Ratified _, Superseded _ -> move ()
-  | Ratified _, Repealed _ -> move ()
-  (* Re-ratifying hides whether the second vote carried, and a ratified norm
-     cannot return to a proposal. *)
-  | Ratified _, Ratified _ -> illegal
-  | Ratified _, Proposed _ -> illegal
-  (* Superseded is terminal: the successor is the live article. *)
-  | Superseded _, Proposed _ -> illegal
-  | Superseded _, Ratified _ -> illegal
-  | Superseded _, Superseded _ -> illegal
-  | Superseded _, Repealed _ -> illegal
-  (* Repealed is terminal: a world that wants the norm back ratifies a new
-     article, leaving the repeal legible in the ledger. *)
-  | Repealed _, Proposed _ -> illegal
-  | Repealed _, Ratified _ -> illegal
-  | Repealed _, Superseded _ -> illegal
-  | Repealed _, Repealed _ -> illegal
-
+type entry =
+  | Added of t
+  | Removed of {
+      id : Article_id.t;
+      by : string;
+      at : float;
+    }

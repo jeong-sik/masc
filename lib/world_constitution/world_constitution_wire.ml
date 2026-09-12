@@ -1,30 +1,19 @@
-(** JSON wire form for constitution articles (RFC-0442).
-
-    The schema is closed: an unknown or duplicated field is a rejection, not a
-    field to ignore. A decoder that answers [None] tells its caller only that
-    something is wrong, so every rejection names its path and reason. *)
-
 open World_constitution_types
 
 (* Wire vocabulary. Encoder and decoder share these so a rename cannot move
    only one side. *)
 let field_id = "id"
 let field_text = "text"
+let field_author = "author"
+let field_at = "at"
 let field_evidence = "evidence"
-let field_proposer = "proposer"
-let field_state = "state"
-let field_last_cited_at = "last_cited_at"
 let field_uri = "uri"
 let field_sha256 = "sha256"
 let field_kind = "kind"
-let field_post_id = "post_id"
-let field_at = "at"
-let field_ratifiers = "ratifiers"
+let field_article = "article"
 let field_by = "by"
-let kind_proposed = "proposed"
-let kind_ratified = "ratified"
-let kind_superseded = "superseded"
-let kind_repealed = "repealed"
+let kind_added = "added"
+let kind_removed = "removed"
 
 type decode_step =
   | Field of string
@@ -38,8 +27,7 @@ type decode_reason =
   | Missing_field of string
   | Unknown_field of string
   | Duplicate_field of string
-  | Unknown_state of string
-  | Empty_list
+  | Unknown_entry of string
   | Invalid_id of string
   | Invalid_article of invalid
 
@@ -60,14 +48,13 @@ let decode_reason_to_string = function
   | Missing_field name -> Printf.sprintf "missing field %S" name
   | Unknown_field name -> Printf.sprintf "unknown field %S" name
   | Duplicate_field name -> Printf.sprintf "duplicate field %S" name
-  | Unknown_state name -> Printf.sprintf "unknown state %S" name
-  | Empty_list -> "expected at least one element"
+  | Unknown_entry name -> Printf.sprintf "unknown entry kind %S" name
   | Invalid_id detail -> detail
   | Invalid_article invalid -> invalid_to_string invalid
 
 let decode_error_to_string { path; reason } =
   let rendered = String.concat "" (List.map decode_step_to_string path) in
-  Printf.sprintf "article%s: %s" rendered (decode_reason_to_string reason)
+  Printf.sprintf "entry%s: %s" rendered (decode_reason_to_string reason)
 
 let ( let* ) = Result.bind
 
@@ -121,25 +108,12 @@ let optional_string_field ~path ~field fields =
   | `String s -> Ok (Some s)
   | _ -> Error { path = path @ [ Field field ]; reason = Expected_string }
 
-let optional_number_field ~path ~field fields =
-  let* value = required ~path ~field fields in
-  match value with
-  | `Null -> Ok None
-  | `Float f -> Ok (Some f)
-  | `Int i -> Ok (Some (float_of_int i))
-  | _ -> Error { path = path @ [ Field field ]; reason = Expected_number }
-
 let article_id_field ~path ~field fields =
   let* raw = string_field ~path ~field fields in
   match Article_id.of_string raw with
   | Ok id -> Ok id
   | Error detail ->
     Error { path = path @ [ Field field ]; reason = Invalid_id detail }
-
-let non_empty ~path items =
-  match Non_empty.of_list items with
-  | Ok value -> Ok value
-  | Error `Empty -> Error { path; reason = Empty_list }
 
 let evidence_item_to_json { uri; sha256 } =
   `Assoc
@@ -166,131 +140,72 @@ let evidence_of_json ~path json =
         in
         decode (index + 1) (decoded :: acc) rest
     in
-    let* items = decode 0 [] items in
-    non_empty ~path items
+    decode 0 [] items
   | _ -> Error { path; reason = Expected_array }
 
-let ratifiers_of_json ~path json =
-  match json with
-  | `List items ->
-    let rec decode index acc = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest -> decode (index + 1) (value :: acc) rest
-      | _ :: _ ->
-        Error { path = path @ [ Index index ]; reason = Expected_string }
-    in
-    let* items = decode 0 [] items in
-    non_empty ~path items
-  | _ -> Error { path; reason = Expected_array }
-
-let state_to_json = function
-  | Proposed { post_id } ->
-    `Assoc [ field_kind, `String kind_proposed; field_post_id, `String post_id ]
-  | Ratified { at; ratifiers } ->
-    `Assoc
-      [ field_kind, `String kind_ratified
-      ; field_at, `Float at
-      ; ( field_ratifiers
-        , `List
-            (List.map
-               (fun name -> `String name)
-               (Non_empty.to_list ratifiers)) )
-      ]
-  | Superseded { by; at } ->
-    `Assoc
-      [ field_kind, `String kind_superseded
-      ; field_by, `String (Article_id.to_string by)
-      ; field_at, `Float at
-      ]
-  | Repealed { at; post_id } ->
-    `Assoc
-      [ field_kind, `String kind_repealed
-      ; field_at, `Float at
-      ; field_post_id, `String post_id
-      ]
-
-let state_of_json ~path json =
-  let* fields = object_fields ~path json in
-  let* kind = string_field ~path ~field:field_kind fields in
-  if String.equal kind kind_proposed then (
-    let* () =
-      reject_unknown ~path ~allowed:[ field_kind; field_post_id ] fields
-    in
-    let* post_id = string_field ~path ~field:field_post_id fields in
-    Ok (Proposed { post_id }))
-  else if String.equal kind kind_ratified then (
-    let* () =
-      reject_unknown ~path
-        ~allowed:[ field_kind; field_at; field_ratifiers ]
-        fields
-    in
-    let* at = number_field ~path ~field:field_at fields in
-    let* raw = required ~path ~field:field_ratifiers fields in
-    let* ratifiers =
-      ratifiers_of_json ~path:(path @ [ Field field_ratifiers ]) raw
-    in
-    Ok (Ratified { at; ratifiers }))
-  else if String.equal kind kind_superseded then (
-    let* () =
-      reject_unknown ~path ~allowed:[ field_kind; field_by; field_at ] fields
-    in
-    let* by = article_id_field ~path ~field:field_by fields in
-    let* at = number_field ~path ~field:field_at fields in
-    Ok (Superseded { by; at }))
-  else if String.equal kind kind_repealed then (
-    let* () =
-      reject_unknown ~path
-        ~allowed:[ field_kind; field_at; field_post_id ]
-        fields
-    in
-    let* at = number_field ~path ~field:field_at fields in
-    let* post_id = string_field ~path ~field:field_post_id fields in
-    Ok (Repealed { at; post_id }))
-  else Error { path; reason = Unknown_state kind }
-
-let to_json article =
+let article_to_json article =
   `Assoc
     [ field_id, `String (Article_id.to_string article.id)
     ; field_text, `String article.text
+    ; field_author, `String article.author
+    ; field_at, `Float article.at
     ; ( field_evidence
-      , `List
-          (List.map evidence_item_to_json (Non_empty.to_list article.evidence))
-      )
-    ; field_proposer, `String article.proposer
-    ; field_state, state_to_json article.state
-    ; ( field_last_cited_at
-      , match article.last_cited_at with
-        | None -> `Null
-        | Some at -> `Float at )
+      , `List (List.map evidence_item_to_json article.evidence) )
     ]
 
-let of_json json =
-  let path = [] in
+let article_of_json ~path json =
   let* fields = object_fields ~path json in
   let* () =
     reject_unknown ~path
       ~allowed:
-        [ field_id
-        ; field_text
-        ; field_evidence
-        ; field_proposer
-        ; field_state
-        ; field_last_cited_at
-        ]
+        [ field_id; field_text; field_author; field_at; field_evidence ]
       fields
   in
   let* id = article_id_field ~path ~field:field_id fields in
   let* text = string_field ~path ~field:field_text fields in
+  let* author = string_field ~path ~field:field_author fields in
+  let* at = number_field ~path ~field:field_at fields in
   let* raw_evidence = required ~path ~field:field_evidence fields in
   let* evidence =
     evidence_of_json ~path:(path @ [ Field field_evidence ]) raw_evidence
   in
-  let* proposer = string_field ~path ~field:field_proposer fields in
-  let* raw_state = required ~path ~field:field_state fields in
-  let* state = state_of_json ~path:(path @ [ Field field_state ]) raw_state in
-  let* last_cited_at =
-    optional_number_field ~path ~field:field_last_cited_at fields
-  in
-  match make ~id ~text ~evidence ~proposer ~state ~last_cited_at with
+  match make ~id ~text ~author ~at ~evidence with
   | Ok article -> Ok article
   | Error invalid -> Error { path; reason = Invalid_article invalid }
+
+let entry_to_json = function
+  | Added article ->
+    `Assoc
+      [ field_kind, `String kind_added
+      ; field_article, article_to_json article
+      ]
+  | Removed { id; by; at } ->
+    `Assoc
+      [ field_kind, `String kind_removed
+      ; field_id, `String (Article_id.to_string id)
+      ; field_by, `String by
+      ; field_at, `Float at
+      ]
+
+let entry_of_json json =
+  let path = [] in
+  let* fields = object_fields ~path json in
+  let* kind = string_field ~path ~field:field_kind fields in
+  if String.equal kind kind_added then (
+    let* () =
+      reject_unknown ~path ~allowed:[ field_kind; field_article ] fields
+    in
+    let* raw = required ~path ~field:field_article fields in
+    let* article = article_of_json ~path:(path @ [ Field field_article ]) raw in
+    Ok (Added article))
+  else if String.equal kind kind_removed then (
+    let* () =
+      reject_unknown ~path
+        ~allowed:[ field_kind; field_id; field_by; field_at ]
+        fields
+    in
+    let* id = article_id_field ~path ~field:field_id fields in
+    let* by = string_field ~path ~field:field_by fields in
+    let* at = number_field ~path ~field:field_at fields in
+    Ok (Removed { id; by; at }))
+  else Error { path; reason = Unknown_entry kind }

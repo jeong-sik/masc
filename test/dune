@@ -2219,6 +2219,7 @@
 (include stanzas/test_sandbox_image_recipe.inc)
 (include stanzas/test_auth_token_inventory.inc)
 (include stanzas/test_config_root_embedded_seed.inc)
+(include stanzas/test_builtin_skill_package.inc)
 (include stanzas/test_front_door.inc)
 
 (include stanzas/test_gate_surface.inc)
@@ -3170,6 +3171,11 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
+ (name test_tui_runtime_config_summary)
+ (modules test_tui_runtime_config_summary)
+ (libraries alcotest masc_tui_runtime_config_view yojson))
+
+(test
  (name test_tui_connection_status)
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))
@@ -3812,6 +3818,12 @@
  (libraries alcotest masc_tui_render_memory masc_tui_types))
 
 (test
+ (name test_tui_planning_proof_mark)
+ (modules test_tui_planning_proof_mark)
+ (libraries alcotest masc masc_tui_planning_proof_mark masc_tui_ansi
+  masc_tui_message_layout masc_tui_theme))
+
+(test
  (name test_tui_esc_interrupt)
  (modules test_tui_esc_interrupt)
  (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))
@@ -3822,6 +3834,12 @@
  ; unix so one case delivers a real SIGTERM to the test process and reads it
  ; back the way the loop does.
  (libraries alcotest masc_tui_exit_signals unix))
+
+(test
+ (name test_tui_terminal_restore)
+ (modules test_tui_terminal_restore)
+ ; unix for the Unix.error constructors the stubbed setter raises with.
+ (libraries alcotest masc_tui_terminal_restore unix))
 
 (test
  (name test_tui_retained_view)
@@ -4776,6 +4794,7 @@
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_rows.inc)
+(include stanzas/test_tui_repository_changes_listing.inc)
 (include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
@@ -4797,6 +4816,7 @@
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
 (include stanzas/test_keeper_connector_names.inc)
+(include stanzas/test_tui_image_cache.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_link_label.inc)
 (include stanzas/test_tui_link_preview.inc)
@@ -5353,6 +5373,15 @@
  (deps test_tui_browser_action_navigation.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action (run python3 %{dep:test_tui_browser_action_navigation.py} %{dep:../bin/masc_tui.exe})))
 
+(rule
+ (alias runtest-test_tui_browser_follow)
+ (deps test_tui_browser_follow.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_browser_follow.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_browser_follow)))
+
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_browser_action_navigation)))
@@ -5609,7 +5638,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc alcotest eio eio_main yojson unix))
+ (libraries masc masc_random_id alcotest eio eio_main yojson unix))
 (include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)
@@ -5698,3 +5727,32 @@
  (deps
   (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps yojson unix fs_compat))
+
+(test
+ (name test_lane_addon_config)
+ (modules test_lane_addon_config)
+ (libraries alcotest masc yojson unix))
+
+(test
+ (name test_lane_addon_composition)
+ (modules test_lane_addon_composition)
+ (libraries masc_test_deps eio eio_main yojson unix))
+
+(test
+ (name test_lane_addon_reconcile)
+ (modules test_lane_addon_reconcile)
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+(test
+ (name test_lane_addon_skills)
+ (modules test_lane_addon_skills)
+ (deps
+  ../addons/msx-observer/lane.toml
+  (source_tree ../addons/msx-observer/skills))
+ (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
+  masc.skill_snapshot masc.skill_snapshot_service))
+
+(test
+ (name test_lane_addon_actions)
+ (modules test_lane_addon_actions)
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix))

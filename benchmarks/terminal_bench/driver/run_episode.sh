@@ -135,7 +135,11 @@ if [[ -d "$tool_log_dir" ]]; then
   # makes jq exit non-zero, and under `set -euo pipefail` an unguarded
   # assignment aborted the script here — after the episode state was known and
   # before result.json was written, so harbor recorded no result at all.
-  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -s 'length')" \
+  # Counted as a stream (`jq -c . | wc -l`): every entry carries multi-KB
+  # output blobs, and `jq -s` materializes all of them just to take a length.
+  # Equivalent under the same guard: verified on a synthetic store — clean
+  # N, malformed-mixed and empty all agree, pipefail keeps the 0-degrade.
+  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -c . | wc -l | tr -d ' ')" \
     || tool_calls=0
   dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \
     | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')" \
@@ -143,6 +147,11 @@ if [[ -d "$tool_log_dir" ]]; then
 fi
 
 # --- token usage: episode-summed from the agent-core trace dumps ---
+# Cache creation and cache read are summed into cache_tokens for harbor's
+# single n_cache_tokens field, and also reported apart. They are priced
+# differently -- 2.5e-06 against 2e-07 per token for claude-sonnet-5, a factor
+# of twelve -- so a cost computed from the sum is not a cost.
+#
 # Each .masc/traces/<session>/trace-*.json carries a cumulative top-level
 # `usage` block (total_input_tokens / total_output_tokens /
 # total_cache_creation_input_tokens / total_cache_read_input_tokens /
@@ -161,6 +170,10 @@ if [[ -d "$traces_dir" ]]; then
           (group_by(.s) | map(max_by(.a) | .u)) as $us
           | { input_tokens: ($us | map(.total_input_tokens // 0) | add),
               output_tokens: ($us | map(.total_output_tokens // 0) | add),
+              cache_creation_tokens:
+                ($us | map(.total_cache_creation_input_tokens // 0) | add),
+              cache_read_tokens:
+                ($us | map(.total_cache_read_input_tokens // 0) | add),
               cache_tokens: ($us | map((.total_cache_creation_input_tokens // 0)
                                        + (.total_cache_read_input_tokens // 0)) | add) }
         end' 2>/dev/null)" || usage_json='null'
@@ -199,6 +212,8 @@ jq -n \
     input_tokens:($usage.input_tokens // null),
     output_tokens:($usage.output_tokens // null),
     cache_tokens:($usage.cache_tokens // null),
+    cache_creation_tokens:($usage.cache_creation_tokens // null),
+    cache_read_tokens:($usage.cache_read_tokens // null),
     final:($final_raw | map(select(type=="object")) | last // {})}' \
   > "$RESULT_JSON"
 rm -f "$final_file"

@@ -1,0 +1,12 @@
+; Runs say for real and checks a file with audio in it appeared. Skipped where
+; say is not installed, which is every machine that is not a mac.
+
+(test
+ (name test_voice_local_command_live)
+ (libraries
+  alcotest
+  unix
+  masc
+  masc.voice_config
+  masc.voice_runtime_overlay
+  masc.voice_bridge_core))

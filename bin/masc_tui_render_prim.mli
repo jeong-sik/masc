@@ -120,6 +120,11 @@ val search_marker_styled : Masc_tui_types.state -> string
     the query is being typed, dim once settled -- or [""] when there is no
     query. *)
 
+val title_missing_reading : error:'a option -> string
+(** What a title says where its counts would go: whether the read was never
+    asked for or was asked for and failed. The title is the row on top, so
+    saying "not loaded" after a failure is the answer that gets read. *)
+
 val footer_line :
   ?status:Masc_tui_footer.status_item list ->
   Masc_tui_types.state -> max_cells:int -> hints:string -> string

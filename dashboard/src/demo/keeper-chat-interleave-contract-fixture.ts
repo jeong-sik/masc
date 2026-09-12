@@ -153,6 +153,7 @@ export function InterleaveContractFixture() {
           style="background: var(--bg-panel); border-color: var(--border-main);"
         >
           <${ChatTranscript}
+            keeperName=${INTERLEAVE_FIXTURE_KEEPER}
             entries=${interleaveEntries}
             emptyText="No interleave rows"
             variant="messenger"

@@ -54,10 +54,8 @@ let mosaic_refusal_text = function
 
 (* What the background fetch decided about an image URL, keyed by that URL and
    filled asynchronously off the render loop. Read by [render_modal_card]; a
-   miss simply draws no preview. Every entry, a mosaic or a refusal, is kept
-   for the session so the same URL is not downloaded and decoded again on
-   every preview parse; [v] and /image fetch on their own, outside this
-   store. *)
+   miss simply draws no preview. Refusals are retained for display, not treated
+   as permanent: only an explicit modal retry consumes them. *)
 let mosaic_cache_mu = Stdlib.Mutex.create ()
 let mosaic_cache : (string, mosaic_entry) Hashtbl.t = Hashtbl.create 64
 
@@ -68,6 +66,16 @@ let mosaic_lookup url =
 
 let mosaic_store url entry =
   Stdlib.Mutex.protect mosaic_cache_mu (fun () -> Hashtbl.replace mosaic_cache url entry)
+
+let retry_mosaic ~retry url =
+  let requested =
+    Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+      match Hashtbl.find_opt mosaic_cache url with
+      | Some (Refused _) -> Hashtbl.remove mosaic_cache url; true
+      | Some (Mosaic _) | None -> false)
+  in
+  if requested then retry ();
+  requested
 
 let clear_cache () =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
@@ -607,6 +615,7 @@ let render_modal_card ~width ~height:_ p =
            (* Said out loud, so a card with no picture is not mistaken for a
               page with no og:image. *)
            add ("  preview: " ^ mosaic_refusal_text refusal);
+           add "  [r] fetch the preview again";
            add ""
        | Some (Mosaic _) | None -> ())
    | None -> ());

@@ -275,11 +275,11 @@ let test_ansi_korean_hint_truncates_by_cells () =
 
 (* A workspace disagreement used to replace the whole screen and swallow every
    key but r. The reads it protects are refused where they happen, so the
-   notice rides the footer instead -- and it is the last fact a narrow footer
-   gives up, after the port. *)
-let test_a_workspace_mismatch_outlives_the_port () =
-  check_string "the local path reads beside the server's own"
-    "<dim>  q:quit  | Base: /me | MISMATCH local /work/masc (r:retry) | Port: 8935<reset>\n"
+   notice rides the footer instead -- in front of the keys, which is the only
+   place on the row that outlives them. *)
+let test_a_workspace_mismatch_outlives_the_keys () =
+  check_string "the notice leads and the local path reads beside the server's own"
+    "<dim>  MISMATCH local /work/masc (r:retry)  q:quit  | Base: /me | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:
          [ Masc_tui_footer.Server_base_path "/me"
@@ -300,6 +300,25 @@ let test_a_workspace_mismatch_outlives_the_port () =
   check_bool "the notice outlives the port" true
     (contains ~needle:"MISMATCH local /work/masc" narrow);
   check_bool "the port went first" false (contains ~needle:"Port:" narrow);
+  (* The width a surface with its own keys actually has. Before the notice led
+     the row, every item of status was given up before one key was, so this
+     row carried keys and no notice -- which is what seven live surfaces
+     drew. *)
+  let keys_fill_the_row =
+    Masc_tui_footer.line
+      ~status:[ Masc_tui_footer.Workspace_mismatch "/work/masc" ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935
+      ~hints:
+        "j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  \
+         a / A:all fleet  s:sort  /:find  q:quit" ()
+  in
+  check_at_most_cells "eighty cells hold" 80 keys_fill_the_row;
+  check_bool "the notice is on the row" true
+    (contains ~needle:"MISMATCH local /work/masc" keys_fill_the_row);
+  check_bool "keys gave way instead" true
+    (contains ~needle:"\xe2\x80\xa6" keys_fill_the_row);
+  check_bool "and the door is still there" true
+    (contains ~needle:"q:quit" keys_fill_the_row);
   check_string "a workspace that agrees says nothing"
     "<dim>  q:quit  | Port: 8935<reset>\n"
     (Masc_tui_footer.line
@@ -381,8 +400,8 @@ let test_answered_glow_reads_by_name () =
        ~hints:"q:quit" ())
 
 let test_worktree_server_warning_survives_narrow_widths () =
-  check_string "the worktree warning reads in full"
-    "<dim>  q:quit  | WORKTREE server (not the root build) | Port: 8935<reset>\n"
+  check_string "the worktree warning reads in full, in front of the keys"
+    "<dim>  WORKTREE server (not the root build)  q:quit  | Port: 8935<reset>\n"
     (Masc_tui_footer.line
        ~status:[ Masc_tui_footer.Server_worktree_binary ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
@@ -410,8 +429,8 @@ let test_build_mismatch_names_the_older_side () =
   in
   (match item with
    | Some item ->
-     check_string "an older TUI is told to restart"
-       "<dim>  q:quit  | TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc) | Port: 8935<reset>\n"
+     check_string "an older TUI is told to restart, ahead of the keys"
+       "<dim>  TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc)  q:quit  | Port: 8935<reset>\n"
        (Masc_tui_footer.line ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>"
           ~max_cells:120 ~port:8935 ~hints:"q:quit" ())
    | None -> Alcotest.fail "a differing pair produced no item");
@@ -668,8 +687,8 @@ let tests =
           test_unavailable_status_is_omitted
       ; Alcotest.test_case "ANSI Korean hint truncates by cells" `Quick
           test_ansi_korean_hint_truncates_by_cells
-      ; Alcotest.test_case "a workspace mismatch outlives the port" `Quick
-          test_a_workspace_mismatch_outlives_the_port
+      ; Alcotest.test_case "a workspace mismatch outlives the keys" `Quick
+          test_a_workspace_mismatch_outlives_the_keys
       ; Alcotest.test_case "answering names the first keeper" `Quick
           test_answering_names_the_first_keeper
       ; Alcotest.test_case "answered glow reads by name" `Quick

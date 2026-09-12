@@ -188,8 +188,26 @@ let omission_order =
   ; Workspace_identity
   ; Live_activity
   ; Endpoint_identity
-  ; Workspace_conflict
   ]
+
+(* A conflict notice leads the row instead of riding its tail.
+
+   The tail is given up whole before a single hint is, so a notice left there
+   cannot be read on any surface whose own keys already fill the row. Measured
+   2026-09-12 with the server one commit behind the TUI: of seven surfaces at
+   150 columns only Activity drew the notice -- Memory, Overview, Board,
+   Keepers, Workspace and Planning all dropped it, and Memory was the screen
+   whose rows the older server had just made undecodable.
+
+   In front the notice becomes the first hint item, and [drop_hint_items]
+   gives up the last droppable item first, so it is the last thing to go. The
+   keys it crowds out have [?] as a second way to be found. The notice has
+   none: nothing else on any surface says the server is not this build. *)
+let leads_the_row item =
+  match item.retention with
+  | Workspace_conflict -> true
+  | Endpoint_identity | Workspace_identity | Build_identity | Refresh_context
+  | Live_activity -> false
 
 (* What ends a row that had to give something up. The ellipsis says items
    were dropped; the key says where they went.
@@ -328,12 +346,19 @@ let rec fit_body ~max_cells ~hints ~omissions statuses =
 
     Key hints retain the row before status facts do. When the facts do not fit,
     whole typed items are omitted in this order: refresh interval, build, base
-    path, port, workspace mismatch. Only an overlong surface-owned hint uses
-    cell-safe truncation
-    as the final fallback. *)
+    path, live turn activity, port. Only an overlong surface-owned hint uses
+    cell-safe truncation as the final fallback.
+
+    A conflict notice is the exception: it is moved in front of the hints
+    ({!leads_the_row}) rather than left in the tail, so it outlives the keys
+    instead of going before them. *)
 let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])
+  in
+  let conflicts, statuses = List.partition leads_the_row statuses in
+  let hints =
+    List.fold_right (fun item rest -> item.text ^ "  " ^ rest) conflicts hints
   in
   let fitted =
     fit_body ~max_cells:(max 0 max_cells) ~hints ~omissions:omission_order

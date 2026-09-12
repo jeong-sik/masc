@@ -3,5 +3,5 @@
 
 (test
  (name test_voice_probe)
- (libraries alcotest ast_grep compiler-libs.common yojson masc masc.voice_config)
+ (libraries alcotest astring ast_grep compiler-libs.common yojson masc masc.voice_config)
  (deps (source_tree ../../lib)))

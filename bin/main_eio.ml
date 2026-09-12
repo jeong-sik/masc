@@ -1764,8 +1764,17 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio as_json =
-  let tts = Masc.Voice_bridge.probe_tts ~message () in
+let voice_verify_cmd_exit message audio agent as_json =
+  (* The keeper whose voice is being checked, when one is named. A voice is
+     resolved per keeper and per endpoint, so "does this configuration work"
+     and "does this keeper have the voice I gave it" are different questions
+     -- and for say only the second one can catch a wrong name, because say
+     speaks in the system voice rather than failing on one it does not have. *)
+  let tts =
+    match agent with
+    | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
+    | None -> Masc.Voice_bridge.probe_tts ~message ()
+  in
   let stt =
     Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
   in
@@ -1828,6 +1837,18 @@ let voice_verify_cmd =
             "Audio file each STT endpoint is asked to transcribe. Without it, only TTS \
              is probed.")
   in
+  let agent =
+    Arg.(
+      value
+      & opt (some string) None
+      & info
+          [ "agent" ]
+          ~docv:"KEEPER"
+          ~doc:
+            "Probe with the voice this keeper is mapped to, rather than the section \
+             default. A voice is resolved per keeper and per endpoint, so a mapping \
+             that names a voice an endpoint does not have is only visible this way.")
+  in
   let as_json =
     Arg.(
       value
@@ -1849,7 +1870,7 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ as_json)
+    Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with

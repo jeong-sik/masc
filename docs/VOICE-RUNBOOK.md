@@ -89,6 +89,30 @@ The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
 whisper.cpp requires, so nothing is converted between the microphone and the
 transcript. And `-l auto` detects Korean, so there is no language to configure.
 
+### Checking one keeper's voice
+
+The section default is not what a keeper speaks in — a keeper mapped under
+`[voice.tts.agent_voices]` gets its own. `--agent` probes with that mapping:
+
+```
+masc voice-verify --agent sangsu --json
+```
+
+Measured on one workstation 2026-09-13, with `sangsu` mapped to a voice that
+exists and `nowhere` to a name that does not:
+
+| Probe | Answer |
+|---|---|
+| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
+| `--agent sangsu` | `124690 bytes of audio in "Flo (한국어(한국))"` |
+| `--agent nowhere` | `79758 bytes of audio in "NoSuchVoice"` |
+
+All three say `answered`, because `say` answers a name it does not have by
+speaking in the system voice. The byte counts cannot separate them either —
+the third is the same 79,758 as the default. **The voice name in the report is
+what separates them**, and a name that is not in `say -v '?'` is a mapping
+that never took.
+
 ### The trap: a wrong voice name is silent
 
 `say` does not fail on a voice it does not have. It exits 0 and speaks in the

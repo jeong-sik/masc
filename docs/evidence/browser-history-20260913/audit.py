@@ -17,11 +17,15 @@ for index,c in enumerate(contexts):
  pty=(p/f'observation-{index}.pty').read_bytes()
  copies=re.findall(rb'\x1b\]52;c;([A-Za-z0-9+/=]+)\x07',pty)
  assert json.loads(base64.b64decode(copies[-1]))==c
- text=(p/f'observation-{index}.txt').read_text()
+ text=(p/('overview-render-settled.txt' if index==3 else f'observation-{index}.txt')).read_text()
  assert scene['url'] in text and scene['title'] in text and 'Historical read' in text
  channel=scene['url'].rsplit('/',1)[-1].split('.')[0]
  needles={'alpha':'accessibility checklist Monday','beta':'client payload before migration starts','gamma':'end-to-end QA Wednesday','index':'Channels'}
  assert needles[channel] in ' '.join(text.split())
+ if channel=='index':
+  assert not any(old in text for old in ['Mina','Hana','Cedar','Text 1/18','Current decision','Superseded'])
+  lines=text.splitlines();footer=next(i for i,line in enumerate(lines) if 'Text 1/4' in line)
+  assert all(not line.strip() for line in lines[footer+1:32]), 'stale body below scoped navigation'
 boundary=load('replay-boundary.json')
 assert (p/'observation-3-complete.pty').read_bytes()==(p/boundary['source']).read_bytes()[:boundary['prefix_bytes']]
 for line in (p/'SHA256SUMS').read_text().splitlines():

@@ -44,8 +44,20 @@ try:
             window.term.resize(columns, rows);
             window.term.reset();
             await new Promise(resolve => window.term.write(new Uint8Array(bytes), resolve));
+            if (typeof window.term.onRender !== 'function' || typeof window.term.refresh !== 'function')
+                throw new Error('xterm render completion API unavailable');
+            await new Promise(resolve => {
+                const subscription = window.term.onRender(({start, end}) => {
+                    if (start === 0 && end >= rows - 1) {
+                        subscription.dispose();
+                        requestAnimationFrame(() => requestAnimationFrame(resolve));
+                    }
+                });
+                window.term.refresh(0, rows - 1);
+            });
         }''', {'columns': args.columns, 'rows': args.rows, 'bytes': list(args.recording.read_bytes())})
-        page.wait_for_timeout(3200)
+        # ttyd briefly overlays resize dimensions; wait for its actual removal.
+        page.get_by_text(f'{args.columns}x{args.rows}', exact=True).wait_for(state='hidden')
         terminal = page.locator('.xterm-screen')
         terminal.screenshot(path=str(args.output))
         text = page.evaluate(r'''rows => Array.from({length: rows}, (_, row) =>

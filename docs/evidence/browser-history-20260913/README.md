@@ -35,8 +35,11 @@ python3 replay.py observation-0.pty --columns 130 --rows 35 --output observation
 
 Repeat for 1 and 2. For 3 use `observation-3-complete.pty`: the original
 per-page capture stopped mid-redraw after OSC52. The complete fourth frame is
-an exact prefix of history.pty through its next cursor-hide frame terminator;
+an exact prefix of history.pty through its next actual FRAME_END (`ESC[?7h`) terminator;
 replay-boundary.json records byte offsets, and audit.py verifies the prefix.
+`overview-complete.png/.txt` are the final fourth-frame replay. The audit rejects
+old Alpha body text and requires blank rows below Text 1/4; merely finding a
+new header and navigation labels is insufficient.
 The original partial recording is retained. Copy completion alone is therefore
 not evidence that a terminal redraw has completed. Replay starts a local terminal renderer, not MASC or Keeper.
 `capture-original.py` is the exact historical capture script; its explicit owned
@@ -44,3 +47,10 @@ scratch paths and authenticated server prerequisites make it unsuitable as an
 offline replay command. No token, login-private file, server configuration or
 provider log is included. `tool-calls.json` is the actual bounded authenticated
 API response from the isolated Keeper, rather than a generated fixture.
+
+The final `overview-render-settled.png/.txt` replay waits for xterm's actual
+full-row onRender event after refresh, then animation-frame completion and ttyd
+resize-overlay disappearance. These APIs were exercised against the installed
+ttyd/xterm. No fixed screenshot delay is used. Earlier images remain: the first
+onRender-only image shows ttyd's resize badge. The clean final image and text
+were inspected; no cache or rendering-race cause is asserted for earlier reports.

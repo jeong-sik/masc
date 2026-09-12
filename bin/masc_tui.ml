@@ -15095,6 +15095,23 @@ and is loaded on demand through keeper_skill.
     if Atomic.exchange resize_requested false then
       invalidate_frame_for_resize frame_presenter render_schedule
   in
+  (* A wheel detent is worth [wheel_notch_rows], and on a plain surface it was
+     worth one row: the key it becomes sits beside j and k in the dispatcher,
+     and those move a single step. Chat and the Activity pane spend the three
+     the constant names; every other surface spent one, so the same flick of
+     the same wheel moved three times as far over the chat pane as over the
+     list beside it.
+
+     Delivered as that many presses rather than by teaching forty arms a
+     second magnitude. The arms already answer the wheel key, and a step is
+     what each of them means by it -- a cursor row here, a scrolled line
+     there, and on the surfaces that page by their own height, that.
+
+     Self-limiting: while presses are owed the loop delivers instead of
+     reading, so the detents behind them stay in the terminal's buffer and
+     nothing accumulates past one notch. *)
+  let owed_presses = ref 0 in
+  let owed_press = ref "" in
   let run_loop () =
     while true do
       request_console_write_repair render_schedule;
@@ -15168,7 +15185,13 @@ and is loaded on demand through keeper_skill.
           launch_msx_poll state ~mailbox:async_messages
         end
       end;
-      let input = read_input ~timeout:input_timeout input_reader () in
+      let input =
+        if !owed_presses > 0 then begin
+          decr owed_presses;
+          Some (Key !owed_press)
+        end
+        else read_input ~timeout:input_timeout input_reader ()
+      in
       (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
          this input sees the old frame; the next loop would be one key too
          late. *)
@@ -15394,6 +15417,16 @@ and is loaded on demand through keeper_skill.
           | Some (Pasted _) | Some (Graphics_reply _)
           | Some (Mouse_left_press _) | Some (Mouse_left_release _) | None -> None
       in
+      (* The rest of the notch. Owed only when the detent became a key at all:
+         over the Activity pane it is the pane's and the pane spends the three
+         itself, and while the image or the MSX screen owns the input the
+         detent is not a step on any surface. *)
+      (match input, key with
+       | Some (Mouse_wheel _), Some name ->
+           owed_press := name;
+           owed_presses := wheel_notch_rows - 1
+       | (Some (Key _ | Pasted _ | Graphics_reply _ | Mouse_wheel _
+               | Mouse_left_press _ | Mouse_left_release _) | None), _ -> ());
       (* Async agenda state can change the usable row budget after the last
          paint. Read the compact marker from that paint, not from the newer
          state. An invalidated or not-yet-painted frame stays compact until

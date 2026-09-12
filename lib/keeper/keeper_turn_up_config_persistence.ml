@@ -523,6 +523,49 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
         else Ok ()
       in
       let created = observed_manifest = Missing in
+      (* Crash-window closure (#31180): stage the before-image pair while
+         both locks are held and BEFORE the first rename. From here until
+         the journal is cleared, any process death leaves a journal on
+         disk and startup recovery rolls both files back to the
+         pre-request state. The journal's mere presence is the recovery
+         trigger — intermediate phases are bookkeeping, not authority. *)
+      let base_path = config.base_path in
+      let journal_path =
+        Keeper_config_journal.journal_path_for_base_path ~base_path
+      in
+      let journal_record : Keeper_config_journal.record =
+        { tx_id = Printf.sprintf "tx-%.0f" (Time_compat.now () *. 1000.0)
+        ; keeper_name = meta.name
+        ; manifest_before =
+            (match snapshot with
+             | Absent -> Keeper_config_journal.Manifest_absent
+             | Present bytes -> Keeper_config_journal.Manifest_bytes bytes)
+        ; runtime_before =
+            (* The transaction type is abstract by design; the before
+               image is simply the file's current bytes, read while the
+               runtime lock is held and before any write happens. *)
+            (let runtime_toml =
+               Config_dir_resolver.runtime_toml_path_for_base_path
+                 ~base_path:config.base_path
+             in
+             if Fs_compat.file_exists runtime_toml
+             then (
+               match Safe_ops.read_file_safe runtime_toml with
+               | Ok bytes -> Some bytes
+               | Error _ -> None)
+             else None)
+        ; manifest_path = path
+        ; runtime_path =
+            Runtime.keeper_assignment_transaction_path runtime_transaction
+        ; started_at_unix = Time_compat.now ()
+        ; phase = Prepared
+        }
+      in
+      let* () =
+        Keeper_config_journal.stage ~base_path journal_record
+        |> Result.map_error (fun detail ->
+          Io_error ("config journal stage failed: " ^ detail))
+      in
       let* write_warnings =
         (if created
          then
@@ -538,6 +581,13 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
       in
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+        (* Mark the journal rolling back BEFORE restoring, so a crash
+           mid-rollback still finds a journal and recovery retries the
+           same idempotent restores. *)
+        let _ =
+          Keeper_config_journal.stage ~base_path
+            { journal_record with phase = Rolling_back }
+        in
         let runtime_restore =
           match restore_runtime runtime_transaction with
           | Ok
@@ -619,15 +669,20 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
           | Error error -> rollback error
           | Ok (Commit value) ->
             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+            (* Both files now carry the request's after-state: the crash
+               window is closed and the journal's authority ends. *)
+            Keeper_config_journal.clear ~journal_path;
             Ok { value; warnings = write_warnings }
           | Ok (Commit_with_warnings (value, publication_warnings)) ->
             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+            Keeper_config_journal.clear ~journal_path;
             Ok
               { value
               ; warnings = write_warnings @ publication_warnings
               }
           | Ok (Rollback value) ->
             let* () = restore_publication_state () in
+            Keeper_config_journal.clear ~journal_path;
             Ok { value; warnings = [] })))
     with
     | Error detail -> Error (Io_error detail)

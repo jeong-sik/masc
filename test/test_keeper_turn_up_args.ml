@@ -1316,6 +1316,177 @@ let test_post_write_revision_failure_restores_missing_manifest () =
      = missing_config_revision)
 ;;
 
+let test_config_journal_recovery_recovers_composite_write () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "journal-recovery-composite-fixture" in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir (name ^ ".toml") in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let manifest_before = "[keeper]\nname = \"journal-recovery-composite-fixture\"\n" in
+  let runtime_before =
+    "[exec.test]\nruntime = \"before\"\n"
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path manifest_before;
+  Fs_compat.save_file runtime_path runtime_before;
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path source =
+    try Ok (Fs_compat.save_file path source)
+    with exn -> Error (Printexc.to_string exn)
+  in
+  let journal_record : Keeper_config_journal.record =
+    { tx_id = "journal-recovery-composite"
+    ; keeper_name = name
+    ; manifest_before = Keeper_config_journal.Manifest_bytes manifest_before
+    ; runtime_before = Some runtime_before
+    ; manifest_path
+    ; runtime_path = Some runtime_path
+    ; started_at_unix = Time_compat.now ()
+    ; phase = Keeper_config_journal.Prepared
+    }
+  in
+  (match Keeper_config_journal.stage ~base_path journal_record with
+   | Ok () -> ()
+   | Error error ->
+     fail ("journal stage failed: " ^ error));
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"changed\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"changed\"\n";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  let manifest_restored, runtime_restored =
+    match report.outcome with
+    | Keeper_config_journal.Recovered_rolled_back
+        { manifest_restored; runtime_restored } ->
+      manifest_restored, runtime_restored
+    | _ ->
+      fail
+        ("expected composite recovery to succeed, got: "
+         ^ "unexpected recovery outcome")
+  in
+  check bool "manifest restored by recovery" true manifest_restored;
+  check bool "runtime restored by recovery" true runtime_restored;
+  check string "manifest bytes restored" manifest_before (Fs_compat.load_file manifest_path);
+  check string "runtime bytes restored" runtime_before (Fs_compat.load_file runtime_path);
+  check bool "journal was cleared" false (Sys.file_exists report.journal_path)
+;;
+
+let test_config_journal_recovery_ignores_missing_journal () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir "no-journal.toml" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path source =
+    try Ok (Fs_compat.save_file path source)
+    with exn -> Error (Printexc.to_string exn)
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"no-journal\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"before\"\n";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | _ ->
+     fail
+       ("expected no_journal when no marker exists, got: "
+        ^ "unexpected recovery outcome"));
+  check bool "journal file absent" false (Sys.file_exists report.journal_path);
+  check string "manifest untouched without recovery" "[keeper]\nname = \"no-journal\"\n"
+    (Fs_compat.load_file manifest_path);
+  check string "runtime untouched without recovery" "[exec.test]\nruntime = \"before\"\n"
+    (Fs_compat.load_file runtime_path)
+;;
+
+let test_config_journal_recovery_corrupt_journal_flags_error () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir "corrupt-journal.toml" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path source =
+    try Ok (Fs_compat.save_file path source)
+    with exn -> Error (Printexc.to_string exn)
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"corrupt\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"before\"\n";
+  Fs_compat.save_file
+    (Keeper_config_journal.journal_path_for_base_path ~base_path)
+    "{ this is not json }";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  let _ =
+    match report.outcome with
+    | Keeper_config_journal.Journal_corrupt detail ->
+      check bool "corrupt detail is visible" true (String.length detail > 0)
+    | _ ->
+      fail
+        ("expected journal_corrupt on bad json, got: "
+         ^ "unexpected recovery outcome")
+  in
+  check bool "corrupt journal is not auto-deleted" true
+    (Sys.file_exists report.journal_path);
+  check string "manifest unchanged while journal corrupt" "[keeper]\nname = \"corrupt\"\n"
+    (Fs_compat.load_file manifest_path);
+  check string "runtime unchanged while journal corrupt" "[exec.test]\nruntime = \"before\"\n"
+    (Fs_compat.load_file runtime_path)
+;;
+
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
    while creation required a sandbox_profile readable only from a keeper TOML the tool
    does not write. The argument was parsed and honoured on update but ignored by the
@@ -2084,6 +2255,18 @@ let () =
             "post-write revision failure restores missing manifest"
             `Quick
             test_post_write_revision_failure_restores_missing_manifest
+        ; test_case
+            "journal recovery recovers interrupted dual-write"
+            `Quick
+            test_config_journal_recovery_recovers_composite_write
+        ; test_case
+            "journal recovery no-op when journal missing"
+            `Quick
+            test_config_journal_recovery_ignores_missing_journal
+        ; test_case
+            "journal recovery reports corrupt manifest"
+            `Quick
+            test_config_journal_recovery_corrupt_journal_flags_error
         ] )
     ]
 ;;

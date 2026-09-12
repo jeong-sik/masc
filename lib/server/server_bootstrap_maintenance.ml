@@ -196,6 +196,46 @@ let latest_keeper_msg_recovery_observation () =
   Atomic.get latest_keeper_msg_recovery
 ;;
 
+let latest_keeper_config_journal_recovery = Atomic.make None
+
+let latest_keeper_config_journal_recovery_report () =
+  Atomic.get latest_keeper_config_journal_recovery
+;;
+
+let recover_keeper_config_journal_on_startup ~base_path =
+  let report =
+    Keeper_config_journal.recover_interrupted ~base_path
+      ~manifest_restore:(fun path before ->
+        match before with
+        | Keeper_config_journal.Manifest_absent ->
+          if Fs_compat.file_exists path
+          then (
+            try
+              Sys.remove path;
+              Ok ()
+            with exn -> Error (Printexc.to_string exn))
+          else Ok ()
+        | Keeper_config_journal.Manifest_bytes bytes ->
+          Fs_compat.save_file_atomic_strict_staged path bytes
+          |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
+      ~runtime_restore:(fun path source_text ->
+        Fs_compat.save_file_atomic_strict_staged path source_text
+        |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
+  in
+  Atomic.set latest_keeper_config_journal_recovery (Some report);
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | Keeper_config_journal.Recovered_rolled_back _ ->
+     Log.Server.info "keeper_config_journal: startup recovery rolled back an interrupted config write (journal cleared)"
+   | Keeper_config_journal.Journal_corrupt detail ->
+     Log.Server.info "keeper_config_journal: startup recovery found an unreadable journal (%s); leaving it in place for diagnosis"
+       detail
+   | Keeper_config_journal.Recovery_failed { detail; _ } ->
+     Log.Server.info "keeper_config_journal: startup recovery could not converge (%s); journal preserved for retry"
+       detail);
+  report
+;;
+
 let recover_keeper_msg_requests_on_startup ~base_path =
   let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
   Atomic.set latest_keeper_msg_recovery (Some report);
@@ -230,6 +270,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   ignore
     (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
       : Keeper_msg_async.recovery_report);
+  ignore
+    (recover_keeper_config_journal_on_startup ~base_path:config.base_path
+      : Keeper_config_journal.report);
   let recovery_ctx : _ Keeper_types_profile.context =
     { config
     ; agent_name = "keeper-maintenance-recovery"

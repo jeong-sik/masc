@@ -12728,9 +12728,16 @@ let render_voice (state : state) =
                       | Some (`Bool false) -> "  (disabled)"
                       | Some _ | None -> ""
                     in
+                    (* runtime.toml is an operator's file, not this pane's
+                       output. box_line's fit_width keeps ANSI, so an id, kind
+                       or address carrying control bytes rewrote the screen the
+                       moment the voice pane opened. The probe rows below
+                       already pass through the same filter. *)
                     Some
-                      (Printf.sprintf "    %-20s %s%-18s%s %s%s" id Ansi.dim kind
-                         Ansi.reset address off))
+                      (Printf.sprintf "    %-20s %s%-18s%s %s%s"
+                         (Terminal_text.single_line id) Ansi.dim
+                         (Terminal_text.single_line kind)
+                         Ansi.reset (Terminal_text.single_line address) off))
               items
         | Some _ | None -> [])
   in

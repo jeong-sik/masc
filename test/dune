@@ -172,6 +172,7 @@
   test_eio_context_fiber_local
   test_pool
   test_pool_dead_server_fd
+  test_pool_address_selection
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field
@@ -520,6 +521,7 @@
   test_eio_context_fiber_local
   test_pool
   test_pool_dead_server_fd
+  test_pool_address_selection
   test_keeper_turn_disposition
   test_keeper_execution_receipt_observation_wire
   test_keeper_turn_terminal_disposition_field

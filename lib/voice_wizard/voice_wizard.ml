@@ -206,3 +206,75 @@ let step_gap = function
   | Voice -> Some Voice_is_blank
   | Review -> None
 ;;
+
+(* ── the request a surface sends ───────────────────────────────────────── *)
+
+(* The wire shape belongs to the server, which parses it back into the closed
+   sum type before it means anything. Producing it here keeps one spelling of it
+   on the sending side: a TUI and a dashboard that each wrote their own would
+   drift, and the drift would only show as a request the server refuses. *)
+
+let section_label = function
+  | Voice_setup.Tts -> "tts"
+  | Voice_setup.Stt -> "stt"
+
+let endpoint_json (endpoint : Voice_config.endpoint) =
+  let text key = function
+    | Some value -> [ key, `String value ]
+    | None -> []
+  in
+  `Assoc
+    ([ "id", `String endpoint.Voice_config.id
+     ; "kind", `String (Voice_config.string_of_endpoint_kind endpoint.Voice_config.kind)
+     ; "enabled", `Bool endpoint.Voice_config.enabled
+     ]
+     @ text "base_url" endpoint.Voice_config.base_url
+     @ text "mcp_url" endpoint.Voice_config.mcp_url
+     @ text "health_url" endpoint.Voice_config.health_url
+     @ text "api_key_env" endpoint.Voice_config.api_key_env
+     @ text "default_voice" endpoint.Voice_config.default_voice
+     @
+     match endpoint.Voice_config.timeout_seconds with
+     | Some seconds -> [ "timeout_seconds", `Float seconds ]
+     | None -> [])
+
+let change_json = function
+  | Voice_setup.Put_endpoint (section, endpoint) ->
+    `Assoc
+      [ "change", `String "put_endpoint"
+      ; "section", `String (section_label section)
+      ; "endpoint", endpoint_json endpoint
+      ]
+  | Voice_setup.Remove_endpoint (section, id) ->
+    `Assoc
+      [ "change", `String "remove_endpoint"
+      ; "section", `String (section_label section)
+      ; "id", `String id
+      ]
+  | Voice_setup.Set_default_model (section, model) ->
+    `Assoc
+      [ "change", `String "set_default_model"
+      ; "section", `String (section_label section)
+      ; "model", `String model
+      ]
+  | Voice_setup.Set_tts_default_voice voice ->
+    `Assoc [ "change", `String "set_tts_default_voice"; "voice", `String voice ]
+  | Voice_setup.Set_agent_voice (agent, voice) ->
+    `Assoc
+      [ "change", `String "set_agent_voice"
+      ; "agent", `String agent
+      ; ( "voice"
+        , match voice with
+          | Some voice -> `String voice
+          | None -> `Null )
+      ]
+
+let save_request draft ~revision =
+  match changes draft with
+  | Error gaps -> Error gaps
+  | Ok changes ->
+    Ok
+      (`Assoc
+        [ "expected_revision", `String revision
+        ; "changes", `List (List.map change_json changes)
+        ])

@@ -5,4 +5,4 @@
  (public_name masc.voice_wizard)
  (wrapped false)
  (modules voice_wizard)
- (libraries masc.voice_config masc.voice_setup))
+ (libraries yojson masc.voice_config masc.voice_setup))

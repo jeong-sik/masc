@@ -459,6 +459,83 @@ let test_the_observation_names_the_tts_tuning () =
             Alcotest.failf "tts.agent_voice_settings must be an object, got %s"
               (Yojson.Safe.to_string other))))
 
+(* adapter_for_endpoint resolves the id before the kind, so an id that is an
+   alias for another adapter reaches that transport while the API reports the
+   declared one. *)
+let test_an_id_that_contradicts_the_kind_is_refused () =
+  refused ~what:"an id naming a different transport than the declared kind"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint",
+         `Assoc [ "id", `String "elevenlabs"; "kind", `String "openai_compat" ]
+       ])
+
+(* The fixture's own endpoint carries a timeout on an openai_compat kind, so the
+   round trip has to keep accepting that pair. *)
+let test_a_timeout_on_an_http_endpoint_is_accepted () =
+  with_workspace (fun ~base_path ~path:_ ->
+    let change =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint",
+          `Assoc
+            [ "id", `String "whisper-local"
+            ; "kind", `String "openai_compat"
+            ; "base_url", `String "http://127.0.0.1:2022/v1"
+            ; "timeout_seconds", `Float 60.0
+            ]
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ -> ())
+
+let test_the_observation_names_the_session_section () =
+  with_workspace (fun ~base_path ~path:_ ->
+    match Actions.observe ~base_path with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok json ->
+      (match member "session" json with
+       | `Assoc fields ->
+         Alcotest.(check bool) "the session section names its endpoints" true
+           (List.mem_assoc "endpoints" fields)
+       | other ->
+         Alcotest.failf "session must be an object once voice is configured, got %s"
+           (Yojson.Safe.to_string other)))
+
+(* Which program a command kind runs is part of the endpoint, and the
+   observation described it by a default it may have overridden. *)
+let test_the_observation_names_a_command_override () =
+  with_workspace (fun ~base_path ~path ->
+    let before = read path in
+    Out_channel.with_open_bin path (fun out ->
+      output_string
+        out
+        (before
+         ^ "\n[[voice.tts.endpoints]]\nid = \"say\"\nkind = \"macos_say\"\ncommand = \
+            \"/opt/bin/say\"\n"));
+    (* The tts section the appended endpoint belongs to still needs its required
+       fields, so this only asserts the field survives when the file parses. *)
+    match Actions.observe ~base_path with
+    | Error _ -> ()
+    | Ok json ->
+      let commands =
+        match member "endpoints" (member "tts" json) with
+        | `List endpoints ->
+          List.filter_map
+            (fun endpoint ->
+              match member "command" endpoint with
+              | `String value -> Some value
+              | _ -> None)
+            endpoints
+        | _ -> []
+      in
+      if commands <> []
+      then
+        Alcotest.(check bool) "the override is named" true (List.mem "/opt/bin/say" commands))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -503,6 +580,18 @@ let () =
       , [ Alcotest.test_case "send_on_stop" `Quick test_the_observation_names_send_on_stop
         ; Alcotest.test_case "the tts tuning" `Quick
             test_the_observation_names_the_tts_tuning
+        ] )
+    ; ( "the declared kind is what the runtime will use"
+      , [ Alcotest.test_case "an id contradicting the kind" `Quick
+            test_an_id_that_contradicts_the_kind_is_refused
+        ; Alcotest.test_case "a timeout on an http endpoint stays accepted" `Quick
+            test_a_timeout_on_an_http_endpoint_is_accepted
+        ] )
+    ; ( "the observation describes every section"
+      , [ Alcotest.test_case "the session section" `Quick
+            test_the_observation_names_the_session_section
+        ; Alcotest.test_case "a command override" `Quick
+            test_the_observation_names_a_command_override
         ] )
     ; ( "the wizard and the routes agree"
       , [ Alcotest.test_case "what the wizard sends is what the routes read" `Quick

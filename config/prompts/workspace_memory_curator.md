@@ -21,6 +21,13 @@ artifacts. Stored file bindings have not been revalidated. A missing store does
 not invalidate claims from another available store; an unavailable store is a
 read gap, not evidence that its earlier memories were cleared.
 
+A source with `evidence_path` points to evidence in the corresponding snapshot's
+`metadata`: resolve its `snapshot_id`, then read the indicated `change` or
+`invalidations` entry. It is not missing evidence merely because it has no
+inline `fact`. These entries can record corrections or withdrawals even when
+the current fact list is empty. Evaluate their actual contents before deciding
+whether they support a statement, conflict, or justified exclusion.
+
 Preserve source referents, nouns and units exactly. Do not infer translations
 of unintelligible text; retain ambiguity explicitly. Different verification
 methods are not contradictions unless their claims are logically incompatible.

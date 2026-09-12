@@ -1877,16 +1877,32 @@ type identity_provider =
 (** The providers a key can act on, in the order the screen numbers them.
     Both the renderer and the key handler read this, so the number an
     operator sees and the provider a keypress starts cannot drift apart. *)
+(* Case-insensitive substring, read rather than rebuilt.
+
+   This used to take a lowercase copy of the haystack and then a [String.sub]
+   of it at every position it tried. The row search calls it once per row per
+   keystroke, so on a twenty-thousand-line file a single keypress asked the
+   allocator for the file again and then for a slice per character of it.
+
+   Folding case per byte the way [String.lowercase_ascii] does -- ASCII A-Z
+   and nothing else, so a UTF-8 continuation byte is left alone -- keeps the
+   same answers without the copies. *)
+let lowercase_byte c =
+  if c >= 'A' && c <= 'Z' then Char.unsafe_chr (Char.code c + 32) else c
+
 let lowercase_contains ~needle haystack =
-  let needle = String.lowercase_ascii needle in
-  let haystack = String.lowercase_ascii haystack in
   let n = String.length needle and h = String.length haystack in
-  if n = 0
-  then true
+  if n = 0 then true
+  else if n > h then false
   else
-    let rec at i =
-      i + n <= h && (String.equal (String.sub haystack i n) needle || at (i + 1))
+    let rec matches_at i k =
+      k >= n
+      || Char.equal
+           (lowercase_byte (String.unsafe_get haystack (i + k)))
+           (lowercase_byte (String.unsafe_get needle k))
+         && matches_at i (k + 1)
     in
+    let rec at i = i + n <= h && (matches_at i 0 || at (i + 1)) in
     at 0
 
 (** Whether a query names this provider.

@@ -266,20 +266,32 @@ let identity_pane_columns (state : state) =
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
    a row the frame will not draw. *)
+(* The rows a surface's list can draw in once the cursor is on [cursor].
+
+   Constant on every surface but one: the Memory overview spends rows on the
+   selected keeper's own alerts and read errors, so its body height is a
+   function of the cursor rather than of the surface. A follow worked out
+   from the layout before the move puts the landing outside the window it
+   measured, and the step key and the jump keys were working that out
+   differently -- the step recomputed, the landing did not. *)
+let surface_body_height_at (state : state) ~cursor scrolled =
+  let scrolled =
+    if state.view = Memory && Option.is_none state.memory_facts_keeper then
+      memory_overview_scrolled ~cursor state
+    else scrolled
+  in
+  surface_body_height ~rows:(surface_rows state) scrolled
+
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let cursor =
-        if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
-        else Masc_tui_scroll.cursor_up ~count:sc_count cursor
-      in
-      let scrolled =
-        if state.view = Memory && Option.is_none state.memory_facts_keeper then
-          memory_overview_scrolled ~cursor state
-        else scrolled
-      in
-      let height = surface_body_height ~rows:(surface_rows state) scrolled in
+      (* [delta], not its sign. The two steppers move one row, and reading
+         only the direction meant a page key that routed through here moved
+         one row while its key table said "page" -- Verification, Harness,
+         Clients and the Git-changes list all read as j/k. *)
+      let cursor = Masc_tui_scroll.cursor_move ~count:sc_count ~delta cursor in
+      let height = surface_body_height_at state ~cursor scrolled in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 (* The Identity tab's provider list. The cursor names a provider while the
@@ -302,10 +314,7 @@ let move_identity_cursor (state : state) ~delta =
           Masc_tui_types.identity_cursor_clamped ~query ~providers
             state.identity_cursor
         in
-        let cursor =
-          if delta >= 0 then Masc_tui_scroll.cursor_down ~count cursor
-          else Masc_tui_scroll.cursor_up ~count cursor
-        in
+        let cursor = Masc_tui_scroll.cursor_move ~count ~delta cursor in
         state.identity_cursor <- cursor;
         match scrolled_surface state state.view with
         | None -> ()
@@ -5269,162 +5278,272 @@ let launch_verification_load state ~mailbox =
         enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
   end
 
+(* One surface's row list: how many rows it has, which one the cursor is on,
+   and how to put the cursor somewhere else.
+
+   These three facts lived in three separate exhaustive matches over
+   [surface], each naming every variant so the compiler would flag a new one.
+   Naming is not agreeing: the Keeper detail's context inspector had a
+   landing and searchable rows but no cursor reading, so [n] and [N] restarted
+   from the first row every press. A fourth match -- the count Home and End
+   need -- would have been a fourth chance to drift, so the three are one
+   record built in one place instead.
+
+   [None] is a surface with no row cursor, or one whose rows only exist once
+   the frame is built. Those keep the keys they already have: Activity has g
+   and G, the Keeper log and Tools have their own Home and End. *)
+type row_list = {
+  rl_count : int;  (** rows the list holds *)
+  rl_cursor : int;  (** the row the cursor is on *)
+  rl_place : int -> unit;
+      (** put the cursor on a row and move the window to show it *)
+}
+
+let row_list (state : state) : row_list option =
+  (* The window follows a named row the same way it follows a step, through
+     [surface_body_height] rather than [rows - sc_chrome]: a surface that
+     gives half its rows to a preview says so in [sc_preview_keep], and a
+     height that ignores it lands the cursor under the preview while
+     [ensure_visible] reports the row as already on screen. *)
+  let follow ~cursor scroll set_scroll =
+    match scrolled_surface state state.view with
+    | None -> ()
+    | Some scrolled ->
+        let height = surface_body_height_at state ~cursor scrolled in
+        set_scroll (Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
+  in
+  (* The count the keypress bound already uses, so a jump cannot land on a
+     row a step cannot reach. [None] here means the state does not own the
+     count; the arms below that need one say where it comes from. *)
+  let counted () =
+    match scrolled_surface state state.view with
+    | Some { sc_count; _ } -> Some sc_count
+    | None -> None
+  in
+  (* A list whose rows the drawing windows around the cursor: nothing to
+     scroll, so the landing is on screen as soon as the cursor names it. *)
+  let windowed ~count ~cursor place = Some { rl_count = count; rl_cursor = cursor; rl_place = place } in
+  (* A list with a scroll of its own, which follows the cursor. *)
+  let scrolling ~count ~cursor ~scroll ~set_cursor ~set_scroll =
+    Some
+      { rl_count = count
+      ; rl_cursor = cursor
+      ; rl_place =
+          (fun index ->
+            set_cursor index;
+            follow ~cursor:index scroll set_scroll)
+      }
+  in
+  let of_counted f = Option.bind (counted ()) f in
+  match state.view with
+  | Keepers Keeper_list ->
+      windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
+        (fun index -> state.keeper_cursor <- index)
+  | Keepers Keeper_detail when state.context_inspector_open ->
+      (* The request tab's items, counted by the pane that draws them. A
+         landed row is a new item, so its reader starts at the top the way a
+         j/k move does. *)
+      if state.context_inspector_tab = Masc_tui_context_inspector.Exact_input
+      then
+        let count, _height = Masc_tui_render.context_inspector_viewport state in
+        if count = 0 then None
+        else
+          windowed ~count ~cursor:state.context_inspector_cursor (fun index ->
+              state.context_inspector_cursor <- index;
+              state.context_inspector_detail_scroll <- 0)
+      else None
+  | Lanes ->
+      (match state.lanes_mode with
+       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       | Lanes_overview ->
+           of_counted (fun count ->
+               windowed ~count ~cursor:state.lanes_standalone_cursor
+                 (fun index -> state.lanes_standalone_cursor <- index)))
+  | Clients ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.clients_surface_cursor
+            ~scroll:state.clients_surface_scroll
+            ~set_cursor:(fun i -> state.clients_surface_cursor <- i)
+            ~set_scroll:(fun s -> state.clients_surface_scroll <- s))
+  | Verification ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.verification_cursor
+            ~scroll:state.verification_scroll
+            ~set_cursor:(fun i -> state.verification_cursor <- i)
+            ~set_scroll:(fun s -> state.verification_scroll <- s))
+  | Harness ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.harness_cursor
+            ~scroll:state.harness_scroll
+            ~set_cursor:(fun i -> state.harness_cursor <- i)
+            ~set_scroll:(fun s -> state.harness_scroll <- s))
+  | Memory ->
+      of_counted (fun count ->
+          if Option.is_some state.memory_facts_keeper then
+            scrolling ~count ~cursor:state.memory_facts_cursor
+              ~scroll:state.memory_facts_scroll
+              ~set_cursor:(fun i -> state.memory_facts_cursor <- i)
+              ~set_scroll:(fun s -> state.memory_facts_scroll <- s)
+          else
+            scrolling ~count ~cursor:state.memory_health_cursor
+              ~scroll:state.memory_health_scroll
+              ~set_cursor:(fun i -> state.memory_health_cursor <- i)
+              ~set_scroll:(fun s -> state.memory_health_scroll <- s))
+  | Repositories ->
+      of_counted (fun count ->
+          if state.repository_changes_open then
+            scrolling ~count ~cursor:state.repository_changes_cursor
+              ~scroll:state.repository_changes_scroll
+              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
+              ~set_scroll:(fun s -> state.repository_changes_scroll <- s)
+          else
+            scrolling ~count ~cursor:state.repositories_cursor
+              ~scroll:state.repositories_scroll
+              ~set_cursor:(fun i -> state.repositories_cursor <- i)
+              ~set_scroll:(fun s -> state.repositories_scroll <- s))
+  | Connectors ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.connectors_cursor
+            ~scroll:state.connectors_scroll
+            ~set_cursor:(fun i -> state.connectors_cursor <- i)
+            ~set_scroll:(fun s -> state.connectors_scroll <- s))
+  | Runtime ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.runtime_cursor
+            ~scroll:state.runtime_surface_scroll
+            ~set_cursor:(fun i -> state.runtime_cursor <- i)
+            ~set_scroll:(fun s -> state.runtime_surface_scroll <- s))
+  | System_logs ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.system_logs_cursor
+            ~scroll:state.system_logs_scroll
+            ~set_cursor:(fun i -> state.system_logs_cursor <- i)
+            ~set_scroll:(fun s -> state.system_logs_scroll <- s))
+  | Changes ->
+      of_counted (fun count ->
+          scrolling ~count ~cursor:state.changes_cursor
+            ~scroll:state.changes_scroll
+            ~set_cursor:(fun i -> state.changes_cursor <- i)
+            ~set_scroll:(fun s -> state.changes_scroll <- s))
+  | Code ->
+      (* Three panes under one surface: the Git changes overlay, the open
+         file, and the tree everything else hangs off. The overlay is the
+         counted one; the file carries its own pane height, and the tree
+         windows itself around the cursor. *)
+      if state.repository_changes_open then
+        of_counted (fun count ->
+            scrolling ~count ~cursor:state.repository_changes_cursor
+              ~scroll:state.repository_changes_scroll
+              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
+              ~set_scroll:(fun s -> state.repository_changes_scroll <- s))
+      else if
+        state.code_focus_file = Right_pane && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+      then
+        (match Masc_tui_fetched.current state.code_file with
+         | Some (_, Masc_tui_fetched.Ready rows) ->
+             Some
+               { rl_count = List.length rows
+               ; rl_cursor = state.code_file_cursor
+               ; rl_place =
+                   (fun index ->
+                     state.code_file_cursor <- index;
+                     state.code_file_scroll <-
+                       Masc_tui_scroll.ensure_visible ~cursor:index
+                         ~height:(Masc_tui_render.code_pane_content_height state)
+                         state.code_file_scroll)
+               }
+         (* Nothing to move through while the file is still being read, and
+            nothing to move through if it failed. *)
+         | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+         | Some (_, Masc_tui_fetched.Absent)
+         | None -> None)
+      else
+        windowed ~count:(List.length state.code_entries)
+          ~cursor:state.code_cursor (fun index -> state.code_cursor <- index)
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ | Board_compose -> None
+       | Board_list ->
+           windowed ~count:(List.length state.board_posts)
+             ~cursor:state.board_cursor (fun index ->
+               state.board_cursor <- index))
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> None
+       | Planning_list ->
+           let count =
+             match state.planning with
+             | None -> 0
+             | Some snapshot ->
+                 List.length
+                   (planning_visible_goals ~filter:state.planning_filter
+                      ~sort:state.planning_sort snapshot.pl_goals)
+           in
+           windowed ~count ~cursor:state.planning_cursor (fun index ->
+               state.planning_cursor <- index))
+  (* Three lists that carry no row search yet (#35306). Home, End and the
+     page keys reach them through here, which is what makes these arms live
+     rather than a landing nobody calls. *)
+  | Approvals ->
+      windowed ~count:(List.length (approval_items state))
+        ~cursor:state.approval_cursor (fun index ->
+          state.approval_cursor <- index)
+  | Schedules ->
+      (match state.schedule_detail_id with
+       | Some _ -> None
+       | None ->
+           let count =
+             match state.schedules with
+             | None -> 0
+             | Some snapshot -> List.length snapshot.scs_rows
+           in
+           windowed ~count ~cursor:state.schedule_cursor (fun index ->
+               state.schedule_cursor <- index))
+  | Fusion ->
+      (match state.fusion_mode with
+       | Fusion_detail _ | Fusion_historical_detail _ -> None
+       | Fusion_list ->
+           windowed ~count:(List.length (fusion_list_entries state))
+             ~cursor:state.fusion_cursor (fun index ->
+               state.fusion_cursor <- index))
+  (* Named rather than caught. A surface that grows a row cursor is added
+     above in one place, and a [_] here would let it be forgotten silently --
+     which is how the context inspector came to have a landing with no
+     reading. *)
+  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
+  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
+  | Config | Resources | Tools ->
+      None
+
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
    the other way. A miss moves nothing. The searched list is the one
    [surface_row_texts] answers -- the same list the row cursor names -- and
    the window follows the landing so the match is visible. *)
-let search_row_cursor state =
-  match state.view with
-  | Keepers Keeper_list -> Some state.keeper_cursor
-  | Lanes -> Some state.lanes_standalone_cursor
-  | Clients -> Some state.clients_surface_cursor
-  | Verification ->
-      if Option.is_some state.verification_detail_request_id then None
-      else Some state.verification_cursor
-  | Harness -> Some state.harness_cursor
-  | Memory ->
-      Some
-        (if Option.is_some state.memory_facts_keeper then
-           state.memory_facts_cursor
-         else state.memory_health_cursor)
-  | Repositories ->
-      Some
-        (if state.repository_changes_open then state.repository_changes_cursor
-         else state.repositories_cursor)
-  | Connectors -> Some state.connectors_cursor
-  | Runtime -> Some state.runtime_cursor
-  | System_logs -> Some state.system_logs_cursor
-  | Code ->
-      if state.repository_changes_open then
-        Some state.repository_changes_cursor
-      else if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then Some state.code_file_cursor
-      else Some state.code_cursor
-  | Board ->
-      (match state.board_mode with
-       | Board_read _ | Board_compose -> None
-       | Board_list -> Some state.board_cursor)
-  | Planning ->
-      (match state.planning_mode with
-       | Planning_detail _ -> None
-       | Planning_list -> Some state.planning_cursor)
-  (* Named rather than left to a wildcard. [surface_row_texts] is exhaustive
-     and will name a new surface; this used to end in [_ -> None], so a
-     surface given searchable rows there still had no cursor to move here and
-     the key did nothing. The three matches -- the rows, this reading, and
-     the write below -- have to agree, and only naming every surface makes
-     the compiler say so. *)
-  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
-  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Approvals | Schedules | Fusion | Changes | Config | Resources | Tools ->
-      None
+let search_row_cursor state = Option.map (fun r -> r.rl_cursor) (row_list state)
 
-let search_land state index =
-  let follow ?(cursor = index) scroll set_scroll =
-    match scrolled_surface state state.view with
-    | None -> ()
-    | Some scrolled ->
-        (* Through [surface_body_height], not [rows - sc_chrome]. A surface that
-           gives half its rows to a preview says so in [sc_preview_keep], and a
-           height that ignores it lands the cursor under the preview while
-           [ensure_visible] reports the row as already on screen. Both movers
-           ask the same helper for the same reason. *)
-        let height = surface_body_height ~rows:(surface_rows state) scrolled in
-        set_scroll (Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
-  in
-  match state.view with
-  | Keepers Keeper_list -> state.keeper_cursor <- index
-  | Keepers Keeper_detail when state.context_inspector_open ->
-      (* A landed search row is a new item: its reader starts at the top of
-         the detail, the way a j/k move does. *)
-      state.context_inspector_cursor <- index;
-      state.context_inspector_detail_scroll <- 0
-  | Lanes -> state.lanes_standalone_cursor <- index
-  | Clients ->
-      state.clients_surface_cursor <- index;
-      follow state.clients_surface_scroll (fun s -> state.clients_surface_scroll <- s)
-  | Verification ->
-      state.verification_cursor <- index;
-      follow state.verification_scroll (fun s -> state.verification_scroll <- s)
-  | Harness ->
-      state.harness_cursor <- index;
-      follow state.harness_scroll (fun s -> state.harness_scroll <- s)
-  | Memory ->
-      if Option.is_some state.memory_facts_keeper then begin
-        state.memory_facts_cursor <- index;
-        follow state.memory_facts_scroll
-          (fun s -> state.memory_facts_scroll <- s)
-      end
-      else begin
-        state.memory_health_cursor <- index;
-        follow state.memory_health_scroll
-          (fun s -> state.memory_health_scroll <- s)
-      end
-  | Repositories ->
-      if state.repository_changes_open then begin
-        state.repository_changes_cursor <- index;
-        follow state.repository_changes_scroll
-          (fun s -> state.repository_changes_scroll <- s)
-      end
-      else begin
-        state.repositories_cursor <- index;
-        follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
-      end
-  | Connectors ->
-      state.connectors_cursor <- index;
-      follow state.connectors_scroll (fun s -> state.connectors_scroll <- s)
-  | Runtime ->
-      state.runtime_cursor <- index;
-      follow state.runtime_surface_scroll
-        (fun s -> state.runtime_surface_scroll <- s)
-  | System_logs ->
-      state.system_logs_cursor <- index;
-      follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
-  | Code ->
-      if state.repository_changes_open then begin
-        state.repository_changes_cursor <- index;
-        follow state.repository_changes_scroll
-          (fun s -> state.repository_changes_scroll <- s)
-      end
-      else if
-        state.code_focus_file = Right_pane && not state.code_history_open
-        && not state.code_diff_open && not state.code_notes_open
-      then begin
-        state.code_file_cursor <- index;
-        state.code_file_scroll <-
-          Masc_tui_scroll.ensure_visible ~cursor:index
-            ~height:(Masc_tui_render.code_pane_content_height state)
-            state.code_file_scroll
-      end
-      else
-        (* The tree pane windows itself around the cursor; no scroll
-           follows. *)
-        state.code_cursor <- index
-  (* Listed rather than caught. A surface becomes searchable by being added to
-     [surface_row_texts], which is exhaustive and will name the new variant at
-     compile time; this match has to move with it or the search finds a row and
-     then goes nowhere. A [_] here would let the two drift apart silently, and
-     the drift shows up as a search that quietly does nothing. *)
-  (* These three lists window themselves around the cursor when they draw --
-     the same reason the Code tree above takes no [follow] -- so the landing
-     is on screen without a scroll to move. [state.board_scroll] is the
-     reading pane's, not the list's. *)
-  | Board ->
-      (match state.board_mode with
-       | Board_read _ | Board_compose -> ()
-       | Board_list -> state.board_cursor <- index)
-  | Planning ->
-      (match state.planning_mode with
-       | Planning_detail _ -> ()
-       | Planning_list -> state.planning_cursor <- index)
-  | Overview | Acting | Metrics | Keepers Keeper_detail | Keepers Keeper_logs
-  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
-  | Approvals | Schedules | Fusion | Changes | Config
-  | Resources | Tools ->
-      ()
+let place_row_cursor state index =
+  Option.iter (fun r -> r.rl_place index) (row_list state)
+
+(* Home and End over a surface's list, and the page keys between them. All
+   three name a row rather than stepping to one, so all three go through the
+   one record and the window follows the way it does for a landed search.
+   A surface with no row list is left to the keys it already has. *)
+let move_list_to_edge (state : state) ~(to_bottom : bool) =
+  match row_list state with
+  | None -> ()
+  | Some { rl_count = 0; _ } -> ()
+  | Some r ->
+      r.rl_place (if to_bottom then Masc_tui_scroll.cursor_last ~count:r.rl_count else 0)
+
+let move_list_by_rows (state : state) ~delta =
+  match row_list state with
+  | None | Some { rl_count = 0; _ } -> ()
+  | Some r ->
+      r.rl_place
+        (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor)
+
 
 (* Standalone rows never scroll, so an action notice only has to be retained
    until movement or navigation clears it. *)
@@ -5435,12 +5554,16 @@ let search_jump ?(backwards = false) state ~query ~after =
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
-      let total = List.length texts in
+      (* Into an array before the scan, not walked per index. The scan visits
+         every row once and [List.nth_opt] walked to each from the front, so a
+         query that matched nothing cost the list squared: on a twenty-
+         thousand-line file open on the Code surface, one keystroke took about
+         a third of a second, and the search runs on every keystroke. *)
+      let texts = Array.of_list texts in
+      let total = Array.length texts in
       if String.length query > 0 && total > 0 then begin
         let matches index =
-          match List.nth_opt texts index with
-          | Some text -> Masc_tui_types.palette_contains ~needle:query text
-          | None -> false
+          Masc_tui_types.palette_contains ~needle:query texts.(index)
         in
         let rec scan step =
           if step > total then ()
@@ -5451,7 +5574,7 @@ let search_jump ?(backwards = false) state ~query ~after =
             in
             if matches index then begin
               if state.view = Lanes then state.lanes_action_error <- None;
-              search_land state index
+              place_row_cursor state index
             end
             else scan (step + 1)
           end
@@ -18091,6 +18214,13 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
+       (* Every other list. The two surfaces above answer first because their
+          rows are drawn newest first, so their Home is the live end rather
+          than the first row -- the rest read oldest first and take the plain
+          meaning. A surface [surface_list_count] cannot count falls through
+          to whatever else claims the key. *)
+       | Some ("home" | "end") when Option.is_some (row_list state) ->
+           move_list_to_edge state ~to_bottom:(key = Some "end")
        | Some ("pageup" | "pagedown") ->
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
@@ -18115,7 +18245,8 @@ and is loaded on demand through keeper_skill.
                      in
                      state.repository_changes_cursor <- cursor;
                      state.repository_changes_scroll <- scroll)
-            | Code -> ()
+            | Code ->
+                move_list_by_rows state ~delta:(direction * page)
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -18254,13 +18385,29 @@ and is loaded on demand through keeper_skill.
                             Masc_tui_scroll.ensure_visible
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
-                 | Lanes_overview -> ())
+                 | Lanes_overview ->
+                     move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
                  state.metrics_scroll <-
                    max 0 (state.metrics_scroll + (direction * page))
-             | Overview | Acting | Keepers _ | Approvals | Planning
-            | Memory | Repositories | Changes | Connectors
-            | Runtime | Config | Tools | Resources | System_logs -> ())
+             (* The surfaces whose page key used to be silent. Each has a
+                row list, so a page moves the cursor and the window follows --
+                the same move Home and End make, by a page rather than to an
+                edge. [move_list_by_rows] finds the list itself and answers
+                to nothing when there is none; the arm below is where there
+                is none. *)
+             | Keepers _ | Approvals | Planning | Memory | Repositories
+             | Changes | Connectors | Runtime | System_logs ->
+                 move_list_by_rows state ~delta:(direction * page)
+             (* No row list to page. Overview's two panes, Activity's ring and
+                the Tools and Resources listings are built by the frame out of
+                text the frame formats, so the count a page needs does not
+                exist at the keypress; Config's five panes each carry a cursor
+                of their own meaning. Activity pages with g and G, Tools with
+                Home and End. Left named rather than folded into the arm above,
+                so the day one of them gains a row list this reads as a lie
+                rather than as silence (#35305). *)
+             | Overview | Acting | Config | Tools | Resources -> ())
        (* On Config, s and t hop to Resources and Tools and r is the global
           refresh, so the pane takes u, twice, for the destructive restore.
           Its save key is n, answered inside the [n] dispatch below, which

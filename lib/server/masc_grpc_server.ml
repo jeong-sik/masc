@@ -467,7 +467,7 @@ let start
   then (
     Transport_metrics.set_grpc_runtime_listening false;
     Transport_metrics.set_grpc_listen_status "disabled";
-    Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)")
+    Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=1 to enable)")
   else (
     let port = configured_port () in
     Eio.Fiber.fork ~sw (fun () ->

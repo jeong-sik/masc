@@ -78,3 +78,36 @@ masc 루프이고, 세션·컴팩션·로그인만 CLI 가 맡는다.
 - 정책: OAuth 는 "ordinary use of Claude Code" 용도다
   (code.claude.com/docs/en/legal-and-compliance). 매트릭스 규모로 돌릴지는
   운영자 판단이고, 제출 런은 API 키 레인으로 남긴다.
+
+## arm K — Keeper 를 도구로 부리는 레인
+
+앞의 레인들은 masc 가 태스크를 푼다. arm K 는 반대다. 태스크는 harbor 의
+`claude-code` 에이전트가 그대로 풀고, 같은 컨테이너에서 도는 masc 서버를 MCP
+서버로 물려 준다. 모델은 `masc_keeper_up` 으로 키퍼를 세우고 `masc_keeper_msg`
+로 일을 주고 `masc_board_post` / `masc_add_task` 로 공유 맥락을 쓴다. 키퍼의
+쉘은 `remote_ssh` 로 같은 컨테이너에 떨어지므로 검증기가 보는 자리에 결과가
+남는다.
+
+베이스라인은 `--agent claude-code` 에 같은 모델, MCP 서버 없음이다. 이건 이미
+리더보드에 있는 구성이라 외부 닻이 있고, 두 arm 사이의 유일한 차이가 키퍼
+계층이다. 그래서 차이가 나면 하네스가 아니라 다중 에이전트 계층에 귀속된다.
+
+    export ANTHROPIC_API_KEY=...        # 키퍼가 쓸 모델
+    harbor run -d terminal-bench/terminal-bench@4.0.0 -i <task> \
+      --agent agents.keeper_tools_agent:KeeperToolsAgent \
+      -m anthropic/claude-sonnet-5 -k 1 -n 1 -o results/jobs-40
+
+    # 베이스라인 (같은 모델, 키퍼 없음)
+    harbor run -d terminal-bench/terminal-bench@4.0.0 -i <task> \
+      --agent claude-code -m anthropic/claude-sonnet-5 -k 1 -n 1 -o results/jobs-40
+
+- `--ak keeper_runtime_id=claude_code.claude-sonnet-5` 로 키퍼도 구독 CLI 를
+  쓰게 할 수 있다. 그러면 위 레인과 합쳐져 API 키가 아예 필요 없다.
+- `--ak announce_pool=false` 면 시스템 프롬프트에 키퍼 안내를 넣지 않는다.
+  도구만 두고 모델이 스스로 발견하는지 재는 변형이다.
+- 키퍼 4개(`bench-1`..`bench-4`)의 프로필만 렌더하고 아무것도 미리 띄우지
+  않는다. 몇 개를 쓸지는 모델이 정한다.
+- 채팅 승인 스탠스(`Keeper_tool_approval_mode`)는 메모리에만 있고 REST 로만
+  바뀌며 설정 기본값이 없다. MCP 클라이언트는 REST 에 못 닿으므로 bootstrap 이
+  풀 이름마다 미리 `yolo` 를 걸어 둔다. 안 그러면 키퍼가 채팅으로 승인을
+  물으며 멈춘다.

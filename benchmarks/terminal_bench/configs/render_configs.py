@@ -33,6 +33,11 @@ ARMS: dict[str, dict] = {
     "f": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False),
     "g": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=False),
     "h": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=True),
+    # Arm K renders a keeper pool for agents/keeper_tools_agent.py: the task is
+    # solved by harbor's own claude-code agent and these keepers are reachable
+    # to it as MCP tools. Nothing pre-starts them, so `keepers` is the size of
+    # the pool the model may bring up, not a count of running agents.
+    "k": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False),
 }
 
 # composition skill 판정 마커: SKILL.md 안에 ```toml composition fenced block이

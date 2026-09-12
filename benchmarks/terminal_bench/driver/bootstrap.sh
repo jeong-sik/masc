@@ -114,7 +114,39 @@ export MCP_TOKEN
 # shellcheck source-path=SCRIPTDIR source=mcp.sh
 source "$BENCH/driver/mcp.sh"
 for _ in $(seq 1 60); do
-  if mcp_init 2>/dev/null; then echo "MASC server ready"; exit 0; fi
+  if mcp_init 2>/dev/null; then
+    # --- keeper pool mode (arm K): no keeper is started here; an external MCP
+    # --- client brings them up by name.
+    if [[ -n "${BENCH_KEEPER_POOL:-}" ]]; then
+      # The chat approval stance (Keeper_tool_approval_mode) is in-memory, has
+      # no config default by design, and is set only over REST — which an MCP
+      # client cannot reach. A keeper nobody has spoken about is Auto, and Auto
+      # asks over the chat stream, which would stall a headless trial. resolve
+      # is keyed by name and does not need the keeper to exist, so the stance
+      # is set for every pool name before any of them is brought up.
+      IFS=',' read -r -a pool <<< "${BENCH_KEEPER_POOL}"
+      for k in "${pool[@]}"; do
+        mkdir -p "/root/${k}"
+        if [[ -n "${GH_TOKEN:-}" ]]; then
+          install -d -m 0700 "/root/${k}/.config/gh"
+          printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' \
+            "${GH_TOKEN}" > "/root/${k}/.config/gh/hosts.yml"
+          chmod 600 "/root/${k}/.config/gh/hosts.yml"
+        fi
+        curl -fsS -m 20 -X POST \
+          "http://127.0.0.1:8935/api/v1/keepers/tool-approval-mode" \
+          -H "Authorization: Bearer ${MCP_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -d "{\"name\":\"${k}\",\"mode\":\"yolo\"}" >/dev/null
+      done
+      # The MCP client runs as the agent user and reads the token to build its
+      # .claude.json entry. Localhost-only admin token, single-task disposable
+      # container.
+      chmod 644 "$BENCH/token"
+      echo "keeper pool approved: ${BENCH_KEEPER_POOL}"
+    fi
+    echo "MASC server ready"; exit 0
+  fi
   sleep 1
 done
 echo "MASC server failed to start; server.log tail:" >&2

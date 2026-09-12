@@ -24,10 +24,13 @@ def test_skill_classification_matches_repo():
 
 
 def test_arms_cover_spec():
-    assert set(ARMS) == {"b", "c", "d", "e", "f", "g", "h"}
+    # b-h are the spec's ablation chain; k is the keeper-pool arm that
+    # agents/keeper_tools_agent.py renders (no keeper is pre-started).
+    assert set(ARMS) == {"b", "c", "d", "e", "f", "g", "h", "k"}
     assert ARMS["b"]["keepers"] == 1
     assert ARMS["f"]["keepers"] == 4
     assert ARMS["g"]["keepers"] == 8
+    assert ARMS["k"]["keepers"] == 4
 
 
 def test_arm_b_skills_off():

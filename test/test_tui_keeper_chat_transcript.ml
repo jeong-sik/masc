@@ -1123,7 +1123,9 @@ let test_runtime_failover_visibility_and_error_attribution () =
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ];
   check bool "failover attempt is indicated" true
-    (contains ~needle:"failover: connecting to [gpt-4o] (attempt 1)" (progress_text t));
+    (* Second attempt: [attempt_index] is 0-based on the wire and the row
+       counts from 1, the way the superseded blocks beside it do. *)
+    (contains ~needle:"failover: connecting to [gpt-4o] (attempt 2)" (progress_text t));
   check (option string) "current runtime updated to failover" (Some "gpt-4o")
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];

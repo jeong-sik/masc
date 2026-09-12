@@ -290,6 +290,7 @@ trail 은 "무슨 일이 있었나" 를 답하고 진행 행은 "지금 무엇�
 | **0** (완료) | §3.6 조사 — attempt 전환 시 열린 call 의 추적. 버그로 확정 | 없음(조사) | 없음 |
 | **1** | 경계를 건드리지 않는 정리: 로스터 기본 숨김 · 토글 키가 한 일을 말하게 · §3.4 중복 제거 · §3.6 집계 수정 · mli 문서 정정 | `types.ml` `masc_tui.ml` `transcript.ml` `message_layout.mli` | 낮음. 행 예산 불변 |
 | **1b** | §1.6 에러에 runtime id 와 복구 시각. `persisted_error_reply` 호출부에 runtime id 가 없어 배선이 먼저다 | `server_routes_http_keeper_stream.ml` | 중간. 서버가 내보내는 문구의 계약 |
+| **1d** | 버려진 호출만 든 tool 블록이 여전히 "돌는 중" 으로 요약된다. `compact_outcome` 이 열린 호출 하나로 블록 전체를 `Started` 로 올리는데, 이를 attempt 로 가리려면 `tool_activity` 가 attempt 를 실어야 한다 | `transcript.ml` | 중간. 타입 변경이 trail 렌더까지 번진다 |
 | **2** | §3.3 계기판 접기 — 상태 행을 1행으로, 펼침 키 | `render.ml` 상태 블록 | 중간. 행 예산 변경 |
 | **3** | §3.2 시간축 통합 — promoted·NEXT 를 transcript 로 | `render.ml` `message_layout.ml` | 높음. 스크롤·높이 계산 |
 | **4** | §1.7 diff 발견성 — compact 에서 변경 요약 칩 | `render.ml` `chat_diff.ml` | 중간 |

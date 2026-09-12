@@ -1076,7 +1076,17 @@ let phase_text ~now t =
          one screen called the same tool "never returned" and "still running"
          at once). The count and the mix below stay on the whole turn: those
          answer "what has this turn done", and that does include the
-         abandoned attempts. *)
+         abandoned attempts.
+
+         The trail's own glyphs are deliberately not narrowed. An abandoned
+         call keeps the running mark inside its superseded block, and that
+         block says which attempt and which runtime it belonged to -- read
+         there, the mark is "this was open when we left", not a claim about
+         now. What is left unanswered is one step up: [compact_outcome]
+         promotes a whole block to [Started] on a single open call, so a block
+         holding nothing but abandoned calls still summarises as running.
+         Fixing that needs [tool_activity] to carry the attempt, which it does
+         not, so it is not in this change. *)
       let still_running =
         t.reversed_tool_calls
         |> List.filter (fun (call : live_tool_call) ->
@@ -1100,8 +1110,15 @@ let phase_text ~now t =
          stops moving when something is stuck.
 
          Beside the names rather than after the mix (#32955 put it there before
-         the names existed): the two describe the same open calls, and the mix
-         is long enough to push whatever follows it off a narrow row. *)
+         the names existed): the two describe nearly the same calls, and the
+         mix is long enough to push whatever follows it off a narrow row.
+
+         Nearly, not exactly. [still_running] takes [Started | Awaiting_result]
+         and [oldest_open_call] takes [not ended], so a call whose request has
+         ended while its result has not arrived is named here without an age.
+         [Tool_ended] sets [ended] without setting [result_ready], so that
+         window is real. Both now also require the current attempt, which
+         makes them look more alike than they are. *)
       let in_this_call =
         match oldest_open_call t with
         | None -> ""
@@ -1110,6 +1127,13 @@ let phase_text ~now t =
           | None -> ""
           | Some age -> Printf.sprintf " · in this call %s" age)
       in
+      (* Counted from 0 internally, shown from 1 -- the superseded blocks on
+         the same screen label themselves [attempt + 1] (render.ml), so a
+         0-based number here put "attempt 1" on screen twice for two
+         different attempts: once on the block the failover left behind, and
+         once on the one now running. The word "failover" used to be the only
+         thing telling them apart, and it is no longer on this row. *)
+      let attempt_shown = t.attempt + 1 in
       let work =
         if calls = 0 then
           match t.current_runtime_id, t.endpoint_streaming with
@@ -1117,11 +1141,12 @@ let phase_text ~now t =
               Printf.sprintf "streaming from [%s]%s" rid in_this_call
           | Some rid, false when t.attempt > 0 ->
               Printf.sprintf "failover: connecting to [%s] (attempt %d)%s"
-                rid t.attempt in_this_call
+                rid attempt_shown in_this_call
           | Some rid, false ->
               Printf.sprintf "connecting to [%s]%s" rid in_this_call
           | None, _ when t.attempt > 0 ->
-              Printf.sprintf "failover working (attempt %d)%s" t.attempt in_this_call
+              Printf.sprintf "failover working (attempt %d)%s" attempt_shown
+                in_this_call
           | None, _ -> "working" ^ in_this_call
         else
           (* The heading above this row already says which of the two states
@@ -1134,10 +1159,10 @@ let phase_text ~now t =
           let runtime_tag =
             match t.current_runtime_id with
             | Some rid when t.attempt > 0 ->
-                Printf.sprintf "[%s] attempt %d · " rid t.attempt
+                Printf.sprintf "[%s] attempt %d · " rid attempt_shown
             | Some rid -> Printf.sprintf "[%s] · " rid
             | None when t.attempt > 0 ->
-                Printf.sprintf "attempt %d · " t.attempt
+                Printf.sprintf "attempt %d · " attempt_shown
             | None -> ""
           in
           Printf.sprintf "%s%s%s%s · %s"

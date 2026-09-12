@@ -53,11 +53,11 @@ bench_install_deps() {
   # it is absent from debian stable, so it is shipped in dist/ instead of
   # installed. jq and curl drive the MCP client in driver/mcp.sh.
   if command -v apt-get >/dev/null 2>&1; then
-    pm_install openssh-server jq curl ca-certificates git || true
+    pm_install openssh-server jq curl ca-certificates git ripgrep || true
   elif command -v dnf >/dev/null 2>&1 || command -v microdnf >/dev/null 2>&1; then
-    pm_install openssh-server openssh-clients jq curl ca-certificates git || true
+    pm_install openssh-server openssh-clients jq curl ca-certificates git ripgrep || true
   elif command -v apk >/dev/null 2>&1; then
-    pm_install openssh jq curl ca-certificates git bash || true
+    pm_install openssh jq curl ca-certificates git ripgrep bash || true
   else
     echo "no supported package manager (apt/dnf/apk) on $(distro_id)" >&2
     exit 1
@@ -92,6 +92,17 @@ bench_install_deps() {
 
   if ! command -v sshd >/dev/null 2>&1 && [[ ! -x /usr/sbin/sshd ]]; then
     echo "sshd is absent on $(distro_id) after install; the keeper exec lane needs it" >&2
+    exit 1
+  fi
+
+  # Everything perform_preflight probes, checked here by name instead of
+  # surfacing one at a time as a keeper_up policy_rejection minutes later.
+  missing=""
+  for tool in git rg gh df jq curl ssh; do
+    command -v "${tool}" >/dev/null 2>&1 || missing="${missing} ${tool}"
+  done
+  if [[ -n "${missing}" ]]; then
+    echo "keeper_up preflight needs these on PATH, absent on $(distro_id):${missing}" >&2
     exit 1
   fi
 

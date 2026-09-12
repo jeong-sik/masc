@@ -393,13 +393,16 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
     failf
       "model-visible tool schemas grew to %d bytes across %d tools, over the %d ceiling \
        by %d.\n\
-       This is the CLI lane's bill: an official-client turn carries all of it, because \
-       that transport answers requests and never originates, so no tool can be supplied \
-       mid-turn (runtime_official_client_mcp.ml). An agent_core-lane Keeper carries \
-       less -- a deferrable tool leaves its request for one listing. Trim the schema or \
-       the description, or raise ceiling_bytes in this file with the PR that needs the \
-       room and say what it bought. Choosing the set per Keeper before the turn starts \
-       is the open question: RFC-0451."
+       This is the unfiltered descriptor total, and no Keeper's actual bill. \
+       Keeper_capability_surface.create subtracts what tool_deny names, and the \
+       fixed-lane bundle adds composition and identity tools on top, so a real turn \
+       is smaller or larger than this. What it does measure is whether the surface \
+       is growing. Trim the schema or the description, or raise ceiling_bytes in this \
+       file with the PR that needs the room and say what it bought. The CLI lane \
+       carries the most of it, because that transport answers requests and never \
+       originates, so no tool can be supplied mid-turn \
+       (runtime_official_client_mcp.ml); choosing the set before the turn starts is \
+       RFC-0451."
       bytes
       count
       ceiling_bytes

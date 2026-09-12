@@ -178,7 +178,34 @@ open Alcotest
    declare defer_loading = true; this figure counts them because
    model_visible_schemas reads the descriptor, not the loading declaration.
    Set to the measurement with no added headroom. *)
-let ceiling_bytes = 109_734
+(* 2026-09-13: the DOS lane adds seven deferred tools -- masc_dos_load, _eject,
+   _screen, _step, _press, _type, _peek. CI 34705960512 measured 114,705 bytes
+   / 133 tools before trimming; the declarations then lost 883 rendered bytes
+   of rationale that belongs in the code rather than in a string every turn
+   carries, which is where this number comes from. What it bought: a second machine keepers drive the way they drive
+   the MSX one (RFC-0439 §3.5) -- a real-mode DOS box that boots a program,
+   takes keys, and says when it wants the next one, with every key in the
+   ledger under the caller's name.
+
+   Worth saying because the number keeps going one way: these two lanes now
+   cost about 11.5 KB of every Keeper turn, and a Keeper that never plays a
+   game still carries them. Tool sets scoped to the lanes a Keeper has
+   attached would give it back; that is a change to how tools are attached,
+   not to this file. RFC-0451 proposes it. *)
+
+(* 2026-09-13: 114,500. The same PR, answering review: masc_dos_press and
+   masc_dos_type now declare max_items = 64 and max_length = 256, and their
+   results carry keys_pressed. Together that is 248 bytes, and 113,822 was
+   set to the measured figure with no room, so the ceiling moves with it.
+   What it bought: one call's work is bounded. The step budget is per key, so
+   a thousand-character type call could run a billion instructions holding
+   the machine's mutex; the caps and the ceiling inside Dos_lane.press_resolved
+   bound it, and keys_pressed is how the caller learns the sequence stopped
+   early. 430 bytes of headroom over the measured result. *)
+(* Compose the main ceiling with both independent Fusion description deltas:
+   task context +162 JSON bytes and result lookup +336. Existing main headroom
+   is preserved, not expanded; CI measures the combined production surface. *)
+let ceiling_bytes = 114_500 + 162 + 336
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -333,6 +360,13 @@ let all_surface_golden_names =
   ; "masc_keeper_delegate_status"
   ; "masc_library_add"
   ; "masc_library_list"
+  ; "masc_dos_eject"
+  ; "masc_dos_load"
+  ; "masc_dos_peek"
+  ; "masc_dos_press"
+  ; "masc_dos_screen"
+  ; "masc_dos_step"
+  ; "masc_dos_type"
   ; "masc_lane_attach"
   ; "masc_lane_act"
   ; "masc_lane_action_status"
@@ -403,8 +437,13 @@ let test_tool_schema_bytes_stay_under_the_ceiling () =
     failf
       "model-visible tool schemas grew to %d bytes across %d tools, over the %d ceiling \
        by %d.\n\
-       Every Keeper turn carries this. Trim the schema or the description, or raise \
-       ceiling_bytes in this file with the PR that needs the room and say what it bought."
+       This is the CLI lane's bill: an official-client turn carries all of it, because \
+       that transport answers requests and never originates, so no tool can be supplied \
+       mid-turn (runtime_official_client_mcp.ml). An agent_core-lane Keeper carries \
+       less -- a deferrable tool leaves its request for one listing. Trim the schema or \
+       the description, or raise ceiling_bytes in this file with the PR that needs the \
+       room and say what it bought. Choosing the set per Keeper before the turn starts \
+       is the open question: RFC-0451."
       bytes
       count
       ceiling_bytes

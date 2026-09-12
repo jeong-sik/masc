@@ -5,7 +5,7 @@ import type { ComponentChildren, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import {
   ATTACHMENT_INPUT_ACCEPT,
@@ -35,7 +35,7 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, C
 import type { KeeperApprovalLifecycle, KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput, toolCallOutputsByExecutionId } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallOutputsByIdentity } from '../../tool-call-output-store'
 import type { ToolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
@@ -3282,7 +3282,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   // Tool results never travel on the chat stream — they are joined here from
   // the tool-call output store by canonical execution_id. Null until result
   // readiness and output hydration have both landed.
-  const lookup = useToolOutputLookup(entry.executionId, lookupToolCallOutput(entry.executionId))
+  const keeper = useContext(KeeperToolOutputScope)
+  const lookup = useToolOutputLookup(entry.executionId, lookupToolCallOutput(keeper, entry.executionId))
   const outputEntry = lookup.output
   const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
   const hasOutput = outputView !== null && outputView.text.trim() !== ''
@@ -3493,12 +3494,12 @@ function ToolTraceStep({
   const output = lookup.output
   const name = traceStep?.name || entry?.label || 'tool'
   const callId = toolTraceCallId(entry, traceStep)
-  const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
+  const displayArgs = structuralSummary ? '' : prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
   const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep, canMarkMissing)
-  const sourceBadge = structuralSummary
+  const sourceBadge = structuralSummary && !(entry?.executionId ?? traceStep?.executionId)
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
     : toolTraceSourceBadge(entry, traceStep)
   let status: ToolTraceDisplayStatus
@@ -3521,7 +3522,11 @@ function ToolTraceStep({
     output?.duration_ms != null && output.duration_ms > 0
       ? formatMsCompact(output.duration_ms)
       : traceStep?.dur ?? ''
-  const resultView = output ? toolOutputDisplay(output.output) : (traceStep?.result ? { text: traceStep.result, truncated: false } : null)
+  // RFC-0358 keeps autonomous arguments/results off the transcript even when
+  // its canonical execution hydrates. Edit evidence below is an independent,
+  // typed receipt projection, not permission to expose the raw tool body.
+  const resultView = structuralSummary ? null
+    : output ? toolOutputDisplay(output.output) : (traceStep?.result ? { text: traceStep.result, truncated: false } : null)
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending
   // call (so the operator can open it and see "출력 대기 중…").
@@ -3635,6 +3640,7 @@ function traceStepDurationMs(dur: string | undefined): number {
 export function interleaveTraceAndTools(
   traceSteps: ChatTraceStep[],
   toolSteps: { entry: KeeperConversationEntry; output: ToolCallEntry | null }[],
+  keeper: string | null = null,
 ): TraceOrderItem[] {
   const toolsByIdentity = new Map<string, { entry: KeeperConversationEntry; output: ToolCallEntry | null }>()
   for (const item of toolSteps) {
@@ -3661,7 +3667,7 @@ export function interleaveTraceAndTools(
       kind: 'tool',
       step,
       entry: matched?.entry ?? null,
-      output: matched?.output ?? lookupToolCallOutput(step.executionId),
+      output: matched?.output ?? lookupToolCallOutput(keeper, step.executionId),
     })
   }
   for (const item of toolSteps) {
@@ -3771,6 +3777,7 @@ function ToolTraceCard({
 }) {
   const liveTurn = assistant !== null && !turnComplete
   const structuralSummary = assistant?.source === 'autonomous_turn'
+  const keeper = useContext(KeeperToolOutputScope)
   // Collapse state is derived, not stored-and-resynced: the operator's
   // explicit choice for this turn if there is one, otherwise "open once the
   // turn is no longer live". The choice lives outside the component because
@@ -3790,7 +3797,7 @@ function ToolTraceCard({
   }
   const steps = tools.map((entry) => ({
     entry,
-    output: lookupToolCallOutput(entry.executionId),
+    output: lookupToolCallOutput(keeper, entry.executionId),
   }))
   const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>
     toolOutputCoverageState(
@@ -3805,8 +3812,8 @@ function ToolTraceCard({
     && assistant.delivery !== 'no_reply'
     && assistant.text.trim().length > 0
   const ordered = hasChatResponse && assistant
-    ? [...interleaveTraceAndTools(traceSteps, steps), { kind: 'chat' as const, entry: assistant }]
-    : interleaveTraceAndTools(traceSteps, steps)
+    ? [...interleaveTraceAndTools(traceSteps, steps, keeper), { kind: 'chat' as const, entry: assistant }]
+    : interleaveTraceAndTools(traceSteps, steps, keeper)
   const orderSignature = ordered.map((item) => {
     if (item.kind === 'trace') return `trace:${item.step.kind}`
     if (item.kind === 'tool') return `tool:${toolTraceCallId(item.entry, item.step) ?? item.step.name}`
@@ -3914,7 +3921,7 @@ function ToolTraceCard({
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           traceStep=${item.step}
                           orderIndex=${index}
-                          structuralSummary=${structuralSummary && !item.step.executionId}
+                          structuralSummary=${structuralSummary}
                           orderKind="tool"
                         />`
                       })()
@@ -3928,6 +3935,7 @@ function ToolTraceCard({
                           hydrationFailureReason=${toolOutputHydrationContract?.failureReason ?? null}
                           orderIndex=${index}
                           orderKind="tool-entry"
+                          structuralSummary=${structuralSummary}
                         />`
                     : html`<${ChatResponseTraceStep} key=${`chat-${item.entry.id}`} entry=${item.entry} orderIndex=${index} />`)}
             </div>
@@ -4623,14 +4631,14 @@ export function ChatTranscript({
       return entries
         .filter(entry => entry.role === 'tool')
         .map((entry) => {
-          const output = lookupToolCallOutput(entry.executionId)
+          const output = lookupToolCallOutput(keeperName, entry.executionId)
           return output
             ? `${entry.id}:${output.success}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
             : `${entry.id}:pending:${coverageSig}`
         })
         .join('|')
     },
-    [entries, toolCallOutputsByExecutionId.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract],
+    [entries, keeperName, toolCallOutputsByIdentity.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract],
   )
 
   const scrollToBottom = () => {

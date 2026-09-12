@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'preact/hooks'
 import { fetchVerifiedToolBlobText } from '../../api/verified-tool-blob'
+import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 import { html } from 'htm/preact'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { parseEditSnapshots } from '../../api/edit-snapshots'
 import { EditSnapshotView } from './edit-snapshot-view'
+import { currentStoredTokenRevision } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -13,6 +16,7 @@ function object(value: unknown): Record<string, unknown> | null {
 type ManifestState = { key: string; kind: 'loading' }
   | { key: string; kind: 'loaded'; result: Record<string, unknown> }
   | { key: string; kind: 'failed'; message: string }
+  | { key: string; kind: 'admin-required' }
 
 function decodedEditResult(text: string, manifest: boolean): Record<string, unknown> {
   const json: unknown = JSON.parse(text)
@@ -33,9 +37,10 @@ function decodedEditResult(text: string, manifest: boolean): Record<string, unkn
 // Read only a joined, successful Edit receipt. Provider display names and
 // transcript arguments cannot identify an applied filesystem operation.
 export function ChatEditEvidence({ output }: { output: ToolCallEntry | null }) {
+  const authRevision = storedTokenRevision.value
   const eligible = output?.success === true && output.route_evidence?.descriptor_id === 'agent.edit_file'
   const blob = eligible && typeof output?.output === 'object' ? output.output._blob : null
-  const key = blob ? JSON.stringify([blob.sha256, blob.bytes, blob.mime]) : null
+  const key = blob ? JSON.stringify([authRevision, blob.sha256, blob.bytes, blob.mime]) : null
   const [manifest, setManifest] = useState<ManifestState | null>(null)
   const [attempt, retry] = useState(0)
   useEffect(() => {
@@ -45,13 +50,14 @@ export function ChatEditEvidence({ output }: { output: ToolCallEntry | null }) {
     void fetchVerifiedToolBlobText(blob, controller.signal).then(text =>
       decodedEditResult(text, blob.mime === 'application/vnd.masc.tool-result-manifest+json'),
     ).then(result => {
-      if (!controller.signal.aborted) setManifest({ key, kind: 'loaded', result })
+      if (!controller.signal.aborted && authRevision === currentStoredTokenRevision()) setManifest({ key, kind: 'loaded', result })
     }, error => {
-      if (!controller.signal.aborted) setManifest({ key, kind: 'failed',
-        message: error instanceof Error ? error.message : '저장된 편집 결과를 불러오지 못했습니다.' })
+      if (!controller.signal.aborted && authRevision === currentStoredTokenRevision()) setManifest(isAdminRequired(error)
+        ? { key, kind: 'admin-required' }
+        : { key, kind: 'failed', message: error instanceof Error ? error.message : '저장된 편집 결과를 불러오지 못했습니다.' })
     })
     return () => controller.abort()
-  }, [key, attempt])
+  }, [key, attempt, authRevision])
   if (!eligible || !output) return null
   const input = object(output.input)
   let result: Record<string, unknown> | null
@@ -59,6 +65,7 @@ export function ChatEditEvidence({ output }: { output: ToolCallEntry | null }) {
     if (manifest?.key !== key || manifest.kind === 'loading') {
       return html`<p role="status" class="m-2 text-xs">저장된 편집 결과를 확인하고 있습니다.</p>`
     }
+    if (manifest.kind === 'admin-required') return html`<p role="alert" data-access-state="admin-required" class="m-2 text-xs">${ADMIN_REQUIRED_MESSAGE}</p>`
     if (manifest.kind === 'failed') return html`<div role="alert" class="m-2 text-xs">${manifest.message}
       <button type="button" class="ml-2 underline" onClick=${() => retry(value => value + 1)}>편집 결과 다시 조회</button>
     </div>`

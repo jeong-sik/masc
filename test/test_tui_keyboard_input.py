@@ -1145,6 +1145,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
             200,
             {
                 "goals": [],
+                "goal_history": {"unlisted": []},
                 "rollup": {
                     "active_count": 0,
                     "verifying_count": 0,
@@ -1251,6 +1252,7 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
         200,
         {
             "goals": goals,
+            "goal_history": {"unlisted": []},
             "rollup": {
                 "active_count": len(goals),
                 "verifying_count": 0,
@@ -3826,13 +3828,37 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
+    mode_prefix = re.search(
+        rb" MASC Planning[^\r\n]*?filter:active", CSI_RE.sub(b"", frame)
+    )
+    if mode_prefix is None:
+        raise AssertionError(f"Planning wide header omitted its modes: {frame!r}")
+    # Four cells belong to the frame margins. At this width the title and
+    # modes exactly fill the content area, before the timestamp is appended.
+    boundary_cols = fixture_cell_width(mode_prefix.group().decode("utf-8")) + 4
+    for columns in (80, boundary_cols):
+        narrow = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=24,
+            columns=columns,
+            needle=b"MASC Planning",
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
+        plain_narrow = CSI_RE.sub(b"", narrow)
+        if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
+            raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
+    terminal_rows = 24
+
     # One press, not two. The pane opens on Planning_filter_active, so the
     # first press lands on completed, which these fixtures leave empty --
     # the note this step is about is already on that screen. The old pair
     # was written for a default of Planning_filter_all: it waited for
-    # "show:active", the filter the pane had just left, and then for a note
+    # "filter:active", the filter the pane had just left, and then for a note
     # that a second press had already carried past.
-    empty = send_and_wait(process, master_fd, output, b"f", b"show:completed")
+    empty = send_and_wait(process, master_fd, output, b"f", b"filter:completed")
     if b"no goals in this filter" not in CSI_RE.sub(b"", empty):
         raise AssertionError(
             f"the empty filter drew no note: {empty!r}"
@@ -4170,7 +4196,7 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         board = send_and_wait(
             process, master_fd, output, b"s", b"post-trend"
         )
-        if b"order:trending" not in board:
+        if b"sort:trending" not in board:
             raise AssertionError(f"Board sort did not expose its order: {board!r}")
 
         fixtures["/api/v1/board?sort_by=trending"] = (
@@ -8675,7 +8701,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
             b"\xe2\x96\xb8Task Verdicts",
         )
         verdicts_plain = CSI_RE.sub(b"", verdicts)
-        for needle in (b"old Harness", b"not Goal proof", b"Task Verdicts"):
+        for needle in (b"automatic Gate rulings on Tasks", b"not Goal proof", b"Task Verdicts"):
             if needle not in verdicts_plain:
                 raise AssertionError(
                     f"Task Verdicts did not explain itself ({needle!r}): "

@@ -457,6 +457,35 @@ its own.
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
 
+### The same probes over HTTP
+
+The CLI and the routes ask the same two functions, so a dashboard or a wizard
+sees what `masc voice-verify` prints. Both are `CanAdmin`: a probe synthesizes
+for real, and on a metered provider that spends a credit — the same reason
+`/api/v1/voice/transcribe` carries no public capability.
+
+```
+curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/tts \
+  -H "authorization: Bearer $MASC_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"message":"음성 연결을 확인합니다"}'
+
+curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/stt \
+  -H "authorization: Bearer $MASC_TOKEN" \
+  -H 'content-type: audio/wav' --data-binary @probe.wav
+```
+
+Both answer the same object:
+
+```json
+{"endpoints":[{"endpoint_id":"macos-say","kind":"macos_say",
+               "state":"answered","detail":"113528 bytes of audio"}]}
+```
+
+A TTS probe with no `"message"` is a 400 that says so rather than a probe of
+an empty sentence, and an empty STT body is a 400 rather than a transcript of
+silence: those two are different answers and the report keeps them apart.
+
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.

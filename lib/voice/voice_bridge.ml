@@ -164,6 +164,161 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
   try_endpoint endpoints
 ;;
 
+(* ── endpoint probes ───────────────────────────────────────────────────── *)
+
+(* What one endpoint did when it was asked, in its own words.
+
+   The fallback chains stop at the first endpoint that answers, which is right
+   for serving a request and wrong for answering "is this configuration
+   working". A chain that succeeds says nothing about the endpoints after the
+   one that answered: a dead fallback looks exactly like a healthy one until
+   the first endpoint goes away. A probe asks every endpoint and reports each.
+
+   [try_http_tts_for_dashboard] above is the shape this replaces for
+   diagnostics: it walks the same endpoints, drops every failure reason, and
+   answers Some/None without naming which endpoint answered. Voice was down for
+   six days behind exactly that kind of silence. *)
+type probe_outcome =
+  | Answered of string
+  | Refused of string
+  | Skipped of string
+
+type probe_attempt =
+  { endpoint_id : string
+  ; kind : Voice_config.endpoint_kind
+  ; outcome : probe_outcome
+  }
+
+let probe_outcome_to_string = function
+  | Answered detail -> "answered: " ^ detail
+  | Refused reason -> "refused: " ^ reason
+  | Skipped reason -> "not asked: " ^ reason
+
+let probe_attempt_json attempt =
+  let state, detail =
+    match attempt.outcome with
+    | Answered detail -> "answered", detail
+    | Refused reason -> "refused", reason
+    | Skipped reason -> "skipped", reason
+  in
+  `Assoc
+    [ "endpoint_id", `String attempt.endpoint_id
+    ; "kind", `String (Voice_config.string_of_endpoint_kind attempt.kind)
+    ; "state", `String state
+    ; "detail", `String detail
+    ]
+
+let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
+
+let probe_tts ?(agent_id = "probe") ~message () =
+  match Voice_config.load_detailed () with
+  | Error error -> Error (Voice_config.load_error_to_string error)
+  | Ok config ->
+    (match config.Voice_config.tts with
+     | None -> Error "no [voice.tts] section is configured, so nothing speaks"
+     | Some tts ->
+       Ok
+         (List.map
+            (fun (endpoint : Voice_config.endpoint) ->
+              let outcome =
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else if
+                  not
+                    (Voice_runtime_overlay.transport_supports_http_tts
+                       (Voice_runtime_overlay.adapter_for_endpoint endpoint))
+                then Skipped "this endpoint kind does not synthesize over HTTP"
+                else (
+                  let output_file = make_audio_file () in
+                  (* The voice is resolved per endpoint: an id is provider
+                     vocabulary, so the one that suits this endpoint is the one
+                     to ask it for (#24068). *)
+                  let voice =
+                    Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
+                  in
+                  let result =
+                    speak_via_http_tts_to_file
+                      endpoint
+                      ~agent_id
+                      ~message
+                      ~voice
+                      ~model:tts.Voice_config.default_model
+                      ~output_file
+                  in
+                  remove_quietly output_file;
+                  match result with
+                  | Ok size -> Answered (Printf.sprintf "%d bytes of audio" size)
+                  | Error reason -> Refused reason)
+              in
+              { endpoint_id = endpoint.Voice_config.id
+              ; kind = endpoint.Voice_config.kind
+              ; outcome
+              })
+            tts.Voice_config.endpoints))
+
+let probe_stt ~audio_file () =
+  match Voice_config.load_detailed () with
+  | Error error -> Error (Voice_config.load_error_to_string error)
+  | Ok config ->
+    (match config.Voice_config.stt with
+     | None -> Error "no [voice.stt] section is configured, so nothing transcribes"
+     | Some stt ->
+       Ok
+         (List.map
+            (fun (endpoint : Voice_config.endpoint) ->
+              let outcome =
+                if not endpoint.Voice_config.enabled
+                then Skipped "disabled in the configuration"
+                else (
+                  match endpoint.Voice_config.kind with
+                  | Voice_config.Voice_mcp ->
+                    Skipped "this endpoint kind does not transcribe"
+                  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
+                    (match
+                       transcribe_via_http_stt
+                         endpoint
+                         ~audio_file
+                         ~model:stt.Voice_config.default_model
+                     with
+                     | Ok json ->
+                       let text =
+                         match json with
+                         | `Assoc fields ->
+                           (match List.assoc_opt "text" fields with
+                            | Some (`String text) -> text
+                            | Some _ | None -> "")
+                         | _ -> ""
+                       in
+                       (* An empty transcript is an answer, not a failure: the
+                          endpoint was reached and heard nothing. Saying which
+                          it was keeps a silent microphone apart from a dead
+                          endpoint. *)
+                       (* A transcript is read by a person deciding whether
+                          the endpoint heard them. %S escapes UTF-8 into byte
+                          numbers, which for any language but English is
+                          unreadable -- measured on a Korean utterance. A
+                          transcript also arrives with its own line breaks,
+                          which would break the one-line-per-endpoint report. *)
+                       let spoken =
+                         String.trim
+                           (String.map
+                              (function
+                                | '\n' | '\r' | '\t' -> ' '
+                                | character -> character)
+                              text)
+                       in
+                       Answered
+                         (if String.equal spoken ""
+                          then "reached, and heard nothing in the audio"
+                          else Printf.sprintf "heard %s" spoken)
+                     | Error reason -> Refused reason))
+              in
+              { endpoint_id = endpoint.Voice_config.id
+              ; kind = endpoint.Voice_config.kind
+              ; outcome
+              })
+            stt.Voice_config.endpoints))
+
 let public_config_json () =
   match Voice_config.load_detailed () with
   | Ok config -> Ok (Voice_config.public_json config)

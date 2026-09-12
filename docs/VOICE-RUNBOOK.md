@@ -279,6 +279,78 @@ Notes that cost time to rediscover:
 - The transcribe response names `endpoint_id`, so it is visible whether a call
   was served locally or fell back.
 
+## Checking that voice actually answers
+
+`GET /api/v1/voice/config` says whether the configuration loads. It does not say
+whether any endpoint responds, and the fallback chain hides the difference: it
+stops at the first endpoint that answers, so a chain that works says nothing
+about the endpoints behind it. A dead fallback looks exactly like a healthy one
+until the endpoint in front of it goes away.
+
+`masc voice-verify` asks every endpoint separately and reports each.
+
+```sh
+masc voice-verify                          # TTS only
+masc voice-verify --audio utterance.wav    # TTS and STT
+masc voice-verify --json                   # one JSON object instead of the report
+masc voice-verify --message "확인합니다"     # say it in the language you actually use
+```
+
+Exit status is 0 when at least one endpoint answered, 1 when none did. A
+configuration that does not load is reported as the loader's own sentence, the
+same one the speak and transcribe paths would have refused with.
+
+Each TTS probe is a real synthesis request. On a metered provider that costs
+what one short sentence costs; the audio is discarded once its size is counted.
+
+### Making an utterance to probe STT with
+
+macOS ships a Korean voice, so no recording is needed:
+
+```sh
+say -v Yuna "음성 연결을 확인합니다" -o probe.aiff
+afconvert -f WAVE -d LEI16@16000 -c 1 probe.aiff probe.wav
+masc voice-verify --audio probe.wav
+```
+
+16 kHz mono 16-bit is what the capture path records and what whisper.cpp wants.
+
+### What a working workstation answered
+
+Measured 2026-09-12 on one workstation (M3 Max, macOS) with
+`scripts/whisper-server.sh start` running:
+
+```
+tts
+  elevenlabs-direct      elevenlabs_direct  answered: 24285 bytes of audio
+
+stt  (probe.wav)
+  whisper-local          openai_compat      answered: heard 음성 연결을 확인합니다.
+  elevenlabs-stt         elevenlabs_direct  answered: heard 음성 연결을 확인합니다.
+```
+
+Both STT endpoints transcribed the Korean correctly. That agreement is the thing
+worth having before trusting a chain — the local endpoint and the hosted one
+heard the same sentence, so a failover between them does not change what a
+keeper receives.
+
+### Reading the report
+
+| Word | Means |
+|---|---|
+| `answered` | the endpoint was reached and did the work |
+| `refused` | the endpoint said no, in its own words rather than a summary |
+| `not asked` | disabled in the configuration, or a kind that does not do this |
+
+An empty transcript reads as `answered: reached, and heard nothing in the audio`
+rather than as a refusal. The endpoint was there and the audio had nothing in
+it, and those two are exactly what an empty composer draft cannot tell apart on
+its own.
+
+`voice_mcp` endpoints are `not asked` for transcription: that kind synthesizes
+through an MCP tool call and has no transcribe path, as the kind table above
+says.
+
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.
@@ -300,3 +372,5 @@ fault.
 
 **If voice behaves oddly, read `GET /api/v1/voice/config` first.** It is the
 one surface that distinguishes "not configured" from "configured and broken".
+Then run `masc voice-verify`: the config route answers whether the settings
+load, and that one answers whether anything on the other end responds.

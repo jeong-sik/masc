@@ -11171,7 +11171,7 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
-    choices = send_and_wait(process, master_fd, output, b"D", b"[Enter] Ask")
+    choices = send_and_wait(process, master_fd, output, b"D", b"Enter:ask")
     choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
     if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
             or "▸ y" not in choices_plain

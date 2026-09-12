@@ -11040,7 +11040,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Voice_wizard_saved result ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
-       | Some session, Ok _ ->
+       | Some session, Ok response ->
+           (* The revision this save produced. The wizard stays open, so a
+              reader who goes back to change a field and saves again sends a
+              revision -- and the one from before the save is now stale
+              against this session's own write, which came back as a
+              configuration-changed conflict every time. *)
+           let session =
+             match response with
+             | `Assoc fields ->
+                 (match List.assoc_opt "revision" fields with
+                  | Some (`String revision) when String.trim revision <> "" ->
+                      { session with vws_revision = revision }
+                  | Some _ | None -> session)
+             | _ -> session
+           in
            (* The pane is reloaded: what it was showing is now one revision
               behind. The session stays open to report what answers. *)
            launch_voice_config_load state ~mailbox;

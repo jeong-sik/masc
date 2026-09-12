@@ -378,7 +378,7 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
@@ -1264,6 +1264,8 @@ let surfaces_that_answer_the_row_search =
   ; "Code", Code
   ; "Board", Board
   ; "Planning", Planning
+  ; "Fusion", Fusion
+  ; "Changes", Changes
   ]
 
 let test_every_searchable_surface_names_its_search () =
@@ -1293,14 +1295,16 @@ let test_a_surface_without_rows_offers_no_row_search () =
     ; "Keeper calls", Keepers Keeper_calls
     ; "Chat", Keepers Keeper_message
     ; "Runtime pick", Keepers Keeper_runtime_pick
-      (* Approvals has rows worth searching and still says no "/": [n] there
-         is deny, unarmed and immediate, so offering the search would invite
-         the reflex that follows it into refusing an approval. *)
+      (* Both have rows worth searching and still say no "/", for the same
+         reason and it is [n]. The key that steps to the next match is the
+         key these two give to something else: on Approvals it denies the
+         presented approval, unarmed and immediate, and on Schedules it opens
+         the form for a new one. A search whose own follow-through refuses an
+         approval is worse than no search, so these wait on a different step
+         key rather than on another arm in [surface_row_texts] (#35306). *)
     ; "Approvals", Approvals
     ; "Schedules", Schedules
-    ; "Fusion", Fusion
     ; "Resources", Resources
-    ; "Changes", Changes
     ; "Config", Config
     ; "Tools", Tools
     ]

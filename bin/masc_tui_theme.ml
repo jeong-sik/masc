@@ -453,6 +453,13 @@ module Glyph = struct
 
   let breadcrumb_sep = "\xe2\x96\xb8"
 
+  (* Where you are, on a strip of places you could be. The same shape as
+     [breadcrumb_sep] and for a related reason -- both point at what follows --
+     but a separate name because a strip can change its mark without moving
+     every breadcrumb with it. Read by the surface strip and the keeper detail
+     tabs, which are the two strips a reader walks. *)
+  let current_entry = "\xe2\x96\xb8"
+
   (* Only the top priority speaks. The !!!/!!/! ladder made every task list
      shout — on the live Overview five of eight rows carried a red tail —
      and a mark on most rows distinguishes nothing. *)

@@ -7961,18 +7961,23 @@ is-non-interactive = true
 api-name = "gate-fixture"
 max-context = 400000
 tools-support = true
+[models.primary]
+api-name = "unused-primary-fixture"
+max-context = 400000
 [official.gate]
+[official.primary]
 [runtime]
-default = "official.gate"
+default = "official.primary"
 |} command);
   let executions = ref 0 in
   let tool = Agent_core.Tool.create ~name:"WebSearch" ~description:"Actual deferred Gate receipt" ~parameters:[]
     (fun _ -> incr executions;
       Ok {Agent_core.Types.content=deferred.Masc.Keeper_tool_execution.raw_output; content_blocks=None; _meta=None}) in
-  let run ?continuation ~goal ~on_transmitted () =
+  let run ?continuation ?(on_runtime_ready=(fun () -> ())) ~goal ~on_transmitted () =
     let saved = Runtime.For_testing.snapshot () in
     Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved) (fun () ->
       (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
+      on_runtime_ready ();
       let native_config = match Runtime.get_runtime_by_id "official.gate" with
         | Some {Runtime.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
@@ -8144,11 +8149,12 @@ let test_direct_gate_current_history_resume ?(native=false) ?(checkpoint_failure
           Masc.Keeper_approval_input_checkpoint.admit ~session_dir ~identity ~message checkpoint |> require "durable model evidence" in
       (match native_fixture with
        | Some (run, capture, executions) ->
-         check bool "fixture primary differs from the runtime that actually yielded" true
-           (Masc.Keeper_meta_contract.runtime_id_of_meta meta <> "official.gate");
-         check string "production direct-turn selection resumes actual fallback runtime" "official.gate"
-           (Masc.Keeper_turn.For_testing.resolve_direct_turn_runtime_id ~meta ~resume_lane:None
-              ~gate_resume:(Some admission) |> require "native resume runtime selection");
+         let check_runtime_selection () =
+           check string "fixture primary differs from the runtime that actually yielded" "official.primary"
+             (Masc.Keeper_meta_contract.runtime_id_of_meta meta);
+           check string "production direct-turn selection resumes actual fallback runtime" "official.gate"
+             (Masc.Keeper_turn.For_testing.resolve_direct_turn_runtime_id ~meta ~resume_lane:None
+                ~gate_resume:(Some admission) |> require "native resume runtime selection") in
          let continuation = Gate.official_client admission |> Option.get in
          let execution = Masc.Keeper_repetition_scope.Execution.direct_operation operation_id in
          Masc.Keeper_repetition_scope.Execution.resume execution continuation.frame |> require "restore original native scope";
@@ -8160,7 +8166,7 @@ let test_direct_gate_current_history_resume ?(native=false) ?(checkpoint_failure
            ~user_message:"Finish the original research" (Some (Gate.resolution admission)) in
          let before = Fs_compat.load_file capture in
          let changed = {continuation with tool_surface_sha256=String.make 64 'f'} in
-         let refused = run ~continuation:changed ~goal:model.text ~on_transmitted:(fun _ -> fail "changed contract transmitted") () in
+         let refused = run ~continuation:changed ~on_runtime_ready:check_runtime_selection ~goal:model.text ~on_transmitted:(fun _ -> fail "changed contract transmitted") () in
          (match refused.Masc.Keeper_codex_runtime.result with
           | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="official_client_session.gate_continuation"; _})) -> ()
           | Error e -> fail (Agent_core.Error.to_string e) | Ok _ -> fail "changed native Gate contract was admitted");

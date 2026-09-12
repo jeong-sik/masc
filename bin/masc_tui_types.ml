@@ -5744,11 +5744,18 @@ type clamped_scroll =
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
    cannot work the number out -- that is what a {!clamped_scroll} is -- and a
-   value it can name has to be larger than any surface's rows. One million
-   rows of a resource reading or a link card is not a screen anyone reaches;
-   the largest thing the TUI opens is a source file, and the Code surface
-   counts its own rows rather than reporting back. *)
-let clamped_scroll_end = 1_000_000
+   value it can name has to be larger than any surface's rows.
+
+   [max_int] rather than a number someone judged large enough. An MCP resource
+   reading carries whatever text the server sent and the frame wraps it, so
+   the row count has no ceiling to sit above; a finite sentinel is a row the
+   reader can be left at, and it would be left there silently.
+
+   Arithmetic on this value is safe because it does not survive a frame. The
+   drawing clamps with [min state.resource_scroll max_scroll] and reports the
+   result back through [Resource_scroll], so by the time a page key adds to
+   [resource_scroll] it holds the real last row, not this. *)
+let clamped_scroll_end = max_int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value

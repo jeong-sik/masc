@@ -15,8 +15,30 @@ let runtime_config_path ~base_path =
 
 (* ── wire shapes ───────────────────────────────────────────────────────── *)
 
+(* A repeated name is a payload whose meaning depends on who reads it: the
+   readers below take the first occurrence through [List.assoc_opt] while a
+   client or proxy that re-serializes may keep the last, so {"enabled": false,
+   "enabled": true} could commit the opposite of what was sent. Refused before
+   any field is read. *)
 let fields = function
-  | `Assoc fields -> Ok fields
+  | `Assoc fields ->
+    let duplicates =
+      List.filter_map
+        (fun (key, _) ->
+          if List.length (List.filter (fun (other, _) -> String.equal key other) fields) > 1
+          then Some key
+          else None)
+        fields
+      |> List.sort_uniq String.compare
+    in
+    if duplicates = []
+    then Ok fields
+    else
+      Error
+        (Invalid_request
+           (Printf.sprintf
+              "a JSON object repeats %s"
+              (String.concat ", " (List.map (fun key -> Printf.sprintf "%S" key) duplicates))))
   | _ -> Error (Invalid_request "expected a JSON object")
 
 let string_field ~what fields key =
@@ -45,11 +67,24 @@ let optional_bool ~what fields key =
   | Some (`Bool value) -> Ok (Some value)
   | Some _ -> Error (Invalid_request (Printf.sprintf "%s needs %S to be a boolean" what key))
 
+(* Zero or less is not a shorter timeout, it is one that has already expired:
+   [Voice_bridge.call_voice_mcp_endpoint] hands the value to [Eio.Time.sleep], so
+   the timeout branch wins immediately and an otherwise working endpoint fails
+   every call while the API reported success. Infinities and NaN go the same way
+   -- neither is a duration. *)
 let optional_seconds ~what fields key =
+  let positive value =
+    if Float.is_finite value && value > 0.
+    then Ok (Some value)
+    else
+      Error
+        (Invalid_request
+           (Printf.sprintf "%s needs %S to be a finite number greater than zero" what key))
+  in
   match List.assoc_opt key fields with
   | None -> Ok None
-  | Some (`Float value) -> Ok (Some value)
-  | Some (`Int value) -> Ok (Some (float_of_int value))
+  | Some (`Float value) -> positive value
+  | Some (`Int value) -> positive (float_of_int value)
   | Some _ -> Error (Invalid_request (Printf.sprintf "%s needs %S to be a number" what key))
 
 (* A name this decoder does not read is a request it is not carrying out. The
@@ -141,7 +176,12 @@ let endpoint_of_json json =
   let what = "an endpoint" in
   let* fields = fields json in
   let* () = no_unknown_fields ~what ~allowed:endpoint_allowed_fields fields in
-  let* id = string_field ~what fields "id" in
+  let* raw_id = string_field ~what fields "id" in
+  (* [Voice_config.select_endpoint] trims a requested id before comparing, so an
+     id stored with padding could never be selected again -- not even with the id
+     the observation handed back. Stored trimmed, which is the form every reader
+     compares. *)
+  let id = String.trim raw_id in
   let* kind_text = string_field ~what fields "kind" in
   let* kind = kind_of_string kind_text in
   let* enabled = optional_bool ~what fields "enabled" in
@@ -373,9 +413,57 @@ let observe ~base_path =
             (List.map endpoint_json config.Voice_config.session.Voice_config.endpoints)
           ~extra:[]
     in
+    (* Capture thresholds, the local-playback allowlist and the Gate's bypasses
+       are all in effect and none of them was described, so a client reading this
+       as the full configuration showed defaults for values the file had already
+       set. These three have no endpoints -- they are settings -- so they are
+       serialized directly rather than through [section_json]. *)
+    let capture =
+      match config with
+      | None -> `Null
+      | Some config ->
+        let capture = config.Voice_config.capture in
+        `Assoc
+          [ "calibration_seconds", `Float capture.Voice_config.calibration_seconds
+          ; "trigger_margin_db", `Float capture.Voice_config.trigger_margin_db
+          ; ( "trailing_silence_seconds"
+            , `Float capture.Voice_config.trailing_silence_seconds )
+          ; "speech_margin_db", `Float capture.Voice_config.speech_margin_db
+          ; "noise_reduction", `Bool capture.Voice_config.noise_reduction
+          ]
+    in
+    let local_playback =
+      match config with
+      | None -> `Null
+      | Some config ->
+        let playback = config.Voice_config.local_playback in
+        `Assoc
+          [ "enabled", `Bool playback.Voice_config.enabled
+          ; ( "agents"
+            , `List (List.map (fun agent -> `String agent) playback.Voice_config.agents) )
+          ]
+    in
+    let gate =
+      match config with
+      | None -> `Null
+      | Some config ->
+        let gate = config.Voice_config.gate in
+        `Assoc
+          [ "always_allow", `Bool gate.Voice_config.always_allow
+          ; ( "exempt_agents"
+            , `List (List.map (fun agent -> `String agent) gate.Voice_config.exempt_agents) )
+          ]
+    in
     Ok
       (`Assoc
-         [ "revision", `String revision; "tts", tts; "stt", stt; "session", session ])
+         [ "revision", `String revision
+         ; "tts", tts
+         ; "stt", stt
+         ; "session", session
+         ; "capture", capture
+         ; "local_playback", local_playback
+         ; "gate", gate
+         ])
 
 let preview ~base_path json =
   let* revision, changes = request_of_json json in

@@ -536,6 +536,105 @@ let test_the_observation_names_a_command_override () =
       then
         Alcotest.(check bool) "the override is named" true (List.mem "/opt/bin/say" commands))
 
+let endpoint_change extra =
+  `Assoc
+    [ "change", `String "put_endpoint"
+    ; "section", `String "stt"
+    ; "endpoint",
+      (* base_url is required for this kind, so it is here rather than left out:
+         without it the refusal would be attributable to the missing url and the
+         case under test would prove nothing. *)
+      `Assoc
+        ([ "id", `String "x"
+         ; "kind", `String "openai_compat"
+         ; "base_url", `String "http://127.0.0.1:2022/v1"
+         ]
+         @ extra)
+    ]
+
+(* Zero is not a shorter timeout: Voice_bridge hands the value to Eio.Time.sleep,
+   so the timeout branch wins immediately and every call fails. *)
+let test_a_zero_timeout_is_refused () =
+  refused ~what:"a zero timeout" (endpoint_change [ "timeout_seconds", `Float 0.0 ])
+
+let test_a_negative_timeout_is_refused () =
+  refused ~what:"a negative timeout" (endpoint_change [ "timeout_seconds", `Float (-1.0) ])
+
+(* The readers take the first occurrence; a client or proxy that re-serializes
+   may keep the last, so the commit could be the opposite of what was sent. *)
+let test_a_repeated_field_is_refused () =
+  refused ~what:"an object repeating a field"
+    (`Assoc
+       [ "change", `String "put_endpoint"
+       ; "section", `String "stt"
+       ; "endpoint",
+         `Assoc
+           [ "id", `String "x"
+           ; "kind", `String "openai_compat"
+           ; "base_url", `String "http://127.0.0.1:2022/v1"
+           ; "enabled", `Bool false
+           ; "enabled", `Bool true
+           ]
+       ])
+
+(* select_endpoint trims a requested id before comparing, so an id stored with
+   padding could never be selected again. *)
+let test_a_padded_id_is_stored_trimmed () =
+  with_workspace (fun ~base_path ~path ->
+    let change =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint",
+          `Assoc
+            [ "id", `String "  padded  "
+            ; "kind", `String "openai_compat"
+            ; "base_url", `String "http://127.0.0.1:2022/v1"
+            ]
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok _ ->
+      Alcotest.(check bool) "the padding did not reach the file" false
+        (Astring.String.is_infix ~affix:"\"  padded  \"" (read path));
+      (match Actions.observe ~base_path with
+       | Error error -> Alcotest.fail (Actions.error_message error)
+       | Ok json ->
+         let ids =
+           match member "endpoints" (member "stt" json) with
+           | `List endpoints -> List.map (string_member "id") endpoints
+           | _ -> []
+         in
+         Alcotest.(check bool) "and the observation names the trimmed id" true
+           (List.mem "padded" ids)))
+
+(* Capture thresholds, the playback allowlist and the Gate's bypasses are in
+   effect, so a response calling itself the full configuration has to carry
+   them. *)
+let test_the_observation_names_every_settings_section () =
+  with_workspace (fun ~base_path ~path:_ ->
+    match Actions.observe ~base_path with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok json ->
+      List.iter
+        (fun (section, keys) ->
+          match member section json with
+          | `Assoc fields ->
+            List.iter
+              (fun key ->
+                Alcotest.(check bool)
+                  (Printf.sprintf "%s names %s" section key) true
+                  (List.mem_assoc key fields))
+              keys
+          | other ->
+            Alcotest.failf "%s must be an object, got %s" section
+              (Yojson.Safe.to_string other))
+        [ "capture", [ "calibration_seconds"; "noise_reduction" ]
+        ; "local_playback", [ "enabled"; "agents" ]
+        ; "gate", [ "always_allow"; "exempt_agents" ]
+        ])
+
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -592,6 +691,18 @@ let () =
             test_the_observation_names_the_session_section
         ; Alcotest.test_case "a command override" `Quick
             test_the_observation_names_a_command_override
+        ] )
+    ; ( "a value that cannot work is refused"
+      , [ Alcotest.test_case "a zero timeout" `Quick test_a_zero_timeout_is_refused
+        ; Alcotest.test_case "a negative timeout" `Quick
+            test_a_negative_timeout_is_refused
+        ; Alcotest.test_case "a repeated field" `Quick test_a_repeated_field_is_refused
+        ; Alcotest.test_case "a padded id is stored trimmed" `Quick
+            test_a_padded_id_is_stored_trimmed
+        ] )
+    ; ( "every settings section is described"
+      , [ Alcotest.test_case "capture, playback and gate" `Quick
+            test_the_observation_names_every_settings_section
         ] )
     ; ( "the wizard and the routes agree"
       , [ Alcotest.test_case "what the wizard sends is what the routes read" `Quick

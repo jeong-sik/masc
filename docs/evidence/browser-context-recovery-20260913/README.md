@@ -116,8 +116,9 @@ passed TUI text, native history and 17 composition cases. It failed a later
 browser-surface case because the new recovery fixture retired an ID reused by
 that case. The new recovery assertions themselves passed. The test-only followup
 `10e24b0735` isolates the ID; its
-[focused run](https://github.com/jeong-sik/masc/actions/runs/34714957961) is tracked
-separately from this unchanged product binary. Original combined output, including
+[focused run](https://github.com/jeong-sik/masc/actions/runs/34714957961) passed all
+nine browser-surface cases. Its log is `after/native/input-recovery-10e-suite-log.txt`,
+separate from this unchanged product binary. Original combined output, including
 the failure, is kept in `after/native/combined-suite-log.txt`.
 
 Each experiment finalized its owned Keeper, closed its private browser profile,

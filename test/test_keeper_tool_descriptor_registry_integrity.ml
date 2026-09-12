@@ -1453,6 +1453,9 @@ let test_concurrent_execution_opt_ins_are_exact () =
     (* Receipt reads use the owner-domain action serializer, including orphan
        recovery. They do not wait for package execution or submit new input. *)
     ; "masc_lane_action_status"
+    (* Declaration reads share the owner-domain configuration serializer with
+       saves/reconcile; offloaded file reads neither start workers nor nudge them. *)
+    ; "masc_lane_declaration_read"
     ; "masc_lane_inspect"
     ; "masc_lane_slice"
     ; "masc_plan_get_task"

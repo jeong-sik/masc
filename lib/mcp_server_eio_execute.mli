@@ -49,6 +49,7 @@ val execute_tool_eio :
   ?invocation_ref:Tool_invocation_ref.t ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
+  ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
   Mcp_server.server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->
@@ -64,6 +65,11 @@ val execute_tool_eio :
     [workspace_scope] is the immutable workspace generation captured by the
     caller at admission.  The dispatcher never re-reads the mutable server
     state's current workspace while executing the call.
+
+    [on_caller_resolved] observes the exact immutable identity used by this
+    execution once, immediately after resolution and before authorization or
+    tool effects. It lets the MCP receipt owner share that identity without
+    resolving mutable session or workspace bindings again.
 
     Side effects on the request scope:
     - Binds [sw] via [Eio_context.with_turn_switch] and refreshes [set_clock] so

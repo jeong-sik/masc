@@ -2276,6 +2276,12 @@ def select_keeper_row(
     the scenario say which keeper it means.
     """
     needle = keeper_row_selected(name)
+    # The roster is a live read that lands after the Keepers screen first draws,
+    # so "MASC Keepers" is on screen while the list is still (0). A scan that
+    # starts there presses Down into an empty list -- which redraws nothing, so
+    # the wait below times out -- and when the roster does land it can already
+    # have walked past the row it wanted. Wait for the row to exist first.
+    wait_for_output(process, master_fd, output, name, start=0, timeout=5.0)
     if find_needle(output, needle, 0) >= 0:
         return
     for _ in range(KEEPER_ROW_SCAN_BOUND):
@@ -10753,7 +10759,10 @@ def keeper_gate_mode_footer_interaction(
         needle=re.compile(rb"g\x1b\[0m:auto"),
         final_cursor=b"\x1b[?25l",
     )
-    if b"g yolo" in CSI_RE.sub(b"", footer):
+    # The hint above it moved to key:label, and this guard did not: the footer
+    # spells the off state "g:yolo", so looking for "g yolo" matched nothing and
+    # the check passed whatever the footer said.
+    if b"g:yolo" in CSI_RE.sub(b"", footer):
         raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
     os.write(master_fd, b"q")
 

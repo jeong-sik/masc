@@ -31,7 +31,8 @@ import { pinKeeper } from './multi-keeper-pin-store'
 import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { routeLinksForContext } from './ide-context-lens'
-import { lspStatusRejected, lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
+import { lspScopeKey, lspScopeSnapshot, lspStatusRejected, lspStatusSnapshot, type LspStatusSnapshot } from './ide-lsp-client'
+import { lspDocumentStatus, lspDocumentStatusLabel, lspDocumentStatusDetail, type LspDocumentStatus } from './ide-lsp-document-status'
 import { navigate, route } from '../../router'
 import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
@@ -137,6 +138,7 @@ interface IdeStatusbarInput {
   readonly dashboardConnected?: boolean
   readonly lspStatus?: LspStatusSnapshot
   readonly lspStatusStale?: boolean
+  readonly lspDocument?: LspDocumentStatus | null
 }
 
 function focusFromRoute(raw: string | null | undefined): IdeFocus | null {
@@ -434,6 +436,7 @@ export function deriveIdeStatusbarModel({
   dashboardConnected = false,
   lspStatus,
   lspStatusStale = false,
+  lspDocument = null,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
   const viewLabel = STATUSBAR_VIEW_LABELS[activeView]
@@ -456,6 +459,17 @@ export function deriveIdeStatusbarModel({
     'warn',
     workspaceIssueTitle(workspaceIssues),
   )
+  const selectedLsp = lspDocument?.filePath === activeFilePath
+    && lspDocument.scope === lspScopeKey(lspScopeSnapshot()) ? lspDocument : null
+  if (activeFilePath !== null) {
+    const healthy = selectedLsp?.connection.kind === 'connected'
+      && selectedLsp.diagnostics.kind === 'complete'
+    addStatusbarChip(chips, 'lsp-document',
+      selectedLsp ? lspDocumentStatusLabel(selectedLsp) : 'LSP not attempted',
+      healthy ? 'info' : 'warn',
+      selectedLsp ? lspDocumentStatusDetail(selectedLsp)
+        : 'No language server observation for this selected file. Browser analysis and Keeper tool usage are separate.')
+  }
   const lspUnavailable = lspUnavailableStatus(lspStatus)
   // A rejected payload leaves the reading below untouched, so it would go on
   // describing a fleet that has since changed. Say that first: which servers
@@ -825,6 +839,7 @@ export function IdeShell() {
   const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
   const lspStatus = useSignalValue(lspStatusSnapshot)
   const lspStatusStale = useSignalValue(lspStatusRejected)
+  const selectedDocumentLsp = useSignalValue(lspDocumentStatus)
   const reviewFocusActive = activeFocus === 'review' && activeView === 'unified'
   const activeLayers = availableLayersForView(
     layersFromRoute(route.value.params.layers, reviewFocusActive ? activeFocus : null),
@@ -861,6 +876,7 @@ export function IdeShell() {
     dashboardConnected: dashboardRuntimeConnected(),
     lspStatus,
     lspStatusStale,
+    lspDocument: selectedDocumentLsp,
   })
 
   useEffect(() => {

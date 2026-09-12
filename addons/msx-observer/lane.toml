@@ -8,6 +8,9 @@ command = ["python3", "server.py"]
 [world.skills]
 directory = "skills"
 
+[world.outputs.frames]
+lanes = ["msx/frame"]
+
 [resources]
 cpus = 0.5
 memory_bytes = 134217728

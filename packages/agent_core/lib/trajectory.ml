@@ -11,6 +11,7 @@
 
 type tool_call =
   { tool_use_id : string option
+  ; source_seq : int option
   ; tool_name : string
   ; tool_input : Yojson.Safe.t
   ; tool_result : string option
@@ -118,9 +119,13 @@ type tool_acc =
   { name : string
   ; input : Yojson.Safe.t
   ; started_at : float
+  ; source_seq : int
   }
 
-module StringMap = Map.Make (String)
+module InvocationMap = Map.Make (struct
+    type t = string * int * int
+    let compare = Stdlib.compare
+  end)
 
 type parser_state =
   { p_agent_name : string
@@ -130,7 +135,7 @@ type parser_state =
   ; p_finished_at : float option
   ; p_success : bool
   ; p_error_msg : string option
-  ; p_pending_tools : tool_acc StringMap.t
+  ; p_pending_tools : tool_acc list InvocationMap.t
   ; p_steps : step list
   }
 
@@ -142,7 +147,7 @@ let initial_state =
   ; p_finished_at = None
   ; p_success = true
   ; p_error_msg = None
-  ; p_pending_tools = StringMap.empty
+  ; p_pending_tools = InvocationMap.empty
   ; p_steps = []
   }
 ;;
@@ -150,6 +155,13 @@ let initial_state =
 let tool_use_id_of_raw = function
   | Some id when String.trim id <> "" -> Some id
   | Some _ | None -> None
+;;
+
+let invocation_key (record : Raw_trace.record) =
+  match tool_use_id_of_raw record.tool_use_id,
+        record.tool_turn, record.tool_planned_index with
+  | Some id, Some turn, Some planned_index -> Some (id, turn, planned_index)
+  | _ -> None
 ;;
 
 let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
@@ -201,15 +213,19 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
          | Tool_execution_started ->
            let tool_name = Option.value ~default:"unknown" r.tool_name in
            let tool_input = Option.value ~default:`Null r.tool_input in
-           (match tool_use_id_of_raw r.tool_use_id with
-            | Some tool_use_id ->
-              let acc = { name = tool_name; input = tool_input; started_at = r.ts } in
+           (match invocation_key r with
+            | Some key ->
+              let acc = { name = tool_name; input = tool_input; started_at = r.ts; source_seq = r.seq } in
               { st with
-                p_pending_tools = StringMap.add tool_use_id acc st.p_pending_tools
+                p_pending_tools =
+                  InvocationMap.update key
+                    (function None -> Some [ acc ] | Some pending -> Some (acc :: pending))
+                    st.p_pending_tools
               }
             | None ->
               let tool_call =
-                { tool_use_id = None
+                { tool_use_id = tool_use_id_of_raw r.tool_use_id
+                ; source_seq = Some r.seq
                 ; tool_name
                 ; tool_input
                 ; tool_result = None
@@ -227,6 +243,7 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
               let tool_name = Option.value ~default:"unknown" r.tool_name in
               let tc =
                 { tool_use_id
+                ; source_seq = None
                 ; tool_name
                 ; tool_input = `Null
                 ; tool_result
@@ -237,13 +254,14 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
               in
               { st with p_steps = Act { tool_call = tc; ts = r.ts } :: st.p_steps }
            in
-           (match tool_use_id with
+           (match invocation_key r with
             | None -> record_unmatched_finish ()
-            | Some tool_use_id ->
-              (match StringMap.find_opt tool_use_id st.p_pending_tools with
-               | Some acc ->
+            | Some ((tool_use_id, _, _) as key) ->
+              (match InvocationMap.find_opt key st.p_pending_tools with
+               | Some [ acc ] ->
                  let tc =
                    { tool_use_id = Some tool_use_id
+                   ; source_seq = Some acc.source_seq
                    ; tool_name = acc.name
                    ; tool_input = acc.input
                    ; tool_result
@@ -261,9 +279,9 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
                  in
                  { st with
                    p_steps = obs_steps @ (act_step :: st.p_steps)
-                 ; p_pending_tools = StringMap.remove tool_use_id st.p_pending_tools
+                 ; p_pending_tools = InvocationMap.remove key st.p_pending_tools
                  }
-               | None -> record_unmatched_finish ()))
+               | Some _ | None -> record_unmatched_finish ()))
          | Native_tool_started | Native_tool_finished -> st
          | Run_finished ->
            let p_success, p_error_msg =
@@ -293,19 +311,23 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
       records
   in
   let pending_steps =
-    StringMap.fold
-      (fun tool_use_id acc steps ->
-         let tc =
-           { tool_use_id = Some tool_use_id
-           ; tool_name = acc.name
-           ; tool_input = acc.input
-           ; tool_result = None
-           ; is_error = false
-           ; started_at = acc.started_at
-           ; finished_at = None
-           }
-         in
-         Act { tool_call = tc; ts = acc.started_at } :: steps)
+    InvocationMap.fold
+      (fun (tool_use_id, _, _) pending steps ->
+         List.fold_left
+           (fun steps acc ->
+              let tc =
+                { tool_use_id = Some tool_use_id
+                ; source_seq = Some acc.source_seq
+                ; tool_name = acc.name
+                ; tool_input = acc.input
+                ; tool_result = None
+                ; is_error = false
+                ; started_at = acc.started_at
+                ; finished_at = None
+                }
+              in
+              Act { tool_call = tc; ts = acc.started_at } :: steps)
+           steps pending)
       final_state.p_pending_tools
       final_state.p_steps
   in
@@ -332,6 +354,7 @@ let tool_call_to_json tc =
       , match tc.tool_use_id with
         | Some id -> `String id
         | None -> `Null )
+    ; "source_seq", (match tc.source_seq with Some seq -> `Int seq | None -> `Null)
     ; "tool_name", `String tc.tool_name
     ; "tool_input", tc.tool_input
     ; ( "tool_result"
@@ -352,6 +375,7 @@ let tool_call_of_json json =
   try
     Ok
       { tool_use_id = json |> member "tool_use_id" |> to_string_option
+      ; source_seq = (match json |> member "source_seq" with `Null -> None | value -> Some (to_int value))
       ; tool_name = json |> member "tool_name" |> to_string
       ; tool_input = json |> member "tool_input"
       ; tool_result = json |> member "tool_result" |> to_string_option

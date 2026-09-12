@@ -91,17 +91,26 @@ export MCP_TOKEN
 source "$BENCH/driver/mcp.sh"
 for _ in $(seq 1 60); do
   if mcp_init 2>/dev/null; then
-    # --- keeper pool mode (arm K): no keeper is started here; an external MCP
-    # --- client brings them up by name.
+    # --- keeper pool (arm K): bring the residents up, then hand the fleet to
+    # --- an external MCP client. No task is sent here.
+    #
+    # The pool is started rather than merely declared because the chat approval
+    # stance (Keeper_tool_approval_mode) can only be set for a keeper that is
+    # already registered — POST /api/v1/keepers/tool-approval-mode answers 404
+    # "keeper not registered" otherwise (measured on 0.35.8, 2026-09-12) — and
+    # that route is REST, which an MCP client cannot reach. A keeper nobody has
+    # spoken about is Auto, and Auto asks over the chat stream, which would
+    # stall a headless trial. So the operator stands the fleet up and sets the
+    # stance; the model addresses keepers that already exist.
     if [[ -n "${BENCH_KEEPER_POOL:-}" ]]; then
-      # The chat approval stance (Keeper_tool_approval_mode) is in-memory, has
-      # no config default by design, and is set only over REST — which an MCP
-      # client cannot reach. A keeper nobody has spoken about is Auto, and Auto
-      # asks over the chat stream, which would stall a headless trial. resolve
-      # is keyed by name and does not need the keeper to exist, so the stance
-      # is set for every pool name before any of them is brought up.
+      pool_instructions="You are an autonomous engineering agent inside a Linux \
+container. Your tool calls execute in this container as root. Do exactly what \
+you are asked, verify it, and stop. Do not ask questions."
       IFS=',' read -r -a pool <<< "${BENCH_KEEPER_POOL}"
+      pool_id=300
       for k in "${pool[@]}"; do
+        # remote_ssh preflight requires <remote_root>/<name> to exist, and it
+        # runs `gh auth status` against <keeper root>/.config/gh.
         mkdir -p "/root/${k}"
         if [[ -n "${GH_TOKEN:-}" ]]; then
           install -d -m 0700 "/root/${k}/.config/gh"
@@ -109,6 +118,12 @@ for _ in $(seq 1 60); do
             "${GH_TOKEN}" > "/root/${k}/.config/gh/hosts.yml"
           chmod 600 "/root/${k}/.config/gh/hosts.yml"
         fi
+        pool_id=$((pool_id + 1))
+        mcp_call "${pool_id}" masc_keeper_up "$(jq -cn \
+          --arg name "$k" --arg ins "$pool_instructions" \
+          --arg rid "${BENCH_RUNTIME_ID:?BENCH_RUNTIME_ID required}" \
+          '{name:$name, instructions:$ins, runtime_id:$rid, activation_mode:"manual"}')" \
+          180 >/dev/null
         curl -fsS -m 20 -X POST \
           "http://127.0.0.1:8935/api/v1/keepers/tool-approval-mode" \
           -H "Authorization: Bearer ${MCP_TOKEN}" \
@@ -119,7 +134,7 @@ for _ in $(seq 1 60); do
       # .claude.json entry. Localhost-only admin token, single-task disposable
       # container.
       chmod 644 "$BENCH/token"
-      echo "keeper pool approved: ${BENCH_KEEPER_POOL}"
+      echo "keeper pool up: ${BENCH_KEEPER_POOL}"
     fi
     echo "MASC server ready"; exit 0
   fi

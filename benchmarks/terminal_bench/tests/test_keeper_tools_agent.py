@@ -65,8 +65,11 @@ def test_pool_is_announced_in_the_appended_system_prompt(tmp_path):
     a = make_agent(tmp_path)
     flags = a.build_cli_flags()
     assert "--append-system-prompt" in flags
-    assert "masc_keeper_up" in flags
+    assert "masc_keeper_msg" in flags
     assert "bench-4" in flags
+    # A keeper the model starts itself has no approval stance and would stall,
+    # so the prompt has to say so rather than leave it to be discovered.
+    assert "masc_keeper_up" in flags and "approval" in flags
     # The baseline arm is this agent's parent with none of this, so the
     # announcement must stay opt-out rather than baked in.
     quiet = make_agent(tmp_path, announce_pool=False)
@@ -76,7 +79,7 @@ def test_pool_is_announced_in_the_appended_system_prompt(tmp_path):
 def test_explicit_append_system_prompt_wins(tmp_path):
     a = make_agent(tmp_path, append_system_prompt="mine")
     assert "mine" in a.build_cli_flags()
-    assert "masc_keeper_up" not in a.build_cli_flags()
+    assert "masc_keeper_msg" not in a.build_cli_flags()
 
 
 def test_mcp_registration_carries_the_bearer_header(tmp_path):

@@ -18,12 +18,14 @@ Two facts decide the wiring:
   masc_keeper_up / down / msg / status / list / delegate_status plus the
   board, task and goal tools to an external MCP client. Nothing in MASC has
   to change for a client to drive keepers.
-- The chat approval stance (`Keeper_tool_approval_mode`) is in-memory and
-  reachable only over REST, deliberately with no config default. A keeper an
-  operator has not spoken about is `Auto`, which asks over the chat stream
-  and would stall a headless trial. `resolve` is keyed by name and does not
-  need the keeper to exist, so bootstrap.sh pre-sets `yolo` for the pool
-  names before the model brings any of them up.
+- The chat approval stance (`Keeper_tool_approval_mode`) is in-memory, has no
+  config default by design, and is set only over REST — which an MCP client
+  cannot reach. The setter also answers 404 for a keeper that is not
+  registered yet (measured on 0.35.8, 2026-09-12), so the stance cannot be
+  pre-declared either. bootstrap.sh therefore stands the pool up and sets the
+  stance, and the model addresses keepers that already exist. A keeper the
+  model starts itself is `Auto` and would stall, which the appended prompt
+  says out loud. Issue filed upstream.
 """
 from __future__ import annotations
 
@@ -47,18 +49,18 @@ MCP_SERVER_NAME = "masc"
 
 POOL_PROMPT = """\
 A MASC server runs in this container and is registered as the MCP server \
-`{server}`. It offers a fleet of keeper agents alongside your own tools.
+`{server}`. A fleet of keeper agents is already running on it: {names}. Each \
+one executes its shell commands in this same container, as root.
 
-- `masc_keeper_up` starts a keeper. The names {names} are preconfigured to \
-run their shell commands in this same container.
-- `masc_keeper_msg` gives a keeper work; `masc_keeper_status` and \
-`masc_keeper_list` report on it; `masc_keeper_down` stops one.
-- Keepers share a board and a task ledger with you: `masc_board_post`, \
+- `masc_keeper_msg` gives a keeper work. `masc_keeper_status` and \
+`masc_keeper_list` report on what they are doing.
+- They share a board and a task ledger with you: `masc_board_post`, \
 `masc_add_task`, `masc_tasks`, `masc_broadcast`.
+- Address the keepers listed above. One you start yourself with \
+`masc_keeper_up` will wait for an approval nobody is there to give.
 
 Using them is optional. You remain responsible for the task either way.\
 """
-
 
 class KeeperToolsAgent(ClaudeCode):
     def __init__(

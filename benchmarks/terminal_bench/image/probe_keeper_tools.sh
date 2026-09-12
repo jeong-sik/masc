@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# Prove the arm K path without harbor: can an external MCP client bring up a
+# keeper and get it to change the container's filesystem?
+#
+# Arm K's claim is that harbor's own claude-code agent can drive a MASC keeper
+# fleet through the public MCP surface. Everything in that sentence except the
+# model's judgement is mechanical, and this script exercises exactly the
+# mechanical part — bootstrap, the pre-set approval stance, masc_keeper_up,
+# masc_keeper_msg, and whether the keeper's shell landed in this container.
+# One container, one keeper, one short turn.
+#
+#   ANTHROPIC_API_KEY=... ./image/probe_keeper_tools.sh
+#   BENCH_RUNTIME_ID=anthropic.claude-sonnet-5 ./image/probe_keeper_tools.sh
+#
+# Exits non-zero with the failing stage named. The container is removed unless
+# PROBE_KEEP=1.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BENCH_DIR="$(dirname "$HERE")"
+IMAGE="${PROBE_IMAGE:-ubuntu:24.04}"
+PLATFORM="${PROBE_PLATFORM:-linux/amd64}"
+RUNTIME_ID="${BENCH_RUNTIME_ID:-anthropic.claude-sonnet-5}"
+POOL="${BENCH_KEEPER_POOL:-bench-1}"
+KEEPER="${POOL%%,*}"
+MARKER="/tmp/arm-k-keeper-was-here"
+NAME="masc-armk-probe-$$"
+
+provider="${RUNTIME_ID%%.*}"
+case "${provider}" in
+  anthropic) key_env=ANTHROPIC_API_KEY ;;
+  openrouter) key_env=OPENROUTER_API_KEY ;;
+  kimi_coding) key_env=KIMI_API_KEY ;;
+  claude_code) key_env=CLAUDE_CODE_OAUTH_TOKEN ;;
+  *) echo "unknown provider ${provider} in ${RUNTIME_ID}" >&2; exit 2 ;;
+esac
+key="$(eval printf '%s' "\${${key_env}:-}")"
+[[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
+[[ -x "${BENCH_DIR}/dist/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
+
+cfg="$(mktemp -d)"
+cleanup() {
+  [[ "${PROBE_KEEP:-0}" = "1" ]] || docker rm -f "${NAME}" >/dev/null 2>&1
+  rm -rf "${cfg}"
+}
+trap cleanup EXIT
+
+echo "== render arm k config for ${RUNTIME_ID}"
+python3 -c "
+import sys; sys.path.insert(0, '${BENCH_DIR}/configs')
+from pathlib import Path
+from render_configs import render_arm
+print(render_arm('k', '${RUNTIME_ID}', 'high', out_root=Path('${cfg}')))
+" || { echo "STAGE_FAIL render" >&2; exit 1; }
+
+echo "== boot container ${IMAGE}"
+docker run -d --name "${NAME}" --platform "${PLATFORM}" \
+  -v "${BENCH_DIR}/dist:/opt/masc-bench/bin:ro" \
+  -v "${BENCH_DIR}/driver:/opt/masc-bench/driver:ro" \
+  -v "${cfg}/k:/opt/masc-bench/config:ro" \
+  -e "${key_env}=${key}" \
+  -e "BENCH_RUNTIME_ID=${RUNTIME_ID}" \
+  -e "BENCH_KEEPER_POOL=${POOL}" \
+  ${GH_TOKEN:+-e "GH_TOKEN=${GH_TOKEN}"} \
+  "${IMAGE}" sleep infinity >/dev/null || { echo "STAGE_FAIL docker-run" >&2; exit 1; }
+
+echo "== bootstrap"
+if ! docker exec \
+    -e "${key_env}=${key}" \
+    -e "BENCH_RUNTIME_ID=${RUNTIME_ID}" \
+    -e "BENCH_KEEPER_POOL=${POOL}" \
+    ${GH_TOKEN:+-e "GH_TOKEN=${GH_TOKEN}"} \
+    "${NAME}" bash /opt/masc-bench/driver/bootstrap.sh; then
+  echo "STAGE_FAIL bootstrap" >&2
+  docker exec "${NAME}" tail -30 /opt/masc-bench/server.log 2>/dev/null >&2 || true
+  exit 1
+fi
+
+# From here on the script speaks the MCP surface the way Claude Code would:
+# streamable HTTP with a bearer token and tools/call. It reuses driver/mcp.sh,
+# the same client the episode driver uses, rather than a second hand-rolled
+# one. Nothing keeper-specific goes through REST, because an MCP client cannot
+# reach REST.
+mcp() {
+  local id="$1" tool="$2" args="$3" secs="${4:-120}"
+  docker exec "${NAME}" bash -c '
+    export MCP_TOKEN="$(cat /opt/masc-bench/token)"
+    source /opt/masc-bench/driver/mcp.sh
+    mcp_call "$1" "$2" "$3" "$4"' _ "${id}" "${tool}" "${args}" "${secs}"
+}
+
+echo "== masc_keeper_up ${KEEPER}"
+up="$(mcp 10 masc_keeper_up "$(printf '{"name":"%s","runtime_id":"%s","activation_mode":"manual","instructions":"You run shell commands in this container. Do exactly what you are asked, then stop."}' "${KEEPER}" "${RUNTIME_ID}")" 180)"
+echo "${up}" | head -c 600; echo
+grep -q '"isError":true' <<<"${up}" && { echo "STAGE_FAIL keeper_up" >&2; exit 1; }
+
+echo "== masc_keeper_msg -> write ${MARKER}"
+msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run this one shell command and nothing else: printf arm-k-ok > %s"}' "${KEEPER}" "${MARKER}")" 300)"
+echo "${msg}" | head -c 600; echo
+
+echo "== wait for the marker the keeper was asked to write"
+found=""
+for _ in $(seq 1 60); do
+  if docker exec "${NAME}" test -f "${MARKER}"; then found=1; break; fi
+  docker exec "${NAME}" sleep 5
+done
+if [[ -z "${found}" ]]; then
+  echo "STAGE_FAIL keeper-did-not-act" >&2
+  mcp 12 masc_keeper_status "$(printf '{"name":"%s"}' "${KEEPER}")" 60 | head -c 800 >&2
+  exit 1
+fi
+
+echo "PROBE_OK marker=$(docker exec "${NAME}" cat "${MARKER}")"

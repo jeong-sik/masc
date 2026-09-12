@@ -29,6 +29,7 @@ let rec unambiguous_json = function
       | value :: rest -> let* () = unambiguous_json value in loop rest
     in loop values
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> Ok ()
+  | `Tuple _ | `Variant _ -> Error "retained observation requires standard JSON"
 
 let of_json json =
   let* () = unambiguous_json json in

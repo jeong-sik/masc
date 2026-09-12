@@ -36,14 +36,7 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
         | Browser_lane.Page_scene {tab_id=7;view=Content;scope=None;_} ->
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])
         | _ -> fail "composition must perform only the observed scene read"));
-      let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () |> List.map
-        (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
-          if reject_schema && descriptor.public_name="BrowserRead" then
-            {descriptor with composable_output=Json_output {schema=`Assoc [
-              "type",`String "object";
-              "properties",`Assoc ["missingReceipt",`Assoc ["type",`String "string"]];
-              "required",`List [`String "missingReceipt"]]}}
-          else descriptor) in
+      let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
       let catalog = Catalog.parse composition |> Result.map_error Catalog.error_to_string |> expect in
       let plan = Catalog.instantiate ~descriptors ~args:(`Assoc []) (List.hd (Catalog.entries catalog))
         |> Result.map_error Catalog.instantiation_error_to_string |> expect in
@@ -70,13 +63,38 @@ let test_composition_retains_observation ?(fail_receipt = false) ~reject_schema 
         check bool "producer read succeeds before schema validation" true
           (execution.disposition=Tool_result.Completed ());
         produced := Some result;
+        (* Plan.create pins canonical descriptors by id, so a caller-supplied
+           replacement schema is deliberately ignored. Model a faulty dispatcher
+           projection after the real read: BrowserRead declares an object, not
+           an array. Its already-retained observation must survive rejection. *)
+        let dispatched = if reject_schema then
+          match result with
+          | Tool_result.Completed payload ->
+            Tool_result.Completed { payload with data = `List [payload.data] }
+          | _ -> fail "schema fixture requires the successful producer"
+          else result in
         if fail_receipt then Log.reset_for_testing ();
-        Executor.dispatch_result result in
+        Executor.dispatch_result dispatched in
       let outcome = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () in
       check bool "executor actually applies declared output schema" (not reject_schema && not fail_receipt) (Result.is_ok outcome);
       let result = match !produced with Some result -> result | None -> fail "read never dispatched" in
+      if reject_schema then (
+        let node = match outcome with
+          | Error { cause = Executor.Node_observation_failed {node; _}; _ } -> node
+          | Error { settled = [node]; _ } -> node
+          | _ -> fail "canonical schema must reject the dispatcher array" in
+        match node.output_validation_error with
+        | Some (Plan.Output_validation_failed _) -> ()
+        | _ -> fail "rejection must come from the declared output schema");
       let reference = match Tool_result.retained_artifacts result with
         | [reference] -> reference | _ -> fail "one retained scene required" in
+      let retained_bytes = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base)
+          ~sha256:reference.Tool_output.sha256 with
+        | Ok (Some bytes) -> bytes
+        | Ok None -> fail "producer observation disappeared"
+        | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+      check string "schema rejection preserves the exact original observation"
+        (Tool_result.message result) retained_bytes;
       if fail_receipt then (
         match outcome with
         | Error { cause = Executor.Node_observation_failed _; _ } -> ()

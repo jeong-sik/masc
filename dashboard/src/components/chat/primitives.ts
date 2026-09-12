@@ -1,3 +1,4 @@
+import { KeeperToolOutputScope, ToolOutputLookupNotice, useToolOutputLookup } from './tool-output-lookup'
 import { ChatEditEvidence } from './edit-evidence'
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
@@ -3281,7 +3282,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   // Tool results never travel on the chat stream — they are joined here from
   // the tool-call output store by canonical execution_id. Null until result
   // readiness and output hydration have both landed.
-  const outputEntry = lookupToolCallOutput(entry.executionId)
+  const lookup = useToolOutputLookup(entry.executionId, lookupToolCallOutput(entry.executionId))
+  const outputEntry = lookup.output
   const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
   const hasOutput = outputView !== null && outputView.text.trim() !== ''
 
@@ -3318,6 +3320,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
       data-chat-tool-execution-id=${entry.executionId ?? undefined}
+      ref=${lookup.ref}
     >
       <button
         type="button"
@@ -3343,6 +3346,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
           : null}
         <span class="ml-1 text-sm text-[var(--color-fg-secondary)]">${expanded ? '▾' : '▸'}</span>
       </button>
+      <${ToolOutputLookupNotice} lookup=${lookup} />
       <${ChatEditEvidence} output=${outputEntry} />
       ${expanded
         ? html`
@@ -3465,7 +3469,7 @@ function isUnlinkedTraceTool(
 
 function ToolTraceStep({
   entry,
-  output,
+  output: suppliedOutput,
   canMarkMissing = false,
   coverageState = 'not-applicable',
   hydrationFailureReason = null,
@@ -3485,6 +3489,8 @@ function ToolTraceStep({
   structuralSummary?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const lookup = useToolOutputLookup(entry?.executionId ?? traceStep?.executionId, suppliedOutput)
+  const output = lookup.output
   const name = traceStep?.name || entry?.label || 'tool'
   const callId = toolTraceCallId(entry, traceStep)
   const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
@@ -3525,6 +3531,7 @@ function ToolTraceStep({
     <div
       class="chat-block-tstep tool ${open ? 'exp' : ''}"
       data-chat-trace-step="tool"
+      ref=${lookup.ref}
       data-chat-turn-order-index=${orderIndex ?? undefined}
       data-chat-turn-order-kind=${orderKind}
       data-chat-trace-provenance=${sourceBadge.label}
@@ -3556,6 +3563,7 @@ function ToolTraceStep({
           <span class="chat-block-tstep-dur">${durLabel}</span>
           ${hasBody ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
         </div>
+        <${ToolOutputLookupNotice} lookup=${lookup} />
         <${ChatEditEvidence} output=${output} />
         ${open && hasBody
           ? html`
@@ -4555,6 +4563,7 @@ function traceStepsSignature(entry: KeeperConversationEntry): string {
 
 export function ChatTranscript({
   entries,
+  keeperName = null,
   emptyText,
   showMetadata,
   variant = 'default',
@@ -4571,6 +4580,7 @@ export function ChatTranscript({
   action,
 }: {
   entries: KeeperConversationEntry[]
+  keeperName?: string | null
   emptyText: string
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
@@ -4680,6 +4690,7 @@ export function ChatTranscript({
     : 'min-h-75 max-h-130'
 
   return html`
+    <${KeeperToolOutputScope.Provider} value=${keeperName}>
     <div class=${`relative flex min-h-0 flex-col ${isPrimary ? 'flex-1' : ''}`}>
       <div
         class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col-reverse overflow-y-auto ${
@@ -4731,6 +4742,7 @@ export function ChatTranscript({
           `
         : null}
     </div>
+    </${KeeperToolOutputScope.Provider}>
   `
 }
 

@@ -809,6 +809,13 @@ def pdf_tools_status(binary):
         raise SetupError('MASC could not inspect PDF tool availability')
 
 
+@dataclass(frozen=True)
+class PresentationToolsReadiness:
+    available: bool
+    checks: tuple
+    pdf: PdfToolsReadiness
+
+
 def decode_presentation_tools_readiness(value, base_path=None):
     if (not isinstance(value, dict) or value.get('schema') != 'masc.presentation_tools_readiness.v1'
             or value.get('status') not in ('tools_available', 'unavailable')
@@ -824,15 +831,21 @@ def decode_presentation_tools_readiness(value, base_path=None):
                    or not isinstance(row.get('command'), str) for row in checks)
             or {row.get('component') for row in checks} != {'python_pptx', 'libreoffice'}):
         raise SetupError('MASC did not check both presentation dependencies')
-    if all(row['status'] == 'started' for row in checks) != (value['status'] == 'tools_available'):
+    pdf = decode_pdf_tools_readiness(value.get('pdf_tools'))
+    available = all(row['status'] == 'started' for row in checks) and pdf.available
+    if available != (value['status'] == 'tools_available'):
         raise SetupError('MASC returned inconsistent presentation readiness')
-    return value
+    return PresentationToolsReadiness(available=available, checks=tuple(checks), pdf=pdf)
 
 
 def presentation_tools_status(binary, base_path):
-    result = subprocess.run([str(binary), 'prerequisite-actions', 'presentation-tools',
-                             '--base-path', str(base_path)],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        result = subprocess.run([str(binary), 'prerequisite-actions', 'presentation-tools',
+                                 '--base-path', str(base_path)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise SetupError('MASC did not answer about presentation tool availability in time')
     try:
         catalog = json.loads(result.stdout)
         if result.returncode or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.prerequisite_actions.v1':
@@ -844,10 +857,12 @@ def presentation_tools_status(binary, base_path):
 
 def show_presentation_readiness(readiness):
     print('Presentation tools are available on this workspace host; document inspection has not run.'
-          if readiness['status'] == 'tools_available' else
+          if readiness.available else
           'Presentation tools are not ready on this workspace host. Install the missing dependencies and refresh detection.',
           file=sys.stderr)
-    for row in readiness['checks']:
+    for row in readiness.pdf.checks:
+        print(terminal_text(row.command) + ': ' + terminal_text(row.status), file=sys.stderr)
+    for row in readiness.checks:
         print(terminal_text(row['component']) + ': ' + terminal_text(row['status'])
               + ' (' + terminal_text(row['command']) + ')', file=sys.stderr)
         detail = row.get('detail') or row.get('output')
@@ -883,7 +898,7 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
     if dependency == 'presentation-tools':
         presentation = decode_presentation_tools_readiness(catalog.get('dependency_readiness'), base_path)
         show_presentation_readiness(presentation)
-        if presentation['status'] == 'tools_available':
+        if presentation.available:
             return True
         if not actions:
             print('No automatic presentation installation action is available on this host.', file=sys.stderr)
@@ -921,9 +936,9 @@ def prerequisite_menu(binary, dependency, base_path=None, port=8945):
                 raise ValueError('PDF tools were not available after installation')
         elif dependency == 'presentation-tools':
             presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
-            if readiness != presentation['status']:
+            if readiness not in (PDF_TOOLS_AVAILABLE, PDF_TOOLS_UNAVAILABLE) or (readiness == PDF_TOOLS_AVAILABLE) != presentation.available:
                 raise ValueError('inconsistent presentation recheck')
-            if state == 'commands_completed' and presentation['status'] != 'tools_available':
+            if state == 'commands_completed' and not presentation.available:
                 raise ValueError('presentation installation was not ready')
         elif readiness != 'not_checked':
             raise ValueError('invalid readiness')
@@ -1677,7 +1692,7 @@ def select_sandbox(binary, base_path, port=8945):
             pdf_label = 'PDF document inspection · could not check tools'
         try:
             presentation = presentation_tools_status(binary, base_path)
-            presentation_label = ('Presentation tools · available on workspace host' if presentation['status'] == 'tools_available'
+            presentation_label = ('Presentation tools · available on workspace host' if presentation.available
                                   else 'Presentation tools · install missing dependencies')
         except SetupError:
             presentation_label = 'Presentation tools · could not check dependencies'

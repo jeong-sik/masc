@@ -162,6 +162,8 @@ let run ~base_path ~dependency:name ~action =
              let selected_component_ready = match action with
                | Standard {id="presentation_parser_install"; _} ->
                  Masc.Presentation_runtime_dependencies.parser_available checks
+               | Standard {id="poppler_install"; _} ->
+                 Masc.Presentation_runtime_dependencies.pdf_available checks
                | Standard {id="presentation_renderer_install"; _} ->
                  Masc.Presentation_runtime_dependencies.renderer_available checks
                | Standard _ | Verified_apple_install | Verified_docker_install | Verified_docker_launch -> ready in

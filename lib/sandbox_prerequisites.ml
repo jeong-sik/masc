@@ -53,7 +53,7 @@ let install_cli client =
    detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
    source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
    action_effect=Install_official_cli client}
-let catalog ?model_dir ~host ~distribution dependency =
+let rec catalog ?model_dir ~host ~distribution dependency =
   let open_ = open_action ~host in
   (* whisper-cli needs a model as well as a binary, on either host, and -m is
      a path the voice configuration then names. Written once because the hosts
@@ -139,7 +139,7 @@ let catalog ?model_dir ~host ~distribution dependency =
           ~detail:"Install LibreOffice using your distribution's instructions and make soffice available in the service host PATH. Return to refresh detection."
           ~source_url:"https://www.libreoffice.org/installation-instructions/" "https://www.libreoffice.org/installation-instructions/"]
       | Unsupported, _ -> [] in
-    renderer @ [parser]
+    renderer @ [parser] @ catalog ?model_dir ~host ~distribution Pdf_tools
   | Pdf_tools, Macos _ ->
     [commands ~id:"poppler_install" ~label:"Install PDF inspection tools with Homebrew"
        ~detail:"Install Poppler through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Both PDF commands are checked after installation."

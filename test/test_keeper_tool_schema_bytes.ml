@@ -168,7 +168,17 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
-let ceiling_bytes = 109_236
+(* 2026-09-13: 109,572 across 126 tools (CI 34706931145 at 596c9dc3). The
+   whole +336 is masc_fusion_status's description; no tool is added. What it
+   bought: the description now says what a run_id read returns -- the original
+   durable Board evidence, panel answers, judge advice, source context and
+   evidence hash -- and that missing evidence is reported rather than read as
+   an expired post. Without that, a Keeper attributes panel positions from
+   metadata it did not check. The tool declares defer_loading = true, so these
+   bytes reach the wire only on a turn that names it; this figure counts them
+   because model_visible_schemas reads the descriptor, not the loading
+   declaration. Set to the measurement with no added headroom. *)
+let ceiling_bytes = 109_572
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

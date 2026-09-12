@@ -234,6 +234,3 @@ val notes_for_schedule :
   state -> schedule_id:string -> Schedule_domain.schedule_note list
 (** Every retained note of one schedule_id, oldest first. Notes survive
     terminal state transitions: they are history, not state. *)
-
-val note_count_per_schedule : state -> string -> int
-(** Number of retained notes for one schedule_id. *)

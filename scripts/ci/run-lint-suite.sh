@@ -132,6 +132,8 @@ blocking_lints() {
     python3 scripts/ci/stanza_env.py --check-all
   run_lint "Hardcoded model prefix" bash scripts/lint/no-roadmap-stale-hardcoding.sh
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
+  run_lint "Harness connector env ratchet (#28807)" \
+    bash scripts/lint/harness-connector-env-ratchet.sh --self-test
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
   run_lint "Timeout env knob ceiling (RFC-0138)" bash scripts/lint/timeout-env-ceiling.sh
   run_self_test_when_changed ".mli env knob exists self-test" \

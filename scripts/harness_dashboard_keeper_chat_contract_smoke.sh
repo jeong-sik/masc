@@ -186,6 +186,10 @@ wait_for_http() {
   return 1
 }
 
+# A smoke harness must not inherit the operator's real connector tokens
+# (#28807): the temp base path isolates config, not the unprefixed env reads.
+unset SLACK_BOT_TOKEN SLACK_APP_TOKEN DISCORD_BOT_TOKEN
+
 log "starting server"
 if [ -x "$SERVER_EXE" ]; then
   nohup env \

@@ -174,6 +174,42 @@ let count_calls_inside_while_in_value_binding ~module_path ~binding_name ~callee
   !total
 ;;
 
+(* Calls to [callee] that sit inside a [for] loop, anywhere in the file.
+
+   A drawing loop runs once per visible row, so a call in its body is paid
+   per row rather than per frame. That is the cost a window removes, and it
+   is not what [count_calls] can see: the same callee outside a loop is a
+   once-a-frame lookup and perfectly fine. *)
+let count_calls_inside_for ~module_path ~callee =
+  let structure = parse_implementation_or_fail module_path in
+  let for_depth = ref 0 in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self expression ->
+          match expression.pexp_desc with
+          (* The bounds are the loop's own two numbers, read once before it
+             runs; only the body is paid per row. Counting the bounds in
+             would have flagged [for _ = 1 to height - List.length drawn]. *)
+          | Pexp_for (_, low, high, _, body) ->
+            self.expr self low;
+            self.expr self high;
+            incr for_depth;
+            self.expr self body;
+            decr for_depth
+          | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _)
+            when !for_depth > 0 && String.equal (longident_to_string txt) callee
+            ->
+            incr count;
+            Ast_iterator.default_iterator.expr self expression
+          | _ -> Ast_iterator.default_iterator.expr self expression)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
 let count_expressions_outside_calls_in_value_binding
       ~module_path
       ~binding_name

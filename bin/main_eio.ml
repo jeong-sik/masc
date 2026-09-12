@@ -429,7 +429,7 @@ let accept_store_quarantine =
 let record_default_arg =
   let doc =
     "Record this workspace as the default for later commands (in \
-     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
      a temporary server workspace must not overwrite the machine's default."
   in
   Arg.(value & flag & info [ "record-default" ] ~doc)
@@ -1268,7 +1268,7 @@ let init_force =
 let init_record_default =
   let doc =
     "Record this workspace as the default for later commands (in \
-     $XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
+     XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
      a throwaway workspace must not become the machine's default. `masc setup` \
      and the installer pass it."
   in

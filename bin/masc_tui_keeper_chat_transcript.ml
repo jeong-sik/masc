@@ -208,6 +208,13 @@ type t =
         (* Currently observed runtime identity serving this attempt. *)
   ; mutable endpoint_streaming : bool
         (* Whether tokens have started streaming from the runtime endpoint. *)
+  ; mutable runtime_named_at : float option
+        (* When the runtime serving this attempt was named. Read only while
+           [endpoint_streaming] is false, where it is the age of the silence:
+           the turn's own age counts tool rounds that already finished, so on
+           a turn that ran for a minute and then went quiet the two numbers
+           are not the same question. Re-stamped per attempt; never cleared,
+           because the streaming flag is what makes it meaningful. *)
   ; mutable reply : reply option
         (* Not a trail node: the server streams the reply text as deltas --
            chunked at the end when nothing streamed -- so the text is already
@@ -246,6 +253,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; attempt = 0
   ; current_runtime_id = None
   ; endpoint_streaming = false
+  ; runtime_named_at = None
   ; reply = None
   ; settled_at = None
   ; revision = 0
@@ -1163,16 +1171,37 @@ let phase_text ~now t =
          once on the one now running. The word "failover" used to be the only
          thing telling them apart, and it is no longer on this row. *)
       let attempt_shown = t.attempt + 1 in
+      (* It used to say "connecting to [rid]", which the screen cannot know.
+         All it observes is that a runtime was named and nothing has come back
+         -- the first byte arrives as STREAM_MODEL_STARTED, text, thinking or
+         a tool start, and until one of those the wait may be a process still
+         starting, an endpoint still authenticating, a provider queue, or a
+         model that is simply thinking. Naming one of them picks a cause the
+         screen did not observe; an operator who reads "connecting" and waits
+         for it to connect is waiting on a word, not a fact.
+
+         With the silence's own age beside it, because the number at the end
+         of this row is the turn's, and a turn that ran a minute of tools and
+         then went quiet for ten seconds reports the minute. Which of the two
+         is growing is the difference between slow and stuck. *)
+      let silent_for =
+        match t.runtime_named_at with
+        | None -> ""
+        | Some since -> (
+          match Masc_tui_message_layout.age_text ~now ~since with
+          | None -> ""
+          | Some age -> Printf.sprintf " \xc2\xb7 nothing back for %s" age)
+      in
       let work =
         if calls = 0 then
           match t.current_runtime_id, t.endpoint_streaming with
           | Some rid, true ->
               Printf.sprintf "streaming from [%s]%s" rid in_this_call
           | Some rid, false when t.attempt > 0 ->
-              Printf.sprintf "failover: connecting to [%s] (attempt %d)%s"
-                rid attempt_shown in_this_call
+              Printf.sprintf "failover: waiting on [%s] (attempt %d)%s%s"
+                rid attempt_shown silent_for in_this_call
           | Some rid, false ->
-              Printf.sprintf "connecting to [%s]%s" rid in_this_call
+              Printf.sprintf "waiting on [%s]%s%s" rid silent_for in_this_call
           | None, _ when t.attempt > 0 ->
               Printf.sprintf "failover working (attempt %d)%s" attempt_shown
                 in_this_call
@@ -1489,6 +1518,7 @@ let apply_delta ~now t (delta : Live.delta) =
       if new_attempt || Option.is_some runtime_id then
         t.current_runtime_id <- runtime_id;
       t.endpoint_streaming <- false;
+      t.runtime_named_at <- Some now;
       t.awaiting <- None;
       (match t.phase with
        | Waiting | Working -> t.phase <- Working

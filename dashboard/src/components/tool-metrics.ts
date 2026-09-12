@@ -1,19 +1,13 @@
 // Tool Metrics — P4 Phase 4.5
-import { ActionButton } from './common/button'
-import { ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 // Displays tool usage statistics from Tool_unified.summary_report()
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
-import { fetchToolMetrics, type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
-import { createAsyncResource } from '../lib/async-state'
+import { type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { toolCategory } from './tool-call-shared'
-
-const metricsResource = createAsyncResource<ToolMetricsResponse>()
 
 // Filter state (module-scoped so filters survive re-renders / refreshes).
 const categoryFilter = signal<string>('all')
@@ -55,10 +49,6 @@ export function filterTools<T extends { name: string }>(
   return items.filter(
     (it) => toolMatchesSearch(it, q) && toolMatchesCategory(it, category),
   )
-}
-
-function loadMetrics() {
-  return metricsResource.load(() => fetchToolMetrics())
 }
 
 /** Map category color CSS class (text-[...]) to a usable bar background color. */
@@ -136,43 +126,32 @@ function ToolDistribution({ dist }: { dist: { total: number; public: number; vis
   `
 }
 
-export function ToolMetrics() {
-  const s = metricsResource.state.value
-  const data = s.status === 'loaded' ? s.data : undefined
-  const loading = s.status === 'loading'
-  const error = s.status === 'error' ? s.message : null
-
-  useEffect(() => {
-    if (s.status === 'idle') {
-      void loadMetrics()
-    }
-  }, [])
-
+export function ToolMetrics({ data }: { data: ToolMetricsResponse | null }) {
+  const catalog = data?.catalog_usage
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex justify-between items-center">
         <h3 class="text-[var(--color-fg-secondary)] text-lg font-semibold m-0">도구 사용 현황</h3>
-        <${ActionButton}
-          variant="ghost"
-          onClick=${() => void loadMetrics()}
-          disabled=${loading}
-        >
-          ${loading ? '불러오는 중...' : data ? '새로고침' : '불러오기'}
-        <//>
       </div>
-
-      ${error ? html`<${ErrorState} message=${error} />` : null}
 
       ${data ? html`
         <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
-          서버 시작 이후 메모리 기반 집계. 재시작 시 초기화됩니다.
+          ${data.metrics_source
+            ? '현재 프로세스 호출과 복원에 성공한 SQLite 보존 기록을 합산합니다. 이 응답은 복원·저장 상태를 확인하지 않습니다. 보존 범위 밖의 과거 사용 여부는 알 수 없습니다.'
+            : '사용 집계의 원천 정보가 아직 없습니다.'}
         </div>
         <div class="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
           <${StatTile} label="총 호출 수" value=${String(data.total_calls)} status="brass" />
-          <${StatTile} label="사용된 도구" value=${String(data.distinct_tools_called)} status="ok" delta=${{ direction: 'up', text: '활성' }} />
-          <${StatTile} label="미사용 도구" value=${String(data.never_called_count)} status=${data.never_called_count > 0 ? 'warn' : 'ok'} delta=${data.never_called_count > 0 ? { direction: 'flat', text: '유휴' } : undefined} />
-          <${StatTile} label="등록됨" value=${String(data.registered_count)} status="brass" />
+          <${StatTile} label="사용이 관측된 전체 도구" value=${String(data.distinct_tools_called)} status="brass" />
         </div>
+        ${catalog ? html`
+          <div class="text-xs text-[var(--color-fg-muted)]">
+            현재 비숨김 도구 ${catalog.visible_total}개: 사용 관측 ${catalog.visible_called}개 · 현재 집계에 호출 없음 ${catalog.visible_without_observed_call}개
+          </div>
+          <div class="text-xs text-[var(--color-fg-muted)]">
+            별도 사용 관측: 숨김 도구 ${catalog.hidden_called}개 · 현재 카탈로그 밖 도구 ${catalog.outside_catalog_called}개
+          </div>
+        ` : html`<p class="muted">카탈로그별 사용 범위를 아직 확인하지 못했습니다.</p>`}
 
         <div class="tool-metrics-sections">
           <div>
@@ -231,9 +210,9 @@ export function ToolMetrics() {
             })()}
           </div>
         </div>
-      ` : !loading ? html`
-        <p class="muted">불러오기를 눌러 도구 사용 통계를 확인하세요.</p>
-      ` : null}
+      ` : html`
+        <p class="muted">도구 사용 통계를 불러오는 중입니다.</p>
+      `}
     </div>
   `
 }

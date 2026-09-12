@@ -1487,6 +1487,7 @@ describe('fetchDashboardTools', () => {
         top_20: [],
         never_called_count: 0,
         registered_count: 0,
+        non_public_call_log: {
         source: 'tool_usage',
         health: 'coverage_gap',
         stale_reason: 'tool_usage_append_failed',
@@ -1502,6 +1503,7 @@ describe('fetchDashboardTools', () => {
             error: 'synthetic append failure',
           },
         ],
+        },
       },
     }
 
@@ -1516,8 +1518,8 @@ describe('fetchDashboardTools', () => {
     const result = await fetchDashboardTools()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tools')
-    expect(result.tool_usage.coverage_gap_count).toBe(1)
-    expect(result.tool_usage.coverage_gaps?.[0]).toMatchObject({
+    expect(result.tool_usage.non_public_call_log?.coverage_gap_count).toBe(1)
+    expect(result.tool_usage.non_public_call_log?.coverage_gaps?.[0]).toMatchObject({
       producer: 'tool_usage_log',
       durable_store: '.masc/tool_usage',
       dashboard_surface: '/api/v1/dashboard/tools',

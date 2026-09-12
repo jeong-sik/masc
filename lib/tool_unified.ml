@@ -137,6 +137,15 @@ let summary_report
   let total_count = List.length all_names in
   let visible_count = List.length allowed_names in
   let hidden_count = total_count - visible_count in
+  let all_name_set = Set_util.StringSet.of_list all_names in
+  let visible_name_set = Set_util.StringSet.of_list allowed_names in
+  let visible_called = Set_util.StringSet.cardinal
+      (Set_util.StringSet.inter called_names visible_name_set) in
+  let hidden_called = Set_util.StringSet.cardinal
+      (Set_util.StringSet.inter called_names
+         (Set_util.StringSet.diff all_name_set visible_name_set)) in
+  let outside_catalog_called = Set_util.StringSet.cardinal
+      (Set_util.StringSet.diff called_names all_name_set) in
   let public_count =
     List.length Tool_catalog_surfaces.public_mcp_surface_tools
   in
@@ -149,6 +158,18 @@ let summary_report
     ]
   in
   `Assoc [
+    ("metrics_source", `Assoc [
+      "kind", `String "tool_metrics";
+      "scope", `String "retained_snapshot_and_current_process";
+      "persistence", `String "sqlite";
+    ]);
+    ("catalog_usage", `Assoc [
+      "visible_total", `Int visible_count;
+      "visible_called", `Int visible_called;
+      "visible_without_observed_call", `Int (List.length never_called);
+      "hidden_called", `Int hidden_called;
+      "outside_catalog_called", `Int outside_catalog_called;
+    ]);
     ("total_calls", `Int total);
     ("distinct_tools_called", `Int distinct);
     ("top_20", `List (List.map (tool_stats_to_json ~public_names) top_20));

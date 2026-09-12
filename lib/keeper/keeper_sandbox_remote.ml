@@ -972,6 +972,47 @@ let github_transport t =
     Api_unreachable (Printf.sprintf "signal=%d" signal)
 ;;
 
+(* Whether this endpoint was ever given a GitHub identity.
+
+   [gh auth status] is the last preflight step, and until now it was
+   unconditional: an endpoint with no GitHub login refused every Execute,
+   Read, Write and Edit of its keeper, whatever the work was. That is the
+   same failure keeper_sandbox_remote_lane already names for guests, where
+   the answer was to skip the preflight entirely -- "a lane the Docker
+   container never gated on identity". A Terminal-Bench container, brought up
+   per trial with nothing to log in with, hits it for tasks that never touch
+   GitHub (#35412).
+
+   Guests skip the whole preflight; a Remote_ssh endpoint is a real host, so
+   the rest of it still means something and only this step is conditional.
+   The condition is read from the endpoint rather than declared in config,
+   because that is where the truth already is: [gh] keeps its login in
+   [hosts.yml] under GH_CONFIG_DIR, and its presence is what the operator
+   provisioning a machine actually creates.
+
+   The unknown case keeps today's behaviour. A probe that cannot answer must
+   not be read as "no identity expected" -- that would turn a broken login on
+   a machine that has one into a keeper running identity-blind, which is what
+   the preflight exists to prevent. *)
+type github_identity_intent =
+  | Login_provisioned
+  | No_login_configured
+
+let github_hosts_path t = Filename.concat t.gh_config_dir "hosts.yml"
+
+let github_identity_intent t =
+  let run = runner ~timeout_sec:(preflight_timeout_sec t) t in
+  let status, _stdout, _stderr =
+    Masc_exec.Sandbox_target.status_tuple
+      (run ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+         ~argv:[ "test"; "-s"; github_hosts_path t ]
+         ~env:[||] ~cwd:(Some t.remote_root))
+  in
+  match status with
+  | Unix.WEXITED 1 -> No_login_configured
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Login_provisioned
+;;
+
 let whitespace_tokens line =
   line
   |> String.split_on_char ' '
@@ -1029,6 +1070,14 @@ let perform_preflight t =
            (code t "disk_probe_failed") t.name)
   in
   let* () =
+    match github_identity_intent t with
+    | No_login_configured ->
+      Log.Keeper.info
+        "remote endpoint %s has no GitHub login at %s; identity preflight \
+         skipped"
+        t.name (github_hosts_path t);
+      Ok ()
+    | Login_provisioned ->
     match
       run_preflight_command t ~error_code:"remote_github_identity_missing"
         [ "env"; "GH_CONFIG_DIR=" ^ t.gh_config_dir; "gh"; "auth"; "status" ]

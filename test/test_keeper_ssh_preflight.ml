@@ -102,6 +102,11 @@ let stub_main () =
     | "rg" :: _ ->
       write_all Unix.stdout "ripgrep 14.1.1\n";
       write_all Unix.stderr (trailer 0)
+    (* The identity step is conditional on the endpoint having a login at
+       all, which the preflight reads as `test -s <gh config>/hosts.yml`. *)
+    | [ "test"; "-s"; path ] when String.equal (Filename.basename path) "hosts.yml" ->
+      write_all Unix.stderr
+        (trailer (if String.equal mode "gh-unconfigured" then 1 else 0))
     | "test" :: _ -> write_all Unix.stderr (trailer 0)
     | "df" :: _ ->
       let available = if String.equal mode "disk-low" then 1 else 2_097_152 in
@@ -110,7 +115,12 @@ let stub_main () =
            "Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 4000000 10 %d 1%% /srv\n"
            available);
       write_all Unix.stderr (trailer 0)
-    | "env" :: _ when String.equal mode "gh-missing" ->
+    | "env" :: _
+      when String.equal mode "gh-missing" || String.equal mode "gh-unconfigured" ->
+      (* No hosts.yml means gh reports no login, exactly as in gh-missing.
+         The two modes differ only in whether the endpoint was ever given
+         one, which is what the preflight now asks first. A fixture where gh
+         succeeds here would pass with or without that question. *)
       write_all Unix.stderr ("not logged in\n" ^ trailer 1)
     | "env" :: _ when String.equal mode "gh-blinded" ->
       write_all Unix.stderr
@@ -211,13 +221,13 @@ let test_ready_ttl_and_force () =
   Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
   check (result unit string) "first ready" (Ok ())
     (Keeper_sandbox_remote.check_preflight state);
-  check int "seven probes" 7 (invocation_count count_path);
+  check int "eight probes" 8 (invocation_count count_path);
   check (result unit string) "cached ready" (Ok ())
     (Keeper_sandbox_remote.check_preflight state);
-  check int "cache avoided respawn" 7 (invocation_count count_path);
+  check int "cache avoided respawn" 8 (invocation_count count_path);
   check (result unit string) "forced ready" (Ok ())
     (Keeper_sandbox_remote.check_preflight ~force:true state);
-  check int "force respawned" 14 (invocation_count count_path)
+  check int "force respawned" 16 (invocation_count count_path)
 ;;
 
 let test_zero_ttl_rechecks () =
@@ -231,7 +241,7 @@ let test_zero_ttl_rechecks () =
     (Keeper_sandbox_remote.check_preflight state);
   check (result unit string) "second ready" (Ok ())
     (Keeper_sandbox_remote.check_preflight state);
-  check int "zero TTL respawned every probe" 14 (invocation_count count_path)
+  check int "zero TTL respawned every probe" 16 (invocation_count count_path)
 ;;
 
 let test_named_failures () =
@@ -254,6 +264,20 @@ let test_named_failures () =
     ]
 ;;
 
+let test_absent_github_login_is_not_a_blocker () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, _ = make_stub ~dir:base_path ~mode:"gh-unconfigured" in
+  let state = make_state ~base_path ~ssh_bin in
+  (* The endpoint has no hosts.yml and `gh auth status` would fail. Until
+     #35412 that refused every tool call the keeper made, including work that
+     never touches GitHub. An endpoint that was never given an identity is not
+     an endpoint with a broken one. *)
+  check (result unit string) "no login, still ready" (Ok ())
+    (Keeper_sandbox_remote.check_preflight ~force:true state)
+;;
+
 let () =
   if Array.length Sys.argv > 1 && String.equal Sys.argv.(1) "--preflight-stub"
   then stub_main ()
@@ -263,5 +287,7 @@ let () =
         , [ test_case "ready TTL + force" `Quick test_ready_ttl_and_force
           ; test_case "zero TTL rechecks" `Quick test_zero_ttl_rechecks
           ; test_case "named failures" `Quick test_named_failures
+          ; test_case "absent GitHub login" `Quick
+              test_absent_github_login_is_not_a_blocker
           ] )
       ]

@@ -487,7 +487,19 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
      (match Runtime.verifier_exact_lane_slot_ids () with
       | Ok slots -> Alcotest.(check (list string))
           "completion authority retains configured official clients" cli slots
-      | Error detail -> Alcotest.fail detail));
+      | Error detail -> Alcotest.fail detail);
+     (* Carrying the id and being able to judge with it are different answers.
+        No runtime table here names this official client, and the server reports
+        exact_output_authority_available from the readiness one, so that is the
+        answer that has to refuse. *)
+     (match Runtime.verifier_exact_lane_readiness () with
+      | Error detail ->
+        Alcotest.(check bool)
+          "readiness names the cli slot that resolves to no runtime"
+          true
+          (String_util.contains_substring detail (List.hd cli))
+      | Ok () ->
+        Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish
       ~lanes:[ { id = "empty"; slot_ids = []; cli_slot_ids = [] } ] snapshot with
    | Error (Registry.Empty_lane _) -> ()

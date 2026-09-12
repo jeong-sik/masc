@@ -388,6 +388,11 @@ let install () =
     let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
+        match Runtime.verifier_exact_cli_slot_admission ~runtime_id:evaluator_runtime with
+        | Error detail ->
+          Error (Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))
+        | Ok () ->
         Option.iter Eio.Switch.check sw;
         Eio.Switch.run (fun review_sw ->
           let review_root = Filename.temp_file "masc-completion-review-" "" in

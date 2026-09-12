@@ -32,6 +32,8 @@ def read():
     record(value)
     return value
 record({'kind':'launch','argv':sys.argv,'cwd':os.getcwd()})
+if mode == 'failed-candidate':
+    sys.exit(17)
 request = read()
 emit({'type':'control_response','response':{'subtype':'success','request_id':request['request_id'],'response':{}}})
 read()
@@ -105,6 +107,7 @@ let test_review mode =
     ; root_layout = ["proof.txt"] } in
   let command, capture = fixture_script root ~mode in
   let outside_command, outside_capture = fixture_script root ~mode:"outside-exact-lane" in
+  let first_command, first_capture = fixture_script root ~mode:"failed-candidate" in
   let outside_runtime = Printf.sprintf {|
 [providers.outside]
 protocol = "claude-code"
@@ -116,6 +119,8 @@ is-non-interactive = true
   let runtime_text =
     match mode with
     | "unknown-slot" -> runtime_config ~cli_slots:["official.missing"] command
+    | "missing-first" ->
+      runtime_config ~cli_slots:["official.missing";"official.verifier"] command
     | "tools-disabled" -> runtime_config ~tools_support:false command
     | "unconfined" -> runtime_config ~protocol:"codex-app-server" command
     | "wrong-kind" ->
@@ -134,10 +139,8 @@ tools-support = true
 [official.disabled]
 enabled = false
 |}
-    | "mixed" | "exact-order" ->
-      runtime_config
-        ~default:(if mode = "exact-order" then "outside.verifier" else "official.verifier")
-        ~cli_slots:["unconfined.verifier";"official.verifier"] command
+    | "mixed" ->
+      runtime_config ~cli_slots:["unconfined.verifier";"official.verifier"] command
       ^ Printf.sprintf {|
 [providers.unconfined]
 protocol = "codex-app-server"
@@ -145,7 +148,16 @@ command = %S
 is-non-interactive = true
 [unconfined.verifier]
 |} command
-      ^ (if mode = "exact-order" then outside_runtime else "")
+    | "exact-order" ->
+      runtime_config ~default:"outside.verifier"
+        ~cli_slots:["first.verifier";"official.verifier"] command
+      ^ outside_runtime ^ Printf.sprintf {|
+[providers.first]
+protocol = "claude-code"
+command = %S
+is-non-interactive = true
+[first.verifier]
+|} first_command
     | "shadow" ->
       runtime_config ~default:"outside.verifier" command ^ outside_runtime ^ {|
 [runtime.lanes."official.verifier"]
@@ -192,6 +204,16 @@ candidates = ["outside.verifier"]
     | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);
+  let unavailable = List.mem mode
+    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding"] in
+  check bool "readiness proves at least one actually compatible candidate"
+    (not unavailable) (Result.is_ok (Runtime.verifier_exact_lane_readiness ()));
+  (match Runtime.verifier_exact_lane_slot_ids () with
+   | Error detail -> fail detail
+   | Ok slots ->
+     if mode = "missing-first" then
+       check (list string) "invalid candidates retain their exact declared position"
+         ["official.missing";"official.verifier"] slots);
   let previous_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
   Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn Runtime.verifier_exact_lane_slot_ids;
   Eio.Switch.on_release sw (fun () ->
@@ -205,13 +227,13 @@ candidates = ["outside.verifier"]
     ~lookup ~base_path:root
     ~on_tool_result:(fun ~input:_ result -> calls := result :: !calls) () in
   let result = review () in
-  if List.mem mode ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding"] then (
+  if unavailable then (
     check bool "unavailable verifier is reported before dispatch" true
       (result.gate = AR.Evaluator_unavailable && result.verdict = None);
     check bool "unavailable verifier never spawns an official client" false (Sys.file_exists capture))
   else (
   (match mode, result.AR.verdict, result.gate with
-   | ("valid" | "mixed" | "exact-order" | "shadow"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
+   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
    | "duplicate", None, AR.Evaluator_unavailable -> ()
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
@@ -222,6 +244,12 @@ candidates = ["outside.verifier"]
   check bool "ordinary default or same-name lane never dispatches outside exact slots" false
     (Sys.file_exists outside_capture);
   let launches rows = List.filter (fun row -> member "kind" row = `String "launch") rows in
+  if mode = "exact-order" then (
+    let failed_launches = launches (records first_capture) in
+    check int "first exact candidate actually dispatched and failed" 1 (List.length failed_launches);
+    List.iter (fun launch ->
+      let cwd = member "cwd" launch |> Yojson.Safe.Util.to_string in
+      check bool "failed candidate session root is removed" false (Sys.file_exists cwd)) failed_launches);
   let launch = List.hd (launches rows) in
   let argv = member "argv" launch |> Yojson.Safe.Util.to_list
     |> List.map Yojson.Safe.Util.to_string in
@@ -275,4 +303,4 @@ let () =
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
-       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"]]
+       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"]]

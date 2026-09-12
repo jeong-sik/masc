@@ -1522,7 +1522,7 @@ let resume_model_configuration () =
           Runtime_startup_state.set Available;
           Server_routes_http_runtime.invalidate_full_health_snapshot ();
           let authority_available =
-            registry_published && Result.is_ok (Runtime.verifier_exact_lane_slot_ids ())
+            registry_published && Result.is_ok (Runtime.verifier_exact_lane_readiness ())
           in
           Ok authority_available)
     in

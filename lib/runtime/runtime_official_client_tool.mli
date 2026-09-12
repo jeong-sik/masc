@@ -57,6 +57,14 @@ val dynamic_tool_bytes : dynamic_tool list -> int
 (** [dynamic_tool_bytes tools] sums the name, description and serialized
     schema lengths. Bytes this process sends, not provider tokens. *)
 
+type content_transport = Codex | Mcp
+
+val project_content :
+  content_transport -> content:string ->
+  content_blocks:Agent_core.Types.content_block list option ->
+  (Yojson.Safe.t list, string) result
+(** Validate delivery before host settlement and terminal outcome selection. *)
+
 val codex_content_items :
   content:string -> content_blocks:Agent_core.Types.content_block list option ->
   (Yojson.Safe.t list, string) result

@@ -222,6 +222,7 @@ val prepare_turn :
     copy kept. *)
 
 val dynamic_tools :
+  content_transport:Runtime_official_client_tool.content_transport ->
   tool_approval:Agent_core.Hooks.tool_approval_callback option ->
   runtime_label:string ->
   keeper_name:string ->

@@ -801,7 +801,7 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
           ^ Printexc.to_string exn))
 ;;
 
-let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
+let dynamic_tool_of_agent_core ~content_transport ~tool_approval ~runtime_label ~keeper_name
     ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
@@ -940,6 +940,17 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
         in
         match execute () with
         | result ->
+          let result, delivery_error =
+            match Runtime_official_client_tool.project_content content_transport
+              ~content:result.content ~content_blocks:result.content_blocks with
+            | Ok _ -> result, None
+            | Error detail ->
+              (* Execution may already have committed. Delivery failure must
+                 reach settlement and the terminal outcome while retaining the
+                 producer's receipt; never present missing media as success. *)
+              { result with success = false; content_blocks = None
+              ; content = detail ^ "\n" ^ result.content }, Some detail
+          in
           let result = settle result in
           let terminal_boundary =
             match terminal_effect_state () with
@@ -1004,6 +1015,20 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                    ; _
                    } ->
                  assert false))
+          in
+          let terminal_boundary =
+            match delivery_error, terminal_boundary with
+            | Some diagnostic,
+              Some (Terminal_tool_boundary {tool_name; outcome = Terminal_completed}) ->
+              Some (Terminal_tool_boundary
+                { tool_name
+                ; outcome = Terminal_failed
+                    { failure_class = Tool_result.Runtime_failure
+                    ; effect_disposition = Tool_result.Proven_post_effect
+                    ; diagnostic
+                    }
+                })
+            | None, _ | Some _, _ -> terminal_boundary
           in
           let result =
             match terminal_boundary with
@@ -1085,7 +1110,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
   }
 ;;
 
-let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
+let dynamic_tools ~content_transport ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
     ?on_tool_boundary
@@ -1103,6 +1128,7 @@ let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ~content_transport
             ~tool_approval
             ~runtime_label
             ~keeper_name

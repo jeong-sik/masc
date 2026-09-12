@@ -2349,7 +2349,7 @@ let render_board_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
+    (Printf.sprintf "  H:choose hearth · Sort [s]: %s"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -3119,20 +3119,22 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  sort:%s  filter:%s  %s  %s"
-    (planning_workspace_title state ~tab:Planning_goals ~window:"")
+  let title = planning_workspace_title state ~tab:Planning_goals ~window:"" in
+  let modes = Printf.sprintf "sort:%s  filter:%s"
     (planning_sort_label state.planning_sort)
-    (planning_filter_label state.planning_filter)
-    timestamp
-    (connection_badge state) in
+    (planning_filter_label state.planning_filter) in
+  let modes_fit_header =
+    Message_layout.display_width (title ^ "  " ^ modes) <= framed_inner_width cols
+  in
+  let header = Printf.sprintf "%s%s  %s  %s" title
+    (if modes_fit_header then "  " ^ modes else "")
+    timestamp (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
-  (* The row under this one drew "Sort [s]: <sort> · Filter [f]: <filter>" from
-     the same two functions the header calls, so both facts were on screen
-     twice on adjacent rows. What it added over the header was the two key
-     letters, and the footer names those -- f:filter and s:sort -- so it was
-     the third place saying one of them. The row is gone and the body keeps it. *)
+  (* Show the modes once, but do not hide them behind a clipped title. *)
+  if not modes_fit_header then
+    box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ modes);
   box_divider buf cols;
 
   let goals =

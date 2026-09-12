@@ -3816,6 +3816,21 @@ def planning_resize_budget_interaction(
         )
         assert_planning_goal_selected(restored, b"plan-alpha-29424")
 
+    narrow = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=24,
+        columns=80,
+        needle=b"MASC Planning",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    plain_narrow = CSI_RE.sub(b"", narrow)
+    if b"filter:active" not in plain_narrow or b"sort:" not in plain_narrow:
+        raise AssertionError(f"Planning hid its modes behind the title: {narrow!r}")
+    terminal_rows = 24
+
     # One press, not two. The pane opens on Planning_filter_active, so the
     # first press lands on completed, which these fixtures leave empty --
     # the note this step is about is already on that screen. The old pair
@@ -8665,7 +8680,7 @@ def planning_review_hierarchy_interaction() -> Interaction:
             b"\xe2\x96\xb8Task Verdicts",
         )
         verdicts_plain = CSI_RE.sub(b"", verdicts)
-        for needle in (b"old Harness", b"not Goal proof", b"Task Verdicts"):
+        for needle in (b"automatic Gate rulings on Tasks", b"not Goal proof", b"Task Verdicts"):
             if needle not in verdicts_plain:
                 raise AssertionError(
                     f"Task Verdicts did not explain itself ({needle!r}): "

@@ -24,6 +24,6 @@
  (name masc_tool_types)
  (public_name masc.tool_types)
  (wrapped false)
- (libraries yojson unix masc_log masc_core eio time_compat llm_provider)
+ (libraries yojson unix masc_log masc_core eio time_compat llm_provider masc.masc_tool_blob_store)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show)))

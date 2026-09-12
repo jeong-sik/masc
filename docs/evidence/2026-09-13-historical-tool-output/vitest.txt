@@ -1,0 +1,16 @@
+
+ RUN  v4.1.5 /private/tmp/masc-autonomous-chat-output-lookup-20260913/dashboard
+
+(node:80236) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80456) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80478) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:80483) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  4 passed (4)
+      Tests  191 passed (191)
+   Start at  00:31:23
+   Duration  4.59s (transform 476ms, setup 522ms, import 1.18s, tests 1.22s, environment 1.17s)

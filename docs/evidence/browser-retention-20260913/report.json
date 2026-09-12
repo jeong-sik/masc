@@ -1,0 +1,257 @@
+{
+  "scope": "isolated three-channel website; experimental MASC callable composition joins navigation with unscoped visible content; persistent native TUI",
+  "steps": [
+    {
+      "label": "01-open",
+      "status": 200,
+      "elapsed_ms": 1474.57,
+      "request": {
+        "action": "open",
+        "headless": true
+      }
+    },
+    {
+      "label": "02-goto",
+      "status": 200,
+      "elapsed_ms": 114.14,
+      "request": {
+        "url": "http://127.0.0.1:63795/index.html"
+      }
+    },
+    {
+      "label": "03-page",
+      "status": 200,
+      "elapsed_ms": 10.01,
+      "request": {
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "04-regions",
+      "status": 200,
+      "elapsed_ms": 7.13,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "regions"
+      }
+    },
+    {
+      "label": "05-selected-region",
+      "status": 200,
+      "elapsed_ms": 4.92,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content",
+        "scope": {
+          "documentId": "fc7a8d7421fe7faec1ac4de0daede211",
+          "nodeId": "n1"
+        }
+      }
+    },
+    {
+      "label": "06-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 22.44,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "14-final-firefox-screenshot",
+      "status": 200,
+      "elapsed_ms": 18.59,
+      "request": {
+        "lane": "automation",
+        "tabId": 1
+      }
+    },
+    {
+      "label": "06-close",
+      "status": 200,
+      "elapsed_ms": 322.05,
+      "request": {
+        "action": "close"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "keeper_shutdown_admission": {
+        "accepted": true,
+        "schema_version": 8,
+        "revision": 0,
+        "operation_id": "shutdown-f3d2515c-999a-40e6-ad66-86a78d6ca0e4",
+        "keeper_name": "browser-handoff-proof-15958000",
+        "lane_ownership": {
+          "kind": "registered_lane",
+          "lane_id": "lane-0f65c2e8-9488-495a-bcf3-41d9da03be78"
+        },
+        "trace_id": "trace-1789228074760-00000",
+        "actor": "browser-handoff-proof",
+        "cleanup_intent": {
+          "reason": {
+            "kind": "operator_stop_retain_meta"
+          },
+          "remove_session": false
+        },
+        "turn_disposition": {
+          "kind": "no_inflight_turn"
+        },
+        "expected_backlog_version": 1,
+        "owned_task_ids": [],
+        "join_evidence": null,
+        "phase": {
+          "kind": "prepared"
+        },
+        "created_at": "2026-09-12T15:48:30Z",
+        "updated_at": "2026-09-12T15:48:30Z"
+      }
+    },
+    {
+      "keeper_shutdown_finalized": true
+    },
+    "owned browser session closed",
+    {
+      "name": "server",
+      "pid": 21877,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 21850,
+      "exit": 0
+    }
+  ],
+  "composition_file_sha256": "a1c3189c8cf1178ad2daaa9b81aefd45d70048cf3f11e5f564964a960d462514",
+  "instruction_sha256": "6e3ea26f00a79eee164488476ecd4bcdb3e348fcd903a3bfe191e747e66576df",
+  "runtime_id": "codex_subscription.gpt-5.6-luna",
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "fb8d2a312b550dd6e02d5857c3ddc989c950b05e",
+    "commit_source": "embedded",
+    "binary_commit": "fb8d2a312b550dd6e02d5857c3ddc989c950b05e",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "2419bca114fd14727f1a9bceca65f5de2adf3c35854c0f7291968f1bd12f4f36",
+    "binary_commit_unix_ts": 1789227077.0,
+    "binary_commit_age_seconds": 994,
+    "executable_path": "/private/tmp/browser-retention-native-fb8/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-retention-native-fb8/runtime",
+    "runtime_instance_id": "01a0964d-b66d-7000-9bbd-0904fbe8693c",
+    "started_at": "2026-09-12T15:47:50Z",
+    "uptime_seconds": 0
+  },
+  "binary_sha256": "2419bca114fd14727f1a9bceca65f5de2adf3c35854c0f7291968f1bd12f4f36",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "api_port": 63736,
+  "driver_port": 63735,
+  "assertions": {
+    "selected_region_retained": true,
+    "channel_navigation_present": true,
+    "sidebar_excluded": true
+  },
+  "observed_content": "Channels Alpha Beta Gamma",
+  "clipboard": {
+    "tui_sha256": "64ccc985541b10c47cdafb92ee7b0922110e5a307c589eb038f4dbcb46908cde",
+    "clipboard_bytes": 526,
+    "clipboard_sha256": "e4f3b393f348032b70923b000acdd787774581ebc1dda13c2ff65ca727e4ae61",
+    "columns": 130,
+    "rows": 35,
+    "selected_region_index": 0,
+    "lifetime": {
+      "columns": 130,
+      "rows": 35,
+      "input_events": [
+        {
+          "monotonic": 971523.213234666,
+          "keys_hex": "3a676f2042726f77736572204c616e650d"
+        },
+        {
+          "monotonic": 971523.231789291,
+          "keys_hex": "61"
+        },
+        {
+          "monotonic": 971523.256008458,
+          "keys_hex": "76"
+        },
+        {
+          "monotonic": 971523.270855375,
+          "keys_hex": "79"
+        },
+        {
+          "monotonic": 971523.2715995,
+          "keys_hex": "73"
+        },
+        {
+          "monotonic": 971523.291221625,
+          "keys_hex": "73"
+        }
+      ],
+      "refresh_interval": "unmodified product default",
+      "pid": 22923,
+      "started_monotonic": 971522.062859125,
+      "binary_sha256": "64ccc985541b10c47cdafb92ee7b0922110e5a307c589eb038f4dbcb46908cde",
+      "copied_monotonic": 971523.271588166,
+      "copy_offset": 20053,
+      "alive_at_copy": true,
+      "display_selected_monotonic": 971523.413173875,
+      "display_intent": "unscoped content selected before Keeper starts",
+      "keeper_observation_finished_monotonic": 971559.236449916,
+      "alive_after_keeper_observation": true,
+      "exit": 0,
+      "stopped_monotonic": 971559.295821875,
+      "capture_errors": []
+    }
+  },
+  "keeper": "browser-handoff-proof-15958000",
+  "turn_started_monotonic": 971524.014727416,
+  "operation_id": "kmsg-6e7cb942e05e12cf988740521890e802",
+  "operation_state": "Succeeded",
+  "turn_observed_elapsed_seconds": 35.133,
+  "model_tool_calls": [
+    {
+      "id": "exec-7e2b2b26-4123-4457-865a-17b4899ee8f8",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789228088433-0003",
+      "success": true
+    },
+    {
+      "id": "exec-b2016b08-01a7-4218-a49a-ba75a684d815",
+      "name": "keeper_skill",
+      "execution_id": "exec-1789228088445-0004",
+      "success": true
+    },
+    {
+      "id": "exec-aa799394-7a8c-49aa-92be-1a878eb8989a",
+      "name": "BrowserRead",
+      "execution_id": "exec-1789228092128-0005",
+      "success": true
+    },
+    {
+      "id": "exec-f4fee352-cb36-49fe-a1ca-52dc112efc90",
+      "name": "keeper_compose_browser-navigate-content",
+      "execution_id": "exec-1789228094800-0008",
+      "success": true
+    },
+    {
+      "id": "exec-0f5d57fe-0c34-431f-b813-1ff23ea6cef5",
+      "name": "keeper_compose_browser-navigate-content",
+      "execution_id": "exec-1789228097050-000b",
+      "success": true
+    },
+    {
+      "id": "exec-b96ee2a6-dde0-4aea-9197-cdc2f910d4de",
+      "name": "keeper_compose_browser-navigate-content",
+      "execution_id": "exec-1789228099854-000e",
+      "success": true
+    }
+  ],
+  "composition_invocations": 3,
+  "chat_envelope_tool_calls": [],
+  "model_tool_calls_measurement": "typed turn execution_ids joined to durable tool_call records",
+  "result": "operation_completed_pending_evidence_audit"
+}

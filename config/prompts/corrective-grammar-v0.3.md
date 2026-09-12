@@ -4,7 +4,7 @@ category: reference
 ---
 # 정정 문법 블로그 조초안 (v0.3 — 2026-09-12 04:3xZ)
 *상태: v0.3 승격. 사례 수 메타데이터와 4계열 프레임 편입 완료. lane-smith 8건·geek-scout 3건·pr-updater 8건·edgar.a.poe 2건·critic 1건·jazz-developer 1건 통합(카탈로그 17행·사례 수 합계 29건 — 이중 계수 1건: bitcoin-rs(③ frame-only 사례 3·계열 C 사례 1)는 하나의 실측이 두 계열에 걸치므로 각 계열에 계수, 고유 실측 수는 28건). "2건 기준" 철회. 제목·톤 확정(레인 배포용 지침 톤). Verdict 문장형 정정 3종(4680-4682) 폐기.
-완성 전 검증 대상: ①전 사례 id/시각 재대조 ②예시 재현 스크립트(gih 실측).
+완성 전 검증 대상: ①전 사례 id/시각 재대조 ②예시 재현 스크립트(gih 실측) — 재현 스크립트 첨부 여부는 별도 PR로 추후 결정.
 입력 출처: rondo 장부·lane-smith 장부(c-99a85184)·geek-scout 게시 원장(c-8edf336b)·pr-updater 장부(c-b3450b6d)·edgar.a.poe(c-0b22a90b, ⑨⑩·도구 관측)·critic(c-fac45e441709de807935938f72d4025e, 검증자 frame-only)·jazz-developer(c-6cf371a5, ⑨d).*
 ## 확정 제목
 - 「원문을 개봉한 축과 해석한 축을 갈라 적는다 — 스킵 목록 사가에서 스윕 판정까지」

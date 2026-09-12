@@ -7125,6 +7125,25 @@ let render_system_log_detail (state : state) seq =
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
+(* Which of Activity's two readings is on screen. Drawn the way the other two
+   tab strips in this product draw it -- a mark on the one you are on, the
+   names beside it -- rather than the third spelling it had: [1 Events |
+   2 Logs*], where a "*" moved between two hand-written literals and the keys
+   were spelled into the title.
+
+   Three literals carried that strip and two of them spelled it one way and one
+   the other, so the mark and the surface could disagree and nothing would say
+   so. The keys leave with it: the Activity footer projects from the key table,
+   which names 1 / 2 there, and no other surface puts its keys in its title. *)
+let activity_tab_strip ~on_logs =
+  let tab label current =
+    if current then Ansi.bold ^ "▸" ^ label ^ Ansi.reset
+    else Ansi.dim ^ " " ^ label ^ Ansi.reset
+  in
+  String.concat
+    (Ansi.dim ^ " |" ^ Ansi.reset)
+    [ tab "Events" (not on_logs); tab "Logs" on_logs ]
+
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -7164,14 +7183,16 @@ let render_system_logs (state : state) =
   let header =
     match state.system_logs with
     | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Activity  [1 Events | 2 Logs*]") timestamp
+        Printf.sprintf "%s  %s  (not loaded)  %s  %s"
+          (screen_title " MASC Activity")
+          (activity_tab_strip ~on_logs:true) timestamp
           (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        Printf.sprintf "%s (%d of %d, seq %d)%s  %s  %s"
-          (screen_title " MASC Activity  [1 Events | 2 Logs*]")
+        Printf.sprintf "%s  %s (%d of %d, seq %d)%s  %s  %s"
+          (screen_title " MASC Activity")
+          (activity_tab_strip ~on_logs:true)
           total_entries snapshot.sys_total snapshot.sys_latest_seq filter_note
           timestamp (connection_badge state)
   in
@@ -11373,10 +11394,11 @@ let render_acting (state : state) =
           (Terminal_text.single_line reason)
   in
   let header =
-    Printf.sprintf "%s  %s  %s"
-      (screen_title
-         (Printf.sprintf " MASC Activity  [1 Events* | 2 Logs] (%d of %d held, %s)" shown held
-            (Acting.filter_label state.acting_filter)))
+    Printf.sprintf "%s  %s%s  %s  %s"
+      (screen_title " MASC Activity")
+      (activity_tab_strip ~on_logs:false)
+      (Printf.sprintf " (%d of %d held, %s)" shown held
+         (Acting.filter_label state.acting_filter))
       timestamp
       (connection_badge state)
   in

@@ -485,7 +485,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name
+let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -556,11 +556,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        that reaches [claim]. *)
     let* native_posture =
       Host.resolve_native_posture
+        ~required:required_native_posture
         ~base_path
         ~keeper_name
         ~client_label:"Codex"
         ~default:Runtime_native_tools.codex_default
-        ~none_supported:false
+        ~none_supported:(Runtime_execution.supports_native_none (Codex_app_server config))
     in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
@@ -1174,7 +1175,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ?required_native_posture ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1244,6 +1245,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             capacity_bytes)
       ~attempt:(fun ~capacity_bytes ->
         run_without_lifecycle
+          ~required_native_posture
           ~runtime_id
           ~keeper_name
     ~pre_tool_rejects

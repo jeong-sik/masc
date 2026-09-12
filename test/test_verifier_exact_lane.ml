@@ -393,7 +393,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
        ~lanes:
          [ { Runtime_schema.id = "verifier_exact"
            ; slot_ids = [ "verifier-b"; "verifier-missing"; "verifier-a" ]
-           ; cli_slot_ids = [ "official.verifier" ]
+           ; cli_slot_ids = []
            }
          ; { Runtime_schema.id = "auxiliary_exact"; slot_ids = [ "verifier-a" ]; cli_slot_ids = [] }
          ]
@@ -406,7 +406,7 @@ let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
   | Ok slots ->
     Alcotest.(check (list string))
       "admitted slots keep declaration order; the catalog-missing slot is dropped"
-      [ "verifier-b"; "verifier-a"; "official.verifier" ]
+      [ "verifier-b"; "verifier-a" ]
       slots
 ;;
 

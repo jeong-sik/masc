@@ -41,6 +41,9 @@ type checkpoint_owner =
   | Masc_agent_core
   | Official_client
 
+val supports_native_none : t -> bool
+(** Whether the execution owner can enforce that all tools are supplied by MASC. *)
+
 val model_id : t -> string option
 val label : t -> string
 val checkpoint_owner : t -> checkpoint_owner

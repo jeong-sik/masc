@@ -1,5 +1,6 @@
 type t = Optional | Required
 type reason = Model_tools_disabled | Binding_tools_unsupported | No_tools_supplied
+  | Native_tools_cannot_be_disabled
 [@@deriving yojson]
 type failure = { runtime_id : string; reason : reason } [@@deriving yojson]
 type Agent_core.Error.carrier += Required_tools_unavailable of failure
@@ -22,7 +23,8 @@ let to_core_error failure =
   let reason = match failure.reason with
     | Model_tools_disabled -> "resolved model does not support tools"
     | Binding_tools_unsupported -> "materialized provider binding does not support inline tools"
-    | No_tools_supplied -> "this execution owner was given no tools" in
+    | No_tools_supplied -> "this execution owner was given no tools"
+    | Native_tools_cannot_be_disabled -> "this execution owner cannot disable built-in tools" in
   Agent_core.Error.Internal_carried
     {message=Printf.sprintf "runtime %s cannot satisfy required tools: %s" failure.runtime_id reason;
      carrier=Required_tools_unavailable failure}

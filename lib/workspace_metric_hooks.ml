@@ -303,7 +303,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
@@ -375,15 +375,6 @@ let install () =
       on_tool_result ~input:args result;
       result
     in
-    let native_tools =
-      match Standalone_skill_tools.for_workspace
-              ~config:(Workspace.default_config base_path)
-              ~on_result:on_tool_result () with
-      | Ok tools -> tools
-      | Error detail ->
-        Log.Task.warn "verification Skills unavailable: %s" detail;
-        []
-    in
     let system_prompt =
       Prompt_registry.render_prompt_template Prompt_names.verification_system []
     in
@@ -392,27 +383,33 @@ let install () =
       Error (Agent_core.Error.Config
         (Agent_core.Error.InvalidConfig { field = "verification.system"; detail }))
     | Ok system_prompt ->
-    (* Each independent review owns a fresh official-client session. Sharing the
-       empty Keeper name would resume another task's thread or contend for its
-       active client session. The owner remains in persisted runtime evidence. *)
+    (* The authority-tool closures retain the submitted evidence root. A review
+       owns only this disposable session tree, never a producer's configuration. *)
     let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
-        Keeper_turn_driver_wrappers.run_named_with_masc_tools
-          ~runtime_id:evaluator_runtime
-          ~base_path
-          ~goal:prompt
-          ?goal_blocks
-          ~keeper_name
-          ~system_prompt
-          ~masc_tools:(report_tool_schema :: lookup_schemas)
-          ~native_tools
-          ~dispatch
-          ~context:(Agent_core.Context.create ())
-          ~output_contract:Keeper_turn_driver.Tool_verdict
-          ~on_runtime_attempt_error
-          ?sw
-          ())
+        Option.iter Eio.Switch.check sw;
+        Eio.Switch.run (fun review_sw ->
+          let review_root = Filename.temp_file "masc-completion-review-" "" in
+          Unix.unlink review_root;
+          Unix.mkdir review_root 0o700;
+          Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
+          Keeper_turn_driver_wrappers.run_named_with_masc_tools
+            ~runtime_id:evaluator_runtime
+            ~base_path:review_root
+            ~goal:prompt
+            ?goal_blocks
+            ~keeper_name
+            ~system_prompt
+            ~masc_tools:(report_tool_schema :: lookup_schemas)
+            ~dispatch
+            ~context:(Agent_core.Context.create ())
+            ~output_contract:Keeper_turn_driver.Tool_verdict
+            ~tool_requirement:Keeper_required_tools.Required
+            ~required_native_posture:Runtime_native_tools.Native_none
+            ~on_runtime_attempt_error
+            ~sw:review_sw
+            ()))
     with
     | Ok result ->
       (match !protocol_error_ref with

@@ -19,6 +19,8 @@ val run_named_with_masc_tools :
   base_path:string ->
   system_prompt:string ->
   ?native_tools:Agent_core.Tool.t list ->
+  ?tool_requirement:Keeper_required_tools.t ->
+  ?required_native_posture:Runtime_native_tools.posture ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
@@ -55,6 +57,10 @@ val run_named_with_masc_tools :
 
     [native_tools] adds native tools without losing invocation identity or
     handler observations.
+
+    [tool_requirement] and [required_native_posture] preserve the caller's
+    invocation authority through candidate admission. A required native posture
+    is never replaced by the runtime's ordinary degraded posture.
 
     [goal_blocks] replaces the [goal] string as the turn input when present
     (same contract as {!Keeper_turn_driver.run_named}): the caller puts the

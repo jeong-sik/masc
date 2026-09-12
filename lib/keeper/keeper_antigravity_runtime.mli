@@ -10,6 +10,7 @@ type attempt_outcome =
     closes the same-turn retry boundary before user/tool code can run. *)
 
 val run :
+  ?required_native_posture:Runtime_native_tools.posture ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

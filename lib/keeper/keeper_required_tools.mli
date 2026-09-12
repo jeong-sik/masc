@@ -4,6 +4,7 @@
     candidate. It does not infer tool support from runtime/provider names. *)
 type t = Optional | Required
 type reason = Model_tools_disabled | Binding_tools_unsupported | No_tools_supplied
+  | Native_tools_cannot_be_disabled
 [@@deriving yojson]
 type failure = { runtime_id : string; reason : reason } [@@deriving yojson]
 val check_surface

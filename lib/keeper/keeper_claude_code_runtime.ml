@@ -419,7 +419,7 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
   | Ok _ -> ()
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name
+let run_without_lifecycle ~required_native_posture ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
@@ -482,11 +482,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let* native_posture =
       Host.resolve_native_posture
+        ~required:required_native_posture
         ~base_path
         ~keeper_name
         ~client_label:"Claude Code"
         ~default:Runtime_native_tools.claude_code_default
-        ~none_supported:true
+        ~none_supported:(Runtime_execution.supports_native_none (Claude_code config))
     in
     (* The keeper TOML surface no longer declares setting sources — the
        fleet never used the field. The safe value the old admission rule
@@ -1116,7 +1117,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                   recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?required_native_posture ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1194,7 +1195,8 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
               previous_capacity_bytes
               capacity_bytes)
         ~attempt:(fun ~capacity_bytes ->
-          run_without_lifecycle
+        run_without_lifecycle
+          ~required_native_posture
             ~runtime_id
             ~keeper_name
     ~pre_tool_rejects

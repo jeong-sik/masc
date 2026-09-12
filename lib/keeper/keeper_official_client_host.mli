@@ -350,13 +350,15 @@ val admit_native_posture :
     what a refusal does to the turn. *)
 
 val resolve_native_posture :
+  required:Runtime_native_tools.posture option ->
   base_path:string ->
   keeper_name:string ->
   client_label:string ->
   default:Runtime_native_tools.posture ->
   none_supported:bool ->
   (Runtime_native_tools.posture, Agent_core.Error.t) result
-(** Read the keeper's declared posture from its profile TOML (cached loader),
+(** A required invocation posture is never degraded; failed admission returns
+    an error. Without one, read the keeper's declared posture from its profile TOML (cached loader),
     fall back to [default] when the profile declares nothing, then apply
     {!admit_native_posture} against the keeper's current approval stance.
     A profile that fails to load is a config error, not a silent default.

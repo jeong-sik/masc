@@ -960,6 +960,7 @@ let run_named
     ?(tools = [])
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
+    ?required_native_posture
     ?(initial_messages = [])
     ?model_input_projection
     ?recovery_view
@@ -1302,7 +1303,12 @@ let run_named
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
             ~agent_cell ~built:agent_core_tools
         | _ -> agent_core_tools in
-      let source_reader_ready = match recovery_view, runtime.Runtime.execution with
+      let source_reader_ready =
+        if required_native_posture = Some Runtime_native_tools.Native_none
+           && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
+          Error (Keeper_required_tools.to_core_error
+            {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
+        else match recovery_view, runtime.Runtime.execution with
         | Some _, Runtime_execution.Agent_core _ ->
           Keeper_recovery_transmission.require_reader agent_core_tools
           |> Result.map_error Keeper_recovery_transmission.to_core_error
@@ -1386,6 +1392,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects
@@ -1514,6 +1521,7 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             (* Antigravity's CLI assembles the wire, so the shape masc can
@@ -1621,6 +1629,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects

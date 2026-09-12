@@ -1780,11 +1780,38 @@ let verifier_exact_lane_slot_ids () =
          ~lane_id:verifier_exact_lane_id
      with
      | Ok { selected_slots; cli_slots } ->
-       Ok
-         (List.map
-            (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-            selected_slots
-          @ cli_slots)
+       let runtimes = (runtime_state ()).runtimes in
+       let rec validate_cli_slots = function
+         | [] -> Ok ()
+         | slot_id :: rest ->
+           (match List.find_opt (fun (runtime : t) -> String.equal runtime.id slot_id) runtimes with
+            | None ->
+              Error (Printf.sprintf
+                "verifier_exact CLI slot %S is not an enabled, materialized runtime" slot_id)
+            | Some runtime ->
+              (match runtime.execution with
+               | Runtime_execution.Agent_core _ ->
+                 Error (Printf.sprintf
+                   "verifier_exact CLI slot %S is not an official-client runtime" slot_id)
+               | Runtime_execution.Claude_code _
+               | Runtime_execution.Codex_app_server _
+               | Runtime_execution.Antigravity_cli _ -> validate_cli_slots rest))
+       in
+       Result.bind (validate_cli_slots cli_slots)
+         (fun () ->
+            let compatible_cli = List.exists
+              (fun slot_id ->
+                List.exists (fun (runtime : t) ->
+                  String.equal runtime.id slot_id
+                  && Runtime_execution.supports_native_none runtime.execution
+                  && runtime.model.tools_support) runtimes)
+              cli_slots in
+            if selected_slots = [] && not compatible_cli then
+              Error "verifier_exact has no admitted runtime that can provide the verdict tool with native tools disabled"
+            else Ok (List.map
+              (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+              selected_slots
+            @ cli_slots))
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;

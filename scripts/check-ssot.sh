@@ -417,6 +417,15 @@ check_rule "R15-tui-title-not-loaded-literal" 0 \
   'bin/masc_tui_render_prim\.mli?:' \
   bin
 
+# The failure note the body draws under an empty page. Nine surfaces read it
+# from one place and two spelled it again, so two screens could drift from the
+# other nine on a word.
+check_rule "R16-tui-page-failed-note-literal" 0 \
+  "Masc_tui_render_prim.page_failed_note" \
+  'load failed; nothing here is a reading' \
+  'bin/masc_tui_render_prim\.mli?:' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

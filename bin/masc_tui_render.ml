@@ -8627,16 +8627,7 @@ let render_memory (state : state) =
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
-  (* "*" is how the fleet view is asked for, not how it should be read. The body
-     used to spell it out in a row of its own -- [GLOBAL FLEET KNOWLEDGE BASE
-     — ALL KEEPERS CONSOLIDATED] -- which said nothing this word does not
-     and cost a body row the compact terminals did not have. *)
-  let keeper_name =
-    match state.memory_facts_keeper with
-    | Some "*" -> "all keepers"
-    | Some name -> name
-    | None -> ""
-  in
+  let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -8650,26 +8641,24 @@ let render_memory_facts (state : state) =
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
-        Printf.sprintf " · find \"%s\"" (Terminal_text.single_line (String.trim q))
-    | Some _ -> " · find \"\""
+        Printf.sprintf " \xc2\xb7 find \"%s\"" (Terminal_text.single_line (String.trim q))
+    | Some _ -> " \xc2\xb7 find \"\""
     | None ->
         if String.length (String.trim state.search_last) > 0 then
-          Printf.sprintf " · filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
+          Printf.sprintf " \xc2\xb7 filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
         else ""
   in
   let title =
-    match state.memory_facts with
-    | None ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s  (not loaded)  %s  %s"
-          (screen_title " MASC Memory") keeper_name timestamp
-          (connection_badge state)
-    | Some _ ->
-        (* The sort is named in the row under this one, beside the breakdown it
-           belongs with. Spelled in both places the title ran past the column
-           and took the clock and the connection badge with it. *)
-        Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s%s)  %s  %s"
-          (screen_title " MASC Memory") keeper_name total filter_label query_label
-          timestamp (connection_badge state)
+    Render_memory.facts_title
+      ~screen:(screen_title " MASC Memory")
+      ~keeper:keeper_name
+      ~reading:
+        (match state.memory_facts with
+         | None -> Render_memory.Facts_not_loaded
+         | Some _ ->
+           Render_memory.Facts_loaded { total; filter_label; query_label })
+      ~timestamp
+      ~badge:(connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~hints:Masc_tui_keys.footer_hints_memory_facts

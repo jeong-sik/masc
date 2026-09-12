@@ -17,6 +17,30 @@ type memory_state = Masc_tui_types.memory_state =
   | Memory_starving
   | Memory_read_error
 
+val facts_keeper_label : string option -> string
+(** How the facts title names the keeper it is reading. The fleet view is asked
+    for as "*" and read as a phrase. *)
+
+type facts_reading =
+  | Facts_not_loaded
+  | Facts_loaded of
+      { total : int
+      ; filter_label : string
+      ; query_label : string
+      }
+
+val facts_title :
+  screen:string ->
+  keeper:string ->
+  reading:facts_reading ->
+  timestamp:string ->
+  badge:string ->
+  string
+(** The facts title row. It carries the total and the filters; the breakdown and
+    the sort belong to the row under it, which this module also draws. Spelled in
+    both places the title ran past the column and took the clock and the
+    connection badge with it. *)
+
 val memory_fact_age_label : float -> string
 val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
 val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list

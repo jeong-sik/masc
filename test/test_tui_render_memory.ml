@@ -461,6 +461,64 @@ let stats_row lines =
   | [] -> fail "no row on the facts body names the sort"
   | _ :: _ -> fail "the sort is named on more than one row"
 
+(* A 140-column frame spends two cells on its border and two on its padding. The
+   title that ran past it was the one spelling the sort twice. *)
+let widest_title_at_one_forty = 136
+
+let live_title ?(keeper = Some "*") ?(total = 2316) ?(filter_label = "All")
+    ?(query_label = "") () =
+  Render_memory.facts_title ~screen:" MASC Memory"
+    ~keeper:(Render_memory.facts_keeper_label keeper)
+    ~reading:(Render_memory.Facts_loaded { total; filter_label; query_label })
+    ~timestamp:"23:41:50" ~badge:"HTTP [refresh failed]"
+
+let test_the_title_and_the_row_each_say_one_fact () =
+  (* The two rows of the facts header, asserted together: the title carries the
+     total and the filters, the row under it the breakdown and the sort. Each
+     fact on one of them, never both. *)
+  let title = live_title () in
+  let rows = facts_body_lines (three_kinds_state ~keeper:"*" ()) in
+  check bool "the title counts what is listed" true (contains "2316 facts" title);
+  check bool "and reads the fleet view as words" true
+    (contains "all keepers" title);
+  check bool "the sort is not on the title" false (contains "Sort" title);
+  check bool "nor is the breakdown" false (contains " ord " title);
+  check bool "the clock survives to the end" true (contains "23:41:50" title);
+  check bool "and so does the connection badge" true
+    (contains "HTTP [refresh failed]" title);
+  check int "the title fits a 140-column frame" 0
+    (max 0 (Masc_tui_message_layout.display_width title
+            - widest_title_at_one_forty));
+  let row = stats_row rows in
+  check bool "the row carries the sort" true (contains "Sort [s]:" row);
+  check bool "and the total is not repeated on it" false (contains "facts" row)
+
+let test_a_read_in_flight_says_so_and_keeps_the_clock () =
+  let title =
+    Render_memory.facts_title ~screen:" MASC Memory"
+      ~keeper:(Render_memory.facts_keeper_label (Some "analyst"))
+      ~reading:Render_memory.Facts_not_loaded ~timestamp:"23:41:50"
+      ~badge:"HTTP [refresh failed]"
+  in
+  check bool "it says the read has not landed" true
+    (contains "(not loaded)" title);
+  check bool "it does not invent a total" false (contains "facts" title);
+  check bool "the clock and the badge are still last" true
+    (contains "23:41:50  HTTP [refresh failed]" title)
+
+let test_a_long_filter_does_not_push_the_badge_off () =
+  (* The width the title has to give back belongs to the filter text, not to the
+     clock: a search for a long phrase is the operator's own doing, the badge is
+     the only thing saying whether the rows are a live read. *)
+  let title =
+    live_title ~query_label:" \xc2\xb7 filter \"a phrase long enough to crowd the row\"" ()
+  in
+  check bool "the badge is still there" true
+    (contains "HTTP [refresh failed]" title);
+  check int "and the title still fits a 140-column frame" 0
+    (max 0 (Masc_tui_message_layout.display_width title
+            - widest_title_at_one_forty))
+
 let test_the_breakdown_and_the_sort_sit_on_one_row () =
   let state = three_kinds_state () in
   let lines = facts_body_lines state in
@@ -674,7 +732,13 @@ let () =
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
         ] )
     ; ( "one place per fact"
-      , [ test_case "the breakdown and the sort sit on one row" `Quick
+      , [ test_case "the title and the row each say one fact" `Quick
+            test_the_title_and_the_row_each_say_one_fact
+        ; test_case "a read in flight says so and keeps the clock" `Quick
+            test_a_read_in_flight_says_so_and_keeps_the_clock
+        ; test_case "a long filter does not push the badge off" `Quick
+            test_a_long_filter_does_not_push_the_badge_off
+        ; test_case "the breakdown and the sort sit on one row" `Quick
             test_the_breakdown_and_the_sort_sit_on_one_row
         ; test_case "the breakdown counts the rows the screen lists" `Quick
             test_the_breakdown_counts_the_rows_the_screen_lists

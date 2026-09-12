@@ -22,6 +22,42 @@ let keeper_lane_idle_text seconds =
    runs out of room: at 140 columns it was cut mid-timestamp.
 
    [grand_total] is not passed in because it is not drawn here. *)
+(* How the facts title reads its own keeper. "*" is how the fleet view is asked
+   for, not how it should be read: the body used to spell it out in a row of its
+   own -- [GLOBAL FLEET KNOWLEDGE BASE - ALL KEEPERS CONSOLIDATED] -- which said
+   nothing this word does not and cost a body row the compact terminals did not
+   have. *)
+let facts_keeper_label = function
+  | Some "*" -> "all keepers"
+  | Some name -> name
+  | None -> ""
+
+(* What the title carries while the read is in flight and once it has landed.
+   Typed so the two spellings cannot drift into each other's shape. *)
+type facts_reading =
+  | Facts_not_loaded
+  | Facts_loaded of
+      { total : int
+      ; filter_label : string
+      ; query_label : string
+      }
+
+(* The facts title. Here beside the row under it so the two cannot disagree
+   about which fact each one carries: the title says the total and the filters,
+   the row says the breakdown and the sort. Spelled in both places the title ran
+   past the column and took the clock and the connection badge with it.
+
+   [screen] and [badge] arrive rendered because colour and the connection
+   reading belong to the caller. *)
+let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
+  match reading with
+  | Facts_not_loaded ->
+    Printf.sprintf "%s \xe2\x96\xb8 %s  (not loaded)  %s  %s" screen keeper
+      timestamp badge
+  | Facts_loaded { total; filter_label; query_label } ->
+    Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts \xc2\xb7 %s%s)  %s  %s" screen
+      keeper total filter_label query_label timestamp badge
+
 let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
   Printf.sprintf "  %s(%d ord \xc2\xb7 %d src \xc2\xb7 %d drop)%s \xc2\xb7 %sSort [s]:%s %s"
     (Theme.recede ()) ordinary source dropped Ansi.reset

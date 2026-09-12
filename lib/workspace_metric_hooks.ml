@@ -386,13 +386,14 @@ let install () =
     (* The authority-tool closures retain the submitted evidence root. A review
        owns only this disposable session tree, never a producer's configuration. *)
     let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
+    let selected_runtime_id = ref None in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
-        match Runtime.verifier_exact_cli_slot_admission ~runtime_id:evaluator_runtime with
+        match Runtime.verifier_exact_slot_admission ~runtime_id:evaluator_runtime with
         | Error detail ->
           Error (Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))
-        | Ok () ->
+        | Ok slot_dispatch ->
         Option.iter Eio.Switch.check sw;
         Eio.Switch.run (fun review_sw ->
           let review_root = Filename.temp_file "masc-completion-review-" "" in
@@ -401,7 +402,10 @@ let install () =
           Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
           Keeper_turn_driver_wrappers.run_named_with_masc_tools
             ~runtime_id:evaluator_runtime
-            ~runtime_selection:Keeper_turn_driver.Exact_runtime
+            ~runtime_selection:(match slot_dispatch with
+              | Runtime.Cli_runtime -> Keeper_turn_driver.Exact_runtime
+              | Runtime.Api_route -> Keeper_turn_driver.Exact_route)
+            ~on_selected_runtime:(fun runtime_id -> selected_runtime_id := Some runtime_id)
             ~base_path:review_root
             ~goal:prompt
             ?goal_blocks
@@ -413,17 +417,25 @@ let install () =
             ~output_contract:Keeper_turn_driver.Tool_verdict
             ~tool_requirement:Keeper_required_tools.Required
             ~required_native_posture:Runtime_native_tools.Native_none
+            (* These bounded authority results have no reader for a disposable
+               session blob. Keep their text on the wire, or fail explicitly
+               at the existing evidence ceiling instead of emitting a marker. *)
+            ~tool_result_projection:(Tool_output.Inline_up_to
+              {maximum_bytes=Tool_shard_limits.verification_evidence_max_bytes})
             ~on_runtime_attempt_error
             ~sw:review_sw
             ()))
     with
-    | Ok result ->
+    | Ok _ ->
       (match !protocol_error_ref with
        | Some detail ->
          Error
            (Agent_core.Error.Internal
               ("task completion verdict protocol violation: " ^ detail))
-       | None -> Ok !verdict_ref)
+       | None ->
+         (match !selected_runtime_id with
+          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;verdict= !verdict_ref}
+          | None -> Error (Agent_core.Error.Internal "verifier dispatch omitted its selected runtime")))
     | Error err ->
       Error err);
 

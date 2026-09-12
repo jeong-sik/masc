@@ -553,18 +553,21 @@ val verifier_exact_lane_slot_ids : unit -> (string list, string) result
 val verifier_exact_lane_readiness : unit -> (unit, string) result
 (** Whether the [verifier_exact] lane has a slot that can be dispatched now,
     for a caller that reports authority readiness rather than walking the lane.
-    [Ok ()] needs one admitted API slot or one cli slot naming a materialized
-    official-client runtime that can supply the verdict tool with native tools
-    disabled. [Error] names incompatible cli ids, which
+    [Ok ()] needs one admitted API route with a materialized tool-capable
+    candidate, or one cli slot naming a materialized official-client runtime
+    that can supply the verdict tool with native tools disabled.
+    [Error] names incompatible slots, which
     {!verifier_exact_lane_slot_ids} cannot: it carries declared
     ids verbatim, so a typo there reads as a configured judge until the review
     reaches dispatch. *)
 
-val verifier_exact_cli_slot_admission : runtime_id:string -> (unit, string) result
+type verifier_slot_dispatch = Cli_runtime | Api_route
+
+val verifier_exact_slot_admission : runtime_id:string -> (verifier_slot_dispatch, string) result
 (** Reject an invalid/incompatible declared CLI candidate at its own attempt,
     without removing it or its peers from frozen declaration order. Explicit
-    standalone overrides outside the registry still use the driver's required
-    tool and native-posture admission. *)
+    API slots and standalone overrides may name a declared lane; CLI slots
+    name one concrete runtime. Both still require driver tool admission. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a

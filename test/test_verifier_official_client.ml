@@ -43,6 +43,10 @@ def mcp(index, method, params):
             'jsonrpc':'2.0','id':index,'method':method,'params':params}}})
     read()
 mcp(0, 'initialize', {'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'fixture','version':'1'}})
+emit({'type':'control_request','request_id':'mcp-ready','request':{
+    'subtype':'mcp_message','server_name':'masc','message':{
+        'jsonrpc':'2.0','method':'notifications/initialized','params':{}}}})
+read()
 mcp(1, 'tools/call', {'name':'tool_read_file','arguments':{'file_path':'proof.txt'}})
 if mode != 'missing':
     mcp(2, 'tools/call', {'name':'report_review_verdict','arguments':{'verdict':'APPROVE','reason':'read-only fixture receipt'}})
@@ -60,6 +64,7 @@ for line in sys.stdin:
 
 let runtime_config ?(protocol = "claude-code") ?(tools_support = true)
     ?(default = "official.verifier")
+    ?(slots = [])
     ?(cli_slots = ["official.verifier"]) command = Printf.sprintf {|
 [providers.official]
 protocol = %S
@@ -75,9 +80,10 @@ supports-image-input = true
 [runtime]
 default = %S
 [runtime.exact_output_lanes.verifier_exact]
-slots = []
+slots = [%s]
 cli_slots = [%s]
 |} protocol command tools_support default
+  (String.concat ", " (List.map (Printf.sprintf "%S") slots))
   (String.concat ", " (List.map (Printf.sprintf "%S") cli_slots))
 
 let records path = In_channel.with_open_bin path In_channel.input_lines
@@ -99,7 +105,10 @@ let test_review mode =
   let config = Workspace.default_config root in
   let proof_root = Filename.concat root Playground_paths.all_playgrounds_prefix in
   Fs_compat.mkdir_p proof_root;
-  write (Filename.concat proof_root "proof.txt") "verified-file-receipt";
+  let proof = if mode = "large-read" then
+      "verified-file-receipt\n" ^ String.make 18000 'x' ^ "\nlast-readable-proof-byte"
+    else "verified-file-receipt" in
+  write (Filename.concat proof_root "proof.txt") proof;
   let lookup_tools = match VAT.create_goal_proof ~config with
     | Ok tools -> tools | Error detail -> fail detail in
   let lookup = AR.Lookup_tools
@@ -148,9 +157,10 @@ command = %S
 is-non-interactive = true
 [unconfined.verifier]
 |} command
-    | "exact-order" ->
+    | "exact-order" | "api-lane" ->
       runtime_config ~default:"outside.verifier"
-        ~cli_slots:["first.verifier";"official.verifier"] command
+        ~slots:(if mode = "api-lane" then ["judge.lane"] else [])
+        ~cli_slots:(if mode = "api-lane" then [] else ["first.verifier";"official.verifier"]) command
       ^ outside_runtime ^ Printf.sprintf {|
 [providers.first]
 protocol = "claude-code"
@@ -158,6 +168,17 @@ command = %S
 is-non-interactive = true
 [first.verifier]
 |} first_command
+      ^ (if mode = "api-lane" then {|
+[runtime.lanes."judge.lane"]
+candidates = ["first.verifier", "official.verifier"]
+|} else "")
+    | "api-tools-disabled" ->
+      runtime_config ~tools_support:false ~slots:["api.verifier"] ~cli_slots:[] command ^ {|
+[providers.api]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[api.verifier]
+|}
     | "shadow" ->
       runtime_config ~default:"outside.verifier" command ^ outside_runtime ^ {|
 [runtime.lanes."official.verifier"]
@@ -200,12 +221,35 @@ candidates = ["outside.verifier"]
     | Ok config -> config.Runtime_schema.exact_output_lane_decls
     | Error _ -> fail "fixture runtime declarations failed to parse" in
   let io : Agent_core.Exact_output.resolver_io = {getenv=(fun _ -> Ok None)} in
-  let snapshot = match Agent_core.Exact_output.load_resolver_snapshot ~io () with
+  let catalog = if List.mem mode ["api-lane";"api-tools-disabled"] then
+      Some (Agent_core.Exact_output.Full_replacement {source="verifier-route-fixture";contents=Printf.sprintf {|
+[[providers]]
+id = "fixture_exact"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:1"
+request_path = "/v1/chat/completions"
+api_key_env = ""
+capabilities_base = "openai_chat_extended"
+[[models]]
+id_prefix = "verifier-fixture"
+provider_name = "fixture_exact"
+max_context_tokens = 400000
+max_output_tokens = 1024
+supports_response_format_json = true
+supports_structured_output = false
+input_per_million = 1.0
+[[targets]]
+id = %S
+provider_ref = "fixture_exact"
+model_id = "verifier-fixture"
+|} (if mode = "api-lane" then "judge.lane" else "api.verifier")})
+    else None in
+  let snapshot = match Agent_core.Exact_output.load_resolver_snapshot ~io ?catalog () with
     | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
   (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
    | Ok _ -> () | Error detail -> fail detail);
   let unavailable = List.mem mode
-    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding"] in
+    ["unknown-slot";"tools-disabled";"unconfined";"wrong-kind";"disabled-binding";"api-tools-disabled"] in
   check bool "readiness proves at least one actually compatible candidate"
     (not unavailable) (Result.is_ok (Runtime.verifier_exact_lane_readiness ()));
   (match Runtime.verifier_exact_lane_slot_ids () with
@@ -233,7 +277,7 @@ candidates = ["outside.verifier"]
     check bool "unavailable verifier never spawns an official client" false (Sys.file_exists capture))
   else (
   (match mode, result.AR.verdict, result.gate with
-   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
+   | ("valid" | "mixed" | "exact-order" | "shadow" | "missing-first" | "large-read" | "api-lane"), Some (AR.Approve "read-only fixture receipt"), AR.Structured_tool -> ()
    | "missing", None, AR.Invalid_verdict -> ()
    | "duplicate", None, AR.Evaluator_unavailable -> ()
    | _ -> failf "unexpected verdict outcome: gate=%s detail=%s"
@@ -244,7 +288,7 @@ candidates = ["outside.verifier"]
   check bool "ordinary default or same-name lane never dispatches outside exact slots" false
     (Sys.file_exists outside_capture);
   let launches rows = List.filter (fun row -> member "kind" row = `String "launch") rows in
-  if mode = "exact-order" then (
+  if mode = "exact-order" || mode = "api-lane" then (
     let failed_launches = launches (records first_capture) in
     check int "first exact candidate actually dispatched and failed" 1 (List.length failed_launches);
     List.iter (fun launch ->
@@ -272,6 +316,13 @@ candidates = ["outside.verifier"]
     (List.exists (fun row ->
       member "type" row = `String "control_response"
       && String_util.contains_substring (Yojson.Safe.to_string row) "verified-file-receipt") rows);
+  if mode = "large-read" then (
+    check bool "large authority read remains inspectable on the actual client wire" true
+      (List.exists (fun row -> String_util.contains_substring
+         (Yojson.Safe.to_string row) "last-readable-proof-byte") rows);
+    check bool "large read does not become an inaccessible session-local marker" false
+      (List.exists (fun row -> String_util.contains_substring
+         (Yojson.Safe.to_string row) Tool_output.marker_prefix) rows));
   List.iter (fun launch ->
     let cwd = member "cwd" launch |> Yojson.Safe.Util.to_string in
     check bool "review never uses producer workspace as cwd" false (cwd = root);
@@ -303,4 +354,5 @@ let () =
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "unknown-slot"; "tools-disabled";
-       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"]]
+       "unconfined"; "wrong-kind"; "disabled-binding"; "mixed"; "exact-order"; "shadow"; "missing-first"; "large-read";
+       "api-lane"; "api-tools-disabled"]]

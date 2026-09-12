@@ -124,6 +124,17 @@ let ( let* ) = Result.bind
 
 let admit_lane_slots resolver_snapshot admitted_by_id
     (lane : Runtime_schema.exact_output_lane_decl) =
+  let rec validate_cli position seen = function
+    | [] -> Ok ()
+    | slot_id :: rest ->
+      if String.trim slot_id = "" then
+        Error (Blank_lane_slot {lane_id=lane.id;position})
+      else if String_set.mem slot_id seen then
+        Error (Duplicate_lane_slot {lane_id=lane.id;position;slot_id})
+      else validate_cli (position + 1) (String_set.add slot_id seen) rest
+  in
+  let* () = validate_cli (List.length lane.slot_ids + 1)
+    (String_set.of_list lane.slot_ids) lane.cli_slot_ids in
   let rec loop position seen admitted_by_id admitted_slots rejected_slots = function
     | [] ->
       Ok (List.rev admitted_slots, admitted_by_id, List.rev rejected_slots)

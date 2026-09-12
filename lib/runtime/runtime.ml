@@ -1823,19 +1823,40 @@ let verifier_cli_slot_rejection slot_id =
          else None)
 ;;
 
-let verifier_exact_cli_slot_admission ~runtime_id =
+type verifier_slot_dispatch = Cli_runtime | Api_route
+
+let verifier_exact_slot_admission ~runtime_id =
   (* The explicit single-runtime override need not be a registry lane member.
      Only a declared CLI slot adds an execution-kind constraint; the driver
      always enforces the actual candidate's required tools/native posture. *)
   match Runtime_exact_output_registry.current () with
-  | Error _ -> Ok ()
+  | Error _ -> Ok Api_route
   | Ok registry ->
     (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
      | Ok {cli_slots; _} when List.mem runtime_id cli_slots ->
        (match verifier_cli_slot_rejection runtime_id with
-        | None -> Ok ()
+        | None -> Ok Cli_runtime
         | Some detail -> Error detail)
-     | Ok _ | Error _ -> Ok ())
+     | Ok _ | Error _ -> Ok Api_route)
+;;
+
+let verifier_api_slot_ready slot_id =
+  let state = runtime_state () in
+  let candidates = match find_declared_lane state.lanes slot_id with
+    | Some lane -> Runtime_lane.ordered_candidates lane
+    | None -> [slot_id] in
+  List.exists (fun id ->
+    match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
+    | None -> false
+    | Some runtime ->
+      match runtime.execution with
+      | Runtime_execution.Agent_core provider ->
+        Provider_tool_support.provider_supports_inline_tools provider
+      | Runtime_execution.Claude_code _
+      | Runtime_execution.Codex_app_server _
+      | Runtime_execution.Antigravity_cli _ ->
+        Runtime_execution.supports_native_none runtime.execution && runtime.model.tools_support)
+    candidates
 ;;
 
 let verifier_exact_lane_readiness () =
@@ -1860,13 +1881,17 @@ let verifier_exact_lane_readiness () =
            (0, [])
            cli_slots
        in
-       if selected_slots <> [] || dispatchable > 0
+       if List.exists (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+            verifier_api_slot_ready slot.slot_id) selected_slots || dispatchable > 0
        then Ok ()
        else
          Error
            (Printf.sprintf
               "verifier_exact has no dispatchable slot: %s"
-              (String.concat "; " (List.rev rejected))))
+              (String.concat "; "
+                (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                   Printf.sprintf "%S has no materialized candidate with required tools" slot.slot_id)
+                   selected_slots @ List.rev rejected))))
 ;;
 
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated

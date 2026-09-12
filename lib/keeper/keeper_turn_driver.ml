@@ -52,7 +52,7 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
-type runtime_selection = Resolve_assignment | Exact_runtime
+type runtime_selection = Resolve_assignment | Exact_runtime | Exact_route
 
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
@@ -278,6 +278,7 @@ let lane_declares ~lane_id runtime_id =
   | Some lane -> List.mem runtime_id (Runtime_lane.ordered_candidates lane)
 
 let attempt_runtime_candidates
+    ?(preserve_order = false)
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
@@ -339,6 +340,7 @@ let attempt_runtime_candidates
         Option.is_some (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let demote_rest rest =
+    if preserve_order then rest else
     let dispatchable, undispatchable =
       List.partition candidate_dispatchable rest
     in
@@ -1013,7 +1015,7 @@ let run_named
     ?net
     ()
   : (named_run_result, Agent_core.Error.t) result =
-  if runtime_selection = Exact_runtime && Option.is_some deferred_runtime_lane then
+  if runtime_selection <> Resolve_assignment && Option.is_some deferred_runtime_lane then
     Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
       {field="runtime_selection";detail="an exact runtime cannot consume an ordinary deferred lane"}))
   else if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
@@ -1097,6 +1099,10 @@ let run_named
   let* lane_id_opt, lane_candidate_ids =
     match runtime_selection, deferred_runtime_lane with
     | Exact_runtime, _ -> Ok (None, [runtime_id])
+    | Exact_route, _ ->
+      Ok (None, match Runtime.get_lane_by_id runtime_id with
+        | Some lane -> Runtime_lane.ordered_candidates lane
+        | None -> [runtime_id])
     | Resolve_assignment, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
     | Resolve_assignment, None ->
@@ -1164,7 +1170,7 @@ let run_named
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
     match runtime_selection with
-    | Exact_runtime -> []
+    | Exact_runtime | Exact_route -> []
     | Resolve_assignment ->
     modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
@@ -1250,7 +1256,7 @@ let run_named
          retain unread artifacts, but never dispatch an out-of-lane vision call. *)
       let mode = match runtime_selection with
         | Resolve_assignment -> mode
-        | Exact_runtime -> Keeper_vision_ingest.Store_only in
+        | Exact_runtime | Exact_route -> Keeper_vision_ingest.Store_only in
       project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
@@ -1266,6 +1272,7 @@ let run_named
       lane_id_opt
   in
   attempt_runtime_candidates
+    ~preserve_order:(runtime_selection <> Resolve_assignment)
     ~pre_tool_rejects
     ?lane_id:sticky_lane_id
     ?on_retry_deferred:on_runtime_retry_deferred

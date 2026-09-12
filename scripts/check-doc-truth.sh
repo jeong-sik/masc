@@ -125,6 +125,28 @@ for install_doc in docs/INSTALL.md docs/INSTALL.ko.md; do
     fail "$install_doc install TAG ($install_tag) != README install TAG ($readme_tag)"
 done
 
+# The same block a third time, on the documentation site the project publishes.
+# It was left out when each guard above was added, so it kept the tag it was
+# born with: v0.35.1 stood while thirteen releases went out, and the page told
+# readers to install a version the project had moved past twice over. Here the
+# version also appears in prose and in a heading, so pinning only the TAG= line
+# would leave the page disagreeing with itself. These pages name one version,
+# so anything else that looks like a version is drift.
+for site_doc in \
+  docs-site/src/content/docs/getting-started/quickstart.md \
+  docs-site/src/content/docs/ko/getting-started/quickstart.md; do
+  site_tag="$(extract_single '^TAG=v\([^ ]*\)$' "$site_doc")"
+  [[ -n "$site_tag" ]] || fail "missing TAG= install pin in $site_doc"
+  [[ "$site_tag" == "$readme_tag" ]] || \
+    fail "$site_doc install TAG ($site_tag) != README install TAG ($readme_tag)"
+  # Compare whole version tokens, not substrings: 0.35.1 is a prefix of
+  # 0.35.12, so a substring filter would hide the very drift this looks for.
+  site_stray="$(grep -n -o -E '[0-9]+\.[0-9]+\.[0-9]+' "$site_doc" \
+    | awk -F: -v want="${site_tag#v}" '$2 != want' || true)"
+  [[ -z "$site_stray" ]] || \
+    fail "$site_doc names a version other than ${site_tag#v}: $site_stray"
+done
+
 # PR checks compare checked-in documents only. Repository-global tags can
 # change after this commit without changing its documentation. The release
 # workflow validates its explicit tag with check-version-truth.sh --tag.

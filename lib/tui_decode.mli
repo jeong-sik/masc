@@ -125,10 +125,26 @@ type planning_backlog = {
   pb_cancelled : int;
 }
 
+(** One goal the event log remembers that [goals.json] no longer lists, as
+    [GET /api/v1/dashboard/planning] reports it under [goal_history.unlisted].
+    Every field past the id is nullable on the wire and stays optional here: a
+    goal opened before the server recorded openings has no [pgh_opened_at], and
+    one that left the list without a terminal phase has no [pgh_closed_at].
+    Reading either as a zero would date something that never happened. *)
+type planning_goal_history = {
+  pgh_goal_id : string;
+  pgh_title : string option;
+  pgh_opened_at : string option;
+  pgh_closed_at : string option;
+  pgh_final_phase : string option;
+  pgh_lifetime_hours : float option;
+}
+
 type planning_snapshot = {
   pl_goals : planning_goal list;
   pl_rollup : planning_rollup;
   pl_backlog : planning_backlog;
+  pl_goal_history : planning_goal_history list;
   pl_generated_at : string;
 }
 

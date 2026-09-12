@@ -46,6 +46,20 @@ type deferred_runtime_lane = private
   ; failure : Agent_core.Error.t
   }
 
+(** The candidate error a runtime walk returned as the lane's error, with the
+    candidate that produced it. [origin_runtime_id] can differ from the
+    candidate the walk ended on: on an exhausted lane a typed context overflow
+    observed on an earlier candidate outranks a later recoverable error, and
+    the lane returns that overflow. Reported through
+    [on_runtime_lane_terminal_error] on every walk that returns a candidate's
+    error; a lane with no candidates returns its own error and reports
+    nothing. *)
+type lane_terminal_error =
+  { origin_runtime_id : string
+  ; origin_attempt : int
+  ; lane_error : Agent_core.Error.t
+  }
+
 val deferred_runtime_ids : deferred_runtime_lane -> string list
 val quota_ordered_deferred_runtime_lane :
   now:float -> deferred_runtime_lane -> deferred_runtime_lane
@@ -180,7 +194,12 @@ val run_named :
   ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
   ?on_runtime_attempt_error:
-    (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
+    (runtime_id:string ->
+    attempt:int ->
+    dispatch:Keeper_attempt_dispatch.t ->
+    Agent_core.Error.t ->
+    unit) ->
+  ?on_runtime_lane_terminal_error:(lane_terminal_error -> unit) ->
   ?on_deferred_runtime_consumed:(unit -> unit) ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
@@ -196,9 +215,15 @@ val run_named :
     The runtime loop runs inside a capacity-managed queue permit.
 
     [on_runtime_attempt_error] observes every typed candidate failure after
-    its runtime manifest row is emitted. It does not change candidate
-    selection or the final error; verifier callers use it to aggregate
-    retryability across a bare runtime and its terminal default fallback.
+    its runtime manifest row is emitted, with [dispatch] saying whether the
+    candidate's provider or client was invoked or the walk refused the
+    candidate first. It does not change candidate selection or the final
+    error; verifier callers use it to aggregate retryability across a bare
+    runtime and its terminal default fallback.
+
+    [on_runtime_lane_terminal_error] observes the candidate error the walk
+    returns as the lane's error, with the candidate that produced it, once per
+    walk that ends on a candidate's error.
 
     [on_request_attribution] reports what an official-client lane could
     observe of its own model input, together with the tool list that lane
@@ -359,7 +384,12 @@ module For_testing : sig
     ?lane_id:string ->
     ?on_retry_deferred:(deferred_runtime_lane -> unit) ->
     ?on_attempt_error:
-      (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
+      (runtime_id:string ->
+      attempt:int ->
+      dispatch:Keeper_attempt_dispatch.t ->
+      Agent_core.Error.t ->
+      unit) ->
+    ?on_lane_terminal_error:(lane_terminal_error -> unit) ->
     ?quota_scope_of:('candidate -> Runtime_quota_window.scope option) ->
     ?candidate_preference_of:('candidate -> Runtime_lane_preference.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
@@ -376,7 +406,8 @@ module For_testing : sig
       'candidate ->
       ('result, Agent_core.Error.t) result
       * Agent_core.Checkpoint.t option
-      * Keeper_provider_attempt_effect.t) ->
+      * Keeper_provider_attempt_effect.t
+      * Keeper_attempt_dispatch.t) ->
     'candidate list ->
     ('result, Agent_core.Error.t) result
 

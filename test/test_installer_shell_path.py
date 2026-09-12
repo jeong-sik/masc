@@ -132,6 +132,7 @@ printf 'SCRIPT_REMAINDER_RAN\\n' >&2
                                    env=self.env, preexec_fn=session)
         os.close(slave)
         try:
+            assert process.stdin is not None
             process.stdin.write(code.encode())
             process.stdin.close()
             output = b''
@@ -155,6 +156,136 @@ printf 'SCRIPT_REMAINDER_RAN\\n' >&2
             self.assertIn(b'READ=zsh', output)
             self.assertIn(b'CHILD_TTY=True', output)
             self.assertIn(b'SCRIPT_REMAINDER_RAN', output)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
+
+    def test_complete_piped_installer_runs_setup_after_commit(self):
+        import test_release_dashboard_bundle as fixtures
+        for setup_status in (0, 7):
+            with self.subTest(setup_status=setup_status):
+                distribution = fixtures.Distribution(
+                    'test_round_trip_keeps_exact_pair_and_build_time_after_source_removal')
+                distribution.setUp()
+                self.addCleanup(distribution.doCleanups)
+                distribution.binary.write_text(
+                    '#!/bin/sh\ncase "$1" in\n'
+                    f'build-commit) echo {fixtures.COMMIT} ;;\n'
+                    '--version) echo 9.9.9 ;;\n'
+                    'setup)\n'
+                    '  if [ -t 0 ]; then echo JOURNEY_STDIN=terminal >&2; fi\n'
+                    '  if [ ! -e "$(dirname "$0")/' + fixtures.bundle.TRANSACTION + '" ]; then\n'
+                    '    echo JOURNEY_COMMITTED=yes >&2\n'
+                    '  fi\n'
+                    f'  exit {setup_status} ;;\n'
+                    '*) exit 0 ;;\nesac\n')
+                mirror = distribution.mirror()
+                workspace = distribution.root / 'workspace'
+                config = workspace / '.masc/config'
+                config.mkdir(parents=True)
+                (config / 'runtime.toml').write_text('[runtime]\n')
+                master, slave = pty.openpty()
+
+                def session():
+                    os.setsid()
+                    fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+                process = subprocess.Popen(
+                    ['/bin/bash', '-s', '--', '--version', 'v9.9.9',
+                     '--prefix', str(distribution.prefix), '--base-path', str(workspace),
+                     '--no-seed', '--wizard', '--no-guest-shim', '--shell-path', 'none'],
+                    stdin=subprocess.PIPE, stdout=slave, stderr=slave,
+                    env=dict(self.env, MASC_RELEASE_BASE_URL=mirror.parent.as_uri()),
+                    preexec_fn=session)
+                os.close(slave)
+                feeder = None
+                try:
+                    # A file feeder avoids blocking on the script pipe while the
+                    # installer fills its terminal output buffer.
+                    assert process.stdin is not None
+                    with INSTALLER.open('rb') as source:
+                        feeder = subprocess.Popen(['cat'], stdin=source, stdout=process.stdin)
+                    process.stdin.close()
+                    output = b''
+                    deadline = time.monotonic() + 60
+                    while time.monotonic() < deadline:
+                        if select.select([master], [], [], .1)[0]:
+                            try:
+                                data = os.read(master, 65536)
+                            except OSError:
+                                break
+                            if not data:
+                                break
+                            output += data
+                        if process.poll() is not None:
+                            break
+                    self.assertEqual(process.wait(timeout=5), 0 if setup_status == 0 else 1,
+                                     output.decode())
+                    self.assertEqual(feeder.wait(timeout=5), 0)
+                    self.assertIn(b'JOURNEY_STDIN=terminal', output)
+                    self.assertIn(b'JOURNEY_COMMITTED=yes', output)
+                    self.assertFalse((distribution.prefix / fixtures.bundle.TRANSACTION).exists())
+                    installed = subprocess.run([str(distribution.prefix / 'masc'), '--version'],
+                                               capture_output=True, text=True, timeout=5)
+                    self.assertEqual(installed.stdout.strip(), '9.9.9')
+                    if setup_status:
+                        self.assertIn(b'imp preparation is incomplete', output)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+                    if feeder is not None and feeder.poll() is None:
+                        feeder.kill()
+                        feeder.wait()
+                    os.close(master)
+
+    def test_piped_installer_hands_the_setup_journey_the_terminal(self):
+        # The journey asks for a model and a sandbox. Read from a pipe without
+        # this, it reads the pipe instead and the wizard reports a cancellation
+        # the operator never asked for.
+        probe = self.prefix/'masc-journey-probe'
+        probe.write_text('#!/bin/sh\n'
+                         'if [ -t 0 ]; then printf "JOURNEY_STDIN=terminal\\n" >&2\n'
+                         'else printf "JOURNEY_STDIN=pipe\\n" >&2; fi\n')
+        probe.chmod(0o755)
+        master, slave = pty.openpty()
+        def session():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        code = ('. '+shlex.quote(str(self.library))+'\n'
+                'RUN_SETUP_JOURNEY=1\n'
+                'DRY_RUN=0\n'
+                'DEST='+shlex.quote(str(probe))+'\n'
+                'BASE_PATH='+shlex.quote(str(self.home))+'\n'
+                'MASC_PORT=8945\n'
+                'finish_setup_journey\n'
+                "printf 'JOURNEY_RETURNED\\n' >&2\n")
+        process = subprocess.Popen(['/bin/bash'], stdin=subprocess.PIPE, stdout=slave, stderr=slave,
+                                   env=self.env, preexec_fn=session)
+        os.close(slave)
+        try:
+            assert process.stdin is not None
+            process.stdin.write(code.encode())
+            process.stdin.close()
+            output = b''
+            deadline = time.monotonic()+15
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    output += data
+                if process.poll() is not None:
+                    break
+            self.assertEqual(process.wait(timeout=5), 0, output.decode())
+            self.assertIn(b'JOURNEY_STDIN=terminal', output)
+            self.assertIn(b'JOURNEY_RETURNED', output)
         finally:
             if process.poll() is None:
                 process.kill()

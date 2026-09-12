@@ -1,7 +1,7 @@
 {
   "CHAT-ACCEPTANCE.md": "ac9e7c837d928847fecca2992a70ebab4607cb4307f2b03d3ab43ecb4dcf428b",
   "README.md": "7078d7026605e8c1cfa717c9b1b6d8eb94df8db288dd04c9c41f365f47f39c1e",
-  "REASSESSMENT.md": "ecbcb9b9dc62b49639e319f2e10b9f99aba8578c56f197f8f6dea493b7da8813",
+  "REASSESSMENT.md": "59bb37c4a2b7946297a24e83b1b7785651b18cc129a386436ec0161cec22b06e",
   "adaptation-decision-misread-2578.json": "c3b0f51b2bec98547e7395ba7d728e0268aae5f7b6e8beb618d675f3539d12bd",
   "adaptation-decision-misread-2578.md": "46107a60381903b1b7d4f844cf54fb18c8fc9bb958bca78d02735420e2c49edd",
   "adaptation-feedback-2578/decision.md": "e5eac06c7a7e75dedb0a20b2e0c07e6198123e3e7001d56a197567155752523d",
@@ -166,5 +166,7 @@
   "tools-browser-53203/mobile-measurement.json": "382b4f2bc73c01ebc2f06d62ed8cc393ad9204fecb5f1f5c02e545bdea8bfc19",
   "tools-browser-53203/receipt.json": "20f513f6db39b82df8068cff8691cd2d052a9bb7546dfceb6cdcf778f04bcef6",
   "tools-browser-53203/tools-desktop.png": "f61d42ec21fa80be515a5cfe5610d521021e079c4fc042a9de8670c5cac34be2",
-  "tools-browser-53203/tools-mobile.png": "330e1b19a3cf0df04b3912afe8b3ebcd72e2e5774f8a805ec1f258d5e83892d2"
+  "tools-browser-53203/tools-mobile.png": "330e1b19a3cf0df04b3912afe8b3ebcd72e2e5774f8a805ec1f258d5e83892d2",
+  "verifier-inspection-gap/proposal.md": "20d17b56921bf8c2f9dfb1a95b90de1f37036fb5f3e2068b741ce016f2e7c404",
+  "verifier-inspection-gap/rejection.redacted.json": "079a52a21175dcbb7454599fb03a71a09d2a36e1b79abd93f4826711c729a5bc"
 }

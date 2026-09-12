@@ -13,7 +13,7 @@
 
 전체 18개 목표는 미완료다. 다음은 ① 새 통합 후보의 실제 Chat·native 재개 수용 ② 검증자의 PPTX·MP4·Board/Fusion 원천 조회 ③ task-004의 정확한 최종 증거와 재검증이다. 이후 통합 UX·IDE·LSP, 공유 기억 품질과 모든 runtime의 연속성 조건으로 넓힌다. 원래 전시·연작 Goal의 사람 확인은 별도로 남는다.
 
-근거: `fusion-feedback-candidate.json`, `ci-2855-gate-admission/`, `candidate-install-2855.json`, `hitl-codex-live-2578.json`, `codex-gate-correction-2578/`, `adaptation-feedback-2578/`의 초기 관측·Task 거절, 그리고 그 안의 `revision-2/` 최신 파일·브라우저 기록.
+근거: `fusion-feedback-candidate.json`, `ci-2855-gate-admission/`, `candidate-install-2855.json`, `hitl-codex-live-2578.json`, `codex-gate-correction-2578/`, `adaptation-feedback-2578/`의 초기 관측·Task 거절, 그리고 그 안의 `revision-2/` 최신 파일·브라우저 기록. 다음 검증 도구 작업의 진입점·권한·의존성은 `verifier-inspection-gap/proposal.md`에 정리했다.
 
 ## 이전 판단과 다음 작업 (2026-09-12 22:40 KST)
 

@@ -1928,9 +1928,14 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let header = Printf.sprintf "%s (%d)  sort:%s%s  %s  %s"
+  (* No sort here. The row under this one says it in the words that answer
+     what the order is -- "latest changed first" rather than "updated" -- and
+     it is the row with space for them. "updated" is the token the board list
+     is asked for (the request's sort_by) and the token the workspace config
+     keeps, so a title that spelled it showed the operator a protocol value. *)
+  let header = Printf.sprintf "%s (%d)%s  %s  %s"
     (screen_title " MASC Board")
-    count (board_sort_label state.board_sort) hearth timestamp
+    count hearth timestamp
     (connection_badge state) in
 
   box_top buf cols;

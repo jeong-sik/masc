@@ -426,6 +426,16 @@ check_rule "R16-tui-page-failed-note-literal" 0 \
   'bin/masc_tui_render_prim\.mli?:' \
   bin
 
+# The Board sort token. [board_sort_label] is the value the server is asked
+# for (load_board_list ~sort_by) and the value the workspace config keeps, so
+# a screen that draws it is showing a protocol value where a reading belongs.
+# The sort the operator reads comes from [board_sort_explanation].
+check_rule "R17-tui-board-sort-token-on-screen" 0 \
+  "board_sort_explanation" \
+  'board_sort_label' \
+  'bin/masc_tui_types\.ml:|bin/masc_tui\.ml:' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

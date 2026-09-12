@@ -769,6 +769,40 @@ let test_a_bare_key_is_left_alone () =
   Alcotest.(check bool) "no quotes were added" true
     (has_line out {|judge = "new-judge"|})
 
+(* A key may carry an equals sign -- the writer quotes it for exactly that
+   reason -- and the reader looked for the first [=] on the line, which cut
+   such a key in half. The first save worked; the entry could never be found
+   again, so a removal returned the text unchanged and said it succeeded. *)
+let test_a_key_with_an_equals_sign_round_trips () =
+  let key = "a=b" in
+  let once =
+    Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio" ~key
+      ~value:(Some "first")
+  in
+  Alcotest.(check bool) "the key is written quoted" true
+    (has_line once {|"a=b" = "first"|});
+  let twice =
+    Toml_line_editor.edit_table_scalar once ~path:"fusion.presets.trio" ~key
+      ~value:(Some "second")
+  in
+  Alcotest.(check bool) "the second edit replaced the first" true
+    (has_line twice {|"a=b" = "second"|});
+  Alcotest.(check bool) "and left no duplicate" false
+    (has_line twice {|"a=b" = "first"|});
+  let removed =
+    Toml_line_editor.edit_table_scalar twice ~path:"fusion.presets.trio" ~key
+      ~value:None
+  in
+  Alcotest.(check bool) "and removing it removes it" false
+    (has_line removed {|"a=b" = "second"|})
+
+(* A literal key is quoted the same way by the reader, so an equals sign in
+   one is not an assignment either. *)
+let test_a_literal_key_with_an_equals_sign_is_not_an_assignment () =
+  Alcotest.(check (option string)) "the whole key, not its first half"
+    (Some "x=y")
+    (Toml_line_editor.key_of_line "'x=y' = \"value\"")
+
 (* A quote inside the key is escaped like any other string content, so the
    line it lands on still parses. *)
 let test_a_key_with_a_quote_is_escaped () =
@@ -879,5 +913,9 @@ let () =
             test_a_bare_key_is_left_alone
         ; Alcotest.test_case "a key with a quote is escaped" `Quick
             test_a_key_with_a_quote_is_escaped
+        ; Alcotest.test_case "a key with an equals sign round-trips" `Quick
+            test_a_key_with_an_equals_sign_round_trips
+        ; Alcotest.test_case "a literal key with an equals sign" `Quick
+            test_a_literal_key_with_an_equals_sign_is_not_an_assignment
         ] )
     ]

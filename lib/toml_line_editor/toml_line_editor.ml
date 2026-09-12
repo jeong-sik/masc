@@ -239,12 +239,36 @@ let parse_literal_key raw =
 (* [key_of_line line] is the bare key of a [key = value] line, or [None] for
    comments, blanks, and non-assignment lines. Quoted/literal keys are unescaped.
    Comment and blank lines return [None], so editors never match them. *)
+(* The [=] that separates the key from the value, which is not always the
+   first one on the line: a quoted key may carry one of its own, and
+   [render_key] quotes a key for exactly that kind of character. Taking the
+   first [=] cut such a key in half, so the entry was written once and never
+   found again -- a later removal returned the text unchanged and reported
+   success, and an update appended a duplicate. *)
+let assignment_index trimmed =
+  let len = String.length trimmed in
+  let rec loop index ~in_basic ~in_literal =
+    if index >= len
+    then None
+    else (
+      match trimmed.[index] with
+      | '\\' when in_basic -> loop (index + 2) ~in_basic ~in_literal
+      | '"' when not in_literal ->
+        loop (index + 1) ~in_basic:(not in_basic) ~in_literal
+      | '\'' when not in_basic ->
+        loop (index + 1) ~in_basic ~in_literal:(not in_literal)
+      | '=' when (not in_basic) && not in_literal -> Some index
+      | _ -> loop (index + 1) ~in_basic ~in_literal)
+  in
+  loop 0 ~in_basic:false ~in_literal:false
+;;
+
 let key_of_line line =
   let trimmed = String.trim line in
   if String.equal trimmed "" || Char.equal trimmed.[0] '#'
   then None
   else (
-    match String.index_opt trimmed '=' with
+    match assignment_index trimmed with
     | None -> None
     | Some eq_index ->
       let key_part = String.sub trimmed 0 eq_index |> String.trim in

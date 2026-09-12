@@ -4034,8 +4034,6 @@ let test_main_eio_serves_health_before_lazy_startup () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_USE_H2", "0");
@@ -4128,8 +4126,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -4298,8 +4294,6 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -4520,8 +4514,6 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -4604,8 +4596,6 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -4676,8 +4666,6 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -4747,8 +4735,6 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
         main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
-            ("GRAPHQL_API_KEY", "");
-            ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
             ("MASC_ORCHESTRATOR_ENABLED", "0");
             ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
@@ -4829,8 +4815,6 @@ let test_main_eio_start_does_not_record_default_without_flag () =
               [
                 ("XDG_CONFIG_HOME", config_home);
                 ("MASC_BASE_PATH", dir);
-                ("GRAPHQL_API_KEY", "");
-                ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
                 ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
                 ("MASC_ORCHESTRATOR_ENABLED", "0");
                 ("MASC_USE_H2", "0");
@@ -4885,8 +4869,6 @@ let test_main_eio_start_records_default_with_flag () =
               [
                 ("XDG_CONFIG_HOME", config_home);
                 ("MASC_BASE_PATH", dir);
-                ("GRAPHQL_API_KEY", "");
-                ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
                 ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
                 ("MASC_ORCHESTRATOR_ENABLED", "0");
                 ("MASC_USE_H2", "0");

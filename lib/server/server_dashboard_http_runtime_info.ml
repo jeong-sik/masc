@@ -747,15 +747,26 @@ let dashboard_runtime_append_probe_path base ~suffix =
   else base ^ suffix
 ;;
 
-let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
+(* What the probe can do with an HTTP endpoint, decided by the wire format.
+   An official-client format reached over HTTP is a misconfiguration. Vertex
+   authenticates with Google Application Default Credentials that only the
+   provider transport can mint, so its reachability is not probed here; that
+   is a stated skip, not a broken transport (it used to answer with the
+   codex-app-server message). *)
+type dashboard_runtime_probe_target =
+  | Probe_url of string
+  | Probe_requires_cli_transport
+  | Probe_native_auth
+
+let dashboard_runtime_probe_target ~(api_format : Runtime_schema.api_format) base_url =
   match api_format with
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Vertex_gemini_api -> None
+  | Runtime_schema.Antigravity_cli_runtime -> Probe_requires_cli_transport
+  | Runtime_schema.Vertex_gemini_api -> Probe_native_auth
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
-    Some
+    Probe_url
       (if String.ends_with ~suffix:"/api/tags" base
        then base
        else if String.ends_with ~suffix:"/api" base
@@ -763,7 +774,7 @@ let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_u
        else base ^ "/api/tags")
   | Runtime_schema.Gemini_api
   | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
-    Some (dashboard_runtime_append_probe_path base_url ~suffix:"/models")
+    Probe_url (dashboard_runtime_append_probe_path base_url ~suffix:"/models")
 ;;
 
 let dashboard_runtime_url_for_json raw =
@@ -816,7 +827,15 @@ let dashboard_runtime_credential_value = function
      | None -> Error "inline credential is empty")
 ;;
 
-let dashboard_runtime_probe_headers (provider : Runtime_schema.provider) =
+(* The auth header is the one the transport itself would send for this
+   provider kind ([Provider_config.auth_headers_for_kind_and_key]): Gemini
+   keys go in [x-goog-api-key], Anthropic-style keys in [x-api-key], the rest
+   as a Bearer token. A Bearer literal here answered auth_failed for a Gemini
+   runtime the keepers were using fine. *)
+let dashboard_runtime_probe_headers
+    ~(kind : Llm_provider.Provider_config.provider_kind)
+    (provider : Runtime_schema.provider)
+  =
   let base_headers =
     [ "Accept", "application/json" ] @ dashboard_runtime_non_auth_headers provider
   in
@@ -824,7 +843,11 @@ let dashboard_runtime_probe_headers (provider : Runtime_schema.provider) =
   | None -> Ok (false, base_headers)
   | Some credential ->
     (match dashboard_runtime_credential_value credential with
-     | Ok value -> Ok (true, ("Authorization", "Bearer " ^ value) :: base_headers)
+     | Ok value ->
+       Ok
+         ( true
+         , Llm_provider.Provider_config.auth_headers_for_kind_and_key ~kind ~api_key:value
+           @ base_headers )
      | Error _ as error -> error)
 ;;
 
@@ -966,16 +989,32 @@ let dashboard_runtime_provider_probe_json
       ~error:"CLI runtimes do not expose an HTTP reachability endpoint"
       ()
   | Runtime_schema.Http endpoint_url ->
-    begin match dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url with
-     | None ->
+    begin match
+      rt.execution,
+      dashboard_runtime_probe_target ~api_format:rt.provider.api_format endpoint_url
+    with
+     | ( Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ ), _
+     | Runtime_execution.Agent_core _, Probe_requires_cli_transport ->
       make
         ~auth_present:false
         ~status:"invalid_execution_transport"
         ~reachable:(Some false)
         ~skipped:false
-        ~error:"codex-app-server must use the official CLI transport"
+        ~error:"official-client runtimes must use the CLI transport"
         ()
-     | Some probe_url ->
+     | Runtime_execution.Agent_core _, Probe_native_auth ->
+      make
+        ~auth_present:false
+        ~status:"skipped_native_auth"
+        ~reachable:None
+        ~skipped:true
+        ~error:
+          "Vertex Gemini authenticates with Google Application Default Credentials; \
+           this probe holds no such credential and does not test reachability"
+        ()
+     | Runtime_execution.Agent_core provider_config, Probe_url probe_url ->
       let probe_url_json = dashboard_runtime_url_for_json probe_url in
       if not (dashboard_runtime_http_url_valid probe_url)
       then
@@ -988,7 +1027,11 @@ let dashboard_runtime_provider_probe_json
           ~error:"runtime endpoint is not an absolute http(s) URL"
           ()
       else (
-      match dashboard_runtime_probe_headers rt.provider with
+      match
+        dashboard_runtime_probe_headers
+          ~kind:provider_config.Llm_provider.Provider_config.kind
+          rt.provider
+      with
       | Error error ->
         make
           ~probe_url:probe_url_json

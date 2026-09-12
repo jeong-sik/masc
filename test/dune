@@ -2614,6 +2614,7 @@
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_antigravity.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
+(include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_official_client_mcp_http.inc)
 (include stanzas/test_runtime_claude_code_config.inc)
 (include stanzas/test_keeper_antigravity_runtime.inc)
@@ -5629,3 +5630,8 @@
  (name test_model_catalog_thinking_control)
  (modules test_model_catalog_thinking_control)
  (libraries alcotest masc.agent_core.llm_provider))
+
+(test
+ (name test_dashboard_routing_body)
+ (modules test_dashboard_routing_body)
+ (libraries masc_test_deps unix masc.server))

@@ -71,7 +71,11 @@ let run_llm_reviewer_fn
      lookup:lookup_surface ->
      on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit) ->
      on_runtime_attempt_error:
-       (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->
+       (runtime_id:string
+        -> attempt:int
+        -> dispatch:Runtime_attempt_dispatch.t
+        -> Agent_core.Error.t
+        -> unit) ->
      unit -> (verdict option, Agent_core.Error.t) result) Atomic.t
   = Atomic.make (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
       Error (Agent_core.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
@@ -510,7 +514,7 @@ let run
                ~lookup
                ~on_tool_result
                ~on_runtime_attempt_error:
-                 (fun ~runtime_id:_ ~attempt:_ error ->
+                 (fun ~runtime_id:_ ~attempt:_ ~dispatch:_ error ->
                     if Agent_core.Error.is_retryable error
                     then nested_retryable_error_seen := true)
                ()

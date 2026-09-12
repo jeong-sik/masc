@@ -128,21 +128,55 @@ let issue_kind_label = function
   | Invalid_schema_version -> "invalid schema" | Unknown_key -> "unknown key"
   | Type_mismatch -> "type mismatch" | Out_of_range -> "out of range"
 let restart metadata = metadata.routing_requires_restart || metadata.keeper_requires_restart
+(* Twelve characters of the source revision. It is there to be compared -- this
+   read against the last one -- and the full sixty-four spent two thirds of the
+   row on characters nobody reads to the end. The footer cuts the build commit
+   to seven for the same reason. *)
+let revision_prefix_length = 12
+
+let short_revision revision =
+  if String.length revision <= revision_prefix_length then revision
+  else String.sub revision 0 revision_prefix_length
+
+(* "valid" already says there are no errors: a report carrying one is not
+   valid. So the error count earns its place only when the verdict is not
+   valid, and a warning count only when there are warnings. A clean read used
+   to spend the rest of the row saying "0 error(s), 0 warning(s)".
+
+   The counts are spelled with the plural the number asks for. *)
+let plural n word = if n = 1 then word else word ^ "s"
+
 let validation_line = function
   | Parse_error _ -> Bad, "Validation: invalid TOML"
   | Checked report ->
       let count severity = List.length (List.filter (fun issue -> issue.severity = severity) report.issues) in
-      (if report.valid then (if count Warning_issue = 0 then Good else Warning) else Bad),
-      Printf.sprintf "Validation: %s · %d error(s), %d warning(s)"
-        (if report.valid then "valid" else "invalid") (count Error_issue) (count Warning_issue)
-let summary_lines metadata =
+      let errors = count Error_issue and warnings = count Warning_issue in
+      let verdict = if report.valid then "valid" else "invalid" in
+      let counts =
+        (if report.valid then [] else [ Printf.sprintf "%d %s" errors (plural errors "error") ])
+        @ (if warnings = 0 then [] else [ Printf.sprintf "%d %s" warnings (plural warnings "warning") ])
+      in
+      (if report.valid then (if warnings = 0 then Good else Warning) else Bad),
+      String.concat " \xc2\xb7 " (("Validation: " ^ verdict) :: counts)
+(* The revision row, and the two verdict rows under it. Both screens draw the
+   same verdict and differ only in how much of the revision they spend a row on,
+   so the verdict lives in one place and the revision is the caller's: the
+   compact summary has three rows for the whole read and prints the prefix, the
+   detail screen has the room for the revision a reader pastes into [git show],
+   and test/test_tui_keyboard_input.py reads it there whole. *)
+let revision_row revision = Neutral, "Source revision: " ^ revision
+
+let verdict_rows metadata =
   let attention = restart metadata || metadata.preempted_keys <> [] in
-  [ Neutral, "Source revision: " ^ metadata.source_revision;
-    validation_line metadata.validation;
+  [ validation_line metadata.validation;
     (if metadata.keeper = Invalid_configuration then Bad else if attention then Warning else Neutral),
       Printf.sprintf "Routing %s · Keeper %s · restart %s"
         (routing_label metadata.routing) (keeper_label metadata.keeper)
         (if restart metadata then "required" else "not required") ]
+
+let summary_lines metadata =
+  revision_row (short_revision metadata.source_revision) :: verdict_rows metadata
+
 let detail_lines metadata =
   let keys label tone values =
     if values = [] then [] else List.map (fun key -> tone, label ^ ": " ^ key) values
@@ -157,7 +191,7 @@ let detail_lines metadata =
             (match issue.severity with Error_issue -> Bad | Warning_issue -> Warning),
             Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail) report.issues
   in
-  summary_lines metadata
+  (revision_row metadata.source_revision :: verdict_rows metadata)
   @ [ (if metadata.routing_requires_restart then Warning else Neutral),
       "Routing restart: " ^ (if metadata.routing_requires_restart then "required" else "not required");
       (if metadata.keeper_requires_restart then Warning else Neutral),

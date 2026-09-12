@@ -60,6 +60,8 @@ let make_backend () =
       let stop_sent = ref false in
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
+        action_schema = (fun () -> None);
+        act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding ~sources:_ ->
           state.observations := (instance_id, binding) :: !(state.observations);
           match package.id with
@@ -85,7 +87,7 @@ let make_backend () =
         on_created connection;
         Ok connection
       end);
-    acquire = (fun ~store:_ ~package:_ ~binding:_ -> Ok (`List []));
+    acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ -> Ok (`List []));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
       if Option.exists (fun id -> id <> Store.digest instance_id) container_id
       then Error "persisted container does not belong to instance"

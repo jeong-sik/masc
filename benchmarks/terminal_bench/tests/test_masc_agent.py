@@ -1,6 +1,8 @@
 import asyncio
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -139,3 +141,89 @@ def test_vendored_gh_is_uploaded_when_present(tmp_path, monkeypatch):
     (root / "driver").mkdir()
     env = asyncio.run(go(root))
     assert ("file", "/opt/masc-bench/bin/gh") in [(k, d) for k, _, d in env.uploads]
+
+
+# --- episode cost ----------------------------------------------------------
+#
+# The judging rule this benchmark answers is cost per task. Until now the MASC
+# arms reported no cost at all, which did not make the comparison careful — it
+# left those arms out of it.
+
+RATES = {
+    "input_cost_per_token": 2e-06,
+    "output_cost_per_token": 1e-05,
+    "cache_creation_input_token_cost": 2.5e-06,
+    "cache_read_input_token_cost": 2e-07,
+}
+
+
+def write_result(tmp_path, **usage):
+    body = {"state": "Succeeded", "duration_ms": 1, "tool_calls": 0,
+            "duplicate_tool_calls": 0, "final": {}}
+    body.update(usage)
+    (Path(tmp_path) / "result.json").write_text(json.dumps(body))
+
+
+def price(monkeypatch, table):
+    import litellm
+    monkeypatch.setattr(litellm, "model_cost", table)
+
+
+def context_for(tmp_path, monkeypatch, table, **usage):
+    price(monkeypatch, table)
+    write_result(tmp_path, **usage)
+    agent = make_agent(tmp_path)
+    context = SimpleNamespace(metadata=None)
+    agent.populate_context_post_run(context)
+    return context
+
+
+def test_cost_prices_each_token_class_at_its_own_rate(tmp_path, monkeypatch):
+    context = context_for(
+        tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
+        input_tokens=1000, output_tokens=100, cache_tokens=600,
+        cache_creation_tokens=400, cache_read_tokens=200)
+    expected = 1000 * 2e-06 + 100 * 1e-05 + 400 * 2.5e-06 + 200 * 2e-07
+    assert context.cost_usd == pytest.approx(expected)
+
+
+def test_the_cache_split_is_not_the_cache_sum(tmp_path, monkeypatch):
+    # 600 cache tokens priced as one class would be either 1.5e-03 (all
+    # creation) or 1.2e-04 (all read). The real answer is neither, and the
+    # gap is why run_episode.sh reports the two apart.
+    context = context_for(
+        tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
+        input_tokens=0, output_tokens=0, cache_tokens=600,
+        cache_creation_tokens=400, cache_read_tokens=200)
+    assert context.cost_usd == pytest.approx(400 * 2.5e-06 + 200 * 2e-07)
+    assert context.cost_usd != pytest.approx(600 * 2.5e-06)
+    assert context.cost_usd != pytest.approx(600 * 2e-07)
+
+
+def test_an_unpriced_model_reports_no_cost_rather_than_a_guess(tmp_path, monkeypatch):
+    context = context_for(
+        tmp_path, monkeypatch, {"some/other-model": RATES},
+        input_tokens=1000, output_tokens=100)
+    assert context.cost_usd is None
+
+
+def test_an_entry_without_usable_rates_is_not_a_free_model(tmp_path, monkeypatch):
+    zeroed = {**RATES, "input_cost_per_token": 0.0, "output_cost_per_token": 0.0}
+    context = context_for(
+        tmp_path, monkeypatch, {"anthropic/claude-fable-5": zeroed},
+        input_tokens=1000, output_tokens=100)
+    assert context.cost_usd is None
+
+
+def test_an_episode_with_no_usage_has_no_cost(tmp_path, monkeypatch):
+    context = context_for(tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES})
+    assert context.cost_usd is None
+
+
+def test_a_missing_cache_class_does_not_zero_the_rest(tmp_path, monkeypatch):
+    # Older result.json files carry no cache split at all. Their input and
+    # output are still real and still cost money.
+    context = context_for(
+        tmp_path, monkeypatch, {"anthropic/claude-fable-5": RATES},
+        input_tokens=1000, output_tokens=100)
+    assert context.cost_usd == pytest.approx(1000 * 2e-06 + 100 * 1e-05)

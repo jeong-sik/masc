@@ -6,7 +6,7 @@
     retains one page, the way {!Masc_tui_board_read_layout} retains one Board
     document (#34272). *)
 
-(** The three branches of [browser_lane_page_lines]: a read scene, the page
+(** The three branches of [browser_lane_page_layout]: a read scene, the page
     text behind it, or neither. *)
 type content =
   | Scene of Masc.Browser_scene.node list
@@ -19,13 +19,17 @@ type content =
 type source = { content : content; scene_cursor : int; columns : int }
 
 type t
+type rows
 
 val create : unit -> t
 
 (** [get cache ~source ~render] returns the retained rows when [source] equals
     the retained one, and otherwise calls [render] and retains its result. One
     page is retained, so moving to another and back re-renders. *)
-val get : t -> source:source -> render:(unit -> string list) -> string array
+val get : t -> source:source -> render:(unit -> string list * int option) -> rows
 
-val count : string array -> int
-val line : string array -> int -> string
+val count : rows -> int
+val line : rows -> int -> string
+val selected_row : rows -> int option
+(** First wrapped row of the selected observed node, or [None] when no node
+    is selected. Comes from the projection, never from matching rendered text. *)

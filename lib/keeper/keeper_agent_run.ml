@@ -781,6 +781,7 @@ let run_turn
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_runtime_attempt_failed
+      ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context
@@ -1427,6 +1428,7 @@ let run_turn
                              manifest)
                       ?deferred_runtime_lane
                       ~on_runtime_retry_deferred:record_runtime_retry_deferred
+                      ?on_runtime_lane_terminal_error
                       ?on_deferred_runtime_consumed
                       ?stream_idle_timeout_s
                       ?body_timeout_s:
@@ -1473,15 +1475,15 @@ let run_turn
                            current_request_projected_messages_ref := None;
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
-                        (fun ~runtime_id ~attempt _error ->
-                           (* The candidate that answered with this error.
-                              The caller's decision record has no other
-                              source for it: a failure returns no
-                              [run_result], and the lane the turn was
-                              budgeted under is not always the candidate
-                              that dispatched (masc#35043). *)
+                        (fun ~runtime_id ~attempt ~dispatch error ->
+                           (* The candidate this error belongs to, and whether
+                              the walk invoked it. The caller's decision
+                              record has no other source for it: a failure
+                              returns no [run_result], and the lane the turn
+                              was budgeted under is not always the candidate
+                              that dispatched. *)
                            Option.iter
-                             (fun callback -> callback ~runtime_id)
+                             (fun callback -> callback ~runtime_id ~dispatch ~error)
                              on_runtime_attempt_failed;
                            (* [on_runtime_attempt] observes only materialized
                               runtimes immediately before provider dispatch.

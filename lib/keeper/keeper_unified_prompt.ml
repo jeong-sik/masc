@@ -1293,17 +1293,49 @@ let active_goal_summaries_for_task
       ) (Goal_store.list_goals_result config ())
 ;;
 
+let constitution_unreadable_reported : (string, unit) Hashtbl.t =
+  Hashtbl.create 1
+
+let constitution_unreadable_mutex = Stdlib.Mutex.create ()
+
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
+  (* The world's own articles (RFC-0442). An unreadable ledger is reported and
+     the turn proceeds without the block: a world that cannot read its norms
+     still has work to do, and a keeper blocked on its own constitution would
+     be a worse failure than one that does not see it. *)
+  let constitution =
+    match World_constitution_store.load ~base_path:config.Workspace.base_path with
+    | Ok ledger -> World_constitution_render.articles ledger.articles
+    | Error error ->
+      (* build_system_prompt runs on every turn of every keeper, and an
+         unreadable ledger does not heal itself, so an unguarded line here is
+         one error per keeper per cycle forever. The condition is worth saying
+         once; repeating it buries everything else. *)
+      let detail = World_constitution_store.read_error_to_string error in
+      let fresh =
+        Stdlib.Mutex.protect constitution_unreadable_mutex (fun () ->
+          if Hashtbl.mem constitution_unreadable_reported detail then false
+          else (
+            Hashtbl.add constitution_unreadable_reported detail ();
+            true))
+      in
+      if fresh then
+        Log.Misc.error
+          "world constitution ledger unreadable, rendering no articles: %s"
+          detail;
+      ""
+  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
       ~keeper_name:meta.name
       ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+      ~constitution
       ()
   in
   (* A second prompt asset used to be appended here as [## Turn Intent] on

@@ -51,6 +51,13 @@ type resource = {
 (** Metadata advertised by [resources/list]. Optional fields remain optional:
     absence is different from an empty value supplied by the server. *)
 
+val display_name : resource -> string
+(** The name a reader sees in the list: the server's [title] when it sent a
+    non-blank one, otherwise the [name]. Beside the type because two readers
+    need the same answer -- the list draws it and the row search matches on
+    it, and a search that matches text the list does not show finds rows the
+    reader cannot see. *)
+
 val resources_of_body :
   request_id:string -> string -> (resource list, string) result
 (** Read a [resources/list] answer in server order without discarding the

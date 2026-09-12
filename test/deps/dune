@@ -30,6 +30,7 @@
   (re_export dated_jsonl)
   (re_export digestif)
   (re_export eio)
+  (re_export eio.mock)
   (re_export eio_main)
   (re_export eio.unix)
   (re_export fmt)

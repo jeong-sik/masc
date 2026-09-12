@@ -14,6 +14,16 @@ module Internal_scope = Internal.Execution_agent_scope
 module Internal_binding = Binding_identity
 module Internal_settlement = Internal.Execution_tool_settlement
 
+(* Direct pipeline fixtures enter the same boundary as Agent: resolve once
+   inside the caller's execution/resume context, then dispatch that frontier.
+   Keep resolution errors as results so malformed-resume tests observe them. *)
+let run_pipeline_turn ~sw ~api_strategy ?raw_trace_run agent =
+  match Internal_pipeline.resolve_turn_frontier agent with
+  | Error error -> Error error
+  | Ok frontier ->
+    Internal_pipeline.run_turn ~sw ~api_strategy ?raw_trace_run ~frontier agent
+;;
+
 let invocation tool_use_id =
   let schedule : Tool_contract.schedule =
     { planned_index = 0
@@ -315,7 +325,7 @@ let test_pipeline_sends_exact_supplied_tools () =
   Internal_agent.set_state
     agent
     { (Internal_agent.state agent) with messages = [ Types.user_msg "hello" ] };
-  (match Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+  (match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
    | Ok (Internal_pipeline.Complete _) -> ()
    | Ok (Internal_pipeline.ToolsExecuted _) -> Alcotest.fail "expected terminal response"
    | Ok (Internal_pipeline.TerminalToolCompleted _) ->
@@ -742,7 +752,7 @@ let test_stream_route_carries_exact_raw_trace_run_id () =
        in
        let expected = Raw_trace.active_run_id active in
        (match
-          Internal_pipeline.run_turn
+          run_pipeline_turn
             ~sw
             ~api_strategy:
               (Internal_pipeline.Stream { on_event = ignore; on_telemetry = None })
@@ -815,7 +825,7 @@ let test_pipeline_output_completes_on_end_turn () =
   @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let agent = make_pipeline_test_agent ~net ~response:(pipeline_response EndTurn) in
-  match Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+  match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
   | Ok (Internal_pipeline.Complete response) ->
     Alcotest.(check bool) "completed" true (response.stop_reason = EndTurn)
   | Ok (Internal_pipeline.ToolsExecuted _) ->
@@ -834,7 +844,7 @@ let test_pipeline_output_rejects_unknown_terminal () =
   let agent =
     make_pipeline_test_agent ~net ~response:(pipeline_response (Unknown "mystery-stop"))
   in
-  match Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+  match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
   | Error (Error.Agent (UnrecognizedStopReason { reason })) ->
     Alcotest.(check string) "unknown reason" "mystery-stop" reason
   | Error err -> Alcotest.failf "unexpected run error: %s" (Error.to_string err)
@@ -850,7 +860,7 @@ let test_pipeline_output_completes_repetition_truncation () =
   let agent =
     make_pipeline_test_agent ~net ~response:(pipeline_response RepetitionTruncation)
   in
-  match Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+  match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
   | Ok (Internal_pipeline.Complete response) ->
     Alcotest.(check bool)
       "documented provider terminal reason is preserved"
@@ -871,7 +881,7 @@ let test_pipeline_output_rejects_tool_stop_without_block () =
   let net = Eio.Stdenv.net env in
   let reject stop_reason expected =
     let agent = make_pipeline_test_agent ~net ~response:(pipeline_response stop_reason) in
-    match Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+    match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
     | Error (Error.Agent (UnrecognizedStopReason { reason })) ->
       Alcotest.(check string) "tool stop rejection" expected reason
     | Error err -> Alcotest.failf "unexpected run error: %s" (Error.to_string err)
@@ -889,7 +899,7 @@ let test_pipeline_text_tool_intent_remains_text () =
   let net = Eio.Stdenv.net env in
   let provider = Provider_mock.to_provider_config () in
   let agent = make_text_tool_intent_test_agent ~net ~provider_config:provider in
-  match Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+  match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
   | Ok (Internal_pipeline.Complete response) ->
     (match response.content with
      | [ Text _ ] -> ()
@@ -2832,7 +2842,7 @@ let test_terminal_durability_failure_is_typed_non_retryable () =
            in
            (match
               Internal.Execution_context.with_agent_scope scope (fun () ->
-                Internal_pipeline.run_turn ~sw ~api_strategy:Internal_pipeline.Sync agent)
+                run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent)
             with
             | Error
                 (Error.Agent
@@ -3082,7 +3092,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                let outcome =
                  Internal.Execution_context.with_agent_scope scope (fun () ->
                    Internal.Execution_context.with_resume_once (fun () ->
-                     Internal_pipeline.run_turn
+                     run_pipeline_turn
                        ~sw
                        ~api_strategy:Internal_pipeline.Sync
                        agent))
@@ -3165,7 +3175,7 @@ let test_settled_malformed_terminal_topology_does_not_finalize_turn () =
                (match
                   Internal.Execution_context.with_agent_scope scope (fun () ->
                     Internal.Execution_context.with_resume_once (fun () ->
-                      Internal_pipeline.run_turn
+                      run_pipeline_turn
                         ~sw
                         ~api_strategy:Internal_pipeline.Sync
                         agent))
@@ -3376,7 +3386,7 @@ let test_agent_run_replays_precheckpoint_terminal_settlement () =
                       (Internal_scope.scope_locator scope));
               match
                 Internal.Execution_context.with_agent_scope scope (fun () ->
-                  Internal_pipeline.run_turn
+                  run_pipeline_turn
                     ~sw
                     ~api_strategy:Internal_pipeline.Sync
                     initial_agent)

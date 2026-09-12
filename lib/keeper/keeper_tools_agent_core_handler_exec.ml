@@ -136,6 +136,8 @@ let execute_with_observers_with_authority
          Keeper_tool_call_log.set_disposition
            ~invocation
            ~disposition:result.Keeper_tool_execution.disposition;
+         if result.retained_artifacts <> [] then
+           Keeper_tool_call_log.set_retained_artifacts ~invocation result.retained_artifacts;
          Option.iter
            (fun evidence ->
               Keeper_tool_call_log.set_file_change_evidence
@@ -260,7 +262,8 @@ let execute_with_observers_with_authority
         ~duration_ms;
       let observed_result : Tool_result.result =
         Tool_result.Completed
-          { Tool_result.tool_name = name
+          { Tool_result.retained_artifacts = result.retained_artifacts
+          ; Tool_result.tool_name = name
           ; content_blocks = None
           ; data = producer_payload ~raw:raw_result producer_data
           ; metadata = producer_metadata
@@ -322,7 +325,8 @@ let execute_with_observers_with_authority
         ~duration_ms;
       let observed_result : Tool_result.result =
         Tool_result.Deferred
-          { Tool_result.tool_name = name
+          { Tool_result.retained_artifacts = result.retained_artifacts
+          ; Tool_result.tool_name = name
           ; content_blocks = None
           ; data = producer_payload ~raw:raw_result producer_data
           ; metadata = producer_metadata

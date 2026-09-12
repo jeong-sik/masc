@@ -5,7 +5,7 @@ module R = Tool_result
 
 let make_result ~name ~success ~duration_ms : R.result =
   if success
-  then R.Completed { content_blocks = None; R.tool_name = name; data = `Null; metadata = None; duration_ms }
+  then R.Completed { retained_artifacts = []; content_blocks = None; R.tool_name = name; data = `Null; metadata = None; duration_ms }
   else
     R.Failed
       { R.class_ = Runtime_failure
@@ -55,7 +55,8 @@ let test_enqueue_writes_directly_to_sqlite () =
     P.enqueue
       ~masc_root:(masc_root base_path)
       (R.Deferred
-         { R.tool_name = "alpha"
+         { R.retained_artifacts = []
+         ; tool_name = "alpha"
          ; data = `Null
          ; metadata = None
          ; content_blocks = None
@@ -102,7 +103,8 @@ let test_restart_hydrates_without_duplicates () =
     P.enqueue
       ~masc_root:(masc_root base_path)
       (R.Deferred
-         { R.tool_name = "alpha"
+         { R.retained_artifacts = []
+         ; tool_name = "alpha"
          ; data = `Null
          ; metadata = None
          ; content_blocks = None

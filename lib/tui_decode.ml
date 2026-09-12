@@ -1006,11 +1006,19 @@ let validate_usage_projection ~input_tokens ~output_tokens
         Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
     | _ ->
         (* Name which of the six are set. The sentence on its own sent a reader
-           to diff the payload against this match by hand, and on a live
-           keeper's log 75 of 200 rows landed here -- 37% of the window -- with
-           no way to tell which field the writer left out. Same shape as the
-           field-set refusal in {!require_exact_object_fields}: the groups that
-           decide the verdict are the groups worth printing. *)
+           to diff the payload against this match by hand, with no way to tell
+           which field the writer left out, and a live keeper's window lands
+           here often enough to matter. Same shape as the field-set refusal in
+           {!require_exact_object_fields}: the groups that decide the verdict
+           are the groups worth printing.
+
+           The missing names come first because this sentence is read on one
+           cut row, behind the metrics notice and the row number. A writer that
+           fills five of six leaves one name unset and five set, so putting the
+           five first is what pushes the one it skipped off the right edge. How
+           many cells are left here is the frame's measure and not this
+           decoder's: test_tui_metrics_tail draws the notice through the same
+           fit and checks the reason survives. *)
         let named =
           [ ("input_tokens", Option.is_some input_tokens)
           ; ("output_tokens", Option.is_some output_tokens)
@@ -1028,9 +1036,8 @@ let validate_usage_projection ~input_tokens ~output_tokens
         in
         Error
           (Printf.sprintf
-             "usage tokens, cost, and trust must form one current atomic \
-              observation (set=[%s], unset=[%s])"
-             (names true) (names false))
+             "usage unset=[%s] set=[%s] is not one current atomic observation"
+             (names false) (names true))
   in
   let* classified = classified in
   let expected_trust = Keeper_usage_trust.to_string classified in

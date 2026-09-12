@@ -165,7 +165,58 @@ let redact_arg s =
   loop 0
 ;;
 
-let redact_argv argv = List.map redact_arg argv
+(* Header values are redacted by where they sit, not by what they look like.
+   [redact_arg] knows three shapes -- Bearer, sk-, credentials in a URL -- and
+   a key shaped like none of them travelled to the corpus as written:
+   [-H "xi-api-key: <key>"] was recorded in full. A redactor built on value
+   shapes lags every provider that spells its key differently, and the shape
+   list only grows after someone finds the next one in an audit file.
+
+   So the rule is positional. The argument after -H or --header is a header,
+   and a header not named below is treated as carrying a credential. Being
+   wrong that way costs a Content-Type in a debugging corpus; being wrong the
+   other way costs the key. *)
+let header_flags = [ "-H"; "--header" ]
+
+let descriptive_headers =
+  [ "accept"
+  ; "accept-encoding"
+  ; "accept-language"
+  ; "cache-control"
+  ; "connection"
+  ; "content-length"
+  ; "content-type"
+  ; "expect"
+  ; "user-agent"
+  ]
+
+let redact_header_arg arg =
+  match String.index_opt arg ':' with
+  (* Not [name: value] at all, so whatever it is goes through the shape rules
+     like any other argument. *)
+  | None -> redact_arg arg
+  | Some colon ->
+    let name = String.sub arg 0 colon in
+    if List.mem (String.lowercase_ascii (String.trim name)) descriptive_headers
+    then redact_arg arg
+    else (
+      let by_shape = redact_arg arg in
+      (* A shape the rules already know keeps the spelling they produce:
+         "Bearer [REDACTED]" says which scheme without saying the token, and
+         that is worth keeping for whoever reads the corpus. Only a value they
+         left untouched -- the case this arm exists for -- is blanked whole. *)
+      if not (String.equal by_shape arg) then by_shape else name ^ ": [REDACTED]")
+;;
+
+let redact_argv argv =
+  let rec loop = function
+    | [] -> []
+    | flag :: value :: rest when List.mem flag header_flags ->
+      flag :: redact_header_arg value :: loop rest
+    | arg :: rest -> redact_arg arg :: loop rest
+  in
+  loop argv
+;;
 
 let env_keys = function
   | None -> None

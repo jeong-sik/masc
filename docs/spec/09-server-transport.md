@@ -24,7 +24,7 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
 - HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
-- gRPC, WebSocket은 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
+- WebSocket은 기본 활성화(`MASC_WS_ENABLED=0`으로 비활성화), gRPC는 기본 비활성화(`MASC_GRPC_ENABLED=1`로 활성화)되는 보조 지원 트랜스포트다.
 - stdio 모드는 CLI-Tool-A MCP 클라이언트의 표준 연결 방식.
 
 ---
@@ -777,7 +777,7 @@ sequenceDiagram
 
 ## 17. Invariants
 
-**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2는 opt-in이고, WS/gRPC는 default-on이며 `MASC_*_ENABLED=0`일 때만 비활성화된다.
+**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2와 gRPC는 opt-in(`MASC_USE_H2=auto|1`, `MASC_GRPC_ENABLED=1`)이고, WS는 default-on이며 `MASC_WS_ENABLED=0`일 때만 비활성화된다.
 
 **INV-SERVER-002**: 모든 MCP POST 요청은 `initialize`/`ping` 제외 `Mcp-Session-Id` 헤더 필수. 없으면 `validate_session_requirement`가 거부한다.
 

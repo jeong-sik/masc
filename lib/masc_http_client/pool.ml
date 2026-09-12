@@ -32,10 +32,10 @@ let default_config = {
   max_total_idle    = 256;
   idle_ttl_seconds  = 60.0;
   connect_timeout_seconds = 5.0;
-  (* TUI refresh ticks every 2 s and issues ~9 surface GETs. 5 s caps
-     connect attempts against a dead host at one per 5 s (was: 9 per
-     2 s), while a restarted server is picked up again within one
-     operator-perceptible delay. *)
+  (* TUI refresh ticks every 2 s and issues ~9 surface GETs. After a
+     reported failure, 5 s suppresses subsequent attempts across ticks.
+     Concurrent cold requests can already be connecting when that failure
+     arrives; each owns its own client scope. *)
   connect_failure_cooldown_seconds = 5.0;
 }
 
@@ -75,18 +75,102 @@ end
 
 module Host_map = Map.Make (Host_key)
 
+(* A daemon keeps each client's switch alive across requests. Closing the
+   scope cancels and joins its protocol fibers, then releases every socket,
+   including sockets Piaf allocated before returning a client or an error.
+   The daemon remains a child of the pool switch, so pool teardown also
+   closes it even when no explicit shutdown was called. *)
+type client = {
+  piaf : Piaf.Client.t;
+  scope : Eio.Switch.t;
+  closed : (unit, exn) result Eio.Promise.t;
+  close : unit -> unit;
+}
+
+exception Client_scope_closed
+
+let reraise_after_close close exn =
+  let bt = Printexc.get_raw_backtrace () in
+  Eio.Cancel.protect (fun () ->
+    try close () with
+    | Eio.Cancel.Cancelled _ ->
+      (* Cleanup cannot replace the caller's original exception, including
+         its cancellation. Preserve that exception and its backtrace. *)
+      Printexc.raise_with_backtrace exn bt
+    | cleanup_exn ->
+      Log.Http.warn "HTTP client scope cleanup: %s"
+        (Printexc.to_string cleanup_exn));
+  Printexc.raise_with_backtrace exn bt
+
+let create_scoped_client ~sw env uri =
+  let ready, publish = Eio.Promise.create () in
+  let stop, stop_request = Eio.Promise.create () in
+  let closed, finished = Eio.Promise.create () in
+  let close () =
+    Eio.Cancel.protect (fun () ->
+      if not (Eio.Promise.is_resolved stop) then
+        Eio.Promise.resolve stop_request ();
+      match Eio.Promise.await closed with
+      | Ok () | Error (Eio.Cancel.Cancelled _) -> ()
+      | Error exn -> raise exn)
+  in
+  (* Eio's fork contract runs the child immediately, before any other fiber.
+     With no yield after this check, the daemon registers and publishes
+     [ready] before another same-domain fiber can cancel [sw]. An already
+     cancelled switch must fail here: fork_daemon would otherwise do nothing.
+     See Eio 1.3 core/eio__core.mli (fork) and eio_posix/sched.ml (Fork). *)
+  Eio.Switch.check sw;
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let outcome =
+      try
+        Eio.Switch.run (fun client_sw ->
+          Eio.Promise.resolve_ok publish client_sw;
+          Eio.Promise.await stop;
+          raise Client_scope_closed)
+      with
+      | Client_scope_closed -> Ok ()
+      | exn -> Error exn
+    in
+    (match outcome with
+     | Error exn ->
+       if not (Eio.Promise.is_resolved ready) then
+         Eio.Promise.resolve_error publish exn
+     | Ok () -> ());
+    Eio.Promise.resolve finished outcome;
+    `Stop_daemon);
+  try
+    let client_sw = Eio.Promise.await_exn ready in
+    match Piaf.Client.create ~sw:client_sw env uri with
+    | Ok piaf ->
+      (* Piaf 0.2.0 can turn cancellation into a connect error. Recheck
+         cancellation at the construction boundary before handing off. *)
+      Eio.Fiber.check ();
+      Eio.Switch.check client_sw;
+      Ok { piaf; scope = client_sw; closed; close }
+    | Error err ->
+      close ();
+      Eio.Fiber.check ();
+      Error err
+  with
+  | Eio.Cancel.Cancelled _ as exn -> reraise_after_close close exn
+  | exn -> reraise_after_close close exn
+
+let close_client client = client.close ()
+let client_is_live client =
+  match Eio.Switch.get_error client.scope with
+  | Some _ -> false
+  | None -> not (Eio.Promise.is_resolved client.closed)
+
 (* ── Idle entry ────────────────────────────────────────────────── *)
 
 (* A reusable piaf Client.t parked on the pool's switch.  Each entry
    carries its [last_used_ts] so the eviction fiber can age it out
    after [idle_ttl_seconds].
 
-   piaf Client.t internals manage the underlying TCP/TLS socket and
-   are bound to the user-supplied [sw].  Because we create clients on
-   the pool's long-lived switch, parked entries survive turn
-   boundaries (RFC-0107 §3.3 hierarchy). *)
+   The client's child switch owns the underlying TCP/TLS sockets and
+   survives request boundaries while this entry is parked. *)
 type idle_entry = {
-  client      : Piaf.Client.t;
+  client      : client;
   last_used_ts : float;
 }
 
@@ -161,7 +245,7 @@ let evict_expired_entries t now =
     t.idle <- remaining;
     !evicted_clients)
   |> List.iter (fun c ->
-       try Piaf.Client.shutdown c
+       try close_client c
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | _ -> ()
@@ -210,7 +294,7 @@ let shutdown t =
           all)
       in
       List.iter (fun e ->
-        try Piaf.Client.shutdown e.client with
+        try close_client e.client with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Log.Http.warn "HTTP pool shutdown: %s" (Printexc.to_string exn))
         leftover))
@@ -241,11 +325,11 @@ let create ~sw ~env ?(config = default_config) () : t =
    would otherwise keep them until the eviction fiber next runs, and the
    whole reason this function exists is that the fiber cannot be relied on
    to run. *)
-let take_live ~now ~ttl entries =
+let take_live ?(is_live = fun _ -> true) ~now ~ttl entries =
   let rec walk expired = function
     | [] -> (None, [], List.rev expired)
     | (client, last_used) :: rest ->
-      if now -. last_used > ttl
+      if now -. last_used > ttl || not (is_live client)
       then walk (client :: expired) rest
       else (Some client, rest, List.rev expired)
   in
@@ -275,6 +359,7 @@ let try_acquire_idle t key ~now =
       | Some entries ->
         let taken, rest, dead =
           take_live ~now ~ttl:t.config.idle_ttl_seconds
+            ~is_live:client_is_live
             (List.map (fun e -> (e.client, e.last_used_ts)) entries)
         in
         expired := dead;
@@ -298,7 +383,7 @@ let try_acquire_idle t key ~now =
   (* Outside the lock, like the eviction fiber does. *)
   List.iter
     (fun c ->
-      try Piaf.Client.shutdown c with
+      try close_client c with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> ())
     !expired;
@@ -363,39 +448,47 @@ let establish_connection ~clock ~timeout_seconds ~resolve ~connect ~create =
 
 (* ── Probe-first connect ───────────────────────────────────────── *)
 
-(* TCP-reachability probe on a short-lived child switch. piaf 0.2.0
-   (pinned) does not release the socket when [Piaf.Client.create]'s
-   connect fails, and the client would be bound to the pool's
-   long-lived switch, so nothing ever reclaims it — one fd per failed
-   request (#dead-server-emfile, 2026-09-10). Probing first confines
-   the failure socket to [probe_sw], whose teardown closes it
-   immediately.
+(* TCP-reachability probe on a short-lived child switch. It reports DNS
+   and TCP failures separately, before entering Piaf's creation path.
 
    Cost: one extra TCP connect+close per fresh client, only on cache
    miss; idle-reuse requests skip this entirely. The probe is
    TCP-level for https too — TLS problems still surface from
    [Piaf.Client.create] and feed the same backoff.
 
-   This only confines the probe socket. A subsequent Piaf creation
-   failure or cancellation (including during TLS) can still retain a
-   socket on the pool switch until shutdown. Backoff limits attempts
-   after reported failures, but caller cancellation propagates without
-   recording a failure (RFC-0106). *)
+   Piaf creation has its own client scope as well, so TCP/TLS failure
+   or cancellation after the probe also releases its sockets. The probe
+   retains separate DNS/TCP diagnostics; callers
+   still receive cancellation without recording backoff (RFC-0106). *)
 let create_probed_client t key uri =
   let net = Eio.Stdenv.net t.env in
   let clock = Eio.Stdenv.clock t.env in
-  establish_connection ~clock
-    ~timeout_seconds:t.config.connect_timeout_seconds
-    ~resolve:(fun () ->
-      Eio.Net.getaddrinfo_stream net key.Host_key.host
-        ~service:(string_of_int key.Host_key.port))
-    ~connect:(fun addr ->
-      Eio.Switch.run (fun probe_sw ->
-        let flow = Eio.Net.connect ~sw:probe_sw net addr in
-        Eio.Flow.close flow))
-    ~create:(fun () ->
-      Piaf.Client.create ~sw:t.sw t.env uri
-      |> Result.map_error (fun err -> Piaf.Error.to_string (err :> Piaf.Error.t)))
+  (* The timeout race can cancel after create returned a client but before
+     the race hands it to its caller. Keep ownership until that handoff. *)
+  let pending = ref None in
+  try
+    let result = establish_connection ~clock
+      ~timeout_seconds:t.config.connect_timeout_seconds
+      ~resolve:(fun () ->
+        Eio.Net.getaddrinfo_stream net key.Host_key.host
+          ~service:(string_of_int key.Host_key.port))
+      ~connect:(fun addr ->
+        Eio.Switch.run (fun probe_sw ->
+          let flow = Eio.Net.connect ~sw:probe_sw net addr in
+          Eio.Flow.close flow))
+      ~create:(fun () ->
+        match create_scoped_client ~sw:t.sw t.env uri with
+        | Ok client -> pending := Some client; Ok client
+        | Error err -> Error (Piaf.Error.to_string (err :> Piaf.Error.t)))
+    in
+    (match result with
+     | Error _ -> Option.iter close_client !pending
+     | Ok _ -> ());
+    result
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    reraise_after_close (fun () -> Option.iter close_client !pending) exn
+  | exn -> reraise_after_close (fun () -> Option.iter close_client !pending) exn
 
 (* Build a fresh piaf client for [key], gated on the per-host
    connect-failure backoff and a TCP reachability probe (see
@@ -412,10 +505,15 @@ let create_fresh t key uri =
   else
     match create_probed_client t key uri with
     | Ok c ->
-      with_mu t (fun () ->
-        t.connect_failures <- Host_map.remove key t.connect_failures);
-      t.counters.create_count_total <- t.counters.create_count_total + 1;
-      Ok c
+      (try
+         with_mu t (fun () ->
+           t.connect_failures <- Host_map.remove key t.connect_failures);
+         t.counters.create_count_total <- t.counters.create_count_total + 1;
+         Ok c
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         reraise_after_close (fun () -> close_client c) exn
+       | exn -> reraise_after_close (fun () -> close_client c) exn)
     | Error err ->
       record_connect_failure t key ~now:(now_ts t);
       Error (Printf.sprintf "%s: %s"
@@ -445,6 +543,7 @@ let release t key client ~close_only =
   let should_park =
     not close_only
     && not (Atomic.get t.stop)
+    && client_is_live client
     && count_idle t < t.config.max_total_idle
   in
   if should_park then begin
@@ -452,13 +551,14 @@ let release t key client ~close_only =
     with_mu t (fun () ->
       let existing = Host_map.find_opt key t.idle |> Option.value ~default:[] in
       if not (Atomic.get t.stop)
+         && client_is_live client
          && List.length existing < t.config.max_idle_per_host then begin
         let entry = { client; last_used_ts = now } in
         t.idle <- Host_map.add key (entry :: existing) t.idle;
         parked := true
       end);
     if not !parked then begin
-      (try Piaf.Client.shutdown client
+      (try close_client client
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | _ -> ());
@@ -466,7 +566,7 @@ let release t key client ~close_only =
         t.counters.evict_count_total <- t.counters.evict_count_total + 1)
     end
   end else
-    try Piaf.Client.shutdown client
+    try close_client client
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> ()
@@ -604,7 +704,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
             (fun () ->
                try
-                 Piaf.Client.request client
+                 Piaf.Client.request client.piaf
                    ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
                    ~meth:(method_to_piaf method_) path
                with
@@ -796,7 +896,7 @@ let do_request_streaming
             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
             (fun () ->
                try
-                 Piaf.Client.request client
+                 Piaf.Client.request client.piaf
                    ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
                    ~meth:(method_to_piaf method_) path
                with
@@ -889,6 +989,6 @@ module For_testing = struct
   module Host_key = Host_key
   let close_unreleased_client = close_unreleased_client
   let read_body_with_idle = read_body_with_idle
-  let take_live = take_live
+  let take_live ~now ~ttl entries = take_live ~now ~ttl entries
   let ensure_host_header = ensure_host_header
 end

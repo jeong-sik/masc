@@ -246,6 +246,188 @@ let test_establishment_cancellation () =
   Alcotest.(check string) "outer cancellation is not a probe failure"
     "outer cancellation" (error_message result)
 
+(* Each accepted socket has its own switch. Completion is published after
+   that switch closes, so FD measurements exclude server-side socket races.
+   [serve] returns false for the probe's connect-and-close, true for a real
+   TLS/HTTP conversation. *)
+let start_loopback_server ~sw env serve =
+  let listener = Eio.Net.listen (Eio.Stdenv.net env) ~sw
+    ~reuse_addr:true ~backlog:8 (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr listener with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> Alcotest.fail "expected TCP listener" in
+  let completed = Eio.Stream.create 1 in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec loop () =
+      let handled = Eio.Switch.run (fun connection_sw ->
+        let flow, _ = Eio.Net.accept listener ~sw:connection_sw in
+        serve flow) in
+      if handled then Eio.Stream.add completed ();
+      loop ()
+    in loop ());
+  port, completed
+
+let fd_count () =
+  match (Fd_accountant.fd_snapshot ()).fd_open with
+  | Some count -> count
+  | None -> Alcotest.fail "FD counter unavailable for socket lifetime regression"
+
+let tls_started flow =
+  try
+    let first_byte = Cstruct.create 1 in
+    ignore (Eio.Flow.single_read flow first_byte);
+    Alcotest.(check int) "client sent a TLS handshake record" 22
+      (Cstruct.get_uint8 first_byte 0);
+    true
+  with End_of_file -> false
+
+let test_failed_tls_fd_flat () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let handshakes = ref 0 in
+  let port, completed = start_loopback_server ~sw env (fun flow ->
+    if not (tls_started flow) then false else begin
+      incr handshakes;
+      Eio.Flow.copy_string "HTTP/1.1 400 Bad Request\r\n\r\n" flow;
+      true
+    end) in
+  let config = { Masc_http_client.Pool.default_config with
+    connect_failure_cooldown_seconds = 0.0 } in
+  let pool = Masc_http_client.Pool.create ~sw ~env ~config () in
+  let url = Printf.sprintf "https://127.0.0.1:%d/" port in
+  let attempt () =
+    (* Bound ordinary network waits. CI's process timeout must cover a
+       deadlock in cancellation-protected cleanup. *)
+    Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+      ignore (error_message
+        (Masc_http_client.Pool.request pool ~method_:`GET ~url ()));
+      Eio.Stream.take completed)
+  in
+  attempt (); (* Initialize TLS before measuring repeated failures. *)
+  let before_ = fd_count () in
+  for _ = 1 to 50 do attempt () done;
+  Alcotest.(check int) "every request reached TLS after its probe" 51 !handshakes;
+  Alcotest.(check int) "failed TLS retains no client descriptors"
+    before_ (fd_count ());
+  Alcotest.(check int) "no failed TLS client was pooled" 0
+    (Masc_http_client.Pool.stats pool).total_idle;
+  Masc_http_client.Pool.shutdown pool
+
+let drain_until_eof flow =
+  let buf = Cstruct.create 4096 in
+  let rec loop () = ignore (Eio.Flow.single_read flow buf); loop () in
+  try loop () with End_of_file -> ()
+
+let test_cancelled_tls_fd_flat () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let started = Eio.Stream.create 1 in
+  let port, completed = start_loopback_server ~sw env (fun flow ->
+    if not (tls_started flow) then false else begin
+      Eio.Stream.add started ();
+      drain_until_eof flow;
+      true
+    end) in
+  let config = { Masc_http_client.Pool.default_config with
+    connect_timeout_seconds = 30.0;
+    connect_failure_cooldown_seconds = 0.0 } in
+  let pool = Masc_http_client.Pool.create ~sw ~env ~config () in
+  let url = Printf.sprintf "https://127.0.0.1:%d/" port in
+  let cancelled = ref 0 in
+  let attempt () =
+    Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+      let result = Eio.Fiber.first
+        (fun () ->
+          try Masc_http_client.Pool.request pool ~method_:`GET ~url () with
+          | Eio.Cancel.Cancelled _ as exn -> incr cancelled; raise exn)
+        (fun () ->
+          Eio.Stream.take started;
+          Error "cancelled after TLS started") in
+      Alcotest.(check string) "caller cancels a live TLS handshake"
+        "cancelled after TLS started" (error_message result);
+      (* The server's EOF proves the client close happened before returning
+         to the next attempt, while the pool switch remains alive. *)
+      Eio.Stream.take completed)
+  in
+  attempt ();
+  let before_ = fd_count () in
+  for _ = 1 to 50 do attempt () done;
+  Alcotest.(check int) "every stalled handshake propagated cancellation" 51 !cancelled;
+  Alcotest.(check int) "cancelled TLS retains no client descriptors"
+    before_ (fd_count ());
+  Alcotest.(check int) "cancellation does not create backoff state" 0
+    (Masc_http_client.Pool.For_testing.connect_failure_count pool);
+  Masc_http_client.Pool.shutdown pool
+
+let test_healthy_reuse_and_scope_shutdown ~explicit () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let requests = ref 0 in
+  let port, completed = start_loopback_server ~sw env (fun flow ->
+    let reader = Eio.Buf_read.of_flow flow ~max_size:4096 in
+    let handled = ref false in
+    let rec headers () =
+      if Eio.Buf_read.line reader <> "" then headers () in
+    let rec loop () =
+      ignore (Eio.Buf_read.line reader);
+      handled := true;
+      headers ();
+      incr requests;
+      Eio.Flow.copy_string
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok" flow;
+      loop () in
+    (try loop () with End_of_file -> ());
+    !handled) in
+  let url = Printf.sprintf "http://127.0.0.1:%d/" port in
+  let before_ = fd_count () in
+  Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+    Eio.Switch.run (fun pool_sw ->
+      let pool = Masc_http_client.Pool.create ~sw:pool_sw ~env () in
+      for _ = 1 to 2 do
+        match Masc_http_client.Pool.request pool ~method_:`GET ~url () with
+        | Error msg -> Alcotest.fail msg
+        | Ok response -> Alcotest.(check string) "healthy response" "ok" response.body
+      done;
+      let stats = Masc_http_client.Pool.stats pool in
+      Alcotest.(check int) "one client survived both requests" 1 stats.create_count_total;
+      Alcotest.(check int) "second request reused the client" 1 stats.reuse_count_total;
+      Alcotest.(check int) "client parked before shutdown" 1 stats.total_idle;
+      if explicit then Masc_http_client.Pool.shutdown pool);
+    Eio.Stream.take completed);
+  Alcotest.(check int) "server handled both requests" 2 !requests;
+  Alcotest.(check int) "shutdown closes the client scope"
+    before_ (fd_count ())
+
+let test_cancelled_pool_before_client_construction () =
+  Eio_main.run @@ fun env ->
+  let before_ = fd_count () in
+  let cancelled = ref false in
+  (try Eio.Switch.run (fun sw ->
+    let listener = Eio.Net.listen (Eio.Stdenv.net env) ~sw
+      ~reuse_addr:true ~backlog:2 (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+    let port = match Eio.Net.listening_addr listener with
+      | `Tcp (_, port) -> port
+      | `Unix _ -> Alcotest.fail "expected TCP listener" in
+    let pool = Masc_http_client.Pool.create ~sw ~env () in
+    Eio.Switch.fail sw Exit;
+    (* Protect the caller so the TCP probe reaches create's pool-switch
+       check. No daemon can be spawned on this cancelled switch. *)
+    Eio.Cancel.protect (fun () ->
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+        try
+          ignore (Masc_http_client.Pool.request pool ~method_:`GET
+            ~url:(Printf.sprintf "http://127.0.0.1:%d/" port) ());
+          Alcotest.fail "cancelled pool accepted client construction"
+        with Eio.Cancel.Cancelled _ -> cancelled := true)))
+   with Exit -> ());
+  Alcotest.(check bool) "construction observes cancelled pool switch"
+    true !cancelled;
+  Alcotest.(check int) "cancelled construction leaves no scope or socket"
+    before_ (fd_count ())
+
 let () =
   Alcotest.run "Pool_dead_server_fd"
     [ ( "dead-server",
@@ -264,4 +446,14 @@ let () =
           Alcotest.test_case "establishment shares one deadline" `Quick
             test_establishment_deadline;
           Alcotest.test_case "establishment propagates cancellation" `Quick
-            test_establishment_cancellation ] ) ]
+            test_establishment_cancellation;
+          Alcotest.test_case "failed TLS releases descriptors" `Quick
+            test_failed_tls_fd_flat;
+          Alcotest.test_case "cancelled TLS releases descriptors" `Quick
+            test_cancelled_tls_fd_flat;
+          Alcotest.test_case "healthy client reuses and shuts down" `Quick
+            (test_healthy_reuse_and_scope_shutdown ~explicit:true);
+          Alcotest.test_case "parent teardown closes parked client" `Quick
+            (test_healthy_reuse_and_scope_shutdown ~explicit:false);
+          Alcotest.test_case "cancelled pool cannot start a client scope" `Quick
+            test_cancelled_pool_before_client_construction ] ) ]

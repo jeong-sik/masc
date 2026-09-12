@@ -39,8 +39,9 @@ type t
 
     [connect_failure_cooldown_seconds]: after a connect to a host fails,
     requests to that host fast-fail without opening a socket for this
-    long. Bounds both the probe traffic against a dead server and any
-    residual fd growth from the create path. Zero disables backoff.
+    long. Suppresses attempts after a reported failure; already concurrent
+    cold requests can still connect. Socket cleanup belongs to each client
+    scope independently of this cooldown. Zero disables backoff.
     Expired failures are removed by lookup and the idle eviction fiber;
     successful creation and shutdown also clear failure state. *)
 type config = {
@@ -57,10 +58,10 @@ val default_config : config
        connect_failure_cooldown_seconds = 5.0 }]. *)
 
 val shutdown : t -> unit
-(** Idempotently stop accepting idle connections and close parked clients.
-    Call before leaving a short-lived switch: client fibers must be closed
-    before that switch can finish joining them. In-flight requests must have
-    completed; late releases close their clients instead of parking them. *)
+(** Idempotently stop accepting idle connections and close parked client scopes.
+    Parent switch teardown also closes these scopes without an explicit call.
+    In-flight requests must have completed before explicit shutdown; late
+    releases close their clients instead of parking them. *)
 
 val create :
   sw:Eio.Switch.t ->
@@ -68,13 +69,15 @@ val create :
   ?config:config ->
   unit ->
   t
-(** Initialize the pool on a long-lived switch (server root_sw). Idle
-    connections close when [sw] closes; in-flight requests outlive
-    pool cleanup via per-call sub-switches.
+(** Initialize the pool on a long-lived switch (server root_sw). All client
+    scopes remain bounded by [sw], including while idle or in flight.
 
     [env] is the full Eio standard environment, required by the piaf
-    transport (h1/h2 client creation). The pool keeps a reference and
-    issues [Piaf.Client.create ~sw env uri] internally on cache miss. *)
+    transport (h1/h2 client creation). Each client has a child switch owned
+    by a daemon on [sw]. Failed/cancelled creation closes that child switch
+    before returning; successful clients retain it through idle reuse.
+    Eviction and shutdown cancel and join the child's fibers before closing
+    its sockets. *)
 
 (* ── Request API ───────────────────────────────────────────────── *)
 

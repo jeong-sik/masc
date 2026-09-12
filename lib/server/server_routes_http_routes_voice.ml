@@ -15,7 +15,7 @@
     route remains on the strict-auth public-read allowlist. Artifact digests
     are content identifiers, not authorization capabilities.
 
-    Response (200): raw bytes, Content-Type audio/mpeg. NOT a JSON envelope:
+    Response (200): raw bytes, Content-Type audio/mpeg or audio/wav. NOT a JSON envelope:
     the dashboard fetches this URL directly from an [<audio>]/[Audio]
     element, which needs the media bytes, not a wrapped payload.
 
@@ -30,14 +30,7 @@ open Server_auth
 
 module Http = Http_server_eio
 
-let token_hex_len = 32 (* Random_id.hex ~bytes:16 => 2*16 hex chars *)
-
-let is_valid_token (s : string) : bool =
-  String.length s = token_hex_len
-  && String.for_all
-       (fun c ->
-         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
-       s
+let is_valid_token token = Option.is_some (Voice_bridge_core.audio_file_of_token token)
 
 let generated_media_serve_max_bytes () =
   Env_config.KeeperGeneratedMedia.max_bytes ()
@@ -45,26 +38,26 @@ let generated_media_serve_max_bytes () =
 (* Clip path under the same audio dir [Voice_bridge_transport.make_audio_file]
    writes to. Reuses [Voice_bridge_core.masc_base_dir] so this route and the
    synthesis side cannot drift apart. *)
-let clip_path ~token =
-  Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio"
-  |> fun dir -> Filename.concat dir (token ^ ".mp3")
-
 let serve_clip ~token request reqd =
-  let path = clip_path ~token in
+  match Voice_bridge_core.audio_file_of_token token with
+  | None ->
+    respond_public_read_json_value ~status:`Bad_request request reqd
+      (`Assoc [ "error", `String "invalid audio token" ])
+  | Some (filename, format) ->
+  let path =
+    Filename.concat (Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio") filename
+  in
   if not (Sys.file_exists path) then
     (* Never synthesized, or reaped by the 24h TTL reaper. Text-only render
        remains the dashboard fallback, so 404 is not a hard failure. *)
     respond_public_read_json_value ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
   else (
-    (* Raw bytes — the dashboard's <audio>/Audio element fetches this URL
-       directly. [Fs_compat.load_file] returns the mp3 bytes as a string;
-       mp3 has no OCaml-string encoding hazard. content-length is explicit
-       to avoid chunked encoding, which some clients mishandle for media. *)
+    (* The capability carries the format written by synthesis. *)
     let body = Fs_compat.load_file path in
     let headers =
       Httpun.Headers.of_list
-        ( ("content-type", "audio/mpeg")
+        ( ("content-type", Voice_bridge_core.audio_content_type format)
         :: ("content-length", string_of_int (String.length body))
         :: public_read_cors_headers request )
     in
@@ -304,7 +297,7 @@ let add_routes router =
                respond_public_read_json_value ~status:`Bad_request request reqd
                  (`Assoc
                     [ ("error", `String "invalid token")
-                    ; ("reason", `String "expected 32-char hex (128-bit)")
+                    ; ("reason", `String "expected 32-char hex (128-bit), optionally followed by .wav")
                     ])
            | Some token -> serve_clip ~token request reqd)
          request reqd)

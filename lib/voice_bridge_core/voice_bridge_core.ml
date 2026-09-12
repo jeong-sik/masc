@@ -1,5 +1,40 @@
 (** Voice_bridge core — config, helpers, audio path utils, local playback. *)
 
+type audio_format = Mp3 | Wav
+
+let audio_extension = function Mp3 -> ".mp3" | Wav -> ".wav"
+let audio_content_type = function Mp3 -> "audio/mpeg" | Wav -> "audio/wav"
+
+let audio_format_of_path path =
+  match Filename.extension path with
+  | ".mp3" -> Some Mp3
+  | ".wav" -> Some Wav
+  | _ -> None
+
+let valid_audio_id token =
+  (* Random_id.hex ~bytes:16 produces the existing 128-bit capability. *)
+  String.length token = 32
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false)
+       token
+
+let audio_file_of_token token =
+  let id, format =
+    match Filename.chop_suffix_opt ~suffix:".wav" token with
+    | Some id -> id, Wav
+    | None -> token, Mp3
+  in
+  if valid_audio_id id then Some (id ^ audio_extension format, format) else None
+
+let audio_token_of_file path =
+  match audio_format_of_path path with
+  | None -> None
+  | Some format ->
+    let filename = Filename.basename path in
+    let id = Filename.chop_extension filename in
+    if not (valid_audio_id id) then None
+    else Some (match format with Mp3 -> id | Wav -> filename)
+
 (** MASC Voice Bridge - Eio-native Implementation
 
     Enables multi-agent voice collaboration via turn-based speaking.

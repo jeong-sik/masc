@@ -2770,14 +2770,15 @@ let voice_agent_backspace session =
   ; vas_status = None }
 
 let voice_agent_selected session =
-  match
-    ( List.nth_opt session.vas_agents session.vas_agent_cursor
-    , List.nth_opt session.vas_voices session.vas_voice_cursor )
-  with
-  | Some agent, _ when String.trim session.vas_manual_voice <> "" ->
-    Some (agent, String.trim session.vas_manual_voice)
-  | Some agent, Some (voice_id, _) -> Some (agent, voice_id)
-  | _ -> None
+  match List.nth_opt session.vas_agents session.vas_agent_cursor with
+  | None -> None
+  | Some agent ->
+    let manual = String.trim session.vas_manual_voice in
+    if manual <> "" then Some (agent, manual)
+    else if session.vas_voice_cursor < 0 then None
+    else
+      Option.map (fun (voice_id, _) -> agent, voice_id)
+        (List.nth_opt session.vas_voices session.vas_voice_cursor)
 
 let voice_wizard_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) =
   match step with

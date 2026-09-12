@@ -154,9 +154,9 @@ let handle_speak_with_outcome
           let clip : Keeper_chat_store.audio_clip option =
             match Json_util.get_string json "audio_file" with
             | Some path ->
-              let token =
-                path |> Filename.basename |> Filename.chop_extension
-              in
+              (match Voice_bridge_core.audio_token_of_file path,
+                     Voice_bridge_core.audio_format_of_path path with
+              | Some token, Some format ->
               let audio_url = Masc_network_defaults.voice_audio_path token in
               let duration_sec =
                 Voice_bridge_core.audio_duration_seconds ~audio_file:path
@@ -164,12 +164,13 @@ let handle_speak_with_outcome
               Some
                 { Keeper_chat_store.token
                 ; audio_url = Some audio_url
-                ; mime = "audio/mpeg"
+                ; mime = Voice_bridge_core.audio_content_type format
                 ; duration_sec
                 ; message_text = message
                 ; device_id = audio_device
                 ; expired = false
                 }
+              | None, _ | _, None -> None)
             | None -> None
           in
           Keeper_chat_store.append_assistant_message

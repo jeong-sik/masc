@@ -232,6 +232,11 @@ printf '%s\n' '{"voices":[{"voice_id":"http-voice"}]}'
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/say-argv"
 printf '%s\n' 'Command Voice  ko_KR  # hello'
 |};
+      write "whisper-cli"
+        {|#!/bin/sh
+printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/whisper-argv"
+printf '%s\n' '명령 음성'
+|};
       Unix.putenv "PATH" root;
       Unix.putenv "MASC_TEST_CATALOGUE_DIR" root;
       Unix.putenv "MASC_TEST_CATALOGUE_KEY" "fixture-catalogue-secret";
@@ -243,20 +248,20 @@ let listed_id endpoint =
   | Ok _ -> Alcotest.fail "expected exactly one voice"
   | Error message -> Alcotest.fail message
 
-let test_resolved_alias_selects_the_same_transport_as_the_request () =
+let test_declared_kind_selects_the_same_transport_as_the_request () =
   with_catalogue_processes (fun ~read:_ ~root:_ ->
     let endpoint =
-      { (endpoint ~kind:Voice_config.Macos_say ~base_url:None) with
-        Voice_config.id = "elevenlabs"
+      { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
+        Voice_config.id = "say"
       ; api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
       }
     in
-    Alcotest.(check string) "HTTP alias wins over the declared command kind"
+    Alcotest.(check string) "declared HTTP transport wins over a command-shaped ID"
       "http-voice" (listed_id endpoint);
     let endpoint =
-      { endpoint with Voice_config.id = "say"; kind = Voice_config.Elevenlabs_direct }
+      { endpoint with Voice_config.id = "elevenlabs"; kind = Voice_config.Macos_say }
     in
-    Alcotest.(check string) "command alias wins over the declared HTTP kind"
+    Alcotest.(check string) "declared command transport wins over an HTTP-shaped ID"
       "Command Voice" (listed_id endpoint))
 
 let test_catalogue_credentials_reach_stdin_and_never_argv () =
@@ -329,18 +334,77 @@ kind = "macos_say"
     Alcotest.(check string) "say was only asked to list voices, never synthesize"
       "-v\n?\n" (read "say-argv"))
 
+let test_normal_transcription_uses_the_command_transport () =
+  with_catalogue_processes (fun ~read ~root ->
+    Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out ->
+      output_string out
+        {|[voice.stt]
+default_model = "/fixture/model.bin"
+[[voice.stt.endpoints]]
+id = "elevenlabs"
+kind = "whisper_cli"
+|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+     | Ok (`Assoc fields) ->
+       Alcotest.(check bool) "normal transcription returns command text" true
+         (List.assoc_opt "text" fields = Some (`String "명령 음성"));
+       Alcotest.(check bool) "the status is a real transcription" true
+         (List.assoc_opt "status" fields = Some (`String "transcribed"))
+     | Ok _ -> Alcotest.fail "expected a transcription object"
+     | Error message -> Alcotest.fail message);
+    Alcotest.(check string) "the configured model and recording reached whisper"
+      "-m\n/fixture/model.bin\n-l\nauto\n-nt\n-f\n/fixture/audio.wav\n"
+      (read "whisper-argv");
+    match Voice.probe_stt ~audio_file:"/fixture/audio.wav" () with
+    | Ok [ { Voice.outcome = Voice.Answered message; _ } ] ->
+      Alcotest.(check string) "the diagnostic takes the same transport"
+        "heard 명령 음성" message
+    | Ok _ -> Alcotest.fail "the working command should answer the probe"
+    | Error message -> Alcotest.fail message)
+
+let test_audio_capabilities_keep_the_generated_format () =
+  List.iter
+    (fun (format, suffix, mime, token_suffix) ->
+      let id = String.make 32 'a' in
+      let filename = id ^ suffix in
+      let token = id ^ token_suffix in
+      Alcotest.(check (option string)) "producer capability"
+        (Some token) (Voice.audio_token_of_file filename);
+      match Voice.audio_file_of_token token with
+      | Some (served_filename, served_format) ->
+        Alcotest.(check string) "the HTTP and history readers find the actual file"
+          filename served_filename;
+        Alcotest.(check bool) "the format survives the URL" true (format = served_format);
+        Alcotest.(check string) "the MIME describes the file" mime
+          (Voice.audio_content_type served_format)
+      | None -> Alcotest.fail "a generated capability must be accepted")
+    [ Voice.Mp3, ".mp3", "audio/mpeg", ""
+    ; Voice.Wav, ".wav", "audio/wav", ".wav" ];
+  List.iter
+    (fun token ->
+      Alcotest.(check bool) "malformed capabilities cannot select a path" true
+        (Option.is_none (Voice.audio_file_of_token token)))
+    [ "../clip.wav"; String.make 31 'a' ^ ".wav"; String.make 32 'g'; "clip.mp3" ]
+
 let () =
   Alcotest.run
     "voice_catalog"
     [ ( "request dispatch and credentials"
-      , [ Alcotest.test_case "resolved aliases select the request transport" `Quick
-            test_resolved_alias_selects_the_same_transport_as_the_request
+      , [ Alcotest.test_case "declared kind selects the request transport" `Quick
+            test_declared_kind_selects_the_same_transport_as_the_request
         ; Alcotest.test_case "credentials reach stdin and never argv" `Quick
             test_catalogue_credentials_reach_stdin_and_never_argv
         ; Alcotest.test_case "catalogue requests dispatch every endpoint kind" `Quick
             test_catalogue_requests_dispatch_every_endpoint_kind
         ; Alcotest.test_case "say probe refuses an uninstalled voice" `Quick
             test_say_probe_refuses_an_uninstalled_voice_before_synthesis
+        ; Alcotest.test_case "normal transcription uses the command transport" `Quick
+            test_normal_transcription_uses_the_command_transport
+        ; Alcotest.test_case "audio capabilities keep the generated format" `Quick
+            test_audio_capabilities_keep_the_generated_format
         ] )
     ; ( "what the endpoint answered"
       , [ Alcotest.test_case "the answer becomes pickable rows" `Quick

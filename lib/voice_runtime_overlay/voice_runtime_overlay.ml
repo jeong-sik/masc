@@ -135,9 +135,9 @@ let adapter_for_endpoint_kind = function
 ;;
 
 let adapter_for_endpoint (endpoint : Voice_config.endpoint) =
-  match resolve_adapter endpoint.id with
-  | Some adapter -> adapter
-  | None -> adapter_for_endpoint_kind endpoint.kind
+  (* IDs name entries; only the declared kind chooses their transport.
+     Provider selection still accepts aliases through resolve_adapter. *)
+  adapter_for_endpoint_kind endpoint.kind
 ;;
 
 let endpoint_matches_provider_label label (endpoint : Voice_config.endpoint) =
@@ -501,7 +501,11 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
     (* A blank voice is not an error: say then uses the system voice, which is
        what a reader who never picked one has been listening to all along. *)
     let voice_args = if String.trim voice = "" then [] else [ "-v"; String.trim voice ] in
-    Ok { argv = (command :: voice_args) @ [ "-o"; output_file; message ] }
+    Ok
+      { argv =
+          (command :: voice_args)
+          @ [ "--file-format=WAVE"; "--data-format=LEI16"; "-o"; output_file; message ]
+      }
 ;;
 
 (* The command that lists the voices installed on this machine.

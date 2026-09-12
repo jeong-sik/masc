@@ -1272,9 +1272,14 @@ let test_unknown_kind_reported_reads_utterance () =
           Alcotest.failf "expected 1 row, got %d" (List.length messages))
 
 let audio_path ~base_dir token =
+  let filename =
+    match Voice_bridge_core.audio_file_of_token token with
+    | Some (filename, _) -> filename
+    | None -> Alcotest.fail "invalid test capability"
+  in
   Filename.concat
     (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "audio")
-    (token ^ ".mp3")
+    filename
 
 let json_audio_expired = function
   | `Assoc fields -> (
@@ -1289,20 +1294,23 @@ let json_audio_expired = function
 (* RFC-0235 P3: the history endpoint marks audio clips as expired when the
    underlying MP3 has been reaped, so the dashboard can show a fallback
    instead of a broken native player. *)
-let test_audio_clip_marked_expired_when_file_missing () =
+let audio_clip_expiry_for_format format =
   let base_dir = temp_base_path "keeper-chat-store-audio-expired" in
   Fun.protect
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "keeper-chat-audio-expired" in
-      let token = "voice-token-missing" in
+      let token =
+        match format with Voice_bridge_core.Mp3 -> String.make 32 'a'
+        | Voice_bridge_core.Wav -> String.make 32 'b' ^ ".wav"
+      in
       K.append_assistant_message ~base_dir ~keeper_name
         ~content:"I will say this out loud now."
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~audio:
           { K.token
           ; audio_url = None
-          ; mime = "audio/mpeg"
+          ; mime = Voice_bridge_core.audio_content_type format
           ; duration_sec = None
           ; message_text = "I will say this out loud now."
           ; device_id = None
@@ -1317,10 +1325,16 @@ let test_audio_clip_marked_expired_when_file_missing () =
       (* Create the file and reload: the clip is no longer expired. *)
       let path = audio_path ~base_dir token in
       mkdir_p (Filename.dirname path);
-      write_file path "mp3-bytes";
+      write_file path "audio-bytes";
       let rows_present = Yojson.Safe.Util.to_list (K.to_json_array ~base_dir messages) in
       Alcotest.(check bool) "present file does not mark expired" false
         (json_audio_expired (List.hd rows_present)))
+
+let test_audio_clip_marked_expired_when_file_missing () =
+  audio_clip_expiry_for_format Voice_bridge_core.Mp3
+
+let test_wav_clip_marked_expired_when_file_missing () =
+  audio_clip_expiry_for_format Voice_bridge_core.Wav
 
 let test_audio_clip_expired_persists_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-audio-expired-rt" in
@@ -3276,6 +3290,8 @@ let () =
         [
           Alcotest.test_case "missing file marks clip expired" `Quick
             test_audio_clip_marked_expired_when_file_missing;
+          Alcotest.test_case "WAV expiry uses its actual filename" `Quick
+            test_wav_clip_marked_expired_when_file_missing;
           Alcotest.test_case "expired flag round-trips" `Quick
             test_audio_clip_expired_persists_roundtrip;
           Alcotest.test_case "audio_url and device_id persist" `Quick

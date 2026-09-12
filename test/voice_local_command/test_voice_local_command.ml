@@ -42,11 +42,12 @@ let test_say_is_asked_for_a_voice_and_a_file () =
     argv_of
       (Overlay.tts_command_for_endpoint
          (endpoint ~kind:Voice_config.Macos_say "macos-say")
-         ~voice:"Yuna" ~message:"안녕하세요 키퍼입니다" ~output_file:"/tmp/out.aiff")
+         ~voice:"Yuna" ~message:"안녕하세요 키퍼입니다" ~output_file:"/tmp/out.wav")
   in
   Alcotest.(check (list string))
     "the argv that was run"
-    [ "say"; "-v"; "Yuna"; "-o"; "/tmp/out.aiff"; "안녕하세요 키퍼입니다" ]
+    [ "say"; "-v"; "Yuna"; "--file-format=WAVE"; "--data-format=LEI16"
+    ; "-o"; "/tmp/out.wav"; "안녕하세요 키퍼입니다" ]
     argv
 
 (* A reader who never picked a voice has been listening to the system voice all
@@ -57,10 +58,11 @@ let test_no_voice_leaves_the_flag_off () =
     argv_of
       (Overlay.tts_command_for_endpoint
          (endpoint ~kind:Voice_config.Macos_say "macos-say")
-         ~voice:"  " ~message:"hello" ~output_file:"/tmp/out.aiff")
+         ~voice:"  " ~message:"hello" ~output_file:"/tmp/out.wav")
   in
   Alcotest.(check (list string))
-    "no -v at all" [ "say"; "-o"; "/tmp/out.aiff"; "hello" ] argv
+    "no -v at all"
+    [ "say"; "--file-format=WAVE"; "--data-format=LEI16"; "-o"; "/tmp/out.wav"; "hello" ] argv
 
 (* The message is the last argument and is never joined into a string. A
    keeper's sentence is arbitrary text, and a shell between here and say would
@@ -70,12 +72,12 @@ let test_the_message_stays_one_argument () =
     argv_of
       (Overlay.tts_command_for_endpoint
          (endpoint ~kind:Voice_config.Macos_say "macos-say")
-         ~voice:"Yuna" ~message:"; rm -rf ~ # \"quoted\"" ~output_file:"/tmp/o.aiff")
+         ~voice:"Yuna" ~message:"; rm -rf ~ # \"quoted\"" ~output_file:"/tmp/o.wav")
   in
   Alcotest.(check string)
     "the whole sentence is one argv entry"
     "; rm -rf ~ # \"quoted\"" (List.nth argv (List.length argv - 1));
-  Alcotest.(check int) "and nothing was split off it" 6 (List.length argv)
+  Alcotest.(check int) "and nothing was split off it" 8 (List.length argv)
 
 let test_whisper_is_asked_for_the_model_and_the_file () =
   let argv =
@@ -148,7 +150,7 @@ let test_each_half_refuses_the_other () =
   (match
      Overlay.tts_command_for_endpoint
        (endpoint ~kind:Voice_config.Whisper_cli "whisper-local")
-       ~voice:"Yuna" ~message:"hello" ~output_file:"/tmp/o.aiff"
+       ~voice:"Yuna" ~message:"hello" ~output_file:"/tmp/o.wav"
    with
    | Ok _ -> Alcotest.fail "a transcriber must not be asked to speak"
    | Error message ->
@@ -170,7 +172,7 @@ let test_an_http_endpoint_is_not_a_command () =
   match
     Overlay.tts_command_for_endpoint
       (endpoint ~kind:Voice_config.Elevenlabs_direct "elevenlabs")
-      ~voice:"Yuna" ~message:"hello" ~output_file:"/tmp/o.aiff"
+      ~voice:"Yuna" ~message:"hello" ~output_file:"/tmp/o.wav"
   with
   | Ok _ -> Alcotest.fail "an HTTP endpoint has no command to run"
   | Error message ->

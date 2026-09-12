@@ -1,7 +1,7 @@
 (** Transport helpers for {!Voice_bridge}. *)
 
 val safe_agent_id : string -> string
-val make_audio_file : unit -> string
+val make_audio_file : ?format:Voice_bridge_core.audio_format -> unit -> string
 
 val run_voice_status
   :  ?timeout_sec:float

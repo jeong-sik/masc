@@ -15,6 +15,15 @@
 
 (** {1 Request timeout} *)
 
+type audio_format = Mp3 | Wav
+val audio_extension : audio_format -> string
+val audio_content_type : audio_format -> string
+val audio_format_of_path : string -> audio_format option
+val audio_token_of_file : string -> string option
+val audio_file_of_token : string -> (string * audio_format) option
+(** Voice clip capability names: 32 hexadecimal characters for MP3, or the
+    same token followed by [.wav] for PCM wave audio. *)
+
 val playback_dedup_window_sec : float
 
 val request_timeout_seconds : unit -> float

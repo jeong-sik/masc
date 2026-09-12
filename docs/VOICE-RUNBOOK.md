@@ -17,8 +17,9 @@ hear.
 
 ### What is already there
 
-`/usr/bin/say` is in the base system and carries **nine Korean voices** among
-184 total. Nothing in the base system transcribes: macOS dictation is not
+`/usr/bin/say` listed **nine Korean voices** among 184 total on the measured
+machine. Installed voices vary; use the catalogue on the actual server.
+Nothing in the base system transcribes: macOS dictation is not
 scriptable, so hearing is the half that has to be fetched.
 
 ### The two downloads
@@ -62,7 +63,8 @@ step 5/5  Here is what will change.                 enter saves this
 
 No address, no credential, no model. say is found under the name its kind
 knows, nothing leaves the machine, and it is asked for a voice rather than a
-model.
+model. Its generated clip is PCM WAV; the capability URL, HTTP content type,
+keeper metadata and history expiry use that format. HTTP TTS clips remain MP3.
 
 Changing providers changes the questions and the counter. ElevenLabs has seven
 steps; say has five because it needs neither a credential nor a model.
@@ -78,9 +80,13 @@ and nothing else.
 ### Giving each keeper its own voice
 
 `a` on the voice pane. Two lists: the keepers this workspace has, and the
-voices the section's **first** endpoint answers to — first rather than chosen,
+voices the section's **first enabled** endpoint answers to — first rather than chosen,
 because a section's endpoints are a fallback chain for one voice and the one in
-front is whose vocabulary the assignment has to speak.
+front is whose vocabulary the assignment has to speak. If that endpoint has
+`default_voice`, it overrides keeper assignments, so the modal refuses to
+open. Remove that fixed endpoint voice before using keeper assignments.
+The setup wizard writes a fixed endpoint voice to keep provider-specific IDs
+apart; its saved endpoint therefore needs that edit before assignment.
 
 ```
 keeper  (up/down)          voice  (left/right)
@@ -89,17 +95,15 @@ keeper  (up/down)          voice  (left/right)
     gamma                      English Narrator
 ```
 
-The axes move separately, so an assignment cannot be made by moving one and
-hoping the other followed. `enter` writes one line of
+The axes move separately. A provider without a catalogue accepts a typed or
+pasted voice ID instead. `enter` writes one line of
 `[voice.tts.agent_voices]`; `esc` leaves.
 
 Each save carries the revision the pane read and takes back the one it answers
 with, so assigning several voices in a row does not tell the second one it is
 stale.
 
-This was worth building only once voices were free: with nine Korean voices in
-the base system, a workspace where every keeper sounds the same is a choice
-nobody made rather than a cost they avoided.
+The offered voices are the ones the configured server actually lists.
 
 ### What the configuration then says
 
@@ -190,9 +194,9 @@ One section in `runtime.toml`, read by `Voice_config`:
 ```
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
-paths refuse by name before any endpoint is asked. Present, each must name its
-`default_model`: a blank one fails the load naming `tts.default_model` or
-`stt.default_model`, since a blank name would reach providers as `model_id ""`.
+paths refuse by name before any endpoint is asked. STT requires its
+`default_model`. TTS requires a model when an endpoint consumes one; a
+say-only or MCP-only section can omit it. A malformed supplied model is rejected.
 `[voice.capture]` and `[voice.gate]` are read as strictly as an endpoint is: a
 key the section does not know, or a value of the wrong type, fails the load
 naming `capture.<key>` or `gate.<key>`, and an absent key takes the default.

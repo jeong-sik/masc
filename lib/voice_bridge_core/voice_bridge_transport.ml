@@ -16,7 +16,7 @@ let safe_agent_id value =
     value
 ;;
 
-let make_audio_file () =
+let make_audio_file ?(format = Voice_bridge_core.Mp3) () =
   Voice_bridge_core.ensure_audio_dir ();
   (* The token is both the filename and the HTTP capability for
      /api/v1/voice/audio/:token (RFC-0235 P1). agent_id is deliberately
@@ -26,7 +26,7 @@ let make_audio_file () =
   let token = Random_id.hex ~bytes:16 in
   Filename.concat
     (Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio")
-    (token ^ ".mp3")
+    (token ^ Voice_bridge_core.audio_extension format)
 ;;
 
 let write_text path content = Fs_compat.save_file path content

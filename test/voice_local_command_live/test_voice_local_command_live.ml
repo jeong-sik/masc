@@ -34,7 +34,7 @@ let endpoint =
 let sentence = "안녕하세요. 키퍼입니다."
 
 let test_say_writes_audio_that_can_be_played () =
-  let output_file = Filename.temp_file "masc_say_live_" ".aiff" in
+  let output_file = Filename.temp_file "masc_say_live_" ".wav" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove output_file with
@@ -56,7 +56,13 @@ let test_say_writes_audio_that_can_be_played () =
           (Printf.sprintf "say wrote %d bytes of audio" file_size)
           true (file_size > 1024);
         Alcotest.(check bool) "and the file is where it was asked for" true
-          (Sys.file_exists output_file))
+          (Sys.file_exists output_file);
+        let header =
+          In_channel.with_open_bin output_file (fun input -> really_input_string input 12)
+        in
+        Alcotest.(check string) "the container starts with RIFF" "RIFF" (String.sub header 0 4);
+        Alcotest.(check string) "the container is WAVE, matching its MIME" "WAVE"
+          (String.sub header 8 4))
 
 (* A voice name that does not exist does NOT fail. Measured 2026-09-12: say
    exits 0 and writes 91,028 bytes in the system voice. A neighbouring
@@ -73,7 +79,7 @@ let test_say_writes_audio_that_can_be_played () =
    future macOS starts refusing unknown voices, this goes red and the reason to
    offer a list weakens. *)
 let test_an_unknown_voice_does_not_fail () =
-  let output_file = Filename.temp_file "masc_say_live_" ".aiff" in
+  let output_file = Filename.temp_file "masc_say_live_" ".wav" in
   Fun.protect
     ~finally:(fun () ->
       try Sys.remove output_file with

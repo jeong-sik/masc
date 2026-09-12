@@ -6,6 +6,17 @@ module Types = Masc.World_constitution_types
 module Render = Masc.World_constitution_render
 module Execution = Masc.Keeper_tool_execution
 
+let repo_source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let () =
+  Prompt_registry.set_markdown_dir
+    (Filename.concat (repo_source_root ()) "config/prompts");
+  Masc.Prompt_defaults.init ()
+;;
+
 let with_world f =
   let dir = Filename.temp_file "world-constitution-tools-" ".tmp" in
   Sys.remove dir;
@@ -43,6 +54,13 @@ let held ~base_path =
   | Ok ledger -> ledger.Store.articles
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
+let contains ~sub s =
+  let n = String.length s and m = String.length sub in
+  let rec scan i =
+    i + m <= n && (String.equal (String.sub s i m) sub || scan (i + 1))
+  in
+  m = 0 || scan 0
+
 let article_id_of execution =
   match Yojson.Safe.from_string (output execution) with
   | `Assoc fields -> (
@@ -78,6 +96,37 @@ let test_a_written_norm_reaches_the_rendered_articles () =
           article.Types.author
       | others ->
         Alcotest.failf "expected one article, got %d" (List.length others))
+
+(* The seam every earlier test stopped short of: the tool writes, and the
+   prompt a real turn is built from renders it. Between them sit the ledger,
+   the fold, the render and the slot, each proven alone. *)
+let test_a_written_norm_reaches_the_turn_prompt () =
+  with_world (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = make_meta "prompt-reader" in
+      let prompt () =
+        Masc.Keeper_unified_prompt.build_system_prompt ~meta ~config ()
+      in
+      Alcotest.(check bool)
+        "the norm is absent before anyone writes it" false
+        (contains ~sub:"open before you record" (prompt ()));
+      let execution =
+        write ~base_path (`Assoc [ "text", `String "open before you record" ])
+      in
+      Alcotest.(check bool) "the write succeeded" false (failed execution);
+      let id = article_id_of execution in
+      let after = prompt () in
+      Alcotest.(check bool)
+        "the norm is in the prompt a turn would be built from" true
+        (contains ~sub:"open before you record" after);
+      Alcotest.(check bool)
+        "and so is the id needed to take it back" true
+        (contains ~sub:id after);
+      Alcotest.(check bool) "the removal succeeded" false
+        (failed (remove ~base_path id));
+      Alcotest.(check bool)
+        "taking it back stops it reaching the prompt" false
+        (contains ~sub:"open before you record" (prompt ())))
 
 let test_an_empty_norm_is_refused () =
   with_world (fun base_path ->
@@ -135,7 +184,11 @@ let test_removing_an_id_the_world_does_not_hold_is_a_failure () =
 
 let () =
   Alcotest.run "world_constitution_tools"
-    [ ( "write",
+    [ ( "end to end",
+        [ Alcotest.test_case "a written norm reaches the turn prompt" `Quick
+            test_a_written_norm_reaches_the_turn_prompt;
+        ] );
+      ( "write",
         [ Alcotest.test_case "a written norm reaches the rendered articles"
             `Quick test_a_written_norm_reaches_the_rendered_articles;
           Alcotest.test_case "an empty norm is refused" `Quick

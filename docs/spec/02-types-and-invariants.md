@@ -232,21 +232,7 @@ type a2a_task = {
 }
 ```
 
-### 2.14 Portal
-
-```ocaml
-type portal_state = PortalOpen | PortalClosed
-
-type portal = {
-  portal_from : string;
-  portal_target : string;
-  portal_opened_at : string;
-  portal_status : portal_state;
-  task_count : int;
-}
-```
-
-### 2.15 SSE Session
+### 2.14 SSE Session
 
 ```ocaml
 type sse_session = {
@@ -257,7 +243,7 @@ type sse_session = {
 }
 ```
 
-### 2.16 Tool Result (core)
+### 2.15 Tool Result (core)
 
 `types_core.ml`에 정의된 기본 tool_result:
 
@@ -269,7 +255,7 @@ type tool_result = {
 }
 ```
 
-### 2.17 Claim Next Result
+### 2.16 Claim Next Result
 
 스케줄링 결과를 구조화한 ADT. brittle한 문자열 파싱을 방지한다:
 
@@ -279,6 +265,7 @@ type claim_next_result =
       task_id : string; title : string;
       priority : int;
       message : string;
+      raw_task_json : Yojson.Safe.t option;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of { excluded_count : int }
@@ -289,51 +276,72 @@ type claim_next_result =
 
 ## 3. Error Hierarchy
 
-MASC 는 비즈니스 로직 에러를 단일 sum type `masc_error` 로 표현한다.
+MASC 는 비즈니스 로직 에러를 모듈화된 sum type `masc_error` 로 표현한다.
 
 > Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Workspace / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Workspace / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
 
 ### 3 masc_error (Unified)
 
-**소스**: `lib/types/types_auth.ml`
+**소스**: `lib/types/masc_error.mli`, `lib/types/types_auth.ml`
 
 ```ocaml
-type masc_error =
-  | NotInitialized
-  | AlreadyInitialized
-  | AgentNotFound of string
-  | AgentNotBound of string
-  | AgentAlreadyBound of string
-  | TaskNotFound of string
-  | TaskAlreadyClaimed of { task_id: string; by: string }
-  | TaskNotClaimed of string
-  | TaskInvalidState of string
-  | PortalNotOpen of string
-  | PortalAlreadyOpen of { agent: string; target: string }
-  | PortalClosed of string
-  | InvalidJson of string
-  | IoError of string
-  | InvalidAgentName of string
-  | InvalidTaskId of string
-  | InvalidFilePath of string
-  | Unauthorized of string
-  | Forbidden of { agent: string; action: string }
-  | TokenExpired of string
-  | InvalidToken of string
+module Task_error : sig
+  type t =
+    | NotFound of string
+    | AlreadyClaimed of { task_id: string; by: string }
+    | NotClaimed of string
+    | InvalidState of string
+    | InvalidId of string
+  val to_string : t -> string
+end
+
+module Agent_error : sig
+  type t =
+    | NotFound of string
+    | InvalidName of string
+  val to_string : t -> string
+end
+
+module Auth_error : sig
+  type unauthorized_reason =
+    | Actor_mismatch
+    | Missing_token
+    | Generic
+  type t =
+    | Unauthorized of { reason: unauthorized_reason; message: string }
+    | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
+    | TokenExpired of string
+    | InvalidToken of string
+  val to_string : t -> string
+end
+
+module System_error : sig
+  type t =
+    | NotInitialized
+    | AlreadyInitialized
+    | InvalidJson of string
+    | IoError of string
+    | InvalidFilePath of string
+    | StorageError of string
+    | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+  val to_string : t -> string
+end
+
+type t =
+  | Task of Task_error.t
+  | Agent of Agent_error.t
+  | Auth of Auth_error.t
+  | System of System_error.t
   | RateLimitExceeded of rate_limit_error
-  | AutonomyError of autonomy_error
   | CacheError of cache_error
 ```
 
-25개 variant. `autonomy_error`(3 variants)와 `cache_error`(4 variants)는 상호 재귀 타입으로 정의된다.
+`cache_error`는 캐시 I/O 및 만료 상태를 표현한다:
 
 ```ocaml
-and autonomy_error =
-  | AutonomyGraphQLFailed of string
-  | AutonomyAgentNotCached of string
-  | AutonomyInvalidResponse of string
-
-and cache_error =
+type cache_error =
   | CacheReadFailed of string
   | CacheWriteFailed of string
   | CacheExpired of { key: string; age_hours: float }
@@ -427,12 +435,12 @@ type result = (success_payload, failure_payload) Stdlib.Result.t
 
 ```ocaml
 type channel =
-  | Telegram | Discord | Slack | Signal
-  | Webchat | Api | Internal
-  | Unknown of string
+  | Api
+  | Internal
+  | External of string
 ```
 
-MCP 세션의 접속 경로를 나타낸다. `Unknown`은 미등록 채널에 대한 확장점이다.
+접속 경로를 나타낸다. 코어가 connector vendor에 의존하지 않도록 외부 플랫폼 이름은 `External string`으로 불투명하게 유지된다.
 
 ### 5.2 Agent Identity Record
 
@@ -487,18 +495,22 @@ type agent_role = Worker | Admin
 
 ```ocaml
 type permission =
-  | CanInit | CanReset
-  | CanReadState | CanAddTask | CanClaimTask | CanCompleteTask
+  | CanInit
+  | CanReset
+  | CanReadState
+  | CanAddTask
+  | CanClaimTask
+  | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal | CanSendPortal | CanVote
+  | CanVote
   | CanAdmin
 ```
 
-11개 variant. 각 `agent_role`에 허용된 permission 목록:
+9개 variant. 각 `agent_role`에 허용된 permission 목록:
 
 | Role | Permissions |
 |------|------------|
-| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanVote` |
+| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanVote` |
 | Admin | Worker + `CanInit`, `CanReset`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential

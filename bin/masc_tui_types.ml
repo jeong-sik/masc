@@ -1425,12 +1425,14 @@ type runtime_probe_annotation =
 
 let runtime_probe_status_label = function
   | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
+  | Tui_decode.Runtime_provider_skipped_native_auth -> "ADC not probed"
   | status -> Tui_decode.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
-    | Tui_decode.Runtime_provider_skipped_cli -> Runtime_probe_note detail
+    | Tui_decode.Runtime_provider_skipped_cli
+    | Tui_decode.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
     | _ -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)

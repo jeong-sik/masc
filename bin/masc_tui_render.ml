@@ -14259,7 +14259,7 @@ let runtime_probe_badge = function
       let style =
         match probe.rpp_status with
         | Runtime_provider_reachable -> (Theme.ok ())
-        | Runtime_provider_skipped_cli -> Ansi.dim
+        | Runtime_provider_skipped_cli | Runtime_provider_skipped_native_auth -> Ansi.dim
         | Runtime_provider_missing_auth | Runtime_provider_auth_failed ->
             (Theme.warn ())
         | Runtime_provider_network_error

@@ -447,16 +447,16 @@ let test_input_viewport_keeps_latest_complete_scalars () =
   let heart_viewport = viewport 7 repeated_hearts in
   check int "repeated emoji viewport fills its cell budget" 7
     (Layout.display_width heart_viewport);
-  check string "repeated emoji viewport keeps whole clusters" "~❤️❤️❤️"
+  check string "repeated emoji viewport keeps whole clusters" "…❤️❤️❤️"
     heart_viewport;
   let before = "abcdefghi" in
   let after = Layout.drop_last_utf8_scalar before in
-  check string "overflow before backspace" "~cdefghi" (viewport 8 before);
+  check string "overflow before backspace" "…cdefghi" (viewport 8 before);
   check string "backspace immediately reveals the new boundary" "abcdefgh"
     (viewport 8 after);
   let mixed = "abcdef한🙂" in
-  check string "mixed tail before backspace" "~f한🙂" (viewport 6 mixed);
-  check string "mixed tail after scalar backspace" "~def한"
+  check string "mixed tail before backspace" "…f한🙂" (viewport 6 mixed);
+  check string "mixed tail after scalar backspace" "…def한"
     (viewport 6 (Layout.drop_last_utf8_scalar mixed))
 
 let test_input_cursor_uses_visible_terminal_cells () =

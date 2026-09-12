@@ -384,12 +384,14 @@ end
    observation-free overflow (the only shape mapped to [Api ContextOverflow]
    in [claude_error_to_core_error]) and a strictly smaller next capacity — so
    consuming the just-written [Input_rejected] recovery with
-   an explicit [Restart_fresh] resolution cannot bypass the fence: a
+   an explicit recovery resolution cannot bypass the fence: a
    next-cycle replay never passes through that callback, and [Effect_fenced]
    recoveries are never resolved here because an effect-observed overflow is
    never retry-safe. A failed resolution is not retried here; the next
    attempt's claim surfaces the refusal instead. *)
-let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
+(* A Gate is bound to its previous settlement. An observation-free rejected
+   input may retry there, but may never discard that session for a fresh one. *)
+let resolve_input_rejected_for_shrink_retry ~official_client_continuation ~base_path ~keeper_name ~runtime_id ()
   =
   match Session_store.load ~base_path ~keeper_name with
   | Error _ -> ()
@@ -410,7 +412,9 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
          ~keeper_name
          ~expected
          ~recovery_id
-         ~resolution:Session_store.Restart_fresh
+         ~resolution:(match official_client_continuation with
+           | Some _ -> Session_store.Retry_previous
+           | None -> Session_store.Restart_fresh)
          ~resolved_by:"context-overflow-shrink-retry"
          ~resolved_at:(Time_compat.now ())
      with
@@ -1190,7 +1194,7 @@ let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects
               ~capacity_bytes)
         ~on_shrink_retry:
           (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
-            resolve_input_rejected_for_shrink_retry
+            resolve_input_rejected_for_shrink_retry ~official_client_continuation
               ~base_path
               ~keeper_name
               ~runtime_id

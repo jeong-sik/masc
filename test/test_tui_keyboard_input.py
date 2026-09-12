@@ -7279,20 +7279,19 @@ def chat_visibility_modes_interaction(
                 timeout=5.0,
             )
         initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        # The Skill can arrive before the gate identity. Reconstruct the
+        # accumulated screen at the completed observation barrier instead of
+        # selecting the first frame that happened to contain the Skill name.
+        completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+        observed_rows = screen_rows(completed)
+        title_row = screen_row_of(
+            observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
-        if identity_row != title_row + 1:
+        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")

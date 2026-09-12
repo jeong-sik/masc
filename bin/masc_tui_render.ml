@@ -2239,7 +2239,12 @@ let board_hearth_census_line ~cols (state : state) =
   match state.board_hearths with
   | [] ->
       Ansi.dim
-      ^ "  H:choose hearth · f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
+      (* The row above this one always names H, so the empty census says
+         only what is its own to say: that nothing is counted yet, and
+         that f walks hearths once something is. It used to open with
+         "H:choose hearth" too, which put that key on two adjacent rows
+         whenever the board had no counted hearth. *)
+      ^ "  f/F:next/previous · none counted yet \xe2\x80\x94 f narrows once they are"
       ^ Ansi.reset
   | census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
@@ -2303,7 +2308,7 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let header = Printf.sprintf "%s (%d)  order:%s%s  %s  %s"
+  let header = Printf.sprintf "%s (%d)  sort:%s%s  %s  %s"
     (screen_title " MASC Board")
     count (board_sort_label state.board_sort) hearth timestamp
     (connection_badge state) in
@@ -3081,7 +3086,7 @@ let render_planning_list (state : state) =
   let now = Unix.localtime now_unix in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  order:%s  show:%s  %s  %s"
+  let header = Printf.sprintf "%s  sort:%s  filter:%s  %s  %s"
     (planning_workspace_title state ~tab:Planning_goals ~window:"")
     (planning_sort_label state.planning_sort)
     (planning_filter_label state.planning_filter)
@@ -3090,10 +3095,11 @@ let render_planning_list (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  Sort [s]: %s · Filter [f]: %s"
-       (planning_sort_label state.planning_sort)
-       (planning_filter_label state.planning_filter));
+  (* The row under this one drew "Sort [s]: <sort> · Filter [f]: <filter>" from
+     the same two functions the header calls, so both facts were on screen
+     twice on adjacent rows. What it added over the header was the two key
+     letters, and the footer names those -- f:filter and s:sort -- so it was
+     the third place saying one of them. The row is gone and the body keeps it. *)
   box_divider buf cols;
 
   let goals =
@@ -7742,7 +7748,7 @@ let render_harness_list (state : state) =
      by whom, and where a fallback answered instead of the evaluator the Gate
      names. *)
   box_line_styled buf cols ~style:(Theme.recede ())
-    "  Task Verdicts = automatic Gate rulings on Tasks (old Harness); not Goal proof.";
+    "  Task Verdicts = automatic Gate rulings on Tasks; not Goal proof.";
   List.iter (box_line buf cols) (harness_ledger_lines ~cols state.harness);
   (* A ledger that quietly stopped is this screen's own failure mode: it once
      starved for a month while the judge kept running, and the stale rows

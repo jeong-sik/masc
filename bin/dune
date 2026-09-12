@@ -516,7 +516,9 @@
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
- (libraries masc_tui_types))
+ ; masc_tui_keeper_mark owns the marks the roster draws, and the sheet this
+ ; module builds is where a reader looks up what one means.
+ (libraries masc_tui_types masc_tui_keeper_mark))
 
 (library
  (name masc_tui_esc_interrupt)
@@ -1389,6 +1391,7 @@
   masc_tui_link_label
   masc_tui_link_preview
   masc_tui_image_mosaic
+  masc_tui_image_cache
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1539,6 +1542,15 @@
  (wrapped false)
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
+
+;; Decides, by magic bytes, whether a downloaded body may sit in the preview
+;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
+;; the TUI executable so every decision is testable without a process.
+(library
+ (name masc_tui_image_cache)
+ (wrapped false)
+ (modules masc_tui_image_cache)
+ (libraries masc unix))
 (library
  (name masc_tui_interactive)
 ;; An interactive surface contract plus the MSX backend: renderer-independent

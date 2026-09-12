@@ -70,8 +70,11 @@ let make_backend () =
     acquire = (fun ~store:_ ~package:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
-      if container_id <> Store.digest instance_id then Error "owner mismatch"
-      else (state.recovery := (instance_id, container_id) :: !(state.recovery); Ok ()))
+      match container_id with
+      | Some id when id = Store.digest instance_id ->
+          state.recovery := (instance_id, id) :: !(state.recovery); Ok ()
+      | None -> Error "Docker recovery unavailable"
+      | Some _ -> Error "owner mismatch")
   } in state, backend
 
 let manifest dir mode =
@@ -199,6 +202,7 @@ let test_detach_without_identity_publishes_unverified_cleanup () =
     await clock (fun () ->
       Result.is_error (dispatch config Runtime.Observe ["instance_id", `String id]));
     detach config id;
+    await_phase clock config id "failed";
     check string "unverified phase recorded" "failed" (phase (instance config id));
     let events = resource_events sub in
     check (list string) "acquire failure then unverified release"
@@ -210,7 +214,7 @@ let test_detach_without_identity_publishes_unverified_cleanup () =
       check string "identity stays null" "null"
         (Yojson.Safe.to_string (member "container_id" payload));
       check string "unverified reason retained"
-        "startup ended without a retained container identity; cleanup is unverified"
+        "Docker recovery unavailable"
         (text "detail" payload)
     | events -> fail ("unexpected resource events: " ^ event_names events))
 

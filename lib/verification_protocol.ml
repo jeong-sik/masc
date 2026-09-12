@@ -28,7 +28,7 @@ type submit_request_spec =
   }
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
-    ~assignee ~(claim : Masc_domain.verification_claim) =
+    ~assignee ~verification_id ~(claim : Masc_domain.verification_claim) =
   let board_type = "verification_request" in
   (* The Board post names what was asked. A stop carries the producer's
      reason where a completion carries its evidence references: the reason is
@@ -38,15 +38,17 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
      a stop to the operator before it opens the record's output, and the
      operator reads the post. The task contract describes work the producer
      says should not be finished, and is not what a stop is judged on. *)
+  (* The title carries the request id: one task is re-submitted many times
+     and a reader must tell the posts apart by their title alone. *)
   let board_title, board_content, evidence_refs =
     match claim with
     | Masc_domain.Completion_evidence { evidence_refs } ->
-      ( Printf.sprintf "Verify: %s" task.title
+      ( Printf.sprintf "Verify: %s [%s]" task.title verification_id
       , Printf.sprintf "Verification requested for task %s (%s) by %s"
           task.id task.title assignee
       , evidence_refs )
     | Masc_domain.Cancellation_reason { reason } ->
-      ( Printf.sprintf "Cancel: %s" task.title
+      ( Printf.sprintf "Cancel: %s [%s]" task.title verification_id
       , Printf.sprintf "Cancellation requested for task %s (%s) by %s: %s"
           task.id task.title assignee reason
       , [] )
@@ -144,7 +146,7 @@ let create_submit_request ~(config : Workspace.config)
   (match claim with
    | Masc_domain.Completion_evidence _ -> warn_contract_gap task
    | Masc_domain.Cancellation_reason _ -> ());
-  let spec = submit_request_spec ~config ~task ~assignee ~claim in
+  let spec = submit_request_spec ~config ~task ~assignee ~verification_id ~claim in
   let artifact_read =
     (* The capture reads the artifact where the producer's sandbox keeps it;
        see [Keeper_tool_task_runtime.evidence_artifact_reader]. *)
@@ -207,7 +209,7 @@ let delete_verification_request ~(config : Workspace.config) ~verification_id =
 let notify_submit_for_verification ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id
     ~(claim : Masc_domain.verification_claim) =
-  let spec = submit_request_spec ~config ~task ~assignee ~claim in
+  let spec = submit_request_spec ~config ~task ~assignee ~verification_id ~claim in
   let evidence_refs =
     match claim with
     | Masc_domain.Completion_evidence { evidence_refs } -> evidence_refs

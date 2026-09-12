@@ -1,5 +1,13 @@
 open Alcotest
 
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+;;
+
+
 let runtime_toml ?credential ?(transport = "command = \"claude\"")
     ?(non_interactive = true) () =
   let credential = Option.value credential ~default:"" in
@@ -31,7 +39,7 @@ let with_runtime_toml content f =
 ;;
 
 let load content =
-  with_runtime_toml content (fun path -> Runtime.load_list ~config_path:path)
+  with_runtime_toml content (fun path -> load_list_text ~config_path:path)
 ;;
 
 let test_materializes_official_client_owner () =

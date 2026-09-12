@@ -191,7 +191,7 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
     (match
        Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes
      with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     match Voice_config.parse_runtime_toml_text (read path) with
     | Error message -> Alcotest.failf "the wizard wrote something that does not load: %s" message

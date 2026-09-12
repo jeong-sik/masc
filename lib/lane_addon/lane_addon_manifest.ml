@@ -1,5 +1,33 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
+let output_ports world =
+  let parse_port (id, value) =
+    let* () = if String.trim id = "" then Error "world.outputs has a blank port name" else Ok () in
+    let* selection = match value with
+      | Otoml.TomlTable ["all_lanes", Otoml.TomlBoolean true]
+      | Otoml.TomlInlineTable ["all_lanes", Otoml.TomlBoolean true] -> Ok All_lanes
+      | Otoml.TomlTable ["lanes", Otoml.TomlArray values]
+      | Otoml.TomlInlineTable ["lanes", Otoml.TomlArray values] ->
+          let rec read acc = function
+            | [] -> Ok (List.rev acc)
+            | Otoml.TomlString lane :: rest when String.trim lane <> "" -> read (lane :: acc) rest
+            | _ -> Error ("world.outputs." ^ id ^ ".lanes requires non-blank lane IDs") in
+          let* lanes = read [] values in
+          if lanes = [] || List.length lanes <> List.length (List.sort_uniq String.compare lanes)
+          then Error ("world.outputs." ^ id ^ ".lanes requires a non-empty list of unique lane IDs")
+          else Ok (Selected_lanes (List.sort String.compare lanes))
+      | _ -> Error ("world.outputs." ^ id ^ " requires only lanes or all_lanes = true") in
+    Ok (id, selection) in
+  match List.assoc_opt "outputs" world with
+  | None -> Ok []
+  | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
+      let names = List.map fst fields in
+      if fields = [] || List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error "world.outputs requires unique named ports"
+      else List.fold_left (fun result field ->
+        let* ports = result in let* port = parse_port field in Ok (port :: ports)) (Ok []) fields
+        |> Result.map (List.sort (fun (a, _) (b, _) -> String.compare a b))
+  | Some _ -> Error "world.outputs must be a table"
 let load ~path =
   try
     let path = Unix.realpath path in
@@ -20,8 +48,8 @@ let load ~path =
       | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
           let names = List.map fst fields in
           if List.length names <> List.length (List.sort_uniq String.compare names)
-             || List.exists (fun key -> key <> "skills" && key <> "actions") names
-          then Error "world accepts skills and actions tables" else Ok fields
+             || List.exists (fun key -> key <> "skills" && key <> "actions" && key <> "outputs") names
+          then Error "world accepts skills, actions and outputs tables" else Ok fields
       | Some _ -> Error "world must be a table" in
     let nested_text section key = match List.assoc_opt section world with
       | None -> Ok None
@@ -35,6 +63,7 @@ let load ~path =
       | Some value -> Skill_resource_path.of_string value |> Result.map Option.some
           |> Result.map_error (fun error -> "world.skills.directory: " ^ Skill_resource_path.error_to_string error) in
     let* action_tool = nested_text "actions" "tool" in
+    let* outputs = output_ports world in
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in
@@ -64,9 +93,10 @@ let load ~path =
          || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
     then Error "resources require finite positive CPU, memory, pids and reply bytes"
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
-      directory = Filename.dirname path; skills_directory; action_tool;
+      directory = Filename.dirname path; skills_directory; action_tool; outputs;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
   with
   | Sys_error message -> Error message
   | Unix.Unix_error (error, call, arg) -> Error (call ^ " " ^ arg ^ ": " ^ Unix.error_message error)
   | Otoml.Parse_error (_, message) -> Error message
+  | Otoml.Duplicate_key message -> Error message

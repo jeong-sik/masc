@@ -240,6 +240,38 @@ let handle_probe_tts request reqd body =
         | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
         | Error reason -> probe_failed request reqd reason))
 
+(* Which voices an endpoint has, asked before the endpoint is written.
+
+   The request names a kind and the environment variable holding that
+   provider's key -- never a key, and never an address. No address because the
+   wizard does not ask for one on the only kind that has a catalogue: an
+   ElevenLabs endpoint carries its own, so the server uses it rather than
+   fetching whatever URL a caller names. That keeps this route from being a way
+   to make the server read an arbitrary address.
+
+   The variable is resolved in the server's own environment, which is where the
+   key lives; a caller that could send one would be sending it through a log. *)
+let catalogue_failed request reqd reason =
+  respond_json ~status:`Bad_request ~request reqd (`Assoc [ ("error", `String reason) ])
+
+let handle_voice_catalogue request reqd body =
+  match Yojson.Safe.from_string body with
+  (* Narrowed to what the parser throws, so a cancelled fiber is not reported
+     as a malformed body. *)
+  | exception Yojson.Json_error _ ->
+    catalogue_failed request reqd "the request body is not JSON"
+  | json ->
+    (match Server_voice_setup_actions.catalogue_endpoint_of_json json with
+     | Error error ->
+       catalogue_failed request reqd (Server_voice_setup_actions.error_message error)
+     | Ok endpoint ->
+       (match Voice_bridge.list_voices endpoint with
+        | Error reason -> catalogue_failed request reqd reason
+        | Ok voices ->
+          respond_json ~request reqd
+            (`Assoc
+              [ "voices", `List (List.map Voice_bridge.catalogue_voice_json voices) ])))
+
 (* The audio arrives in the raw body, the way /voice/transcribe takes it. *)
 let handle_probe_stt request reqd body =
   if String.length body = 0 then probe_failed request reqd "empty audio body"
@@ -341,6 +373,15 @@ let add_routes router =
          (fun _state _agent_name _req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_probe_tts request reqd body))
+         request reqd)
+  (* Asking a provider for its catalogue spends nothing but reaches out with
+     the workspace's key, so it sits with the probes rather than with the
+     public read. *)
+  |> Http.Router.post "/api/v1/voice/voices" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_voice_catalogue request reqd body))
          request reqd)
   |> Http.Router.post "/api/v1/voice/probe/stt" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin

@@ -225,3 +225,34 @@ let apply ~base_path json =
      | Error error -> Error (Setup_failed error)
      | Ok (revision, _) ->
        Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ]))
+
+(* The endpoint a catalogue read is taken against. It is not an endpoint anyone
+   configured: it is built for one request and thrown away, so it carries only
+   what asking needs -- the kind, and the name of the variable holding that
+   provider's key.
+
+   No address, deliberately. The wizard does not ask for one on the only kind
+   that has a catalogue, and accepting one here would turn an admin route into
+   a way to make the server read whatever URL a caller names. The kind's own
+   default is used instead. *)
+let catalogue_endpoint_of_json json =
+  let* fields = fields json in
+  let* kind_text = string_field ~what:"a listing" fields "kind" in
+  let* kind = kind_of_string kind_text in
+  let api_key_env =
+    match List.assoc_opt "api_key_env" fields with
+    | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+    | Some _ | None -> None
+  in
+  Ok
+    { Voice_config.id = "voice-catalogue-read"
+    ; kind
+    ; base_url = None
+    ; mcp_url = None
+    ; health_url = None
+    ; api_key_env
+    ; enabled = true
+    ; timeout_seconds = None
+    ; default_voice = None
+    }
+;;

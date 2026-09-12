@@ -41,3 +41,12 @@ val apply : base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t, error) result
     The request must carry the revision it was written against. A caller that
     read, thought, and then wrote is told its read went stale rather than
     quietly overwriting whoever wrote in between. *)
+
+(** The endpoint a catalogue read is taken against, from the request body. It
+    names a kind and, optionally, the environment variable holding that
+    provider's key -- never a key, and never an address: the kind's own default
+    base URL is used, so this route cannot be pointed at an arbitrary host.
+    An unknown kind is refused by name rather than defaulted. *)
+val catalogue_endpoint_of_json
+  :  Yojson.Safe.t
+  -> (Voice_config.endpoint, error) result

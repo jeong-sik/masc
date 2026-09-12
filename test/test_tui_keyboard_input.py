@@ -14278,7 +14278,95 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
+def run_browser_viewport_cadence_regression(executable: str) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    url = "https://example.org/"
+    viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    captures, actions, png = [], [], [""]
+    stale_started, stale_release = threading.Event(), threading.Event()
+    closing_started, closing_release = threading.Event(), threading.Event()
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        request = json.loads(body)
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":url,"text":"cadence fixture","chars":15,"truncated":False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        assert request == {"lane":"automation","tabId":2}
+        captures.append(request)
+        number = len(captures)
+        title = {1:"INITIAL FRAME",2:"AUTOMATIC FRAME",3:"STALE FRAME",4:"DRAG FRAME"}.get(number,"CLOSED FRAME")
+        if number == 3:
+            stale_started.set()
+            if not stale_release.wait(timeout=10):
+                return 504, {"ok":False,"error":"stale fixture was not released"}
+        elif number >= 5:
+            closing_started.set()
+            if not closing_release.wait(timeout=10):
+                return 504, {"ok":False,"error":"closing fixture was not released"}
+        return 200, {"ok":True,"data":{"source":"automation","tabId":2,"title":title,"url":url,
+            "mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
+
+    def act(body):
+        request = json.loads(body)
+        assert request == {"lane":"automation","tabId":2,"expectedUrl":url,"action":"drag",
+            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":viewport}
+        actions.append(request)
+        return 200, {"ok":True,"data":{}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    def interact(process, master, slave, output, _base):
+        def image_after(start, title):
+            wait_for_output(process, master, output, title, start=start, timeout=5)
+            wait_for_output(process, master, output, b"j/k:center", start=end_of_needle(output,title,start), timeout=3)
+
+        palette_go(process, master, output, b"go Browser Lane", b"cadence fixture")
+        send_and_wait(process, master, output, b"a", b"cadence fixture")
+        start = len(output)
+        os.write(master,b"\x0f")
+        image_after(start,b"INITIAL FRAME")
+        # No refresh key: the normal cadence updates an open screenshot.
+        image_after(start,b"AUTOMATIC FRAME")
+        assert wait_for_fixture_event(process,master,output,stale_started,timeout=5)
+        start = len(output)
+        os.write(master,b"\x1b[<0;2;5M\x1b[<0;5;8m")
+        image_after(start,b"DRAG FRAME")
+        assert len(actions)==1, "background observation blocked or replayed the gesture"
+        # The old request settles after the effect-owned image. It must neither
+        # replace that frame nor close the overlay, and must release single-flight.
+        stale_release.set()
+        assert wait_for_fixture_event(process,master,output,closing_started,timeout=5)
+        assert b"STALE FRAME" not in output[start:]
+        send_and_wait(process,master,output,b"\x1b",b"cadence fixture")
+        start = len(output)
+        closing_release.set()
+        send_and_wait(process,master,output,b"\x1b",b"MASC Overview")
+        assert b"CLOSED FRAME" not in output[start:], "late cadence reopened the overlay"
+        assert len(actions)==1 and len(captures)==5
+        os.write(master,b"q")
+
+    try:
+        run_terminal_scenario(executable,description="Open browser viewport cadence yields to drag and dismissal",
+            interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,refresh=0.5,
+            preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+    finally:
+        stale_release.set()
+        closing_release.set()
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
+    run_browser_viewport_cadence_regression(executable)
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)

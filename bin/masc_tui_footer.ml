@@ -46,6 +46,20 @@ type status_item =
       ; seconds_ago : int
       ; more : int
       }
+  (* A destructive action armed and waiting for its key again, or one already
+     running. Neither is a key hint: [?] cannot recover "press d again to delete
+     analyst", and the next unrelated key cancels the arm, so a row that drops it
+     drops the only notice of a state the operator is standing in. Here rather
+     than in a surface's hint string so the fitter can keep it whole. *)
+  | Keeper_action_armed of
+      { key : string
+      ; action : string
+      ; keeper : string
+      }
+  | Keeper_action_running of
+      { gerund : string
+      ; keeper : string
+      }
   | Port of int
 
 (* Enough of the commit to tell two checkouts apart, which is the question
@@ -66,6 +80,10 @@ type retention =
   (* Live turn activity outlasts the identity facts a keeper list can also
      answer, but yields to the conflict notice and the port. *)
   | Live_activity
+  (* Ahead of every conflict. A conflict says the screen is reading the wrong
+     thing, which stays true on the next frame; an armed action is a question
+     waiting for one keypress and gone after any other. *)
+  | Armed_action
   (* Last to go. A footer with no room for the port still has room to say the
      screen is reading two different workspaces. *)
   | Workspace_conflict
@@ -129,6 +147,16 @@ let status_item_projection = function
           Printf.sprintf "TUI %s \xe2\x89\xa0 server %s (%s)"
             (short_commit tui) (short_commit server) action
       ; retention = Build_conflict
+      }
+  | Keeper_action_armed { key; action; keeper } ->
+    Some
+      { text = Printf.sprintf "press %s again to %s %s" key action keeper
+      ; retention = Armed_action
+      }
+  | Keeper_action_running { gerund; keeper } ->
+    Some
+      { text = Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper
+      ; retention = Armed_action
       }
   | Keeper_answering { names = []; _ } -> None
   | Keeper_answering { names = name :: rest; lead_elapsed_s } ->
@@ -207,14 +235,17 @@ let omission_order =
    none: nothing else on any surface says the server is not this build. *)
 let leads_the_row item =
   match item.retention with
-  | Workspace_conflict | Build_conflict | Worktree_conflict -> true
+  | Armed_action | Workspace_conflict | Build_conflict | Worktree_conflict ->
+    true
   | Endpoint_identity | Workspace_identity | Build_identity | Refresh_context
   | Live_activity -> false
 
-(* Wrong-workspace reads come first, then the actionable binary disagreement.
-   The generic worktree provenance warning gives way before either diagnosis.
-   Caller list order does not establish conflict retention priority. *)
-let conflict_order = [ Workspace_conflict; Build_conflict; Worktree_conflict ]
+(* An armed action first: it is the only one of these the next keypress can
+   lose. Then the wrong-workspace read, then the actionable binary
+   disagreement, then the generic worktree provenance warning. Caller list order
+   does not establish retention priority. *)
+let conflict_order =
+  [ Armed_action; Workspace_conflict; Build_conflict; Worktree_conflict ]
 
 let ordered_conflicts items =
   List.concat_map (fun retention ->

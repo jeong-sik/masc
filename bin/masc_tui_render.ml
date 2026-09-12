@@ -4275,8 +4275,10 @@ let render_keeper_list (state : state) =
      no box_tl, box_tr or edge bar for a corner to point at. *)
   box_divider buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(keeper_action_hints ~offers_back:false state selected_reading));
+    (footer_line state
+       ~status:(keeper_action_status state)
+       ~max_cells:cols
+       ~hints:(keeper_control_hints ~offers_back:false state selected_reading));
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf

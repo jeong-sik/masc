@@ -705,6 +705,44 @@ let test_actionable_conflicts_outrank_worktree_provenance () =
 let keeper_control_hints =
   "j/k:move  p:pause  w:wake  s:shutdown  d:delete  r:refresh  q:quit"
 
+let test_an_armed_action_outlives_every_notice () =
+  (* A conflict stays true on the next frame. An armed action is a question
+     waiting for one keypress and gone after any other, and [?] cannot recover
+     it, so it is the one thing on this row that must not be dropped. Carried in
+     the hint string it was an unpinned item and went first. *)
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Server_worktree_binary
+        ; Masc_tui_footer.Workspace_mismatch "/work/masc"
+        ; Masc_tui_footer.Keeper_action_armed
+            { key = "d"; action = "delete"; keeper = "analyst" }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935
+      ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the armed action is whole" true
+    (contains ~needle:"press d again to delete analyst" row);
+  check_bool "the notices gave way for it" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "and so did the provenance warning" false
+    (contains ~needle:"WORKTREE" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
+let test_a_running_action_reads_as_one_item () =
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Keeper_action_running
+            { gerund = "deleting"; keeper = "analyst" }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:60 ~port:8935 ~hints:"j/k:move  q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 60 row;
+  check_bool "it says what is running" true
+    (contains ~needle:"deleting analyst" row)
+
 let test_keys_come_back_with_the_cells_a_dropped_notice_gave_up () =
   (* Two notices and the keys do not fit together, so the lower-ranked notice
      goes. The cells it hands back belong to the keys it had crowded out: the
@@ -860,6 +898,10 @@ let tests =
           test_actionable_conflicts_outrank_worktree_provenance
       ; Alcotest.test_case "ANSI Keeper controls drop individually and keep q" `Quick
           test_ansi_keeper_keys_remain_individually_droppable
+      ; Alcotest.test_case "an armed action outlives every notice" `Quick
+          test_an_armed_action_outlives_every_notice
+      ; Alcotest.test_case "a running action reads as one item" `Quick
+          test_a_running_action_reads_as_one_item
       ; Alcotest.test_case "keys come back with a dropped notice's cells" `Quick
           test_keys_come_back_with_the_cells_a_dropped_notice_gave_up
       ; Alcotest.test_case "status facts come back with a rejected notice" `Quick

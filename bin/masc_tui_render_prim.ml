@@ -1802,7 +1802,31 @@ let planning_proof_mark proof =
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+(* A destructive action armed, or one already running. Status rather than a hint:
+   [?] cannot recover "press d again to delete analyst", and the next unrelated
+   key cancels the arm, so a footer that gives this up to fit something else
+   gives up the only notice of a state the operator is standing in. The keys stay
+   on the row beside it now instead of being replaced by it. *)
+let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  match (state.keeper_action_inflight, state.keeper_action_pending) with
+  | Some (keeper_name, action), _ ->
+    [ Masc_tui_footer.Keeper_action_running
+        { gerund = Keeper_control.action_gerund action
+        ; keeper = Terminal_text.single_line keeper_name
+        }
+    ]
+  | None, Some pending ->
+    [ Masc_tui_footer.Keeper_action_armed
+        { key = Keeper_control.action_key pending.Keeper_control.pending_action
+        ; action =
+            Keeper_control.action_label pending.Keeper_control.pending_action
+        ; keeper =
+            Terminal_text.single_line pending.Keeper_control.pending_keeper
+        }
+    ]
+  | None, None -> []
+
+let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1831,20 +1855,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
         (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
-  match (state.keeper_action_inflight, state.keeper_action_pending) with
-  | Some (keeper_name, action), _ ->
-      Printf.sprintf "%s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-        (Keeper_control.action_gerund action)
-        (Terminal_text.single_line keeper_name)
-        Ansi.reset
-  | None, Some pending ->
-      Printf.sprintf "%s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
-        (Keeper_control.action_key pending.Keeper_control.pending_action)
-        (Keeper_control.action_label pending.Keeper_control.pending_action)
-        (Terminal_text.single_line pending.Keeper_control.pending_keeper)
-        Ansi.reset
-  | None, None ->
-      (* Two spaces, not a dimmed middle dot. {!Masc_tui_footer.line} splits a
+  (* Two spaces, not a dimmed middle dot. {!Masc_tui_footer.line} splits a
          hint row on two spaces to drop whole keys when the row will not fit,
          and a row joined any other way reaches it as one item: nothing to
          drop, so it fell through to the cell cut and ended mid-word --
@@ -1893,6 +1904,25 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 (* One colour per level so an operator scanning the column sees severity before
    reading the text. A level this build does not name keeps its own text and
    renders unstyled rather than borrowing another level's colour. *)
+
+(* What the footer says about the Keeper actions: the armed or running sentence
+   when there is one, otherwise the keys. The sentence's words come from
+   {!Masc_tui_footer}, which is also where the Keepers list reads them as a
+   status item, so the two footers cannot word the same state differently. *)
+let keeper_action_state_text (state : state) =
+  match keeper_action_status state with
+  | item :: _ ->
+    Option.map
+      (fun (projected : Masc_tui_footer.projected_status) ->
+        Ansi.bold ^ (Theme.warn ()) ^ projected.text ^ Ansi.reset)
+      (Masc_tui_footer.status_item_projection item)
+  | [] -> None
+
+let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+  match keeper_action_state_text state with
+  | Some text -> text
+  | None -> keeper_control_hints ~offers_chat ~offers_back state reading
+
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
   | System_info -> Ansi.reset

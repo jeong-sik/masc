@@ -248,7 +248,7 @@ let test_schemas_are_the_descriptor_schemas () =
     in
     Alcotest.(check (list string))
       "the surface is read-only"
-      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch" ]
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -262,6 +262,10 @@ let test_schemas_are_the_descriptor_schemas () =
              | "tool_read_file" ->
                  descriptor.Descriptor.description
                  ^ " " ^ VAT.image_delivery_note
+             | "masc_board_post_get" | "masc_fusion_status" ->
+                 (* These descriptors supply input validation; standalone
+                    reviewer descriptions state their narrower authority. *)
+                 schema.description
              | _ -> descriptor.Descriptor.description
            in
            Alcotest.(check string)
@@ -422,7 +426,7 @@ let test_workspace_producer_gets_owned_read_surface () =
   | Ok surface ->
     Alcotest.(check (list string))
       "workspace producer surface"
-      [ "tool_read_file"; "masc_web_fetch" ]
+      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match

@@ -8,6 +8,11 @@
     refused, validated redirects, bounded extraction — live in the tool. Descriptor registry drift and unreadable
     producer state reject surface construction. Every dispatched call is
     validated and translated by the same descriptor that was advertised.
+    Exact Board/Fusion source reads are also available. Task authority uses
+    the actual producer identity; Goal authority permits shared workspace
+    records. Direct posts are readable only by their author via Task review,
+    because immutable target readership is not available at this boundary.
+    Neither surface grants general access to the MASC storage directory.
     Mutating execution is absent: a verifier has no turn continuation that
     could resume an approved Gate effect. *)
 

@@ -1,0 +1,11 @@
+# Standalone verification of collaboration sources
+
+Task004's verdict could not independently inspect referenced peer discussion or Fusion results. The read-only verifier surface now resolves original Board posts/comments and full Fusion source evidence by their existing canonical IDs. It does not infer existence from a textual reference or add write, execution, voting, deliberation or adoption tools.
+
+Task review uses the actual submitting producer: it may read shared peer Board discussions and its own Fusion sources. Goal review uses shared records in the active workspace. Direct posts are available only to their author through Task review; immutable target readership is not available here, so foreign Direct reads remain an explicit unsupported authority rather than being granted from mutable mentions. The active Board workspace must match the review config. This is a limited access policy, not proof of full Direct-conversation verification support.
+
+Original post/comment IDs, authors, body and metadata are preserved. Board comment pagination states totals and the next offset. Fusion source origin and run ID are checked, full panel/judge/source context is returned with the same evidence hash used by separately recorded Keeper decisions. Reads do not adopt the judge's advice.
+
+Review fixed an error-classification defect in the initial implementation: request/missing-source rejection, denied access and actual storage failure now remain different typed failures. The dispatch tests exercise shared peer comments, Direct limits, source ownership, wrong origin, missing records, corrupt decision storage, workspace mismatch and absence of mutation tools. Parse-only OCaml and diff checks passed locally. Native execution requires CI; no local MASC build or deployed success is claimed.
+
+Stacked on PR35511's canonical Fusion source retrieval. The MP4/PDF inspector changes are separate dependencies and are not included in this component branch.

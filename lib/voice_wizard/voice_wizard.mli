@@ -81,6 +81,7 @@ val changes : draft -> (Voice_setup.change list, gap list) result
     own would leave a file the loader refuses. *)
 
 type step =
+  | Section
   | Provider
   | Name
   | Address
@@ -111,3 +112,9 @@ val save_request
     type before it means anything. Producing it here keeps one spelling of it on
     the sending side: a TUI and a dashboard that each wrote their own would
     drift, and the drift would show only as a request the server refuses. *)
+
+val with_section : draft -> Voice_setup.section -> draft
+(** Move a draft to the other side. The provider is re-picked when the current
+    one does not serve the new side -- an MCP tool speaks and does not listen --
+    and everything but the endpoint's name is reset with it, since the rest is
+    provider vocabulary. *)

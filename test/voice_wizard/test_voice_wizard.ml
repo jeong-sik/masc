@@ -37,6 +37,7 @@ let with_config contents f =
 let read path = In_channel.with_open_bin path In_channel.input_all
 
 let step_name : Voice_wizard.step -> string = function
+  | Voice_wizard.Section -> "section"
   | Voice_wizard.Provider -> "provider"
   | Voice_wizard.Name -> "name"
   | Voice_wizard.Address -> "address"
@@ -64,16 +65,16 @@ let test_speech_in_is_not_offered_an_mcp_tool () =
 let test_the_questions_depend_on_the_provider () =
   Alcotest.(check (list string))
     "elevenlabs is not asked for an address, and speech out is asked for a voice"
-    [ "provider"; "name"; "credential"; "model"; "voice"; "review" ]
+    [ "section"; "provider"; "name"; "credential"; "model"; "voice"; "review" ]
     (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Elevenlabs));
   Alcotest.(check (list string))
     "a local server is asked for an address"
-    [ "provider"; "name"; "address"; "credential"; "model"; "review" ]
+    [ "section"; "provider"; "name"; "address"; "credential"; "model"; "review" ]
     (steps
        (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Openai_compatible));
   Alcotest.(check (list string))
     "a tool endpoint is not asked for a credential"
-    [ "provider"; "name"; "address"; "model"; "voice"; "review" ]
+    [ "section"; "provider"; "name"; "address"; "model"; "voice"; "review" ]
     (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool))
 
 let test_elevenlabs_arrives_with_what_is_the_same_everywhere () =
@@ -207,6 +208,28 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
               (fun (endpoint : Voice_config.endpoint) -> endpoint.Voice_config.id)
               stt.Voice_config.endpoints)))
 
+(* An MCP tool speaks and does not listen, so a draft carried to speech in has
+   to give it up rather than sit on a provider its own offered list refuses. *)
+let test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen () =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool) with
+      Voice_wizard.endpoint_id = "kept"
+    }
+  in
+  let moved = Voice_wizard.with_section draft Voice_setup.Stt in
+  Alcotest.(check bool) "the provider is one speech in can use" true
+    (List.mem moved.Voice_wizard.provider (Voice_wizard.providers_for Voice_setup.Stt));
+  Alcotest.(check string) "the name survives the move" "kept"
+    moved.Voice_wizard.endpoint_id
+
+let test_moving_keeps_a_provider_that_serves_both () =
+  let draft =
+    Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Openai_compatible
+  in
+  let moved = Voice_wizard.with_section draft Voice_setup.Stt in
+  Alcotest.(check bool) "still openai-compatible" true
+    (moved.Voice_wizard.provider = Voice_wizard.Openai_compatible)
+
 let () =
   Alcotest.run
     "voice_wizard"
@@ -217,6 +240,10 @@ let () =
             test_the_questions_depend_on_the_provider
         ; Alcotest.test_case "elevenlabs arrives with what is the same everywhere" `Quick
             test_elevenlabs_arrives_with_what_is_the_same_everywhere
+        ; Alcotest.test_case "moving to speech in gives up a provider that cannot listen" `Quick
+            test_moving_to_speech_in_gives_up_a_provider_that_cannot_listen
+        ; Alcotest.test_case "moving keeps a provider that serves both" `Quick
+            test_moving_keeps_a_provider_that_serves_both
         ] )
     ; ( "when a draft is complete"
       , [ Alcotest.test_case "a local endpoint may go without a credential" `Quick

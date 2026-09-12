@@ -505,12 +505,12 @@ let test_keeper_chat_uses_current_async_contract () =
      >= 1);
   check bool "the chat pane draws the merged transcript" true
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_keeper_message"
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
        ~callee:"chat_rows_for"
      >= 1);
   check int "the chat pane draws exactly one shared status footer" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message" ~callee:"footer_line");
   check bool "draft cleanup checks Keeper and message identity" true
     (Ast_grep.count_calls_in_value_binding ~module_path
@@ -526,7 +526,8 @@ let test_keeper_chat_uses_current_async_contract () =
        ~binding_name:"post_keeper_chat"
        ~callee:"Masc_tui_keeper_chat_projection.decode_response_with_provenance"
      >= 1);
-  let render_path = "bin/masc_tui_render.ml" in
+  (* The chat surface is its own file now, so the renderer names it. *)
+  let render_path = "bin/masc_tui_render_chat.ml" in
   List.iter
     (fun callee ->
       check bool ("message renderer wires " ^ callee) true
@@ -643,7 +644,9 @@ let test_recent_projection_is_prepared_inside_frame_build () =
 
 let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
-  let render_path = "bin/masc_tui_render.ml" in
+  (* Every binding this test still reaches for is drawn by the chat surface,
+     which is its own file. *)
+  let chat_path = "bin/masc_tui_render_chat.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
   check int "late palette publication clears its callback before use" 1
     (Ast_grep.count_field_clears_to_none ~module_path:main_path
@@ -692,37 +695,37 @@ let test_user_message_background_has_one_render_snapshot () =
        ~module_path:ansi_path ~binding_name:"body_context" ~callees:[]
        ~fields:[ "palette_generation" ]);
   check int "one palette snapshot spans layout and draw" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message" ~callee:"Chat_theme.snapshot");
   check int "layout receives the captured Chat theme" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
-       ~module_path:render_path ~binding_name:"render_keeper_message"
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
        ~callee:"cached_chat_markdown" ~arguments:[ "theme", "chat_theme" ]);
   check int "visible drawing receives the captured Chat theme" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
-       ~module_path:render_path ~binding_name:"render_keeper_message"
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
        ~callee:"render_chat_row" ~arguments:[ "theme", "chat_theme" ]);
   check int "layout derives one body context per entry" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"cached_chat_markdown"
        ~callee:"Chat_theme.body_context");
   check int "draw derives one body context per row" 1
-    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+    (Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_chat_row" ~callee:"Chat_theme.body_context");
   check int "cache key reads the role-aware palette generation" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"cached_chat_markdown" ~callees:[]
        ~fields:[ "palette_generation" ]);
   (* The folded-origin margin changes several attributes, so it still closes
      by fully restoring the captured row. A bare link has a narrower typed
      closer below: resetting it would cut an enclosing diff background. *)
   check int "the margin fully restores the captured row" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "inline_restore" ]);
   check int "the link uses its selective row restore" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "link_restore" ]);
   check int "the selective closer turns off underline" 1
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
@@ -764,7 +767,7 @@ let test_user_message_background_has_one_render_snapshot () =
     (fun binding_name ->
       check int (binding_name ^ " restores the captured Markdown context") 1
         (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-           ~module_path:render_path ~binding_name ~callees:[]
+           ~module_path:chat_path ~binding_name ~callees:[]
            ~fields:[ "markdown_close" ]))
     [ "chat_markdown"; "chat_markdown_streaming" ]
 ;;
@@ -939,9 +942,12 @@ let test_operator_approvals_use_current_contract () =
      skills the same screen lists by name a few rows below.
 
      A return to the wire form brings the call back with it. *)
+  (* The Tools surface has had its own file since before the primitives
+     moved; this asked the godfile about a binding that is not in it, so it
+     answered 0 whatever the surface did. *)
   check int "the tools header does not serialise its skills" 0
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_tools.ml"
        ~binding_name:"tools_display_lines"
        ~callee:"Skill_reference.list_to_yojson");
   check bool "approval renderer measures its name column" true
@@ -1227,12 +1233,12 @@ let test_tui_current_projection_wiring () =
        ~callee:"Context_state.reading_for_keeper");
   check int "chat header reads context through the Keeper stamp" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message"
        ~callee:"Context_state.reading_for_keeper");
   check int "chat header uses one measured context item projection" 1
     (Ast_grep.count_calls_in_value_binding
-       ~module_path:"bin/masc_tui_render.ml"
+       ~module_path:"bin/masc_tui_render_chat.ml"
        ~binding_name:"render_keeper_message"
        ~callee:"Observation_layout.context_header_item");
   (* The budget handed to the context item is in cells, or a CJK title (two
@@ -1247,7 +1253,8 @@ let test_tui_current_projection_wiring () =
      of [inner_cells] -- which is a cell count already, so the property holds
      by a route no callee name can see. *)
   check int "chat context item is handed a cell budget" 1
-    (Ast_grep.count_calls_with_label ~module_path:"bin/masc_tui_render.ml"
+    (Ast_grep.count_calls_with_label
+       ~module_path:"bin/masc_tui_render_chat.ml"
        ~callee:"Observation_layout.context_header_item" ~label:"max_cells");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
@@ -1481,7 +1488,10 @@ let test_gate_stance_listing_rides_the_flow_generation () =
 
 let test_the_scroll_counts_back_from_a_pinned_row () =
   let main_path = "bin/masc_tui.ml" in
-  let render_path = "bin/masc_tui_render.ml" in
+  (* The pane that reads the pin is the chat surface, so that is the file
+     this asks. Left pointed at the godfile it would answer "no writes"
+     about a file that no longer draws the pane. *)
+  let render_path = "bin/masc_tui_render_chat.ml" in
   (* [msg_scroll] used to count back from whatever row was newest at the
      moment it was read, so a reply landing moved what the same count meant
      and the operator reading back was carried toward it. Three things hold
@@ -1500,7 +1510,7 @@ let test_the_scroll_counts_back_from_a_pinned_row () =
        ~field:"msg_scroll_pin");
   check int "and the count it asks for carries what arrived" 1
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
-       ~module_path:render_path ~binding_name:"render_keeper_message"
+       ~module_path:"bin/masc_tui_render_chat.ml" ~binding_name:"render_keeper_message"
        ~callees:[] ~identifiers:[ "rows_since_pin" ])
 ;;
 

@@ -6,6 +6,8 @@
 #   /opt/masc-bench/config/       (rendered arm config: runtime.toml, keepers/, ...)
 set -euo pipefail
 
+source "$BENCH/driver/gh_seed.sh"
+
 # BENCH_RUNTIME_ID must be the id masc resolves, `<provider>.<binding id>` —
 # not the wire model. They differ whenever the wire name carries a slash, as
 # every OpenRouter id does; the renderer's effective_runtime_id() is the one
@@ -121,12 +123,7 @@ you are asked, verify it, and stop. Do not ask questions."
         # remote_ssh preflight requires <remote_root>/<name> to exist, and it
         # runs `gh auth status` against <keeper root>/.config/gh.
         mkdir -p "/root/${k}"
-        if [[ -n "${GH_TOKEN:-}" ]]; then
-          install -d -m 0700 "/root/${k}/.config/gh"
-          printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' \
-            "${GH_TOKEN}" > "/root/${k}/.config/gh/hosts.yml"
-          chmod 600 "/root/${k}/.config/gh/hosts.yml"
-        fi
+        seed_gh_hosts "${k}"
         pool_id=$((pool_id + 1))
         mcp_call "${pool_id}" masc_keeper_up "$(jq -cn \
           --arg name "$k" --arg ins "$pool_instructions" \

@@ -4319,7 +4319,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4335,7 +4335,7 @@ let launch_browser_lane state ~mailbox operation =
          result; effects still use the observed document/URL checks. Failed
          refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ | Read_refresh | Scene_refresh _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
@@ -4346,7 +4346,7 @@ let launch_browser_lane state ~mailbox operation =
       state.browser_lane <- Some { view with load = Loading (generation, operation);
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4377,7 +4377,7 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
@@ -15381,6 +15381,14 @@ and is loaded on demand through keeper_skill.
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
+        else match state.browser_lane with
+          | Some ({load = Browser_lane_view.Loading (_, Viewport_cadence _);_} as view) ->
+              (* A background image read yields to the gesture on the image
+                 already displayed. Its late response cannot redraw between
+                 press and release or reopen a dismissed viewport. *)
+              state.image_request_generation <- state.image_request_generation + 1;
+              state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
+          | _ -> ()
       end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
@@ -21665,7 +21673,12 @@ and is loaded on demand through keeper_skill.
               | Some view when not state.image_open ->
                   Option.iter (launch_browser_lane state ~mailbox:async_messages)
                     (Browser_lane_view.cadence_operation view)
-              | Some _ -> ())
+              | Some view ->
+                  (match state.browser_viewport with
+                   | Some (shot, _) when Option.is_none !browser_pointer_press ->
+                       Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                         (Browser_lane_view.cadence_operation ~viewport:shot view)
+                   | _ -> ()))
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)

@@ -836,7 +836,8 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
            list is a declaration directory that can hold more. *)
         b Navigate "arrows+enter" "connect"
       ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
-      ; b Act "A" "app" ~help:"open the app-registration form for it"
+      ; b Act "A" "app"
+          ~help:"open the app-registration form for it -- it asks for a Client ID"
       ; b Search "/" "filter"
       ; b Meta "R" "refresh"
       ]

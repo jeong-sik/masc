@@ -5537,12 +5537,16 @@ let search_jump ?(backwards = false) state ~query ~after =
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
-      let total = List.length texts in
+      (* Into an array before the scan, not walked per index. The scan visits
+         every row once and [List.nth_opt] walked to each from the front, so a
+         query that matched nothing cost the list squared: on a twenty-
+         thousand-line file open on the Code surface, one keystroke took about
+         a third of a second, and the search runs on every keystroke. *)
+      let texts = Array.of_list texts in
+      let total = Array.length texts in
       if String.length query > 0 && total > 0 then begin
         let matches index =
-          match List.nth_opt texts index with
-          | Some text -> Masc_tui_types.palette_contains ~needle:query text
-          | None -> false
+          Masc_tui_types.palette_contains ~needle:query texts.(index)
         in
         let rec scan step =
           if step > total then ()

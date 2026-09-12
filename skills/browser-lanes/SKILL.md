@@ -15,11 +15,16 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 이미 있다면 그대로 사용한다. 같은 탭을 다시 찾기 위해 BrowserTabs부터 반복하지 않는다.
 현재 페이지를 더 읽어야 하면 전달받은 범위를 사용해 필요한 관측으로 바로 이어간다.
 
-- `documentId`·`nodeId`는 선택한 요소다. `scope`는 그 요소가 속한 읽기 범위다.
-  `scope` 객체가 있으면 후속 BrowserRead에도 그대로 전달하고, null이거나 없으면 생략한다.
-  선택한 요소를 영역으로 바꾸지 않는다.
-- `view=content`는 BrowserRead `mode=scene`, `view=regions`는 `mode=regions`에 해당한다.
-  읽기에는 `url`을 `expectedUrl`로 사용하고, 실제 도구 스키마의 필드만 골라 전달한다.
+- `documentId`·`nodeId`는 선택한 요소다. `view=content`에서 `scope`는 그 요소가 속한
+  읽기 범위다. 이 범위를 다시 읽을 때 `mode=scene`으로 scope 객체를 그대로 전달하고,
+  null이거나 없으면 생략한다. content의 임의 선택 요소를 영역 scope로 승격하지 않는다.
+- `view=regions`는 관측된 영역 목록이다. 선택한 **영역의 본문을 읽으라는 요청**이면
+  TUI Enter와 같이 선택된 `documentId`·`nodeId` 쌍을 새 scope 객체로 만들어
+  BrowserRead `mode=scene`으로 읽는다. 이때 복사된 scope가 null이어도 선택 영역의
+  참조는 별개로 존재한다. 영역 목록 자체를 새로 확인하려는 요청이면 `mode=regions`를
+  사용하고 원래 scope 객체만 유지한다(null 또는 누락은 생략). 이 구분을 content 뷰의
+  일반 텍스트·버튼에 적용하지 않는다.
+- 읽기에는 `url`을 `expectedUrl`로 사용하고, 실제 도구 스키마의 필드만 골라 전달한다.
   복사된 JSON 전체나 없는 필드를 요청 인자로 넣지 않는다.
 - `viewport`와 `truncated`는 당시 관측의 범위다. 선택한 요소의 `text`를 영역 전체나
   화면 밖의 기록으로 확대하지 않는다. 복사된 좌표만으로 현재 화면에 클릭·드래그하지 않는다.

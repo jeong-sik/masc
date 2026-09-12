@@ -8,18 +8,23 @@ type tool =
   | Read_file
   | Search_files
   | Web_fetch
+  | Board_source
+  | Fusion_source
 
 let tool_name = function
   | Read_file -> "tool_read_file"
   | Search_files -> "tool_search_files"
   | Web_fetch -> "masc_web_fetch"
+  | Board_source -> "masc_board_post_get"
+  | Fusion_source -> "masc_fusion_status"
 ;;
 
-let all_tools = [ Read_file; Search_files; Web_fetch ]
+let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_source ]
 
 type t =
   { ownership_root : string
   ; config : Workspace.config
+  ; collaboration_authority : Verification_collaboration_evidence.authority
   ; producer_scope : producer_scope
   ; tools : (tool * Keeper_tool_descriptor.t) list
   }
@@ -66,7 +71,7 @@ let create ~config ~producer =
     resolve_tools
       (match producer_scope with
        | Keeper_producer _ -> all_tools
-       | Workspace_producer -> [ Read_file; Web_fetch ])
+       | Workspace_producer -> [ Read_file; Web_fetch; Board_source; Fusion_source ])
   in
   let* ownership_root =
     match producer_scope with
@@ -88,7 +93,8 @@ let create ~config ~producer =
   let ownership_root =
     Env_config_core.strip_trailing_slashes ownership_root
   in
-  Ok { ownership_root; config; producer_scope; tools }
+  Ok { ownership_root; config; producer_scope; tools
+     ; collaboration_authority = Verification_collaboration_evidence.Task_producer producer }
 ;;
 
 (* The Goal proof surface. A Goal names no producer: it is a shared intent
@@ -105,7 +111,7 @@ let create ~config ~producer =
    the checkouts under them. *)
 let create_goal_proof ~(config : Workspace.config) =
   let open Result.Syntax in
-  let* tools = resolve_tools [ Read_file; Web_fetch ] in
+  let* tools = resolve_tools [ Read_file; Web_fetch; Board_source; Fusion_source ] in
   let project_root =
     Workspace_verification_store.project_root_of_base_path config.base_path
   in
@@ -113,7 +119,8 @@ let create_goal_proof ~(config : Workspace.config) =
     Env_config_core.strip_trailing_slashes
       (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
   in
-  Ok { ownership_root; config; producer_scope = Workspace_producer; tools }
+  Ok { ownership_root; config; producer_scope = Workspace_producer; tools
+     ; collaboration_authority = Verification_collaboration_evidence.Goal_workspace }
 ;;
 
 (* The listing answers one question for the evaluator: where do the paths the
@@ -271,6 +278,10 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
   ; description =
       (match tool with
        | Read_file -> descriptor.description ^ " " ^ image_delivery_note
+       | Board_source ->
+         "Read an exact Board post and its paginated comments as original structured evidence, including identities and full metadata. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
+       | Fusion_source ->
+         "Read original durable Fusion panel/judge/source-context evidence and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. This does not run Fusion or adopt advice."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -337,7 +348,16 @@ let result_of_execution (execution : Keeper_tool_execution.t) =
    keeper and the base path, so the backend attaches to a running one. Neither
    route lets the judge start anything or touch the host outside the
    playground, which is the property [None] is protecting. *)
+type run_error = Runtime_error of string | Collaboration_error of Verification_collaboration_evidence.error
+
 let run t tool ~args =
+  let execution_result execution =
+    result_of_execution execution |> Result.map_error (fun detail -> Runtime_error detail) in
+  let collaboration_read read =
+    read ~config:t.config ~authority:t.collaboration_authority ~args
+    |> Result.map Yojson.Safe.to_string
+    |> Result.map_error (fun error -> Collaboration_error error)
+  in
   match t.producer_scope, tool with
   | Keeper_producer producer_meta, Read_file ->
     Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
@@ -345,21 +365,21 @@ let run t tool ~args =
       ~config:t.config
       ~meta:producer_meta
       ~args
-    |> result_of_execution
+    |> execution_result
   | Keeper_producer producer_meta, Search_files ->
     Keeper_workspace_ops.handle_tool_search_files_with_outcome
       ~turn_sandbox_factory:None
       ~config:t.config
       ~meta:producer_meta
       ~args
-    |> result_of_execution
+    |> execution_result
   | Workspace_producer, Read_file ->
     Keeper_tool_filesystem_runtime.handle_owned_read_file_with_outcome
       ~ownership_root:t.ownership_root
       ~args
-    |> result_of_execution
+    |> execution_result
   | Workspace_producer, Search_files ->
-    Error "workspace producers do not expose tool_search_files"
+    Error (Runtime_error "workspace producers do not expose tool_search_files")
   (* Evidence notes carry URLs (a PR, a CI run) the judge must be able to
      dereference itself — a producer's claim about a URL is not inspection
      (masc#28989: three genuinely-completed submissions rejected because the
@@ -369,13 +389,17 @@ let run t tool ~args =
      public internet, not the producer tree, so it is producer-scope
      independent; it dispatches directly because the judge has no turn
      continuation for a Gate to resume. *)
+  | (Keeper_producer _ | Workspace_producer), Board_source ->
+    collaboration_read Verification_collaboration_evidence.read_board
+  | (Keeper_producer _ | Workspace_producer), Fusion_source ->
+    collaboration_read Verification_collaboration_evidence.read_fusion
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     Tool_misc_web_fetch.handle
       ~tool_name:(tool_name Web_fetch)
       ~start_time:(Time_compat.now ())
       args
     |> Keeper_tool_execution.of_tool_result
-    |> result_of_execution
+    |> execution_result
 ;;
 
 let is_pdf path bytes =
@@ -541,15 +565,22 @@ let media_result t tool ~name ~args ~start_time =
                    ; Llm_provider.Types.image_block ~media_type
                        ~data:(Base64.encode_exn bytes) () ] ()) ))
      | _ -> None)
-  | (Read_file | Search_files | Web_fetch), _ -> None
+  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source), _ -> None
 ;;
 
 let dispatch t ~name ~args =
   let start_time = Time_compat.now () in
   let text_result = function
     | Ok text -> Tool_result.ok ~tool_name:name ~start_time text
-    | Error detail -> Tool_result.error ~failure_class:Tool_result.Runtime_failure
+    | Error (Runtime_error detail) -> Tool_result.error ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name ~start_time detail
+    | Error (Collaboration_error error) ->
+      let failure_class = match error with
+        | Verification_collaboration_evidence.Invalid_request _ | Source_unavailable _ -> Tool_result.Workflow_rejection
+        | Access_denied _ -> Tool_result.Policy_rejection
+        | Storage_failed _ -> Tool_result.Runtime_failure in
+      Tool_result.error ~failure_class ~tool_name:name ~start_time
+        (Verification_collaboration_evidence.error_to_string error)
   in
   match List.find_opt (fun (tool, _) -> String.equal (tool_name tool) name) t.tools with
   | None ->
@@ -583,10 +614,11 @@ let dispatch t ~name ~args =
          | Some result -> result
          | None -> text_result (
          match run t tool ~args:prepared_args with
-         | (Ok text | Error text) as result when String_util.is_valid_utf8 text ->
+         | (Ok text | Error (Runtime_error text)) as result when String_util.is_valid_utf8 text ->
            result
-         | Ok bytes | Error bytes ->
-           Error
+         | Error (Collaboration_error _) as result -> result
+         | Ok bytes | Error (Runtime_error bytes) ->
+           Error (Runtime_error
              (Yojson.Safe.to_string
                 (`Assoc
                    [ "code", `String "lookup_output_invalid_utf8"
@@ -596,7 +628,7 @@ let dispatch t ~name ~args =
                      `String Digestif.SHA256.(digest_string bytes |> to_hex)
                    ; "error",
                      `String "The lookup returned non-UTF-8 bytes, not readable text. No text content was delivered. Binary file bytes are not a visual inspection."
-                   ])))
+                   ]))))
        in
        log_call
          t

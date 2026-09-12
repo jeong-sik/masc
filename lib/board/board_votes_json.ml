@@ -269,7 +269,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
 ;;
 
 let load_persisted_posts store =
-  let path = persist_path () in
+  let path = Board_paths.store_file_path store Board_paths.Posts in
   if not (Fs_compat.file_exists path)
   then Ok 0
   else
@@ -305,7 +305,7 @@ let load_persisted_posts store =
 ;;
 
 let load_persisted_comments store =
-  let path = comments_path () in
+  let path = Board_paths.store_file_path store Board_paths.Comments in
   if not (Fs_compat.file_exists path)
   then Ok 0
   else

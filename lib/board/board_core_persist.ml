@@ -31,7 +31,8 @@ let persist_io_error ~where msg =
 ;;
 
 let create_store () =
-  { posts = Hashtbl.create 1024
+  { workspace_masc_dir = None
+  ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
   ; vote_log = Hashtbl.create 2048
   ; post_count = ref 0

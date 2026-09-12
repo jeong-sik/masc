@@ -34,14 +34,18 @@ let parse json =
     let* reason = string "reason" in
     Ok {run_id; task_id; disposition; choice; reason}
 
-let source ~keeper ~run_id =
+let source_in_workspace ~run_id =
   match Board_dispatch.find_post_by_run_id ~run_id with
-  | Some post when Board.Agent_id.to_string post.author = keeper ->
+  | Some post ->
     (match post.origin with
      | Some {source=Some "fusion"; fusion_run_id=Some actual; _} when actual=run_id -> Ok post
      | _ -> Error (Rejected "source is not exact Fusion evidence"))
-  | Some _ -> Error (Rejected "Fusion run belongs to another Keeper")
   | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
+
+let source ~keeper ~run_id =
+  let* post = source_in_workspace ~run_id in
+  if Board.Agent_id.to_string post.author = keeper then Ok post
+  else Error (Rejected "Fusion run belongs to another Keeper")
 
 let evidence_sha256 (post : Board.post) =
   Digestif.SHA256.(digest_string (Yojson.Safe.to_string

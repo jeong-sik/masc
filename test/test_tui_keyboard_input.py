@@ -14324,7 +14324,14 @@ VOICE_CONFIG_FIXTURE = {
 def voice_wizard_http_fixtures() -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
     fixtures["/api/v1/voice/config"] = (200, VOICE_CONFIG_FIXTURE)
-    fixtures["/api/v1/voice/setup"] = (200, VOICE_SETUP_FIXTURE)
+    # One path, two meanings: the pane reads it and the wizard writes to it.
+    # The fixture table is keyed by path alone, so the body tells them apart --
+    # a read arrives with none.
+    fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (200, {"revision": "fixture-voice-revision-2"})
+        if body
+        else (200, VOICE_SETUP_FIXTURE)
+    )
     return fixtures
 
 
@@ -14376,7 +14383,7 @@ def open_the_voice_pane(
     raise AssertionError("p never reached the voice pane")
 
 
-def voice_wizard_interaction() -> Interaction:
+def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
     """The pane names its endpoints, e opens the wizard, and the questions walk.
 
     What this holds that the unit suites cannot: that the box is drawn at all,
@@ -14459,9 +14466,64 @@ def voice_wizard_interaction() -> Interaction:
         expect(back, b"step 3/7", "up did not go back a step")
         expect(back, b"pty-endpoint", "going back lost the typed name")
 
-        # Esc leaves. The pane is underneath and no step counter remains; no
-        # save route is in the fixtures, so a wizard that wrote on the way out
-        # would show a failed request rather than this.
+        # Forward again, filling what is left, so the last step can save.
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 4/7",
+            "enter did not return to the credential step",
+        )
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 5/7",
+            "enter did not reach the model step",
+        )
+        press_and_settle(process, master_fd, output, b"eleven_multilingual_v2", cap=15.0)
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 6/7",
+            "enter did not reach the voice step",
+        )
+        press_and_settle(process, master_fd, output, b"pty-voice-id", cap=15.0)
+        review = press_and_settle(process, master_fd, output, b"\r")
+        expect(review, b"step 7/7", "enter did not reach the review")
+        # With nothing missing the review offers to save. A gap would be listed
+        # here instead, which is the same screen answering the other way.
+        expect(review, b"enter saves this", "the review did not offer to save")
+        # The draft rows are read off the screen rather than off this frame:
+        # only the rows that changed are repainted, and these did not.
+        screen = screen_text(bytes(output))
+        expect(screen, b"pty-endpoint", "the review lost the name")
+        expect(screen, b"eleven_multilingual_v2", "the review lost the model")
+
+        # What the wizard actually puts on the wire. The server side is held by
+        # save_request -> apply -> loader in test/voice_wizard; this is the half
+        # that test cannot see, which is whether the pane sends it.
+        os.write(master_fd, b"\r")
+        body = json.loads(
+            wait_for_http_request(
+                process, master_fd, output, requests, path="/api/v1/voice/setup"
+            )
+        )
+        if body.get("expected_revision") != "fixture-voice-revision":
+            raise AssertionError(
+                f"the save did not carry the revision the pane read: {body!r}"
+            )
+        changes = {change.get("change"): change for change in body.get("changes", [])}
+        for wanted in ("put_endpoint", "set_default_model", "set_tts_default_voice"):
+            if wanted not in changes:
+                raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        endpoint = changes["put_endpoint"].get("endpoint", {})
+        if endpoint.get("id") != "pty-endpoint":
+            raise AssertionError(f"the endpoint is not the one typed: {endpoint!r}")
+        if endpoint.get("api_key_env") != "ELEVENLABS_API_KEY":
+            raise AssertionError(f"the credential variable was lost: {endpoint!r}")
+        # The name of the variable, never its value: runtime.toml is committed.
+        if any("sk-" in str(value) for value in endpoint.values()):
+            raise AssertionError(f"the save carried something key-shaped: {endpoint!r}")
+        if changes["set_tts_default_voice"].get("voice") != "pty-voice-id":
+            raise AssertionError(f"the default voice was lost: {changes!r}")
+
+        # Esc leaves. The pane is underneath and no step counter remains.
         closed = press_and_settle(process, master_fd, output, b"\x1b")
         expect(closed, b"fixture-elevenlabs", "the pane did not come back")
         if b"step " in closed:
@@ -14477,11 +14539,16 @@ def voice_wizard_interaction() -> Interaction:
 
 
 def run_voice_wizard_regression(executable: str) -> None:
+    requests: HttpRequests = []
+    # The probe that follows a save is left to fail: whether an endpoint
+    # answers is the endpoint's business, and a fixture that said yes would be
+    # saying it for them.
     run_terminal_scenario(
         executable,
-        description="The voice setup wizard opens, walks, and leaves on Esc",
-        interact=voice_wizard_interaction(),
+        description="The voice setup wizard opens, walks, saves, and leaves on Esc",
+        interact=voice_wizard_interaction(requests),
         http_fixtures=voice_wizard_http_fixtures(),
+        http_requests=requests,
     )
 
 

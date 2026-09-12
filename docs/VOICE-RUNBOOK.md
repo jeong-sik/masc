@@ -452,7 +452,7 @@ What stands in for that, and what it is worth:
 | step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
 | the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
 | the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
-| the wizard drawn and walked in a real terminal | `dune build @test/runtest-test_tui_keyboard_input-voice-wizard` | that a live server answers the save |
+| the wizard drawn and walked in a real terminal, and what it puts on the wire | `dune build @test/runtest-test_tui_keyboard_input-voice-wizard` | that a live server accepts it |
 
 The last row is the one that found something. Everything above it was green
 while typing an endpoint name containing `i` put the `i` into a keeper message
@@ -460,10 +460,16 @@ and sent the rest of the word after it: the composer sees every key before the
 field does, and the list of places it must not do that named six fields by hand
 and did not name this one. `whisper` reached the screen as `wh`.
 
-What is still not measured is the save against a running server. The scenario
-answers the two reads from fixtures and leaves on Esc, so nothing is written;
-the save path is covered by `save_request` → `apply` → loader instead, which is
-the shape, not the round trip.
+That scenario now walks to the end and presses save, and reads the request the
+wizard posts: the revision the pane was showing, a `put_endpoint` carrying the
+name that was typed, the default model, the default voice — and the **name** of
+the credential variable, never a value, which is asserted rather than assumed
+because `runtime.toml` is committed. The other half, that such a request
+actually writes a loadable `[voice]` section, is `save_request` → `apply` →
+loader in `test/voice_wizard`.
+
+So both ends of the wire are measured against the same shape. What nobody has
+done is run the two against each other with a real server on the other side.
 
 ## Incident: voice was down for six days and said nothing
 

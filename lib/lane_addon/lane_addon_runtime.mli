@@ -10,6 +10,19 @@ val dispatch : ?caller:string -> config:Workspace.config -> operation:operation 
     activity can wake observers; repeated notifications coalesce visibly. *)
 val notify_activity : config:Workspace.config -> unit
 
+type skill_export_owner = Declaration of string | Instance of string
+type skill_export = {
+  owner : skill_export_owner;
+  instance_id : string;
+  package : Lane_addon_types.package;
+}
+val skill_source_id : skill_export_owner -> string
+val register_skill_export_handler :
+  (config:Workspace.config -> skill_export list -> (unit, string) result) -> unit
+(** Server publication bridge for package-declared Skills. The callback receives
+    applied package state, including manual installations. It never becomes a
+    Keeper turn prerequisite. Bodies are not inserted into Keeper instructions. *)
+
 (** Reconcile a complete TOML declaration inventory with owned observers.
     Malformed declarations and incomplete reads preserve the last applied
     configuration. Confirmed declaration removal detaches its owned observer.

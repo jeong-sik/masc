@@ -462,6 +462,21 @@ let parse_text content =
 
 let validate_text content = Result.map (fun _ -> ()) (parse_text content)
 
+let read_only_absolute_source ~id ~path =
+  match absolute_path_rejection path with
+  | Some rejection -> Error rejection
+  | None -> Ok { id; anchor = Absolute; configured_path = path; access = Read_only }
+;;
+
+let append_sources config additions =
+  let sources = config.sources @ additions in
+  let diagnostics = duplicate_diagnostics (List.mapi (fun index source -> index, source) sources) in
+  let diagnostics = match config.resource_read_max_bytes, additions with
+    | None, _ :: _ -> Missing_resource_read_max_bytes :: diagnostics
+    | Some _, _ | None, [] -> diagnostics in
+  if diagnostics = [] then Ok { config with sources } else Error diagnostics
+;;
+
 let to_yojson config =
   `Assoc
     [ ( "resource_read_max_bytes"

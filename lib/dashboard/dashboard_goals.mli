@@ -63,6 +63,33 @@ val build_forest :
 
 (** {1 Per-node JSON renderer} *)
 
+val unlisted_goal_history_of_rows :
+  listed:string list ->
+  rows:Yojson.Safe.t list ->
+  malformed_lines:int ->
+  Yojson.Safe.t
+(** The counting behind [unlisted_goal_history_json], over rows already read.
+    [listed] are the goal ids [goals.json] still holds; a row naming one of them
+    is skipped, because a listed goal is already on every goal surface. Separate
+    from the file read so it can be exercised without a workspace on disk.
+    Ordered by goal id, so two reads of one log agree. *)
+
+val unlisted_goal_history_json :
+  config:Workspace.config -> goals:Goal_store.goal list -> Yojson.Safe.t
+(** What [goal_events.jsonl] remembers about goals [goals.json] no longer lists.
+    [goals.json] holds only the current set, so a goal that reached a terminal
+    phase and left it had no surviving record that it existed; this reads the log
+    without asking the current list what to look for.
+
+    Per goal: [opened_at] and [title] from its [goal_created] row, the last
+    [final_phase] it reached, [closed_at] only when that phase is terminal, and
+    [lifetime_hours] between the two. A goal opened before [goal_created] existed
+    reports null rather than a guessed time, and a goal that left the list
+    without a terminal phase reports no closing time rather than an invented
+    outcome. [coverage] counts malformed lines, rows carrying no [goal_id], and
+    names every event type this reader does not understand, so nothing is
+    dropped in silence. *)
+
 val verification_projection :
   config:Workspace.config -> Goal_store.goal -> Yojson.Safe.t
 (** Load the authoritative proof ledger once, then project each Goal against

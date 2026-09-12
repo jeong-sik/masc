@@ -221,6 +221,92 @@ let test_retained_task_outcomes () =
   check bool "old glow cache is not presented as history" false (contains output "Heatmap")
 ;;
 
+let test_assignee_work_and_daily_flow () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let tasks =
+    [ (* Two completions two and four hours wide: an even sample count has to
+         average the middle pair rather than pick a side. *)
+      task "r1" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T02:00:00Z");
+      task "r2" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T04:00:00Z");
+      (* The agent spelling of the same keeper. RFC-0393 removed the suffix
+         strip, so this must stay its own row. *)
+      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-rondo-agent" "2026-09-11T06:00:00Z");
+      task "o1" "2026-09-11T00:00:00Z"
+        (Claimed { assignee = "rondo"; claimed_at = "2026-09-11T01:00:00Z" });
+      (* Todo carries no assignee and must not invent one. *)
+      task "t1" "2026-09-11T00:00:00Z" Todo;
+      (* [cancelled_by] answers who cancelled, not who held the task. *)
+      task "c1" "2026-09-11T00:00:00Z"
+        (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
+          reason = None }) ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  let rows = flow.by_assignee in
+  check int "only states that carry an assignee open a row" 2 (List.length rows);
+  let row name =
+    List.find (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = name) rows
+  in
+  check bool "a cancelled task does not attribute work to the canceller" false
+    (List.exists (fun (r : Masc_tui_task_flow.assignee_flow) -> r.af_assignee = "polisher") rows);
+  let rondo = row "rondo" in
+  check int "completed tasks counted" 2 rondo.af_done;
+  check int "claimed work counted as open" 1 rondo.af_open;
+  check (option (float 0.001)) "even sample count averages the middle pair"
+    (Some 3.0) rondo.af_median_lead_hours;
+  let agent = row "keeper-rondo-agent" in
+  check int "the agent spelling keeps its own completions" 1 agent.af_done;
+  check (option (float 0.001)) "a single sample is its own median"
+    (Some 6.0) agent.af_median_lead_hours;
+  check string "the longer queue sorts first" "rondo"
+    (List.hd rows).af_assignee;
+  let days = flow.daily in
+  check int "the span is the declared number of days" Masc_tui_task_flow.daily_days
+    (List.length days);
+  let day_from_end back = List.nth days (Masc_tui_task_flow.daily_days - back) in
+  let today = day_from_end 1 in
+  check int "the span ends on the observation day" 0 today.d_created;
+  let yesterday = day_from_end 2 in
+  check int "creations land on their own day" 4 yesterday.d_created;
+  check int "completions land on their own day" 1 yesterday.d_completed;
+  check int "cancellations stay separate from completions" 1 yesterday.d_cancelled;
+  let before = day_from_end 3 in
+  check int "an earlier day keeps its own creations" 2 before.d_created;
+  check int "an earlier day keeps its own completions" 2 before.d_completed;
+  let quiet = day_from_end Masc_tui_task_flow.daily_days in
+  check int "a day with no activity is present as zero" 0 quiet.d_created;
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "the per-assignee table is drawn" true (contains output "median lead");
+  check bool "the keeper spelling is listed" true (contains output "rondo");
+  check bool "the agent spelling is listed beside it" true
+    (contains output "keeper-rondo-agent");
+  check bool "the span names its last day" true (contains output "09-12");
+  check bool "creations are a row of their own" true (contains output "created");
+  check bool "cancellations are a row of their own" true (contains output "cancelled");
+  check bool "lead time is not presented as work time" false (contains output "work time")
+;;
+
+let test_assignee_rows_capped () =
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let tasks =
+    List.init 13 (fun index ->
+      let who = Printf.sprintf "holder-%02d" index in
+      task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
+        (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now tasks in
+  check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
+  check bool "the tail is reported rather than dropped" true
+    (contains output "3 further assignees not listed")
+;;
+
 let test_overview_pulse_line () =
   let state = make_state () in
   let pulse = Render_metrics.overview_pulse_line ~cols:120 state in
@@ -421,6 +507,8 @@ let () =
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "retained task outcomes and observation scope" `Quick test_retained_task_outcomes
+        ; test_case "assignee work and daily flow" `Quick test_assignee_work_and_daily_flow
+        ; test_case "assignee rows capped" `Quick test_assignee_rows_capped
         ] )
     ; ( "overview_pulse"
       , [ test_case "overview_pulse_line" `Quick test_overview_pulse_line ] )

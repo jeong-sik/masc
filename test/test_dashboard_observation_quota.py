@@ -55,7 +55,7 @@ def main():
             with response:
                 status, raw = response.status, response.read().decode()
             assert token not in raw, 'credential echoed'
-            observations.append({'method': request.method, 'path': path, 'status': status})
+            observations.append({'method': request.get_method(), 'path': path, 'status': status})
             return status, raw
         with (base / 'server.log').open('wb') as log:
             process = subprocess.Popen([str(binary), 'start', '--base-path', str(base), '--host', '127.0.0.1', '--port', str(port)],

@@ -10,7 +10,7 @@ let ( let* ) = Result.bind
 (* Bumped when the schema below changes. A file that does not carry this
    number is deleted and rebuilt: the index is derived, so there is nothing
    to migrate. *)
-let schema_version = 2
+let schema_version = 3
 
 let database_path ~ledger_dir = Filename.concat ledger_dir "read-index.sqlite3"
 
@@ -22,10 +22,12 @@ CREATE TABLE IF NOT EXISTS rows (
   ledger_length INTEGER NOT NULL CHECK (ledger_length > 0),
   ts REAL NOT NULL,
   keeper_name TEXT NOT NULL,
+  execution_id TEXT,
   PRIMARY KEY (ledger_path, ledger_offset)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS rows_keeper_ts ON rows(keeper_name, ts);
 CREATE INDEX IF NOT EXISTS rows_ts ON rows(ts);
+CREATE INDEX IF NOT EXISTS rows_keeper_execution ON rows(keeper_name, execution_id);
 CREATE TABLE IF NOT EXISTS cursors (
   ledger_path TEXT PRIMARY KEY NOT NULL,
   boundary INTEGER NOT NULL CHECK (boundary >= 0),
@@ -235,6 +237,14 @@ let keeper_of_row json =
   | _ -> None
 ;;
 
+let execution_id_of_row = function
+  | `Assoc fields ->
+    (match List.assoc_opt "execution_id" fields with
+     | Some (`String value) -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
 let ts_of_row json =
   match json with
   | `Assoc fields ->
@@ -252,13 +262,13 @@ let indexable line =
   | exception Yojson.Json_error _ -> None
   | json ->
     (match keeper_of_row json, ts_of_row json with
-     | Some keeper, Some ts -> Some (keeper, ts)
+     | Some keeper, Some ts -> Some (keeper, ts, execution_id_of_row json)
      | _ -> None)
 ;;
 
 let insert_sql =
   "INSERT OR REPLACE INTO rows (ledger_path, ledger_offset, ledger_length, ts, \
-   keeper_name) VALUES (?, ?, ?, ?, ?)"
+   keeper_name, execution_id) VALUES (?, ?, ?, ?, ?, ?)"
 ;;
 
 let cursor_sql =
@@ -337,7 +347,7 @@ let advance_one store ~before_scan ~path ~cursor =
               let* () = acc in
               match indexable line with
               | None -> Ok ()
-              | Some (keeper, ts) ->
+              | Some (keeper, ts, execution_id) ->
                 (* fire-and-forget: reset returns the last step's code. *)
                 ignore (Sqlite3.reset insert : Sqlite3.Rc.t);
                 let* () = bind_all store.db ~operation:"bind row" insert
@@ -345,7 +355,10 @@ let advance_one store ~before_scan ~path ~cursor =
                     ; Sqlite3.Data.INT (Int64.of_int offset)
                     ; Sqlite3.Data.INT (Int64.of_int (String.length line))
                     ; Sqlite3.Data.FLOAT ts
-                    ; Sqlite3.Data.TEXT keeper ] in
+                    ; Sqlite3.Data.TEXT keeper
+                    ; (match execution_id with
+                       | Some value -> Sqlite3.Data.TEXT value
+                       | None -> Sqlite3.Data.NULL) ] in
                 step_done store.db ~operation:"insert row" insert)
         in
         let* () = pending in
@@ -395,7 +408,7 @@ let advance store ~before_scan ~paths ~cursors =
 
 let select_sql ~filtered =
   Printf.sprintf
-    "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts FROM rows%s ORDER BY ts DESC, \
+    "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts, execution_id FROM rows%s ORDER BY ts DESC, \
      ledger_path DESC, ledger_offset DESC LIMIT ?"
     (if filtered then " WHERE keeper_name = ?" else "")
 ;;
@@ -414,8 +427,14 @@ let select_locations store ~keeper_name ~n =
       | Sqlite3.Rc.ROW ->
         (match Array.to_list (Sqlite3.row_data stmt) with
          | [ Sqlite3.Data.TEXT path; Sqlite3.Data.INT offset; Sqlite3.Data.INT length
-           ; Sqlite3.Data.TEXT keeper; Sqlite3.Data.FLOAT ts ] ->
-           loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts) :: acc)
+           ; Sqlite3.Data.TEXT keeper; Sqlite3.Data.FLOAT ts
+           ; (Sqlite3.Data.TEXT _ | Sqlite3.Data.NULL as execution) ] ->
+           let execution_id = match execution with
+             | Sqlite3.Data.TEXT value -> Some value
+             | _ -> None
+           in
+           loop ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
+                  execution_id) :: acc)
          | _ -> Error "select rows: unexpected column types")
       | Sqlite3.Rc.DONE -> Ok acc
       | rc -> Error (sqlite_error store.db "select rows" rc)
@@ -426,10 +445,44 @@ let select_locations store ~keeper_name ~n =
     loop [])
 ;;
 
+let select_execution_locations store ~keeper_name ~execution_ids =
+  with_stmt store.db ~operation:"select execution rows"
+    "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts, execution_id \
+     FROM rows WHERE keeper_name = ? AND execution_id = ? \
+     ORDER BY ts DESC, ledger_path DESC, ledger_offset DESC"
+    (fun stmt ->
+      let rec collect acc =
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW ->
+          (match Array.to_list (Sqlite3.row_data stmt) with
+           | [ Sqlite3.Data.TEXT path; Sqlite3.Data.INT offset; Sqlite3.Data.INT length
+             ; Sqlite3.Data.TEXT keeper; Sqlite3.Data.FLOAT ts
+             ; Sqlite3.Data.TEXT execution_id ] ->
+             collect ((path, Int64.to_int offset, Int64.to_int length, keeper, ts,
+                       Some execution_id) :: acc)
+           | _ -> Error "select execution rows: unexpected column types")
+        | Sqlite3.Rc.DONE -> Ok acc
+        | rc -> Error (sqlite_error store.db "select execution rows" rc)
+      in
+      let* batches =
+        List.fold_left
+          (fun acc execution_id ->
+            let* batches = acc in
+            (* fire-and-forget: reset returns the last successful step's code. *)
+            ignore (Sqlite3.reset stmt : Sqlite3.Rc.t);
+            let* () = bind_all store.db ~operation:"bind execution identity" stmt
+                [ Sqlite3.Data.TEXT keeper_name; Sqlite3.Data.TEXT execution_id ] in
+            let* locations = collect [] in
+            Ok (locations :: batches))
+          (Ok []) (List.sort_uniq String.compare execution_ids)
+      in
+      Ok (List.concat (List.rev batches)))
+;;
+
 let rows_of_locations locations =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
-    | (path, offset, length, keeper, ts) :: rest ->
+    | (path, offset, length, keeper, ts, execution_id) :: rest ->
       let line = Fs_compat.read_slice ~path ~from:offset ~len:length in
       let* json =
         try Ok (Yojson.Safe.from_string line) with
@@ -437,15 +490,14 @@ let rows_of_locations locations =
       in
       if String.length line = length
          && keeper_of_row json = Some keeper && ts_of_row json = Some ts
+         && execution_id_of_row json = execution_id
       then loop (json :: acc) rest
       else Error ("indexed ledger row no longer matches its identity: " ^ path)
   in
   loop [] locations
 ;;
 
-let recent_rows_with ~before_scan ~store:ledger ?keeper_name ~n () =
-  if n <= 0 then Ok []
-  else
+let read_with ~before_scan ~store:ledger ~select =
     blocking (fun () ->
       let ledger_dir = Dated_jsonl.base_dir ledger in
       Stdlib.Mutex.protect store_mu (fun () ->
@@ -459,7 +511,7 @@ let recent_rows_with ~before_scan ~store:ledger ?keeper_name ~n () =
               |> Result.map_error Dated_jsonl.read_error_to_string
             in
             let* () = advance store ~before_scan ~paths ~cursors in
-            let* locations = select_locations store ~keeper_name ~n in
+            let* locations = select store in
             rows_of_locations locations
           with
           | Sys_error detail -> Error ("read index: " ^ detail)
@@ -480,7 +532,21 @@ let recent_rows_with ~before_scan ~store:ledger ?keeper_name ~n () =
           | Error _ as error -> discard (); error))
 ;;
 
+let recent_rows_with ~before_scan ~store ?keeper_name ~n () =
+  if n <= 0 then Ok []
+  else read_with ~before_scan ~store ~select:(fun index ->
+    select_locations index ~keeper_name ~n)
+;;
+
 let recent_rows = recent_rows_with ~before_scan:(fun ~path:_ -> ())
+
+let by_execution_ids ~store ~keeper_name ~execution_ids =
+  match execution_ids with
+  | [] -> Ok []
+  | _ ->
+    read_with ~before_scan:(fun ~path:_ -> ()) ~store ~select:(fun index ->
+      select_execution_locations index ~keeper_name ~execution_ids)
+;;
 
 module For_testing = struct
   let recent_rows = recent_rows_with

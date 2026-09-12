@@ -37,6 +37,9 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # keeper_up's remote_ssh preflight refuses without a gh identity, and
+    # bootstrap writes the keeper's hosts.yml from this token.
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
 
 
 def make_agent(tmp_path, **kw):
@@ -127,7 +130,7 @@ def test_mcp_registration_command_actually_runs(tmp_path, monkeypatch):
 
 
 def test_container_env_names_the_pool_and_starts_no_keeper(tmp_path):
-    env = make_agent(tmp_path)._container_env()
+    env = make_agent(tmp_path).masc_container_env()
     assert env["BENCH_KEEPER_POOL"] == "bench-1,bench-2,bench-3,bench-4"
     assert env["BENCH_RUNTIME_ID"] == "anthropic.claude-sonnet-5"
     assert env["ANTHROPIC_API_KEY"] == "test-key"
@@ -143,6 +146,19 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "harbor.agents.installed.claude_code.ClaudeCode.install", fake_super_install
     )
+    # The binaries are fetched, not committed, so point the sidecar at a tree
+    # that has them. Without this the test passes only on a machine that has
+    # run image/fetch_masc.sh, and fails everywhere else for a reason that has
+    # nothing to do with what it checks.
+    import masc_sidecar
+
+    fake_root = tmp_path / "bench-root"
+    (fake_root / "dist").mkdir(parents=True)
+    (fake_root / "driver").mkdir()
+    for name in ("masc", "masc-exec-shim"):
+        (fake_root / "dist" / name).write_bytes(b"")
+    (fake_root / "driver" / "bootstrap.sh").write_text("")
+    monkeypatch.setattr(masc_sidecar, "BENCH_ROOT", fake_root)
 
     async def go():
         a = make_agent(tmp_path)

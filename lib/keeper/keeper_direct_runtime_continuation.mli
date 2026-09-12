@@ -1,5 +1,9 @@
-(** Direct-operation adapter over the Owner journal and canonical checkpoint.
-    An admission never reconstructs a prompt or rolls shared history backwards. *)
+(** Direct-operation adapter over the Owner journal and retained exact checkpoint.
+    Deferral retains immutable owned bytes before committing their reference.
+    Resume preserves newer shared history only when the original input and
+    effects remain its exact prefix, restores the original execution scope,
+    and durably admits an explicit continuation if another scope intervened.
+    Missing original bytes never authorize reconstruction or replay. *)
 type admission
 val checkpoint : admission -> Agent_core.Checkpoint.t
 val lane : admission -> Keeper_turn_driver.deferred_runtime_lane

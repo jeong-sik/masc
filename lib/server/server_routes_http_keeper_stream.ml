@@ -2623,6 +2623,34 @@ let process_single_turn ~user_row_origin ~submission
       signal_stream_projection_done ();
       raise exn
 
+(* Durable queue state owns the yield. A display/transcript failure after a
+   committed deferral cannot fail_running a Queued row; a stale binding on a
+   still-Running row cannot hide a terminal checkpoint-admission failure. *)
+let operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery =
+  let failed ?outcome_ref kind detail =
+    Keeper_owner.Operation_failed { kind; detail; outcome_ref } in
+  match operation_state () with
+  | Error detail -> failed Keeper_chat_operation.Store_unavailable detail
+  | Ok Keeper_chat_operation.Queued ->
+    (match pending_continuation () with
+     | Ok (Some _) -> Keeper_owner.Operation_deferred
+     | Error detail -> failed Keeper_chat_operation.Store_unavailable detail
+     | Ok None -> failed Keeper_chat_operation.Turn_invariant
+         "queued operation has no committed continuation")
+  | Ok (Keeper_chat_operation.Running _) ->
+    (match outcome with
+     | Some (Failed { kind; detail }) ->
+       failed (chat_operation_failure_kind_of_queued kind)
+         (queued_turn_failure_kind_to_string kind ^ ": " ^ detail)
+     | None -> failed Keeper_chat_operation.Turn_invariant
+         "Owner operation returned no terminal turn outcome"
+     | Some (Delivered { outcome_ref }) ->
+       match delivery with
+       | Ok () -> Keeper_owner.Operation_succeeded { outcome_ref }
+       | Error detail -> failed ~outcome_ref Keeper_chat_operation.Delivery_failed detail)
+  | Ok (Keeper_chat_operation.Succeeded _ | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _) ->
+    failed Keeper_chat_operation.Turn_invariant "claimed operation was already terminal"
+
 let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   fun ~sw ~keeper_name ~claim ->
   let failed ?outcome_ref kind detail =
@@ -2912,23 +2940,15 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 ~events
             in
             let delivery = Eio.Promise.await delivery in
-            (match pending_continuation () with
-             | Ok (Some _) -> Keeper_owner.Operation_deferred
-             | Error detail -> failed Keeper_chat_operation.Store_unavailable detail
-             | Ok None ->
-            (match outcome, delivery with
-             | Some (Delivered { outcome_ref }), Ok () ->
-               Keeper_owner.Operation_succeeded { outcome_ref }
-             | Some (Delivered { outcome_ref }), Error detail ->
-               failed ~outcome_ref Keeper_chat_operation.Delivery_failed detail
-             | Some (Failed { kind; detail }), _ ->
-               failed
-                 (chat_operation_failure_kind_of_queued kind)
-                 (queued_turn_failure_kind_to_string kind ^ ": " ^ detail)
-             | None, _ ->
-               failed
-                 Keeper_chat_operation.Turn_invariant
-                 "Owner operation returned no terminal turn outcome"))))
+            let operation_state () =
+              Keeper_owner_registry.exact_operation
+                ~base_path:(Mcp_server.workspace_config state).base_path ~keeper_name
+                operation.operation_id
+              |> Result.map_error Keeper_owner_registry.command_error_to_string
+              |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
+                | None -> Error "claimed operation disappeared before settlement") in
+            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery))
+
   in
   match
     Keeper_turn_dispatch_authority.run execute_admitted
@@ -3248,6 +3268,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
+  let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request
   let live_event_is_new = live_event_is_new
   let journal_replay_frames = journal_replay_frames

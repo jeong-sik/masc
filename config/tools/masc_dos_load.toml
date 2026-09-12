@@ -2,8 +2,9 @@ name = "masc_dos_load"
 description = """
 Boot a DOS program on the shared machine.
 
-Call with no program to list what is available. A name may be one file or a \
-directory holding a game: the directory's executable boots and every file \
+Call with no program to list what is available. The name is an entry in the \
+inventory, not a host path — that is the whole filesystem this machine can \
+see. It may be one file or a directory holding a game: the directory's executable boots and every file \
 beside it is mounted where the program opens files. Returns the observation \
 (see masc_dos_screen) after running the program far enough to reach its \
 first screen, stopping early when it asks for a key. Loading is not proof it \
@@ -15,4 +16,4 @@ defer_loading = true
 [[params]]
 name = "program"
 type = "string"
-description = "Name in the programs inventory, or a path. Omit to list what is there."
+description = "Name in the programs inventory. Omit to list what is there."

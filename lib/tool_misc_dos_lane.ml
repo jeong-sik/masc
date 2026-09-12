@@ -112,23 +112,36 @@ let executable_in dir =
          (String.concat ", " many))
 ;;
 
-(* A program is a path that exists, or a name in programs/. Either may be a
-   file (boots alone) or a directory (boots with its data files mounted). *)
+(* A program is a name in programs/, never a host path. The machine reads the
+   file into guest memory and masc_dos_peek reads guest memory back out, so a
+   caller-supplied path would be an arbitrary host-file read. The inventory is
+   the whole filesystem this lane can see; an operator puts a game there.
+
+   The name may be a file (boots alone) or a directory (boots with its data
+   files mounted). It cannot climb out: a separator or a dot segment is
+   refused before it reaches the filesystem. *)
+let escapes name =
+  String.contains name '/'
+  || String.contains name '\\'
+  || String.equal name ".."
+  || String.starts_with ~prefix:"." name
+;;
+
 let resolve_program ~base_path name =
   let trimmed = String.trim name in
   if trimmed = "" then Error "name a program"
+  else if escapes trimmed then
+    Error
+      (Printf.sprintf "%S is not a name in the inventory: no paths, and no dots"
+         trimmed)
   else begin
-    let direct = if Sys.file_exists trimmed then Some trimmed else None in
-    let in_inventory =
-      let p = Filename.concat (programs_dir ~base_path) trimmed in
-      if Sys.file_exists p then Some p else None
-    in
-    match (direct, in_inventory) with
-    | None, None ->
+    let candidate = Filename.concat (programs_dir ~base_path) trimmed in
+    match (if Sys.file_exists candidate then Some candidate else None) with
+    | None ->
       Error
         (Printf.sprintf "no program named %S: put it under %s" trimmed
            (programs_dir ~base_path))
-    | Some path, _ | None, Some path ->
+    | Some path ->
       if Sys.is_directory path then
         Result.map
           (fun (exe, files) ->

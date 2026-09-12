@@ -145,6 +145,22 @@ let test_press_reaches_the_guest_and_the_ledger () =
       fail (Printf.sprintf "expected one ledger entry, got %d" (List.length entries)))
 ;;
 
+(* The machine reads a program into guest memory and masc_dos_peek reads guest
+   memory back out. A caller-supplied path would therefore be an arbitrary
+   host-file read, so only inventory names resolve. *)
+let test_only_inventory_names_resolve () =
+  with_workspace (fun base_path ->
+    let outside = Filename.temp_file "masc-dos-outside-" ".com" in
+    Out_channel.with_open_bin outside (fun oc -> output_string oc hello_com);
+    Fun.protect
+      ~finally:(fun () -> Sys.remove outside)
+      (fun () ->
+        let by_path = load ~base_path outside in
+        check bool "a host path is refused" false (is_completed by_path);
+        let climbing = load ~base_path "../../etc/passwd" in
+        check bool "and so is climbing out" false (is_completed climbing)))
+;;
+
 let test_unknown_key_is_refused () =
   with_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;
@@ -219,6 +235,7 @@ let () =
         ; test_case "inventory" `Quick test_inventory_when_unnamed
         ; test_case "load" `Quick test_load_runs_to_the_first_key_request
         ; test_case "press" `Quick test_press_reaches_the_guest_and_the_ledger
+        ; test_case "inventory only" `Quick test_only_inventory_names_resolve
         ; test_case "unknown key" `Quick test_unknown_key_is_refused
         ; test_case "step cap" `Quick test_step_cap
         ; test_case "peek" `Quick test_peek_reads_the_text_page

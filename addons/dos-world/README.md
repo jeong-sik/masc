@@ -110,8 +110,8 @@ Dashboard screenshots, guest bytes, hashes and cleanup records.
 
 The first host probe installed DOS and an independent controlled-capture observer
 through TOML, with no Attach request or DOS-specific host/UI change. It read the
-package's exact SKILL.md through the existing catalog/editor, then used the
-common Dashboard to submit one increment request. The receipt progressed from
+package's exact SKILL.md through the existing Skill catalog and read-only
+document API, then used the common Dashboard to submit one increment request. The receipt progressed from
 queued to confirmed. Independent decoding of host-retained STATE.BIN and every
 VGA pixel established guest counter 0→1. The companion observer progressed through
 sequences 2→3→4 and stayed active after DOS removal. DOS evidence remained readable

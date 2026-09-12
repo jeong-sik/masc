@@ -110,6 +110,10 @@ let pdf_filter =
   "pdf:impress_pdf_Export:{\"ExportHiddenSlides\":{\"type\":\"boolean\",\"value\":\"true\"},\"ExportNotesPages\":{\"type\":\"boolean\",\"value\":\"false\"}}"
 
 let inspect ~base_path ~max_image_bytes ~bytes =
+  let* () = if String.length bytes > Verification_pdf_inspection.max_source_bytes then
+    Error (Policy_rejected (Printf.sprintf "source exceeds %d byte inspection limit"
+      Verification_pdf_inspection.max_source_bytes))
+    else Ok () in
   let python = Presentation_runtime_dependencies.parser_python ~base_path in
   let missing = List.filter (fun program -> not (Executable_path.command_available program))
       [python; "soffice"] in

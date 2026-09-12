@@ -4873,9 +4873,13 @@ let text_input_target (state : state) ~compact_viewport =
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
-  (* A wizard is only ever open on its own pane, and closing it clears this,
-     so its presence is the whole condition. *)
-  else if Option.is_some state.voice_wizard then Some Text_voice_wizard
+  (* A wizard is only ever open on its own pane and closing it clears this, so
+     its presence is the whole condition -- except that the pane is not drawn at
+     all on a viewport this small. Without the guard the operator saw "terminal
+     too small" while letters still went into a field they could not read and
+     Enter still saved the draft. The other text targets already carry it. *)
+  else if Option.is_some state.voice_wizard && not compact_viewport then
+    Some Text_voice_wizard
   else if state.view = Approvals && not compact_viewport
           && not state.context_inspector_open && Option.is_some state.ask_text_entry
   then Some Text_ask_answer

@@ -1,6 +1,40 @@
 # Changelog
 
 
+## [0.35.15] - 2026-09-12
+
+### Added
+
+- The help sheet names all eight keeper marks, which is the only place a reader
+  sees them together: the roster pane beside the chat draws the glyph with no
+  word at all (#35439).
+- Resources answers `/` in the list, and both panes reach their own top and
+  bottom (#35370).
+- `doctor` names the binding that did not resolve instead of reporting the
+  workspace invalid (RFC 3/5) (#35435).
+
+### Fixed
+
+- HTTP pool: establishment is bounded and failed hosts are pruned, pooled
+  clients are owned in cancellable child scopes, and Piaf connects to the
+  address the probe actually succeeded on (#35381, #35389, #35394).
+- Tool work that yielded no longer counts toward parent-provider stall
+  detection (#35454).
+- The TUI tells an interrupted tool state apart from the runtime the turn ran
+  on (#35455).
+- Keepers drew two bottom corners of a box the surface no longer has (#35414).
+- The Schedules notice said "failed" three times on a row it was cutting
+  (#35436).
+- The Attention badge cut `critical`, the one level that shares its colour with
+  another and so needs its word (#35411).
+- Footers named keys in a spelling the key table does not use (#35430).
+- Source hints are drawn only when a source is present (#35421).
+
+### Changed
+
+- A runtime configuration load failure carries a typed shape to its caller
+  rather than a string (RFC 1/5, 2/5) (#35378, #35417).
+
 ## [0.35.14] - 2026-09-12
 
 ### Added

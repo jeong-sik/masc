@@ -311,6 +311,63 @@ let render_section_resources ~cols (state : state) =
       @ (match state.tasks_error with None -> [] | Some error ->
            [ "    Snapshot warning: " ^ error ])
   in
+  (* One row per assignee, longest queue first. The list is capped so the two
+     blocks below it stay on screen; the tail is reported as a count rather
+     than dropped silently. *)
+  let assignee_rows_shown = 10 in
+  let assignee_lines = match state.task_flow with
+    | None -> [ "    No snapshot to attribute work in." ]
+    | Some flow ->
+      (match flow.Task_flow.by_assignee with
+       | [] -> [ "    No retained task carries an assignee." ]
+       | rows ->
+         let head = List.filteri (fun index _ -> index < assignee_rows_shown) rows in
+         let body =
+           List.map
+             (fun (row : Task_flow.assignee_flow) ->
+               Printf.sprintf "    %-26s %5d %5d  %s"
+                 (Layout.fit_width row.af_assignee 26) row.af_done row.af_open
+                 (match row.af_median_lead_hours with
+                  | None -> "no measurable pair"
+                  | Some hours -> age_text (hours *. 3600.)))
+             head
+         in
+         let omitted = List.length rows - List.length head in
+         [ "    A keeper name and an agent name stay separate rows; nothing is merged."
+         ; Printf.sprintf "    %-26s %5s %5s  %s" "assignee" "done" "open" "median lead" ]
+         @ body
+         @ (if omitted <= 0 then []
+            else [ Printf.sprintf "    %d further assignees not listed" omitted ]))
+  in
+  let day_label at =
+    let tm = Unix.gmtime at in
+    Printf.sprintf "%02d-%02d" (tm.Unix.tm_mon + 1) tm.tm_mday
+  in
+  let daily_title = match state.task_flow with
+    | Some flow when flow.Task_flow.daily <> [] ->
+      let first = List.hd flow.Task_flow.daily in
+      let last = List.fold_left (fun _ day -> day) first flow.Task_flow.daily in
+      Printf.sprintf "Daily task flow · %s to %s UTC"
+        (day_label first.Task_flow.d_start) (day_label last.Task_flow.d_start)
+    | Some _ | None ->
+      Printf.sprintf "Daily task flow · %d UTC days" Task_flow.daily_days
+  in
+  (* Days run across rather than down: the question is the shape of the trend,
+     and one line per day pushes every other block off the section. *)
+  let daily_lines = match state.task_flow with
+    | None -> [ "    No snapshot to count days in." ]
+    | Some flow ->
+      let days = flow.Task_flow.daily in
+      let row label pick =
+        Printf.sprintf "    %-10s" label
+        ^ String.concat ""
+            (List.map (fun (day : Task_flow.day) -> Printf.sprintf "%3d" (pick day)) days)
+      in
+      [ row "day" (fun (day : Task_flow.day) -> (Unix.gmtime day.d_start).Unix.tm_mday)
+      ; row "created" (fun (day : Task_flow.day) -> day.d_created)
+      ; row "completed" (fun (day : Task_flow.day) -> day.d_completed)
+      ; row "cancelled" (fun (day : Task_flow.day) -> day.d_cancelled) ]
+  in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
       [ "    Current turn observation failed: " ^ error
@@ -352,6 +409,8 @@ let render_section_resources ~cols (state : state) =
   in
   List.map clip
     ([ title "Retained task outcomes · 24-hour snapshot window" ] @ task_lines
+     @ [ ""; title "Work per assignee · lead time is created to completed" ] @ assignee_lines
+     @ [ ""; title daily_title ] @ daily_lines
      @ [ ""; title "Current owner turns" ] @ turn_lines
      @ [ ""; title "Execution readiness (health snapshot)" ] @ safety_lines)
 
@@ -471,6 +530,7 @@ let render_section_tools ~cols (state : state) : string list =
   @ List.map clip tool_bars
 
 let render_metrics_body ~cols ~budget (state : state)
+    ~(report_scroll : int -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
     ~push_selected:_
@@ -499,6 +559,10 @@ let render_metrics_body ~cols ~budget (state : state)
   let available = max 0 (room - hint_rows) in
   let max_scroll = max 0 (total_lines - available) in
   let scroll = max 0 (min state.metrics_scroll max_scroll) in
+  (* The row this frame could actually start at, handed back so the next
+     keypress steps from it rather than from wherever the last one left the
+     stored value. *)
+  report_scroll scroll;
   let section_lines_window =
     Rows.of_list ~first:scroll ~height:available section_lines
   in

@@ -6,7 +6,8 @@ let runtime id : Masc.Tui_decode.runtime_option =
   { ro_id = id; ro_provider = "provider"; ro_model = "model";
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_is_local = false;
-    ro_dispatchable = true; ro_blocked_reason = None; ro_is_default = false }
+    ro_dispatchable = true; ro_blocked_reason = None; ro_is_default = false;
+    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None }
 
 let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
 

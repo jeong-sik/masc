@@ -666,6 +666,9 @@ type runtime_option = {
   ro_dispatchable : bool;
   ro_blocked_reason : string option;
   ro_is_default : bool;
+  ro_quota_exhausted : bool;
+  ro_quota_resets_at : float option;
+  ro_quota_scope : string option;
 }
 
 type runtime_resolved_lane = {

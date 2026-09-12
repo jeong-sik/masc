@@ -8415,7 +8415,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             beta_frame,
             health=b"idle",
-            runtime=b"paused anthropic.claude-sonnet-4",
+            runtime=b"paused configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
         )
         for expected in (
@@ -12313,30 +12313,19 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
-        # Two assertions rather than one line, because the whole line is not
-        # a property of this surface. masc_tui_footer.drop_hint_items drops
-        # hints from the back when they plus the status tail leave the row
-        # too wide, and that tail carries the workspace base path -- a
-        # tempfile path, which is /var/folders/... on macOS and /tmp/... on
-        # Linux. Pinning the whole line pins how many hints that length
-        # leaves room for, so the same footer reads as two different strings
-        # on the two machines that run this.
-        #
-        # What is stable is the direction: drops come off the back, and
-        # never_dropped_keys holds Esc, q and y / n wherever they sit. So the
-        # leading run is asserted whole, and the pinned keys separately.
-        #
-        # The single literal was written 2026-09-07 (#33965) and went stale
-        # when #35324 gave Fusion / and n / N: the row dropped r:refresh and
-        # Tab:next to make room and the literal kept naming them. It had
-        # been failing since, unseen -- no pull request runs this scenario,
-        # because the selector reads only test/test_*.ml (#35561).
+        # Fusion's expanded hint text exceeds 200 columns. fit_body removes
+        # status projections before dropping hints, so workspace path length
+        # does not decide which controls survive. Check the list's navigation,
+        # copy, search and exit controls on the same footer row; the footer
+        # unit suite owns the exact fitting algorithm and omission order.
         footer_head = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
             b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
             b"Enter:open"
         )
-        footer_pinned = (b"Esc:back", b"q:quit")
+        footer_controls = (
+            b"Y:copy", b"Esc:back", b"/:find", b"n / N:next / previous match", b"q:quit"
+        )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=200,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -12346,17 +12335,18 @@ def fusion_list_detail_interaction(
         # the frames to stop and read the screen.
         drain_until_quiet(process, master_fd, output)
         footer_frame = bytes(output)
-        drawn = screen_text(footer_frame)
-        if footer_head not in drawn:
+        drawn_rows = screen_rows(footer_frame)
+        footer_row = screen_row_of(drawn_rows, footer_head)
+        if footer_row < 0:
             raise AssertionError(
                 "Fusion list footer disagrees with its exercised keys: "
                 f"{footer_head!r} is not in {footer_frame!r}"
             )
-        for pinned in footer_pinned:
-            if pinned not in drawn:
+        for control in footer_controls:
+            if control not in drawn_rows[footer_row]:
                 raise AssertionError(
-                    "Fusion list footer dropped a key that never drops: "
-                    f"{pinned!r} is not in {footer_frame!r}"
+                    "Fusion list footer omitted an exercised control: "
+                    f"{control!r} is not in {drawn_rows[footer_row]!r}"
                 )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=120,

@@ -301,6 +301,7 @@ export interface TextAreaProps {
   ariaActiveDescendant?: string
   role?: string
   disabled?: boolean
+  readOnly?: boolean
   required?: boolean
   /** Forwards a Preact ref to the inner <textarea>. Mirrors TextInput —
       see that component's docstring for when this is needed (imperative
@@ -359,6 +360,7 @@ export function TextArea({
   ariaActiveDescendant,
   role,
   disabled,
+  readOnly,
   required,
   inputRef,
   onInput,
@@ -396,6 +398,7 @@ export function TextArea({
       aria-expanded=${ariaExpanded}
       aria-activedescendant=${ariaActiveDescendant}
       disabled=${disabled}
+      readOnly=${readOnly}
       required=${required}
       value=${value}
       data-textarea

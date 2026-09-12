@@ -46,6 +46,8 @@ let dos_type = schema_of_name "masc_dos_type"
 let dos_peek = schema_of_name "masc_dos_peek"
 
 let lane_attach = schema_of_name "masc_lane_attach"
+let lane_declaration_read = schema_of_name "masc_lane_declaration_read"
+let lane_declaration_save = schema_of_name "masc_lane_declaration_save"
 let lane_inspect = schema_of_name "masc_lane_inspect"
 let lane_observe = schema_of_name "masc_lane_observe"
 let lane_slice = schema_of_name "masc_lane_slice"

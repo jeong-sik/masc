@@ -122,6 +122,8 @@ let reject_invalid_values () = with_directory (fun _root packages directory ->
   let path = Filename.concat directory "frames.toml" in
   List.iter (fun (label, bytes) -> write path bytes; check_error label path)
     ["unknown top-level field", declaration ~extra:"enabled = true" msx_binding;
+     "duplicate declaration identity key", "id = \"duplicate\"\n" ^ declaration msx_binding;
+     "duplicate declaration binding key", declaration (msx_binding ^ "sources=[]\n");
      "missing binding", declaration "";
      "empty snapshot path is not expanded into a valid directory",
        declaration {|[binding]

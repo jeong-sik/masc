@@ -7285,10 +7285,15 @@ def chat_visibility_modes_interaction(
         # sequences -- strip them and there is no address left to read.
         # Search the raw frame; the census showed both needles contiguous
         # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        # Each row comes from the frame that drew it. The pane redraws only what
+        # changed, so the frame carrying a new transcript row need not carry the
+        # header above it -- asking one frame for both fails on a screen showing
+        # both. The row addresses are still what the pane decided.
+        title = b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        title_row = frame_row_of(frame_containing(initial, title), title)
+        identity_row = frame_row_of(
+            frame_containing(initial, b"gate:auto_judge"), b"gate:auto_judge"
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
         if identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
@@ -9649,13 +9654,12 @@ def keeper_lanes_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # tab_until returns as soon as the title is on screen, and the roster is
+        # a live read that lands after that. Pressing j on the (0) list moves
+        # nothing and redraws nothing, so waiting for beta's band times out.
+        # select_keeper_row waits for the row to exist and is indifferent to how
+        # many frames the surface drew getting there.
+        select_keeper_row(process, master_fd, output, b"beta")
         unread = palette_go(process, master_fd, output, b"go lanes", b"MASC Lanes")
         # The body note is "(not loaded yet — press r)": #30945 added the
         # key hint without updating this needle.
@@ -10286,13 +10290,12 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
-        send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"j",
-            keeper_row_selected(b"beta"),
-        )
+        # tab_until returns as soon as the title is on screen, and the roster is
+        # a live read that lands after that. Pressing j on the (0) list moves
+        # nothing and redraws nothing, so waiting for beta's band times out.
+        # select_keeper_row waits for the row to exist and is indifferent to how
+        # many frames the surface drew getting there.
+        select_keeper_row(process, master_fd, output, b"beta")
         if not wait_for_fixture_event(
             process, master_fd, output, gate.requested, timeout=10.0
         ):

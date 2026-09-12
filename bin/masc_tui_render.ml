@@ -14675,6 +14675,7 @@ let render_runtime (state : state) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
+  let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
   let scroll_hint =
     if shown > content_height then Printf.sprintf "[%d rows, scroll %d]  " shown scroll else ""
   in
@@ -14809,7 +14810,7 @@ let render_runtime (state : state) =
                  c.push_selected (Masc_tui_theme.strip_sgr line)
                else c.push line)
       | Masc_tui_types.Runtime_lanes ->
-      match List.nth_opt candidates (index + scroll) with
+      match Rows.at candidates_window (index + scroll) with
       | None -> c.push_empty ()
       | Some candidate ->
           let open Masc.Tui_decode in

@@ -12,18 +12,24 @@ assert len(by_id)==sum(r['record_kind']=='tool_call' for r in rows)
 outer=[by_id[x] for x in ids]
 raw_path=Path(turn['raw_trace_run_ref']['path'])
 raw_events=[json.loads(line) for line in raw_path.read_text().splitlines()]
-raw_outputs={event['tool_use_id']:event for event in raw_events if event['record_type']=='tool_execution_finished'}
+raw_finished=[event for event in raw_events if event['record_type']=='tool_execution_finished']
+raw_outputs={event['tool_use_id']:event for event in raw_finished}
+assert len(raw_outputs)==len(raw_finished), 'duplicate raw tool_use_id'
 resolved_outer=[]
 for row in outer:
  row=dict(row)
- if row.get('truncated_to') is not None:
-  event=raw_outputs[row['tool_use_id']]
-  assert event['tool_name']==row['tool'] and event['tool_error']==(not row['success'])
-  row['logged_output']=row['output']
-  row['output']=event['tool_result']
-  row['full_output_source']={'path':str(raw_path),'seq':event['seq'],'tool_use_id':row['tool_use_id']}
-  assert len(row['output'].encode())==row['result_bytes']
+ event=raw_outputs[row['tool_use_id']]
+ assert event['tool_name']==row['tool'] and event['tool_error']==(not row['success'])
+ row['logged_output']=row['output']
+ row['output']=event['tool_result']
+ row['full_output_source']={'path':str(raw_path),'seq':event['seq'],'tool_use_id':row['tool_use_id']}
+ row['raw_result_bytes']=len(row['output'].encode('utf-8'))
+ if row.get('result_bytes') is not None:
+  row['byte_count_matches_declared']=row['raw_result_bytes']==row['result_bytes']
+ else:
+  row['byte_count_matches_declared']=None
  resolved_outer.append(row)
+(p/'raw-tool-results.json').write_text(json.dumps([raw_outputs[row['tool_use_id']] for row in outer],ensure_ascii=False,indent=2)+'\n')
 outer=resolved_outer
 composed=[]
 for row in outer:
@@ -61,6 +67,6 @@ if isinstance(items,dict):
 assert isinstance(items,list),type(items)
 answer=[r['content'] for r in items if r.get('role')=='assistant' and r.get('transcript_slot',{}).get('kind')=='terminal_assistant']
 assert len(answer)==1
-result={'source':'typed turn execution_ids joined to durable tool_call rows; composition actions joined by execution_id and tool_use_id', 'operation_id':report['operation_id'],'state':report['operation_state'],'trace_id':turn['trace_id'],'runtime_id':report['runtime_id'],'server':report['build'],'tui_sha256':report['clipboard']['tui_sha256'],'outer_call_count':len(outer),'outer_errors':sum(not r['success'] for r in outer),'composition_invocations':len(composed),'outer_result_bytes':sum(len(r['output'].encode()) for r in outer),'outer_calls':[{'tool':r['tool'],'input':r['input'],'execution_id':r['execution_id'],'tool_use_id':r['tool_use_id'],'success':r['success'],'output':r['output'],'full_output_source':r.get('full_output_source')} for r in outer],'composition_routes':composed,'answer':answer[0],'observed_elapsed_seconds':report['turn_observed_elapsed_seconds'],'measurement_limits':['Outer calls are typed execution-ID joins; truncated durable outputs are resolved from raw tool_execution_finished events by exact tool_use_id.','Timing includes status polling and request latency; no causal speed claim from a single run.','Answer accuracy is reviewed separately against the retained fixture; call counts alone do not establish it.']}
+result={'source':'typed turn execution_ids joined to durable tool_call rows; composition actions joined by execution_id and tool_use_id', 'operation_id':report['operation_id'],'state':report['operation_state'],'trace_id':turn['trace_id'],'runtime_id':report['runtime_id'],'server':report['build'],'tui_sha256':report['clipboard']['tui_sha256'],'outer_call_count':len(outer),'outer_errors':sum(not r['success'] for r in outer),'composition_invocations':len(composed),'outer_result_bytes':sum(len(r['output'].encode()) for r in outer),'outer_calls':[{'tool':r['tool'],'input':r['input'],'execution_id':r['execution_id'],'tool_use_id':r['tool_use_id'],'success':r['success'],'output':r['output'],'logged_output':r['logged_output'],'raw_result_bytes':r['raw_result_bytes'],'declared_result_bytes':r.get('result_bytes'),'byte_count_matches_declared':r['byte_count_matches_declared'],'full_output_source':r.get('full_output_source')} for r in outer],'byte_count_mismatches':[{'tool_use_id':r['tool_use_id'],'raw_result_bytes':r['raw_result_bytes'],'declared_result_bytes':r['result_bytes']} for r in outer if r['byte_count_matches_declared'] is False],'composition_routes':composed,'answer':answer[0],'observed_elapsed_seconds':report['turn_observed_elapsed_seconds'],'measurement_limits':['Outer calls are typed execution-ID joins; all outputs are resolved from raw tool_execution_finished events by exact tool_use_id, including untruncated normalized previews. UTF-8 raw result bytes are checked against result_bytes when supplied; absent declarations remain null. Mismatches are retained explicitly: failed results can include a bridge-added failure-class wrapper beyond the producer byte count. The metric counts actual raw result strings, not provider wire input bytes.','Timing includes status polling and request latency; no causal speed claim from a single run.','Answer accuracy is reviewed separately against the retained fixture; call counts alone do not establish it.']}
 (p/'composition-audit.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
 print({k:result[k] for k in ['outer_call_count','outer_errors','composition_invocations','outer_result_bytes','observed_elapsed_seconds']})

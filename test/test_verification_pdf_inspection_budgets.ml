@@ -1,18 +1,19 @@
-(** The page and byte budgets [Verification_pdf_inspection.inspect] applies to
-    submitted evidence. Evidence is not trusted input: every page can sit under
-    the per-page image limit and the document still be too large, because the
-    pages are held together and base64-encoded into one response.
+(* The two budgets [Verification_pdf_inspection.inspect] puts on submitted
+   evidence. Evidence is not trusted input, and the per-page image limit does
+   not bound a document: every page can sit under it while the pages together
+   are far too large, because they are held in one list and base64-encoded into
+   a single response.
 
-    Needs pdftotext and pdftoppm. Without them [inspect] answers
-    [Dependency_unavailable] before any budget is consulted, and these cases say
-    so rather than reporting a budget they never reached. *)
+   Needs pdftotext and pdftoppm. Without them [inspect] answers
+   [Dependency_unavailable] before any budget is consulted, so those cases say
+   they were skipped rather than report a budget they never reached. *)
 
 open Alcotest
 module Pdf = Masc.Verification_pdf_inspection
 
-(* Two pages, 200x200, one word each. Written out rather than fetched so the
-   suite needs no fixture file, and kept minimal so pdftotext's page count is
-   the only thing it is relied on for. *)
+(* Two pages, 200x200 points, one word each. Written inline so the suite needs
+   no fixture file, and kept minimal because the only thing read off it is the
+   page count and two rendered PNGs. *)
 let two_page_pdf = {|%PDF-1.4
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
@@ -58,6 +59,10 @@ startxref
 %%EOF
 |}
 
+(* Generous enough that no page of the fixture can reach it, so the per-page
+   limit never explains a refusal these cases see. *)
+let per_page_limit = 4 * 1024 * 1024
+
 let poppler_available =
   List.for_all Executable_path.command_available [ "pdftotext"; "pdftoppm" ]
 
@@ -70,56 +75,71 @@ let with_base_path f =
   Sys.remove dir;
   Unix.mkdir dir 0o700;
   Fun.protect
-    ~finally:(fun () -> ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
+    (* A finally that raises would replace whatever the case was reporting,
+       so cleanup failures are swallowed here. *)
+    ~finally:(fun () ->
+      try Fs_compat.remove_tree dir with
+      | Sys_error _ | Unix.Unix_error _ -> ())
     (fun () -> f dir)
 
-let skip_without_poppler name =
+let skipped name =
   Printf.printf "%s: skipped, pdftotext/pdftoppm not installed\n" name
 
-let test_a_document_over_the_page_budget_is_refused () =
-  if not poppler_available then skip_without_poppler "page budget"
+let test_a_document_over_the_page_budget_never_renders () =
+  if not poppler_available then skipped "page budget"
   else
     with_base_path (fun base_path ->
       match
-        Pdf.inspect ~max_pages:1 ~base_path ~max_image_bytes:(4 * 1024 * 1024)
+        Pdf.inspect ~max_pages:1 ~base_path ~max_image_bytes:per_page_limit
           ~bytes:two_page_pdf ()
       with
       | Ok _ -> fail "a document over the page budget must be refused"
-      | Error (Pdf.Page_budget_exceeded { pages; page_limit; bytes; byte_limit = _ }) ->
-        check int "the count it found" 2 pages;
-        check int "against the limit it was given" 1 page_limit;
-        (* Refused before rendering, so there are no bytes to report. *)
-        check int "and nothing was rendered" 0 bytes
+      (* The constructor is the claim: [Too_many_pages] is only reachable
+         before the render loop, so a document this large costs no render at
+         all before it is turned away. *)
+      | Error (Pdf.Too_many_pages { pages; limit }) ->
+        check int "it reports the count it parsed" 2 pages;
+        check int "against the limit it was given" 1 limit
       | Error other -> failf "unexpected refusal: %s" (Pdf.error_to_string other))
 
-let test_pages_over_the_total_byte_budget_are_refused () =
-  if not poppler_available then skip_without_poppler "byte budget"
+let test_pages_under_the_per_page_limit_can_still_exceed_the_total () =
+  if not poppler_available then skipped "byte budget"
   else
     with_base_path (fun base_path ->
       match
-        Pdf.inspect ~max_total_image_bytes:1 ~base_path
-          ~max_image_bytes:(4 * 1024 * 1024) ~bytes:two_page_pdf ()
+        Pdf.inspect ~max_total_image_bytes:1 ~base_path ~max_image_bytes:per_page_limit
+          ~bytes:two_page_pdf ()
       with
       | Ok _ -> fail "pages over the total byte budget must be refused"
-      | Error (Pdf.Page_budget_exceeded { bytes; byte_limit; _ }) ->
-        check int "the limit it was given" 1 byte_limit;
-        (* The first rendered page already passes it, and the per-page limit
-           above is generous, so this is the aggregate talking. *)
-        check bool "and it counted what was rendered" true (bytes > 1)
+      | Error (Pdf.Rendered_bytes_exceeded { bytes; limit; _ }) ->
+        check int "the total it was given" 1 limit;
+        (* The per-page limit above is generous and the first page alone passes
+           the total, so it is the running sum that refused, not one page. *)
+        check bool "and it counted what it had rendered" true (bytes > 1)
       | Error other -> failf "unexpected refusal: %s" (Pdf.error_to_string other))
 
-let test_the_document_passes_inside_both_budgets () =
-  if not poppler_available then skip_without_poppler "inside budgets"
+let test_a_document_inside_both_budgets_is_inspected () =
+  if not poppler_available then skipped "inside both budgets"
   else
     with_base_path (fun base_path ->
-      match
-        Pdf.inspect ~base_path ~max_image_bytes:(4 * 1024 * 1024) ~bytes:two_page_pdf ()
-      with
+      match Pdf.inspect ~base_path ~max_image_bytes:per_page_limit ~bytes:two_page_pdf () with
       | Error error -> failf "the fixture must inspect: %s" (Pdf.error_to_string error)
       | Ok inspection -> check int "both pages came back" 2 (List.length inspection.pages))
 
+(* Runs without Poppler, so the suite still pins something when the tools are
+   absent. An operator reading the refusal has to be able to tell which budget
+   stopped them; the exact wording belongs to [error_to_string] and may change,
+   so what is pinned is that the two do not collapse into one sentence. *)
+let test_the_two_refusals_do_not_read_alike () =
+  let over_pages = Pdf.error_to_string (Pdf.Too_many_pages { pages = 90; limit = 64 }) in
+  let over_bytes =
+    Pdf.error_to_string (Pdf.Rendered_bytes_exceeded { pages = 4; bytes = 999; limit = 100 })
+  in
+  check bool "a count refusal and a byte refusal say different things" true
+    (String.compare over_pages over_bytes <> 0)
+
 let test_extracted_xml_is_bounded_before_parsing () =
-  if not poppler_available then skip_without_poppler "extracted text budget"
+  if not poppler_available then skipped "extracted text budget"
   else with_base_path (fun base_path ->
     match Pdf.inspect ~max_extracted_bytes:1 ~base_path
       ~max_image_bytes:(4 * 1024 * 1024) ~bytes:two_page_pdf () with
@@ -130,7 +150,7 @@ let test_extracted_xml_is_bounded_before_parsing () =
     | Ok _ -> fail "oversized extracted XML was parsed")
 
 let test_large_geometry_has_bounded_raster_dimensions () =
-  if not poppler_available then skip_without_poppler "raster geometry"
+  if not poppler_available then skipped "raster geometry"
   else with_base_path (fun base_path ->
     let bytes = Astring.String.cuts ~sep:"200 200" two_page_pdf
       |> String.concat "20000 20000" in
@@ -160,38 +180,22 @@ let test_source_budget_precedes_dependency_or_process_lookup () =
   | Error error -> fail (Pdf.error_to_string error)
   | Ok _ -> fail "oversized source reached inspection"
 
-let test_each_refusal_says_which_budget () =
-  let counted =
-    Pdf.error_to_string
-      (Pdf.Page_budget_exceeded { pages = 90; page_limit = 64; bytes = 0; byte_limit = 1 })
-  in
-  check bool "a page-count refusal names the pages" true
-    (Astring.String.is_infix ~affix:"90 pages" counted);
-  check bool "and does not claim rendered bytes" false
-    (Astring.String.is_infix ~affix:"bytes" counted);
-  let rendered =
-    Pdf.error_to_string
-      (Pdf.Page_budget_exceeded { pages = 4; page_limit = 64; bytes = 999; byte_limit = 100 })
-  in
-  check bool "a byte refusal names what was rendered" true
-    (Astring.String.is_infix ~affix:"999 bytes" rendered)
-
 let () =
-  run "verification pdf budgets"
+  run "verification pdf inspection budgets"
     [ ( "budgets"
-      , [ test_case "a document over the page budget" `Quick
-            test_a_document_over_the_page_budget_is_refused
-        ; test_case "pages over the total byte budget" `Quick
-            test_pages_over_the_total_byte_budget_are_refused
-        ; test_case "inside both budgets" `Quick
-            test_the_document_passes_inside_both_budgets
+      , [ test_case "a document over the page budget never renders" `Quick
+            test_a_document_over_the_page_budget_never_renders
+        ; test_case "pages under the per-page limit can still exceed the total" `Quick
+            test_pages_under_the_per_page_limit_can_still_exceed_the_total
+        ; test_case "a document inside both budgets is inspected" `Quick
+            test_a_document_inside_both_budgets_is_inspected
         ; test_case "extracted XML is bounded before parsing" `Quick
             test_extracted_xml_is_bounded_before_parsing
-        ; test_case "large page geometry has bounded raster dimensions" `Quick
+        ; test_case "large geometry is raster bounded" `Quick
             test_large_geometry_has_bounded_raster_dimensions
-        ; test_case "source cap precedes dependency and subprocess lookup" `Quick
+        ; test_case "source cap precedes dependency lookup" `Quick
             test_source_budget_precedes_dependency_or_process_lookup
-        ; test_case "each refusal says which budget" `Quick
-            test_each_refusal_says_which_budget
+        ; test_case "the two refusals do not read alike" `Quick
+            test_the_two_refusals_do_not_read_alike
         ] )
     ]

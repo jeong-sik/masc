@@ -115,14 +115,32 @@ msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run this one sh
 echo "${msg}" | head -c 600; echo
 
 echo "== wait for the marker the keeper was asked to write"
+# Sleep on the host, not with `docker exec sleep`: a container that dies
+# mid-wait turned that into a hot loop printing "is not running" once per
+# iteration instead of stopping with a reason.
 found=""
-for _ in $(seq 1 60); do
-  if docker exec "${NAME}" test -f "${MARKER}"; then found=1; break; fi
-  docker exec "${NAME}" sleep 5
+for _ in $(seq 1 90); do
+  if ! docker inspect -f '{{.State.Running}}' "${NAME}" 2>/dev/null | grep -q true; then
+    echo "STAGE_FAIL container-died during the keeper turn" >&2
+    exit 1
+  fi
+  if docker exec "${NAME}" test -f "${MARKER}" 2>/dev/null; then found=1; break; fi
+  sleep 5
 done
 if [[ -z "${found}" ]]; then
   echo "STAGE_FAIL keeper-did-not-act" >&2
-  mcp 12 masc_keeper_status "$(printf '{"name":"%s"}' "${KEEPER}")" 60 | head -c 800 >&2
+  # The reason a turn did not act lives in the server log, not in the tool
+  # result: masc_keeper_msg returns as soon as the turn is queued, so a
+  # provider rejection lands minutes later and asynchronously. Surfacing it
+  # here is the difference between "the keeper did nothing" and "the API key
+  # is over its usage limit until 2026-10-01", which is what one run actually
+  # turned out to be.
+  echo "--- keeper status" >&2
+  mcp 12 masc_keeper_status "$(printf '{"name":"%s"}' "${KEEPER}")" 60 2>&1 | head -c 600 >&2
+  echo >&2
+  echo "--- server log, turn failures" >&2
+  docker exec "${NAME}" sh -c \
+    'grep -iE "turn_failed|attempt_rejected|pipeline stage failed|keeper tool call failed|stop=\"error" /opt/masc-bench/server.log | tail -6' >&2 2>/dev/null || true
   exit 1
 fi
 

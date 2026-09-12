@@ -1044,8 +1044,7 @@ let exact_lane_of_id = function
 ;;
 
 let exact_lane_supports_cli_tail = function
-  | Librarian | Hitl_auto_judge | Board_attention -> true
-  | Verifier -> false
+  | Librarian | Hitl_auto_judge | Board_attention | Verifier -> true
 ;;
 
 let verifier_exact_slot_ids_of_lane_decls
@@ -1780,19 +1779,12 @@ let verifier_exact_lane_slot_ids () =
          registry
          ~lane_id:verifier_exact_lane_id
      with
-     | Ok { selected_slots; _ } ->
-       (match selected_slots with
-        | [] ->
-          Error
-            (Runtime_exact_output_registry.lane_resolution_error_to_string
-               (Runtime_exact_output_registry.No_admitted_lane_slots
-                  { lane_id = verifier_exact_lane_id }))
-        | slots ->
-          Ok
-            (List.map
-               (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-                  slot.slot_id)
-               slots))
+     | Ok { selected_slots; cli_slots } ->
+       Ok
+         (List.map
+            (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+            selected_slots
+          @ cli_slots)
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;

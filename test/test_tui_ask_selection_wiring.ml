@@ -58,12 +58,11 @@ let test_the_two_modes_give_the_walk_one_name () =
        ~binding_name:"question_hints" ~needle:"[/]:question")
 ;;
 
-(* The vocabulary is the repository's, not this surface's. [ and ] walk the
-   container a surface is a list of: Board says post, Changes says keeper,
-   Approvals says ask. Three surfaces, three names -- a fourth means one of
-   them has started calling the same key something of its own. *)
+(* [ and ] name the container a surface walks: asks, keepers, posts, or
+   retained browser observations. Count the declared vocabulary so a new
+   reader does not look like a second spelling of an existing container. *)
 let test_the_bracket_keys_keep_one_vocabulary () =
-  let names = [ "[/]:ask"; "[/]:keeper"; "[/]:post" ] in
+  let names = [ "[/]:ask"; "[/]:keeper"; "[/]:post"; "[/]:observation" ] in
   List.iter
     (fun name ->
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
@@ -71,7 +70,8 @@ let test_the_bracket_keys_keep_one_vocabulary () =
     names;
   Alcotest.(check int) "the question reader explains the same ask walk" 1
     (literals_in_the_drawing ~needle:"[/]: previous/next ask");
-  Alcotest.(check int) "three footer labels and one reader explanation" 4
+  Alcotest.(check int) "declared footer labels and one reader explanation"
+    (List.length names + 1)
     (literals_in_the_drawing ~needle:"[/]:")
 ;;
 

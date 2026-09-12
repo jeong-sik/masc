@@ -5,7 +5,6 @@ the runner's temporary directory, including the python-pptx installation.
 """
 import hashlib
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,7 +13,9 @@ import zipfile
 
 
 def main():
-    base = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir())) / "masc-presentation-verifier"
+    # RUNNER_TEMP can be inside HOME, where native workspace tests reject writes.
+    # Match Filename.get_temp_dir_name() in the OCaml consumer.
+    base = Path(tempfile.gettempdir()) / "masc-presentation-verifier"
     environment = base / ".masc/runtime-tools/presentation"
     python = environment / "bin/python3"
     if len(sys.argv) == 1:

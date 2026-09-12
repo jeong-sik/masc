@@ -1,0 +1,31 @@
+name = "masc_lane_act"
+description = """
+Queue an explicit action on one optional Lane package's advertised world action port.
+
+Inspect action_schema first. Return is a durable receipt, not guest completion. Reusing the same request_id and normalized input returns that receipt; changed input is rejected. Never automatically retry an unknown outcome against a new instance. Existing Keeper work continues."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "instance_id"
+type = "string"
+required = true
+description = "Exact active Lane instance."
+
+[[params]]
+name = "expected_incarnation"
+type = "string"
+required = true
+description = "Incarnation from inspect; v0 is the instance UUID."
+
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+description = "Caller-created request identity, retained across a lost reply."
+
+[[params]]
+name = "action"
+type = "object"
+required = true
+description = "Payload matching the advertised action_schema properties.action."

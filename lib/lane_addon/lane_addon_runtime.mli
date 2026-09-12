@@ -1,6 +1,6 @@
 (** Optional observers run in independent server-owned fibers. No Keeper tool
     set, input queue, turn switch or environment owner is replaced. *)
-type operation = Attach | Inspect | Observe | Detach | Slice | Evidence
+type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
@@ -39,6 +39,8 @@ module For_testing : sig
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
+    action_schema : unit -> Yojson.Safe.t option;
+    act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, string) result;
     container_id : string;
   }

@@ -149,7 +149,8 @@ let test_cycle_and_cross_run_are_local_to_connections () = with_fixture (fun clo
   reconcile config directory;
   let producer = active config "producer" |> text "instance_id" in
   let consumer = active config "other-consumer" |> text "instance_id" in
-  await clock (fun () -> Hashtbl.mem received producer && Hashtbl.mem received consumer);
+  await clock (fun () -> Hashtbl.mem received producer && Hashtbl.mem received consumer
+    && (member "observation_seq" (instance config producer) |> Yojson.Safe.Util.to_int) > 0);
   let source = require_some "consumer received no source envelope" (source received consumer) in
   check bool "another world is not silently joined" false (member "complete" source |> Yojson.Safe.Util.to_bool);
   check int "different-run input has no fabricated output" 0 (list "observations" source |> List.length);

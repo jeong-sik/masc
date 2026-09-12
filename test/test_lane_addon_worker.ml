@@ -137,7 +137,7 @@ let package directory mode : Types.package = {
 let unwrap = function Ok value -> value | Error error -> fail (Worker.error_to_string error)
 let sources mode = `Assoc [ "mode", `String mode ]
 let observe worker mode = Worker.observe worker ~binding:(`Assoc []) ~sources:(sources mode)
-let start ?(instance_id = Masc.Random_id.uuid_v7 ()) env sw dir docker mode =
+let start ?(instance_id = Random_id.uuid_v7 ()) env sw dir docker mode =
   Worker.start ~sw ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id
     ~package:(package dir mode) ~docker_command:docker ()
 

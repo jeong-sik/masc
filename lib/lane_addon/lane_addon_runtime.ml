@@ -512,7 +512,9 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
       let* id = text args "instance_id" in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
-      Eio.Mutex.use_rw m.configuration_mutex (fun () ->
+      (* Each owned transition is recoverable from its binding record.
+         Cancellation releases the serializer so a later pass can reconcile. *)
+      Eio.Mutex.use_ro m.configuration_mutex (fun () ->
         match Hashtbl.find_opt m.entries id with
         | None ->
             let* fields = persisted_binding m id in
@@ -534,7 +536,7 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
 
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
-  Eio.Mutex.use_rw m.configuration_mutex (fun () ->
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
     let issues = ref snapshot.issues in
     let add_issue ?id source_path message =

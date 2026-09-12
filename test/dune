@@ -5590,7 +5590,7 @@
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc alcotest eio eio_main yojson unix))
+ (libraries masc masc_random_id alcotest eio eio_main yojson unix))
 (include stanzas/test_runtime_model_discovery.inc)
 
 (include stanzas/test_bedrock_sdk.inc)
@@ -5688,4 +5688,4 @@
 (test
  (name test_lane_addon_reconcile)
  (modules test_lane_addon_reconcile)
- (libraries alcotest masc yojson unix eio_main eio.mock fs_compat))
+ (libraries masc_test_deps eio eio_main eio.mock yojson unix))

@@ -159,9 +159,11 @@ let load ~directory =
       (* [Sys.readdir] loses the errno. [stat] distinguishes a missing directory
          from a failed directory read; neither an empty default nor a string
          match may authorize removal of an existing installation. *)
-      (try ignore (Unix.stat directory); Error message with
-       | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
-       | Unix.Unix_error _ -> Error message)
+      (match (Unix.stat directory).Unix.st_kind with
+       | Unix.S_DIR -> Error message
+       | _ -> Error "configuration path is not a directory"
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+       | exception Unix.Unix_error _ -> Error message)
   in
   match listing with
   | Error message ->

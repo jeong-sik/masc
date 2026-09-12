@@ -1,0 +1,35 @@
+ Overview  Activity  Keepers  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+   MASC Browser Lane  automation · browser  [HTTP read ok]                                                                        
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    coordinator HTTP [connected]  Scene 46.7 ms • 13 nodes                                                                        
+    Element 1/13: Channels • n/p:select • y:copy context                                                                          
+    [1/1] Gamma · Team Channels (active)  [ / ]:select tab                                                                        
+    Page content · viewport only · http://127.0.0.1:60831/gamma.html                                                              
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [>1 h2] Channels                                                                                                              
+    [2 button/link] Alpha                                                                                                         
+    [3 button/link] Beta                                                                                                          
+    [4 button/link] Gamma                                                                                                         
+    [5 h1] Gamma channel                                                                                                          
+    [6 strong] Sora                                                                                                               
+    [7 time] 2026-09-12 10:15                                                                                                     
+    [8 p] Current decision: run Cedar end-to-end QA Wednesday against schema v4. Owner: Sora. No additional request for Mina in   
+    this channel.                                                                                                                 
+    [9 button/link] Message link                                                                                                  
+    [10 p] Coverage: currently displayed messages only.                                                                           
+    [11 h2] Navigation summary                                                                                                    
+    [12 p] Old cached snippet: @Mina ship Cedar on Friday.                                                                        
+    [13 p] This is not the channel message list.                                                                                  
+    Text 1/14 • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane                                                                   
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+
+  Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  Ctrl-O:image  | TUI c2304e7 ≠ server cd7f637 (restart masc)
+Browser Lane · automation · browser page reader                                                                                   

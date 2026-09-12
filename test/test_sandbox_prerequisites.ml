@@ -68,9 +68,75 @@ let test_official_clients_are_explicit_and_not_ready () =
       [mac S.Arm64 26; S.Linux S.X64])
     [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install"]
 
+(* Hearing is the only half of voice a fresh mac cannot already do: say is in
+   the base system with nine Korean voices, and nothing transcribes. What the
+   catalog offers for that was measured 2026-09-12 -- the brew bottle is 8.9MB,
+   and the model at this URL answered 200 with content-length 1,624,555,275. *)
+let whisper host distribution = P.catalog ~host ~distribution P.Whisper_cli
+
+let test_whisper_offers_a_package_and_a_model () =
+  let actions =
+    P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac S.Arm64 26)
+      ~distribution:P.Other P.Whisper_cli
+  in
+  check int "a package and a model, nothing else" 2 (List.length actions);
+  (match (find "whisper_cli_brew_install" actions).action_effect with
+   | P.Run_commands steps ->
+     check (list (list string)) "the formula, installed and not started"
+       [ [ "brew"; "install"; "whisper-cpp" ] ] steps
+   | _ -> fail "the package step must run a command");
+  match (find "whisper_model_download" actions).action_effect with
+  | P.Run_commands [ argv ] ->
+    (* --create-dirs because the cache directory will not exist on a machine
+       that has never had one, and the whole path is one argv item: no shell
+       expands a ~ here. *)
+    check (list string) "the model, fetched to where it was told"
+      [ "curl"
+      ; "-L"
+      ; "--create-dirs"
+      ; "-o"
+      ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin"
+      ; "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"
+      ]
+      argv
+  | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
+    fail "the model step must be one download command"
+
+(* Offering a download with nowhere to write would produce a command that
+   fails on a path nobody chose. The page is opened instead. *)
+let test_without_a_directory_the_model_is_a_page_not_a_command () =
+  let actions = whisper (mac S.Arm64 26) P.Other in
+  match (find "whisper_model_page" actions).action_effect with
+  | P.Open_official_installer _ -> ()
+  | P.Run_commands _ | P.Install_official_cli _ ->
+    fail "with no directory there is no download command to offer"
+
+(* Homebrew is the only route this catalog can name a command for. Naming an
+   apt package would install whatever happens to carry that name, or nothing. *)
+let test_linux_gets_instructions_rather_than_a_guessed_package () =
+  List.iter
+    (fun distribution ->
+      let actions = whisper (S.Linux S.X64) distribution in
+      check int "one action, and it is a link" 1 (List.length actions);
+      List.iter
+        (fun (action : P.action) ->
+          match action.action_effect with
+          | P.Open_official_installer _ -> ()
+          | P.Run_commands _ | P.Install_official_cli _ ->
+            fail "no package name is guessed for Linux")
+        actions)
+    [ P.Debian; P.Ubuntu; P.Other ]
+
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
   test_case "explicit distro plan and failure boundary" `Quick test_linux_install_is_explicit;
   test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
-  test_case "effects are not readiness" `Quick test_completion_never_means_ready]]
+  test_case "effects are not readiness" `Quick test_completion_never_means_ready];
+  "hearing on a fresh machine",[
+  test_case "whisper offers a package and a model" `Quick
+    test_whisper_offers_a_package_and_a_model;
+  test_case "without a directory the model is a page" `Quick
+    test_without_a_directory_the_model_is_a_page_not_a_command;
+  test_case "linux gets instructions rather than a guessed package" `Quick
+    test_linux_gets_instructions_rather_than_a_guessed_package]]

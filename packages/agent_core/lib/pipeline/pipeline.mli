@@ -38,8 +38,25 @@ val persist_turn_checkpoint_for_state
   -> Types.agent_state
   -> (unit, Error.t) result
 
-(** Run a single agent turn through the 6-stage pipeline.
-    Equivalent to the previous [run_turn_core].
+(** {1 Provider turn identity} *)
+
+(** The provider turn about to run, resolved once at the resume-or-fresh
+    boundary: a fresh turn, a durable turn resumed after a restart, or an
+    already-settled turn boundary replayed. Carries the one zero-based ordinal
+    every producer for that turn reads: the [agent_turn] span the caller opens,
+    the stage spans, hooks, events, tool invocations and the turn log line. *)
+type turn_frontier
+
+(** Resolve the next turn's identity. Consumes the one-shot resume flag [Agent]
+    binds for a resumed run, so it is called exactly once per turn, before any
+    span or record names that turn. Fails closed on inconsistent restored
+    topology. *)
+val resolve_turn_frontier : Agent_types.t -> (turn_frontier, Error.t) result
+
+val turn_frontier_ordinal : turn_frontier -> int
+
+(** Run a single agent turn through the 6-stage pipeline under the identity
+    [frontier] from {!resolve_turn_frontier}.
 
     [before_tool_execution], when present, runs exactly once for a non-empty
     tool batch after assistant collection has committed successfully and before
@@ -57,5 +74,6 @@ val run_turn
   -> ?raw_trace_run:Raw_trace.active_run
   -> ?on_provider_failure:(Provider_failure_attribution.t option -> unit)
   -> ?before_tool_execution:(unit -> unit)
+  -> frontier:turn_frontier
   -> Agent_types.t
   -> (turn_outcome, Error.t) result

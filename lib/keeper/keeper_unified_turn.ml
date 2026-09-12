@@ -542,7 +542,8 @@ let run_keeper_cycle
     ; runtime_rotation_attempts = []
     ; failure_reason = None
     ; retry_phase_started_at = None
-    ; last_dispatched_runtime_id = None
+    ; runtime_attempt_errors = []
+    ; lane_terminal_error = None
     }
   in
   let turn_state =
@@ -1281,34 +1282,44 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  (* masc#28762: [final_execution.runtime_id] names the
-                     deferred-lane assignment this cycle was budgeted under,
-                     not necessarily the concrete candidate
-                     [attempt_runtime_candidates] actually dispatched —
+                  (* [final_execution.runtime_id] names the deferred-lane
+                     assignment this cycle was budgeted under, not
+                     necessarily the concrete candidate
+                     [attempt_runtime_candidates] dispatched:
                      [Runtime_lane_preference] sticky ordering can route a
                      lane keyed by one runtime id to a different candidate
-                     first (observed 2026-08-15T11:49Z: the lane-entry
-                     runtime was consistently logged while a
-                     sticky-reordered sibling candidate actually dispatched,
-                     so this log named the untried lane key instead of the
-                     runtime that actually errored).
-                     [keeper_cycle_failed_runtime_attribution] reports the
-                     dispatched candidate's own id when a same-turn
-                     deferral hint is available. *)
+                     first. [keeper_cycle_failed_runtime_attribution] takes
+                     [runtime=] from the last dispatched entry of
+                     [turn_state.runtime_attempt_errors] (never from a
+                     pre-dispatch refusal and never from the execution
+                     record), reports the lane key as its own [lane=] field,
+                     and names the candidate whose error [error=] carries as
+                     [error_origin=], which can be an earlier candidate than
+                     [runtime=]. [cycle_latency=] measures the whole
+                     execution, every candidate included, not the reported
+                     candidate alone. *)
                   let runtime_attribution =
                     keeper_cycle_failed_runtime_attribution
                       ~deferred_runtime_lane:turn_state.deferred_runtime_lane
-                      ~execution_runtime_id:final_execution.runtime_id
+                      ~lane_runtime_id:final_execution.runtime_id
+                      ~runtime_attempt_errors:turn_state.runtime_attempt_errors
+                      ~lane_terminal_error:turn_state.lane_terminal_error
                   in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
                     ~category:Log.Turn
-                    "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
+                    "%s: keeper cycle FAILED runtime=%s lane=%s error_origin=%s \
+                     attempts=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
-                     latency=%dms%s error=%s"
+                     cycle_latency=%dms%s error=%s"
                     meta.name
-                    runtime_attribution.reported_runtime_id
+                    (keeper_cycle_failed_runtime_to_string
+                       runtime_attribution.reported_runtime)
+                    runtime_attribution.lane_runtime_id
+                    (keeper_cycle_failed_terminal_origin_to_string
+                       runtime_attribution.terminal_error_origin)
+                    (runtime_attempt_errors_to_string runtime_attribution.attempts)
                     runtime_attribution.deferred_next_runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
@@ -1364,13 +1375,14 @@ let run_keeper_cycle
                       (Option.map EC.degraded_retry_reason_to_string fallback_reason)
                     ~error:e_str
                     ~terminal_reason
-                    (* The runtime walk's own name for the candidate that
-                       answered with this error. [runtime_attribution] above
-                       resolves the same question for the log line, but only
-                       from a deferral hint; without one it falls back to the
-                       lane id. The record takes the walk's report or nothing
-                       (masc#35043). *)
-                    ?executed_runtime_id:turn_state.last_dispatched_runtime_id
+                    (* The runtime walk's own name for the last candidate it
+                       dispatched: the same attempt list
+                       [runtime_attribution] above reports on the log line.
+                       The record takes the walk's report or nothing. *)
+                    ?executed_runtime_id:
+                      (match runtime_attribution.reported_runtime with
+                       | Dispatched_candidate runtime_id -> Some runtime_id
+                       | No_candidate_dispatched -> None)
                     ();
                   commit_turn_runtime_or_raise
                     ~config

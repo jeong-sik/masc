@@ -157,7 +157,7 @@ type keeper_wake_activation_deferred_reason =
   | Keeper_wake_activation_proactive_disabled
   | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
   | Keeper_wake_activation_owner_unknown of string
-  | Keeper_wake_activation_owner_absent
+  | Keeper_wake_activation_owner_not_current of string
   | Keeper_wake_activation_unregistered
   | Keeper_wake_activation_not_running of Keeper_state_machine.phase
 
@@ -175,7 +175,8 @@ let keeper_wake_activation_deferred_reason_fields = function
     ( "shutdown_fenced"
     , Some (Keeper_shutdown_types.Operation_id.to_string operation_id) )
   | Keeper_wake_activation_owner_unknown detail -> "owner_unknown", Some detail
-  | Keeper_wake_activation_owner_absent -> "owner_absent", None
+  | Keeper_wake_activation_owner_not_current detail ->
+    "owner_not_current", Some detail
   | Keeper_wake_activation_unregistered -> "unregistered", None
   | Keeper_wake_activation_not_running phase ->
     "not_running", Some (Keeper_state_machine.phase_to_string phase)
@@ -195,7 +196,8 @@ let keeper_wake_activation_deferred_reason_of_fields fields =
       Keeper_wake_activation_shutdown_fenced operation_id)
   | "owner_unknown", Some detail ->
     Ok (Keeper_wake_activation_owner_unknown detail)
-  | "owner_absent", None -> Ok Keeper_wake_activation_owner_absent
+  | "owner_not_current", Some detail ->
+    Ok (Keeper_wake_activation_owner_not_current detail)
   | "unregistered", None -> Ok Keeper_wake_activation_unregistered
   | "not_running", Some phase ->
     (match Keeper_state_machine.phase_of_string phase with
@@ -204,11 +206,11 @@ let keeper_wake_activation_deferred_reason_of_fields fields =
   | ( "lifecycle_denied"
     | "shutdown_fenced"
     | "owner_unknown"
+    | "owner_not_current"
     | "not_running" ), None ->
     Error ("activation_detail is required for activation_reason: " ^ reason)
   | ( "autoboot_disabled"
     | "proactive_disabled"
-    | "owner_absent"
     | "unregistered" ), Some _ ->
     Error ("activation_detail must be null for activation_reason: " ^ reason)
   | reason, _ -> Error ("unsupported activation_reason: " ^ reason)
@@ -481,7 +483,67 @@ let activation_deferred_of_paused_dead = function
       ("runtime_" ^ Keeper_state_machine.phase_to_string phase)
 ;;
 
-let activation_outcome_for_required_wake config ~base_path ~keeper_name =
+(* What the metadata store said about the Keeper a due occurrence would
+   wake, read once before the durable queue is touched. *)
+type owner_meta_read =
+  | Owner_meta_answered of (Keeper_meta_contract.keeper_meta, string) result
+      (* [Ok]: the store holds this Keeper, overlaid with its declaration.
+         [Error]: the file exists but the store or the overlay failed on
+         it; the string is that failure. *)
+  | Owner_meta_not_current of string
+      (* The store holds a file under this name that this binary does not
+         decode as current. Boot re-materialises the Keeper from its
+         declaration, so the stimulus is enqueued and consumed then; the
+         string is the decode detail. *)
+  | Owner_meta_unavailable of string
+      (* The store did not answer; the string is that failure. *)
+
+(* Whether the store was consulted for this occurrence. *)
+type owner_meta_preflight =
+  | Owner_meta_consulted of owner_meta_read
+  | Owner_meta_not_consulted
+      (* The occurrence is already terminal: activation is not required
+         and its evidence reconciles without the store. *)
+
+let owner_absent_rejection keeper_name =
+  Printf.sprintf
+    "scheduled keeper wake target is absent from the keeper store keeper=%s"
+    keeper_name
+;;
+
+(* No file under this name is terminal for the occurrence: no Keeper can
+   consume the stimulus, so nothing is enqueued and the schedule fails with
+   this reason. Only that authoritative absence is terminal; a file the
+   store holds but cannot decode as current, and a store that did not
+   answer, keep the stimulus with a typed deferral. *)
+let read_owner_meta config keeper_name =
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      Keeper_meta_store.read_effective_meta_presence config keeper_name)
+  with
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Ok
+      (Owner_meta_unavailable
+         ("durable keeper metadata read failed: "
+          ^ Executor_pool_ref.strict_submit_error_to_string
+              (Executor_pool_ref.Work_failed failure)))
+  | Error error ->
+    Ok
+      (Owner_meta_unavailable
+         ("durable keeper metadata read unavailable: "
+          ^ Executor_pool_ref.strict_submit_error_to_string error))
+  | Ok (Ok Keeper_meta_store.Meta_absent) ->
+    Error
+      (Schedule_runner.Terminal_dispatch_rejection
+         (owner_absent_rejection keeper_name))
+  | Ok (Ok (Keeper_meta_store.Meta_present meta)) ->
+    Ok (Owner_meta_answered (Ok meta))
+  | Ok (Ok (Keeper_meta_store.Meta_not_current detail)) ->
+    Ok (Owner_meta_not_current detail)
+  | Ok (Error detail) -> Ok (Owner_meta_answered (Error detail))
+;;
+
+let activation_outcome_for_required_wake ~base_path ~keeper_name owner_meta =
   let classify meta_result =
     let admission =
       Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
@@ -544,32 +606,13 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
             (Keeper_wake_activation_lifecycle_denied
                (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))))
   in
-  match
-    Executor_pool_ref.submit_strict (fun () ->
-      Keeper_meta_store.read_effective_meta config keeper_name)
-  with
-  | Error (Executor_pool_ref.Work_failed failure) ->
+  match owner_meta with
+  | Owner_meta_unavailable detail ->
+    Keeper_wake_activation_deferred (Keeper_wake_activation_owner_unknown detail)
+  | Owner_meta_not_current detail ->
     Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown
-         ("durable keeper metadata read failed: "
-          ^ Executor_pool_ref.strict_submit_error_to_string
-              (Executor_pool_ref.Work_failed failure)))
-  | Error error ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown
-         ("durable keeper metadata read unavailable: "
-          ^ Executor_pool_ref.strict_submit_error_to_string error))
-  (* The store answered with nothing it can read under this name -- no
-     file, or a file this binary cannot decode, which boot re-materialises
-     from TOML. Either way this is not a read that failed, and the queue
-     drain cancels the stimulus as owner-absent within the minute. Measured
-     live 2026-09-02: a daily wake for a Keeper deleted days earlier still
-     reported [succeeded] with the fact buried in a detail string. The
-     receipt now says it in its own word. *)
-  | Ok (Ok None) ->
-    Keeper_wake_activation_deferred Keeper_wake_activation_owner_absent
-  | Ok (Ok (Some meta)) -> classify (Ok meta)
-  | Ok (Error detail) -> classify (Error detail)
+      (Keeper_wake_activation_owner_not_current detail)
+  | Owner_meta_answered meta_result -> classify meta_result
 ;;
 
 let log_activation_outcome ~schedule_id ~keeper_name = function
@@ -1149,6 +1192,17 @@ let dispatch_keeper_wake
     | Error detail -> retryable_dispatch_failure detail
   in
   let intake_owner = resolved_occurrence_owner initial_disposition in
+  (* The store is consulted only where enqueue or owner activation can
+     follow. A terminal occurrence reconciles its evidence and commits an
+     acceptance without it. *)
+  let* owner_meta =
+    match initial_disposition with
+    | Terminal_completed_at _ | Terminal_failed_at _ | Terminal_cancelled_at _ ->
+      Ok Owner_meta_not_consulted
+    | Pending_at _ | Absent_at _ | Transfer_projecting_at _ ->
+      read_owner_meta config intake_owner
+      |> Result.map (fun read -> Owner_meta_consulted read)
+  in
   let dispatch_while_fenced intake_token =
     let* acceptance =
       accept_keeper_wake_occurrence
@@ -1166,26 +1220,33 @@ let dispatch_keeper_wake
       | Already_failed _ -> Keeper_wake_already_failed
       | Already_cancelled -> Keeper_wake_already_cancelled
     in
-    let activation_outcome =
-      match acceptance with
-      | Already_acked | Already_failed _ | Already_cancelled ->
-        Keeper_wake_activation_not_required
-      | Wake_required ->
-        activation_outcome_for_required_wake
-          config
-          ~base_path
-          ~keeper_name
-      | Already_pending owner ->
-        activation_outcome_for_required_wake
-          config
-          ~base_path
-          ~keeper_name:owner
-    in
     let activation_keeper_name =
       match acceptance with
       | Already_pending owner -> owner
       | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
         keeper_name
+    in
+    (* [accept_keeper_wake_occurrence] rejects an owner that differs from
+       [intake_owner], so [owner_meta] is the activation Keeper's answer. *)
+    let* activation_outcome =
+      match acceptance, owner_meta with
+      | (Already_acked | Already_failed _ | Already_cancelled), _ ->
+        Ok Keeper_wake_activation_not_required
+      | (Wake_required | Already_pending _), Owner_meta_consulted consulted ->
+        Ok
+          (activation_outcome_for_required_wake
+             ~base_path
+             ~keeper_name:activation_keeper_name
+             consulted)
+      | (Wake_required | Already_pending _), Owner_meta_not_consulted ->
+        (* The occurrence was terminal when resolved and is not under the
+           fence; the retry resolves it again and consults the store. *)
+        retryable_dispatch_failure
+          (Printf.sprintf
+             "scheduled keeper wake occurrence left its terminal disposition \
+              while acquiring intake fence keeper=%s occurrence=%s"
+             activation_keeper_name
+             stimulus_id)
     in
     let* () =
       match activation_outcome with
@@ -1213,7 +1274,17 @@ let dispatch_keeper_wake
              (match reason_detail with
               | Some detail -> " detail=" ^ detail
               | None -> ""))
-      | _ -> Ok ()
+      | Keeper_wake_activation_signaled
+      | Keeper_wake_activation_not_required
+      | Keeper_wake_activation_deferred
+          ( Keeper_wake_activation_lifecycle_denied _
+          | Keeper_wake_activation_autoboot_disabled
+          | Keeper_wake_activation_proactive_disabled
+          | Keeper_wake_activation_shutdown_fenced _
+          | Keeper_wake_activation_owner_unknown _
+          | Keeper_wake_activation_owner_not_current _
+          | Keeper_wake_activation_unregistered ) ->
+        Ok ()
     in
     log_activation_outcome
       ~schedule_id:request.schedule_id

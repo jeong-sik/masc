@@ -4,6 +4,7 @@ import { get, post } from './core'
 const text = Schema.NonEmptyString
 const count = Schema.Int.pipe(Schema.nonNegative())
 const nullableText = Schema.NullOr(text)
+const jsonObject = Schema.Record({ key: Schema.String, value: Schema.Unknown })
 export const laneAddonRowSchema = Schema.Struct({
   id: text, lane_id: text, kind: Schema.Literal('event', 'value', 'relation'),
   title: text, observed_at: Schema.Number.pipe(Schema.finite()), subject_id: text,
@@ -29,6 +30,7 @@ const configurationSchema = Schema.Struct({
 })
 const instanceSchema = Schema.Struct({
   instance_id: text, run_id: text, addon_id: text, title: text, revision: text,
+  incarnation: text, action_schema: Schema.NullOr(jsonObject),
   configuration: Schema.NullOr(instanceConfigurationSchema),
   phase: Schema.Struct({
     kind: Schema.Literal('attached', 'observing', 'failed', 'detaching', 'detached'),
@@ -44,12 +46,42 @@ const snapshotSchema = Schema.Struct({
 const sliceSchema = Schema.Struct({
   rows: Schema.Array(laneAddonRowSchema), coverage: Schema.Array(coverageSchema), complete: Schema.Boolean,
 })
+const actionReceiptSchema = Schema.Struct({
+  instance_id: text, incarnation: text, request_id: text, requester: text,
+  executor: nullableText, input_sha256: text, action: jsonObject,
+  state: Schema.Literal('queued', 'running', 'confirmed', 'failed_before_effect', 'outcome_unknown'),
+  result: Schema.NullOr(jsonObject), detail: Schema.NullOr(Schema.String),
+})
 export type LaneAddonRow = Schema.Schema.Type<typeof laneAddonRowSchema>
+export type LaneAddonInstance = Schema.Schema.Type<typeof instanceSchema>
 export type LaneAddonSnapshot = Schema.Schema.Type<typeof snapshotSchema>
 export type LaneAddonSlice = Schema.Schema.Type<typeof sliceSchema>
+export type LaneAddonActionReceipt = Schema.Schema.Type<typeof actionReceiptSchema>
+export type LaneAddonActionRequest = {
+  instance_id: string; expected_incarnation: string; request_id: string; action: Record<string, unknown>
+}
 export type LaneAddonQuery = { run_id?: string; lane_id?: string; since?: number; until?: number }
 export const parseLaneAddonSnapshot = Schema.decodeUnknownSync(snapshotSchema)
 export const parseLaneAddonSlice = Schema.decodeUnknownSync(sliceSchema)
+export const parseLaneAddonActionReceipt = Schema.decodeUnknownSync(actionReceiptSchema)
+
+function matchingActionReceipt(value: unknown, request: LaneAddonActionRequest): LaneAddonActionReceipt {
+  const receipt = parseLaneAddonActionReceipt(value)
+  if (receipt.instance_id !== request.instance_id || receipt.incarnation !== request.expected_incarnation
+    || receipt.request_id !== request.request_id) {
+    throw new Error('Action receipt does not match the requested instance, incarnation, and request ID.')
+  }
+  return receipt
+}
+
+export async function requestLaneAddonAction(request: LaneAddonActionRequest): Promise<LaneAddonActionReceipt> {
+  return matchingActionReceipt(await post<unknown>('/api/v1/lane-addons/actions', request), request)
+}
+
+export async function fetchLaneAddonAction(request: LaneAddonActionRequest, signal?: AbortSignal): Promise<LaneAddonActionReceipt> {
+  const params = new URLSearchParams({ instance_id: request.instance_id, request_id: request.request_id })
+  return matchingActionReceipt(await get<unknown>(`/api/v1/lane-addons/actions?${params}`, { signal }), request)
+}
 
 export async function fetchLaneAddons(signal?: AbortSignal): Promise<LaneAddonSnapshot> {
   return parseLaneAddonSnapshot(await get<unknown>('/api/v1/lane-addons', { signal }))

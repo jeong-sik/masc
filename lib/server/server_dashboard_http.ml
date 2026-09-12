@@ -620,6 +620,9 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "goals", `List (List.map goal_json goals)
+    (* [goals] above is the current set only, so a goal that completed and left
+       it disappeared from every planning surface. The log still remembers it. *)
+    ; "goal_history", Dashboard_goals.unlisted_goal_history_json ~config ~goals
     ; "rollup", Goal_store.rollup_to_yojson rollup
     ; ( "task_backlog"
       , `Assoc

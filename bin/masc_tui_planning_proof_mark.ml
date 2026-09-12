@@ -57,3 +57,24 @@ let legend_for proofs =
   List.filter_map
     (fun kind -> if List.mem kind present then Some (entry kind) else None)
     kinds
+
+let legend_rows ~max_cells ~max_rows proofs =
+  let label = "  JUDGE  " in
+  let label_cells = Masc_tui_message_layout.display_width label in
+  if max_cells <= label_cells || max_rows <= 0 then []
+  else
+    let text =
+      legend_for proofs
+      |> List.map (fun (mark, word) -> mark ^ " " ^ word)
+      |> String.concat "  "
+    in
+    let rows =
+      Masc_tui_message_layout.wrap_words
+        ~max_cells:(max_cells - label_cells) text
+    in
+    if List.length rows > max_rows then []
+    else
+      List.mapi
+        (fun index row ->
+          (if index = 0 then label else String.make label_cells ' ') ^ row)
+        rows

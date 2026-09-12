@@ -821,7 +821,7 @@
  (name masc_tui_planning_proof_mark)
  (wrapped false)
  (modules masc_tui_planning_proof_mark)
- (libraries masc))
+ (libraries masc masc_tui_message_layout))
 
 (library
  (name masc_tui_approval_detail)

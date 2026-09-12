@@ -18,3 +18,10 @@ val legend_for : Masc.Tui_decode.goal_proof list -> (string * string) list
 (** The rows of {!legend} these verdicts need. A mark an operator can see is
     explained; one no goal carries does not spend the line. The order follows
     {!legend}. *)
+
+val legend_rows :
+  max_cells:int -> max_rows:int -> Masc.Tui_decode.goal_proof list -> string list
+(** Complete, uncoloured legend rows, including the JUDGE label and continuation
+    indent. Wraps within the frame's content-cell budget. Returns no rows when
+    the full legend cannot fit the available height, the label leaves no room
+    for text, or the verdicts need no legend. Never truncates an explanation. *)

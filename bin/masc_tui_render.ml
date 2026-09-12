@@ -3244,28 +3244,23 @@ let render_planning_list (state : state) =
        (* What the JUDGE column's marks mean, once, under the header that
           names it. The glyphs are the only part of a row an operator cannot
           read straight off, and every one of them changes what to do next --
-          which is why the line says the marks this list draws and only those.
-          It used to be a literal that named four of the six states, missing
-          "criterion changed" entirely, and a fixed line with all five words
-          would not fit an eighty-column frame. *)
+          which is why the legend says the marks this list draws and only those.
+          Wrap complete explanations within the frame's cell width: a clipped
+          legend would lose a verdict and add a truncation mark identical to
+          the stale-proof glyph. *)
        (* Reserve the divider, a goal (or empty note), and the selected
-          verdict before spending a row on the legend. At the minimum
+          verdict before spending rows on the legend. At the minimum
           height the headers and summary stay in place and a goal remains
           visible; taller frames get the legend back. *)
        let selection_rows = if count = 0 then 0 else 1 in
        let rows_after_legend = 1 + 1 + selection_rows + tail_rows in
        let judge_legend =
-         Masc_tui_planning_proof_mark.legend_for
+         Masc_tui_planning_proof_mark.legend_rows
+           ~max_cells:(framed_inner_width cols)
+           ~max_rows:(rows - count_frame_lines buf - rows_after_legend)
            (List.map (fun (g : planning_goal) -> g.pg_proof) goals)
        in
-       if
-         judge_legend <> []
-         && count_frame_lines buf + 1 + rows_after_legend <= rows
-       then
-         box_line_styled buf cols ~style:Ansi.dim
-           ("  JUDGE  "
-            ^ String.concat "  "
-                (List.map (fun (mark, word) -> mark ^ " " ^ word) judge_legend));
+       List.iter (box_line_styled buf cols ~style:Ansi.dim) judge_legend;
        box_divider buf cols;
 
        if count = 0 then begin

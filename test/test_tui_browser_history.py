@@ -89,6 +89,9 @@ def run(binary):
             assert len(requests) == count, "history dispatched a current browser request"
             assert not any(kind == "unexpected effect" for kind, _ in requests)
             h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
+            h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
+            # Global navigation must release the hidden history's key ownership.
+            h.send_and_wait(process, fd, output, b"\x1b[<0;5;1M\x1b[<0;5;1m", b"MASC Overview")
             os.write(fd, b"q")
         finally:
             beta_release.set()

@@ -286,6 +286,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0443 | Runtime lifecycle is not a provider stream event — a turn before its first to... | Draft | - |
 | 0444 | goal store 를 못 읽으면 빈 목록이 아니라 typed 상태다 | Draft | - |
 | 0445 | 'deferred' 대신 다음 행위자를 말한다 — 누가 다시 움직이는지가 닫힌 합으로 기록에 남는다 | Draft | - |
+| 0446 | 계약 없는 제출은 검증에 들어가지 않는다 | Draft | - |
 | 0449 | 402 는 429 가 아니다 — Hard_quota 는 운영자 행동과 즉시 회전 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |

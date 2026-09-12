@@ -46,6 +46,7 @@ module For_testing : sig
     start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+      resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
       (unit, string) result;

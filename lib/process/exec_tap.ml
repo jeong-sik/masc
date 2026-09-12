@@ -176,7 +176,21 @@ let redact_arg s =
    and a header not named below is treated as carrying a credential. Being
    wrong that way costs a Content-Type in a debugging corpus; being wrong the
    other way costs the key. *)
-let header_flags = [ "-H"; "--header" ]
+(* Which programs give -H the meaning "header". Not every one does: rg reads
+   -H as --with-filename, and reading its next argument as a header value
+   rewrote a search pattern in the corpus. The option's meaning belongs to the
+   program, so the program is what is asked. *)
+let header_taking_commands = [ "curl"; "wget" ]
+
+let command_takes_headers argv0 =
+  let base = Filename.basename argv0 in
+  let base =
+    match Filename.chop_suffix_opt ~suffix:".exe" base with
+    | Some stripped -> stripped
+    | None -> base
+  in
+  List.mem base header_taking_commands
+;;
 
 let descriptive_headers =
   [ "accept"
@@ -190,6 +204,10 @@ let descriptive_headers =
   ; "user-agent"
   ]
 
+(* The whole value, not the part the shape rules did not recognise. A partial
+   pass left the rest readable -- "X-Api-Key: sk-live:opaque" came out as
+   "[REDACTED]:opaque" -- which is the same failure as not redacting, with a
+   [REDACTED] next to it to look safe. *)
 let redact_header_arg arg =
   match String.index_opt arg ':' with
   (* Not [name: value] at all, so whatever it is goes through the shape rules
@@ -199,23 +217,51 @@ let redact_header_arg arg =
     let name = String.sub arg 0 colon in
     if List.mem (String.lowercase_ascii (String.trim name)) descriptive_headers
     then redact_arg arg
-    else (
-      let by_shape = redact_arg arg in
-      (* A shape the rules already know keeps the spelling they produce:
-         "Bearer [REDACTED]" says which scheme without saying the token, and
-         that is worth keeping for whoever reads the corpus. Only a value they
-         left untouched -- the case this arm exists for -- is blanked whole. *)
-      if not (String.equal by_shape arg) then by_shape else name ^ ": [REDACTED]")
+    else name ^ ": [REDACTED]"
 ;;
 
-let redact_argv argv =
-  let rec loop = function
-    | [] -> []
-    | flag :: value :: rest when List.mem flag header_flags ->
-      flag :: redact_header_arg value :: loop rest
-    | arg :: rest -> redact_arg arg :: loop rest
+(* curl takes a short option's value attached or separated -- "-H name: v" and
+   "-Hname: v" are the same request (curl 8.5 manual, "Options"). Only the
+   separated form was read as a header, so the attached one carried its key
+   through. wget spells the long form attached with "=". *)
+let attached_header_value arg =
+  let starts_with prefix =
+    String.length arg > String.length prefix
+    && String.equal (String.sub arg 0 (String.length prefix)) prefix
   in
-  loop argv
+  if starts_with "-H"
+  then Some ("-H", String.sub arg 2 (String.length arg - 2))
+  else if starts_with "--header="
+  then Some ("--header=", String.sub arg 9 (String.length arg - 9))
+  else None
+;;
+
+let separated_header_flags = [ "-H"; "--header" ]
+
+let redact_argv argv =
+  let headers_apply =
+    match argv with
+    | argv0 :: _ -> command_takes_headers argv0
+    | [] -> false
+  in
+  (* Accumulated rather than built on the way out of the recursion: the tap
+     records every invocation, and an argv long enough to overflow the stack
+     here would take the process down with it -- inside a facility whose
+     contract is that it does not break what it is recording. *)
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | flag :: value :: rest
+      when headers_apply && List.mem flag separated_header_flags ->
+      loop (redact_header_arg value :: flag :: acc) rest
+    | arg :: rest ->
+      let redacted =
+        match if headers_apply then attached_header_value arg else None with
+        | Some (prefix, value) -> prefix ^ redact_header_arg value
+        | None -> redact_arg arg
+      in
+      loop (redacted :: acc) rest
+  in
+  loop [] argv
 ;;
 
 let env_keys = function

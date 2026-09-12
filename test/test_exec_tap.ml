@@ -111,7 +111,9 @@ let test_argv_redaction () =
   must_not_contain ~tag:"bearer secret" line "ghp_super_secret_token";
   must_not_contain ~tag:"url password" line "user:password";
   must_not_contain ~tag:"sk secret" line "sk-proj-abc123";
-  must_contain ~tag:"redacted bearer" line "Bearer [REDACTED]";
+  (* Authorization is not a descriptive header, so the whole value goes --
+     the scheme word is not worth leaving credential material beside. *)
+  must_contain ~tag:"redacted bearer" line "Authorization: [REDACTED]";
   must_contain ~tag:"redacted url" line "://[REDACTED]@api.example.com/v1";
   must_contain ~tag:"redacted sk" line "[REDACTED]"
 
@@ -146,6 +148,64 @@ let test_header_values_are_redacted_by_position () =
   must_contain ~tag:"content type survives" line "Content-Type: application/json";
   must_contain ~tag:"the url survives" line "api.example.com/v1/voices"
 
+(* curl takes a short option's value attached or separated. Only the separated
+   form was read as a header, so [-Hxi-api-key: ...] carried its key through. *)
+let test_an_attached_header_option_is_still_a_header () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:
+      [ "curl"; "-Hxi-api-key: attached-secret"; "--header=X-Api-Key: long-attached" ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_not_contain ~tag:"attached short option" line "attached-secret";
+  must_not_contain ~tag:"attached long option" line "long-attached";
+  must_contain ~tag:"the short form keeps its shape" line "-Hxi-api-key: [REDACTED]";
+  must_contain ~tag:"and the long one too" line "--header=X-Api-Key: [REDACTED]"
+
+(* -H is curl's header flag. rg reads it as --with-filename and takes no value,
+   so reading the next argument as a header rewrote a search pattern. *)
+let test_only_header_taking_commands_consume_the_next_argument () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:[ "rg"; "-H"; "TODO: fix this"; "lib" ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_contain ~tag:"the pattern is not a header value" line "TODO: fix this"
+
+(* A value the shape rules half-recognise is still a credential. Left partial,
+   "sk-live:opaque" came out as "[REDACTED]:opaque" -- unredacted, with a
+   [REDACTED] beside it to look safe. *)
+let test_a_partly_recognised_header_value_goes_whole () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:[ "curl"; "-H"; "X-Api-Key: sk-live:opaque-tail" ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_not_contain ~tag:"the opaque tail" line "opaque-tail";
+  must_contain ~tag:"the whole value went" line "X-Api-Key: [REDACTED]"
+
+(* The tap records every invocation, so an argv long enough to overflow the
+   stack while preparing the record would take the process with it. *)
+let test_a_long_argv_does_not_overflow () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:("curl" :: List.init 500_000 (fun i -> Printf.sprintf "arg-%d" i))
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_contain ~tag:"the last argument survived" line "arg-499999"
+
 (* A header argument that is not [name: value] has no name to judge, so it
    falls back to the shape rules rather than being blanked. *)
 let test_a_header_argument_without_a_name_falls_back_to_shapes () =
@@ -170,4 +230,8 @@ let () =
   test_argv_redaction ();
   test_header_values_are_redacted_by_position ();
   test_a_header_argument_without_a_name_falls_back_to_shapes ();
+  test_an_attached_header_option_is_still_a_header ();
+  test_only_header_taking_commands_consume_the_next_argument ();
+  test_a_partly_recognised_header_value_goes_whole ();
+  test_a_long_argv_does_not_overflow ();
   print_endline "[test_exec_tap] all tests passed"

@@ -390,6 +390,109 @@ let test_rows_and_header_share_one_grid () =
     check string "header names the text from cell 22" "CLAIM" (String.sub header 22 5)
 ;;
 
+(* The row under the facts title. Each fact on this screen is written in one
+   place: the title carries the total and the filters, this row carries the
+   breakdown and the sort. Both used to carry the total and both used to carry
+   the sort, and the title is the row that runs out of width first -- at 140
+   columns against a live server it was cut mid-timestamp, taking the clock and
+   the connection badge with it. *)
+let facts_body_lines ?(cols = 120) ?(budget = 30) state =
+  let lines = ref [] in
+  let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
+  Render_memory.render_memory_facts_body ~cols ~budget state
+    ~push:keep
+    ~push_styled:(fun ~style:_ line -> keep line)
+    ~push_selected:keep
+    ~push_divider:(fun () -> ())
+    ~push_empty:(fun () -> ());
+  List.rev !lines
+
+let three_kinds_state ?(keeper = "alpha") () =
+  let state = make_state () in
+  let fact category claim : Decode.memory_fact =
+    { mf_claim = claim
+    ; mf_category = category
+    ; mf_origin = "manual"
+    ; mf_first_seen = 100.0
+    ; mf_last_seen = 200.0
+    ; mf_memory_id = "mem-" ^ claim
+    ; mf_events = Decode.no_memory_fact_events
+    }
+  in
+  let ordinary : Decode.memory_ordinary_store =
+    { mos_revision = 1
+    ; mos_updated_at = 1000.0
+    ; mos_facts =
+        [ fact "architecture" "The renderer draws the board"
+        ; fact "persona" "Roger reads for the tester"
+        ]
+    }
+  in
+  let source : Decode.memory_source_store =
+    { mss_revision = 1
+    ; mss_updated_at = 1000.0
+    ; mss_facts =
+        [ { msf_claim = "Config points at runtime.toml"
+          ; msf_first_seen = 150.0
+          ; msf_path = "config/rt.toml"
+          ; msf_sha256 = "abc123sha"
+          }
+        ]
+    ; mss_invalidations =
+        [ { mi_source_path = "legacy_docs.md"
+          ; mi_invalidated_at = 300.0
+          ; mi_reason = "superseded"
+          }
+        ]
+    }
+  in
+  state.memory_facts
+  <- Some
+       { mfs_keeper = keeper
+       ; mfs_ordinary = Decode.Memory_store_present ordinary
+       ; mfs_source = Decode.Memory_store_present source
+       };
+  state.memory_facts_cursor <- 0;
+  state
+
+let stats_row lines =
+  match List.filter (contains "Sort [s]:") lines with
+  | [ row ] -> row
+  | [] -> fail "no row on the facts body names the sort"
+  | _ :: _ -> fail "the sort is named on more than one row"
+
+let test_the_breakdown_and_the_sort_sit_on_one_row () =
+  let state = three_kinds_state () in
+  let lines = facts_body_lines state in
+  check string "the breakdown, then the sort that ordered it"
+    "  (2 ord \xc2\xb7 1 src \xc2\xb7 1 drop) \xc2\xb7 Sort [s]: Recency (Newest)"
+    (stats_row lines);
+  check bool "and the total the title already draws is not repeated" false
+    (List.exists (contains "Total:") lines)
+
+let test_the_breakdown_counts_the_rows_the_screen_lists () =
+  (* A filter narrows the rows; the title then says how many are left. A
+     breakdown taken from the store would sum to four under a title saying
+     one. *)
+  let state = three_kinds_state () in
+  state.search_last <- "Roger";
+  let lines = facts_body_lines state in
+  check string "one ordinary fact matched, and nothing else"
+    "  (1 ord \xc2\xb7 0 src \xc2\xb7 0 drop) \xc2\xb7 Sort [s]: Recency (Newest)"
+    (stats_row lines);
+  check int "which is the number the title counts" 1
+    (List.length (Types.memory_fact_rows state))
+
+let test_the_fleet_view_does_not_shout_before_the_sort () =
+  (* The fleet view is named in the title. A row saying so again was the only
+     body row a seven-row terminal had, and the sort fell off the screen. *)
+  let state = three_kinds_state ~keeper:"*" () in
+  state.memory_facts_keeper <- Some "*";
+  let lines = facts_body_lines ~budget:1 state in
+  check bool "no banner row" false (List.exists (contains "FLEET") lines);
+  check string "the first body row is the one carrying the sort"
+    (stats_row lines) (List.hd lines)
+
 let test_fleet_fact_row_line () =
   let fact : Decode.memory_fact =
     { mf_claim = "System uses Roger voice for Tester"
@@ -569,6 +672,14 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ] )
+    ; ( "one place per fact"
+      , [ test_case "the breakdown and the sort sit on one row" `Quick
+            test_the_breakdown_and_the_sort_sit_on_one_row
+        ; test_case "the breakdown counts the rows the screen lists" `Quick
+            test_the_breakdown_counts_the_rows_the_screen_lists
+        ; test_case "the fleet view does not shout before the sort" `Quick
+            test_the_fleet_view_does_not_shout_before_the_sort
         ] )
     ]
 ;;

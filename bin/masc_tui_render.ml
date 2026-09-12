@@ -9662,7 +9662,16 @@ let render_memory (state : state) =
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
-  let keeper_name = Option.value state.memory_facts_keeper ~default:"" in
+  (* "*" is how the fleet view is asked for, not how it should be read. The body
+     used to spell it out in a row of its own -- [GLOBAL FLEET KNOWLEDGE BASE
+     â ALL KEEPERS CONSOLIDATED] -- which said nothing this word does not
+     and cost a body row the compact terminals did not have. *)
+  let keeper_name =
+    match state.memory_facts_keeper with
+    | Some "*" -> "all keepers"
+    | Some name -> name
+    | None -> ""
+  in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
   let now = Unix.localtime (Unix.gettimeofday ()) in

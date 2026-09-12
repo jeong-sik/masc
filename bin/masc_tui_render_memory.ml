@@ -490,32 +490,43 @@ let render_memory_facts_body ~cols ~budget (state : state)
   let total = List.length rows in
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
   let sort_label = memory_sort_order_label state.memory_facts_sort in
-  let fleet_banner =
-    if is_fleet then
-      Printf.sprintf "  %s%s[GLOBAL FLEET KNOWLEDGE BASE — ALL KEEPERS CONSOLIDATED]%s"
-        Ansi.bold (Theme.info ()) Ansi.reset
-    else ""
+  (* The parts of the total the title draws, counted from the rows this screen
+     is about to list. Counting the store instead left a filtered title saying
+     "2 facts" above a breakdown that summed to 285. The store's own totals are
+     the category pills' job, and the All pill carries the grand total.
+
+     The fleet view used to open with a row shouting that it was the fleet view,
+     which the title already says. In a seven-row terminal that row was the only
+     body row the budget had, so the sort -- the one fact nothing else on screen
+     carries -- never got drawn. *)
+  let ordinary_count, source_count, dropped_count =
+    List.fold_left
+      (fun (ordinary, source, dropped) row ->
+        match row with
+        | Memory_row_fact _ -> (ordinary + 1, source, dropped)
+        | Memory_row_source_fact _ -> (ordinary, source + 1, dropped)
+        | Memory_row_invalidation _ -> (ordinary, source, dropped + 1))
+      (0, 0, 0) rows
   in
-  if fleet_banner <> "" then push fleet_banner;
   let stats_line, pills_line =
     match state.memory_facts with
     | None -> ("  (loading facts\xe2\x80\xa6)", "")
     | Some snapshot ->
-        let ord_count, ord_facts =
+        let store_ordinary, store_ordinary_facts =
           match snapshot.mfs_ordinary with
           | Memory_store_present store ->
               (List.length store.mos_facts, store.mos_facts)
           | _ -> (0, [])
         in
-        let src_count, dropped_count =
+        let store_source, store_dropped =
           match snapshot.mfs_source with
           | Memory_store_present store ->
               (List.length store.mss_facts, List.length store.mss_invalidations)
           | _ -> (0, 0)
         in
-        let grand_total = ord_count + src_count + dropped_count in
+        let grand_total = store_ordinary + store_source + store_dropped in
         let stats =
-          facts_stats_row ~ordinary:ord_count ~source:src_count
+          facts_stats_row ~ordinary:ordinary_count ~source:source_count
             ~dropped:dropped_count ~sort_label
         in
         let all_categories = memory_fact_categories state in
@@ -535,13 +546,13 @@ let render_memory_facts_body ~cols ~budget (state : state)
               let count =
                 match filt with
                 | Category_all -> grand_total
-                | Category_source -> src_count
-                | Category_dropped -> dropped_count
+                | Category_source -> store_source
+                | Category_dropped -> store_dropped
                 | Category_ordinary cat ->
                     List.length
                       (List.filter
                          (fun (f : memory_fact) -> f.mf_category = cat)
-                         ord_facts)
+                         store_ordinary_facts)
               in
               let is_active = state.memory_facts_category = filt in
               pill_of_filter filt count is_active)
@@ -609,7 +620,6 @@ let render_memory_facts_body ~cols ~budget (state : state)
   in
   let top_fixed =
     1
-    + (if fleet_banner <> "" then 1 else 0)
     + (if pills_line <> "" then 1 else 0)
     + (if search_banner <> "" then 1 else 0)
     + 1

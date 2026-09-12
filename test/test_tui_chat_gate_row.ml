@@ -93,7 +93,8 @@ let test_no_target_reserves_nothing () =
    disagreed would move the composer. *)
 let test_the_pane_and_the_budget_read_one_list () =
   let count binding =
-    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render_chat.ml"
       ~binding_name:binding ~callee:"keeper_effects_at_the_gate"
   in
   check int "the chat pane asks the projection for the rows it draws" 1

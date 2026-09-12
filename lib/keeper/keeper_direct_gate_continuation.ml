@@ -313,21 +313,29 @@ let discharge ~config ~keeper_name ~operation_id ~user_message ~checkpoint admis
   else Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
     ~obligation:admission.selected.obligation |> owner
 
-let observe_native_input ?blocks ~config ~user_message admission ~transmitted =
+let observe_native_input ?blocks ~(prepared : Keeper_gate_replay.model_message) ~config ~user_message admission ~transmitted =
   match admission.authority with
   | Agent_core _ -> Ok ()
   | Official_client _ ->
     let expected = Keeper_gate_replay.user_message_with_hitl_resolution
       ~base_path:config.Workspace.base_path ~user_message (Some admission.resolution) in
-    let* () = match admission.selected.decision, expected.replay_evidence with
-      | Semantic.Gate_approved, None -> Error "native Gate input has no durable replay evidence"
-      | Semantic.Gate_approved, Some _ | Semantic.Gate_denied _, _ -> Ok () in
-    let evidence_present = match blocks, expected.replay_evidence with
-      | None, _ -> transmitted = expected.text
-      | Some blocks, Some evidence ->
-        let required = Keeper_gate_replay.append_model_evidence_block evidence [] in
-        List.for_all (fun block -> List.mem block blocks) required
-      | Some blocks, None -> List.mem (Agent_core.Types.Text expected.text) blocks in
+    let* () = match admission.selected.decision, prepared.replay_evidence, expected.replay_evidence with
+      | Semantic.Gate_approved, Some prepared, Some durable ->
+        let input_identity evidence = Keeper_gate_replay.approval_input evidence
+          |> Result.map fst |> Result.map_error Keeper_approval_input_admission.error_to_string in
+        let* prepared_identity = input_identity prepared in
+        let* durable_identity = input_identity durable in
+        if prepared_identity <> durable_identity then Error "native Gate input does not identify the durable replay receipt"
+        else Ok ()
+      | Semantic.Gate_denied _, None, None -> Ok ()
+      | Semantic.Gate_approved, None, (None | Some _)
+      | Semantic.Gate_approved, Some _, None
+      | Semantic.Gate_denied _, Some _, (None | Some _)
+      | Semantic.Gate_denied _, None, Some _ ->
+        Error "native Gate input has no matching durable resolution evidence" in
+    let evidence_present = match blocks with
+      | None -> transmitted = prepared.text
+      | Some blocks -> List.mem (Agent_core.Types.Text prepared.text) blocks in
     if not evidence_present then Error "native Gate transmitted input differs from its replay evidence"
     else (admission.transmitted_input <- Some transmitted; Ok ())
 

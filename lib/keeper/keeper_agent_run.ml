@@ -1017,13 +1017,14 @@ let run_turn
   | Error e -> Error e
   | Ok s ->
     let original_gate_message = user_message in
-    let user_message = s.Keeper_run_tools.user_message in
+    let prepared_gate_input = s.Keeper_run_tools.model_message in
+    let user_message = prepared_gate_input.text in
     let user_blocks =
-      match user_blocks, s.Keeper_run_tools.gate_replay_evidence with
+      match user_blocks, prepared_gate_input.replay_evidence with
+      | Some blocks, _ when Option.is_some official_client_continuation ->
+        Some (blocks @ [Agent_core.Types.Text prepared_gate_input.text])
       | Some blocks, Some evidence ->
         Some (Keeper_gate_replay.append_model_evidence_block evidence blocks)
-      | Some blocks, None when Option.is_some official_client_continuation ->
-        Some (blocks @ [Agent_core.Types.Text user_message])
       | (Some _ as blocks), None -> blocks
       | None, _ -> None
     in
@@ -1032,7 +1033,7 @@ let run_turn
          the stored resolution. Preserve their existing input path until those
          blocks have their own durable admission identity. *)
       if Option.is_some official_client_continuation then Ok None else
-      match hitl_resolution, s.Keeper_run_tools.gate_replay_evidence, user_blocks with
+      match hitl_resolution, prepared_gate_input.replay_evidence, user_blocks with
       | Some _, Some evidence, blocks
         when Option.is_none blocks || (match direct_resume with
           | Some (Gate_continuation _) -> true
@@ -1273,7 +1274,8 @@ let run_turn
     let record_transmitted_model_input ~runtime_id ~tools ~transmitted =
       let () = match direct_resume with
         | Some (Gate_continuation admission) ->
-          (match Keeper_direct_gate_continuation.observe_native_input ?blocks:user_blocks ~config
+          (match Keeper_direct_gate_continuation.observe_native_input
+             ~prepared:prepared_gate_input ?blocks:user_blocks ~config
              ~user_message:original_gate_message admission ~transmitted:user_message with
            | Ok () -> ()
            | Error detail -> failwith detail)

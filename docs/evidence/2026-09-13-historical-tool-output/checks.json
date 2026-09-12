@@ -1,0 +1,19 @@
+{
+  "observed_at": "2026-09-12T15:36:52.704215+00:00",
+  "vitest": {
+    "files": 4,
+    "passed": 191,
+    "log": "vitest.txt"
+  },
+  "dashboard_tsc_no_emit": {
+    "exit_code": 0
+  },
+  "selected_eslint": {
+    "exit_code": 0
+  },
+  "ocaml_parse_only": "passed",
+  "native_tests": "not run locally; CI pending",
+  "production_build": "not run locally",
+  "installed_browser_acceptance": false,
+  "review": "independent P2 refetch loop fixed and re-reviewed; no remaining P1/P2"
+}

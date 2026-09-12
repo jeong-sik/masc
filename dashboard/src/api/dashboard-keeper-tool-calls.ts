@@ -336,3 +336,22 @@ export function fetchKeeperToolCalls(
     return decoded
   })
 }
+
+/** Fetch one execution across the retained ledger, independently of recent history. */
+export async function fetchKeeperToolCall(
+  keeper: string, executionId: string, opts?: AbortableRequestOptions,
+): Promise<ToolCallEntry> {
+  const params = new URLSearchParams({ execution_id: executionId })
+  const raw = await get<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-calls?${params}`,
+    { signal: opts?.signal },
+  )
+  if (!isRecord(raw) || raw.keeper !== keeper || raw.execution_id !== executionId) {
+    throw new Error('요청한 Keeper의 실행 기록과 응답이 일치하지 않습니다.')
+  }
+  const entry = decodeToolCallEntry(raw.entry)
+  if (!entry || entry.keeper !== keeper || entry.execution_id !== executionId) {
+    throw new Error('요청한 도구 실행의 기록을 확인할 수 없습니다.')
+  }
+  return entry
+}

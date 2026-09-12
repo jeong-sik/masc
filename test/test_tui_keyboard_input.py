@@ -1923,12 +1923,12 @@ def keeper_runtime_phase_and_identity_interaction(
     # toggle on purpose. The footer named no key for it, so the single action
     # that worked was the one the screen never mentioned. The needle carries the
     # reset that follows the key, which is what separates an offered hint from
-    # the dim `\x1b[2mx delete` an unavailable one would draw.
+    # the dim `\x1b[2mx:delete` an unavailable one would draw.
     wait_for_output(
         process,
         master_fd,
         output,
-        b"x\x1b[0m delete",
+        b"x\x1b[0m:delete",
         start=0,
         timeout=3.0,
     )

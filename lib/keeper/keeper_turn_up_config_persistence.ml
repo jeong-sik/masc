@@ -583,7 +583,11 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
         (* Mark the journal rolling back BEFORE restoring, so a crash
            mid-rollback still finds a journal and recovery retries the
-           same idempotent restores. *)
+           same idempotent restores. The stage result is deliberately
+           ignored: the phase line is bookkeeping, not authority — the
+           journal's mere presence is the recovery trigger, and recovery
+           reruns the same idempotent restores either way, so a failed
+           phase write cannot change the recovery outcome. *)
         let _ =
           Keeper_config_journal.stage ~base_path
             { journal_record with phase = Rolling_back }
@@ -628,7 +632,13 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
       in
       let rollback error =
         match restore_publication_state () with
-        | Ok () -> Error error
+        | Ok () ->
+          (* Compensation succeeded, so the request has converged to its
+             pre-request state: the journal's authority ends here too.
+             Keeping it would let startup recovery overwrite LATER
+             successful writes with this request's stale before-images. *)
+          Keeper_config_journal.clear ~journal_path;
+          Error error
         | Error reconciliation -> Error reconciliation
       in
       (match read_revision path with

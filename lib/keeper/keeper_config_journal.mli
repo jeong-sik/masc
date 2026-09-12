@@ -71,6 +71,15 @@ val phase_to_string : phase -> string
 val record_to_yojson : record -> Yojson.Safe.t
 val record_of_yojson : Yojson.Safe.t -> (record, string) result
 
+(** Serialization is a documented compatibility surface: the journal is
+    read back by [recover_interrupted] after crashes, including across
+    version upgrades. Fields are additive; a failed decode is reported
+    as [Journal_corrupt] with the journal preserved on disk — never
+    silently discarded. [phase] is deliberately NOT serialized as
+    authoritative state (see the module note): [prepared] and
+    [manifest_committed] read identically to recovery, [rolling_back]
+    only marks that restores were already attempted. *)
+
 (** Path of the journal file for a workspace config root. *)
 val journal_path_for_base_path : base_path:string -> string
 

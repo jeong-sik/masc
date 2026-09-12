@@ -233,11 +233,12 @@ let recover_keeper_config_journal_on_startup ~base_path =
    | Keeper_config_journal.Recovered_rolled_back _ ->
      Log.Server.info "keeper_config_journal: startup recovery rolled back an interrupted config write (journal cleared)"
    | Keeper_config_journal.Journal_corrupt detail ->
-     Log.Server.info "keeper_config_journal: startup recovery found an unreadable journal (%s); leaving it in place for diagnosis"
+     Log.Server.warn "keeper_config_journal: startup recovery found an unreadable journal (%s); leaving it in place for diagnosis"
        detail
-   | Keeper_config_journal.Recovery_failed { detail; _ } ->
-     Log.Server.info "keeper_config_journal: startup recovery could not converge (%s); journal preserved for retry"
-       detail);
+   | Keeper_config_journal.Recovery_failed { detail; notes } ->
+     Log.Server.warn "keeper_config_journal: startup recovery could not converge (%s; %s); journal preserved for retry"
+       detail
+       (String.concat "; " notes));
   report
 ;;
 
@@ -275,12 +276,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   ignore
     (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
       : Keeper_msg_async.recovery_report);
+  (* Fire-and-forget on purpose: the typed report is retained in
+     latest_keeper_config_journal_recovery for readback, and recovery is
+     idempotent — it reruns on next boot if it failed. *)
   ignore
     (recover_keeper_config_journal_on_startup ~base_path:config.base_path
-      : Keeper_config_journal.report)
-  (* fire-and-forget: the typed report is retained in
-     latest_keeper_config_journal_recovery for readback; recovery is
-     idempotent and re-runs on next boot if it failed. *);
+      : Keeper_config_journal.report);
   let recovery_ctx : _ Keeper_types_profile.context =
     { config
     ; agent_name = "keeper-maintenance-recovery"

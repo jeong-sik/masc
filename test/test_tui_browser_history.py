@@ -76,11 +76,12 @@ def run(binary):
             h.palette_go(process, fd, output, b"go Keepers", b"alpha")
             h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
             h.send_and_wait(process, fd, output, b"h", b"retained observations")
-            assert beta_entered.wait(5), "newest observation was never requested"
+            assert h.wait_for_fixture_event(process, fd, output, beta_entered, timeout=5), \
+                "newest observation was never requested"
             # A slow newest page must not prevent switching to an earlier one.
             h.send_and_wait(process, fd, output, b"]", b"SAVED ALPHA CONTENT")
             beta_release.set()
-            assert beta_returned.wait(5)
+            assert h.wait_for_fixture_event(process, fd, output, beta_returned, timeout=5)
             count = len(requests)
             h.write_all(fd, output, b"\rsvgo\x0f")
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,

@@ -1916,7 +1916,7 @@ def keeper_runtime_phase_and_identity_interaction(
         process,
         master_fd,
         output,
-        b"paused anthropic.claude-sonnet-4",
+        b"paused configured: anthropic.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -8415,7 +8415,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             beta_frame,
             health=b"idle",
-            runtime=b"paused anthropic.claude-sonnet-4",
+            runtime=b"paused configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
         )
         for expected in (
@@ -8460,7 +8460,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             alpha_frame,
             health=b"healthy",
-            runtime=b"running anthropic.claude-opus-5",
+            runtime=b"running configured: anthropic.claude-opus-5",
             description="restored alpha chat",
         )
         for expected in (

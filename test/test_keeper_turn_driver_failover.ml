@@ -3490,7 +3490,10 @@ let test_access_failover_preserves_effect_and_caller_authority () =
         ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
           incr attempts;
           if runtime_id <> "denied" then Alcotest.fail "possible effect was replayed";
-          Error (access_error_from_http code), None, disposition)
+          ( Error (access_error_from_http code)
+          , None
+          , disposition
+          , Masc.Keeper_attempt_dispatch.Dispatched ))
         ["denied"; "available"] in
       Alcotest.(check int) "effect owner attempted once" 1 !attempts;
       match result with

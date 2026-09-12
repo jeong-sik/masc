@@ -444,6 +444,22 @@ let for_surface = function
           ~help:"params return to default; prompts clear override; themes follow terminal colours"
       ; b Act "f" "filter"
           ~help:"on themes, cycle All / Dark / Light schemes"
+        (* Pane-scoped writes. Each of these is the only key that does what it
+           does, and none of them were listed: presets could be made and put
+           back, and the prompt list could be switched between three readings,
+           with nothing on screen saying so. *)
+      ; b Act "n" "new preset"
+          ~help:"on presets, name a preset holding the configuration as it stands"
+      ; b Act "u" "restore preset"
+          ~help:"on presets, put the selected one back; press twice to confirm"
+      ; b Act "i" "model input"
+          ~help:"on prompts, the input this prompt was last given"
+      ; b Act "a" "fragments"
+          ~help:"on prompts, show or hide the internal pieces the main prompts \
+                 are built from; not on the runtime assets reading"
+      ; b Act "o" "runtime assets"
+          ~help:"on prompts, switch between the read-only runtime assets and \
+                 the registry you can override"
       ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"

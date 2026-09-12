@@ -21207,7 +21207,7 @@ and is loaded on demand through keeper_skill.
                     selected model's [models.NAME] line, where the existing
                     $EDITOR path takes over. One write path, not two. *)
                  | Config_models -> handle_config_models_open_source ()
-                 (* The preset pane writes through s and r, never $EDITOR. *)
+                 (* The preset pane writes through n and u, never $EDITOR. *)
                  | Config_presets | Config_themes -> ()
                  (* The voice pane was a reading. It now opens the wizard,
                     which writes through the setup route rather than $EDITOR:

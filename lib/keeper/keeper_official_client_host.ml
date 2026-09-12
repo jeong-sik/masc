@@ -528,6 +528,7 @@ let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
   }
 
@@ -579,6 +580,13 @@ let dynamic_tool_fingerprint ~tool_name ~input result =
   let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = feed_string context result.content in
+  let context = match result.content_blocks with
+    | None -> feed_string context "text-only"
+    | Some blocks ->
+      feed_string context
+        (`List (List.map Llm_provider.Api_common.content_block_to_json blocks)
+         |> Yojson.Safe.to_string)
+  in
   get context |> to_hex
 ;;
 
@@ -873,7 +881,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
             pre_tool_rejects
             := { call_id; tool_name = tool.schema.name; input; detail }
                :: !pre_tool_rejects;
-            { success = false; content = detail; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None }
           | Agent_core.Agent_tool_pre_execution_gate.Reject { stage; detail } ->
             (* A hook that failed, or a decision illegal at this stage. Both
                are turn-level faults rather than something the model can
@@ -886,7 +894,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                 detail
             in
             record_terminal_error terminal_error detail;
-            { success = false; content = detail; abort_turn = None }
+            { success = false; content = detail; content_blocks = None; abort_turn = None }
           | Agent_core.Agent_tool_pre_execution_gate.Admit ->
             (match
                Agent_core.Agent_tools.find_and_execute_tool
@@ -913,6 +921,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                { success =
                    not (Agent_core.Types.tool_result_outcome_is_error result.outcome)
                ; content = result.content
+               ; content_blocks = result.content_blocks
                ; abort_turn = None
                }
              | Error error ->
@@ -924,10 +933,10 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                   { success = true
                   ; content =
                       Tool_guidance.to_string Tool_guidance.Post_execution_hook_failed
-                  ; abort_turn = None
+                  ; content_blocks = None; abort_turn = None
                   }
                 | Agent_core.Agent_tools.Hook_execution_failed _ ->
-                  { success = false; content = detail; abort_turn = None }))
+                  { success = false; content = detail; content_blocks = None; abort_turn = None }))
         in
         match execute () with
         | result ->
@@ -1070,7 +1079,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
               (settle
                  { success = false
                  ; content = "dynamic tool call exited without an authoritative result"
-                 ; abort_turn = None
+                 ; content_blocks = None; abort_turn = None
                  }));
           Printexc.raise_with_backtrace exn backtrace)
   }

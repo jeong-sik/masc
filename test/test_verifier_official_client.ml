@@ -1,6 +1,6 @@
 (* Actual managed verifier -> named-runtime -> Codex app-server process boundary.
    The fixture supplies model responses, never the reviewer callback. This proves
-   typed verdict delivery and initial image transport, not model judgement quality. *)
+   typed verdict delivery, initial images and actual Read image tool results, not model judgement quality. *)
 open Alcotest
 open Masc
 module AR = Task.Anti_rationalization
@@ -45,11 +45,11 @@ for line in sys.stdin:
         emit({'id':ident,'result':{'thread':{'id':'thread-1'},'model':'verifier-fixture'}})
     elif method == 'turn/start':
         emit({'id':ident,'result':{'turn':{'id':'turn-1'}}})
-        pending = [('tool_read_file',{'file_path':'proof.txt'},0)]
+        pending = [('tool_read_file',{'file_path':'proof.txt'},0), ('tool_read_file',{'file_path':'proof.png'},1)]
         if mode != 'missing':
-            pending.append(('report_review_verdict',{'verdict':'APPROVE','reason':'read-only fixture receipt'},1))
+            pending.append(('report_review_verdict',{'verdict':'APPROVE','reason':'read-only fixture receipt'},2))
         if mode == 'duplicate':
-            pending.append(('report_review_verdict',{'verdict':'REJECT','reason':'second verdict must invalidate review'},2))
+            pending.append(('report_review_verdict',{'verdict':'REJECT','reason':'second verdict must invalidate review'},3))
         advance()
     elif method is None and isinstance(ident,str) and ident.startswith('call-'):
         advance()
@@ -98,6 +98,7 @@ let test_review mode =
   let proof_root = Filename.concat root Playground_paths.all_playgrounds_prefix in
   Fs_compat.mkdir_p proof_root;
   write (Filename.concat proof_root "proof.txt") "verified-file-receipt";
+  write (Filename.concat proof_root "proof.png") (Base64.decode_exn png);
   let lookup_tools = match VAT.create_goal_proof ~config with
     | Ok tools -> tools | Error detail -> fail detail in
   let lookup = AR.Lookup_tools
@@ -111,7 +112,7 @@ let test_review mode =
     let refused = Keeper_turn_driver.run_named ~runtime_id:"official.verifier"
       ~keeper_name:"arbitrary-transform-probe" ~base_path:root
       ~goal:"This request must be refused before spawn." ~system_prompt:"Explicit contract."
-      ~tools:[] ~output_contract:Keeper_turn_driver.Tool_verdict
+      ~tools:[] ~agent_core_tools:[] ~output_contract:Keeper_turn_driver.Tool_verdict
       ~provider_config_transform:(fun cfg -> Ok cfg) ~sw () in
     (match refused with
      | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="provider_config_transform"; _})) -> ()
@@ -151,7 +152,18 @@ let test_review mode =
     (member "success" (member "result" read_response) = `Bool true);
   check bool "real filesystem content survives tool bridge" true
     (String_util.contains_substring (Yojson.Safe.to_string read_response) "verified-file-receipt");
-  check int "each tool result observed" (if mode = "missing" then 1 else if mode = "duplicate" then 3 else 2)
+  let image_response = List.find (fun row -> member "id" row = `String "call-1") rows
+    |> member "result" in
+  check bool "actual image lookup delivered successfully" true
+    (member "success" image_response = `Bool true);
+  let image_items = member "contentItems" image_response |> Yojson.Safe.Util.to_list
+    |> List.filter (fun item -> member "type" item = `String "inputImage") in
+  check int "Read retains its visual content" 1 (List.length image_items);
+  check string "Read exact PNG reaches client tool-result wire" ("data:image/png;base64," ^ png)
+    (List.hd image_items |> member "imageUrl" |> Yojson.Safe.Util.to_string);
+  check string "image read leaves source unchanged" (Base64.decode_exn png)
+    (In_channel.with_open_bin (Filename.concat proof_root "proof.png") In_channel.input_all);
+  check int "each tool result observed" (if mode = "missing" then 2 else if mode = "duplicate" then 4 else 3)
     (List.length !calls);
   if mode = "valid" then (
     (* A second independent review of the same workspace/runtime must start a

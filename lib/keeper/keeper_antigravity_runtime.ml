@@ -248,6 +248,7 @@ let tool_spec (tool : Host.dynamic_tool) =
 let tool_result (result : Host.dynamic_tool_result) =
   { Runtime_official_client_mcp.success = result.success
   ; content = result.content
+  ; content_blocks = result.content_blocks
   }
 ;;
 

@@ -131,7 +131,8 @@ class KeeperToolsAgent(ClaudeCode):
             # slug when the wire model carries a slash (OpenRouter). Rendering
             # takes the wire form; keeper_up takes this one.
             "BENCH_RUNTIME_ID": effective_runtime_id(self.keeper_runtime_id),
-            # Names the pool bootstrap pre-approves; no keeper is started.
+            # Names the pool bootstrap brings up and sets the approval stance
+            # for, before any of them is addressed. See the module docstring.
             "BENCH_KEEPER_POOL": ",".join(self.pool_names),
         }
         if os.environ.get("GH_TOKEN"):
@@ -178,10 +179,20 @@ class KeeperToolsAgent(ClaudeCode):
         # the program; shlex.quote would leave a bare token that jq reads as an
         # identifier and rejects.
         program = f".mcpServers[{json.dumps(MCP_SERVER_NAME)}] = {entry}"
-        config = "$CLAUDE_CONFIG_DIR/.claude.json"
+        config = '"$CLAUDE_CONFIG_DIR/.claude.json"'
+        # Both guards are the difference between arm K and its own baseline.
+        # An unreadable token yielded `Authorization: Bearer ` and exit 0, and
+        # an unset CLAUDE_CONFIG_DIR wrote /.claude.json and exit 0 — either
+        # way Claude Code starts with an MCP server that 401s or that it never
+        # reads, the model finds no keeper tools, and the run looks like a
+        # baseline run rather than a broken one.
         masc = (
+            ': "${CLAUDE_CONFIG_DIR:?CLAUDE_CONFIG_DIR is unset}" && '
+            f'masc_token="$(cat {REMOTE}/token)" && '
+            '[ -n "$masc_token" ] || '
+            f'{{ echo "masc MCP token at {REMOTE}/token is empty" >&2; exit 1; }}; '
             f"([ -f {config} ] || echo '{{}}' > {config}) && "
-            f'jq --arg t "$(cat {REMOTE}/token)" --arg url {shlex.quote(MASC_MCP_URL)} '
+            f'jq --arg t "$masc_token" --arg url {shlex.quote(MASC_MCP_URL)} '
             f"{shlex.quote(program)} "
             f"{config} > {config}.tmp && mv {config}.tmp {config}"
         )

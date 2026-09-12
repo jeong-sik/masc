@@ -19,13 +19,22 @@ _mcp_post() { # body timeout_sec -> raw response body
   curl "${args[@]}" --data-binary "$body"
 }
 
-_mcp_extract() { # raw -> json payload (unwrap SSE data: lines)
-  local raw="$1"
+_mcp_extract() { # raw request_id -> the response frame with that id
+  # An SSE body carries progress notifications and keepalives alongside the
+  # response. Taking the last data: line accepted whichever frame happened to
+  # come last, and a notification satisfies a guard that only asks "no error":
+  #   {"jsonrpc":"2.0","method":"notifications/progress",...}  -> passes
+  # So select the frame whose id matches the request instead.
+  local raw="$1" want_id="$2"
+  local frames
   if printf '%s' "$raw" | grep -q '^data:'; then
-    printf '%s' "$raw" | grep '^data:' | sed 's/^data: //' | tail -1
+    frames="$(printf '%s' "$raw" | grep '^data:' | sed 's/^data: //')"
   else
-    printf '%s' "$raw"
+    frames="$raw"
   fi
+  printf '%s' "$frames" \
+    | jq -c --argjson id "$want_id" 'select(.id == $id)' 2>/dev/null \
+    | tail -n 1
 }
 
 mcp_init() {
@@ -49,16 +58,32 @@ mcp_call() { # id tool args_json timeout_sec -> tool result json (stdout)
   local body resp payload
   body="$(jq -cn --argjson id "$id" --arg name "$tool" --argjson a "$args_json" \
     '{jsonrpc:"2.0",id:$id,method:"tools/call",params:{name:$name,arguments:$a}}')"
-  resp="$(_mcp_post "$body" "$timeout")"
-  payload="$(_mcp_extract "$resp")"
-  # Collapse multi-line / multi-value payloads (NDJSON bodies, repeated SSE
-  # events) to the last JSON value first: jq -e on a multi-value payload only
-  # judges the last value, and without this the unwrapped result below comes
-  # out multi-line, which later breaks jq --argjson in run_episode.sh.
-  payload="$(printf '%s' "$payload" | jq -c '.' 2>/dev/null | tail -n 1)"
-  if [[ -z "$payload" ]] || ! printf '%s' "$payload" | jq -e '.error == null and (.result.isError // false) == false' >/dev/null 2>&1; then
-    echo "mcp_call ${tool} failed: ${payload:-<empty response>}" >&2
+  # Guard the assignments. Callers reach mcp_call both inside a condition
+  # (`if mcp_init`) and bare (`mcp_call ... >/dev/null` in bootstrap), and in
+  # the bare case an unguarded `x="$(...)"` aborts the caller with curl's or
+  # jq's exit code before the diagnostic below can print — the operator sees
+  # an empty failure.
+  resp="$(_mcp_post "$body" "$timeout")" || {
+    echo "mcp_call ${tool} failed: transport error (timeout ${timeout}s)" >&2
+    return 1
+  }
+  payload="$(_mcp_extract "$resp" "$id")" || payload=""
+  if [[ -z "$payload" ]]; then
+    echo "mcp_call ${tool} failed: no response frame with id ${id}: ${resp:-<empty response>}" >&2
     return 1
   fi
-  printf '%s' "$payload" | jq -c 'try (.result.content[0].text | fromjson) catch .result'
+  # `has("result")` matters as much as the error check: a frame can be
+  # well-formed, carry the right id and still be a notification rather than
+  # the response.
+  if ! printf '%s' "$payload" \
+    | jq -e '.error == null and has("result") and (.result.isError // false) == false' >/dev/null 2>&1
+  then
+    echo "mcp_call ${tool} failed: ${payload}" >&2
+    return 1
+  fi
+  # `catch .result` never worked: jq binds the error *message string* to `.`
+  # inside catch, so indexing it raises "Cannot index string with string" and
+  # jq exits 5 — after the guard above already called the response healthy.
+  # Every tool whose content[0].text is prose rather than JSON hit that.
+  printf '%s' "$payload" | jq -c '(.result.content[0].text | fromjson?) // .result'
 }

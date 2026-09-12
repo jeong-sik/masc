@@ -158,3 +158,52 @@ def test_install_adds_masc_on_top_of_claude_code(tmp_path, monkeypatch):
     assert any("bootstrap.sh" in c for c in env.commands)
     # run_episode.sh drives keepers for the other arms; here the model does.
     assert not any("run_episode.sh" in c for c in env.commands)
+
+
+def test_registration_refuses_an_empty_token(tmp_path):
+    # An unreadable token used to yield `Authorization: Bearer ` and exit 0.
+    # Claude Code would then start with an MCP server that 401s, the model
+    # would find no keeper tools, and arm K would silently produce a baseline
+    # run — the exact comparison the arm exists to make.
+    import shutil
+    import subprocess
+
+    if shutil.which("jq") is None:
+        pytest.skip("jq not installed")
+    token_dir = tmp_path / "opt" / "masc-bench"
+    token_dir.mkdir(parents=True)
+    (token_dir / "token").write_text("")
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    cmd = make_agent(tmp_path)._build_register_mcp_servers_command()
+    cmd = cmd.replace("/opt/masc-bench", str(token_dir))
+    r = subprocess.run(
+        ["bash", "-c", cmd],
+        env={"CLAUDE_CONFIG_DIR": str(cfg), "PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0
+    assert "empty" in r.stderr
+    assert not (cfg / ".claude.json").exists()
+
+
+def test_registration_refuses_an_unset_config_dir(tmp_path):
+    import shutil
+    import subprocess
+
+    if shutil.which("jq") is None:
+        pytest.skip("jq not installed")
+    token_dir = tmp_path / "opt" / "masc-bench"
+    token_dir.mkdir(parents=True)
+    (token_dir / "token").write_text("tok-123\n")
+    cmd = make_agent(tmp_path)._build_register_mcp_servers_command()
+    cmd = cmd.replace("/opt/masc-bench", str(token_dir))
+    r = subprocess.run(
+        ["bash", "-c", cmd],
+        env={"PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode != 0
+    assert "CLAUDE_CONFIG_DIR" in r.stderr

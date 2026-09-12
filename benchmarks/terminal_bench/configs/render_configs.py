@@ -36,8 +36,10 @@ ARMS: dict[str, dict] = {
     "h": dict(keepers=8, skills=True,  composition=True,  parallel=True,  fusion=True),
     # Arm K renders a keeper pool for agents/keeper_tools_agent.py: the task is
     # solved by harbor's own claude-code agent and these keepers are reachable
-    # to it as MCP tools. Nothing pre-starts them, so `keepers` is the size of
-    # the pool the model may bring up, not a count of running agents.
+    # to it as MCP tools. bootstrap.sh brings the pool up and sets each
+    # keeper's approval stance before handing the fleet over, because that
+    # stance is REST-only and 404s for a keeper that is not registered yet
+    # (masc#35319), so `keepers` is how many are running when the model starts.
     "k": dict(keepers=4, skills=True,  composition=True,  parallel=True,  fusion=False),
 }
 

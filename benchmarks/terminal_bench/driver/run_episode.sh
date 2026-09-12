@@ -85,15 +85,39 @@ submit="$(mcp_call 200 masc_keeper_msg \
 op_id="$(printf '%s' "$submit" | jq -r '.operation_id // empty')"
 [[ -n "$op_id" ]] || { echo "keeper_msg returned no operation_id: $submit" >&2; exit 1; }
 
+# The poll must not let a client failure decide the episode. `|| true` made a
+# transport error indistinguishable from "not finished yet", so a run whose
+# status calls all failed sat here to the deadline and was recorded as
+# Timeout — on the one field the benchmark measures. Failures are counted and
+# reported as their own state instead.
 state="Timeout"; final='{}'
+poll_failures=0
+POLL_FAILURE_LIMIT="${POLL_FAILURE_LIMIT:-10}"
 deadline=$(( start_epoch + EPISODE_TIMEOUT_SEC ))
 while [[ "$(date +%s)" -lt "$deadline" ]]; do
-  st="$(mcp_call 300 masc_keeper_delegate_status "$(jq -cn \
+  if st="$(mcp_call 300 masc_keeper_delegate_status "$(jq -cn \
     --arg op "$op_id" \
-    '{target:{kind:"keeper",name:"bench-1"}, operation_id:$op}')" 30)" || true
+    '{target:{kind:"keeper",name:"bench-1"}, operation_id:$op}')" 30)"
+  then
+    poll_failures=0
+  else
+    poll_failures=$(( poll_failures + 1 ))
+    if [[ "$poll_failures" -ge "$POLL_FAILURE_LIMIT" ]]; then
+      state="PollError"
+      final="$(jq -cn --argjson n "$poll_failures" \
+        '{error:"delegate_status failed consecutively", failures:$n}')"
+      break
+    fi
+    sleep "$POLL_INTERVAL_SEC"
+    continue
+  fi
   s="$(printf '%s' "$st" | jq -r '.state // empty' 2>/dev/null || true)"
   case "$s" in
+    "") : ;;
     Succeeded|Failed|Cancelled) state="$s"; final="$st"; break ;;
+    # An unmapped terminal state is surfaced under its own name rather than
+    # polled until it looks like a timeout.
+    *) state="$s"; final="$st"; break ;;
   esac
   sleep "$POLL_INTERVAL_SEC"
 done
@@ -107,9 +131,15 @@ done
 tool_log_dir="$MASC_BASE_PATH/.masc/tool_calls"
 tool_calls=0; dup_calls=0
 if [[ -d "$tool_log_dir" ]]; then
-  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -s 'length')"
+  # Guarded like the usage block below: one malformed line in the jsonl store
+  # makes jq exit non-zero, and under `set -euo pipefail` an unguarded
+  # assignment aborted the script here — after the episode state was known and
+  # before result.json was written, so harbor recorded no result at all.
+  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -s 'length')" \
+    || tool_calls=0
   dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \
-    | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')"
+    | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')" \
+    || dup_calls=0
 fi
 
 # --- token usage: episode-summed from the agent-core trace dumps ---

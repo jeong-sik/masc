@@ -1928,15 +1928,24 @@ let render_board_list (state : state) =
         Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
-  let header = Printf.sprintf "%s (%d)  sort:%s%s  %s  %s"
+  (* No sort here. The row under this one says it in the words that answer
+     what the order is -- "latest changed first" rather than "updated" -- and
+     it is the row with space for them. "updated" is the token the board list
+     is asked for (the request's sort_by) and the token the workspace config
+     keeps, so a title that spelled it showed the operator a protocol value. *)
+  let header = Printf.sprintf "%s (%d)%s  %s  %s"
     (screen_title " MASC Board")
-    count (board_sort_label state.board_sort) hearth timestamp
+    count hearth timestamp
     (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  H:choose hearth · Sort [s]: %s"
+    (* The sort first. It has no other home on this surface now, and this row
+       is cut to the frame's inner width: at 34 columns the key hint alone
+       spent all 30 cells, so the order the rows are in was invisible while
+       the key to change it was not. H is in the sheet under [?]. *)
+    (Printf.sprintf "  Sort [s]: %s · H:choose hearth"
        (board_sort_explanation state.board_sort));
   box_line buf cols (board_hearth_census_line ~cols state);
   box_divider buf cols;
@@ -5167,7 +5176,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
-        | Some _ -> Ansi.dim, "  (load failed; nothing here is a reading)"
+        | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
       for _ = 2 to content_height do
@@ -8305,7 +8314,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-         | None, Some _ -> [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+         | None, Some _ -> [ Ansi.dim, page_failed_note ]
          | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (cols - 8)) detail)
   in
   let total = List.length lines in
@@ -10922,8 +10931,8 @@ let render_code (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.code_focus_file = Right_pane then "  [j/k]" else "")
+       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
@@ -11450,9 +11459,10 @@ let render_resources (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim) ^ " Resources"
+      ((if list_focused then Ansi.bold else Ansi.dim)
+       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ "Resources"
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
-       ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
     (* The status line spends one of the budgeted rows, not an extra one:
@@ -11523,8 +11533,8 @@ let render_resources (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.resource_focus = Right_pane then "  [j/k]" else "")
+       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = framed_content_height ~rows in
@@ -13023,13 +13033,15 @@ let render_palette (state : state) =
      prompt is a filter over those names, not a jump query. *)
   let title, prompt, action =
     match state.palette_mode with
-    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "Jump")
+    (* The action reads as a footer label now, so it is spelled like one:
+       lower case, the way every other [key:label] item is. *)
+    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "jump")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
             (if names = 1 then "" else "s") choice_line
         , "filter:"
-        , "Ask" )
+        , "ask" )
   in
   framed_shadow_line buf cols
     (screen_title title ^ "  "
@@ -13056,8 +13068,16 @@ let render_palette (state : state) =
   framed_shadow_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
+       (* [key:label] items, two spaces apart, the way every other footer is
+          written. In the dotted form this row was one item with no colon, so
+          {!Masc_tui_footer} could shed no whole key and keep no door: it fell
+          through to the cell cut, where [Esc] survived only when the budget
+          happened to reach it. test_a_row_in_another_grammar_loses_its_door
+          measures that across widths. The count keeps no colon on purpose --
+          it is not a key, and it is the first thing a narrow row should give
+          up. *)
        ~hints:
-         (Printf.sprintf "%d/%d · [Enter] %s · [Up/Down] Navigate · [Esc] Close"
+         (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
             (if total = 0 then 0 else cursor + 1)
             total action));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
@@ -13272,7 +13292,13 @@ let render_help (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  h:hints  Esc:close");
+       (* The sheet that names every other surface's keys did not name its own.
+          It is longer than any terminal -- at 150x78 the later sections are
+          still off screen -- so [G] is the difference between reading them and
+          pressing [j] forty times, and nothing said [G] exists. The keys are
+          handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
+       ~hints:
+         "j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds

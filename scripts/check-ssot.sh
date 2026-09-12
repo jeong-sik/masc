@@ -417,6 +417,37 @@ check_rule "R15-tui-title-not-loaded-literal" 0 \
   'bin/masc_tui_render_prim\.mli?:' \
   bin
 
+# The failure note the body draws under an empty page. Twelve sites draw it:
+# ten read it from one place and two spelled the literal again, so two screens
+# could drift from the other ten on a word.
+check_rule "R16-tui-page-failed-note-literal" 0 \
+  "Masc_tui_render_prim.page_failed_note" \
+  'load failed; nothing here is a reading' \
+  'bin/masc_tui_render_prim\.mli?:' \
+  bin
+
+# The Board sort token. It is the value the board list is asked for
+# (load_board_list ~sort_by) and the value the workspace config keeps, so
+# anything that draws it is showing a protocol value where a reading belongs.
+# The two the baseline allows are those two serializations; a third use is a
+# display use until shown otherwise, including an event row, which the Overview
+# draws. The sort the operator reads comes from [board_sort_explanation].
+check_rule "R17-tui-board-sort-token-on-screen" 2 \
+  "board_sort_explanation" \
+  'board_sort_label' \
+  'bin/masc_tui_types\.ml:' \
+  bin
+
+# Pane focus. Four panes across the Code and Resources surfaces mark which one
+# has the cursor, and three marked it by printing the key that moves it while
+# the fourth printed the glyph the tab strip uses. The weight beside it is not
+# a second signal: NO_COLOR empties bold and dim, so the glyph is what is left.
+check_rule "R18-tui-pane-focus-key-marker" 0 \
+  "the marker the Code tree uses" \
+  '"  \[j/k\]"' \
+  '' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

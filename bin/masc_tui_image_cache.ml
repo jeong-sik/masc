@@ -108,22 +108,53 @@ let invalidate_download ~cache_dir url =
   discard input;
   discard (png_path ~cache_dir input)
 
+(* A cache path is derived from the URL, so every worker on one URL names the
+   same file. Writing it in place makes two workers visible to each other in the
+   worst way: a retry invalidating the entry can delete the file a visual render
+   is mid-download on, and two downloads curl into one path and each read the
+   other's half. So an attempt writes a file of its own and renames it over the
+   target, which is atomic within a directory -- a reader sees the whole old file
+   or the whole new one, never a partial write, and a delete underneath an
+   attempt costs that attempt nothing. *)
+let attempt_path ~cache_dir ~prefix ~suffix =
+  try Ok (Filename.temp_file ~temp_dir:cache_dir prefix suffix) with
+  | Sys_error detail -> Error detail
+
+(* Published only after the bytes are judged, so a refused download never sits
+   in the cache waiting to be discarded by whoever reads it next. *)
+let publish ~attempt ~target =
+  try Sys.rename attempt target; Ok target with
+  | Sys_error detail -> discard attempt; Error detail
+
 let download ~run ~cache_dir url =
   let target = input_path ~cache_dir url in
+  let judge bytes = verdict_of_bytes bytes in
   let read_cached () =
     match read_bytes target with
     | Error detail -> discard target; Error (Cache_unreadable { detail })
     | Ok bytes ->
-      match verdict_of_bytes bytes with
+      match judge bytes with
       | Known_image _ | Unknown_signature -> Ok target
       | Empty -> discard target; Error Empty_body
   in
   let fetch () =
-    let status = run (Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
-      (Filename.quote target) (Filename.quote url)) in
-    match fetch_failure_of_status status ~body_present:(Sys.file_exists target) with
-    | None -> read_cached ()
-    | Some failure -> discard target; Error (Fetch_failed failure)
+    match attempt_path ~cache_dir ~prefix:"dl_" ~suffix:".part" with
+    | Error detail -> Error (Cache_unreadable { detail })
+    | Ok attempt ->
+      let status = run (Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
+        (Filename.quote attempt) (Filename.quote url)) in
+      (match fetch_failure_of_status status ~body_present:(Sys.file_exists attempt) with
+       | Some failure -> discard attempt; Error (Fetch_failed failure)
+       | None ->
+         match read_bytes attempt with
+         | Error detail -> discard attempt; Error (Cache_unreadable { detail })
+         | Ok bytes ->
+           match judge bytes with
+           | Empty -> discard attempt; Error Empty_body
+           | Known_image _ | Unknown_signature ->
+             (match publish ~attempt ~target with
+              | Ok path -> Ok path
+              | Error detail -> Error (Cache_unreadable { detail })))
   in
   if Sys.file_exists target then
     match read_cached () with Ok path -> Ok path | Error _ -> fetch ()
@@ -155,20 +186,38 @@ let convert_to_png ~run ~cache_dir input =
   match read_bytes target with
   | Ok bytes when String.length bytes > 0 -> Ok target
   | Ok _ | Error _ ->
-    let input = Filename.quote input and output = Filename.quote target in
+    let source = Filename.quote input in
     let commands =
-      [ Sips, Printf.sprintf "sips -s format png %s --out %s >/dev/null 2>&1" input output
-      ; Image_magick, Printf.sprintf "convert %s %s >/dev/null 2>&1" input output
-      ; Ffmpeg, Printf.sprintf "ffmpeg -y -i %s %s >/dev/null 2>&1" input output ]
+      [ Sips,
+        (fun out ->
+          Printf.sprintf "sips -s format png %s --out %s >/dev/null 2>&1" source
+            (Filename.quote out))
+      ; Image_magick,
+        (fun out ->
+          Printf.sprintf "convert %s %s >/dev/null 2>&1" source (Filename.quote out))
+      ; Ffmpeg,
+        (fun out ->
+          Printf.sprintf "ffmpeg -y -i %s %s >/dev/null 2>&1" source (Filename.quote out))
+      ]
     in
-    let rec attempt failures = function
-      | [] -> Error (List.rev failures)
-      | (converter, command) :: rest ->
-        match run_decoder ~run ~output_path:target command with
-        | Ok path -> Ok path
-        | Error failure -> attempt ((converter, failure) :: failures) rest
-    in
-    attempt [] commands
+    match attempt_path ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" with
+    | Error detail -> Error [ Sips, Frame_unreadable { detail } ]
+    | Ok attempt_file ->
+      let rec attempt failures = function
+        | [] -> discard attempt_file; Error (List.rev failures)
+        | (converter, command) :: rest ->
+          (* The decoder writes into this attempt's own file; only a frame
+             that was actually written is renamed over the shared path. *)
+          match run_decoder ~run ~output_path:attempt_file (command attempt_file) with
+          | Ok _ ->
+            (* Published once, after a converter actually wrote a frame. *)
+            (match publish ~attempt:attempt_file ~target with
+             | Ok path -> Ok path
+             | Error detail ->
+               Error (List.rev ((converter, Frame_unreadable { detail }) :: failures)))
+          | Error failure -> attempt ((converter, failure) :: failures) rest
+      in
+      attempt [] commands
 
 let prepare_png ~run ~cache_dir url =
   match download ~run ~cache_dir url with

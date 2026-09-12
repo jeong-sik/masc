@@ -5328,6 +5328,16 @@ type row_list = {
       (** put the cursor on a row and move the window to show it *)
 }
 
+(* The task whose detail is on screen, which is not the same as a detail id
+   being set: [render_surface] falls back to the list when the id names a row
+   the backlog no longer holds -- after an archived task link, or a refresh
+   that removed it. Asking the renderer's own question here keeps Home and End
+   on the surface the reader is looking at; a stale id used to send both keys
+   into a scroll nothing was drawing while the visible list refused them. *)
+let task_detail_on_screen (state : state) =
+  Masc_tui_task_selection.detail_row ~detail_id:state.task_detail_id
+    ~tasks:state.tasks_domain
+
 let row_list (state : state) : row_list option =
   (* The window follows a named row the same way it follows a step, through
      [surface_body_height] rather than [rows - sc_chrome]: a surface that
@@ -5383,7 +5393,14 @@ let row_list (state : state) : row_list option =
       else None
   | Lanes ->
       (match state.lanes_mode with
-       | Lanes_run_list _ | Lanes_run_detail _ -> None
+       (* The run list moves [lane_runs_cursor] for j/k and the page keys, so
+          the edge keys name a run the same way. Neither edge handler could
+          claim it while this arm and [reading_pane] both answered no. *)
+       | Lanes_run_list _ ->
+           let runs = List.length (Option.value state.lane_runs ~default:[]) in
+           windowed ~count:runs ~cursor:state.lane_runs_cursor (fun index ->
+             state.lane_runs_cursor <- index)
+       | Lanes_run_detail _ -> None
        | Lanes_overview ->
            of_counted (fun count ->
                windowed ~count ~cursor:state.lanes_standalone_cursor
@@ -5546,6 +5563,43 @@ let row_list (state : state) : row_list option =
        | Left_pane, Some rows ->
            windowed ~count:(List.length rows) ~cursor:state.resources_cursor
              (fun index -> state.resources_cursor <- index))
+  (* The task column, when the cursor is in it and no task's detail is over
+     it. The panel is shorter than the list gets and the drawing windows
+     around the cursor, so a landing is on screen as soon as the cursor names
+     it. The events column beside it and an open detail are readings rather
+     than lists; [reading_pane] has those. *)
+  | Overview
+    when state.task_focus = Right_pane
+         && Option.is_none (task_detail_on_screen state) ->
+      windowed ~count:(List.length state.tasks) ~cursor:state.task_cursor
+        (fun index -> state.task_cursor <- index)
+  (* Under the Actions and Everything filters the ring is read by a cursor,
+     not by a scroll: [render_acting] recomputes the scroll from
+     [acting_cursor] every frame and reports both back, so a key that moved
+     only the scroll was undone before it was drawn. The Turns filter has no
+     cursor and stays a reading. *)
+  | Acting
+    when Option.is_none state.acting_detail
+         && state.acting_filter <> Masc_tui_acting.Turns ->
+      windowed
+        ~count:(List.length (acting_flat_entries state))
+        ~cursor:state.acting_cursor
+        (fun index ->
+          state.acting_cursor <- index;
+          (* Landing on the newest row means the rows above it have been seen --
+             the rule j/k and the g binding already apply. Left out, Home drew
+             the newest row while the header still claimed there were new events
+             above and prompted (g) for them. *)
+          if index = 0 then state.acting_unseen <- 0)
+  (* Same shape on the Runs tab: the drawing pulls [detail_scroll] to whatever
+     [keeper_run_cursor] names, which is why j and k move the cursor and set
+     the scroll to it. An edge jump has to name a run for the same reason. *)
+  | Keepers Keeper_detail
+    when state.detail_tab = Detail_runs && not state.context_inspector_open ->
+      let runs = List.length (selected_keeper_runs state) in
+      windowed ~count:runs ~cursor:state.keeper_run_cursor (fun index ->
+        state.keeper_run_cursor <- index;
+        state.detail_scroll <- index)
   (* Named rather than caught. A surface that grows a row cursor is added
      above in one place, and a [_] here would let it be forgotten silently --
      which is how the context inspector came to have a landing with no
@@ -5554,6 +5608,132 @@ let row_list (state : state) : row_list option =
   | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
   | Config | Tools ->
       None
+
+(* The reading pane on screen, when one is: a pane whose rows the drawing
+   formats -- a post and its comments, a keeper's detail, a diff -- rather
+   than rows the state can count. Named as the {!Masc_tui_types.clamped_scroll}
+   it reports back through, so Home and End write the field the frame then
+   corrects: End names a row past any real end and the frame says where that
+   landed.
+
+   Home is 0 and End is the far end for every pane here, and that one rule
+   reads correctly whichever way a pane is ordered. A log-shaped pane counts
+   rows back from the newest, so its 0 is now and its far end is the oldest
+   row it holds -- which is how Keeper logs has read since it was written.
+
+   Named rather than caught, like [row_list]: a surface that grows a reading
+   pane is added here once, and a [_] would let one be forgotten. That is how
+   these came to have no way to reach their own ends -- a post with three
+   hundred comments took a page key held down, and the way back up took it
+   held down again. *)
+let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
+    =
+  let pane f = Some f in
+  match state.view with
+  (* The Git changes reader draws over whichever surface opened it, so it
+     answers before the surface underneath does. Its list is not a reading
+     pane: [row_list] has it. *)
+  | _ when state.repository_changes_open ->
+      (match state.repository_changes_diff_path with
+       | Some _ -> pane (fun v -> Repository_changes_diff_scroll v)
+       | None -> None)
+  | Overview ->
+      (* The id alone is not the screen: one that names a task the backlog
+         dropped draws the list, and [row_list] owns that. *)
+      if Option.is_some (task_detail_on_screen state) then
+        pane (fun v -> Task_detail v)
+      else if state.task_focus = Left_pane then
+        pane (fun v -> Overview_events v)
+      else None
+  | Acting ->
+      (match state.acting_detail with
+       | Some _ -> pane (fun v -> Acting_detail_scroll v)
+       (* The ring itself reads newest first, so Home is now. [g] already
+          says that; this gives the key every other reader uses. Only under
+          the Turns filter: the other two are read by a cursor and [row_list]
+          has them. *)
+       | None when state.acting_filter = Masc_tui_acting.Turns ->
+           pane (fun v -> Acting v)
+       | None -> None)
+  (* Except with the context inspector open, where the body is that tab's
+     item list and [row_list] owns the cursor -- and except on the Runs tab,
+     where the drawing follows [keeper_run_cursor] and [row_list] has it. *)
+  | Keepers Keeper_detail
+    when (not state.context_inspector_open) && state.detail_tab <> Detail_runs ->
+      pane (fun v -> Keeper_detail v)
+  | Keepers Keeper_calls -> pane (fun v -> Keeper_calls v)
+  | Approvals ->
+      if state.approval_detail_open then
+        pane (fun v -> Approval_detail_scroll v)
+      else None
+  | Board ->
+      (match state.board_mode with
+       | Board_read _ when state.board_focus = Right_pane ->
+           pane (fun v -> Board_read v)
+       | Board_read _ | Board_list | Board_compose -> None)
+  | Planning ->
+      (match state.planning_mode with
+       | Planning_detail _ -> pane (fun v -> Planning_detail_scroll v)
+       | Planning_list -> None)
+  | Fusion ->
+      (match state.fusion_mode with
+       | Fusion_detail _ | Fusion_historical_detail _ ->
+           pane (fun v -> Fusion_detail_scroll v)
+       | Fusion_list -> None)
+  | Schedules ->
+      if Option.is_some state.schedule_detail_id then
+        pane (fun v -> Schedule_detail_scroll v)
+      else None
+  | Verification ->
+      if Option.is_some state.verification_detail_request_id then
+        pane (fun v -> Verification_detail_scroll v)
+      else None
+  | Harness ->
+      (match state.harness_detail with
+       | Some _ -> pane (fun v -> Harness_detail_scroll v)
+       | None -> None)
+  | Runtime ->
+      (match state.runtime_detail_target with
+       | Some _ -> pane (fun v -> Runtime_detail_scroll v)
+       | None -> None)
+  | System_logs ->
+      (match state.system_logs_detail_seq with
+       | Some _ -> pane (fun v -> System_log_detail_scroll v)
+       | None -> None)
+  | Lanes ->
+      (match state.lanes_mode with
+       | Lanes_run_detail _ -> pane (fun v -> Lane_run_detail_scroll v)
+       | Lanes_run_list _ | Lanes_overview -> None)
+  | Changes ->
+      (match state.changes_diff_row with
+       | Some _ -> pane (fun v -> Changes_diff_scroll v)
+       | None -> None)
+  (* The resource reading beside the catalog. The catalog is a row list and
+     [row_list] has it. *)
+  | Resources when state.resource_focus = Right_pane ->
+      pane (fun v -> Resource_scroll v)
+  (* Two panes read this way and still answer no, each for a reason of its
+     own rather than for want of an arm.
+
+     The chat scroll is pinned to a row it anchors on across live appends,
+     and the history behind it is paged in from the server -- so the far end
+     is not a row the client holds, and naming one past what is loaded would
+     ask the pin to settle on a row that has not arrived.
+
+     The chat scroll is the one left. *)
+  | Keepers Keeper_message -> None
+  (* Metrics was here for want of a report, and that reason had gone stale:
+     [render_metrics] already answers [Metrics_scroll] through
+     [surface_chrome]'s [clamped] callback, so the generic End sentinel is
+     corrected after drawing exactly as the other reading panes are. *)
+  | Metrics -> pane (fun v -> Metrics_scroll v)
+  (* Surfaces whose whole body is a row list, which [row_list] answers for,
+     and the two panes that own every key while they are open. *)
+  | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
+  | Keepers Keeper_runtime_pick | Memory | Repositories | Clients
+  | Connectors | Code | Config | Resources | Tools ->
+      None
+
 
 (* Move the active surface's row cursor to the next row whose search text
    contains [query], scanning from [after] and wrapping; [backwards] walks
@@ -11046,7 +11226,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
               if state.acting_scroll > 0 then begin
-                state.acting_scroll <- state.acting_scroll + 1;
+                state.acting_scroll <- Masc_tui_types.scroll_down_from state.acting_scroll ~by:1;
                 state.acting_unseen <- state.acting_unseen + 1
               end
           | Masc_tui_observer.Undecodable reason ->
@@ -17602,7 +17782,14 @@ and is loaded on demand through keeper_skill.
                 let delta = match move with
                   | "j" | "down" -> 1 | "k" | "up" -> -1
                   | "pageup" -> -page | _ -> page in
-                state.acting_detail_scroll <- max 0 (state.acting_detail_scroll + delta))
+                (* G above leaves the sentinel here, and a frame that drew no
+                   evidence pane reports no clamp to replace it, so a step
+                   down in between would carry it into [+]. *)
+                state.acting_detail_scroll <-
+                  (if delta > 0 then
+                     Masc_tui_types.scroll_down_from state.acting_detail_scroll
+                       ~by:delta
+                   else max 0 (state.acting_detail_scroll + delta)))
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
          when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
            let terminal_rows, _ = get_terminal_size () in
@@ -18306,16 +18493,34 @@ and is loaded on demand through keeper_skill.
            state.tools_scroll <-
              move_surface_to_end state ~rows:(surface_rows state)
                ~current:state.tools_scroll
-       (* The reading, not the list. [row_list] answers for the list pane
-          below; with the text focused the rows are the ones the frame wrapped
-          out of the resource body, which the keypress cannot count -- so End
-          names a row past any of them and the frame reports back where that
-          landed. *)
+       (* Reading a post with the list pane focused: j/k and the page keys move
+          the list and open what they land on, so the edge keys reach the first
+          and last post the same way. This cannot go through [row_list] -- the
+          cursor alone would leave the reader on the old post, and opening one
+          needs the mailbox a place callback does not have. *)
        | Some ("home" | "end")
-         when state.view = Resources && state.resource_focus = Right_pane ->
-           state.resource_scroll <-
-             (if key = Some "end" then Masc_tui_types.clamped_scroll_end
-              else 0)
+         when state.view = Board
+              && (match state.board_mode with
+                  | Board_read _ -> true
+                  | Board_list | Board_compose -> false)
+              && state.board_focus = Left_pane ->
+           let count = List.length state.board_posts in
+           let target = if key = Some "end" then count - 1 else 0 in
+           step_board_read state ~mailbox:async_messages
+             ~delta:(target - state.board_cursor)
+       (* A reading pane before the list behind it: a detail that is open owns
+          the scroll keys, and moving the list under it would leave the cursor
+          somewhere the reader cannot see. The pane reports its own clamp, so
+          End names a row past the end and the frame corrects it -- the same
+          report its j/k already relies on. *)
+       | Some ("home" | "end") when Option.is_some (reading_pane state) ->
+           Option.iter
+             (fun clamped ->
+               apply_clamped_scroll state
+                 (clamped
+                    (if key = Some "end" then Masc_tui_types.clamped_scroll_end
+                     else 0)))
+             (reading_pane state)
        (* Every other list. The two surfaces above answer first because their
           rows are drawn newest first, so their Home is the live end rather
           than the first row -- the rest read oldest first and take the plain
@@ -18336,9 +18541,9 @@ and is loaded on demand through keeper_skill.
                 (match state.repository_changes_diff_path with
                  | Some _ ->
                      state.repository_changes_diff_scroll <-
-                       max 0
-                         (state.repository_changes_diff_scroll
-                         + (direction * page))
+                       (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
+                   else max 0 (state.repository_changes_diff_scroll + (direction * page)))
                  | None ->
                      let cursor, scroll =
                        move_row_cursor state ~delta:(direction * page)
@@ -18363,7 +18568,9 @@ and is loaded on demand through keeper_skill.
                             ~delta:(direction * page)
                       | Right_pane ->
                           state.board_scroll <-
-                            max 0 (state.board_scroll + (direction * page)))
+                            (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.board_scroll ~by:page
+                   else max 0 (state.board_scroll + (direction * page))))
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with
@@ -18376,11 +18583,15 @@ and is loaded on demand through keeper_skill.
                          (min (count - 1) (state.fusion_cursor + (direction * page)))
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
-                       max 0 (state.fusion_scroll + (direction * page)))
+                       (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.fusion_scroll ~by:page
+                   else max 0 (state.fusion_scroll + (direction * page))))
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then
                   state.schedule_scroll <-
-                    max 0 (state.schedule_scroll + (direction * page))
+                    (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.schedule_scroll ~by:page
+                   else max 0 (state.schedule_scroll + (direction * page)))
                 else
                   let count =
                     match state.schedules with
@@ -18394,8 +18605,9 @@ and is loaded on demand through keeper_skill.
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
-                    max 0
-                      (state.verification_detail_scroll + (direction * page))
+                    (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:page
+                   else max 0 (state.verification_detail_scroll + (direction * page)))
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -18407,7 +18619,9 @@ and is loaded on demand through keeper_skill.
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
-                    max 0 (state.harness_detail_scroll + (direction * page))
+                    (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:page
+                   else max 0 (state.harness_detail_scroll + (direction * page)))
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -18423,16 +18637,30 @@ and is loaded on demand through keeper_skill.
                   ~target:(state.runtime_config_cursor + (direction * page))
             | Runtime when Option.is_some state.runtime_detail_target ->
                 state.runtime_detail_scroll <-
-                  max 0 (state.runtime_detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:page
+                   else max 0 (state.runtime_detail_scroll + (direction * page)))
             | System_logs when Option.is_some state.system_logs_detail_seq ->
                 state.system_logs_detail_scroll <-
-                  max 0 (state.system_logs_detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:page
+                   else max 0 (state.system_logs_detail_scroll + (direction * page)))
+            (* The Runs tab is read by a cursor, so its page key names a run
+               the way Home and End do. Scrolling it instead wrote a value the
+               drawing pulled straight back to the selected run, which is the
+               same reason the edge keys had to move the cursor. *)
+            | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
+                move_list_by_rows state ~delta:(direction * page)
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
                 state.detail_scroll <-
-                  max 0 (state.detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
+                   else max 0 (state.detail_scroll + (direction * page)))
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
-                  max 0 (state.detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
+                   else max 0 (state.detail_scroll + (direction * page)))
             (* The log pane owns its own height, so it pages by that rather
                than by [page]: the generic surface size counts chrome this
                pane does not have, and a page that overshoots the window skips
@@ -18460,8 +18688,9 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
-                       max 0
-                         (state.lane_run_detail_scroll + (direction * page))
+                       (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page
+                   else max 0 (state.lane_run_detail_scroll + (direction * page)))
                  | Lanes_run_list _ ->
                      let count =
                        match state.lane_runs with
@@ -19066,7 +19295,7 @@ and is loaded on demand through keeper_skill.
            (match state.repository_changes_diff_path with
             | Some _ ->
                 state.repository_changes_diff_scroll <-
-                  state.repository_changes_diff_scroll + 1
+                  Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
             | None ->
                 let cursor, scroll =
                   move_row_cursor state ~delta:1
@@ -19164,7 +19393,7 @@ and is loaded on demand through keeper_skill.
                   state.connectors_binding_cursor <- 0;
                   state.detail_scroll <- 0
                 end
-                else state.detail_scroll <- state.detail_scroll + 1
+                else state.detail_scroll <- Masc_tui_types.scroll_down_from state.detail_scroll ~by:1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
                   Metrics_tail.scroll_down
@@ -19172,7 +19401,7 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state)
                     state.log_scroll
             | Keepers Keeper_calls ->
-                state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
+                state.keeper_calls_scroll <- Masc_tui_types.scroll_down_from state.keeper_calls_scroll ~by:1
             | Config when state.config_pane = Config_themes ->
                 let last = List.length (filtered_theme_entries ()) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
@@ -19201,7 +19430,13 @@ and is loaded on demand through keeper_skill.
                     (state.runtime_params_cursor + 1);
                 state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
-                state.approval_detail_scroll <- state.approval_detail_scroll + 1
+                (* End writes a row past the end and the frame reports the
+                   real one back. A j pressed before that frame carries the
+                   sentinel into the addition, which wraps negative and throws
+                   the reader to the top -- the saturating step every other
+                   reading pane already uses. *)
+                state.approval_detail_scroll <-
+                  Masc_tui_types.scroll_down_from state.approval_detail_scroll ~by:1
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -19219,7 +19454,7 @@ and is loaded on demand through keeper_skill.
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
                       | Right_pane ->
-                          state.board_scroll <- state.board_scroll + 1)
+                          state.board_scroll <- Masc_tui_types.scroll_down_from state.board_scroll ~by:1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -19234,7 +19469,7 @@ and is loaded on demand through keeper_skill.
                      if state.planning_cursor < List.length goals - 1 then
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
-                     state.planning_scroll <- state.planning_scroll + 1)
+                     state.planning_scroll <- Masc_tui_types.scroll_down_from state.planning_scroll ~by:1)
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->
@@ -19244,10 +19479,10 @@ and is loaded on demand through keeper_skill.
                      if state.fusion_cursor < count - 1 then
                        state.fusion_cursor <- state.fusion_cursor + 1
                  | Fusion_detail _ | Fusion_historical_detail _ ->
-                     state.fusion_scroll <- state.fusion_scroll + 1)
+                     state.fusion_scroll <- Masc_tui_types.scroll_down_from state.fusion_scroll ~by:1)
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then
-                  state.schedule_scroll <- state.schedule_scroll + 1
+                  state.schedule_scroll <- Masc_tui_types.scroll_down_from state.schedule_scroll ~by:1
                 else
                   let count =
                     match state.schedules with
@@ -19258,7 +19493,7 @@ and is loaded on demand through keeper_skill.
                     state.schedule_cursor <- state.schedule_cursor + 1
             | Overview ->
                 if Option.is_some state.task_detail_id then
-                  state.task_detail_scroll <- state.task_detail_scroll + 1
+                  state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
                 else if state.task_focus = Right_pane then begin
                   if state.task_cursor < List.length state.tasks - 1 then
                     state.task_cursor <- state.task_cursor + 1
@@ -19280,7 +19515,7 @@ and is loaded on demand through keeper_skill.
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
-                    state.verification_detail_scroll + 1
+                    Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19301,7 +19536,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
-                       state.lane_run_detail_scroll + 1
+                       Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
                  | Lanes_run_list _ ->
                      (let cursor, scroll =
                         move_row_cursor state ~delta:1
@@ -19319,7 +19554,7 @@ and is loaded on demand through keeper_skill.
                             (state.lanes_standalone_cursor + 1)))
             | Harness ->
                 if Option.is_some state.harness_detail then
-                  state.harness_detail_scroll <- state.harness_detail_scroll + 1
+                  state.harness_detail_scroll <- Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19369,7 +19604,7 @@ and is loaded on demand through keeper_skill.
                    cannot see. *)
                 match state.changes_diff_row with
                 | Some _ ->
-                    state.changes_diff_scroll <- state.changes_diff_scroll + 1
+                    state.changes_diff_scroll <- Masc_tui_types.scroll_down_from state.changes_diff_scroll ~by:1
                 | None ->
                     let cursor, scroll =
                       move_row_cursor state ~delta:1 ~cursor:state.changes_cursor
@@ -19386,7 +19621,7 @@ and is loaded on demand through keeper_skill.
                  state.connectors_scroll <- scroll)
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then
-                  state.runtime_detail_scroll <- state.runtime_detail_scroll + 1
+                  state.runtime_detail_scroll <- Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19424,14 +19659,14 @@ and is loaded on demand through keeper_skill.
                   in
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
-            | Acting -> state.acting_scroll <- state.acting_scroll + 1
+            | Acting -> state.acting_scroll <- Masc_tui_types.scroll_down_from state.acting_scroll ~by:1
             | Metrics ->
                 state.metrics_scroll <-
                   Masc_tui_types.scroll_down_from state.metrics_scroll ~by:1
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then
                   state.system_logs_detail_scroll <-
-                    state.system_logs_detail_scroll + 1
+                    Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -20996,9 +21231,11 @@ and is loaded on demand through keeper_skill.
                      (match Masc_tui_config.set_board_sort ~base_path (board_sort_label state.board_sort) with
                       | Ok () -> ()
                       | Error message -> add_event state "error" ("Board sort not saved: " ^ message));
+                     (* The event row is read on the Overview, so it says the
+                        order rather than the token the request carries. *)
                      add_event state "system"
                        ("Board order: "
-                        ^ board_sort_label state.board_sort);
+                        ^ board_sort_explanation state.board_sort);
                      start_http_refresh state ~host:server_peer_host
                        ~port:state.port ~intent:Revalidate
                        ~refresh_inflight:http_refresh_inflight

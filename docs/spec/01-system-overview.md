@@ -121,6 +121,8 @@ MASC는 단일 public library(`masc`)로 구성된다. `lib/` 아래 기능별 �
 | Executable | Entry Point | 역할 |
 |------------|-------------|------|
 | `public_tool_manifest` | `bin/public_tool_manifest.ml` | Tool manifest 생성 |
+| `keeper_store_layout_manifest` | `bin/keeper_store_layout_manifest.ml` | Keeper 런타임 저장소 레이아웃 manifest 생성 |
+| `gen_board_tool_registry` | `bin/gen_board_tool_registry.ml` | Board 도구 레지스트리 미러 코드 생성 |
 
 ## 7. Canonical Front Door and Internal Supporting Substrates
 

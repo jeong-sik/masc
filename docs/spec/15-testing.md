@@ -149,7 +149,7 @@ type scenario = {
 - `Deterministic`: 필드(result/tool_name/error)에 대한 Exact/Contains/Regex/NotContains 매칭. 0 지연.
 - `ModelBased`: LLM에 rubric과 결과를 제출하여 0.0-1.0 점수 산출. 비용 발생.
 
-### 5.4 Trajectory (`lib/trajectory/trajectory.ml`)
+### 5.3 Trajectory (`lib/trajectory/trajectory.ml`)
 
 Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적, 엔트로피 탐지, eval_harness 연동을 지원한다.
 
@@ -170,7 +170,7 @@ Keeper tool call의 JSONL 기반 궤적 로깅. 결정적 재생, 비용 누적,
 
 **trajectory_outcome**: `Completed | Failed | Timeout | CostExceeded | Gated`.
 
-### 5.5 Judgment boundary tests
+### 5.4 Judgment boundary tests
 
 LLM judgment tests are owned by the product contract they exercise. Shared
 tests do not manufacture a generic action-verifier lifecycle or infer
@@ -267,7 +267,7 @@ bisect-ppx-report html --coverage-path _coverage
 - **INV-T2**: Env-gated 테스트는 필수 환경변수 부재 시 skip 또는 not run으로 처리한다. 실패가 아니다.
 - **INV-T3**: 구조 경계 테스트는 명령 문자열이나 도구 이름에서 권한 의미를 추론하지 않는다.
 - **INV-T4**: 한 Gate 요청의 pending/HITL 상태는 다른 Keeper 또는 같은 Keeper의 독립 작업 lane을 중단시키지 않는다.
-- **INV-T6**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
+- **INV-T5**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
 
 ---
 

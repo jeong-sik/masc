@@ -577,11 +577,11 @@ let test_stale_lease_release_preserves_new_active_lease () =
       (match
          Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
        with
-       | Server_startup_takeover.Base_path_already_owned { pid } ->
+       | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
          Alcotest.(check (option int))
            "stale release preserves current owner"
            (Some (Unix.getpid ()))
-           pid
+           (Server_startup_takeover.base_path_owner_pid owner)
        | Server_startup_takeover.Base_path_rejected rejection ->
          Alcotest.failf
            "stale release corrupted active ownership: %s"

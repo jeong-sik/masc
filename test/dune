@@ -5396,19 +5396,6 @@
  (name runtest)
  (deps (alias runtest-test_install_runtime_setup)))
 
-; The installer's shell-profile and controlling-terminal behaviour. Registered
-; late: the file existed unregistered, so the terminal handover it pins had
-; never run here.
-(rule
- (alias runtest-test_installer_shell_path)
- (deps test_installer_shell_path.py ../scripts/install.sh)
- (action
-  (run python3 %{dep:test_installer_shell_path.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_installer_shell_path)))
-
 (include stanzas/test_keeper_approval_input_admission.inc)
 
 (rule

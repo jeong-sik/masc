@@ -276,7 +276,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   ignore
     (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
       : Keeper_msg_async.recovery_report);
-  (* Fire-and-forget on purpose: the typed report is retained in
+  (* fire-and-forget on purpose: the typed report is retained in
      latest_keeper_config_journal_recovery for readback, and recovery is
      idempotent — it reruns on next boot if it failed. *)
   ignore

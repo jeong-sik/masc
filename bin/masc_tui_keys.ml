@@ -101,6 +101,8 @@ let for_surface = function
       ; b Act "t" "tasks" ~help:"hand j/k to the task list"
       ; b Act "Right / Enter" "open" ~help:"open the selected task"
       ; b Act "Left / Esc" "back" ~help:"close detail / back to events"
+      ; b Navigate "Home/End" "top/bottom"
+          ~help:"the ends of the events column, or of an open task's detail"
       ]
       @ listing_meta
   | Acting ->
@@ -113,6 +115,10 @@ let for_surface = function
       ; b Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Overview"
       ; b Navigate "g / G" "newest / oldest"
+      ; b Navigate "Home/End" "newest / oldest"
+          ~help:"the same two ends as g and G, under the keys every other \
+                 reader uses; the ring counts back from the newest, so its \
+                 top is now"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
       ; b Act "f" "filter" ~help:"cycle the filter"
@@ -145,6 +151,7 @@ let for_surface = function
           ~help:"open container logs in Sandbox; Keeper activity elsewhere"
       ; b Act "U" "runtime" ~help:"pick a runtime lane"
       ; b Act "Left / Esc" "back"
+      ; b Navigate "Home/End" "top/bottom" ~help:"the ends of this tab"
       ]
       @ List.filter
           (fun binding -> binding.key <> "l" && binding.key <> "u")
@@ -155,7 +162,11 @@ let for_surface = function
          whether r/q worked on this screen. *)
       [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
   | Keepers Keeper_calls ->
-      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ] @ listing_meta
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "Home/End" "top/bottom"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
   | Keepers Keeper_message ->
       [ b Navigate "Left" "roster" ~help:"focus the visible Keeper roster"
       ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
@@ -171,7 +182,7 @@ let for_surface = function
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
-      ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
+      ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
       ; b Act expand_turn_label "turn detail"
@@ -245,7 +256,7 @@ let for_surface = function
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
         (* Beside [f], not instead of it: [f] narrows the list to one hearth,
            this jumps the cursor to a post without changing what is listed. *)
-      ; b Navigate "PgUp / PgDn" "detail page"
+      ; b Navigate "PgUp/PgDn" "detail page"
         (* The global page dispatcher already scrolls the open post body and
            its comment thread by a window; it answers in the detail pane, so
            the help owed it a line. *)
@@ -436,6 +447,9 @@ let for_surface = function
       @ row_list_edges @ listing_meta
   | Config ->
       [ b Navigate "j/k" "select / scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"pages the runtime.toml and prompts panes; the other five \
+                 panes take the key and do nothing with it"
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
       ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
@@ -471,7 +485,7 @@ let for_surface = function
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
       ; b Navigate "Ctrl-W" "focus" ~help:"switch between resource list and text"
-      ; b Navigate "J / K" "scroll text"
+      ; b Navigate "J/K" "scroll text"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while the detail is focused, read the adjacent resource"
       ; b Navigate "PgUp/PgDn" "page"
@@ -549,8 +563,8 @@ let for_surface = function
       ; b Navigate "p" "section"
           ~help:"available / async runs / receipts / usage / all tools"
       ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
-      ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
-      ; b Act "c/C" "new Skill"
+      ; b Navigate "[ / ]" "Keeper" ~help:"change the effective Keeper surface"
+      ; b Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
                  instruction Skill, C starts a composition Skill"
       ; b Act "e" "edit Skill"
@@ -578,7 +592,7 @@ let for_surface = function
                  over the rows the level and category filters leave"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
@@ -909,6 +923,10 @@ let help_sections ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Board's first column is the only place these three appear, and
+             the column has no room for a legend of its own: its header already
+             spends three rows and the hearth row is cut at 150 columns. *)
+          ; ("Board marks", Masc_tui_board_kind_mark.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)

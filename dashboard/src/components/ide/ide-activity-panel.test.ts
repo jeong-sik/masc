@@ -3,7 +3,7 @@ import { h } from 'preact'
 import { render as preactRender } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { deriveIdeRunProgressSummary, IdeActivityPanel } from './ide-activity-panel'
-import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
+import { focusIdeFile, ideContextFocus } from './ide-state'
 import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { goals, tasks } from '../../store'
@@ -49,6 +49,53 @@ afterEach(() => {
 })
 
 describe('IdeActivityPanel', () => {
+  it('keeps global history and planning links while file anchors follow the real scoped IDE response', async () => {
+    const requests: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = new URL(String(input), 'http://localhost')
+      let payload: unknown
+      if (url.pathname === '/api/v1/ide/events') {
+        const scope = url.searchParams.get('codebase')!
+        requests.push(scope)
+        payload = { ok: true, data: { events: [{
+          type: 'tool', keeper_id: 'scoped-keeper', turn_id: `turn-${scope}`,
+          timestamp_ms: 2, tool_name: 'read_file', outcome: 'success', typed_outcome: 'progress',
+          latency_ms: 1, summary: `observed ${scope}`, file_path: 'src/shared.ml',
+        }] } }
+      } else {
+        payload = { events: [{
+          seq: 1, ts_ms: 1, ts_iso: '2026-05-05T10:00:00Z', kind: 'task.noted',
+          actor: { kind: 'keeper', id: 'global-keeper' }, subject: { kind: 'task', id: 'global-task' },
+          payload: { file_path: 'src/shared.ml', line: 99, codebase: 'github.com_owner_a',
+            summary: 'global same filename', goal_id: 'global-goal', task_id: 'global-task' }, tags: [],
+        }] }
+      }
+      return new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    const container = document.createElement('div')
+    const show = (codebase: string) => render(h(IdeActivityPanel, { codebase, activeFile: 'src/shared.ml' }), container)
+    show('github.com_owner_a')
+    await waitFor(() => expect(container.querySelector('[data-total-anchors]')?.getAttribute('data-total-anchors')).toBe('1'))
+    expect(container.textContent).toContain('2 events')
+    expect(container.querySelector('.ide-context-anchor-action')?.textContent).toContain('turn-github.com_owner_a')
+    const globalRow = [...container.querySelectorAll('.ide-activity-row')].find(row => row.textContent?.includes('global same filename'))!
+    expect(globalRow.querySelector('.ide-activity-context-jump')).toBeNull()
+    expect([...globalRow.querySelectorAll('.ide-activity-route-link')].map(link => link.textContent)).toEqual(['Goal', 'Task', 'Telemetry', 'Keeper'])
+    fireEvent.click(globalRow.querySelector<HTMLButtonElement>('[aria-label="Open Task global-task"]')!)
+    expect(window.location.hash).toBe('#workspace?section=planning&view=default&task=global-task')
+    const scopedJump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')!
+    fireEvent.click(scopedJump)
+    expect(ideContextFocus.value).toMatchObject({ file_path: 'src/shared.ml' })
+    expect(ideContextFocus.value?.line).toBeUndefined()
+    show('github.com_owner_b')
+    expect(container.querySelector('.ide-context-anchor-action')).toBeNull()
+    await waitFor(() => expect(container.querySelector('.ide-context-anchor-action')?.textContent).toContain('turn-github.com_owner_b'))
+    expect(container.querySelector('[data-total-anchors]')?.getAttribute('data-total-anchors')).toBe('1')
+    expect(container.textContent).not.toContain('observed github.com_owner_a')
+    expect(container.textContent).toContain('global same filename')
+    expect(requests).toEqual(['github.com_owner_a', 'github.com_owner_b'])
+  })
+
   it('renders the activity pane with empty state when no API data', () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, {}), container)
@@ -131,10 +178,10 @@ describe('IdeActivityPanel', () => {
 
     const container = document.createElement('div')
     render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-a' }), container)
-    await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
+    await waitFor(() => expect(container.querySelector('[aria-label="Open Log turn-repo-a"]')).not.toBeNull())
 
     render(h(IdeActivityPanel, {}), container)
-    expect(container.textContent).not.toContain('turn-repo-a')
+    expect(container.querySelector('[aria-label="Open Log turn-repo-a"]')).toBeNull()
     expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
 
     await waitFor(() => expect(resolveUnscopedGraph).not.toBeNull())
@@ -181,10 +228,10 @@ describe('IdeActivityPanel', () => {
 
     const container = document.createElement('div')
     render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-a' }), container)
-    await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
+    await waitFor(() => expect(container.querySelector('[aria-label="Open Log turn-repo-a"]')).not.toBeNull())
 
     render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-b' }), container)
-    expect(container.textContent).not.toContain('turn-repo-a')
+    expect(container.querySelector('[aria-label="Open Log turn-repo-a"]')).toBeNull()
     await waitFor(() => expect(resolveRepoB).not.toBeNull())
 
     resolveRepoB!(new Response(JSON.stringify({
@@ -200,8 +247,8 @@ describe('IdeActivityPanel', () => {
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
-    await waitFor(() => expect(container.textContent).toContain('turn-repo-b'))
-    expect(container.textContent).not.toContain('turn-repo-a')
+    await waitFor(() => expect(container.querySelector('[aria-label="Open Log turn-repo-b"]')).not.toBeNull())
+    expect(container.querySelector('[aria-label="Open Log turn-repo-a"]')).toBeNull()
   })
 
   it('treats a null active file as no active file', () => {
@@ -251,7 +298,7 @@ describe('IdeActivityPanel', () => {
     })
   })
 
-  it('maps activity payload and tags into structured context lens links', async () => {
+  it('keeps global activity operational links without claiming file context', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
         events: [{
@@ -280,10 +327,7 @@ describe('IdeActivityPanel', () => {
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('goal goal-runtime')
-      expect(container.textContent).toContain('task task-runtime')
-      expect(container.textContent).toContain('PR 15000')
-      expect(container.textContent).toContain('1 line anchors')
+      expect(container.textContent).toContain('0 line anchors')
       expect(container.textContent).toContain('1/1 linked')
     })
     expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('100')
@@ -336,13 +380,12 @@ describe('IdeActivityPanel', () => {
     expect(activityRows.every(row => row.classList.contains('v2-ide-row'))).toBe(true)
 
     const contextJump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
-    expect(contextJump?.classList.contains('v2-ide-action')).toBe(true)
+    expect(contextJump).toBeNull()
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
     expect(activityRouteLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
-    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 9')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
-      'Code',
       'Goal',
       'Task',
       'Board',
@@ -353,44 +396,10 @@ describe('IdeActivityPanel', () => {
       'Telemetry',
       'Keeper',
     ])
-    fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Code')!)
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=4&surface=PR&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
-    const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
-    expect(jump?.textContent).toContain('runtime.ml:4')
-    fireEvent.click(jump!)
-
-    expect(activeIdeFile.value).toBe('lib/runtime.ml')
-    expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/runtime.ml',
-      line: 4,
-      surface: 'PR',
-      keeper_id: 'sangsu',
-      source_id: 'evt-1',
-    })
-    expect(ideContextFocus.value?.route_links?.map(link => link.label)).toEqual([
-      'Code',
-      'Goal',
-      'Task',
-      'Board',
-      'Comment',
-      'PR',
-      'Git',
-      'Log',
-      'Telemetry',
-      'Keeper',
-    ])
-    await waitFor(() => expect(keeperTraceState.value.events).toEqual([expect.objectContaining({
-      id: 'activity:run-default:evt-1',
-      keeperName: 'sangsu',
-      source: 'activity-event',
-      eventId: 'evt-1',
-      filePath: 'lib/runtime.ml',
-      line: 4,
-      surface: 'PR',
-    })]))
+    expect(keeperTraceState.value.events).toEqual([])
   })
 
   it('merges IDE bridge events into the activity timeline', async () => {
@@ -556,15 +565,13 @@ describe('IdeActivityPanel', () => {
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('goal goal-runtime')
-      expect(container.textContent).toContain('PR 15008')
-      expect(container.textContent).toContain('1 line anchors')
+      expect(container.querySelectorAll('.ide-activity-row')).toHaveLength(1)
+      expect(container.textContent).toContain('0 line anchors')
     })
 
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
-    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
+    expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 9')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
-      'Code',
       'Goal',
       'Task',
       'Board',
@@ -575,9 +582,6 @@ describe('IdeActivityPanel', () => {
       'Telemetry',
       'Keeper',
     ])
-
-    fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Code')!)
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=PR&label=telemetry.turn&source_id=evt-1&keeper=sangsu')
 
     fireEvent.click(activityRouteLinks.find(link => link.textContent === 'Telemetry')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
@@ -653,7 +657,7 @@ describe('IdeActivityPanel', () => {
 
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('goal goal-refresh')
+      expect(container.querySelector('[aria-label="Open Goal goal-refresh"]')).not.toBeNull()
     })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('turn-2')
@@ -869,7 +873,7 @@ describe('IdeActivityPanel', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&q=turn-1')
   })
 
-  it('normalizes derived file paths and hides unsafe context jumps', async () => {
+  it('does not infer codebase authority from global activity paths or tags', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
         events: [
@@ -943,20 +947,9 @@ describe('IdeActivityPanel', () => {
       expect(container.textContent).toContain('4 events')
     })
 
-    const jumps = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-context-jump')]
-    expect(jumps.map(jump => jump.textContent)).toEqual([
-      '↗ runtime.ml:4',
-      '↗ runtime.ml:7',
-      '↗ payload.ml:4',
-    ])
-
-    fireEvent.click(jumps[0]!)
-    expect(activeIdeFile.value).toBe('lib/runtime.ml')
-    expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/runtime.ml',
-      line: 4,
-      source_id: 'evt-1',
-    })
+    expect(container.querySelectorAll('.ide-activity-context-jump')).toHaveLength(0)
+    expect(container.querySelectorAll('[aria-label^="Open Code "]')).toHaveLength(0)
+    expect(container.querySelectorAll('.ide-activity-row')).toHaveLength(4)
   })
 
   it('derives a compact run progress summary from activity events', () => {
@@ -1023,7 +1016,7 @@ describe('IdeActivityPanel', () => {
 
     expect(summary).toMatchObject({
       totalEvents: 3,
-      currentFileEvents: 1,
+      currentFileEvents: 0,
       linkedEvents: 3,
       linkedCoveragePercent: 100,
       linkedCoverageLabel: '100%',

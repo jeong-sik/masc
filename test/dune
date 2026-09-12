@@ -25,6 +25,16 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_vision_official_client)
+ (modules test_keeper_vision_official_client)
+ (libraries masc_test_deps))
+
+(test
+ (name test_verifier_official_client)
+ (modules test_verifier_official_client)
+ (libraries masc_test_deps))
+
+(test
  (name test_completion_repair_delivery)
  (modules test_completion_repair_delivery)
  (libraries masc_test_deps))
@@ -1744,6 +1754,7 @@
   test_set_util
   test_board_core_payload)
  (libraries
+  masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
  masc_test_deps
@@ -2259,6 +2270,8 @@
 
 
 (include stanzas/test_msx_tools.inc)
+
+(include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_msx_frame_route.inc)
 
@@ -3524,6 +3537,21 @@
  (libraries alcotest masc_tui_frame))
 
 (test
+ (name test_tui_keeper_legend)
+ (modules test_tui_keeper_legend)
+ (libraries
+  alcotest
+  masc_tui_footer
+  masc_tui_render_prim
+  masc_tui_theme
+  masc_tui_types))
+
+(test
+ (name test_tui_help_banner)
+ (modules test_tui_help_banner)
+ (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
+
+(test
  (name test_tui_agenda)
  (modules test_tui_agenda)
  (deps
@@ -3824,6 +3852,7 @@
  (libraries
   alcotest
   masc
+  masc_tui_acting_pane
   masc_tui_frame
   masc_tui_scroll
   masc_tui_message_layout
@@ -4626,7 +4655,9 @@
  (modules test_tui_metrics_tail)
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_keeper_chat_projection
+  masc_tui_message_layout
   masc_tui_metrics_tail
   masc
   dated_jsonl
@@ -5109,6 +5140,16 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_log_channel_column)
+ (modules test_tui_log_channel_column)
+ (libraries alcotest masc masc_tui_observation_layout))
+
+(test
+ (name test_tui_board_kind_mark)
+ (modules test_tui_board_kind_mark)
+ (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
+
+(test
  (name test_keeper_composition_async_broker)
  (modules test_keeper_composition_async_broker)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf
@@ -5382,6 +5423,16 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_board_scroll)))
+
+(rule
+ (alias runtest-test_tui_reading_ends)
+ (deps test_tui_reading_ends.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_reading_ends.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_reading_ends)))
 
 (rule
  (alias runtest-test_tui_browser_lane_scroll)
@@ -5761,6 +5812,7 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
+ (deps ../addons/protocol.py ../addons/output-statistics/server.py)
  (libraries masc_test_deps eio eio_main yojson unix))
 
 (test
@@ -5776,6 +5828,23 @@
   (source_tree ../addons/msx-observer/skills))
  (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
   masc.skill_snapshot masc.skill_snapshot_service))
+
+(include stanzas/test_browser_observation.inc)
+(include stanzas/test_browser_observation_composition.inc)
+
+(rule
+ (alias runtest-test_tui_browser_history)
+ (deps test_tui_browser_history.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_browser_history.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_browser_history)))
+
+(test
+ (name test_tui_browser_history_model)
+ (modules test_tui_browser_history_model)
+ (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
 
 (test
  (name test_lane_addon_actions)

@@ -685,7 +685,7 @@ let test_composition_action_context_persisted () =
     in
     let typed_result =
       Tool_result.Completed
-        { content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
+        { retained_artifacts = []; content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
         ; data = `Assoc [ "content", `String "typed output" ]
         ; metadata = None
         ; duration_ms = 12.5
@@ -2260,6 +2260,56 @@ let test_execution_lookup_covers_complete_ledger () =
       (List.length (execution_rows store ~keeper_name:"alice" [])))
 ;;
 
+let test_execution_lookup_orders_only_matches () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let ts = Unix.gettimeofday () in
+    List.iter (fun (execution_id, tool, delta) ->
+      Dated_jsonl.append store
+        (execution_row ~keeper:"alice" ~execution_id ~tool ~ts:(ts +. delta)))
+      [ "exec-b", "b-first", -10.
+      ; "exec-a", "a-last", 10.
+      ; "exec-a", "a-tie-first", 0.
+      ; "exec-a", "a-first", -5.
+      ; "exec-a", "a-tie-second", 0. ];
+    Alcotest.(check (list string)) "identity batches retain timestamp and offset ordering"
+      [ "a-first"; "a-tie-first"; "a-tie-second"; "a-last"; "b-first" ]
+      (tool_names (execution_rows store ~keeper_name:"alice"
+        [ "exec-b"; "exec-a"; "exec-missing"; "exec-a" ])))
+;;
+
+let test_execution_lookup_uses_both_index_keys () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    write_rows store ~keeper:"alice" ~count:300
+      ~base_ts:(Unix.gettimeofday ()) ~label:"plan";
+    ignore (index_rows store () : Yojson.Safe.t list);
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+      (fun () ->
+        let stmt = Sqlite3.prepare db
+          ("EXPLAIN QUERY PLAN " ^ Keeper_tool_call_index.For_testing.select_execution_sql) in
+        Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t))
+          (fun () ->
+            let rec collect acc =
+              match Sqlite3.step stmt with
+              | Sqlite3.Rc.ROW -> collect (Sqlite3.column_text stmt 3 :: acc)
+              | Sqlite3.Rc.DONE -> String.concat "\n" (List.rev acc)
+              | rc -> Alcotest.fail (Sqlite3.Rc.to_string rc)
+            in
+            let plan = collect [] in
+            let contains needle =
+              let rec loop i =
+                i + String.length needle <= String.length plan
+                && (String.sub plan i (String.length needle) = needle || loop (i + 1))
+              in loop 0
+            in
+            Alcotest.(check bool) ("exact composite lookup: " ^ plan) true
+              (contains "rows_keeper_execution (keeper_name=? AND execution_id=?)"))))
+;;
+
 let test_execution_lookup_rebuilds_changed_ledger () =
   List.iter (fun mode ->
     with_tmp_log (fun () ->
@@ -2602,6 +2652,10 @@ let () =
             test_read_recent_rebuilds_a_removed_index
         ; eio_test "execution lookup covers history, keeper isolation and duplicate identities"
             test_execution_lookup_covers_complete_ledger
+        ; eio_test "execution lookup preserves unordered duplicate evidence ordering"
+            test_execution_lookup_orders_only_matches
+        ; eio_test "execution lookup uses both composite index keys"
+            test_execution_lookup_uses_both_index_keys
         ; eio_test "execution lookup rebuilds changed files and obsolete schema"
             test_execution_lookup_rebuilds_changed_ledger
         ; eio_test "execution lookup revalidates indexed execution identity"

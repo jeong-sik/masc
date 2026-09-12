@@ -520,7 +520,7 @@
  ; masc_tui_keeper_mark owns the marks the roster draws and
  ; masc_tui_planning_proof_mark the marks Planning's JUDGE column draws; the
  ; sheet this module builds is where a reader looks up what one means.
- (libraries masc_tui_types masc_tui_keeper_mark masc_tui_planning_proof_mark))
+ (libraries masc_tui_types masc_tui_keeper_mark masc_tui_board_kind_mark masc_tui_planning_proof_mark))
 
 (library
  (name masc_tui_esc_interrupt)
@@ -829,6 +829,12 @@
  (libraries masc))
 
 (library
+ (name masc_tui_board_kind_mark)
+ (wrapped false)
+ (modules masc_tui_board_kind_mark)
+ (libraries masc_tui_types))
+
+(library
  (name masc_tui_planning_proof_mark)
  (wrapped false)
  (modules masc_tui_planning_proof_mark)
@@ -1041,6 +1047,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc.browser_lane
   masc.sse_wire
@@ -1455,6 +1462,7 @@
   masc_tui_render_tools
   masc_tui_render_metrics
   masc_tui_render_memory
+  masc_tui_board_kind_mark
   masc_tui_planning_proof_mark
   masc_tui_context_bars
   masc_tui_chart
@@ -1576,7 +1584,7 @@
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
 ;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
-;; the TUI executable so every decision is testable without a process.
+;; the TUI executable so cache workflows can be tested with process fixtures.
 (library
  (name masc_tui_image_cache)
  (wrapped false)

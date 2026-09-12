@@ -232,6 +232,20 @@ let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
 let page_failed_note = "  (load failed; nothing here is a reading)"
 
+(* What a title says where its counts would go. A read nobody has asked for and a
+   read that failed both leave the snapshot empty, and the title is the row on
+   top, so it is the answer that gets read: "not loaded" after a failure sends
+   the operator to [r] while the server's reason sits in red two rows below.
+
+   The same distinction the body makes with {!page_unread_note} and
+   {!page_failed_note}, in the words a title has room for. The Memory header was
+   taught it in #35457; every other surface still said "not loaded" for both. *)
+let title_unread = "(not loaded)"
+let title_failed = "(load failed)"
+
+let title_missing_reading ~error =
+  if Option.is_some error then title_failed else title_unread
+
 
 (* A level meter, only while a capture is running.
 
@@ -1813,23 +1827,23 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
       if Keeper_control.requires_confirmation action then (Theme.bad ()) else (Masc_tui_theme.tone Masc_tui_theme.Accent)
     in
     if List.mem action available then
-      Printf.sprintf "%s%s%s %s" key_color (Keeper_control.action_key action)
+      Printf.sprintf "%s%s%s:%s" key_color (Keeper_control.action_key action)
         Ansi.reset label
     else
-      Printf.sprintf "%s%s %s%s" Ansi.dim (Keeper_control.action_key action)
+      Printf.sprintf "%s%s:%s%s" Ansi.dim (Keeper_control.action_key action)
         label Ansi.reset
   in
   let toggle =
     match Option.bind reading Keeper_control.primary with
     | Some action -> hint action (Keeper_control.action_label action)
-    | None -> Printf.sprintf "%sp pause%s" Ansi.dim Ansi.reset
+    | None -> Printf.sprintf "%sp:pause%s" Ansi.dim Ansi.reset
   in
   let gate_hint =
     match reading with
     | Some reading
       when List.mem reading.Keeper_control.name state.keeper_yolo_names ->
-        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ " auto"
-    | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ " yolo"
+        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
+    | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
@@ -1844,16 +1858,22 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
         (Terminal_text.single_line pending.Keeper_control.pending_keeper)
         Ansi.reset
   | None, None ->
+      (* [key:label] items, two spaces apart: the shape every other footer
+         uses, so Masc_tui_footer can split the row, drop the lowest priority
+         item when the row is tight, and keep the keys it never drops. Written
+         "key label" and joined with a middle dot, the whole legend was one
+         item nothing could split -- at 60 columns the row cut mid-word and
+         "q quit", last in the list, went first. The two keys the footer pins
+         lead with a plain key so it can read them past the colour. *)
       "  "
-      ^ String.concat
-          (Ansi.dim ^ " \xc2\xb7 " ^ Ansi.reset)
-          [ Ansi.dim ^ "j/k move" ^ Ansi.reset
+      ^ String.concat "  "
+          [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
           ; (match state.connection_status with
-             | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ " start server"
+             | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
              | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
             (* Delete is the only action a keeper whose configuration failed to
@@ -1862,27 +1882,27 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
           ; hint Keeper_control.Delete "delete"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ " settings"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ " new"
+          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
+          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
           ; (if state.view = Keepers Keeper_detail then
                if state.detail_tab = Detail_sandbox then
-                 (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ " container logs"
-               else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ " logs"
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ " logs")
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ " calls"
+                 (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":container logs"
+               else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
+             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
+          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
           ; gate_hint
           ; (Masc_tui_theme.tone Masc_tui_theme.Accent)
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
-            ^ Ansi.reset ^ " runtime"
+            ^ Ansi.reset ^ ":runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ " chat"
-             else Ansi.dim ^ "c chat" ^ Ansi.reset)
-          ; (if offers_back then Ansi.dim ^ "left/esc back" ^ Ansi.reset
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ " detail")
-          ; Ansi.dim ^ "r refresh" ^ Ansi.reset
-          ; Ansi.dim ^ "q quit" ^ Ansi.reset
+          ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
+             else Ansi.dim ^ "c:chat" ^ Ansi.reset)
+          ; (if offers_back then "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
+             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
+          ; Ansi.dim ^ "r:refresh" ^ Ansi.reset
+          ; "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
           ]
 
 
@@ -2425,27 +2445,13 @@ let runtime_config_status_lines state ~cols =
     |> List.map (fun text -> tone, text)) lines
 
 
-let help_surface_name (surface : surface) =
-  match surface with
-  | Overview -> "Overview"
-  | Acting -> "Activity"
-  | Metrics -> "Metrics"
-  | Keepers _ -> "Keepers"
-  | Memory -> "Memory"
-  | Approvals -> "Approvals"
-  | Board -> "Board"
-  | Planning | Verification | Harness -> "Planning"
-  | Fusion -> "Fusion"
-  | Repositories | Code | Changes -> "Workspace"
-  | Runtime | Lanes | Clients | Config | Resources | Tools -> "Config"
-  | Connectors | Schedules -> "Keepers"
-  | System_logs -> "Activity"
-
-
-let help_ascii_banner ~cols (state : state) =
+(* The sheet's masthead. It carries no keys and no surface name: both scroll
+   away with it, and both are said by rows that do not. The overlay's own title
+   row is fixed chrome -- it draws "hints on/off . [h] toggle . [Esc] close" at
+   every width, above the divider -- and the sheet's first section names the
+   active surface two rows under this. *)
+let help_ascii_banner ~cols (_state : state) =
   let inner_width = max 1 (framed_inner_width cols) in
-  let surface_label = help_surface_name state.view in
-  let hints_status = if state.hints_visible then "on" else "off" in
   let bar_char = "\xe2\x94\x80" in
   let repeat_utf8 str count =
     let buf = Buffer.create (String.length str * count) in
@@ -2459,15 +2465,11 @@ let help_ascii_banner ~cols (state : state) =
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x91\xe2\x95\x91\xe2\x95\x91\xe2\x95\xa0\xe2\x95\x90\xe2\x95\xa3\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x97\xe2\x95\x91    " ^ Ansi.reset
       ^ Ansi.dim ^ "Interactive Autonomous Fleet Workspace & Operations" ^ Ansi.reset
     ; "  " ^ (Theme.info ()) ^ "\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a \xe2\x95\xa9\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d\xe2\x95\x9a\xe2\x95\x90\xe2\x95\x9d" ^ Ansi.reset
-      ^ "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
-      ^ Ansi.dim ^ "  \xc2\xb7  [?] Close  \xc2\xb7  [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
     ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (min 68 (inner_width - 4)) ^ Ansi.reset
     ; ""
     ]
   else
     [ "  " ^ Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "[ MASC · Multi-Agent Shared Context ]" ^ Ansi.reset
-    ; "  Active: " ^ (Theme.warn ()) ^ "[" ^ surface_label ^ "]" ^ Ansi.reset
-      ^ Ansi.dim ^ " · [?] Close · [h] Hints (" ^ hints_status ^ ")" ^ Ansi.reset
     ; "  " ^ (Theme.recede ()) ^ repeat_utf8 bar_char (max 1 (inner_width - 4)) ^ Ansi.reset
     ; ""
     ]

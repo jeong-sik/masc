@@ -724,6 +724,61 @@ let test_a_duplicated_id_addresses_every_match () =
   in
   Alcotest.(check (list string)) "and every one of them is removed" [] (ids removed)
 
+
+(* A key with a dot in it is not one key with dots: TOML reads it as a path
+   into nested tables. Written bare, [edgar.a.poe = "Yuna"] under
+   [voice.tts.agent_voices] makes tables named edgar, a and poe, so the mapping
+   written is not the mapping meant -- and a reader that asks for the agent
+   named "edgar.a.poe" does not find it.
+
+   [key_of_line] has always understood a quoted key. Only the writing side
+   never produced one, which is why such a key could not round-trip. *)
+let test_a_key_that_is_not_bare_is_quoted () =
+  let out =
+    Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio"
+      ~key:"edgar.a.poe" ~value:(Some "Yuna")
+  in
+  Alcotest.(check bool) "the key is written quoted" true
+    (has_line out {|"edgar.a.poe" = "Yuna"|});
+  Alcotest.(check bool) "and not as a path into tables" false
+    (has_line out {|edgar.a.poe = "Yuna"|})
+
+(* And it comes back as the one key it was. Written bare, the second edit
+   appended a duplicate instead of replacing the first. *)
+let test_a_quoted_key_is_found_again () =
+  let once =
+    Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio"
+      ~key:"edgar.a.poe" ~value:(Some "Yuna")
+  in
+  let twice =
+    Toml_line_editor.edit_table_scalar once ~path:"fusion.presets.trio"
+      ~key:"edgar.a.poe" ~value:(Some "Jamie")
+  in
+  Alcotest.(check bool) "the second edit replaced the first" true
+    (has_line twice {|"edgar.a.poe" = "Jamie"|});
+  Alcotest.(check bool) "and left no duplicate behind" false
+    (has_line twice {|"edgar.a.poe" = "Yuna"|})
+
+(* A bare key stays bare. Quoting every key would rewrite files an operator
+   reads, for nothing. *)
+let test_a_bare_key_is_left_alone () =
+  let out =
+    Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio"
+      ~key:"judge" ~value:(Some "new-judge")
+  in
+  Alcotest.(check bool) "no quotes were added" true
+    (has_line out {|judge = "new-judge"|})
+
+(* A quote inside the key is escaped like any other string content, so the
+   line it lands on still parses. *)
+let test_a_key_with_a_quote_is_escaped () =
+  let out =
+    Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio"
+      ~key:"say \"hi\"" ~value:(Some "Yuna")
+  in
+  Alcotest.(check bool) "the inner quotes are escaped" true
+    (has_line out {|"say \"hi\"" = "Yuna"|})
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
@@ -814,5 +869,15 @@ let () =
             test_a_new_entry_lands_above_a_comment_documenting_the_next_table
         ; Alcotest.test_case "a duplicated id addresses every match" `Quick
             test_a_duplicated_id_addresses_every_match
+        ] )
+    ; ( "keys the writer has to quote"
+      , [ Alcotest.test_case "a key that is not bare is quoted" `Quick
+            test_a_key_that_is_not_bare_is_quoted
+        ; Alcotest.test_case "a quoted key is found again" `Quick
+            test_a_quoted_key_is_found_again
+        ; Alcotest.test_case "a bare key is left alone" `Quick
+            test_a_bare_key_is_left_alone
+        ; Alcotest.test_case "a key with a quote is escaped" `Quick
+            test_a_key_with_a_quote_is_escaped
         ] )
     ]

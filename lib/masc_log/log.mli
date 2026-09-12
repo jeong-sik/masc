@@ -223,6 +223,7 @@ module Pulse : LOGGER
 module Orchestrator : LOGGER
 module BoardLog : LOGGER
 module MsxLog : LOGGER
+module DosLog : LOGGER
 module Metrics : LOGGER
 module Dashboard : LOGGER
 module Telemetry : LOGGER

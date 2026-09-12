@@ -6,11 +6,17 @@
 #   /opt/masc-bench/config/       (rendered arm config: runtime.toml, keepers/, ...)
 set -euo pipefail
 
+# Before anything that expands it. The helper below is addressed through
+# $BENCH, and under `set -u` an unset one ends the script on that line -- so
+# the container installed nothing and started no MASC, silently, on every run.
+BENCH=/opt/masc-bench
+
+source "$BENCH/driver/gh_seed.sh"
+
 # BENCH_RUNTIME_ID must be the id masc resolves, `<provider>.<binding id>` —
 # not the wire model. They differ whenever the wire name carries a slash, as
 # every OpenRouter id does; the renderer's effective_runtime_id() is the one
 # source of that rule and the caller applies it before setting this.
-BENCH=/opt/masc-bench
 export MASC_BASE_PATH=$BENCH/base
 export MASC_CONFIG_DIR=$BENCH/config
 export MASC_KEEPER_AUTONOMOUS_ENABLED=0
@@ -121,12 +127,7 @@ you are asked, verify it, and stop. Do not ask questions."
         # remote_ssh preflight requires <remote_root>/<name> to exist, and it
         # runs `gh auth status` against <keeper root>/.config/gh.
         mkdir -p "/root/${k}"
-        if [[ -n "${GH_TOKEN:-}" ]]; then
-          install -d -m 0700 "/root/${k}/.config/gh"
-          printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' \
-            "${GH_TOKEN}" > "/root/${k}/.config/gh/hosts.yml"
-          chmod 600 "/root/${k}/.config/gh/hosts.yml"
-        fi
+        seed_gh_hosts "${k}"
         pool_id=$((pool_id + 1))
         mcp_call "${pool_id}" masc_keeper_up "$(jq -cn \
           --arg name "$k" --arg ins "$pool_instructions" \

@@ -122,6 +122,8 @@ let reject_invalid_values () = with_directory (fun _root packages directory ->
   let path = Filename.concat directory "frames.toml" in
   List.iter (fun (label, bytes) -> write path bytes; check_error label path)
     ["unknown top-level field", declaration ~extra:"enabled = true" msx_binding;
+     "duplicate declaration identity key", "id = \"duplicate\"\n" ^ declaration msx_binding;
+     "duplicate declaration binding key", declaration (msx_binding ^ "sources=[]\n");
      "missing binding", declaration "";
      "empty snapshot path is not expanded into a valid directory",
        declaration {|[binding]
@@ -193,9 +195,56 @@ let directory_and_read_failures () = with_directory (fun root _packages director
   check (list string) "unreadable declaration retains its path" [rejected] snapshot.paths;
   check int "unreadable declaration is reported" 1 (List.length snapshot.issues))
 
+let output_ports_are_typed_and_revisioned () = with_directory (fun _root packages directory ->
+  let manifest = install_package packages in
+  let path = Filename.concat directory "frames.toml" in
+  write path (declaration msx_binding);
+  let install ports = write manifest (package () ^ ports); Config.load_file ~path in
+  let initial = unwrap (install {|
+[world.outputs.frames]
+lanes = ["msx/frame", "msx/state"]
+[world.outputs.statistics]
+all_lanes = true
+|}) in
+  let open Lane_addon_types in
+  check bool "manifest has exact typed port selections" true
+    (initial.package.outputs = ["frames", Selected_lanes ["msx/frame"; "msx/state"]; "statistics", All_lanes]);
+  let reordered = unwrap (install {|
+# Table order and membership order are not port identity.
+[world.outputs.statistics]
+all_lanes = true
+[world.outputs.frames]
+lanes = ["msx/state", "msx/frame"]
+|}) in
+  check string "port and selected-lane ordering preserve semantic revision" initial.revision reordered.revision;
+  let changed = unwrap (install "\n[world.outputs.frames]\nlanes=[\"msx/state\"]\n") in
+  check bool "mapping change alters the resolved configuration revision" true
+    (initial.revision <> changed.revision);
+  check string "package author's revision need not change to observe a mapping edit"
+    initial.package.revision changed.package.revision;
+  List.iter (fun ports -> check bool ("reject invalid output ports: " ^ ports) true
+    (Result.is_error (install ports))) [
+      "\n[world.outputs]\n";
+      "\n[world.outputs.\"\"]\nall_lanes=true\n";
+      "\n[world.outputs.frames]\nlanes=[]\n";
+      "\n[world.outputs.frames]\nlanes=[\"\"]\n";
+      "\n[world.outputs.frames]\nlanes=[\"msx/frame\",\"msx/frame\"]\n";
+      "\n[world.outputs.frames]\nlanes=[1]\n";
+      "\n[world.outputs.frames]\nall_lanes=false\n";
+      "\n[world.outputs.frames]\nlanes=[\"msx/frame\"]\nall_lanes=true\n";
+      "\n[world.outputs.frames]\nunknown=true\n";
+      "\n[world.outputs]\nframes={all_lanes=true}\nframes={all_lanes=true}\n" ];
+  write manifest (package ());
+  List.iter (fun extra ->
+    write path (declaration (Printf.sprintf {|[binding]
+sources=[{source_id="upstream",kind="lane_output",installation_id="producer",selection="latest_completed",%s}]
+|} extra)); check_error ("invalid output selector: " ^ extra) path)
+    ["output_id=\"\""; "output_id=1"; "output=\"frames\""])
+
 let () = run "Lane Add-on declarative composition"
   ["configuration",
-    [test_case "relative package and source preserve typed bindings" `Quick relative_package_and_source;
+    [test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;
+     test_case "relative package and source preserve typed bindings" `Quick relative_package_and_source;
      test_case "comments, rename and key order preserve identity" `Quick comments_rename_and_key_order;
      test_case "meaningful configuration and package changes alter revision" `Quick meaningful_changes;
      test_case "invalid values remain errors" `Quick reject_invalid_values;

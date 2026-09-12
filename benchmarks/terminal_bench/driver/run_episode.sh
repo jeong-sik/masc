@@ -12,6 +12,7 @@ fi
 MCP_TOKEN="$(cat "$BENCH/token")"
 export MCP_TOKEN
 source "$BENCH/driver/mcp.sh"
+source "$BENCH/driver/gh_seed.sh"
 
 INSTRUCTION_FILE="$1"
 RESULT_JSON="$2"
@@ -48,14 +49,9 @@ for i in $(seq 1 "${KEEPER_COUNT}"); do
   mkdir -p "/root/${k}"
   # Preflight also runs `gh auth status` with GH_CONFIG_DIR=<keeper root>/
   # .config/gh and refuses keeper_up without a GitHub identity
-  # (remote_github_identity_missing). Seed hosts.yml from the GH_TOKEN env
-  # passed into the container.
-  if [[ -n "${GH_TOKEN:-}" ]]; then
-    install -d -m 0700 "/root/${k}/.config/gh"
-    printf 'github.com:\n    oauth_token: %s\n    git_protocol: https\n' \
-      "${GH_TOKEN}" > "/root/${k}/.config/gh/hosts.yml"
-    chmod 600 "/root/${k}/.config/gh/hosts.yml"
-  fi
+  # (remote_github_identity_missing); gh_seed.sh seeds hosts.yml from
+  # ${GH_TOKEN} and is a no-op when it is unset.
+  seed_gh_hosts "${k}"
   mcp_call $((100+i)) masc_keeper_up "$(jq -cn \
     --arg name "$k" --arg ins "$KEEPER_INSTRUCTIONS" --arg rid "$RUNTIME_ID" \
     '{name:$name, instructions:$ins, runtime_id:$rid, activation_mode:"manual"}')" 90 >/dev/null

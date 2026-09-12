@@ -183,7 +183,9 @@ let test_keeper_sensitive_get_permissions_are_exact () =
        part of what raw-trace already holds. Same data, same gate — a lighter
        one here would be a second door onto the first door's content. *)
     [ "raw-traces"; "raw-trace"; "provider-input"; "memory-journal"
-    ; "memory-facts"; "file-changes" ];
+    ; "memory-facts"; "file-changes"; "tool-calls" ];
+  check bool "safe chat history stays on its ordinary read route" true
+    (permission "/api/v1/keepers/fixture-keeper/chat/history" = None);
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true
@@ -4210,6 +4212,63 @@ let test_running_keeper_reconciliation_rebuilds_continuity_brief () =
             config
             unrelated_surface))
 
+let test_composite_preserves_runtime_attempt_scopes () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let check_receipt ~keeper_name ~lane_attempt_count ~fallback_applied ~outcome =
+    (* Observed turn 408: the selected GLM runtime had one internal attempt,
+       after a failed Kimi candidate. Turn 409 had one candidate and no fallback.
+       Persist the receipt wire, then read the actual composite execution view. *)
+    let runtime_fields =
+      [ "name", `String "glm-coding.glm-5.3"
+      ; "attempt_count", `Int 1
+      ; "fallback_applied", `Bool fallback_applied
+      ; "outcome", `String outcome
+      ]
+      @ Option.to_list
+          (Option.map (fun count -> "lane_attempt_count", `Int count) lane_attempt_count)
+    in
+    let receipt =
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "recorded_at", `String "2026-09-12T13:09:49Z"
+        ; "outcome", `String "success"
+        ; "terminal_reason_code", `String "success"
+        ; "operator_disposition",
+          `String (if fallback_applied then "pass_next_model" else "pass")
+        ; "runtime", `Assoc runtime_fields
+        ]
+    in
+    Dated_jsonl.append
+      (Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name)
+      receipt;
+    let execution =
+      Server_dashboard_http_composite_claims.composite_execution_receipt_json
+        ~config
+        ~claim_window:(Server_dashboard_http_composite_claims.read_claim_window ())
+        ~keeper_name
+    in
+    let open Yojson.Safe.Util in
+    check bool "durable receipt is present" true
+      (execution |> member "latest_receipt_present" |> to_bool);
+    let runtime = execution |> member "runtime" in
+    check int "selected runtime's internal attempt count stays one" 1
+      (runtime |> member "attempt_count" |> to_int);
+    check (option int) "lane candidate count retains its own scope"
+      lane_attempt_count
+      (Json_util.get_int runtime "lane_attempt_count");
+    check bool "observed fallback is preserved" fallback_applied
+      (runtime |> member "fallback_applied" |> to_bool);
+    check string "runtime outcome is preserved" outcome
+      (runtime |> member "outcome" |> to_string)
+  in
+  check_receipt ~keeper_name:"composite-failover" ~lane_attempt_count:(Some 2)
+    ~fallback_applied:true ~outcome:"passed_to_next_model";
+  check_receipt ~keeper_name:"composite-single" ~lane_attempt_count:(Some 1)
+    ~fallback_applied:false ~outcome:"completed";
+  check_receipt ~keeper_name:"composite-unobserved" ~lane_attempt_count:None
+    ~fallback_applied:false ~outcome:"completed"
+
 let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
   let execution ~terminal_reason_code ~operator_disposition_reason =
     `Assoc
@@ -5307,43 +5366,38 @@ let test_cached_surface_success_clears_the_previous_error () =
     (Yojson.Safe.to_string succeeded.Cache.json)
 ;;
 
-let test_tool_call_fleet_cache_tracks_durable_revision () =
+let test_tool_calls_select_keeper_before_limiting () =
   let base_path = test_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Dashboard_cache.invalidate_all ();
       Masc.Keeper_tool_call_log.reset_for_testing ();
       cleanup_dir base_path)
     (fun () ->
-       Masc.Keeper_tool_call_log.reset_for_testing ();
-       Masc.Keeper_tool_call_log.init ~base_path ();
-       let masc_root =
-         match Masc.Keeper_tool_call_log.configured_masc_root () with
-         | Some value -> value
-         | None -> fail "tool-call log did not retain its MASC root"
-       in
-       let key =
-         Server_dashboard_http_keeper_api.tool_calls_fleet_cache_key ~masc_root
-       in
-       ignore
-         (Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () -> `List []));
-       check bool "fleet cache is seeded" true (Option.is_some (Dashboard_cache.peek key));
-       Masc.Keeper_tool_call_log.log_call
-         ~keeper_name:"delta"
-         ~tool_name:"keeper_time_now"
-         ~input:(`Assoc [])
-         ~output_text:"ok"
-         ~success:true
-         ~duration_ms:1.0
-         ();
-       check int "durable append advances revision" 1
-         (Masc.Keeper_tool_call_log.committed_revision ());
-       let same_key =
-         Server_dashboard_http_keeper_api.tool_calls_fleet_cache_key ~masc_root
-       in
-       check string "cache identity remains bounded" key same_key;
-       check bool "revision change invalidates stale fleet rows" true
-         (Option.is_none (Dashboard_cache.peek key)))
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path ();
+      let append keeper index =
+        Masc.Keeper_tool_call_log.log_call ~keeper_name:keeper
+          ~tool_name:"keeper_time_now" ~input:(`Assoc ["index", `Int index])
+          ~output_text:(string_of_int index) ~success:true ~duration_ms:1. () in
+      for index = 1 to 100 do append "target" index done;
+      for index = 1 to 1001 do append "busy-neighbor" index done;
+      let entries = Server_dashboard_http_keeper_api.tool_call_entries
+        ~keeper_name:"target" ~limit:100 in
+      check int "other Keepers cannot truncate the requested 100 calls" 100 (List.length entries);
+      check bool "every returned row belongs to the requested Keeper" true
+        (List.for_all (fun row -> Safe_ops.json_string_opt "keeper" row=Some "target") entries);
+      let outputs rows = List.map (fun row -> Safe_ops.json_string_opt "output" row) rows in
+      check (list (option string)) "chronological order is retained"
+        (List.init 100 (fun index -> Some (string_of_int (index+1)))) (outputs entries);
+      let tail = Server_dashboard_http_keeper_api.tool_call_entries
+        ~keeper_name:"target" ~limit:3 in
+      check (list (option string)) "limit applies after Keeper selection"
+        [Some "98";Some "99";Some "100"] (outputs tail);
+      append "target" 101;
+      let latest = Server_dashboard_http_keeper_api.tool_call_entries
+        ~keeper_name:"target" ~limit:3 in
+      check (list (option string)) "next request sees the committed indexed tail"
+        [Some "99";Some "100";Some "101"] (outputs latest))
 ;;
 
 let test_skill_evidence_joins_activation_and_composition () =
@@ -5530,8 +5584,8 @@ let () =
             test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming;
           test_case "operator snapshot hydrates on first default request" `Quick
             test_operator_snapshot_default_route_hydrates_first_success;
-          test_case "tool-call fleet cache follows durable revision" `Quick
-            test_tool_call_fleet_cache_tracks_durable_revision;
+          test_case "tool-call limit applies to selected Keeper" `Slow
+            test_tool_calls_select_keeper_before_limiting;
           test_case "dashboard query cache segment normalizes missing values" `Quick
             test_dashboard_query_cache_segment_normalizes_missing_values;
           test_case "dashboard query cache key partitions route params" `Quick
@@ -5644,6 +5698,8 @@ let () =
             test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick
             test_event_operator_uses_exact_source_refs_across_unrelated_enqueues;
+          test_case "composite preserves runtime attempt scopes" `Quick
+            test_composite_preserves_runtime_attempt_scopes;
           test_case "observation metadata does not override terminal contract" `Quick
             test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );

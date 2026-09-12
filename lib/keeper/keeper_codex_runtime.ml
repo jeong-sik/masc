@@ -632,16 +632,26 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let developer_instructions =
       Some
         ((prepared.system_prompt :: native_posture_note native_posture)
-         @ developer_messages
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)
     in
+    (* A resumed vendor thread retains its original developer messages.
+       Updating thread/resume configuration alone did not add the current
+       World State or changed Keeper instructions to the observed native
+       history. Explicit developer items are acknowledged before turn/start
+       and persist in the same thread without replaying conversation history. *)
+    let developer_context =
+      match thread_mode with
+      | Runtime_codex_app_server.Start -> developer_messages
+      | Runtime_codex_app_server.Resume _ ->
+        Option.to_list developer_instructions @ developer_messages
+    in
     (* Reported from [prepared.messages], the post-window list, gated on the
        same [thread_mode] that decides whether [thread/inject_items] runs at
        all. Only a [Start] injects the history into the new thread; a [Resume]
-       sends the prompt and leaves the conversation in the thread the
-       app-server owns, so on that branch there is nothing here to attribute.
+       injects current developer context and sends the prompt, while prior
+       conversation remains in the app-server. Its full size is not measured.
        The composition line further down states the same split. The callback
        below reports it only after the complete turn/start write, not when
        this prepared composition becomes available. *)
@@ -729,7 +739,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        tokens; they bound the request, they do not price it. *)
     Log.Keeper.info
       ~keeper_name
-      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d \
+      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d developer_context_bytes=%d \
        history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d"
       runtime_label
       (match thread_mode with
@@ -737,6 +747,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        | Runtime_codex_app_server.Resume _ -> "resume")
       (String.length prompt)
       (Option.fold ~none:0 ~some:String.length client_config.developer_instructions)
+      (List.fold_left (fun bytes text -> bytes + String.length text) 0 developer_context)
       (List.length history)
       (Runtime_codex_app_server.history_bytes history)
       (List.length dynamic_tools)
@@ -941,6 +952,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
          ?reasoning_effort:effective_reasoning_effort
          ~thread_mode
          ~history
+         ~developer_context
          ?on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->

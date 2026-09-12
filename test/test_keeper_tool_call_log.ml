@@ -685,7 +685,7 @@ let test_composition_action_context_persisted () =
     in
     let typed_result =
       Tool_result.Completed
-        { content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
+        { retained_artifacts = []; content_blocks = None; Tool_result.tool_name = "keeper_fs_read"
         ; data = `Assoc [ "content", `String "typed output" ]
         ; metadata = None
         ; duration_ms = 12.5
@@ -2214,6 +2214,116 @@ let index_rows store ?keeper_name () =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let execution_rows store ~keeper_name execution_ids =
+  match Keeper_tool_call_index.by_execution_ids ~store ~keeper_name ~execution_ids with
+  | Ok rows -> rows
+  | Error detail -> Alcotest.fail detail
+;;
+
+let execution_row ~keeper ~execution_id ~tool ~ts =
+  `Assoc [ "ts", `Float ts; "keeper", `String keeper
+         ; "execution_id", `String execution_id; "tool", `String tool ]
+;;
+
+let test_execution_lookup_covers_complete_ledger () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let base_ts = Unix.gettimeofday () -. 600. in
+    let append ~keeper ~execution_id ~tool ~ts =
+      Dated_jsonl.append store (execution_row ~keeper ~execution_id ~tool ~ts)
+    in
+    append ~keeper:"alice" ~execution_id:"exec-old" ~tool:"old-edit" ~ts:base_ts;
+    append ~keeper:"bruce" ~execution_id:"exec-old" ~tool:"foreign-edit" ~ts:base_ts;
+    append ~keeper:"bruce" ~execution_id:"exec-foreign" ~tool:"foreign-only" ~ts:base_ts;
+    write_rows store ~keeper:"alice" ~count:300 ~base_ts:(base_ts +. 1.) ~label:"later";
+    let recent = match Keeper_tool_call_index.recent_rows
+        ~store ~keeper_name:"alice" ~n:200 () with
+      | Ok rows -> rows | Error detail -> Alcotest.fail detail
+    in
+    Alcotest.(check bool) "old edit is outside the recent tail" false
+      (List.mem "old-edit" (tool_names recent));
+    Alcotest.(check (list string)) "exact lookup crosses the tail and isolates the keeper"
+      [ "old-edit" ]
+      (tool_names (execution_rows store ~keeper_name:"alice"
+        [ "exec-old"; "exec-old"; "exec-foreign"; "exec-missing" ]));
+    append ~keeper:"alice" ~execution_id:"exec-old" ~tool:"conflicting-edit"
+      ~ts:(base_ts +. 400.);
+    append ~keeper:"alice" ~execution_id:"exec-' OR 1=1 --" ~tool:"quoted-id"
+      ~ts:(base_ts +. 401.);
+    Alcotest.(check (list string)) "duplicate canonical identities remain visible"
+      [ "old-edit"; "conflicting-edit" ]
+      (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-old"; "exec-old" ]));
+    Alcotest.(check (list string)) "execution IDs are bound as data"
+      [ "quoted-id" ]
+      (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-' OR 1=1 --" ]));
+    Alcotest.(check int) "empty batch has no rows" 0
+      (List.length (execution_rows store ~keeper_name:"alice" [])))
+;;
+
+let test_execution_lookup_rebuilds_changed_ledger () =
+  List.iter (fun mode ->
+    with_tmp_log (fun () ->
+      let store = log_store () in
+      let ts = Unix.gettimeofday () in
+      Dated_jsonl.append store
+        (execution_row ~keeper:"alice" ~execution_id:"exec-old" ~tool:"old" ~ts);
+      let path = match Dated_jsonl.range_day_file_paths store
+          ~since:"1970-01-01" ~until:"9999-12-31" with
+        | [ path ] -> path | _ -> Alcotest.fail "expected one ledger file"
+      in
+      Fs_compat.invalidate_cached_writer path;
+      Unix.utimes path 1. 1.;
+      Alcotest.(check int) "old execution is indexed" 1
+        (List.length (execution_rows store ~keeper_name:"alice" [ "exec-old" ]));
+      let replacement = Yojson.Safe.to_string
+          (execution_row ~keeper:"alice" ~execution_id:"exec-new" ~tool:"new" ~ts) ^ "\n" in
+      let target = match mode with
+        | `Replace -> path ^ ".replacement" | `Same_inode -> path
+      in
+      let oc = open_out_bin target in
+      Fun.protect ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc replacement);
+      (match mode with `Replace -> Unix.rename target path | `Same_inode -> ());
+      Alcotest.(check (list string)) "rewritten identity replaces stale execution key"
+        [ "new" ]
+        (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-old"; "exec-new" ]));
+      let ledger_dir = Dated_jsonl.base_dir store in
+      Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+      let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+      Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+        (fun () ->
+          let rc = Sqlite3.exec db
+            "UPDATE rows SET execution_id = 'wrong'; PRAGMA user_version = 2" in
+          Alcotest.(check bool) "seed obsolete schema" true (Sqlite3.Rc.is_success rc));
+      Alcotest.(check (list string)) "obsolete schema rebuilds exact execution lookup"
+        [ "new" ]
+        (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-new" ]))))
+    [ `Replace; `Same_inode ]
+;;
+
+let test_execution_lookup_revalidates_indexed_identity () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    Dated_jsonl.append store
+      (execution_row ~keeper:"alice" ~execution_id:"exec-real" ~tool:"real-edit"
+         ~ts:(Unix.gettimeofday ()));
+    Alcotest.(check int) "seed exact index" 1
+      (List.length (execution_rows store ~keeper_name:"alice" [ "exec-real" ]));
+    let ledger_dir = Dated_jsonl.base_dir store in
+    Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+    let db = Sqlite3.db_open (Keeper_tool_call_index.database_path ~ledger_dir) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db : bool))
+      (fun () ->
+        let rc = Sqlite3.exec db "UPDATE rows SET execution_id = 'exec-fake'" in
+        Alcotest.(check bool) "seed a stale execution identity" true
+          (Sqlite3.Rc.is_success rc));
+    Alcotest.(check int) "stale index never attributes real evidence to the wrong execution"
+      0 (List.length (execution_rows store ~keeper_name:"alice" [ "exec-fake" ]));
+    Alcotest.(check (list string)) "identity mismatch rebuild restores authoritative lookup"
+      [ "real-edit" ]
+      (tool_names (execution_rows store ~keeper_name:"alice" [ "exec-real" ])))
+;;
+
 let test_read_index_concurrent_fibers () =
   with_tmp_log (fun () ->
     let store = log_store () in
@@ -2490,6 +2600,12 @@ let () =
             test_read_recent_picks_up_rows_appended_between_reads
         ; eio_test "read_recent rebuilds a removed index"
             test_read_recent_rebuilds_a_removed_index
+        ; eio_test "execution lookup covers history, keeper isolation and duplicate identities"
+            test_execution_lookup_covers_complete_ledger
+        ; eio_test "execution lookup rebuilds changed files and obsolete schema"
+            test_execution_lookup_rebuilds_changed_ledger
+        ; eio_test "execution lookup revalidates indexed execution identity"
+            test_execution_lookup_revalidates_indexed_identity
         ; eio_test "concurrent fibers read outside the scheduler"
             test_read_index_concurrent_fibers
         ; eio_test "replacement and shrink retire every old row"

@@ -2871,17 +2871,19 @@ let approval_request_call_summary ~base_dir ~keeper_name ~approval_id =
    has been reaped by checking the same audio directory the synthesis side
    writes to. This keeps the TTL reaper simple while avoiding a broken
    native player on reload. *)
-let audio_clip_file_path ~base_dir token =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "audio")
-    (token ^ ".mp3")
+let audio_clip_exists ~base_dir token =
+  (* Which container the clip is in is the endpoint's, not this reader's, so
+     the token is resolved against every format rather than against MP3 --
+     a say clip is WAVE, and looking only for MP3 reports every one of them
+     as reaped. *)
+  Voice_bridge_core.find_clip
+    ~dir:
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "audio")
+    ~token
+  |> Option.is_some
 
 let valid_audio_token token =
   Re.execp (Re.compile (Re.Pcre.re "^[A-Za-z0-9_-]+$")) token
-
-let file_exists_safe path =
-  try Sys.file_exists path with
-  | Sys_error _ | Unix.Unix_error _ -> false
 
 let audio_fields_with_expired ~base_dir audio =
   match audio with
@@ -2894,7 +2896,7 @@ let audio_fields_with_expired ~base_dir audio =
           | None -> a.expired
           | Some base_dir ->
               a.expired
-              || not (file_exists_safe (audio_clip_file_path ~base_dir a.token))
+              || not (audio_clip_exists ~base_dir a.token)
       in
       [ ("audio", `Assoc (audio_to_json { a with expired })) ]
 

@@ -472,8 +472,8 @@ let handle_browser_tabs_with_outcome ~args =
 
 let handle_browser_read_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =
   let result =
-    Tool_misc_browser_lane.handle_read ~keeper_name:meta.name
-      ~tool_name:"masc_browser_read" ~start_time:0.0 args
+    Tool_misc_browser_lane.handle_read_with_retention ~base_path:config.base_path
+      ~keeper_name:meta.name ~tool_name:"masc_browser_read" ~start_time:0.0 args
   in
   (* Downloads carry normalized references to durable files. The result's
      manifest must be persisted by this producer before provider projection,
@@ -2303,7 +2303,9 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
   (match Json_util.assoc_member_opt "path" args,
         Json_util.assoc_member_opt "artifact" args with
   | None, _ ->
-      Keeper_vision_tool.handle_with_outcome ?complete ?sw ?clock ?net ~meta ~args ()
+      Keeper_vision_tool.handle_with_outcome
+        ?base_path:(Option.map (fun (config : Workspace.config) -> config.base_path) config)
+        ?complete ?sw ?clock ?net ~meta ~args ()
   | Some _, Some _ -> invalid "Provide exactly one of artifact or path."
   | Some (`String path), None when String.trim path <> "" ->
       (match Json_util.assoc_member_opt "query" args, config, sw, clock, net with
@@ -2331,7 +2333,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
             | Ok handle ->
                 let handle = Multimodal.Vision_artifact_store.to_string handle in
                 let args = `Assoc (("artifact", `String handle) :: List.remove_assoc "path" fields) in
-                let result = Keeper_vision_tool.handle_with_outcome ?complete ?sw ?clock ?net ~meta ~args () in
+                let result = Keeper_vision_tool.handle_with_outcome ~base_path:config.base_path ?complete ?sw ?clock ?net ~meta ~args () in
                 (match result.disposition, result.data with
                  | Tool_result.Completed (), Some (`Assoc output) ->
                      Keeper_tool_execution.success_data

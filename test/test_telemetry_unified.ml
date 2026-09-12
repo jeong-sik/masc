@@ -865,7 +865,7 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
       Tool_metrics_persist.enqueue
         ~masc_root:(masc_root dir)
         (Tool_result.Completed
-           { content_blocks = None; tool_name = "tool_read_file"
+           { retained_artifacts = []; content_blocks = None; tool_name = "tool_read_file"
            ; data = `Null
            ; metadata = None
            ; duration_ms = 12.0
@@ -1504,7 +1504,7 @@ let test_cluster_tool_metrics () =
       Tool_metrics_persist.enqueue
         ~masc_root:cluster_masc
         (Tool_result.Completed
-           { content_blocks = None; tool_name = "cluster_tool"
+           { retained_artifacts = []; content_blocks = None; tool_name = "cluster_tool"
            ; data = `Null
            ; metadata = None
            ; duration_ms = 4.0

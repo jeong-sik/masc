@@ -893,7 +893,7 @@ let test_the_open_call_age_sits_with_the_names () =
    question ("what is open now") and must not count it.
 
    Observed 2026-09-12: one screen said "1 never returned: keeper_analyze_image"
-   on a settled turn and "still running: keeper_analyze~" in the progress row
+   on a settled turn and "still running: keeper_analyze…" in the progress row
    at the same time. *)
 let test_a_superseded_attempts_open_call_is_not_still_running () =
   let t = fresh () in

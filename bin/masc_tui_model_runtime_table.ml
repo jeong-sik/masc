@@ -190,7 +190,7 @@ let clip s n =
   else
     (* [String.sub] here cut at a byte, which splits a multi-byte scalar and
        puts its pieces on screen. [fit_width] cuts at a cell and fills the
-       column, with the same trailing [~]. *)
+       column, with the same trailing […]. *)
     Masc_tui_message_layout.fit_width s n
 
 let effort_width = 8

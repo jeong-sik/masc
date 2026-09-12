@@ -931,13 +931,13 @@ let test_operator_approvals_use_current_contract () =
      palette and the reader should be made to say why. Here more is the
      behaviour the rule wants, and only fewer is the failure. *)
   (* The name column is measured, not chosen. Sixteen cells cut
-     "rw-e0-r9-20260820-review" to "rw-e0-r9-202608~", and two keepers whose
+     "rw-e0-r9-20260820-review" to "rw-e0-r9-202608…", and two keepers whose
      names share a long prefix then read alike -- which is the column's whole
      job. The pre-pass that measures them is the [display_width] call; a
      return to a fixed width takes it with it. *)
   (* The Tools header names its skills instead of serialising them. It used
      [Skill_reference.list_to_yojson] and then let the line's width cut the
-     result, so the header read [{"identity":{"source_id":"project-masc"~] --
+     result, so the header read [{"identity":{"source_id":"project-masc"…] --
      sixty characters answering nothing, where a reader looks first, about
      skills the same screen lists by name a few rows below.
 
@@ -2488,7 +2488,7 @@ let test_the_session_filter_reads_the_transcript () =
 
    They were not: the rows sized their title to [cols - 68] and the header
    claimed a fixed 20, so at eighty columns the header ran long, SCORE was
-   cut to "SC~" and REPLIES fell off the frame entirely -- two columns still
+   cut to "SC…" and REPLIES fell off the frame entirely -- two columns still
    drawn on every row with nothing saying what they were. The mark ahead of
    the id is one cell and the header reserved two, which put every label one
    cell off its data.

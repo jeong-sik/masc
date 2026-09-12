@@ -69,7 +69,7 @@ let test_keeps_newest_metadata_and_bytes () =
              (List.length all_rows - 2) hidden_rows;
            check bool "the marker fits without the generic truncation mark" true
              (Layout.display_width gap.text <= 20
-              && not (String.ends_with ~suffix:"~" gap.text))
+              && not (String.ends_with ~suffix:"…" gap.text))
        | Layout.Metadata _ | Layout.Body ->
            fail "oversized newest entry hid rows without a typed gap");
       check string "the newest body tail remains visible"
@@ -225,12 +225,12 @@ let test_terminal_cell_width_and_fit () =
   check int "fitted UTF-8 fills the cell budget" 5
     (Layout.display_width fitted);
   check bool "fitted UTF-8 stays valid" true (String.is_valid_utf_8 fitted);
-  check string "wide scalar is never split" "가~"
+  check string "wide scalar is never split" "가…"
     (Layout.fit_width "가나" 3);
   check string "truncated ANSI style is reset before the marker"
-    "\x1B[31m한\x1B[0m~"
+    "\x1B[31m한\x1B[0m…"
     (Layout.fit_width "\x1B[31m한글\x1B[0m" 3);
-  check string "emoji grapheme is never split by fit" " ~"
+  check string "emoji grapheme is never split by fit" " …"
     (Layout.fit_width "👍🏽A" 2);
   (* drop_cells is fit_width's left-edge counterpart: the Code pane's
      horizontal scroll. Styles crossed by the cut still open the remainder,
@@ -424,18 +424,18 @@ let test_input_viewport_keeps_latest_complete_scalars () =
   check string "short input stays complete" "abc" (viewport 8 "abc");
   check string "exact boundary stays complete" "abcdefgh"
     (viewport 8 "abcdefgh");
-  check string "ASCII overflow keeps the newest tail" "~cdefghi"
+  check string "ASCII overflow keeps the newest tail" "…cdefghi"
     (viewport 8 "abcdefghi");
-  check string "mixed-width overflow keeps complete scalars" "~한🙂Z"
+  check string "mixed-width overflow keeps complete scalars" "…한🙂Z"
     (viewport 6 "Aé한🙂Z");
-  check string "one-cell viewport keeps omission marker" "~"
+  check string "one-cell viewport keeps omission marker" "…"
     (viewport 1 "한");
-  check string "detached combining mark is not rendered" "~"
+  check string "detached combining mark is not rendered" "…"
     (viewport 2 "A한\xCC\x81");
   List.iter
     (fun (grapheme, cells) ->
       check string ("overflow keeps complete grapheme " ^ grapheme)
-        ("~" ^ grapheme) (viewport (cells + 1) ("AB" ^ grapheme)))
+        ("…" ^ grapheme) (viewport (cells + 1) ("AB" ^ grapheme)))
     [ "👍🏽", 2
     ; "🇰🇷", 2
     ; "❤️", 2
@@ -1357,7 +1357,7 @@ let test_age_reads_as_seconds_then_minutes () =
     ]
 
 (* The ladder did not go past minutes, and the Fusion table drew every one of
-   its 28 rows through it: [12045m~], five figures cut by a seven-cell column,
+   its 28 rows through it: [12045m…], five figures cut by a seven-cell column,
    so a day-old run and a nine-day-old run were the same shape.
 
    The widest reading is what a column has to hold, so it is pinned: a span

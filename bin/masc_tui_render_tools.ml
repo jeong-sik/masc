@@ -398,7 +398,7 @@ let tools_display_lines (state : state) =
         in
         (* Names, not the wire form. These were serialised to JSON and then
            cut to the width of the line, so the header read
-           [{"identity":{"source_id":"project-masc","package_id"~] -- sixty
+           [{"identity":{"source_id":"project-masc","package_id"…] -- sixty
            characters that answer nothing, in the place a reader looks first.
 
            The skills are listed by name a few rows below, so the header's

@@ -68,7 +68,7 @@ let test_the_detail_pane_says_where_the_command_would_run () =
 (* A blocked Gate row exposes a short reason under the list, where the frame
    has to fit it to one line. Enter promises the whole ask, so that pane must
    carry the producer's exact reason and whether this attempt can be retried;
-   otherwise the operator still decides from the prefix before [~]. *)
+   otherwise the operator still decides from the prefix before […]. *)
 let test_the_detail_pane_keeps_the_blocked_gate_reason () =
   Alcotest.(check bool) "the whole-ask pane reads the exact reason" true
     (reads ~binding_name:"approval_detail_pane"
@@ -181,7 +181,7 @@ let test_the_detail_pane_compares_before_repeating_the_operation () =
 
 (* The subject column took [cols - 76] -- everything the fixed parts did not
    use. On rows whose subject is a keeper name, that spent ninety cells on
-   [edgar.a.poe] and left the recurrence past it reading [daily 08:00:00 A~]:
+   [edgar.a.poe] and left the recurrence past it reading [daily 08:00:00 A…]:
    the timezone, which is the part of a recurrence a reader cannot infer.
 
    Measured from the rows now, the way the Approvals and Fusion tables measure

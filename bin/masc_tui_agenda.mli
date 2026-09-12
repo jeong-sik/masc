@@ -112,7 +112,7 @@ val short_who : string -> string
     distinguishes nothing and costs seven cells of a line that has to fit a
     name. That is not only waste: on a narrow column the seven cells are
     taken out of the name, and the name is the whole reason the cell exists.
-    Two schedules for two different keepers both drew ["keeper:~"] before the
+    Two schedules for two different keepers both drew ["keeper:…"] before the
     Schedules list called this.
 
     Exported because a second surface needs the same answer, and two

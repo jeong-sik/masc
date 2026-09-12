@@ -437,7 +437,7 @@ let test_rows_fit_the_width_they_were_given () =
 ;;
 
 (* [short_who] is public now: the Schedules list needed the same answer, and
-   before it called this it drew "keeper:~" -- the seven-cell prefix took the
+   before it called this it drew "keeper:…" -- the seven-cell prefix took the
    name's room and two schedules for two different keepers read alike.
 
    A target with no prefix, or one whose prefix is a different kind, comes

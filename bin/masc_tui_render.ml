@@ -136,9 +136,14 @@ let data_unreliable_row ~cols err =
        - Message_layout.display_width data_unreliable_open
        - Message_layout.display_width data_unreliable_close)
   in
+  (* Cut the middle, not the tail. Both ends of a load failure carry: the head
+     names the surface and the call, and the tail is the address or field the
+     call was about. A tail cut kept "overview load failed: (GET failed:
+     connect backoff: http://127.0.0.1" and dropped the port -- the one token
+     that says which server was not answering. *)
   (Theme.bad ())
   ^ data_unreliable_open
-  ^ fit_width err room
+  ^ Message_layout.fit_middle room err
   ^ data_unreliable_close
   ^ Ansi.reset
 let set_table_frame enabled = table_frame_enabled := enabled
@@ -1131,7 +1136,7 @@ let render_approval_detail (state : state) (row : approval_row) =
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 
 (* Long question, choice, and reason text was cut to one line with a trailing
-   "~", so an operator could not read the decision being asked of them. Each
+   "…", so an operator could not read the decision being asked of them. Each
    field wraps instead: the first row carries [head] (the caret and Keeper
    name, or a choice's number and mark), and every wrapped row after it is
    indented to [head]'s visible width so the text stays in one column. [head]'s
@@ -1784,12 +1789,12 @@ let render_approvals (state : state) =
     let now_unix = Unix.gettimeofday () in
     (* The name column, sized to the names it has to hold rather than to a
        number chosen once. Sixteen cells cut "rw-e0-r9-20260820-review" to
-       "rw-e0-r9-202608~", and two keepers whose names share a long prefix
+       "rw-e0-r9-202608…", and two keepers whose names share a long prefix
        then read alike -- which is the whole job of the column.
 
        The cells come out of the last one, which carries the server's input
        preview. That preview is a JSON envelope, so at this width it shows
-       "{\"schema\":\"ma~" and nothing a reader can act on; ten fewer of those
+       "{\"schema\":\"ma…" and nothing a reader can act on; ten fewer of those
        characters costs nothing and buys the identifier back. The cap keeps
        one long name from taking the row. *)
     (* Sanitised here, not at the call below. These are external names and
@@ -2858,7 +2863,7 @@ let planning_phase_label = function
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
    are nine cells and the column was eight, so nearly every planning row read
-   [complet~] with sixty columns of space to its right -- the mark that says
+   [complet…] with sixty columns of space to its right -- the mark that says
    "there was more" on a value nothing was cut from. Taken from the phase list
    so a new phase widens the column instead of losing its last letter. *)
 let planning_phase_column =
@@ -3614,7 +3619,7 @@ let render_planning_detail (state : state)
 
    The kind prefix comes off first. It is "keeper:" on every row here, so it
    separates nothing and takes seven cells out of the name -- which left two
-   schedules for two different keepers both reading "keeper:~". The agenda
+   schedules for two different keepers both reading "keeper:…". The agenda
    strip has stripped it since it was written; this list is the surface that
    did not.
 
@@ -3807,7 +3812,7 @@ let render_schedule_list (state : state) =
                   The kind prefix comes off first. It is "keeper:" on every
                   row this list can draw, so it separates nothing and takes
                   seven cells out of the name -- which left two schedules for
-                  two different keepers both reading "keeper:~". The agenda
+                  two different keepers both reading "keeper:…". The agenda
                   strip has stripped it since it was written; this list is
                   the surface that did not. *)
                let subject = schedule_row_subject row in
@@ -3825,7 +3830,7 @@ let render_schedule_list (state : state) =
                       line. The subject is a keeper name on every row that has
                       a payload target, so [cols - 76] spent ninety cells on
                       [edgar.a.poe] and the recurrence past it -- which is
-                      where the timezone lives -- read [daily 08:00:00 A~].
+                      where the timezone lives -- read [daily 08:00:00 A…].
                       The fallback summary can be long, so it is capped rather
                       than trusted. *)
                    (fit_width (Terminal_text.single_line subject)
@@ -10380,7 +10385,7 @@ let runtime_column width text =
 (* A column that holds names rather than prose. Lane and candidate ids share
    long prefixes -- glm-coding-…-a, glm-coding-…-b -- and at eighty columns
    the lane column is ten cells, so cutting from the end drew four different
-   lanes as four identical "glm-codin~". The tail is what tells them apart,
+   lanes as four identical "glm-codin…". The tail is what tells them apart,
    which is the same reason the Keepers table fits its names from the middle.
 
    Padded to the column afterwards, like {!runtime_column}, so the columns to
@@ -11434,7 +11439,7 @@ let render_acting (state : state) =
              events carry ("agent start", "waiting queue"). A type this build
              was not taught has no such label -- its name is all there is, and
              it is a wire identifier, so it ran off the column at every width:
-             [approval:summar~], [transport_healt~]. Those rows have no detail
+             [approval:summar…], [transport_healt…]. Those rows have no detail
              either, so the label takes the empty column rather than the
              reader losing the only thing the row says. *)
           let detail = Terminal_text.single_line row.Acting.detail in

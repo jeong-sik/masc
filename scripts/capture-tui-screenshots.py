@@ -82,7 +82,7 @@ REDACT_JS = r"""
 # colours stay where they were, and the grid does not move.
 ROW_REDACT_JS = r"""
 () => {
-  const STATE = /\((?:todo|doing|done|blocked|review|verify|paused)[)~]/;
+  const STATE = /\((?:todo|doing|done|blocked|review|verify|paused)[)\u2026]/;
   const HEAD = /^(\s*[\u25cb\u25cf\u25d0\u25cc]\s*\[task-\d+\]\s*)/;
   const TITLES = [
     'rewrite the loader so a missing lane fails at boot',
@@ -149,7 +149,7 @@ ROW_REDACT_JS = r"""
       const state = rest.match(STATE);
       // Up to the state marker, or to the end of the drawn text when the row
       // was truncated before one was reached.
-      const cutAt = state ? state.index : rest.replace(/\s*~?\s*$/, '').length;
+      const cutAt = state ? state.index : rest.replace(/\s*\u2026?\s*$/, '').length;
       const middle = rest.slice(0, cutAt);
       after = head[1] + fit(TITLES[seen++ % TITLES.length], cells(middle)) + rest.slice(cutAt);
     }

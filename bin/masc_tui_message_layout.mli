@@ -324,6 +324,12 @@ val dress_bare_links :
     link. *)
 
 val fit_width : string -> int -> string
+(** [fit_width text width] pads [text] to [width] cells, or cuts its tail to
+    fit and marks the cut with ["…"] -- the same mark {!fit_middle} uses, so
+    a frame drawing both cuts spells the one fact one way.
+
+    For a fixed column whose head carries the meaning. Where both ends carry
+    -- an identifier, an address -- use {!fit_middle}. *)
 
 val fit_middle : int -> string -> string
 
@@ -362,7 +368,7 @@ val split_cells : max_cells:int -> string -> string list
     identifier longer than the frame. *)
 
 val input_viewport : max_cells:int -> string -> string
-(** Keep the complete input when it fits. Overflow uses a leading [~] and the
+(** Keep the complete input when it fits. Overflow uses a leading […] and the
     newest complete-scalar suffix that fits in the remaining cells. *)
 
 val scroll_hint : scrolled_back:int -> older_exist:bool -> string

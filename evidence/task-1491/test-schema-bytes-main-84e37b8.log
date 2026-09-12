@@ -1,9 +1,0 @@
-Testing `[1mkeeper_tool_schema_bytes[0m'.
-[2mThis run has ID `3U8S03LZ'.
-
-[0m  [32m[OK][0m          [36mper-turn tool surface[0m          0   stays under the ceiling.
-  [32m[OK][0m          [36mper-turn tool surface[0m          1   the ceiling still tracks t...
-  [32m[OK][0m          [36msurface golden[0m                 0   the surface is unchanged (...
-
-Full test results in `[36m/masc-work/polisher/masc-t1491/_build/_tests/keeper_tool_schema_bytes[0m'.
-[32mTest Successful[0m in 0.002s. 3 tests run.

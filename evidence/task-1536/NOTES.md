@@ -54,3 +54,10 @@
 - 남은 risk: 433행 게이트는 preflight 경로뿐 — ready_admission 경로
   (exact_output_ready_admission.ml:306의 Plan.Caller_supplied_header_not_allowed
   전파)는 동일 Plan 에러를 재사용하므로 이 수리의 수혜.
+
+## Adversarial Review 대응 (issuecomment-5642917479)
+1. 대소문자 무관 wire-default 필터링: String.lowercase_ascii (String.trim name) = "content-type" && String.lowercase_ascii (String.trim value) = "application/json"
+2. 순서 무관 실제 호출자 헤더 보고: wire-default를 제외한 첫 헤더(List.find_opt)를 찾아 보고하여 [ ("Content-Type", ...); ("X-Custom", ...) ] 순서에서도 "X-Custom"을 정확히 지목.
+3. 인라인 테스트 확장: empty header 허용, 대소문자 허용, 커스텀 Content-Type 거부, 와이어 기본값과 호출자 헤더 혼합 시 진원지 지목 및 순서 무관성 검증.
+4. 스테이징 오염 정리: 직전 커밋에 잘못 포함되었던 evidence/task-1491/* (15개 파일) 제거.
+

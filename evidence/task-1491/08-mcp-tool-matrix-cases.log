@@ -1,9 +1,0 @@
-HEAD=84e37b836e1e107ec6cda664e029a77669e93c72
-[2026-09-11 17:23:14] [INFO] [MCP] Tag registry initialized: 160 tools registered
-[2026-09-11 17:23:14] [INFO] [Workspace] MASC base resolved: /tmp/mcp-tool-matrix-ee96f3 → /tmp/mcp-tool-matrix-ee96f3 (git root)
-[2026-09-11 17:23:14] [INFO] [Workspace] MASC base: /tmp/masc-runtime (MASC_BASE_PATH_INPUT)
-[2026-09-11 17:23:14] [INFO] [Backend] Board: JSONL default backend
-[2026-09-11 17:23:14] [INFO] [Board] Board flusher actor started
-[2026-09-11 17:23:14] [INFO] [Board] JSONL backend initialized
-[2026-09-11 17:23:14] [WARN] [Server] publication recovery registry is unavailable; publication filesystem tools fail closed
-__MCP_TOOL_MATRIX_RESULT__{"name":"masc_schedule_note_add","ok":false,"base_path":"/tmp/mcp-tool-matrix-ee96f3","message":"masc_schedule_note_add raised during contract execution: Sys_error(\"/tmp/masc-runtime/.masc/agents: Eio.Io Fs Permission_denied Unix_error (Permission denied, \\\"mkdirat\\\", \\\"agents\\\"),\\n  creating directory <fs:/tmp/masc-runtime/.masc/agents>\")"}

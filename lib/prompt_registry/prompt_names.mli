@@ -100,6 +100,10 @@ val keeper_identity : string
 val keeper_instructions_custom : string
 (** The operator-instructions block. Variable: [instructions]. *)
 
+val keeper_constitution : string
+(** The norms this world's keepers wrote for themselves (RFC-0442). Variable:
+    [articles]. *)
+
 val keeper_tags_system_open : string
 val keeper_tags_system_close : string
 val keeper_tags_instructions_open : string

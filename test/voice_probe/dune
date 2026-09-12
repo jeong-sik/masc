@@ -1,0 +1,6 @@
+; The probe report contract. The probes themselves reach endpoints over the
+; network and are measured instead; docs/VOICE-RUNBOOK.md carries a dated run.
+
+(test
+ (name test_voice_probe)
+ (libraries alcotest yojson masc masc.voice_config))

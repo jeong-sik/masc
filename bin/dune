@@ -25,6 +25,7 @@
  (package masc)
  (libraries
   masc.workspace_connection
+  masc.voice_config
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -1143,6 +1144,7 @@
   masc_tui_ansi
   masc_tui_chart
   masc_tui_context_inspector
+  masc_tui_rows
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout

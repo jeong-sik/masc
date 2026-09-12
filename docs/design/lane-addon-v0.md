@@ -83,6 +83,11 @@ Slice는 질의다. 저장하는 것은 원천 관측과 파생 출력, 설치 �
 질의는 source별 incarnation/cursor/누락·지연을 반환한다. 미래의 모든 과거 질의를 복구할 수
 있다고 약속하지 않는다. 이미 Keeper가 사용한 선택 근거는 detach와 원천 교체 뒤에도 읽혀야 한다.
 
+이력 질의는 선택한 사건을 응답 공간에 먼저 담고, 남은 공간에는 선택한 기록의 source coverage를
+우선 담는다. 나머지 coverage를 다 담지 못하면 누락을 표시하고 partial로 반환한다.
+coverage에는 독립적인 시각이 없으므로 시간창 밖이라고 추정해 버리거나 완전함을 주장하지 않는다.
+선택한 사건과 coverage를 분리해 읽는 두 번의 스캔은 같은 highwater에서 멈춘다.
+
 ## 진행과 장애 경계
 
 한 instance에 독립 Docker container와 server-owned fiber를 둔다. Keeper 턴 switch를 쓰지 않는다.

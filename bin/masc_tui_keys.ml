@@ -334,6 +334,10 @@ let for_surface = function
       ; b Navigate "K" "calling Keeper"
       ; b Navigate "B" "Board evidence"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching run id, Keeper or preset; an \
+                 open run's detail carries no searchable rows"
+      ; b Search "n / N" "next / previous match"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
       @ row_list_edges @ listing_meta
@@ -377,6 +381,9 @@ let for_surface = function
       ; b Act "v" "view code"
           ~help:"the file on the Code surface, read from the keeper's own \
                  workspace"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching written path"
+      ; b Search "n / N" "next / previous match"
       ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
       ]
       @ row_list_jumps @ listing_meta

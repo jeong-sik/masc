@@ -6755,8 +6755,51 @@ let surface_row_texts (state : state) : surface -> string list option = function
      approval instead of stepping to the next match. Verification met the
      same collision and moved its rejection to [x]; until Approvals makes
      that call, the safe answer is no row search. *)
+  (* Two lists that grew a row cursor with the jump keys and had no way to be
+     searched. Each is named by what an operator has in mind reaching for the
+     key: the run and who called it, the file that was written.
+
+     Approvals and Schedules are not here, and the reason is [n]. The key
+     that steps to the next match is the key those two surfaces give to
+     "deny this approval" and "write a new schedule". A search whose own
+     follow-through refuses an approval is worse than no search, so offering
+     it there needs a different step key rather than another arm here
+     (#35306). *)
+  | Fusion -> (
+      match state.fusion_mode with
+      | Fusion_detail _ | Fusion_historical_detail _ -> None
+      | Fusion_list -> (
+          match fusion_list_entries state with
+          | [] -> None
+          | entries ->
+              Some
+                (List.map
+                   (fun entry ->
+                     match entry with
+                     | Tui_decode.Fusion_retained_run run ->
+                         run.Tui_decode.fur_run_id ^ " "
+                         ^ run.Tui_decode.fur_keeper ^ " "
+                         ^ run.Tui_decode.fur_preset
+                     | Tui_decode.Fusion_historical_evidence evidence ->
+                         evidence.Tui_decode.fhe_post_id ^ " "
+                         ^ evidence.Tui_decode.fhe_title)
+                   entries)))
+  | Changes -> (
+      match state.changes with
+      | None -> None
+      | Some snapshot -> (
+          match snapshot.Tui_decode.fcs_changes with
+          | [] -> None
+          | changes ->
+              (* The address the row is drawn under, read from the one place
+                 that spells it. A second match here would find a row under an
+                 address the pane never shows. *)
+              Some
+                (List.map
+                   (fun change -> Tui_decode.file_change_address change)
+                   changes)))
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
-  | Fusion | Resources | Changes | Config | Tools ->
+  | Resources | Config | Tools ->
       None
 
 (* Whether the chat pane is parked somewhere other than the newest row.

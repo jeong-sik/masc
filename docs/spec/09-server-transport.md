@@ -374,14 +374,30 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 
 ```ocaml
 let make_routes ~port ~host:_ ~sw ~clock =
-  Http.Router.empty
-  |> Server_routes_http_routes_frontend.add_routes ~port
+  Http.Router.create ()
+  |> Server_routes_http_routes_frontend.add_routes ~port ~sw ~clock
+  |> Server_oauth_http.add_routes
+  |> Server_keeper_oauth_http.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
-  |> Server_routes_http_routes_runtime.add_routes
+  |> Server_routes_http_routes_verification.add_routes
+  |> Server_routes_http_routes_attribution.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
+  |> Server_routes_http_routes_presets.add_routes
+  |> Server_routes_http_routes_browser_lane.add_routes
+  |> Server_routes_http_routes_lane_addons.add_routes ~sw ~clock
+  |> Server_routes_http_routes_msx.add_routes
+  |> Server_routes_http_routes_artifacts.add_routes
+  |> Server_routes_http_routes_voice.add_routes
+  |> Server_routes_http_routes_multimodal.add_routes
+  |> Server_routes_http_routes_autonomous.add_routes
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
+  |> Server_routes_http_routes_sidecar.add_routes ~sw ~clock
+  |> Server_routes_http_routes_repositories.add_routes
+  |> Server_routes_http_routes_workspace.add_routes
+  |> Server_ide_http.add_routes
+  |> Server_ide_lsp_proxy.add_routes ~sw ~clock
 ```
 
 주요 REST 라우트 그룹:
@@ -392,12 +408,11 @@ let make_routes ~port ~host:_ ~sw ~clock =
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
 | Workspace | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_workspace` | `GET /api/v1/status` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
-| Runtime | `/api/v1/runtime/*` | `_runtime` | `GET /api/v1/runtime/health` |
+| Runtime | `/api/v1/runtime/*` | `_dashboard` / `_activity` | `GET /api/v1/runtime/resolved` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
 | Channel Gate | `/api/v1/gate/*` | `_channel_gate` | `GET /api/v1/gate/health` |
-| Board | `/api/v1/board/*` | main_eio 직접 | `GET /api/v1/board/{id}` |
-| GraphQL | `/graphql` | main_eio 직접 | `POST /graphql` |
-| OpenAPI | `/api/v1/openapi.json` | `Transport.Rest` | OpenAPI 3.1 문서 자동 생성 |
+| Board | `/api/v1/board/*` | `_activity` | `GET /api/v1/board/{id}` |
+| OpenAPI | `/api/v1/openapi.json` | `_frontend` (`Transport.Rest`) | OpenAPI 3.1 문서 자동 생성 |
 
 ### 6.3 Dashboard Static Files
 

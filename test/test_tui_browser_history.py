@@ -14,6 +14,7 @@ def run(binary, *, quit_from_history=False, disconnected=False):
     client = "11111111-1111-4111-8111-111111111111"
     current = "https://example.org/current"
     requests = []
+    read_revision = 0
     beta_entered = threading.Event()
     beta_release = threading.Event()
     beta_returned = threading.Event()
@@ -61,10 +62,11 @@ def run(binary, *, quit_from_history=False, disconnected=False):
         request = json.loads(body)
         requests.append(("read", request))
         lane = request["lane"]
+        text = f"CURRENT PAGE CONTENT read-{read_revision}"
         return 200, {"ok": True, "data": {"source": lane, "clientId": client if lane == "live" else None, "elapsed_ms": 1.,
             "tabs": [{"id": 2, "title": "Current page", "url": current, "active": True}],
             "page": {"tabId": 2, "title": "Current page", "url": current,
-                     "text": "CURRENT PAGE CONTENT", "chars": 20, "truncated": False}}}
+                     "text": text, "chars": len(text), "truncated": False}}}
 
     def read_scene(body):
         request = json.loads(body)
@@ -98,6 +100,15 @@ def run(binary, *, quit_from_history=False, disconnected=False):
         fixtures["/api/v1/dashboard/browser-lane/" + suffix] = h.RequestHttpResponse(effect)
 
     def interact(process, fd, _slave, output, _base):
+        def read_and_wait(keys):
+            nonlocal read_revision
+            # A retained/loading frame can still contain the prior text, and
+            # the incremental renderer need not redraw identical reply text.
+            # Only this new fixture reply can produce the next marker.
+            read_revision += 1
+            marker = f"CURRENT PAGE CONTENT read-{read_revision}".encode()
+            return h.send_and_wait(process, fd, output, keys, marker)
+
         try:
             h.palette_go(process, fd, output, b"go Keepers", b"alpha")
             h.palette_go(process, fd, output, b"go Browser Lane",
@@ -124,9 +135,9 @@ def run(binary, *, quit_from_history=False, disconnected=False):
             # An explicit browser reopen chooses the current page even when
             # history overlays an already-visible browser lane.
             reopen_reads = sum(kind == "read" for kind, _ in requests)
-            h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
+            read_and_wait(b":go Browser Lane\r")
             assert sum(kind == "read" for kind, _ in requests) > reopen_reads
-            h.send_and_wait(process, fd, output, b"a", b"CURRENT PAGE CONTENT")
+            read_and_wait(b"a")
             h.send_and_wait(process, fd, output, b"ghttps://example.org/history", b"https://example.org/history")
             h.send_and_wait(process, fd, output, b"\x1b", b"g:URL")
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
@@ -144,18 +155,18 @@ def run(binary, *, quit_from_history=False, disconnected=False):
                 needle=b"SAVED BETA CONTENT", controls=(h.FULL_REDRAW,))
             assert sum(kind == "read" for kind, _ in requests) == reads_before_completion, \
                 "navigation follow-up escaped history isolation"
-            h.send_and_wait(process, fd, output, b"h", b"CURRENT PAGE CONTENT")
+            read_and_wait(b"h")
             assert sum(kind == "read" for kind, _ in requests) > reads_before_completion, \
                 "closing history did not resume the deferred read"
             assert sum(kind == "goto" for kind, _ in requests) == 1, "history replayed navigation"
-            h.send_and_wait(process, fd, output, b"l", b"CURRENT PAGE CONTENT")
+            read_and_wait(b"l")
             h.send_and_wait(process, fd, output, b"s", b"CURRENT SCENE CONTROL")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             # History leaves Tab to the global ring, including when its
             # underlying browser pane could otherwise consume focus traversal.
             h.send_and_wait(process, fd, output, b"\t", b"MASC Overview")
-            h.palette_go(process, fd, output, b"go Browser Lane", b"CURRENT PAGE CONTENT")
-            h.send_and_wait(process, fd, output, b"l", b"CURRENT PAGE CONTENT")
+            read_and_wait(b":go Browser Lane\r")
+            read_and_wait(b"l")
             h.send_and_wait(process, fd, output, b"s", b"CURRENT SCENE CONTROL")
             h.send_and_wait(process, fd, output, b"h", b"SAVED BETA CONTENT")
             h.send_and_wait(process, fd, output, b"\x1b[Z", b"MASC Workspace")

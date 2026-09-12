@@ -202,7 +202,7 @@ val run_llm_reviewer_fn
       -> on_runtime_attempt_error:
         (runtime_id:string
          -> attempt:int
-         -> dispatch:Keeper_attempt_dispatch.t
+         -> dispatch:Runtime_attempt_dispatch.t
          -> Agent_core.Error.t
          -> unit)
       -> unit

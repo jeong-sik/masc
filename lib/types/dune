@@ -10,6 +10,7 @@
   ids
   prompt_block_id
   runtime_usage_scope
+  runtime_attempt_dispatch
   turn_record
   health_status
   types_core

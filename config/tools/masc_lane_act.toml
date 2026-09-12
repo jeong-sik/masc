@@ -1,6 +1,6 @@
 name = "masc_lane_act"
 description = """
-Queue an explicit action on one optional Lane package's advertised world action port.
+Queue an action on an optional Lane package and return its receipt.
 
 Inspect action_schema first. Return is a durable receipt, not guest completion. Reusing the same request_id and normalized input returns that receipt; changed input is rejected. Never automatically retry an unknown outcome against a new instance. Existing Keeper work continues."""
 additional_properties = false

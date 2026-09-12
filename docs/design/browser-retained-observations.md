@@ -4,7 +4,7 @@ A fast composition can read several pages between two TUI refreshes. The three-c
 
 ## Data and lifetime
 
-Scene and region reads validate their Browser_scene schema, observed tab, explicit source and resolved client identity. Direct Keeper BrowserRead and MCP reads bound to an actual registered Keeper use the same retention boundary. Unbound external MCP reads remain ordinary observations without hidden retained blobs. It writes the exact result data to the existing durable Tool_blob_store as application/vnd.masc.browser-scene+json before returning a reference.
+Scene and region reads validate their Browser_scene schema, observed tab, explicit source and resolved client identity. Direct Keeper BrowserRead and MCP reads bound to an actual registered Keeper use the same retention boundary. Unbound external MCP reads remain ordinary observations without hidden retained blobs. The local read boundary replaces backend-supplied source, clientId and elapsed_ms fields with one authoritative value each. Durable decoding rejects duplicate object keys at every depth so consumers cannot disagree through first-key versus last-key interpretation. It writes the exact result data to the existing durable Tool_blob_store as application/vnd.masc.browser-scene+json before returning a reference.
 
 Tool_result.retained_artifacts carries observer roots outside model-facing data. Tool_result.to_json intentionally omits these roots: composition serializes node results into model data, and an embedded normalized artifact reference would force Tool_bridge to externalize an otherwise inline scene. Normal configured output-size projection still applies.
 

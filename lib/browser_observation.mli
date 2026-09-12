@@ -8,6 +8,8 @@ type t = private {
 }
 val mime : string
 val of_json : Yojson.Safe.t -> (t, string) result
+(** Rejects duplicate object keys at every depth before interpreting identity
+    or scene fields, so stored observations have one JSON meaning. *)
 val retain : base_path:string -> view:Browser_lane.scene_view -> Tool_result.result -> (Tool_result.result, string) result
 (** Validate and persist a completed scene before publishing its typed retained
     reference. Model data and its inline/composition projection are unchanged.

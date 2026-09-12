@@ -105,7 +105,13 @@ let read ?navigation_source ?expected_url ?(view=Browser_lane.Content) ?scope (r
   let* () = if actual = `Int tab_id then Ok () else Error "scene tab identity mismatch" in
   let elapsed_ms = Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e6 in
   match json with
-  | `Assoc fields -> Ok (`Assoc (fields @ ["source",`String (match request.source with Live -> "live" | Automation -> "automation");
+  | `Assoc fields ->
+    (* These fields belong to the resolved local route, not page/backend JSON.
+       Remove every supplied occurrence before attaching the authoritative
+       values so first-key and last-key consumers see the same observation. *)
+    let fields = List.filter (fun (key, _) ->
+      not (List.mem key ["source"; "clientId"; "elapsed_ms"])) fields in
+    Ok (`Assoc (fields @ ["source",`String (match request.source with Live -> "live" | Automation -> "automation");
       "clientId",Browser_surface.client_id_json target;"elapsed_ms",`Float elapsed_ms]))
   | _ -> Error "scene must be an object"
 

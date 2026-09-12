@@ -36,11 +36,14 @@ val observe :
     caller's switch. Calling it again retries incomplete cleanup. *)
 val stop : t -> (unit, error) result
 
-(** Explicit detach after a host restart. The persisted exact container ID
-    must still carry this instance's ownership label before removal. *)
+(** Explicit detach after a host restart. [Some id] verifies that exact
+    container's ownership label before removal. [None] recovers a lost create
+    receipt using this instance's deterministic container name, then verifies
+    both the name and ownership label before removing the resolved exact ID.
+    In either case, absence requires a successful Docker query. *)
 val recover_stop :
   mgr:_ Eio.Process.mgr ->
-  instance_id:string -> container_id:string -> max_reply_bytes:int ->
+  instance_id:string -> container_id:string option -> max_reply_bytes:int ->
   ?docker_command:string -> unit -> (unit, error) result
 
 val container_id : t -> string

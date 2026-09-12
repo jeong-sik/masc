@@ -5805,6 +5805,7 @@ let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail
 
 let search_jump ?(backwards = false) state ~query ~after =
+  let query = surface_search_query state.view query in
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->

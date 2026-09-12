@@ -6249,13 +6249,24 @@ let palette_starts_with ~needle haystack =
 
 let palette_contains ~needle haystack = lowercase_contains ~needle haystack
 
+(* Memory already trims its filter; count and cursor search must use that
+   same query. Other surfaces keep their literal-space search semantics. *)
+let surface_search_query surface query =
+  match surface with Memory -> String.trim query | _ -> query
+
+let memory_fact_search_text = function
+  | Memory_row_fact f ->
+      f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
+      ^ f.Tui_decode.mf_origin
+  | Memory_row_source_fact f ->
+      f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
+  | Memory_row_invalidation f ->
+      f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
+
 let memory_overview_query (state : state) =
     match state.search with
-    | Some q -> String.lowercase_ascii (String.trim q)
-    | None ->
-        if String.length (String.trim state.search_last) > 0 then
-          String.lowercase_ascii (String.trim state.search_last)
-        else ""
+    | Some q -> String.lowercase_ascii (surface_search_query Memory q)
+    | None -> String.lowercase_ascii (surface_search_query Memory state.search_last)
 
 
 let visible_memory_keepers (state : state) =
@@ -6400,25 +6411,15 @@ let memory_fact_rows (state : state) : memory_fact_row list =
       let all_rows = ordinary @ source_rows @ invalidation_rows in
       let query =
         match state.search with
-        | Some q -> String.trim q
-        | None -> String.trim state.search_last
+        | Some q -> surface_search_query Memory q
+        | None -> surface_search_query Memory state.search_last
       in
       let filtered_rows =
         if query = "" then all_rows
         else
           List.filter
             (fun row ->
-              let text =
-                match row with
-                | Memory_row_fact f ->
-                    f.Tui_decode.mf_claim ^ " " ^ f.Tui_decode.mf_category ^ " "
-                    ^ f.Tui_decode.mf_origin
-                | Memory_row_source_fact f ->
-                    f.Tui_decode.msf_claim ^ " " ^ f.Tui_decode.msf_path
-                | Memory_row_invalidation f ->
-                    f.Tui_decode.mi_reason ^ " " ^ f.Tui_decode.mi_source_path
-              in
-              palette_contains ~needle:query text)
+              palette_contains ~needle:query (memory_fact_search_text row))
             all_rows
       in
       (match state.memory_facts_sort with
@@ -6986,24 +6987,9 @@ let surface_row_texts (state : state) : surface -> string list option =
         Option.map
           (fun _ ->
              let rows = memory_fact_rows state in
-               (List.map
-                  (* The same fields [memory_fact_rows] filters on. A row the
-                     filter kept for a field this projection left out is on
-                     screen and unreachable: the count reports one number
-                     while a different number of rows is drawn, and n cannot
-                     land on the rows it does not see. *)
-                  (function
-                    | Memory_row_fact fact ->
-                        fact.Tui_decode.mf_category ^ " "
-                        ^ fact.Tui_decode.mf_claim ^ " "
-                        ^ fact.Tui_decode.mf_origin
-                    | Memory_row_source_fact fact ->
-                        fact.Tui_decode.msf_path ^ " "
-                        ^ fact.Tui_decode.msf_claim
-                    | Memory_row_invalidation row ->
-                        row.Tui_decode.mi_source_path ^ " "
-                        ^ row.Tui_decode.mi_reason)
-                  rows))
+             (* The exact filter projection, including field order: a phrase
+                crossing a field boundary must remain countable and reachable. *)
+             List.map memory_fact_search_text rows)
           state.memory_facts
       else
         Option.map
@@ -7196,6 +7182,7 @@ let code_file_search_count ~query rows =
       count
 
 let surface_search_count (state : state) surface ~query =
+  let query = surface_search_query surface query in
   match surface with
   | Code when code_file_search_focused state ->
       (match Masc_tui_fetched.current state.code_file with

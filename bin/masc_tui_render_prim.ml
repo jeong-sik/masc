@@ -345,17 +345,18 @@ let awaiting_approval_notice (state : state) =
    said three different things about the same pair of fields. *)
 let search_marker (state : state) =
   let marker query ~settled =
+    let has_query = surface_search_query state.view query <> "" in
     let reached = Masc_tui_types.surface_search_count state state.view ~query in
     let found =
       match reached with
       | None -> ""
-      | Some _ when String.length query = 0 -> ""
+      | Some _ when not has_query -> ""
       | Some reached ->
           if reached = 0 then " (none)" else Printf.sprintf " (%d)" reached
     in
     let tail =
       if not settled then "\xe2\x96\x8c"
-      else if not state.hints_visible then
+      else if not state.hints_visible || not has_query then
         (* "n/N" names keys, and hints off is the reader saying they know the
            keys -- the setting leaves "?:help" as the only one and takes the
            room back for status. The query and its count are status, so they

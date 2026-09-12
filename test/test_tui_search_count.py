@@ -112,6 +112,37 @@ def run(executable: str) -> None:
         interact=memory_interact,
         http_fixtures=h.memory_facts_http_fixtures())
 
+    memory_fixtures = h.memory_facts_http_fixtures()
+    response = memory_fixtures["/api/v1/keepers/alpha/memory-facts"]
+    assert isinstance(response, tuple)
+    payload = response[1]
+    assert isinstance(payload, dict)
+    facts = payload["ordinary"]["facts"]
+    for fact, prefix in zip(facts, ("first", "second")):
+        fact.update(claim=f"{prefix} deploy", category="note",
+                    origin=f"authored-{prefix}")
+
+    def memory_phrase_interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Memory")
+        h.wait_for_output(process, fd, output, b"Total 3 facts", start=0, timeout=5)
+        h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
+        h.wait_for_output(process, fd, output, b"first deploy", start=0, timeout=5)
+        h.send_and_wait(process, fd, output, b"/", b"/")
+        h.send_and_wait(process, fd, output, b"  deploy note  ", b"/  deploy note   (2)")
+        h.send_and_wait(process, fd, output, b"\r", b"/  deploy note   (2) n/N")
+        # Both rows survive the pre-existing Memory filter. The phrase crosses
+        # claim/category and has spaces at both ends: n/N must use the same
+        # text and normalization as the filter, not just report its count.
+        h.send_and_wait(process, fd, output, b"n", b"authored-second")
+        h.send_and_wait(process, fd, output, b"N", b"authored-first")
+        os.write(fd, b"q")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Memory phrase counts and n/N share the existing filter",
+        interact=memory_phrase_interact,
+        http_fixtures=memory_fixtures)
+
 
 def run_git_changes_overlay(executable: str) -> None:
     """The Git changes overlay is what the search reaches, wherever it is drawn.

@@ -20,6 +20,17 @@ gh release download "v${MASC_VERSION}" -R jeong-sik/masc \
 chmod +x "${DIST_DIR}/masc" "${DIST_DIR}/masc-exec-shim"
 printf '%s\n' "$MASC_VERSION" > "${DIST_DIR}/.version"
 
+# gh is required on the remote PATH by the keeper_up preflight (`gh auth
+# status`) and is absent from debian stable, which most Terminal-Bench python
+# base images use. Ship it in dist/ so bootstrap.sh never has to find a
+# package for it.
+GH_VERSION="${GH_VERSION:-2.65.0}"
+GH_ARCH="${ARCH}"; [[ "${ARCH}" == "x64" ]] && GH_ARCH="amd64"
+curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" \
+  | tar -xz -C "${DIST_DIR}" --strip-components=2 "gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh"
+chmod +x "${DIST_DIR}/gh"
+
+
 docker run --rm --platform "${PLATFORM}" \
   -v "${DIST_DIR}:/opt/dist:ro" \
   ubuntu:24.04 bash -c '/opt/dist/masc --version || /opt/dist/masc --help | head -5'

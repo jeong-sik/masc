@@ -111,3 +111,20 @@ masc 루프이고, 세션·컴팩션·로그인만 CLI 가 맡는다.
   바뀌며 설정 기본값이 없다. MCP 클라이언트는 REST 에 못 닿으므로 bootstrap 이
   풀 이름마다 미리 `yolo` 를 걸어 둔다. 안 그러면 키퍼가 채팅으로 승인을
   물으며 멈춘다.
+
+## 베이스 이미지 이식성 확인
+
+    ./image/probe_bases.sh                  # 4.0 세트의 서로 다른 베이스들
+    ./image/probe_bases.sh python:3.13-slim # 특정 이미지만
+
+`driver/deps.sh` 를 태스크 베이스 이미지에서 그대로 돌려 masc 가 실행되는지와
+sshd 가 있는지만 본다. API 키도 태스크도 서버도 필요 없다. 2026-09-11 매트릭스가
+arm 당 72 trial 중 36개를 LLM 토큰 한 개 쓰기 전에 잃은 게 `libssl3t64` 한 줄
+때문이었고, 이 프로브가 그걸 공짜로 잡는다.
+
+`libssl3t64` 는 ubuntu 24.04 에만 있다. 4.0 의 66 태스크 중 24.04 는 14개뿐이고
+python:*-slim(debian) 이 30개가 넘는다. deps.sh 는 이제 패키지 매니저 계열
+(apt/dnf/apk)을 감지하고, 런타임 라이브러리는 `masc --version` 이 실패할 때만
+설치하며, 안 되면 배포판 이름과 빠진 라이브러리를 찍고 죽는다. `gh` 는 debian
+stable 에 패키지가 없는데 keeper_up preflight 가 요구하므로 `dist/` 에 실어
+보낸다 (`image/fetch_masc.sh` 가 같이 받는다).

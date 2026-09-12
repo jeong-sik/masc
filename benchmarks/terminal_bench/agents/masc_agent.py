@@ -76,6 +76,12 @@ class MascAgent(BaseInstalledAgent):
         for binary in binaries:
             if not binary.exists():
                 raise RuntimeError("run image/fetch_masc.sh first")
+        # gh is required by the keeper_up preflight and is absent from debian
+        # stable, which most task base images use, so it ships in dist/ when
+        # fetched. deps.sh falls back to the package manager without it.
+        vendored_gh = BENCH_ROOT / "dist" / "gh"
+        if vendored_gh.exists():
+            binaries.append(vendored_gh)
         config_dir = render_arm(self.arm, self.runtime_id, self.effort)
         await self.exec_as_root(environment, f"mkdir -p {REMOTE}/bin")
         for binary in binaries:

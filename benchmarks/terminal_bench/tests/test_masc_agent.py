@@ -105,3 +105,25 @@ def test_claude_code_lane_requires_oauth_token(tmp_path, monkeypatch):
     a = MascAgent(logs_dir=tmp_path, model_name="claude_code/claude-sonnet-5", arm="b")
     with pytest.raises(RuntimeError, match="CLAUDE_CODE_OAUTH_TOKEN"):
         a._container_env()
+
+
+def test_vendored_gh_is_uploaded_when_present(tmp_path, monkeypatch):
+    # deps.sh installs $BENCH/bin/gh system-wide when it is there; the
+    # keeper_up preflight runs `gh auth status` and debian stable has no gh
+    # package, so the vendored copy is what makes those base images work.
+    import agents.masc_agent as m
+
+    async def go(root):
+        monkeypatch.setattr(m, "BENCH_ROOT", root)
+        a = make_agent(tmp_path, arm="b")
+        env = FakeEnv()
+        await a.install(env)
+        return env
+
+    root = tmp_path / "bench"
+    (root / "dist").mkdir(parents=True)
+    for name in ("masc", "masc-exec-shim", "gh"):
+        (root / "dist" / name).write_text("")
+    (root / "driver").mkdir()
+    env = asyncio.run(go(root))
+    assert ("file", "/opt/masc-bench/bin/gh") in [(k, d) for k, _, d in env.uploads]

@@ -423,7 +423,14 @@ let keeper_chat_history_freshness config name =
         (Option.fold ~none:"unknown" ~some:string_of_int line_number)
         detail
   in
-  Printf.sprintf "%s|%s|%s" chat_stamp trace_stamp turn_record_stamp
+  (* The tool-call row carrying a step's execution_id commits on its own
+     asynchronous flush, roughly half a second after the turn record lands.
+     Neither stat above observes that file, so a refetch inside that window
+     caches a trace whose steps have no execution_id and nothing later moves
+     the fingerprint off it. This revision advances exactly after each durable
+     append, so the flush that adds the row also invalidates the cached body. *)
+  let tool_call_stamp = Keeper_tool_call_log.committed_revision () in
+  Printf.sprintf "%s|%s|%s|%d" chat_stamp trace_stamp turn_record_stamp tool_call_stamp
 ;;
 
 (* The canonical autonomous User/Assistant/Tool exchange lives in the Keeper's

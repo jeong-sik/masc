@@ -132,9 +132,10 @@ let create_scoped_client ~sw env uri =
       | exn -> Error exn
     in
     (match outcome with
-     | Error exn when not (Eio.Promise.is_resolved ready) ->
-       Eio.Promise.resolve_error publish exn
-     | _ -> ());
+     | Error exn ->
+       if not (Eio.Promise.is_resolved ready) then
+         Eio.Promise.resolve_error publish exn
+     | Ok () -> ());
     Eio.Promise.resolve finished outcome;
     `Stop_daemon);
   try

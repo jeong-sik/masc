@@ -245,13 +245,15 @@ let make_manifest
       ~execution_mode
   =
   let cases = default_case_manifests () in
-  let case_ids = List.map (fun c -> c.case_id) cases in
-  let expected_outcomes = List.map (fun c -> c.case_id, c.expected_outcome) cases in
+  let case_ids = List.map (fun (c : case_manifest) -> c.case_id) cases in
+  let expected_outcomes =
+    List.map (fun (c : case_manifest) -> c.case_id, c.expected_outcome) cases
+  in
   let required_entities_by_case =
-    List.map (fun c -> c.case_id, c.required_entities) cases
+    List.map (fun (c : case_manifest) -> c.case_id, c.required_entities) cases
   in
   let phase_boundaries_by_case =
-    List.map (fun c -> c.case_id, c.phase_boundaries) cases
+    List.map (fun (c : case_manifest) -> c.case_id, c.phase_boundaries) cases
   in
   { contract_sha256
   ; source_commit
@@ -278,10 +280,12 @@ type usage_totals =
 
 let aggregate_run_usages (observations : run_observation list) : usage_totals =
   let per_request_obs =
-    List.filter (fun o -> o.usage_scope = Some Per_request) observations
+    List.filter (fun (o : run_observation) -> o.usage_scope = Some Per_request) observations
   in
   let cumulative_obs =
-    List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) observations
+    List.filter
+      (fun (o : run_observation) -> o.usage_scope = Some Cumulative_request_snapshot)
+      observations
   in
   let distinct_per_request =
     List.fold_left
@@ -299,7 +303,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
   let request_ids =
     List.sort_uniq String.compare
       (List.map
-         (fun o ->
+         (fun (o : run_observation) ->
             match o.request_or_task_identity with
             | Some r -> r
             | None -> o.run_id)
@@ -310,7 +314,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
       (fun req_id ->
          let matching =
            List.filter
-             (fun o ->
+             (fun (o : run_observation) ->
                 let r =
                   match o.request_or_task_identity with
                   | Some r -> r
@@ -500,10 +504,12 @@ let check_observations
 
        (* Check for duplicated usage within run *)
        let per_req_attempts =
-         List.filter (fun o -> o.usage_scope = Some Per_request) run_obs
+         List.filter (fun (o : run_observation) -> o.usage_scope = Some Per_request) run_obs
        in
        let per_req_ids =
-         List.filter_map (fun o -> o.run_turn_attempt_identity) per_req_attempts
+         List.filter_map
+           (fun (o : run_observation) -> o.run_turn_attempt_identity)
+           per_req_attempts
        in
        let unique_per_req_ids = List.sort_uniq String.compare per_req_ids in
        if List.length per_req_ids <> List.length unique_per_req_ids then (
@@ -515,7 +521,10 @@ let check_observations
            (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
        );
        let cumulative_attempts =
-         List.filter (fun o -> o.usage_scope = Some Cumulative_request_snapshot) run_obs
+         List.filter
+           (fun (o : run_observation) ->
+              o.usage_scope = Some Cumulative_request_snapshot)
+           run_obs
        in
        (* Key on the snapshot's own identity: the contract's canonical
           cumulative shape records several progressive snapshots of one
@@ -526,7 +535,7 @@ let check_observations
           attempt. *)
        let cumulative_keys =
          List.map
-           (fun o ->
+           (fun (o : run_observation) ->
               ( match o.run_turn_attempt_identity with
                 | Some id -> id
                 | None -> o.run_id )
@@ -610,7 +619,7 @@ let check_observations
 
        (* Check phase timestamps monotonicity *)
        List.iter
-         (fun o ->
+         (fun (o : run_observation) ->
             if not (check_phase_boundary_order o.phase_timestamps) then (
               run_valid := false;
               add_finding "phase_boundary_order"

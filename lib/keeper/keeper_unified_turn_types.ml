@@ -7,12 +7,14 @@
 
 module StringMap = Set_util.StringMap
 
-(** One candidate the runtime walk dispatched and that answered with an
-    error. Carried on the turn in dispatch order so a failure report can name
-    the candidate that actually errored; the lane the turn was budgeted under
-    is a different fact (masc#35043, audit-adversarial-20260912 L3). *)
-type dispatched_runtime_attempt =
+(** One candidate the runtime walk attempted and that ended in an error,
+    with whether the candidate's provider or client was invoked. Carried on
+    the turn in walk order so a failure report can name the candidate that
+    actually answered; the lane the turn was budgeted under is a different
+    fact. *)
+type runtime_attempt_error =
   { runtime_id : string
+  ; dispatch : Keeper_attempt_dispatch.t
   ; error : Agent_core.Error.t
   }
 
@@ -28,7 +30,8 @@ type turn_state =
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
-  ; dispatched_runtime_attempts : dispatched_runtime_attempt list
+  ; runtime_attempt_errors : runtime_attempt_error list
+  ; lane_terminal_error : Keeper_turn_driver.lane_terminal_error option
   }
 
 let require_last_execution_for_finalize ~keeper_name turn_state =
@@ -47,32 +50,57 @@ type keeper_cycle_failed_runtime =
   | Dispatched_candidate of string
   | No_candidate_dispatched
 
+type keeper_cycle_failed_terminal_origin =
+  | Terminal_error_from of
+      { runtime_id : string
+      ; attempt : int
+      }
+  | Terminal_error_not_from_a_candidate
+
 type keeper_cycle_failed_runtime_attribution =
   { reported_runtime : keeper_cycle_failed_runtime
   ; lane_runtime_id : string
   ; deferred_next_runtime_id : string
-  ; attempts : dispatched_runtime_attempt list
+  ; terminal_error_origin : keeper_cycle_failed_terminal_origin
+  ; attempts : runtime_attempt_error list
   }
 
 let keeper_cycle_failed_runtime_attribution
       ~deferred_runtime_lane
       ~lane_runtime_id
-      ~(dispatched_attempts : dispatched_runtime_attempt list)
+      ~(runtime_attempt_errors : runtime_attempt_error list)
+      ~(lane_terminal_error : Keeper_turn_driver.lane_terminal_error option)
   =
   let reported_runtime =
-    match List.rev dispatched_attempts with
-    | last :: _ -> Dispatched_candidate last.runtime_id
-    | [] -> No_candidate_dispatched
+    match
+      List.rev runtime_attempt_errors
+      |> List.find_opt (fun (attempt : runtime_attempt_error) ->
+           match attempt.dispatch with
+           | Keeper_attempt_dispatch.Dispatched -> true
+           | Keeper_attempt_dispatch.Rejected_before_dispatch -> false)
+    with
+    | Some last_dispatched -> Dispatched_candidate last_dispatched.runtime_id
+    | None -> No_candidate_dispatched
   in
   let deferred_next_runtime_id =
     match deferred_runtime_lane with
     | Some (hint : Keeper_turn_driver.deferred_runtime_lane) -> hint.next_runtime_id
     | None -> "none"
   in
+  let terminal_error_origin =
+    match lane_terminal_error with
+    | Some (terminal : Keeper_turn_driver.lane_terminal_error) ->
+      Terminal_error_from
+        { runtime_id = terminal.origin_runtime_id
+        ; attempt = terminal.origin_attempt
+        }
+    | None -> Terminal_error_not_from_a_candidate
+  in
   { reported_runtime
   ; lane_runtime_id
   ; deferred_next_runtime_id
-  ; attempts = dispatched_attempts
+  ; terminal_error_origin
+  ; attempts = runtime_attempt_errors
   }
 ;;
 
@@ -81,12 +109,19 @@ let keeper_cycle_failed_runtime_to_string = function
   | No_candidate_dispatched -> "none"
 ;;
 
-let dispatched_runtime_attempts_to_string (attempts : dispatched_runtime_attempt list) =
+let keeper_cycle_failed_terminal_origin_to_string = function
+  | Terminal_error_from { runtime_id; attempt } ->
+    Printf.sprintf "%s#%d" runtime_id attempt
+  | Terminal_error_not_from_a_candidate -> "none"
+;;
+
+let runtime_attempt_errors_to_string (attempts : runtime_attempt_error list) =
   attempts
-  |> List.map (fun (attempt : dispatched_runtime_attempt) ->
+  |> List.map (fun (attempt : runtime_attempt_error) ->
        Printf.sprintf
-         "%s=%s"
+         "%s@%s=%s"
          attempt.runtime_id
+         (Keeper_attempt_dispatch.to_string attempt.dispatch)
          (Keeper_types_profile.short_preview (Agent_core.Error.to_string attempt.error)))
   |> String.concat ", "
   |> Printf.sprintf "[%s]"

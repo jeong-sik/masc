@@ -99,7 +99,7 @@ streaming = false
       ~system_prompt:"Optional cap fixture."
       ~runtime_id ~keeper_name:"optional-cap-proof" ~base_path
       ~agent_core_tools:[] ~goal ~sw ~net:env#net
-      ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ error ->
+      ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         attempt_errors := (runtime_id, error) :: !attempt_errors)
       ~on_model_input_window_observation:(fun ~measurement:_ _ ->
         incr model_input_windows)

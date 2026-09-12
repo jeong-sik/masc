@@ -176,6 +176,7 @@ let test_nested_runtime_retryable_attempt_survives_terminal_error () =
          on_runtime_attempt_error
            ~runtime_id:"glm.test-model"
            ~attempt:0
+           ~dispatch:Masc.Keeper_attempt_dispatch.Dispatched
            (Agent_core.Error.Api
               (Agent_core.Error.Retry.RateLimited
                  { retry_after = None; message = "rate limited" }));

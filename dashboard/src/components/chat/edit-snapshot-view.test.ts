@@ -1,10 +1,14 @@
 import { html } from 'htm/preact'
-import { render, cleanup, fireEvent, waitFor } from '@testing-library/preact'
+import { act, render, cleanup, fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fetchEditSnapshots } from '../../api/edit-snapshots'
 import { computeEditSnapshotDiff } from './edit-snapshot-diff-engine'
 import { ChatEditEvidence } from './edit-evidence'
 import type { ToolCallEntry } from '../../api/dashboard'
+import { ApiRequestError, clearStoredToken, setStoredToken } from '../../api/core'
+import { fetchVerifiedToolBlobText } from '../../api/verified-tool-blob'
+
+vi.mock('../../api/verified-tool-blob', () => ({ fetchVerifiedToolBlobText: vi.fn() }))
 
 vi.mock('../../api/edit-snapshots', async importOriginal => ({
   ...await importOriginal<typeof import('../../api/edit-snapshots')>(),
@@ -26,11 +30,12 @@ class DiffWorker {
   }
 }
 beforeEach(() => {
+  clearStoredToken()
   DiffWorker.instances = []
   DiffWorker.defer = false
   vi.stubGlobal('Worker', DiffWorker)
 })
-afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); clearStoredToken(); vi.resetAllMocks(); vi.unstubAllGlobals() })
 const ref = { _blob: { sha256: 'a'.repeat(64), bytes: 3 } }
 const receipt: ToolCallEntry = {
   ts: 1, keeper: 'writer', tool: 'Edit', success: true, duration_ms: 3,
@@ -38,6 +43,35 @@ const receipt: ToolCallEntry = {
   output: JSON.stringify({ ok: true, mode: 'patch', path: 'essay.md', occurrences: 1,
     edit_snapshots: { status: 'stored', before: ref, after: ref } }),
 }
+
+it('retries a denied manifest only after credentials change', async () => {
+  vi.mocked(fetchVerifiedToolBlobText)
+    .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status: 403 }))
+    .mockResolvedValue(receipt.output as string)
+  const output = { ...receipt, output: { _blob: { ...ref._blob, mime: 'application/json' } } }
+  const view = render(html`<${ChatEditEvidence} output=${output} />`)
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+  expect(fetchVerifiedToolBlobText).toHaveBeenCalledTimes(1)
+  act(() => setStoredToken('fixture-admin'))
+  await waitFor(() => expect(view.getByRole('button', { name: '편집 전후 원본 보기' })).toBeTruthy())
+  expect(fetchVerifiedToolBlobText).toHaveBeenCalledTimes(2)
+})
+
+it('discards a late Admin manifest when the replacement credentials are denied', async () => {
+  setStoredToken('fixture-admin')
+  let complete!: (text: string) => void
+  vi.mocked(fetchVerifiedToolBlobText)
+    .mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    .mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status: 403 }))
+  const output = { ...receipt, output: { _blob: { ...ref._blob, mime: 'application/json' } } }
+  const view = render(html`<${ChatEditEvidence} output=${output} />`)
+  await waitFor(() => expect(fetchVerifiedToolBlobText).toHaveBeenCalledOnce())
+  act(() => setStoredToken('fixture-worker'))
+  complete(receipt.output as string)
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+  expect(view.queryByRole('button', { name: '편집 전후 원본 보기' })).toBeNull()
+  expect(view.queryByText('essay.md · 1곳 편집')).toBeNull()
+})
 
 it('opens full originals even when recorded input snippets are unavailable', async () => {
   vi.mocked(fetchEditSnapshots).mockResolvedValue({ before: '\told\r\n', after: '<b>new</b>\r\n' })
@@ -63,6 +97,33 @@ it('shows retrieval failure and lets the operator close and retry', async () => 
   vi.mocked(fetchEditSnapshots).mockResolvedValueOnce({ before: 'old', after: 'new' })
   fireEvent.click(view.getByRole('button'))
   await waitFor(() => expect(view.getByLabelText('편집 후 전체 원본').textContent).toBe('new'))
+})
+
+it('discards visible originals after a credential change and permits a fresh authorized read', async () => {
+  setStoredToken('fixture-admin')
+  vi.mocked(fetchEditSnapshots).mockResolvedValueOnce({ before: 'private-before', after: 'private-after' })
+    .mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status: 403 }))
+    .mockResolvedValue({ before: 'new-before', after: 'new-after' })
+  const view = render(html`<${ChatEditEvidence} output=${receipt} />`)
+  fireEvent.click(view.getByRole('button', { name: '편집 전후 원본 보기' }))
+  await waitFor(() => expect(view.getByLabelText('편집 전 전체 원본').textContent).toBe('private-before'))
+  act(() => setStoredToken('fixture-worker'))
+  expect(view.queryByText('private-before')).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: '편집 전후 원본 보기' }))
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+  act(() => setStoredToken('fixture-new-admin'))
+  fireEvent.click(view.getByRole('button', { name: '편집 전후 원본 보기' }))
+  await waitFor(() => expect(view.getByLabelText('편집 전 전체 원본').textContent).toBe('new-before'))
+})
+
+it.each([401, 403])('requires administrator credentials for snapshot HTTP %i without retry', async status => {
+  vi.mocked(fetchEditSnapshots).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status }))
+  const view = render(html`<${ChatEditEvidence} output=${receipt} />`)
+  fireEvent.click(view.getByRole('button', { name: '편집 전후 원본 보기' }))
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+  expect(view.queryByRole('button')).toBeNull()
+  expect(view.queryByLabelText('편집 전 전체 원본')).toBeNull()
+  expect(fetchEditSnapshots).toHaveBeenCalledTimes(1)
 })
 
 it('shows a final-newline-only edit in the verified originals diff', async () => {

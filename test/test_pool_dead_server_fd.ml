@@ -192,6 +192,25 @@ let test_establishment_errors () =
         Alcotest.(check bool) "client receives reachable address" true selected;
         Ok "created"))
 
+let test_later_address_after_client_failure () =
+  Eio_main.run @@ fun env ->
+  let establish ~create =
+    Masc_http_client.Pool.For_testing.establish_connection
+      ~clock:(Eio.Stdenv.clock env) ~timeout_seconds:1.0
+      ~resolve:(fun () -> [1; 2; 3]) ~connect:(fun _ -> ()) ~create in
+  let attempts = ref [] in
+  Alcotest.(check (result int string)) "later address establishes the client"
+    (Ok 2)
+    (establish ~create:(fun address ->
+      attempts := address :: !attempts;
+      if address = 1 then Error "first TLS failure" else Ok address));
+  Alcotest.(check (list int)) "stop at the first established client"
+    [1; 2] (List.rev !attempts);
+  Alcotest.(check string) "all client failures preserve the last cause"
+    "TLS failure at 3"
+    (error_message (establish ~create:(fun address ->
+      Error (Printf.sprintf "TLS failure at %d" address))))
+
 let test_establishment_deadline () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -218,6 +237,15 @@ let test_establishment_deadline () =
   check_timeout "Piaf creation uses remaining establishment deadline"
     (establish ~resolve:(fun () -> [()]) ~connect:(fun () -> ())
       ~create:Eio.Fiber.await_cancel);
+  let client_attempts = ref 0 in
+  check_timeout "client failures do not renew the address scan deadline"
+    (establish ~resolve:(fun () -> List.init 50 Fun.id) ~connect:(fun _ -> ())
+      ~create:(fun _ ->
+        incr client_attempts;
+        Eio.Time.sleep clock 0.01;
+        Error "TLS failure"));
+  Alcotest.(check bool) "deadline interrupts client fallback before exhaustion"
+    true (!client_attempts < 50);
   let created = ref false in
   check_timeout "DNS and probe time consume the same budget"
     (establish
@@ -528,6 +556,8 @@ let () =
             test_failure_state_cleanup;
           Alcotest.test_case "establishment preserves failure causes" `Quick
             test_establishment_errors;
+          Alcotest.test_case "client failure continues through resolved addresses" `Quick
+            test_later_address_after_client_failure;
           Alcotest.test_case "establishment shares one deadline" `Quick
             test_establishment_deadline;
           Alcotest.test_case "establishment propagates cancellation" `Quick

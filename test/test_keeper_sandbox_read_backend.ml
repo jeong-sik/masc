@@ -1804,11 +1804,10 @@ let test_run_command_preserves_bare_command_argv () =
         "head -n 1 /home/keeper/playground/acme-sandbox/scratch/demo.txt\n" out
 
 (* [max_bytes] used to be a trim of a finished answer: [cat] wrote the whole
-   file, Process_eio held all of it, and only the returned prefix was cut. So a
-   Keeper naming a multi-gigabyte path in its own tree sized this process
-   rather than its answer. The limit now travels to the producer, which is what
-   this pins -- the returned value is a bounded prefix either way, so restoring
-   the [cat] argv passes every assertion except this one. *)
+   file, the drainer read every byte to EOF, and only then was the prefix cut.
+   The limit travels to the producer now, which is what this pins -- the
+   returned value is the same bounded prefix either way, so restoring the
+   [cat] argv passes every assertion except this one. *)
 let test_read_asks_the_sandbox_for_a_bounded_prefix () =
   with_fake_docker fake_docker_echo_command_script @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->

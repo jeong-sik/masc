@@ -909,6 +909,10 @@ let help_sections ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Board's first column is the only place these three appear, and
+             the column has no room for a legend of its own: its header already
+             spends three rows and the hearth row is cut at 150 columns. *)
+          ; ("Board marks", Masc_tui_board_kind_mark.legend)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)

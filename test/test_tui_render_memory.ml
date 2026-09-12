@@ -504,10 +504,11 @@ let test_a_read_in_flight_says_so_and_keeps_the_clock () =
   let title =
     Render_memory.facts_title ~screen:" MASC Memory"
       ~keeper:(Render_memory.facts_keeper_label (Some "analyst"))
-      ~reading:Render_memory.Facts_not_loaded ~timestamp:"23:41:50"
+      ~reading:(Render_memory.Facts_unread { reading = "(not loaded)" })
+      ~timestamp:"23:41:50"
       ~badge:"HTTP [refresh failed]"
   in
-  check bool "it says the read has not landed" true
+  check bool "it carries the reading the caller handed it" true
     (contains "(not loaded)" title);
   check bool "it does not invent a total" false (contains "facts" title);
   check bool "the clock and the badge are still last" true

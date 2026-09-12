@@ -22,7 +22,7 @@ val facts_keeper_label : string option -> string
     for as "*" and read as a phrase. *)
 
 type facts_reading =
-  | Facts_not_loaded
+  | Facts_unread of { reading : string }
   | Facts_loaded of
       { total : int
       ; filter_label : string

@@ -32,9 +32,12 @@ let facts_keeper_label = function
   | None -> ""
 
 (* What the title carries while the read is in flight and once it has landed.
-   Typed so the two spellings cannot drift into each other's shape. *)
+   Typed so the two spellings cannot drift into each other's shape. The unread
+   word arrives rendered, like [screen] and [badge]: whether a read is still in
+   flight or came back failed is the caller's reading, and
+   [Masc_tui_render_prim.title_missing_reading] is the one place that words it. *)
 type facts_reading =
-  | Facts_not_loaded
+  | Facts_unread of { reading : string }
   | Facts_loaded of
       { total : int
       ; filter_label : string
@@ -51,8 +54,8 @@ type facts_reading =
    reading belong to the caller. *)
 let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
   match reading with
-  | Facts_not_loaded ->
-    Printf.sprintf "%s \xe2\x96\xb8 %s  (not loaded)  %s  %s" screen keeper
+  | Facts_unread { reading } ->
+    Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s" screen keeper reading
       timestamp badge
   | Facts_loaded { total; filter_label; query_label } ->
     Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts \xc2\xb7 %s%s)  %s  %s" screen

@@ -5075,6 +5075,11 @@
  (libraries alcotest masc_tui_types))
 
 (test
+ (name test_tui_board_kind_mark)
+ (modules test_tui_board_kind_mark)
+ (libraries alcotest masc_tui_board_kind_mark masc_tui_types))
+
+(test
  (name test_keeper_composition_async_broker)
  (modules test_keeper_composition_async_broker)
  (libraries masc_test_deps masc_schedule multimodal bigstringaf

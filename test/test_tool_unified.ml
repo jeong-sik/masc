@@ -70,7 +70,7 @@ let () =
                 check string "metrics source owns the snapshot" "tool_metrics"
                   (report |> member "metrics_source" |> member "kind" |> to_string);
                 check bool "no unrelated log health attached" true
-                  (report |> member "health" = `Null)));
+                  ((report |> member "health") = `Null)));
           test_case "report has required keys" `Quick (fun () ->
               let report = Tool_unified.summary_report () in
               let open Yojson.Safe.Util in

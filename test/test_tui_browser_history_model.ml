@@ -3,7 +3,7 @@ let expect message value = if not value then failwith message
 let ok = function Ok value -> value | Error detail -> failwith detail
 let () =
   List.iter (fun key -> expect "global keys remain outside history ownership" (not (History.owns_key key)))
-    ["q";"?";":";"\020";"\002";"\012";"\030"];
+    ["q";"Q";"?";":";"\020";"\002";"\012";"\030"];
   expect "history owns the browser screenshot key" (History.owns_key "\015");
   let waiting = History.create "reader" in
   expect "navigation during list load does not supersede the pending list"

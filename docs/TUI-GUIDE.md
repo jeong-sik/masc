@@ -45,6 +45,13 @@ live / automation Firefox. `[` / `]` choose among open tabs and `r` refreshes.
 Live reads use the operator's browser login; automation owns an isolated session.
 See the [Browser guide](guides/tui-browser-lanes.md) for setup and controls.
 
+To revisit what a Keeper read, select that Keeper, open Browser Lane, and press
+`h`. The observation list comes from that Keeper's 100 most recent tool calls.
+`[` / `]` choose a saved page, `j` / `k` scroll it, and `y` copies its receipt
+and artifact reference. `h` or `Esc` returns to the browser. Saved pages remain
+readable after the browser closes; dismiss the browser picker with `Esc` first
+if it is open. The MASC server must be running to fetch these records.
+
 ## MSX
 
 `&` (also `:` then `go MSX`) takes the terminal over with the workspace MSX

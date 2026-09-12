@@ -9,7 +9,7 @@ import threading
 import test_tui_keyboard_input as h
 
 
-def run(binary):
+def run(binary, *, quit_from_history=False):
     fixtures = h.keeper_runtime_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     current = "https://example.org/current"
@@ -82,6 +82,9 @@ def run(binary):
             h.send_and_wait(process, fd, output, b"]", b"SAVED ALPHA CONTENT")
             beta_release.set()
             assert h.wait_for_fixture_event(process, fd, output, beta_returned, timeout=5)
+            if quit_from_history:
+                os.write(fd, b"Q")
+                return
             count = len(requests)
             h.write_all(fd, output, b"\rsvgo\x0f")
             frame = h.resize_and_wait(process, fd, output, rows=30, columns=101,
@@ -108,4 +111,5 @@ def run(binary):
 
 if __name__ == "__main__":
     run(str(Path(sys.argv[1]).resolve()))
+    run(str(Path(sys.argv[1]).resolve()), quit_from_history=True)
     print("Browser observation history: PASS")

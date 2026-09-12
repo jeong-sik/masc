@@ -330,8 +330,11 @@ self_test() {
   # read: it is one of the two such entries in 170 (source, suite) pairs, and
   # narrowing the match to exclude it would cost the guards that assign the
   # path to a plain let-binding.
+  # test_tui_row_wiring joined when it grew ~module_path declarations over
+  # this file: it pins that a surface's row count, its cursor and the landing
+  # come from one record, and those are facts about masc_tui.ml.
   check "an umbrella module selects only the guards that name it" \
-    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml" \
+    "test/test_tui_agenda.ml test/test_tui_ask_selection_wiring.ml test/test_tui_chat_queue_wiring.ml test/test_tui_composer_projection.ml test/test_tui_decode.ml test/test_tui_http_ast.ml test/test_tui_row_wiring.ml" \
     "bin/masc_tui.ml"
   # The regression the declared mapping exists for: #35011 changed this file,
   # test_tui_http_ast watches it through 52 ~module_path declarations, and the

@@ -803,3 +803,9 @@ let defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id ~exec
 
 let direct_gate_binding ~base_path ~keeper_name ~operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner -> Keeper_owner.direct_gate_binding owner ~operation_id)
+
+let direct_gate_bindings ~base_path ~keeper_name =
+  with_owner_command ~base_path ~keeper_name Keeper_owner.direct_gate_bindings
+let reconcile_direct_gate_binding ~base_path ~keeper_name ~operation_id ~binding ~waiting =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.reconcile_direct_gate_binding owner ~operation_id ~binding ~waiting)

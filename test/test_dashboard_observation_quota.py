@@ -65,8 +65,10 @@ def main():
                 while True:
                     assert process.poll() is None, (base / 'server.log').read_text()[-8000:]
                     try:
-                        status, raw = http('/health?full=1')
-                        if status == 200 and json.loads(raw).get('status') == 'ok':
+                        # MCP admission uses state_ready, not the /health
+                        # aggregate's status (which can be ok during startup).
+                        status, raw = http('/health/ready')
+                        if status == 200 and json.loads(raw).get('ready') is True:
                             break
                     except (URLError, OSError):
                         pass
@@ -84,7 +86,8 @@ def main():
                 def mcp(index):
                     return http('/mcp', {'jsonrpc': '2.0', 'id': index, 'method': 'tools/call',
                         'params': {'name': 'masc_status', 'arguments': {}, '_meta': meta}},
-                        extra={'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/call'})
+                        extra={'mcp-protocol-version': '2026-07-28', 'mcp-method': 'tools/call',
+                               'mcp-name': 'masc_status'})
                 for index in range(4):
                     status, raw = mcp(index)
                     assert status == 200, (index, status, raw)

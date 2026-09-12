@@ -26,7 +26,12 @@ Invalid credentials must still fail, and subsequent asset reads must exhaust the
 separate IP bucket. Zero-refill fixture settings make those assertions independent
 of elapsed time; no sleeps or 429 retries occur in the burst.
 
-Local validation is Python syntax, OCaml parse-only and diff checks. Native H1
-fixture execution belongs to CI; H2 source uses the same method policy but this
-fixture does not establish an H2 wire result. No installed runtime or live
-configuration was changed.
+The repaired fixture passed the complete H1 scenario against the existing
+macOS arm64 executable from CI run `34692595258`, source `94276567e4`, whose
+production code is unchanged by the fixture repairs. The binary SHA-256,
+fixture SHA-256, exit status and requests are in `native-artifact-proof.json`.
+This used a downloaded CI artifact in an isolated workspace, with no local
+build. Python syntax and diff checks also passed. Linux exact-head CI is
+dispatched separately. H2 source uses the same method policy but this fixture
+does not establish an H2 wire result. No installed runtime or live configuration
+was changed.

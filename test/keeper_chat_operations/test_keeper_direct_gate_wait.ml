@@ -65,7 +65,7 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     let operation = match claim store with Some value -> value | None -> fail "exact resolution did not requeue original input" in
     check bool "same original request resumes" true (Operation.Operation_id.equal original operation.operation_id);
     let wrong_scope = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> require)
-      ~checkpoint:waiting.checkpoint ~obligations:[obligation] |> require in
+      ~checkpoint:(match waiting.checkpoint with Semantic.Agent_core value -> value | Semantic.Official_client _ -> fail "expected Agent Core") ~obligations:[obligation] |> require in
     rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:wrong_scope ~resolution);
     let changed = Semantic.gate_wait ~session_scope:(Semantic.session_scope [] |> Result.get_ok) ~checkpoint:(checkpoint "another invocation") ~obligations:[obligation] |> require in
     rejected (Store.resume_direct_gate store ~now:9. ~operation_id:original ~waiting:changed ~resolution);
@@ -160,7 +160,53 @@ let test_unbound_gate_and_runtime_survive_restart () = with_path (fun path ->
     check bool "original task attachments and channel retained" true ((get store).input=Some input);
     check bool "no model claim without binding authority" true (claim store = None)))
 
+let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
+  let unrecorded = Semantic.gate_binding ~approval_ids:[obligation.approval_id]
+    ~obligations:[] ~runtime_suffix:None |> require in
+  let binding = Semantic.gate_binding_with_wait ~binding:unrecorded ~waiting |> require in
+  with_store path (fun store ->
+    let operation = admit store in
+    let wrong_frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+      (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation other)) |> require in
+    let native_wait = Semantic.official_client_gate_wait ~session_scope:channel_scope ~obligations:[obligation]
+      ~checkpoint:{Semantic.client_kind=Semantic.Codex; runtime_id="native.fixture"; session_id="native-session";
+        turn_id="native-turn"; tool_surface_sha256=String.make 64 'a'; frame=wrong_frame} |> require in
+    let wrong_binding = Semantic.gate_binding_with_wait ~binding:unrecorded ~waiting:native_wait |> require in
+    (match Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
+       ~execution_digest:operation.execution_digest ~binding:wrong_binding ~diagnostic:"wrong native scope" with
+     | Error (Store.Invalid_input _) -> ()
+     | Error error -> fail ("wrong scope poisoned store: " ^ Store.error_to_string error)
+     | Ok _ -> fail "another operation's native scope was persisted");
+    Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
+      ~execution_digest:operation.execution_digest ~binding ~diagnostic:"retention fsync was not confirmed" |> ok |> ignore);
+  with_store path (fun store ->
+    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    let observed = Store.direct_gate_binding store ~operation_id:original |> ok |> Option.get in
+    check bool "exact source and original channel survive SQLite restart" true
+      (Option.fold ~none:false ~some:(Semantic.equal_gate_wait waiting) observed.unconfirmed_wait);
+    rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original
+      ~binding:unrecorded ~waiting);
+    let other_wait = Semantic.gate_wait ~checkpoint:(checkpoint "different bytes") ~session_scope:channel_scope
+      ~obligations:[obligation] |> require in
+    rejected (Store.reconcile_direct_gate_binding store ~now:5. ~operation_id:original ~binding ~waiting:other_wait);
+    check bool "unproven source cannot make the original claimable" true (claim store = None);
+    Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
+    Store.reconcile_direct_gate_binding store ~now:6. ~operation_id:original ~binding ~waiting |> ok;
+    check bool "confirmed retention alone does not bypass approval" true (claim store = None);
+    Store.submit store ~now:7. ~operation_id:other ~source ~input:(`String "independent peer request") |> ok |> ignore;
+    let peer = claim store |> Option.get in
+    check bool "independent peer progresses during approval wait" true (Operation.Operation_id.equal peer.operation_id other);
+    Store.succeed_running store ~now:8. ~operation_id:other ~outcome_ref:"peer-effect-receipt" |> ok |> ignore;
+    let resolution = {Semantic.obligation; decision=Semantic.Gate_approved} in
+    Store.resolve_direct_gate store ~now:9. ~operation_id:original ~resolution |> ok |> ignore;
+    let resumed = claim store |> Option.get in
+    check bool "same original input is resumed" true (resumed.input = Some input);
+    Store.resume_direct_gate store ~now:10. ~operation_id:original ~waiting ~resolution |> ok;
+    Store.discharge_direct_gate store ~now:11. ~operation_id:original ~obligation |> ok;
+    Store.succeed_running store ~now:12. ~operation_id:original ~outcome_ref:"original-exact-resume" |> ok |> ignore))
+
 let () = run "direct Gate waiting" ["journal", [
+  test_case "exact unconfirmed source is reconciled by CAS after restart" `Quick test_exact_source_reconciliation_after_restart;
   test_case "unbound Gate identity and runtime suffix survive restart" `Quick test_unbound_gate_and_runtime_survive_restart;
   test_case "session scope rejects traversal and ambiguous components" `Quick test_session_scope_validation;
   test_case "fresh Gate and frozen runtime retry survive restart together" `Quick test_fresh_gate_and_runtime_retry_restart;

@@ -233,7 +233,7 @@ let test_assignee_work_and_daily_flow () =
       task "r2" "2026-09-10T00:00:00Z" (done_by "rondo" "2026-09-10T04:00:00Z");
       (* The agent spelling of the same keeper. RFC-0393 removed the suffix
          strip, so this must stay its own row. *)
-      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-rondo-agent" "2026-09-11T06:00:00Z");
+      task "a1" "2026-09-11T00:00:00Z" (done_by "keeper-vesta-agent" "2026-09-11T06:00:00Z");
       task "o1" "2026-09-11T00:00:00Z"
         (Claimed { assignee = "rondo"; claimed_at = "2026-09-11T01:00:00Z" });
       (* Todo carries no assignee and must not invent one. *)
@@ -256,7 +256,7 @@ let test_assignee_work_and_daily_flow () =
   check int "claimed work counted as open" 1 rondo.af_open;
   check (option (float 0.001)) "even sample count averages the middle pair"
     (Some 3.0) rondo.af_median_lead_hours;
-  let agent = row "keeper-rondo-agent" in
+  let agent = row "keeper-vesta-agent" in
   check int "the agent spelling keeps its own completions" 1 agent.af_done;
   check (option (float 0.001)) "a single sample is its own median"
     (Some 6.0) agent.af_median_lead_hours;
@@ -283,7 +283,7 @@ let test_assignee_work_and_daily_flow () =
   check bool "the per-assignee table is drawn" true (contains output "median lead");
   check bool "the keeper spelling is listed" true (contains output "rondo");
   check bool "the agent spelling is listed beside it" true
-    (contains output "keeper-rondo-agent");
+    (contains output "keeper-vesta-agent");
   check bool "the span names its last day" true (contains output "09-12");
   check bool "creations are a row of their own" true (contains output "created");
   check bool "cancellations are a row of their own" true (contains output "cancelled");

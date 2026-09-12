@@ -16,7 +16,7 @@ let safe_agent_id value =
     value
 ;;
 
-let make_audio_file () =
+let make_audio_file ~format =
   Voice_bridge_core.ensure_audio_dir ();
   (* The token is both the filename and the HTTP capability for
      /api/v1/voice/audio/:token (RFC-0235 P1). agent_id is deliberately
@@ -24,9 +24,30 @@ let make_audio_file () =
      must not be able to enumerate another keeper's clips by guessing
      <ts>_<agent>. 16 bytes = 128-bit unguessable. *)
   let token = Random_id.hex ~bytes:16 in
+  (* The extension is the format the caller is about to write, not a fixed
+     one: a writer handed a name it cannot encode fails without saying so
+     (see [Voice_bridge_core.clip_format]). *)
   Filename.concat
-    (Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio")
-    (token ^ ".mp3")
+    (Voice_bridge_core.audio_dir ())
+    (token ^ Voice_bridge_core.clip_extension format)
+;;
+
+(* The tail of a failed command's output, because that is where the reason
+   is. Measured 2026-09-13: whisper-cli printed 9 lines of backend loading
+   before "failed to open <model>", so a head-first cut reported which Metal
+   library loaded and never the missing file. *)
+let command_failure_reason_bytes = 400
+
+let command_failure_reason output =
+  let length = String.length output in
+  if length <= command_failure_reason_bytes
+  then output
+  else
+    "..."
+    ^ String.sub
+        output
+        (length - command_failure_reason_bytes)
+        command_failure_reason_bytes
 ;;
 
 let write_text path content = Fs_compat.save_file path content
@@ -192,7 +213,7 @@ let run_audio_command_to_file (req : Voice_runtime_overlay.command_request) ~out
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf "voice command exit %d: %s" code
-         (if String.length output > 200 then String.sub output 0 200 else output))
+         (command_failure_reason output))
   (* Named rather than wildcarded, for the reason the dispatches above are:
      a wildcard discards which signal ended it. *)
   | Unix.WSIGNALED sig_num ->
@@ -231,7 +252,7 @@ let transcribe_via_command endpoint ~audio_file ~model =
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf "%s exit %d: %s" command code
-         (if String.length output > 200 then String.sub output 0 200 else output))
+         (command_failure_reason output))
   | Unix.WSIGNALED sig_num ->
     Error (Printf.sprintf "%s killed by signal %d" command sig_num)
   | Unix.WSTOPPED sig_num ->
@@ -258,7 +279,7 @@ let list_voices_via_command endpoint =
   | Unix.WEXITED code ->
     Error
       (Printf.sprintf "%s exit %d: %s" command code
-         (if String.length output > 200 then String.sub output 0 200 else output))
+         (command_failure_reason output))
   | Unix.WSIGNALED sig_num ->
     Error (Printf.sprintf "%s killed by signal %d" command sig_num)
   | Unix.WSTOPPED sig_num ->

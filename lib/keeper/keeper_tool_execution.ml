@@ -15,7 +15,8 @@ type terminal_effect_receipt =
 let memory_revision_wire_key = "memory_revision"
 
 type t =
-  { raw_output : string
+  { retained_artifacts : Tool_output.artifact_ref list
+  ; raw_output : string
   ; data : Yojson.Safe.t option
   ; metadata : Yojson.Safe.t option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition
@@ -37,7 +38,8 @@ let resolve_repeated_keys data =
 ;;
 
 let success raw_output =
-  { raw_output
+  { retained_artifacts = []
+  ; raw_output
   ; data = None
   ; metadata = None
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
@@ -50,7 +52,8 @@ let success raw_output =
 
 let success_data ?metadata data =
   let data = resolve_repeated_keys data in
-  { raw_output = Yojson.Safe.to_string data
+  { retained_artifacts = []
+  ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
@@ -63,7 +66,8 @@ let success_data ?metadata data =
 
 let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
-  { raw_output = Yojson.Safe.to_string data
+  { retained_artifacts = []
+  ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
   ; failure_effect_disposition = effect_disposition
@@ -76,7 +80,8 @@ let deferred_data ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?me
 
 let deferred_external_effect_data ?approval_id ?(effect_disposition = Tool_result.Effect_outcome_unknown) ?metadata data =
   let data = resolve_repeated_keys data in
-  { raw_output = Yojson.Safe.to_string data
+  { retained_artifacts = []
+  ; raw_output = Yojson.Safe.to_string data
   ; data = Some data
   ; metadata
   ; failure_effect_disposition = effect_disposition
@@ -92,7 +97,8 @@ let failure
       ?(effect_disposition = Tool_result.Effect_outcome_unknown)
       raw_output
   =
-  { raw_output
+  { retained_artifacts = []
+  ; raw_output
   ; data = None
   ; metadata = None
   ; failure_effect_disposition = effect_disposition
@@ -111,7 +117,8 @@ let failure_data
       data
   =
   let data = resolve_repeated_keys data in
-  { raw_output = message
+  { retained_artifacts = []
+  ; raw_output = message
   ; data = Some data
   ; metadata
   ; failure_effect_disposition = effect_disposition
@@ -175,7 +182,8 @@ let of_tool_result
   let data = Some (Tool_result.data result) in
   match result with
   | Tool_result.Completed { metadata; _ } ->
-    { raw_output
+    { retained_artifacts = Tool_result.retained_artifacts result
+    ; raw_output
     ; data
     ; metadata
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
@@ -185,7 +193,8 @@ let of_tool_result
     ; file_change_evidence = None
     }
   | Tool_result.Deferred { metadata; _ } ->
-    { raw_output
+    { retained_artifacts = Tool_result.retained_artifacts result
+    ; raw_output
     ; data
     ; metadata
     ; failure_effect_disposition
@@ -195,7 +204,8 @@ let of_tool_result
     ; file_change_evidence = None
     }
   | Tool_result.Failed { class_; _ } ->
-    { raw_output
+    { retained_artifacts = Tool_result.retained_artifacts result
+    ; raw_output
     ; data
     ; metadata = Tool_result.metadata result
     ; failure_effect_disposition

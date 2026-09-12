@@ -13994,7 +13994,7 @@ def run_browser_scene_regression(executable: str) -> None:
         visible = screen_text(frame)
         # Source-context selection includes text and raster observations,
         # not only clickable controls. Preserve their document order.
-        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+        for text in (b"[>1] SCENE BEFORE CLICK", b"[2 button/link] First action",
                      b"[3 button/link] Second action",
                      "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"

@@ -34,7 +34,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       let current = ref (match data "alpha" (String.make 8000 'a' ^ "한글🙂") with
         | `Assoc fields -> `Assoc (fields @ [
             "source", `String "live";
-            "clientId", `String "ed6c30dd-565d-4f3a-af0e-f7d7f0725421";
+            "clientId", `String "11111111-1111-4111-8111-111111111111";
             "source", `String "backend-conflict";
             "clientId", `Null;
             "elapsed_ms", `Float (-1.); "elapsed_ms", `Float (-2.)])

@@ -26,3 +26,9 @@ node scripts/lsp-editor-browser-probe.mjs dashboard ocamllsp /tmp/lsp-browser-ev
 The output directory owns the synthetic workspace and Vite cache. The probe shuts down its own browser, language server and development server. It does not build MASC, install dependencies, or modify a user workspace.
 
 Protocol references: [document synchronization](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_synchronization), [publish diagnostics](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_publishDiagnostics).
+
+## Native protocol comparison
+
+The root-owned `scripts/lsp-native-document-probe.py` also exercised the actual ocamllsp executable directly. `native-version-support` and `native-baseline` both pass: invalid source produces two errors and the corrected source produces none. Both configurations omit the optional diagnostic version; pull diagnostics returns -32603, Request not supported yet. `native-first-failure` preserves the initial harness error: shutdown sent null params, which the server rejected; the successful probe omits params for shutdown and exit. These probes own synthetic files and do not establish installed IDE or Keeper behavior.
+
+The MASC proxy now advertises publishDiagnostics.versionSupport=true during initialize. This requests versioned reports; it does not assume every server supplies them. OCaml parse-only verification passed.

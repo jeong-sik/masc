@@ -17,7 +17,10 @@ runs:
       run: |
         set -euo pipefail
         start="$(date +%s)"
-        chmod +x .github/actions/pin-ocaml-deps/pin.sh scripts/opam-pin-external-deps.sh
-        .github/actions/pin-ocaml-deps/pin.sh
+        chmod +x scripts/opam-pin-external-deps.sh
+        # PIN_FLAGS is a flag list authored in the calling workflow, so it is
+        # left unquoted to split on spaces. No caller passes --install, and the
+        # script reads its flags with a case loop where order does not matter.
+        scripts/opam-pin-external-deps.sh --install $PIN_FLAGS
         elapsed="$(( $(date +%s) - start ))"
         echo "Pinned external OCaml dependencies in ${elapsed}s"

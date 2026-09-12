@@ -8687,7 +8687,7 @@ let render_memory (state : state) =
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
-  let keeper_name = Option.value state.memory_facts_keeper ~default:"" in
+  let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -8698,27 +8698,29 @@ let render_memory_facts (state : state) =
   let filter_label =
     Masc_tui_types.memory_category_filter_label state.memory_facts_category
   in
-  let sort_label = Masc_tui_types.memory_sort_order_label state.memory_facts_sort in
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
-        Printf.sprintf " · find \"%s\"" (Terminal_text.single_line (String.trim q))
-    | Some _ -> " · find \"\""
+        Printf.sprintf " \xc2\xb7 find \"%s\"" (Terminal_text.single_line (String.trim q))
+    | Some _ -> " \xc2\xb7 find \"\""
     | None ->
         if String.length (String.trim state.search_last) > 0 then
-          Printf.sprintf " · filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
+          Printf.sprintf " \xc2\xb7 filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
         else ""
   in
   let title =
-    match state.memory_facts with
-    | None ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s"
-          (screen_title " MASC Memory") keeper_name (title_missing_reading ~error:state.memory_facts_error) timestamp
-          (connection_badge state)
-    | Some _ ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s · sort: %s%s)  %s  %s"
-          (screen_title " MASC Memory") keeper_name total filter_label sort_label query_label
-          timestamp (connection_badge state)
+    Render_memory.facts_title
+      ~screen:(screen_title " MASC Memory")
+      ~keeper:keeper_name
+      ~reading:
+        (match state.memory_facts with
+         | None ->
+           Render_memory.Facts_unread
+             { reading = title_missing_reading ~error:state.memory_facts_error }
+         | Some _ ->
+           Render_memory.Facts_loaded { total; filter_label; query_label })
+      ~timestamp
+      ~badge:(connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~hints:Masc_tui_keys.footer_hints_memory_facts
@@ -9170,7 +9172,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
+      | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  h:observations  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
       | None, None when Option.is_some view.scene ->
@@ -9178,8 +9180,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some Read_region -> "Enter:read region  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  Ctrl-O:image"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions")
+          action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -9295,10 +9297,58 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         (Printf.sprintf "  Text %d/%d • j/k:scroll • r:refresh • Ctrl-^ / Esc:hide lane"
            (if total = 0 then 0 else scroll + 1) total))
 
+let browser_history_fixed_rows = 6
+
+let browser_history_scroll_limit state ~terminal_rows ~cols history =
+  let view = Browser_history.page_view history in
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let room = max 0 (max 1 (body_rows-5) - browser_history_fixed_rows) in
+  max 0 (Browser_lane_layout.count (browser_lane_rows ~cols view) - room)
+
+let render_browser_history (state : state) (history : Browser_history.t) =
+  let terminal_rows, cols = get_terminal_size () in
+  let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser"
+    ~body:(fun ~budget c ->
+      let status = match history.content with
+        | Listing -> "Reading the Keeper's recent tool receipts…"
+        | List_failed detail -> "Could not read observations: " ^ Terminal_text.single_line detail
+        | Entries {entries;cursor;selection} ->
+          let position = Printf.sprintf "Observation %d/%d · from 100 recent tool calls"
+            (if entries=[] then 0 else cursor+1) (List.length entries) in
+          position ^ (match selection with Loading -> " · loading saved page…"
+            | Failed detail -> " · " ^ Terminal_text.single_line detail | Observed _ -> "") in
+      c.push_styled ~style:(Theme.info ()) ("  " ^ status);
+      c.push_styled ~style:(Theme.recede ()) "  Historical read · browser actions and live screenshots are inactive here";
+      (match Browser_history.selected history with
+       | None -> c.push_styled ~style:(Theme.recede ()) "  No selected observation"
+       | Some entry -> c.push_styled ~style:(Theme.recede ())
+           ("  " ^ Terminal_text.single_line (Masc_domain.iso8601_of_unix_seconds entry.at)
+            ^ " · " ^ entry.execution_id));
+      (match Browser_history.observation history with
+       | None -> c.push_styled ~style:(Theme.recede ()) "  Page content has not been loaded"
+       | Some observation -> c.push_styled ~style:(Theme.info ())
+           ("  " ^ Terminal_text.single_line observation.scene.title ^ " · "
+            ^ Terminal_text.single_line observation.scene.url
+            ^ (if observation.scene.truncated then " · partial observation" else " · observed viewport")));
+      c.push_divider ();
+      let view = Browser_history.page_view history in
+      let lines = browser_lane_rows ~cols view in
+      let count = Browser_lane_layout.count lines in
+      let room = max 0 (budget - browser_history_fixed_rows) in
+      let scroll = min history.scroll (max 0 (count-room)) in
+      for index=scroll to min (scroll+room-1) (count-1) do
+        c.push_styled ~style:Ansi.reset ("  " ^ Browser_lane_layout.line lines index)
+      done;
+      c.push_styled ~style:(Theme.recede ())
+        (Printf.sprintf "  Text %d/%d" (if count=0 then 0 else scroll+1) count))
+
 let render_connectors (state : state) =
-  match browser_lane_on_screen state with
-  | Some view -> render_browser_lane state view
-  | None ->
+  match browser_lane_on_screen state, state.browser_history with
+  | Some _, Some history -> render_browser_history state history
+  | Some view, None -> render_browser_lane state view
+  | None, _ ->
   let terminal_rows, cols = get_terminal_size () in
   let connectors =
     match state.connectors with
@@ -10909,8 +10959,8 @@ let render_code (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.code_focus_file = Right_pane then "  [j/k]" else "")
+       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
@@ -11437,9 +11487,10 @@ let render_resources (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim) ^ " Resources"
+      ((if list_focused then Ansi.bold else Ansi.dim)
+       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ "Resources"
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
-       ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
     (* The status line spends one of the budgeted rows, not an extra one:
@@ -11510,8 +11561,8 @@ let render_resources (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.resource_focus = Right_pane then "  [j/k]" else "")
+       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = framed_content_height ~rows in

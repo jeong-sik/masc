@@ -36,6 +36,9 @@ type host_stop =
 type dynamic_tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
+    (** Model-visible producer content. [None] selects the text fallback;
+        [Some blocks] is preserved through client transport. *)
   ; abort_turn : host_stop option
     (** Host-owned terminal reason. The transport returns the current tool
         outcome, then stops the provider loop instead of admitting another
@@ -53,3 +56,24 @@ type dynamic_tool =
 val dynamic_tool_bytes : dynamic_tool list -> int
 (** [dynamic_tool_bytes tools] sums the name, description and serialized
     schema lengths. Bytes this process sends, not provider tokens. *)
+
+type content_transport = Codex | Mcp
+
+val project_content :
+  content_transport -> content:string ->
+  content_blocks:Agent_core.Types.content_block list option ->
+  (Yojson.Safe.t list, string) result
+(** Validate delivery before host settlement and terminal outcome selection. *)
+
+val codex_content_items :
+  content:string -> content_blocks:Agent_core.Types.content_block list option ->
+  (Yojson.Safe.t list, string) result
+(** Project tool text and images to the app-server's typed contentItems. An
+    unsupported block is an explicit delivery error, not successful text-only
+    evidence. [Some blocks] is authoritative; [None] uses [content]. *)
+
+val mcp_content :
+  content:string -> content_blocks:Agent_core.Types.content_block list option ->
+  (Yojson.Safe.t list, string) result
+(** MCP image content carries base64 bytes and mimeType. URL/file-id images
+    require a separate resolver and are refused here rather than fetched. *)

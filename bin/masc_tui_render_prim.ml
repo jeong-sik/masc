@@ -1847,24 +1847,26 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
   in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
-      Printf.sprintf "%s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      Printf.sprintf "  %s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
         (Keeper_control.action_gerund action)
         (Terminal_text.single_line keeper_name)
         Ansi.reset
   | None, Some pending ->
-      Printf.sprintf "%s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
+      Printf.sprintf "  %s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
         (Keeper_control.action_key pending.Keeper_control.pending_action)
         (Keeper_control.action_label pending.Keeper_control.pending_action)
         (Terminal_text.single_line pending.Keeper_control.pending_keeper)
         Ansi.reset
   | None, None ->
-      (* Two spaces, not a dimmed middle dot. {!Masc_tui_footer.line} splits a
-         hint row on two spaces to drop whole keys when the row will not fit,
-         and a row joined any other way reaches it as one item: nothing to
-         drop, so it fell through to the cell cut and ended mid-word --
-         [t cal…?] where its own contract promises "never half a word".
-         Every other surface already writes its hints this way. *)
-      String.concat "  "
+      (* [key:label] items, two spaces apart: the shape every other footer
+         uses, so Masc_tui_footer can split the row, drop the lowest priority
+         item when the row is tight, and keep the keys it never drops. Written
+         "key label" and joined with a middle dot, the whole legend was one
+         item nothing could split -- at 60 columns the row cut mid-word and
+         "q quit", last in the list, went first. The two keys the footer pins
+         lead with a plain key so it can read them past the colour. *)
+      "  "
+      ^ String.concat "  "
           [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
@@ -1897,10 +1899,10 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
                between surfaces reads as a key that does not exist. *)
           ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
              else Ansi.dim ^ "c:chat" ^ Ansi.reset)
-          ; (if offers_back then Ansi.dim ^ "left/esc:back" ^ Ansi.reset
+          ; (if offers_back then "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
              else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
           ; Ansi.dim ^ "r:refresh" ^ Ansi.reset
-          ; Ansi.dim ^ "q:quit" ^ Ansi.reset
+          ; "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
           ]
 
 

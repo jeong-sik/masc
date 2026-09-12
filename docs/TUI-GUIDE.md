@@ -971,7 +971,7 @@ stops are not numbered. `Goals` is the goal lifecycle, judged against the
 goal verification ledger. `Task Review` and `Task Verdicts` are the two
 halves of the Task protocol: what is waiting for a ruling, and what was
 ruled. A goal sitting in `verifying` appears in neither of them, and Task
-Verdicts is the old Harness ledger, not a Goal completion proof. `Schedules`
+Verdicts is the ledger of Gate rulings, not a Goal completion proof. `Schedules`
 and `Fusion` keep their own headers but continue the same `v` walk.
 
 Each side carries its own count on the strip: `Goals·2` is goals with the
@@ -979,7 +979,7 @@ completion judge, `Task Review·7` is tasks waiting for an operator.
 
 ```
  MASC Planning  ▸Goals·1  Task Review·2  Task Verdicts  10:44:57  [connected]
-   show executing + verifying · order phase order, then P1→P5
+   sort:phase/P1-P5  filter:active
    Executing: 3  Paused/Blocked: 1  Verifying: 0  Done: 24  Dropped: 22
    Backlog: todo=4  claimed=0  running=6  done=109  cancelled=37
  >   [dropped ] P1  Reduce all exampleorg service backlogs to 0

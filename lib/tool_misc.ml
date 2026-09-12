@@ -261,6 +261,28 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some
         (Tool_misc_msx_lane.handle_step_until_change ~tool_name:name
            ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_dos_load ->
+      Some
+        (Tool_misc_dos_lane.handle_load ~tool_name:name ~start_time:start
+           ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_eject ->
+      Some
+        (Tool_misc_dos_lane.handle_eject ~tool_name:name ~start_time:start
+           ~agent_name:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_screen ->
+      Some (Tool_misc_dos_lane.handle_screen ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_dos_step ->
+      Some (Tool_misc_dos_lane.handle_step ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_dos_press ->
+      Some
+        (Tool_misc_dos_lane.handle_press ~tool_name:name ~start_time:start
+           ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_type ->
+      Some
+        (Tool_misc_dos_lane.handle_type ~tool_name:name ~start_time:start
+           ~who:ctx.agent_name args)
+  | Some Tool_schemas_misc.Misc_dos_peek ->
+      Some (Tool_misc_dos_lane.handle_peek ~tool_name:name ~start_time:start args)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -288,10 +310,12 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_browser_tabs
   | Tool_schemas_misc.Misc_browser_read
   (* Reads the machine without moving its time. *)
-  | Tool_schemas_misc.Misc_msx_screen -> true
+  | Tool_schemas_misc.Misc_msx_screen
+  | Tool_schemas_misc.Misc_dos_screen -> true
   (* RAM introspection reads memory and moves nothing. *)
   | Tool_schemas_misc.Misc_msx_peek
-  | Tool_schemas_misc.Misc_msx_ram_diff ->
+  | Tool_schemas_misc.Misc_msx_ram_diff
+  | Tool_schemas_misc.Misc_dos_peek ->
     true
   (* Loading, ejecting, pressing and stepping change the shared machine. *)
   | Tool_schemas_misc.Misc_msx_load
@@ -302,6 +326,12 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_msx_press
   | Tool_schemas_misc.Misc_msx_step
   | Tool_schemas_misc.Misc_msx_step_until_change
+  (* Booting, ejecting, pressing and typing change the shared machine. *)
+  | Tool_schemas_misc.Misc_dos_load
+  | Tool_schemas_misc.Misc_dos_eject
+  | Tool_schemas_misc.Misc_dos_press
+  | Tool_schemas_misc.Misc_dos_type
+  | Tool_schemas_misc.Misc_dos_step
   (* Starting and stopping the automation browser changes its lifecycle. *)
   | Tool_schemas_misc.Misc_browser_session
   | Tool_schemas_misc.Misc_ask

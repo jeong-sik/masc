@@ -37,7 +37,7 @@ let await_idle ~clock ~base_path =
     while not (Worker.For_testing.is_idle ~base_path) do Eio.Fiber.yield () done)
 
 let with_base f =
-  Masc.Prompt_registry.set_markdown_dir "../config/prompts";
+  Prompt_registry.set_markdown_dir "../config/prompts";
   let base_path = Filename.temp_dir "workspace-curator-lane" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     Eio_main.run (fun env -> f base_path env#clock))
@@ -143,17 +143,17 @@ let test_directory_alias () = with_base (fun base_path clock ->
       Worker.For_testing.stop ~base_path:alias)))
 
 let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
-  let key = Masc.Prompt_names.workspace_memory_curator in
+  let key = Prompt_names.workspace_memory_curator in
   commit base_path "Stable source observation";
   let prompts = ref [] in
   let execute ~rendered_prompt context =
     prompts := rendered_prompt :: !prompts;
     Ok (proposal context, "test.slot") in
-  Fun.protect ~finally:(fun () -> Masc.Prompt_registry.clear_prompt_override key) (fun () ->
+  Fun.protect ~finally:(fun () -> Prompt_registry.clear_prompt_override key) (fun () ->
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute;
       await_idle ~clock ~base_path;
-      ignore (Masc.Prompt_registry.set_override key
+      ignore (Prompt_registry.set_override key
         "Changed curator instructions. Preserve attribution. {{workspace_memory_inventory}}" |> require);
       Worker.request ~base_path;
       await_idle ~clock ~base_path;

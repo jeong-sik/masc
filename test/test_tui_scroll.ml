@@ -30,6 +30,21 @@ let test_moving_stays_inside_the_bound () =
    scroll past the end. Moving from that position has to start from where the
    reader actually is: stepping from the stale number would answer [up] with
    another number still past the end, and the screen would not move. *)
+(* A surface no listing counts has no bound below to hold its scroll at, and
+   the mover used to add the key's delta as it stood. A negative scroll is not
+   a position: the frame indexes the list with it. The Git-changes overlay
+   opened over a keeper view was such a surface, and one up-key from the top
+   exited the process. *)
+let test_an_uncounted_scroll_is_held_at_the_top () =
+  check int "up from the top stays at the top" 0
+    (Masc_tui_scroll.step_uncounted ~delta:(-1) 0);
+  check int "a page up from near the top stays at the top" 0
+    (Masc_tui_scroll.step_uncounted ~delta:(-9) 2);
+  check int "down moves by the delta" 3
+    (Masc_tui_scroll.step_uncounted ~delta:3 0);
+  check int "up from the middle moves by the delta" 1
+    (Masc_tui_scroll.step_uncounted ~delta:(-1) 2)
+
 let test_a_stale_scroll_moves_from_where_the_reader_is () =
   check int "up from past the end lands one above the end" 5
     (Masc_tui_scroll.up ~count:10 ~height:4 40);
@@ -163,6 +178,8 @@ let () =
             test_moving_stays_inside_the_bound
         ; Alcotest.test_case "a stale scroll moves from where the reader is"
             `Quick test_a_stale_scroll_moves_from_where_the_reader_is
+        ; Alcotest.test_case "an uncounted scroll is held at the top" `Quick
+            test_an_uncounted_scroll_is_held_at_the_top
         ] )
     ; ( "preview"
       , [ Alcotest.test_case "a preview leaves the list its keep" `Quick

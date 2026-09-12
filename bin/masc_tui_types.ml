@@ -6480,6 +6480,15 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       ; sc_preview_keep = None
       }
   in
+  (* One spelling for the overlay's rows. It draws the same list over three
+     surfaces, and the count the keys move through has to be the count the
+     frame draws, whichever surface it is over. *)
+  let repository_changes_listing () =
+    listing ~error:state.repository_changes_error
+      (match state.repository_changes with
+       | None -> 0
+       | Some s -> List.length s.Tui_decode.rcs_changes)
+  in
   function
   | System_logs ->
       if Option.is_some state.system_logs_detail_seq then None
@@ -6516,11 +6525,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | None -> 0
            | Some s -> List.length s.Tui_decode.hs_verdicts)
   | Repositories ->
-      if state.repository_changes_open then
-        listing ~error:state.repository_changes_error
-          (match state.repository_changes with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.rcs_changes)
+      if state.repository_changes_open then repository_changes_listing ()
       else
         listing ~error:state.repositories_error
           (match state.repositories with
@@ -6544,11 +6549,16 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
-  | Code when state.repository_changes_open ->
-      listing ~error:state.repository_changes_error
-        (match state.repository_changes with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.rcs_changes)
+  | Code when state.repository_changes_open -> repository_changes_listing ()
+  (* [d] on the roster, the detail and the chat pane opens the overlay
+     without leaving the Keepers surface, and the frame draws it there. With
+     no arm here the surface read as unlisted, so the up-key added its delta
+     to the scroll with no bound and stored a negative one; the frame then
+     indexed the list with it and the process exited (four times between
+     2026-09-05 and 2026-09-11). The three modes are the ones the frame
+     draws the overlay over. *)
+  | Keepers (Keeper_list | Keeper_detail | Keeper_message)
+    when state.repository_changes_open -> repository_changes_listing ()
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
       listing ~error:state.connectors_error

@@ -70,15 +70,24 @@ let capture ~current_task ~config ~keeper ~turn_ref ~args =
   let* task_id = read "task_id" in let* selected_goal = read "goal_id" in
   let* decision_context = read "decision_context" in
   let source result = Result.map_error (fun detail -> Source_unavailable detail) result in
-  let* task_id = match task_id, selected_goal, current_task with
+  let empty_context = {keeper; turn_ref; task=None; goals=[]; question; decision_context} in
+  (* The inferred Task is resolved inside the same locks that read the backlog
+     below, not before them. The resolver reads the backlog unlocked, so a Task
+     that changed hands or finished between the two reads used to be inferred
+     from one view of the file and then validated against another -- the caller
+     was told its own inferred Task does not exist, or the context was built on
+     a premise the lock never saw. One lock, one view. *)
+  let resolved_task_id () = match task_id, selected_goal, current_task with
     | None, None, Some resolve ->
       source (resolve ()) |> Result.map (Option.map Keeper_id.Task_id.to_string)
     | (Some _ as selected), _, _ -> Ok selected
     | None, Some _, _ | None, None, None -> Ok None in
-  if task_id = None && selected_goal = None then
-    Ok {keeper; turn_ref; task=None; goals=[]; question; decision_context}
+  (* Nothing to name and nobody to ask: no source is read, so no lock is taken. *)
+  if task_id = None && selected_goal = None && current_task = None then Ok empty_context
   else try Workspace_utils.with_file_lock config (Goal_store.goals_path config) (fun () ->
     Workspace_utils.with_file_lock config (Workspace_backlog.backlog_lock_path config) (fun () ->
+      let* task_id = resolved_task_id () in
+      if task_id = None && selected_goal = None then Ok empty_context else
       let* task, linked_goals = match task_id with
         | None -> Ok (None, [])
         | Some task_id ->

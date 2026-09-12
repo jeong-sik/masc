@@ -4125,8 +4125,12 @@ let decode_runtime_option ~default_id json =
      fields -- an older server's rows simply lack them, and absence reads as
      unknown, not healthy. *)
   let* ro_quota_exhausted =
-    optional_bool_field json "quota_exhausted"
-    |> Result.map (Option.value ~default:false)
+    match optional_bool_field json "quota_exhausted" with
+    | Ok (Some value) -> Ok value
+    (* Absent on an older server's document: the badge then answers ready,
+       which is the reading every pre-quota surface already gave. *)
+    | Ok None -> Ok false
+    | Error detail -> Error detail
   in
   let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in

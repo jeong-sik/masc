@@ -132,7 +132,7 @@ To install one specific release instead of the latest one, take that tag's
 installer and pin it:
 
 ```bash
-TAG=v0.35.12
+TAG=v0.35.14
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"

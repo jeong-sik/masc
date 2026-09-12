@@ -7,6 +7,7 @@ type change =
   | Remove_endpoint of section * string
   | Set_default_model of section * string
   | Set_tts_default_voice of string
+  | Set_send_on_stop of bool
   | Set_agent_voice of string * string option
 
 type error =
@@ -112,6 +113,12 @@ let apply_change contents = function
       ~path:"voice.tts"
       ~key:"default_voice"
       ~value:(Some voice)
+  | Set_send_on_stop send ->
+    Toml_line_editor.edit_table_bool
+      contents
+      ~path:"voice.stt"
+      ~key:"send_on_stop"
+      ~value:send
   | Set_agent_voice (agent, voice) ->
     Toml_line_editor.edit_table_scalar
       contents

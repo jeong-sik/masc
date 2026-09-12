@@ -27,58 +27,79 @@ let test_follow_output_contract () =
     check bool "ordinary clicks need no destination receipt" false
       (List.mem (`String "destinationUrl") (schema |> member "required" |> to_list))
 
-let test_click_then_regions ~fail_click ~fail_read () =
+type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
+type observation = Regions | Content
+
+let test_follow_then_read observation case () =
   Eio_main.run (fun _ ->
+    let skill_name, read_mode = match observation with
+      | Regions -> "browser-live-click-regions", "regions"
+      | Content -> "browser-live-click-content", "scene" in
     let args = `Assoc ["clientId",`String "11111111-1111-4111-8111-111111111111";
       "tabId",`Int 7;"documentId",`String "observed";"nodeId",`String "link";
       "expectedUrl",`String "https://example.org/before"] in
-    let plan = match Catalog.instantiate ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~args (skill_entry "browser-live-click-regions") with
+    let entry = skill_entry skill_name in
+    check string "native callable skill name"
+      ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
+    let plan = match Catalog.instantiate ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~args entry with
       | Ok plan -> plan | Error e -> fail (Catalog.instantiation_error_to_string e) in
     let calls = ref [] in
     let dispatch ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input =
       calls := !calls @ [node.Plan.tool_name];
       let result = match node.tool_name with
         | "BrowserInteract" ->
-            check bool "follow uses the observed document and link" true
+            check bool "follow pins the observed client, tab, URL, document and link" true
               (Yojson.Safe.Util.member "action" input=`String "follow_link"
+               && Yojson.Safe.Util.member "lane" input=`String "live"
+               && Yojson.Safe.Util.member "clientId" input=Yojson.Safe.Util.member "clientId" args
+               && Yojson.Safe.Util.member "tabId" input=`Int 7
+               && Yojson.Safe.Util.member "expectedUrl" input=`String "https://example.org/before"
                && Yojson.Safe.Util.member "documentId" input=`String "observed"
                && Yojson.Safe.Util.member "nodeId" input=`String "link");
-            if fail_click then Tool_result.make_err ~tool_name:node.tool_name
-              ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observed link detached"
-            else Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+            (match case with
+            | Navigation_failed -> Tool_result.make_err ~tool_name:node.tool_name
+                ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observed link detached"
+            | Invalid_receipt -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+                ~data:(`Assoc ["tabId",`Int 7;"action",`String "follow_link"]) ()
+            | Navigated | Read_failed -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
               ~data:(`Assoc ["tabId",`Int 7;"url",`String "https://example.org/after";
                 "navigationSource",`Assoc ["url",`String "https://example.org/before";"documentId",`String "observed"];
-                "destinationUrl",`String "https://example.org/after";"urlBefore",`String "https://example.org/before";"action",`String "follow_link"]) ()
+                "destinationUrl",`String "https://example.org/after";"urlBefore",`String "https://example.org/before";"action",`String "follow_link"]) ())
         | "BrowserRead" ->
-            check bool "follow-up reads regions on the pinned tab and client" true
+            check bool "follow-up reads the selected view on the pinned tab and client" true
               (Yojson.Safe.Util.member "tabId" input=`Int 7
+               && Yojson.Safe.Util.member "lane" input=`String "live"
                && Yojson.Safe.Util.member "clientId" input=Yojson.Safe.Util.member "clientId" args
-               && Yojson.Safe.Util.member "mode" input=`String "regions"
+               && Yojson.Safe.Util.member "mode" input=`String read_mode
                && Yojson.Safe.Util.member "expectedUrl" input=`String "https://example.org/after"
+               && Yojson.Safe.Util.(input |> member "navigationSource" |> member "url")=`String "https://example.org/before"
                && Yojson.Safe.Util.(input |> member "navigationSource" |> member "documentId")=`String "observed");
-            if fail_read then Tool_result.make_err ~tool_name:node.tool_name
-              ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "region observation unavailable"
-            else Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
-              ~data:(`Assoc ["url",`String "https://example.org/after";"nodes",`List []]) ()
+            (match case with
+            | Read_failed -> Tool_result.make_err ~tool_name:node.tool_name
+                ~class_:Tool_result.Workflow_rejection ~start_time:0.0 "observation unavailable"
+            | Navigated -> Tool_result.make_ok ~tool_name:node.tool_name ~start_time:0.0
+                ~data:(`Assoc ["url",`String "https://example.org/after";"nodes",`List []]) ()
+            | Navigation_failed | Invalid_receipt -> fail "read ran without a valid follow receipt")
         | name -> fail ("unexpected composition action: " ^ name) in
       Executor.dispatch_result ~failure_effect_disposition:Tool_result.Proven_pre_effect result in
     let result = Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () in
-    if fail_click then (
+    match case with
+    | Navigation_failed | Invalid_receipt -> (
       check bool "failure is retained" true (Result.is_error result);
       check (list string) "failed click is not retried and no read runs" ["BrowserInteract"] !calls)
-    else if fail_read then (
+    | Read_failed -> (
       check (list string) "successful click is never replayed after read failure" ["BrowserInteract";"BrowserRead"] !calls;
       match result with
       | Ok _ -> fail "read failure disappeared"
-      | Error failure -> check bool "settled click receipt remains available" true
+      | Error failure ->
+          check bool "completed follow remains a recorded effect after read failure" true
+            (failure.effect_disposition = Tool_result.Proven_post_effect);
+          check bool "settled click receipt remains available" true
           (List.exists (fun node -> Plan.Node_id.to_string node.Executor.node_id = "click"
             && (match node.result with Tool_result.Completed _ -> true | _ -> false)) failure.settled))
-    else (
+    | Navigated -> (
       check bool "composition completes" true (Result.is_ok result);
       check (list string) "exact ordered browser route" ["BrowserInteract";"BrowserRead"] !calls))
-
-type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
-type observation = Regions | Content
 
 let test_navigate_then_read observation case () =
   Eio_main.run (fun _ ->
@@ -155,9 +176,14 @@ let test_navigate_then_read observation case () =
 
 let () = run "browser composition" ["native skill",[
   test_case "runtime destination output contract" `Quick test_follow_output_contract;
-  test_case "observed click then region read" `Quick (test_click_then_regions ~fail_click:false ~fail_read:false);
-  test_case "failed click stops without replay" `Quick (test_click_then_regions ~fail_click:true ~fail_read:false);
-  test_case "read failure retains successful click without replay" `Quick (test_click_then_regions ~fail_click:false ~fail_read:true);
+  test_case "observed click then region read" `Quick (test_follow_then_read Regions Navigated);
+  test_case "failed click stops without replay" `Quick (test_follow_then_read Regions Navigation_failed);
+  test_case "read failure retains successful click without replay" `Quick (test_follow_then_read Regions Read_failed);
+  test_case "region read rejects malformed follow receipt" `Quick (test_follow_then_read Regions Invalid_receipt);
+  test_case "observed click then visible content" `Quick (test_follow_then_read Content Navigated);
+  test_case "content follow failure stops without replay" `Quick (test_follow_then_read Content Navigation_failed);
+  test_case "content read failure retains follow receipt" `Quick (test_follow_then_read Content Read_failed);
+  test_case "content read rejects malformed follow receipt" `Quick (test_follow_then_read Content Invalid_receipt);
   test_case "navigation uses redirected landing URL" `Quick (test_navigate_then_read Regions Navigated);
   test_case "navigation failure stops before read" `Quick (test_navigate_then_read Regions Navigation_failed);
   test_case "read failure retains navigation receipt" `Quick (test_navigate_then_read Regions Read_failed);

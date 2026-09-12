@@ -20,6 +20,7 @@ type error =
   | Image_policy_rejected of { page : int; bytes : int; limit : int }
   | Page_budget_exceeded of
       { pages : int; page_limit : int; bytes : int; byte_limit : int }
+  | Payload_budget_exceeded of { bytes : int; limit : int }
   | Storage_failed of string
 
 let error_to_string = function
@@ -46,6 +47,8 @@ let error_to_string = function
         "pdf_page_budget_exceeded: %d pages rendered to %d bytes, over the %d one \
          response carries"
         pages bytes byte_limit
+  | Payload_budget_exceeded { bytes; limit } ->
+    Printf.sprintf "pdf_payload_budget_exceeded: %d bytes exceed %d" bytes limit
   | Storage_failed detail -> "pdf_inspection_storage_failed: " ^ detail
 
 let ( let* ) = Result.bind
@@ -53,6 +56,14 @@ let ( let* ) = Result.bind
 let read_owned root path =
   match Fs_compat.load_owned_regular_file ~ownership_root:root path with
   | Ok (Some bytes) -> Ok bytes
+  | Ok None -> Error (Invalid_output ("missing " ^ Filename.basename path))
+  | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error))
+
+let read_bounded_owned root path ~max_bytes =
+  match Fs_compat.load_owned_regular_file_prefix ~ownership_root:root ~max_bytes path with
+  | Ok (Some prefix) when prefix.truncated ->
+    Error (Payload_budget_exceeded { bytes = prefix.file_size; limit = max_bytes })
+  | Ok (Some prefix) -> Ok prefix.content
   | Ok None -> Error (Invalid_output ("missing " ^ Filename.basename path))
   | Error error -> Error (Storage_failed (Fs_compat.owned_regular_file_read_error_to_string error))
 
@@ -90,11 +101,18 @@ let command_timeout_sec = 120.
    document with many admissible pages could reach hundreds of megabytes and
    exceed the verifier client's request limit. Both the count and the total are
    capped, because either alone lets the other run away. *)
+let max_source_bytes = 64 * 1024 * 1024
+let max_extracted_bytes = 2 * 1024 * 1024
+let max_page_pixels = 2048
 let max_pages = 64
 let max_total_image_bytes = 24 * 1024 * 1024
 
 let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_bytes)
+      ?(max_extracted_bytes = max_extracted_bytes)
       ~base_path ~max_image_bytes ~bytes () =
+  let* () = if String.length bytes > max_source_bytes then
+    Error (Payload_budget_exceeded { bytes = String.length bytes; limit = max_source_bytes })
+    else Ok () in
   let missing = Pdf_runtime_dependencies.missing () in
   if missing <> [] then Error (Dependency_unavailable missing)
   else
@@ -123,7 +141,7 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
           Error (Command_failed {program;status;detail}) in
       let xml_path = Filename.concat root "pages.xhtml" in
       let* () = run "pdftotext" ["-bbox-layout";"-enc";"UTF-8";source;xml_path] in
-      let* xml = read_owned root xml_path in
+      let* xml = read_bounded_owned root xml_path ~max_bytes:max_extracted_bytes in
       let* descriptions = parsed_pages xml in
       let page_count = List.length descriptions in
       let* () =
@@ -138,7 +156,7 @@ let inspect ?(max_pages = max_pages) ?(max_total_image_bytes = max_total_image_b
           (* Explicit single-page output gives the page its declared index,
              avoiding filename/count guesses and preserving all PDF pages. *)
           let* () = run "pdftoppm"
-            ["-png";"-singlefile";"-f";string_of_int number;"-l";string_of_int number;source;prefix] in
+            ["-png";"-scale-to";string_of_int max_page_pixels;"-singlefile";"-f";string_of_int number;"-l";string_of_int number;source;prefix] in
           let* png = read_owned root (prefix ^ ".png") in
           let size = String.length png in
           let* () = if size > max_image_bytes then

@@ -49,7 +49,7 @@ let test_tool_input_recovery () =
           ~start_time:0. (`Assoc ["url",`Int 1]))] in
       List.iter (fun (name, run) ->
         match run () with
-        | Tool_result.Failed failure ->
+        | Tool_result.Failed (failure : Tool_result.failure_payload) ->
           check bool (name ^ " is caller validation, not changed-state rejection") true
             (failure.class_ = Tool_result.Policy_rejection);
           check bool (name ^ " has no dispatched effect") true

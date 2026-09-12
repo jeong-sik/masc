@@ -2,4 +2,12 @@
 
 (test
  (name test_voice_setup_routes)
- (libraries alcotest astring yojson masc.server masc.voice_setup masc.voice_config unix))
+ (libraries
+  alcotest
+  astring
+  yojson
+  masc.server
+  masc.voice_wizard
+  masc.voice_setup
+  masc.voice_config
+  unix))

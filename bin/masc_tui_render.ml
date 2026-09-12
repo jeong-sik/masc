@@ -1304,14 +1304,11 @@ let agenda_line agenda ~cols =
    the agent-core correlation ids resolve through the same trace table the
    Activity surface uses. *)
 (* The address a change is listed under and the range label it carries.
-   Read here, ahead of every surface, because the Activity pane lists the
-   selected keeper's changes the same way the Changes surface does. *)
-let change_row_address (change : Masc.Tui_decode.file_change) =
-  match change.Masc.Tui_decode.fc_location with
-  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
-      Printf.sprintf "%s:%s" repo_id relative_path
-  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> bundle_path
-  | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
+   Named here, ahead of every surface, because the Activity pane lists the
+   selected keeper's changes the same way the Changes surface does -- and the
+   address itself is Tui_decode's now, so the row search can read the same
+   one without the renderer. *)
+let change_row_address = Masc.Tui_decode.file_change_address
 
 let file_change_range_label
       (range : Masc.Keeper_file_change_evidence.line_range)

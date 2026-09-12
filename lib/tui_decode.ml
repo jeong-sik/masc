@@ -8645,6 +8645,18 @@ let decode_file_change json =
     ; fc_succeeded
     }
 
+(* The address a change is listed under: repository and path, the scratch
+   file's own path, or the absolute one. It lived beside the drawing, which
+   left the row search on the Changes surface with nowhere to read it from --
+   masc_tui_types cannot see the renderer -- and a second copy of this match
+   would be a row that draws one address and is found under another. *)
+let file_change_address change =
+  match change.fc_location with
+  | Fc_in_repo { repo_id; relative_path } ->
+      Printf.sprintf "%s:%s" repo_id relative_path
+  | Fc_in_bundle { bundle_path } -> bundle_path
+  | Fc_at_absolute_path { path } -> path
+
 let file_change_target_line change =
   match change.fc_line_evidence with
   | Some (Keeper_file_change_evidence.Written { new_range = Some range }) ->

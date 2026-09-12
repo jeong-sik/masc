@@ -419,11 +419,6 @@ let record_runtime_mcp_keeper_tool_trace
   in
   Keeper_tool_call_log.log_call
     ?typed_result
-    ?on_committed:
-      (Option.bind typed_result (fun result ->
-         match Tool_result.retained_artifacts result with
-         | [] -> None
-         | _ -> Some (fun () -> ())))
     ~keeper_name:ctx.keeper_name
     ~tool_name
     ~input:arguments

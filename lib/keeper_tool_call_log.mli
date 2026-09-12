@@ -269,7 +269,10 @@ val log_call :
     typed plan executor; readers must not reconstruct them from [tool_use_id]
     or tool-name strings. [file_change_evidence] is producer-owned typed data,
     persisted independently of the truncated opaque [output] preview.
-    [on_committed], when supplied, forces this row through the synchronous
+    Explicit [artifact_refs] and [typed_result]'s retained artifacts require a
+    synchronous append even without a callback; an unavailable store or failed
+    append raises rather than losing their receipt in the preview queue.
+    [on_committed], when supplied, also forces the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the
     asynchronous log queue. [turn_kind] names which turn made the call —

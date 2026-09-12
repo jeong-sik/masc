@@ -11,5 +11,4 @@
   masc_core
   masc.agent_core.llm_provider
   eio
-  time_compat
-  yojson))
+  time_compat))

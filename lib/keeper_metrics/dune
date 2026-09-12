@@ -14,4 +14,4 @@
   keeper_tool_outcome)
  (preprocess
   (pps ppx_enumerate))
- (libraries masc_core otel_metric_store time_compat unix yojson))
+ (libraries otel_metric_store unix yojson))

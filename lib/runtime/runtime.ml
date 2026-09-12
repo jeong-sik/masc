@@ -907,6 +907,34 @@ let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
    declaration order, fail over in that order. *)
 let verifier_exact_lane_id = "verifier_exact"
 
+type exact_lane =
+  | Librarian
+  | Hitl_auto_judge
+  | Board_attention
+  | Verifier
+
+let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Verifier ]
+
+let exact_lane_id = function
+  | Librarian -> "librarian_exact"
+  | Hitl_auto_judge -> "hitl_auto_judge"
+  | Board_attention -> "board_attention_exact"
+  | Verifier -> verifier_exact_lane_id
+;;
+
+let exact_lane_of_id = function
+  | "librarian_exact" -> Some Librarian
+  | "hitl_auto_judge" -> Some Hitl_auto_judge
+  | "board_attention_exact" -> Some Board_attention
+  | "verifier_exact" -> Some Verifier
+  | _ -> None
+;;
+
+let exact_lane_supports_cli_tail = function
+  | Librarian | Hitl_auto_judge | Board_attention -> true
+  | Verifier -> false
+;;
+
 let verifier_exact_slot_ids_of_lane_decls
       (decls : Runtime_schema.exact_output_lane_decl list)
   =
@@ -917,7 +945,7 @@ let verifier_exact_slot_ids_of_lane_decls
       decls
   with
   | None -> []
-  | Some lane -> lane.slot_ids @ lane.cli_slot_ids
+  | Some lane -> lane.slot_ids
 ;;
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
@@ -1663,13 +1691,19 @@ let verifier_exact_lane_slot_ids () =
          registry
          ~lane_id:verifier_exact_lane_id
      with
-     | Ok { selected_slots; cli_slots } ->
-       Ok
-         (List.map
-            (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-               slot.slot_id)
-            selected_slots
-          @ cli_slots)
+     | Ok { selected_slots; _ } ->
+       (match selected_slots with
+        | [] ->
+          Error
+            (Runtime_exact_output_registry.lane_resolution_error_to_string
+               (Runtime_exact_output_registry.No_admitted_lane_slots
+                  { lane_id = verifier_exact_lane_id }))
+        | slots ->
+          Ok
+            (List.map
+               (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                  slot.slot_id)
+               slots))
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
@@ -2914,12 +2948,21 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         in
         let next =
           List.fold_left
-            (fun content lane_id ->
+            (fun content lane ->
+              let lane_id = exact_lane_id lane in
               let path = "runtime.exact_output_lanes." ^ lane_id in
-              let content = Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots in
-              Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:cli_slots)
+              let lane_cli_slots =
+                if exact_lane_supports_cli_tail lane then cli_slots else []
+              in
+              if slots = [] && lane_cli_slots = []
+              then content
+              else
+                let content =
+                  Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots
+                in
+                Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+            all_exact_lanes
         in
         commit_runtime_config_text ~path next)
     in

@@ -12,41 +12,23 @@
   masc.embedded_config
   masc.auth
   yojson
-  otoml
-  base64
   bigstringaf
-  sqlite3
   unix
   threads
   logs
   optint
   re
-  re.str
   str
-  re.pcre
   mirage-crypto
   mirage-crypto-ec
   mirage-crypto-rng
   mirage-crypto-rng.unix
-  cstruct
   digestif
-  ocaml-protoc-plugin
-  masc_proto
-  grpc-direct
-  grpc-direct-core
-  h2
-  h2-eio
   eio
   eio_main
   eio.unix
-  httpun-eio
-  httpun
-  gluten-eio
-  gluten
   ipaddr
   fmt
-  cohttp
-  cohttp-eio
   masc.agent_core
   masc.agent_core.base
   masc.agent_core.llm_provider
@@ -72,11 +54,6 @@
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
   uri
-  tls
-  tls-eio
-  domain-name
-  ca-certs
-  pbrt
   mtime
   mtime.clock
   mtime.clock.os

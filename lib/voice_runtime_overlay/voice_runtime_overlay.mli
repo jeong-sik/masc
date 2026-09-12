@@ -47,6 +47,10 @@ type stt_request =
   }
 
 val resolve_adapter : string -> adapter option
+val adapter_for_endpoint_kind : Voice_config.endpoint_kind -> adapter
+(** The adapter a kind names. Endpoint resolution uses this same mapping;
+    endpoint ids never override the declared transport. *)
+
 val adapter_for_endpoint : Voice_config.endpoint -> adapter
 val select_endpoints : ?provider:string -> Voice_config.endpoint list -> Voice_config.endpoint list
 val auth_env_name : ?endpoint_api_key_env:string -> adapter -> string option

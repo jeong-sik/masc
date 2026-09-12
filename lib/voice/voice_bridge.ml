@@ -17,14 +17,20 @@ type transcriber =
   | By_command
   | Does_not_transcribe
 
-let transcriber_of_endpoint endpoint =
-  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-  match adapter.transport with
+let transcriber_of_transport = function
   | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct -> Over_http
   | Voice_runtime_overlay.Whisper_cli -> By_command
   (* Both of these speak. Neither listens: [macos_say] is the say command, and
      voice_mcp carries a tool call, not audio. *)
   | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Macos_say -> Does_not_transcribe
+
+let transcriber_of_kind kind =
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint_kind kind in
+  transcriber_of_transport adapter.transport
+
+let transcriber_of_endpoint endpoint =
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  transcriber_of_transport adapter.transport
 
 (* Decode the provider boundary before either normal capture or the probe
    interprets the transcript. An unreadable body is not a quiet microphone. *)

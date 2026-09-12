@@ -414,8 +414,9 @@ let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
       (* A document refused for its size is the submitter's to fix, same as a
          page over the image limit -- not a fault of this runtime. *)
       | Verification_pdf_inspection.Image_policy_rejected _
-      | Page_budget_exceeded _ -> Tool_result.Policy_rejection
-      | Dependency_unavailable _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+      | Page_budget_exceeded _ | Payload_budget_exceeded _ -> Tool_result.Policy_rejection
+      | Dependency_unavailable _ -> Tool_result.Dependency_unavailable
+      | Command_failed _ | Invalid_output _ | Storage_failed _ ->
         Tool_result.Runtime_failure in
     Tool_result.error ~failure_class ~tool_name:name ~start_time
       (Verification_pdf_inspection.error_to_string error)
@@ -461,9 +462,11 @@ let media_result t tool ~name ~args ~start_time =
             | Ok probe ->
               (match (is_pdf path probe || is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
-               | true, _ | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+               | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                    ~config:t.config ~meta ~path ?cwd
-                   ~max_bytes:(max_media_source_bytes + 1) ()))
+                   ~max_bytes:(max_media_source_bytes + 1) ()
+               | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
+                   ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with

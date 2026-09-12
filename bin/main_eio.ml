@@ -118,8 +118,10 @@ let safe_reqd_respond reqd response body =
 
     Enforces two complementary rate limits:
     1. Per-client IP (via [client_addr]) — protects against volumetric abuse.
-    2. Per-agent bearer token (via Authorization header) — enforces per-agent
-       quotas regardless of source IP, complementing the IP-level check. *)
+    2. MCP transport requests consume the per-agent operation bucket here.
+       Authenticated API operation wrappers own that charge for their routes;
+       charging them here too would double-debit one request. Dashboard assets
+       and read observations remain under the same per-IP resource boundary. *)
 let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
@@ -141,7 +143,8 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ~protocol:Transport_metrics.H1
         ~scope:Transport_metrics.Client_ip;
       true
-    end else
+    end else if not (is_mcp_transport_request request) then false
+    else
       match auth_token_from_request request with
       | None -> false
       | Some token ->

@@ -2619,10 +2619,27 @@ let voice_wizard_probe_lines json =
               | `Assoc entry ->
                   let text key =
                     match List.assoc_opt key entry with
-                    | Some (`String value) -> value
+                    (* A refusal is whatever the probed endpoint wrote, and
+                       [box_line] keeps escape sequences rather than stripping
+                       them. An endpoint that answers with control bytes would
+                       otherwise redraw the screen from inside this row. *)
+                    | Some (`String value) -> Terminal_text.single_line value
                     | Some _ | None -> "?"
                   in
-                  Some (Printf.sprintf "%-20s %s" (text "endpoint_id") (text "detail"))
+                  (* The state is the answer the wizard was opened to get. Left
+                     out, an endpoint that refused drew in the same shape as one
+                     that answered. The same three words the CLI prints, so the
+                     two readings of one probe agree. *)
+                  let state =
+                    match List.assoc_opt "state" entry with
+                    | Some (`String "answered") -> "answered"
+                    | Some (`String "refused") -> "refused"
+                    | Some (`String "skipped") -> "not asked"
+                    | Some _ | None -> "?"
+                  in
+                  Some
+                    (Printf.sprintf "%-20s %-10s %s" (text "endpoint_id") state
+                       (text "detail"))
               | _ -> None)
             items
       | Some _ | None -> [])

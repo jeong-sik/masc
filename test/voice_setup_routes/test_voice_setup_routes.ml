@@ -259,6 +259,83 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
                Alcotest.(check (option string)) "and no credential it was not given"
                  None endpoint.Voice_config.api_key_env))))
 
+
+(* A present field of the wrong type is not an absent one. Read as absence,
+   [{"api_key_env": 7}] removed the credential and answered success -- the one
+   shape a client cannot tell apart from having been obeyed. *)
+let test_a_wrongly_typed_optional_field_is_refused () =
+  with_workspace (fun ~base_path ~path ->
+    let before = read path in
+    let attempt field value =
+      let change =
+        `Assoc
+          [ "change", `String "put_endpoint"
+          ; "section", `String "stt"
+          ; "endpoint",
+            `Assoc
+              [ "id", `String "whisper-local"
+              ; "kind", `String "openai_compat"
+              ; "base_url", `String "http://127.0.0.1:2022/v1"
+              ; field, value
+              ]
+          ]
+      in
+      Actions.apply ~base_path (request (revision ~base_path) [ change ])
+    in
+    let refused what result =
+      match result with
+      | Ok _ -> Alcotest.failf "%s of the wrong type must be refused" what
+      | Error error ->
+        Alcotest.(check bool) (what ^ " is named in the refusal") true
+          (Astring.String.is_infix ~affix:what (Actions.error_message error))
+    in
+    refused "api_key_env" (attempt "api_key_env" (`Int 7));
+    refused "enabled" (attempt "enabled" (`String "yes"));
+    refused "timeout_seconds" (attempt "timeout_seconds" (`String "60"));
+    Alcotest.(check string) "and nothing was written" before (read path))
+
+(* null is absence spelled out, and the writer already reads a blank string as
+   "nothing in this setting". Both stay. *)
+let test_null_and_blank_still_clear_a_field () =
+  with_workspace (fun ~base_path ~path ->
+    let attempt value =
+      let change =
+        `Assoc
+          [ "change", `String "put_endpoint"
+          ; "section", `String "stt"
+          ; "endpoint",
+            `Assoc
+              [ "id", `String "whisper-local"
+              ; "kind", `String "openai_compat"
+              ; "base_url", `String "http://127.0.0.1:2022/v1"
+              ; "api_key_env", value
+              ]
+          ]
+      in
+      Actions.apply ~base_path (request (revision ~base_path) [ change ])
+    in
+    (match attempt `Null with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Actions.error_message error));
+    (match attempt (`String "  ") with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Actions.error_message error));
+    ignore (read path))
+
+(* The comment said null and omission were different requests; the code read
+   both as "clear it". A client that forgot the field deleted a mapping and was
+   told it worked. *)
+let test_a_missing_voice_does_not_clear_a_mapping () =
+  with_workspace (fun ~base_path ~path ->
+    let before = read path in
+    let change = `Assoc [ "change", `String "set_agent_voice"; "agent", `String "alpha" ] in
+    match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+    | Ok _ -> Alcotest.fail "a set_agent_voice with no voice field must be refused"
+    | Error error ->
+      Alcotest.(check bool) "the refusal says what is missing" true
+        (Astring.String.is_infix ~affix:"voice" (Actions.error_message error));
+      Alcotest.(check string) "and nothing was written" before (read path))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -270,6 +347,12 @@ let () =
       , [ Alcotest.test_case "an unknown kind" `Quick test_an_unknown_kind_is_refused_by_name
         ; Alcotest.test_case "an unknown change" `Quick test_an_unknown_change_is_refused
         ; Alcotest.test_case "an unknown section" `Quick test_an_unknown_section_is_refused
+        ; Alcotest.test_case "a wrongly typed optional field" `Quick
+            test_a_wrongly_typed_optional_field_is_refused
+        ; Alcotest.test_case "a set_agent_voice with no voice field" `Quick
+            test_a_missing_voice_does_not_clear_a_mapping
+        ; Alcotest.test_case "null and blank still clear" `Quick
+            test_null_and_blank_still_clear_a_field
         ] )
     ; ( "writing"
       , [ Alcotest.test_case "apply writes and answers with the new revision" `Quick

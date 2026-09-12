@@ -23,10 +23,21 @@ let string_field ~what fields key =
   | Some _ | None ->
     Error (Invalid_request (Printf.sprintf "%s needs a non-empty %S" what key))
 
-let optional_string fields key =
+(* Three states, not two. A field that is not in the request says nothing
+   about that setting; a field that is there with the wrong type is a request
+   this route cannot read. Reading both as absence let {"api_key_env": 7}
+   remove the credential and answer success, which is the one shape a client
+   cannot tell from having been obeyed. [null] is absence spelled out. *)
+let optional_string ~what fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | Some _ | None -> None
+  | None | Some `Null -> Ok None
+  (* Blank still clears: a client that sends "" is naming the setting and
+     asking for nothing in it, which is what the writer already did with it. *)
+  | Some (`String value) ->
+    Ok (if String.trim value = "" then None else Some value)
+  | Some _ ->
+    Error
+      (Invalid_request (Printf.sprintf "%s needs %S to be a string" what key))
 
 let section_of_string ~what = function
   | "tts" -> Ok Voice_setup.Tts
@@ -59,27 +70,39 @@ let endpoint_of_json json =
   let* id = string_field ~what:"an endpoint" fields "id" in
   let* kind_text = string_field ~what:"an endpoint" fields "kind" in
   let* kind = kind_of_string kind_text in
-  let enabled =
+  let what = "an endpoint" in
+  let* enabled =
     match List.assoc_opt "enabled" fields with
-    | Some (`Bool value) -> value
-    | Some _ | None -> true
+    | None | Some `Null -> Ok true
+    | Some (`Bool value) -> Ok value
+    | Some _ ->
+      Error (Invalid_request (Printf.sprintf "%s needs \"enabled\" to be true or false" what))
   in
-  let timeout_seconds =
+  let* timeout_seconds =
     match List.assoc_opt "timeout_seconds" fields with
-    | Some (`Float value) -> Some value
-    | Some (`Int value) -> Some (float_of_int value)
-    | Some _ | None -> None
+    | None | Some `Null -> Ok None
+    | Some (`Float value) -> Ok (Some value)
+    | Some (`Int value) -> Ok (Some (float_of_int value))
+    | Some _ ->
+      Error
+        (Invalid_request
+           (Printf.sprintf "%s needs \"timeout_seconds\" to be a number of seconds" what))
   in
+  let* base_url = optional_string ~what fields "base_url" in
+  let* mcp_url = optional_string ~what fields "mcp_url" in
+  let* health_url = optional_string ~what fields "health_url" in
+  let* api_key_env = optional_string ~what fields "api_key_env" in
+  let* default_voice = optional_string ~what fields "default_voice" in
   Ok
     { Voice_config.id
     ; kind
-    ; base_url = optional_string fields "base_url"
-    ; mcp_url = optional_string fields "mcp_url"
-    ; health_url = optional_string fields "health_url"
-    ; api_key_env = optional_string fields "api_key_env"
+    ; base_url
+    ; mcp_url
+    ; health_url
+    ; api_key_env
     ; enabled
     ; timeout_seconds
-    ; default_voice = optional_string fields "default_voice"
+    ; default_voice
     (* Not taken from the request. A command kind knows the name it is
        installed under, and an override is a path this route cannot check;
        someone who needs one edits the file. *)
@@ -136,11 +159,18 @@ let change_of_json json =
   | "set_agent_voice" ->
     let* agent = string_field ~what:"set_agent_voice" fields "agent" in
     (* A null voice clears the mapping, which is a different request from not
-       mentioning the field at all. *)
+       mentioning the field at all. Saying so and then reading both the same
+       way let a client that forgot the field delete a mapping and be told it
+       succeeded. *)
     (match List.assoc_opt "voice" fields with
-     | Some `Null | None -> Ok (Voice_setup.Set_agent_voice (agent, None))
+     | Some `Null -> Ok (Voice_setup.Set_agent_voice (agent, None))
      | Some (`String voice) when String.trim voice <> "" ->
        Ok (Voice_setup.Set_agent_voice (agent, Some voice))
+     | None ->
+       Error
+         (Invalid_request
+            "set_agent_voice needs \"voice\": a non-empty string to set one, or null to \
+             clear it")
      | Some _ ->
        Error
          (Invalid_request "set_agent_voice needs \"voice\" to be a non-empty string or null"))

@@ -896,7 +896,7 @@ let fail_running ?finished_at config ~now ~schedule_id ~error =
                ; error = Some error
                })
         in
-        let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
+        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
         let* () = write_state config next_state in
         Ok updated)
 ;;

@@ -264,6 +264,57 @@ let test_goal_list_rejects_status_filter () =
   | [] -> fail "expected status field error"
 ;;
 
+let test_goal_creation_emits_an_event () =
+  with_workspace
+  @@ fun config ->
+  let events_path =
+    Filename.concat
+      (Filename.dirname (Goal_store.goals_path config))
+      "goal_events.jsonl"
+  in
+  let events () =
+    if Sys.file_exists events_path
+    then
+      Fs_compat.load_file events_path
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> String.trim line <> "")
+    else []
+  in
+  check int "no goal has been opened yet" 0 (List.length (events ()));
+  let upsert args =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_upsert"
+      ~args:(`Assoc args)
+  in
+  let created =
+    match
+      upsert
+        [ "title", `String "Close the goal ledger"
+        ; "metric", `String "goals counted"
+        ; "target_value", `String "1"
+        ]
+    with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_upsert not handled"
+  in
+  let goal_id = get_string_field created "goal_id" in
+  let lines = events () in
+  check int "opening a goal records one event" 1 (List.length lines);
+  let event = Yojson.Safe.from_string (List.hd lines) in
+  check string "the event names creation" "goal_created"
+    (get_string_field event "event_type");
+  check string "the event names its goal" goal_id (get_string_field event "goal_id");
+  (* The title has to outlive the goal's row in goals.json, which holds only the
+     current set, so it travels in the payload rather than only in the store. *)
+  check string "the payload carries the title as created" "Close the goal ledger"
+    (get_string_field (Yojson.Safe.Util.member "payload" event) "title");
+  (match upsert [ "id", `String goal_id; "title", `String "Renamed after the fact" ] with
+   | Some _ -> ()
+   | None -> fail "masc_goal_upsert not handled on update");
+  check int "editing a goal is not a second beginning" 1 (List.length (events ()))
+;;
+
 let test_goal_upsert_rejects_lifecycle_fields () =
   with_workspace
   @@ fun config ->
@@ -532,6 +583,10 @@ let () =
             "upsert rejects lifecycle fields"
             `Quick
             test_goal_upsert_rejects_lifecycle_fields
+        ; test_case
+            "creating a goal emits an event"
+            `Quick
+            test_goal_creation_emits_an_event
         ; test_case
             "goal review removed from dispatch"
             `Quick

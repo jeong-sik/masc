@@ -2278,6 +2278,54 @@ let test_real_directory_release_failure_preserves_effect_truth () =
          (Atomic.get provider_reads))
 ;;
 
+(* The constitution tools reach their handler only if the name routes through
+   the descriptor to Tool_constitution_write / Tool_constitution_remove. The
+   RFC-0442 suites call the runtime functions directly, so that hop was carried
+   by the exhaustive match alone: a descriptor pointed at the wrong handler
+   still compiles. This drives it the way a keeper does, by name. *)
+let test_constitution_tools_dispatch_by_name () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_constitution"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let run name input =
+        KET.execute_keeper_tool_call_with_outcome ~config ~meta
+          ~publication_recovery ~ctx_work ~name ~input ()
+      in
+      let written =
+        run "keeper_constitution_write"
+          (`Assoc [ "text", `String "open before you record" ])
+      in
+      let written_json = check_success_result "keeper_constitution_write" written in
+      let article_id = json_string_field ~default:"" "article_id" written_json in
+      check bool "the write returns a minted article id" true
+        (String.length article_id = 34);
+      (* The handler wrote into this world, not somewhere else. *)
+      let ledger =
+        match
+          Masc.World_constitution_store.load ~base_path:config.Workspace.base_path
+        with
+        | Ok ledger -> ledger
+        | Error error ->
+          fail (Masc.World_constitution_store.read_error_to_string error)
+      in
+      check int "the world holds the norm" 1
+        (List.length ledger.Masc.World_constitution_store.articles);
+      let removed =
+        run "keeper_constitution_remove"
+          (`Assoc [ "article_id", `String article_id ])
+      in
+      ignore (check_success_result "keeper_constitution_remove" removed);
+      let after =
+        match
+          Masc.World_constitution_store.load ~base_path:config.Workspace.base_path
+        with
+        | Ok ledger -> ledger.Masc.World_constitution_store.articles
+        | Error error ->
+          fail (Masc.World_constitution_store.read_error_to_string error)
+      in
+      check int "taking it back empties the world" 0 (List.length after))
+;;
+
 let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
   with_exec_fixture
     ~require_sandbox:true
@@ -8301,7 +8349,6 @@ let test_peer_delegate_schema_reaches_model_wires () =
       | Ok _ -> fail "expected one official-client delegate definition"
       | Error error -> fail (Agent_core.Error.to_string error))
       ["actual Keeper bundle", bundled; "plain MASC bridge", plain])
-
 let test_binary_write_reference_survives_replay () =
   with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
@@ -8420,6 +8467,8 @@ let () =
         test_workspace_memory_read_dispatch;
       test_case "model-visible local tools dispatch to runtime handlers" `Quick
         test_model_visible_local_tools_dispatch_to_runtime_handlers;
+      test_case "constitution tools dispatch by name" `Quick
+        test_constitution_tools_dispatch_by_name;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
       test_case "unknown tool returns exact error" `Quick

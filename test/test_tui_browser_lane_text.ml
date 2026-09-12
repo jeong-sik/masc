@@ -10,7 +10,7 @@ let () =
     page = Some page; source = Live; client_id = Some "11111111-1111-4111-8111-111111111111"; elapsed_ms = 1.;
   } in
   let view = { (Lane.create ()) with reading = Some reading } in
-  let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in
+  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view)) in
   if lines <> ["Alice"; "First message"; ""; "Bob"; "두 번째 메시지"; ""] then
     failwith "Page paragraph boundaries, blank lines and trailing newline must survive projection";
   print_endline "PASS page multiline and blank-line projection"
@@ -78,12 +78,12 @@ let () =
     width=800.;height=600.;scroll_x=0.;scroll_y=0.;nodes=[node];truncated=false;view=Content;scope=None } in
   let scene : Lane.scene = {source=Automation;client_id=None;tab_id=1;content;elapsed_ms=1.} in
   let view = {(Lane.create ()) with source=Automation;selected_tab=Some 1;scene=Some scene} in
-  let lines = Masc_tui_types.browser_lane_page_lines ~cols:80 view in
+  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:80 view)) in
   List.iter (fun line ->
     if Masc_tui_message_layout.display_width ("  " ^ line) > 76 then
       failwith "scene line plus indentation exceeds the framed content width") lines;
   (match lines with
-   | "[>1 p]" :: content_lines when String.concat "" content_lines = node.text -> ()
+   | "[>1]" :: content_lines when String.concat "" content_lines = node.text -> ()
    | _ -> failwith "scene wrapping lost Unicode/ASCII text or the selected target prefix");
   let pending = {view with load=Loading (42,Scene_read 1)} in
   assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
@@ -111,7 +111,23 @@ let () =
        let open Yojson.Safe.Util in
        let json=Yojson.Safe.from_string text in
        assert (json |> member "nodeId" |> to_string = mapped.node_id);
-       assert (json |> member "source" |> member "sha256" |> to_string = located.digest));
+       assert (json |> member "source" |> member "sha256" |> to_string = located.digest);
+       assert (json |> member "scope" = `Null);
+       assert (json |> member "truncated" = `Bool false));
+  let focused_view = {view with scene=Some {scene with content={content with
+    nodes=[mapped];scope=Some target;scroll_y=240.;truncated=true}}} in
+  (match Lane.scene_context focused_view with
+   | None -> failwith "scoped element context missing"
+   | Some text ->
+       let open Yojson.Safe.Util in
+       let json=Yojson.Safe.from_string text in
+       assert (json |> member "view" = `String "content");
+       (* The copied scope is accepted by the browser read boundary, keeping
+          the region distinct from the selected element within it. *)
+       assert (Masc.Browser_scene.scope_of_json (json |> member "scope") = Ok target);
+       assert (json |> member "nodeId" = `String mapped.node_id);
+       assert (json |> member "viewport" |> member "scrollY" = `Float 240.);
+       assert (json |> member "truncated" = `Bool true));
   print_endline "PASS scene wrapping, source handoff, node deduplication and asynchronous ownership"
 
 (* Repeated ids are what the target index is for: a scene can hold the same
@@ -134,7 +150,10 @@ let () =
     scene_cursor = 2 } in
   if List.length (Lane.scene_targets view) <> 3 then
     failwith "repeated node ids must collapse to one target each";
-  let lines = Masc_tui_types.browser_lane_page_lines ~cols:100 view in
-  if lines <> ["[1 p] first"; "[2 p] second"; "[1 p] first again"; "[>3 p] third"] then
-    failwith "each node must carry the number of its id's first appearance, and the cursor its marker";
+  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view)) in
+  if lines <> ["first"; "second"; "first again"; "[>3] third"] then
+    failwith "text stays readable and the selected node retains its deduplicated number";
+  let repeated, selected = Masc_tui_types.browser_lane_page_layout ~cols:100 {view with scene_cursor=0} in
+  if repeated <> ["[>1] first"; "second"; "[>1] first again"; "third"] || selected <> Some 0 then
+    failwith "repeated selected text must retain its identity and first row";
   print_endline "PASS repeated scene node ids keep one number each"

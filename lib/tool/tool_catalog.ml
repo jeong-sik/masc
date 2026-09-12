@@ -232,6 +232,8 @@ let explicit_metadata : (string * metadata) list =
     ("masc_lane_slice", read_state_tool);
     ("masc_lane_detach", mutating_tool);
     ("masc_lane_evidence", mutating_tool);
+    ("masc_lane_act", mutating_tool);
+    ("masc_lane_action_status", read_state_tool);
     ("masc_msx_screen", read_state_tool);
     ("masc_msx_load", mutating_tool);
     ("masc_msx_eject", mutating_tool);
@@ -508,6 +510,8 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_memory_search", keeper_shard_read);
     ("keeper_memory_retract", keeper_shard_write);
     ("keeper_memory_write", keeper_shard_write);
+    ("keeper_constitution_write", keeper_shard_write);
+    ("keeper_constitution_remove", keeper_shard_write);
     ("keeper_library_search", keeper_shard_read);
     ("keeper_library_read", keeper_shard_read);
     ("keeper_surface_read", keeper_shard_read);

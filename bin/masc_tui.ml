@@ -1511,16 +1511,33 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     true
   | s ->
     let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
+    (* Both of these keys say what they did. The same two stances reached
+       through [/reasoning] and [/tools] answer with a notice, and reached
+       through the key they answered with nothing -- so on a turn that holds
+       no reasoning block and no tool call, the press changed a stance and
+       moved not one cell. That reads as a dead key, and pressing it again to
+       check puts the stance back where it started. The header names a stance
+       only when it is away from its default ([chat_visibility_summary]), so
+       it cannot stand in for this: returning to the default is exactly the
+       press that clears the label. *)
     if c = Some 18 then begin
       (* Ctrl-R cycles the presentation only; transcript bytes stay intact. *)
-      state.msg_reasoning_visibility <-
-        next_reasoning_visibility state.msg_reasoning_visibility;
+      let visibility = next_reasoning_visibility state.msg_reasoning_visibility in
+      state.msg_reasoning_visibility <- visibility;
+      state.last_action <-
+        Some
+          ( "reasoning " ^ reasoning_visibility_to_string visibility
+          , Unix.gettimeofday () );
       true
     end else if c = Some 4 then begin
       (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
       let visibility = toggle_tool_visibility state.msg_tool_visibility in
       state.msg_tool_visibility <- visibility;
       if visibility = Tools_full then load_tool_changes ();
+      state.last_action <-
+        Some
+          ( "tool calls " ^ tool_visibility_to_string visibility
+          , Unix.gettimeofday () );
       true
     end else if c = Some 6 then begin
       (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,

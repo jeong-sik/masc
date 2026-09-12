@@ -87,6 +87,12 @@ type live_tool_call =
       (** When TOOL_CALL_START arrived. A turn age says how long the turn has
           run; only this says whether the thing it is in right now has been
           running that whole time. *)
+  ; attempt : int
+      (** The runtime attempt that opened this call. The trail keeps every
+          attempt's calls as evidence, so a question about what is open *now*
+          has to say which attempt it means: a call left open on the runtime
+          failover walked away from is never going to return, and counting it
+          as running says the new attempt is waiting on something it is not. *)
   ; occurrence : Live.tool_occurrence
   ; call_id : string option
   ; execution_id : string option
@@ -1020,7 +1026,8 @@ let approval_outcome_to_string = function
    is the one a watcher is waiting on. *)
 let oldest_open_call t =
   t.reversed_tool_calls
-  |> List.filter (fun (call : live_tool_call) -> not call.ended)
+  |> List.filter (fun (call : live_tool_call) ->
+       (not call.ended) && call.attempt = t.attempt)
   |> List.fold_left
        (fun acc (call : live_tool_call) ->
          match acc with
@@ -1062,13 +1069,24 @@ let phase_text ~now t =
          Named rather than counted, and placed before the mix: the question is
          which call is still out, the names are few -- a round holds a handful
          -- and a long tool mix is what a narrow row loses first. *)
+      (* What is open *now*, which is not the same list as what this turn has
+         called. A call the failover walked away from keeps its place in the
+         trail as evidence, and reporting it here said the new attempt was
+         waiting on a runtime it had already left (observed 2026-09-12, where
+         one screen called the same tool "never returned" and "still running"
+         at once). The count and the mix below stay on the whole turn: those
+         answer "what has this turn done", and that does include the
+         abandoned attempts. *)
       let still_running =
-        List.filter
-          (fun activity ->
-            match activity.outcome with
-            | Started | Awaiting_result -> true
-            | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
-          activities
+        t.reversed_tool_calls
+        |> List.filter (fun (call : live_tool_call) ->
+             call.attempt = t.attempt)
+        |> List.rev
+        |> List.map activity_of_live_call
+        |> List.filter (fun activity ->
+             match activity.outcome with
+             | Started | Awaiting_result -> true
+             | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
       in
       let running =
         match still_running with
@@ -1106,14 +1124,21 @@ let phase_text ~now t =
               Printf.sprintf "failover working (attempt %d)%s" t.attempt in_this_call
           | None, _ -> "working" ^ in_this_call
         else
+          (* The heading above this row already says which of the two states
+             it is ("IN PROGRESS" / "FAILOVER IN PROGRESS", render.ml). Saying
+             it again here spent forty-eight cells on "failover [rid] (attempt
+             1) · " before the row reached its first fact, and what fell off
+             the far end was the open call's age -- the one number that tells
+             a slow call from a stuck one. The tag now carries only what the
+             heading cannot: which runtime, and which attempt. *)
           let runtime_tag =
             match t.current_runtime_id with
             | Some rid when t.attempt > 0 ->
-                Printf.sprintf "failover [%s] (attempt %d) · " rid t.attempt
-            | Some rid -> Printf.sprintf "working [%s] · " rid
+                Printf.sprintf "[%s] attempt %d · " rid t.attempt
+            | Some rid -> Printf.sprintf "[%s] · " rid
             | None when t.attempt > 0 ->
-                Printf.sprintf "failover (attempt %d) · " t.attempt
-            | None -> "working · "
+                Printf.sprintf "attempt %d · " t.attempt
+            | None -> ""
           in
           Printf.sprintf "%s%s%s%s · %s"
             runtime_tag (plural calls "tool") running in_this_call
@@ -1446,6 +1471,7 @@ let apply_delta ~now t (delta : Live.delta) =
          t.reversed_tool_calls <-
            { local_id
            ; started_at = now
+           ; attempt = t.attempt
            ; occurrence
            ; call_id = occurrence.tool_call_id
            ; execution_id = None

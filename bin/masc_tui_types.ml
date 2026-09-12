@@ -4966,7 +4966,13 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  roster_pane_hidden = false;
+  (* The roster comes when it is asked for. Ctrl-L's Activity pane already
+     answers "what is every keeper doing right now", and a name-only column
+     beside the chat repeated that answer while taking 34 of the
+     conversation's cells. Ctrl-B brings it back, and that press is the whole
+     cost of being wrong here -- whereas the column was drawn on every frame
+     whether or not anyone read it. *)
+  roster_pane_hidden = true;
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;

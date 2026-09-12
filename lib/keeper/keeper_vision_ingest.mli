@@ -45,7 +45,8 @@ val delegates_media : runtime_id:string -> bool
     alternative (RFC-0265 [No_capable_runtime]) drops it. *)
 
 val evict_blocks
-  :  mode:mode
+  :  ?base_path:string
+  -> mode:mode
   -> delegate:bool
   -> keeper_name:string
   -> Agent_core.Types.content_block list
@@ -62,7 +63,8 @@ val evict_blocks
     it falls back to an unread placeholder, so eviction still holds. *)
 
 val evict_message
-  :  mode:mode
+  :  ?base_path:string
+  -> mode:mode
   -> delegate:bool
   -> keeper_name:string
   -> Agent_core.Types.message
@@ -77,7 +79,8 @@ type image_projection =
   }
 
 val fallback_projector
-  : ?exclude_runtime_ids:string list
+  : ?base_path:string
+  -> ?exclude_runtime_ids:string list
   -> keeper_name:string
   -> unit
   -> mode:mode

@@ -55,21 +55,21 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   }
   |> Keeper_structured_output_schema.without_response_format
 
+let vision_output_instruction =
+  "Return only a JSON object with a non-empty string field named text. When \
+   the requested content is not visible, explicitly describe its absence \
+   in text; do not invent content to fill the field. Distinguish no visible \
+   content from content that is present but unreadable. Do not include \
+   markdown fences or prose outside the JSON object."
+
+let prompt_of_request (req : Va.request) =
+  Printf.sprintf "Analyze the attached image for this request:\n%s\n\n%s"
+    req.Va.query vision_output_instruction
+
 let message_of_request (req : Va.request) : Agent_core.Types.message =
-  let query =
-    Printf.sprintf
-      "Analyze the attached image for this request:\n\
-       %s\n\n\
-       Return only a JSON object with a non-empty string field named text. When \
-       the requested content is not visible, explicitly describe its absence \
-       in text; do not invent content to fill the field. Distinguish no visible \
-       content from content that is present but unreadable. Do not include \
-       markdown fences or prose outside the JSON object."
-      req.Va.query
-  in
   Agent_core.Types.make_message
     ~role:Agent_core.Types.User
-    [ Agent_core.Types.text_block query
+    [ Agent_core.Types.text_block (prompt_of_request req)
     ; Agent_core.Types.image_block
         ~source_type:Agent_core.Types.Base64
         ~media_type:req.Va.image_media_type
@@ -77,40 +77,25 @@ let message_of_request (req : Va.request) : Agent_core.Types.message =
         ()
     ]
 
-let vision_runtime_candidates ~now
-  : (string * Runtime.t * Llm_provider.Provider_config.t) list =
-  (* Delegate image-capability admission to the RFC-0265 SSOT
-     [Runtime_agent.caps_admit_required_modalities] so a runtime surfaced to the
-     vision tool is exactly one the dispatch capability gate would admit. Do NOT
-     re-derive this from [supports_image_input] / [supports_multimodal_inputs]
-     here: the SSOT admits "image" on [supports_image_input] alone, and the
-     modality reroute, the capability gate, and this vision pick must share one
-     predicate or a vision pick can land on a runtime the gate then rejects.
-     The candidate order is the RFC-0440 set the keeper reroute walks
-     ([Runtime_agent.media_candidates] with no lane, which is
-     [runtime.media_failover] in declared order). A declared runtime outside
-     that list is not offered here: it is the one boot does not validate
-     dispatch caps for, and this tool dispatches what it is handed
-     (#34823). Only [Agent_core] runtimes
-     qualify here because this tool calls the provider itself; an official
-     client carries inline images for the reroute but has no provider config.
-     The set is held in quota-window order ([Runtime_quota_window.demote_order],
-     the order the keeper lane already uses): a candidate whose account answered
-     a hard quota rejection moves behind the live ones, so a read does not start
-     at the candidate that just said it cannot pay (RFC-0440 §3). *)
+type vision_backend =
+  | Api of Llm_provider.Provider_config.t
+  | Official_client
+
+let vision_runtime_candidates ~now =
+  (* Only explicitly declared media candidates qualify. Capability admission
+     and account ordering are shared with the Keeper media reroute. *)
   Runtime_agent.media_candidates ~lane:[]
   |> Runtime_quota_window.demote_order ~now ~quota_scope_of:(fun (rt : Runtime.t) ->
        Some (Runtime.quota_scope_of_runtime rt))
   |> List.filter_map (fun (rt : Runtime.t) ->
-       match rt.Runtime.execution with
+       let caps = Runtime_agent.input_capabilities_of_runtime rt in
+       if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
+       then None
+       else match rt.Runtime.execution with
+       | Runtime_execution.Agent_core config -> Some (rt.id, rt, Api config)
        | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _ -> None
-       | Runtime_execution.Agent_core provider_config ->
-         let caps = Runtime_agent.input_capabilities_of_runtime rt in
-         if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
-         then Some (rt.Runtime.id, rt, provider_config)
-         else None)
+       | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
+       | Runtime_execution.Antigravity_cli _ -> None)
 
 let vision_runtime_ids ~now : string list =
   List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)
@@ -301,6 +286,7 @@ type vision_outcome =
       { failure_class : Tool_result.tool_failure_class
       ; detail : string
       }
+  | Vo_official_failure of { runtime_id : string; failure : Fusion_official_client.failure }
   | Vo_empty
   | Vo_truncated
 
@@ -376,6 +362,55 @@ type candidate_failure =
   | Candidate_provider_error of Llm_provider.Http_client.http_error
   | Candidate_output_limit
   | Candidate_invalid_output of string
+  | Candidate_official_failure of { runtime_id : string; failure : Fusion_official_client.failure }
+
+(* Preserve the client error until the candidate walk has used its typed
+   admission and effect observations. An accepted-but-unobserved timeout is
+   not evidence that another candidate may safely replace the turn. *)
+let official_failure_can_advance : Fusion_official_client.failure -> bool = function
+  | Setup_failure _ | Antigravity_failure _ -> false
+  | Claude_admission_failure (Invalid_config _) -> false
+  | Claude_admission_failure _ -> true
+  | Codex_failure error ->
+    (match error with
+     | Subscription_required _ | Spawn_failed _
+     | Timeout { turn_accepted = false; _ }
+     | Context_window_exceeded { tool_effect_attempted = false; _ } -> true
+     | Invalid_config _ | Turn_input_write_failed _ | Protocol_error _
+     | Rpc_error _ | Unsupported_server_request _
+     | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
+     | Turn_interrupted | Runtime_shutting_down | Process_exited _
+     | Timeout { turn_accepted = true; _ } -> false)
+  | Claude_failure error ->
+    (match error with
+     | Subscription_required _ | Spawn_failed _
+     | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
+     | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
+     | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ } -> true
+     | Invalid_config _ | Protocol_error _ | Unsupported_control_request _
+     | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
+     | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
+     | Process_exited _ | Timeout _ -> false)
+;;
+
+let outcome_of_official_failure ~runtime_id failure =
+  Vo_official_failure { runtime_id; failure }
+;;
+
+(* A failed transport does not prove that the accepted turn had no effect.
+   Only typed pre-submission or explicit no-effect observations grant that
+   receipt. The stateless runner supplies no durable recovery session. *)
+let official_failure_effect : Fusion_official_client.failure -> Tool_result.failure_effect_disposition = function
+  | Setup_failure _ | Claude_admission_failure _ -> Proven_pre_effect
+  | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
+      | Timeout { turn_accepted = false; _ }
+      | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect
+  | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
+      | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
+      | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
+      | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
+  | Codex_failure _ | Claude_failure _ | Antigravity_failure _ -> Effect_outcome_unknown
+;;
 
 (* One walk shrinks the image at most once per distinct edge it is asked
    for. The live fleet declares three distinct caps, so a 4K screenshot costs
@@ -497,6 +532,7 @@ let note_candidate_account ~(runtime : Runtime.t) = function
 ;;
 
 let run_candidates_outcome
+    ?base_path
     ?complete
     ~sw
     ~clock
@@ -514,7 +550,9 @@ let run_candidates_outcome
          refusal) is not the reason the image went unread, and it is already
          on the candidate counter under that runtime's id. *)
       (match last_error with
-       | None -> Vo_no_runtime "no schema-capable image runtime configured"
+       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | Some (Candidate_official_failure { runtime_id; failure }) ->
+         outcome_of_official_failure ~runtime_id failure
        | Some Candidate_timeout -> Vo_timeout
        | Some Candidate_output_limit -> Vo_truncated
        | Some (Candidate_invalid_output detail) -> Vo_invalid_structured_response detail
@@ -523,7 +561,50 @@ let run_candidates_outcome
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
            })
-    | (runtime_id, rt, provider_config) :: rest ->
+    | (runtime_id, rt, Official_client) :: rest ->
+      let result = match base_path with
+        | None -> Error (Fusion_official_client.Setup_failure (Fusion_types.Provider_error
+            "official-client image analysis requires the workspace base path"))
+        | Some base_dir ->
+          Fusion_official_client.run_with_images ~base_dir ~runtime:rt
+            ~system_prompt:vision_output_instruction
+            ~prompt:(prompt_of_request req)
+            ~images:[{ Fusion_official_client.media_type = req.image_media_type;
+                       base64_data = Base64.encode_string req.image_bytes }]
+            ~output_schema:(`Assoc [
+              "type", `String "object";
+              "properties", `Assoc ["text", `Assoc ["type", `String "string"]];
+              "required", `List [`String "text"];
+              "additionalProperties", `Bool false]) () in
+      (match result with
+       | Error failure ->
+         record_vision_candidate_attempt ~runtime_id ~result:"error"
+           ~reason:"official_client_error";
+         if official_failure_can_advance failure then
+           loop ~last_error:(Some (Candidate_official_failure { runtime_id; failure }))
+             ~attempt_index:(attempt_index + 1) rest
+         else outcome_of_official_failure ~runtime_id failure
+       | Ok response ->
+         let parsed =
+           try vision_text_of_json (Yojson.Safe.from_string response.text)
+           with Yojson.Json_error detail -> Error detail in
+         (match parsed with
+          | Ok text when String.trim text <> "" ->
+            record_vision_candidate_attempt ~runtime_id ~result:"ok"
+              ~reason:"provider_response";
+            Vo_ok { text; runtime_id; requested_model = rt.model.api_name;
+                    response_model = response.model }
+          | parsed ->
+            let detail = match parsed with
+              | Error detail -> detail
+              | Ok _ -> "empty extraction" in
+            record_vision_candidate_attempt ~runtime_id ~result:"error"
+              ~reason:"invalid_structured_output";
+            if not (List.is_empty rest) then sleep_before_next_candidate ~clock ~attempt_index;
+            loop ~last_error:(Some (Candidate_invalid_output
+              (Printf.sprintf "%s: %s" runtime_id detail)))
+              ~attempt_index:(attempt_index + 1) rest))
+    | (runtime_id, rt, Api provider_config) :: rest ->
       let continue_with last_error =
         (if not (List.is_empty rest)
          then sleep_before_next_candidate ~clock ~attempt_index);
@@ -687,6 +768,7 @@ let run_candidates_outcome
   loop ~last_error ~attempt_index candidates
 
 let run_vision
+    ?base_path
     ?complete
     ?runtime_id
     ?(exclude_runtime_ids = [])
@@ -748,6 +830,7 @@ let run_vision
               match selected with
               | Error detail -> Vo_invalid_request detail
               | Ok candidates -> run_candidates_outcome
+                ?base_path
                 ?complete
                 ~sw
                 ~clock
@@ -767,10 +850,10 @@ let run_vision
 (* The [Vo_provider] arm below binds its class once and hands the same value
    to the result and to the payload. The other arms wrote theirs twice, so a
    change to one spelling left the other saying something else. *)
-let failed ~failure_class ?detail code =
+let failed ~failure_class ?(effect_disposition = Tool_result.Proven_pre_effect) ?detail code =
   Keeper_tool_execution.failure
     ~class_:failure_class
-    ~effect_disposition:Tool_result.Proven_pre_effect
+    ~effect_disposition
     (err_json ~failure_class ?detail code)
 ;;
 
@@ -788,6 +871,22 @@ let execution_of_vision_outcome = function
       "invalid_structured_response"
   | Vo_provider { failure_class; detail } ->
     failed ~failure_class ~detail "provider_error"
+  | Vo_official_failure { runtime_id; failure } ->
+    let effect_disposition = official_failure_effect failure in
+    let detail = Fusion_official_client.panel_failure ~runtime_id failure
+      |> Fusion_types.show_panel_failure in
+    let failure_class, code = match failure with
+      | Codex_failure (Timeout _)
+      | Claude_failure (Timeout _) | Claude_admission_failure (Timeout _) ->
+        Tool_result.Dependency_unavailable, "timeout"
+      | Codex_failure (Subscription_required _)
+      | Claude_failure (Subscription_required _)
+      | Claude_admission_failure (Subscription_required _) ->
+        Tool_result.Policy_rejection, "provider_error"
+      | _ when official_failure_can_advance failure ->
+        Tool_result.Dependency_unavailable, "provider_error"
+      | _ -> Tool_result.Runtime_failure, "provider_error" in
+    failed ~failure_class ~effect_disposition ~detail code
   | Vo_empty ->
     failed ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
   | Vo_truncated ->
@@ -801,6 +900,7 @@ let runtime_id_of_args args =
   | Some _ -> Error "runtime_id must be a non-empty configured runtime identifier"
 
 let handle_with_outcome
+    ?base_path
     ?complete
     ?sw
     ?clock
@@ -853,6 +953,7 @@ let handle_with_outcome
                   "invalid_media_type"
               | Ok media_type ->
                 run_vision
+                  ?base_path
                   ?complete
                   ?runtime_id
                   ~sw
@@ -864,8 +965,9 @@ let handle_with_outcome
                   ()
                 |> execution_of_vision_outcome))))
 
-let handle ?complete ?sw ?clock ?net ~meta ~args () =
+let handle ?base_path ?complete ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome
+     ?base_path
      ?complete
      ?sw
      ?clock

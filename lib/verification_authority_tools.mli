@@ -29,7 +29,10 @@ val root_layout : t -> (string list, string) result
     time and relative to the ownership root: bounded immediate entries plus
     every checkout returned by the shared checkout-discovery authority.
     Unavailable or partial discovery is [Error], so a caller must defer the
-    review instead of turning an incomplete list into absence evidence. *)
+    review instead of turning an incomplete list into absence evidence. A
+    workspace producer whose root does not exist gets one line stating that
+    absence: nothing creates that directory for such a producer, so the fact
+    is complete and the review proceeds on the submitted evidence. *)
 
 val goal_proof_root_layout : t -> (string list, string) result
 (** {!root_layout} for a {!create_goal_proof} surface: the producer entries

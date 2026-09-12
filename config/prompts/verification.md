@@ -130,6 +130,9 @@ producer 자신의 tool을 producer의 sandbox 루트에 겨눈 채 가지고 �
 ### lookup.root_layout_empty
 (this root is empty)
 
+### lookup.root_layout_absent (vars: root)
+(이 producer 에게는 playground 트리가 없습니다. {{root}} 는 존재하지 않습니다. Keeper 가 아닌 producer 의 디렉터리는 아무도 만들어 주지 않으므로 artifact 증거는 여기서 읽을 수 없습니다. 스냅샷이 제출 시점에 기록한 것, note 증거, URL 로 판정하세요.)
+
 ### image_evidence (vars: image_evidence_lines)
 <image_evidence>
 이 검증 요청에는 이미지 증거가 첨부로 실립니다. 각 항목은 제출된 typed

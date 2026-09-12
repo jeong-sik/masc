@@ -313,6 +313,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           , delta_rate (fun usage -> usage.input_tokens + usage.output_tokens) );
           ( "last_output_tokens_per_sec"
           , delta_rate (fun usage -> usage.output_tokens) );
+          ( "last_usage_reported_at"
+          , Json_util.float_opt_to_json m.runtime.usage.last_usage_reported_at );
         ]
       in
       let current_phase =

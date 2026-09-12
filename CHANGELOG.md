@@ -1,6 +1,46 @@
 # Changelog
 
 
+## [0.35.12] - 2026-09-12
+
+### Added
+
+- Tool-result images reach vision models as user-media followups on the OpenAI-compatible, Ollama, and Gemini wires; a model without declared image capability degrades the image to a named placeholder instead of a rejected request (#35162).
+- Verifier inspects contained image evidence with the actual judge model (#35171).
+- Keepers hand generated binary artifacts to peers through the workspace blob store without either side touching the other's host paths (#35155).
+- `masc_schedule_note_add` / `masc_schedule_notes_list` tools for durable schedule notes (task-381) (#35237).
+- Setup installs and launches verified Docker Desktop from selection (#35151), and continues saved sandbox setup in a Docker group session (#35156).
+- Setup installs selected official CLI clients without Homebrew (#35165).
+- CLI setup uses the native runtime identity and an atomic batch writer (#35164).
+- Each workspace HTTP port persists across fresh processes (#35241).
+- Setup selection shows exact model release evidence (#35143).
+- Lane add-on containers publish lifecycle events on the MASC bus — first slice of an experimental surface (#35242).
+
+### Fixed
+
+- Nested tool-result documents and audio degrade at every wire instead of leaking or rejecting (#35252).
+- Positive `Retry-After` hints floor at 1.0s to prevent a rapid-fire retry loop (#35253).
+- Reasoning efforts and thinking control propagate through the exact catalog binding (#35254).
+- Model preparation requests stay alive until completion or explicit cancellation (#35238).
+- OpenRouter rows accepting effort `none` declare their control format (#35258).
+- A single librarian slot projection failure no longer kills the whole exact lane (#35234).
+- Evidence retains complete binary snapshots beyond text preview limits (#35170).
+- TUI repairs from PR #35230 review findings F2-F4 (#35235).
+- Keeper dispatch tests check their Docker mount premise and initialize the prompt directory (#35251).
+
+### Performance
+
+- TUI turns and chat history inflight guards; IDE file activity cached (#35257).
+- Board attention quarantine caching and comprehensive TUI inflight guards (#35244).
+- Dashboard snapshot cache thrashing eliminated; operator TUI inflight guards (#35243).
+- Keeper file-change scanning with a raw pre-filter and sliding window pruning (#35239).
+
+### Docs
+
+- Corrective grammar v0.2 catalog of measured failure cases and its follow-up (#35249, #35256).
+- RFC: event spine and event source contract (#35240).
+
+
 ## [0.35.11] - 2026-09-11
 
 ### Added

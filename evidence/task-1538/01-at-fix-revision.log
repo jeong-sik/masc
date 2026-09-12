@@ -1,0 +1,7 @@
+# receipt: task-1538 at-fix-revision checks (clean rerun)
+branch=polish/task-1538-g1-field-ambiguity head=594643d
+utc=2026-09-11T22:14:04Z
+% dune build @check
+check_exit=0
+% dune build --profile release @check
+release_check_exit=0

@@ -19,6 +19,7 @@ let goal_verification_lookup = "goal_verification.lookup"
 let verification_lookup_none = "verification.lookup.none"
 let verification_lookup_producer_tree = "verification.lookup.producer_tree"
 let verification_lookup_root_layout_empty = "verification.lookup.root_layout_empty"
+let verification_lookup_root_layout_absent = "verification.lookup.root_layout_absent"
 let verification_contract = "verification.contract"
 let verification_required_evidence = "verification.required_evidence"
 

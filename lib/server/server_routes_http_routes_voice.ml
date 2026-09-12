@@ -42,29 +42,32 @@ let is_valid_token (s : string) : bool =
 let generated_media_serve_max_bytes () =
   Env_config.KeeperGeneratedMedia.max_bytes ()
 
-(* Clip path under the same audio dir [Voice_bridge_transport.make_audio_file]
-   writes to. Reuses [Voice_bridge_core.masc_base_dir] so this route and the
-   synthesis side cannot drift apart. *)
-let clip_path ~token =
-  Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio"
-  |> fun dir -> Filename.concat dir (token ^ ".mp3")
+(* The clip a token names, under the same audio dir
+   [Voice_bridge_transport.make_audio_file] writes to. Reuses
+   [Voice_bridge_core.find_clip] so this route and the synthesis side cannot
+   drift apart — including on the container, which the endpoint that spoke
+   decides: say writes WAVE, the HTTP providers answer MP3. *)
+let find_clip ~token =
+  Voice_bridge_core.find_clip ~dir:(Voice_bridge_core.audio_dir ()) ~token
 
 let serve_clip ~token request reqd =
-  let path = clip_path ~token in
-  if not (Sys.file_exists path) then
+  match find_clip ~token with
+  | None ->
     (* Never synthesized, or reaped by the 24h TTL reaper. Text-only render
        remains the dashboard fallback, so 404 is not a hard failure. *)
     respond_public_read_json_value ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
-  else (
+  | Some (path, format) -> (
     (* Raw bytes — the dashboard's <audio>/Audio element fetches this URL
-       directly. [Fs_compat.load_file] returns the mp3 bytes as a string;
-       mp3 has no OCaml-string encoding hazard. content-length is explicit
-       to avoid chunked encoding, which some clients mishandle for media. *)
+       directly. [Fs_compat.load_file] returns the encoded bytes as a string;
+       neither container has an OCaml-string encoding hazard. content-length
+       is explicit to avoid chunked encoding, which some clients mishandle
+       for media. The content type is the format found on disk, so a player
+       is never told MP3 about WAVE bytes. *)
     let body = Fs_compat.load_file path in
     let headers =
       Httpun.Headers.of_list
-        ( ("content-type", "audio/mpeg")
+        ( ("content-type", Voice_bridge_core.clip_content_type format)
         :: ("content-length", string_of_int (String.length body))
         :: public_read_cors_headers request )
     in
@@ -170,6 +173,40 @@ let handle_transcribe _state request reqd body =
         respond_json ~status:`Bad_request ~request reqd
           (`Assoc [ ("error", `String err) ]))
 
+
+(* A voice setup failure carries its own sentence; the status says what kind of
+   failure it was. A revision that moved under the caller is a conflict, not a
+   bad request: the caller did nothing wrong, it just read before someone else
+   wrote. *)
+let respond_voice_setup_error request reqd error =
+  let status =
+    match error with
+    | Server_voice_setup_actions.Invalid_request _ -> `Bad_request
+    | Server_voice_setup_actions.Setup_failed Voice_setup.Configuration_changed ->
+      `Conflict
+    | Server_voice_setup_actions.Setup_failed
+        (Voice_setup.Configuration_unavailable _) -> `Internal_server_error
+    | Server_voice_setup_actions.Setup_failed
+        ( Voice_setup.Voice_section_invalid _
+        | Voice_setup.Endpoint_path_unusable _
+        | Voice_setup.Configuration_rejected _ ) -> `Bad_request
+  in
+  respond_json_value_with_cors ~status request reqd
+    (`Assoc
+      [ "error", `String (Server_voice_setup_actions.error_message error) ])
+
+let handle_voice_setup ~base_path ~act request reqd body =
+  match Yojson.Safe.from_string body with
+  (* Narrowed to what the parser throws: a wildcard here would swallow
+     Eio.Cancel.Cancelled and answer a cancelled fiber with a parse error. *)
+  | exception Yojson.Json_error _ ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (`Assoc [ "error", `String "the request body is not JSON" ])
+  | json ->
+    (match act ~base_path json with
+     | Ok result -> respond_json_value_with_cors ~status:`OK request reqd result
+     | Error error -> respond_voice_setup_error request reqd error)
+
 let add_routes router =
   router
   |> Http.Router.prefix_get Masc_network_defaults.voice_audio_path_prefix
@@ -219,4 +256,33 @@ let add_routes router =
          (fun state _agent_name _req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_transcribe state request reqd body))
+         request reqd)
+  (* Voice setup: read what is configured, see what a change would do, commit
+     it. All three are CanAdmin -- they read and rewrite the workspace's
+     runtime.toml, which GET /api/v1/voice/config deliberately does not expose
+     (it answers three booleans and no endpoint identity, because it is a public
+     read). *)
+  |> Http.Router.get "/api/v1/voice/setup" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           match Server_voice_setup_actions.observe ~base_path with
+           | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
+           | Error error -> respond_voice_setup_error request reqd error)
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/setup/preview" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Request.read_body_async reqd (fun body ->
+             handle_voice_setup ~base_path
+               ~act:Server_voice_setup_actions.preview request reqd body))
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/setup" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Request.read_body_async reqd (fun body ->
+             handle_voice_setup ~base_path ~act:Server_voice_setup_actions.apply request
+               reqd body))
          request reqd)

@@ -343,10 +343,18 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
            Buffer.add_string buf line;
            Buffer.add_string buf "\027[0K\r\n")
          entries);
-  (* Pad the body so a previously longer list leaves no ghost rows behind. *)
+  (* Pad the body so a previously longer list leaves no ghost rows behind, and
+     stop the clearing one newline short of the bottom. A newline written on the
+     last row scrolls the screen by one, and the row that scrolls off is the
+     first -- the title, which is the only place this screen says [esc] goes
+     back. Measured at 150x44 with no cartridges: the screen held two lines, the
+     sentence about the empty directory and a blank, and nothing said how to
+     leave. *)
   let drawn = 1 + status_rows + max 1 (List.length entries) in
-  for _ = drawn to max 4 (rows - 1) do
-    Buffer.add_string buf "\027[0K\r\n"
+  let last_row = max 4 (rows - 1) in
+  for row = drawn to last_row do
+    Buffer.add_string buf "\027[0K";
+    if row < last_row then Buffer.add_string buf "\r\n"
   done;
   write_batch ~write (Buffer.contents buf);
   image_may_exist := false

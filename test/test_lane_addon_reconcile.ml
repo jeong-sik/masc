@@ -299,6 +299,59 @@ let test_deleted_declaration_retains_history () =
     ignore (reconcile config directory);
     check int "absence does not create a replacement" 1 (List.length (starts state)))
 
+let test_duplicate_toml_keys_preserve_applied_workers () =
+  with_fixture (fun env _ config directory packages state ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let original_manifest = In_channel.with_open_bin manifest In_channel.input_all in
+    let path = Filename.concat directory "observer.toml" in
+    let original_declaration = declaration ~id:"observer" ~manifest () in
+    write path original_declaration;
+    let independent_manifest = package packages "independent" in
+    write (Filename.concat directory "independent.toml")
+      (declaration ~id:"independent" ~manifest:independent_manifest ());
+    ignore (reconcile config directory);
+    let id = declared_instance config "observer" |> text "instance_id" in
+    let independent = declared_instance config "independent" |> text "instance_id" in
+    await_ready clock config id;
+    await_ready clock config independent;
+    let original_binding = instance config id |> member "binding" in
+    let original_revision = instance config id |> member "configuration" |> text "revision" in
+    let duplicate_port = "\n[world.outputs]\nframes={all_lanes=true}\nframes={all_lanes=true}\n" in
+    List.iter (fun (label, corrupt, expected_id) ->
+      write manifest original_manifest;
+      write path original_declaration;
+      corrupt ();
+      let report = reconcile config directory in
+      check bool (label ^ ": directory membership remains authoritative") true
+        (member "complete" report = `Bool true);
+      let issue = values "issues" report |> List.find (fun issue -> text "source_path" issue = path) in
+      check bool (label ^ ": issue retains only a successfully parsed identity") true
+        (member "id" issue = expected_id);
+      check bool (label ^ ": parser diagnostic remains visible") true
+        (String.trim (text "message" issue) <> "");
+      check string (label ^ ": previous worker keeps ownership") id
+        (declared_instance config "observer" |> text "instance_id");
+      check string (label ^ ": applied revision is not replaced by malformed input") original_revision
+        (instance config id |> member "configuration" |> text "revision");
+      check bool (label ^ ": applied binding remains unchanged") true
+        ((instance config id |> member "binding") = original_binding);
+      check int (label ^ ": invalid input starts no replacement") 2 (List.length (starts state));
+      check int (label ^ ": invalid input stops no worker") 0 (List.length (stops state));
+      List.iter (fun instance_id ->
+        let seq = number "observation_seq" (instance config instance_id) in
+        ignore (dispatch config Runtime.Observe ["instance_id", `String instance_id]);
+        await clock (fun () -> number "observation_seq" (instance config instance_id) > seq)) [id; independent])
+      ["duplicate manifest port", (fun () -> write manifest (original_manifest ^ duplicate_port)), `String "observer";
+       "duplicate declaration key", (fun () -> write path ("id=\"ambiguous\"\n" ^ original_declaration)), `Null];
+    write manifest original_manifest;
+    write path original_declaration;
+    check int "repair clears the parser issues" 0 (values "issues" (reconcile config directory) |> List.length);
+    check string "repair reuses the original applied owner" id
+      (declared_instance config "observer" |> text "instance_id");
+    detach clock config id;
+    detach clock config independent)
+
 let test_restart_recovers_exact_owner_before_replacement () =
   with_fixture (fun env sw config directory packages state ->
     let clock = Eio.Stdenv.clock env in
@@ -613,6 +666,8 @@ let test_historical_recovery_failure_waits_for_maintenance () =
     detach real_clock config id)
 
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "duplicate TOML keys preserve applied owners and report issues" `Quick
+    test_duplicate_toml_keys_preserve_applied_workers;
   test_case "historical cleanup failures wait for virtual maintenance beats" `Quick
     test_historical_recovery_failure_waits_for_maintenance;
   test_case "explicit removal preserves newer and malformed desired files" `Quick

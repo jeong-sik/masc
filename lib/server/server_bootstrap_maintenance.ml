@@ -274,13 +274,15 @@ let recover_keeper_config_journal_on_startup ~base_path =
 let with_initial_configuration ~base_path initialize =
   let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
   let config_root = Filename.dirname runtime_config_path in
-  (* Preserve fresh-root seeding before the lock file creates its directory.
-     Existing roots may contain an interrupted writer: their bootstrap reads
-     and backfills must stay inside the guarded constructor below. *)
-  if not (Sys.file_exists config_root) then
-    Server_runtime_config_root_bootstrap.bootstrap_base_path_config_root ~base_path;
-  Fs_compat.mkdir_p config_root;
+  (* Directory creation is atomic. No configuration bytes are read or seeded
+     before journal admission; a concurrent creator is an existing root. *)
+  Fs_compat.mkdir_p (Filename.dirname config_root);
+  let created =
+    try Unix.mkdir config_root 0o755; true with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> false in
   Runtime.with_config_lock ~runtime_config_path (fun () ->
+    if created then
+      Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created;
     Ok (initialize ~runtime_config_path))
 ;;
 

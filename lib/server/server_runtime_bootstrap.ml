@@ -609,6 +609,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     Env_config_core.base_path_input_env_key
     (Option.value ~default:"" input_base_path);
   Unix.putenv Env_config_core.base_path_env_key base_path;
+  Config_dir_resolver.reset ();
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   Server_slack_connector_config.configure ~config_root;

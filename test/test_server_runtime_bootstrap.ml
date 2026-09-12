@@ -1050,6 +1050,32 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
+let test_created_root_populated_before_lock_is_not_fresh_seeded () =
+  with_temp_dir "startup-populated-created-root" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    mkdir_p repo;
+    let seed = make_config_root repo in
+    mkdir_p (Filename.concat seed "keepers-default");
+    write_file (Filename.concat seed "keepers-default/default-imp.toml") "[keeper]";
+    let base_path = Filename.concat dir "base" in
+    let config_root = Filename.concat base_path ".masc/config" in
+    mkdir_p (Filename.dirname config_root);
+    Unix.mkdir config_root 0o755;
+    let runtime_path = Filename.concat config_root "runtime.toml" in
+    (* Startup created the directory, but another writer populated it before
+       startup acquired the configuration lock. The old created flag alone
+       must not turn this into a full fresh install. *)
+    write_file runtime_path "# operator configuration";
+    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_cwd repo @@ fun () ->
+    (match Runtime.with_config_lock ~runtime_config_path:runtime_path (fun () ->
+       Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created:true;
+       Ok ()) with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    Alcotest.(check string) "competing writer bytes survive" "# operator configuration" (read_file runtime_path);
+    Alcotest.(check bool) "populated root does not receive a fresh default roster" false
+      (Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")))
+
 let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
@@ -1110,6 +1136,7 @@ let test_initial_configuration_relative_override_matches_writer_path () =
     mkdir_p config_root;
     let runtime_path = Filename.concat config_root "runtime.toml" in
     write_file runtime_path "[runtime]";
+    with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "1") @@ fun () ->
     with_env "MASC_CONFIG_DIR" (Some "relative-config") @@ fun () ->
     with_env "MASC_BASE_PATH" (Some base_path) @@ fun () ->
     with_cwd process_cwd @@ fun () ->
@@ -5306,6 +5333,8 @@ let () =
             test_startup_state_json_includes_watchdog;
           Alcotest.test_case "startup json includes runtime resolution" `Quick
             test_startup_state_json_includes_runtime_resolution;
+          Alcotest.test_case "created root populated before lock is not fresh seeded" `Quick
+            test_created_root_populated_before_lock_is_not_fresh_seeded;
           Alcotest.test_case "initial configuration relative override matches writer path" `Quick
             test_initial_configuration_relative_override_matches_writer_path;
           Alcotest.test_case

@@ -457,58 +457,121 @@ its own.
 through an MCP tool call and has no transcribe path, as the kind table above
 says.
 
-### The same probes over HTTP
+### Setting voice up over HTTP, measured end to end
 
-The CLI and the routes ask the same two functions, so a dashboard or a wizard
-sees what `masc voice-verify` prints. Both are `CanAdmin`: a probe synthesizes
-for real, and on a metered provider that spends a credit — the same reason
-`/api/v1/voice/transcribe` carries no public capability.
+Run on this machine 2026-09-13 (macOS 26, M3 Max) against a scratch workspace,
+every line below copied from the terminal. The token is the workspace's own:
 
-```
-curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/tts \
-  -H "authorization: Bearer $MASC_TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"message":"음성 연결을 확인합니다"}'
-
-curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/stt \
-  -H "authorization: Bearer $MASC_TOKEN" \
-  -H 'content-type: audio/wav' --data-binary @probe.wav
+```sh
+MASC=http://127.0.0.1:8971
+TOKEN=$(cat "$MASC_BASE_PATH/.masc/auth/admin.token")
 ```
 
-Both answer the same object:
+**1 — what is configured now.** A fresh workspace has nothing:
+
+```
+GET /api/v1/voice/setup
+{"revision":"623b8dbc…","tts":null,"stt":null,"session":null,
+ "capture":null,"local_playback":null,"gate":null}
+```
+
+**2 — which voices this machine has**, asked before anything is written:
+
+```
+POST /api/v1/voice/voices   {"kind":"macos_say"}
+→ 184 rows, 9 of them ko_KR
+  {"id":"Eddy (한국어(한국))","name":"Eddy (한국어(한국))","language":"ko_KR"}
+```
+
+**3 — turn speaking on.** The revision from step 1 goes back as
+`expected_revision`, so a second writer cannot be overwritten:
 
 ```json
-{"endpoints":[{"endpoint_id":"macos-say","kind":"macos_say",
-               "state":"answered","detail":"113528 bytes of audio"}]}
+{"expected_revision":"623b8dbc…",
+ "changes":[{"change":"put_endpoint","section":"tts",
+             "endpoint":{"id":"macos-say","kind":"macos_say"}},
+            {"change":"set_tts_default_voice","voice":"Yuna"}]}
+```
+```
+POST /api/v1/voice/setup
+→ {"applied":true,"revision":"436a6857…"}
 ```
 
-A TTS probe with no `"message"` is a 400 that says so rather than a probe of
-an empty sentence, and an empty STT body is a 400 rather than a transcript of
-silence: those two are different answers and the report keeps them apart.
+No `default_model` anywhere, and the section loads. Against a build without
+that narrowing the same request answered
+`the edit does not load as a voice configuration, so it was not written:
+runtime.toml [voice]: tts.default_model is required` — measured on both, an
+hour apart.
 
-### Asking an endpoint which voices it has
+**4 — make it speak, for real:**
 
 ```
-curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/voices \
-  -H "authorization: Bearer $MASC_TOKEN" \
-  -H 'content-type: application/json' \
-  -d '{"kind":"macos_say"}'
+POST /api/v1/voice/probe/tts   {"message":"음성 연결을 확인합니다"}
+→ {"endpoints":[{"endpoint_id":"macos-say","kind":"macos_say",
+                 "state":"answered","detail":"79758 bytes of audio"}]}
+   2.4s wall
 ```
+
+**5 — turn listening on and make it hear:**
 
 ```json
-{"voices":[{"id":"Albert","name":"Albert","language":"en_US"},
-           {"id":"Yuna","name":"Yuna","language":"ko_KR"}]}
+{"changes":[{"change":"put_endpoint","section":"stt",
+             "endpoint":{"id":"whisper-local","kind":"whisper_cli"}},
+            {"change":"set_default_model","section":"stt",
+             "model":"~/models/whisper/ggml-large-v3-turbo.bin"}]}
+```
+```
+POST /api/v1/voice/probe/stt   (raw wav body)
+→ {"endpoints":[{"endpoint_id":"whisper-local","kind":"whisper_cli",
+                 "state":"answered","detail":"heard 오늘 음성 설정을 마쳤습니다."}]}
+   3.1s wall
 ```
 
-184 rows on a stock macOS 26, nine of them `ko_KR`. For `elevenlabs_direct`
-pass `{"kind":"elevenlabs_direct","api_key_env":"ELEVENLABS_API_KEY"}` — the
-**name** of the variable, never the value, the same rule the setup routes
-follow because `runtime.toml` is committed.
+The transcript is the sentence that was spoken, word for word.
 
-The request carries no address and no command path. A route cannot check
-where one points, so the read uses the kind's own destination; asking for a
-kind that publishes no catalogue is refused by name rather than answered with
-an empty list, which would read as "this endpoint has no voices".
+**What the public config then says.** `GET /api/v1/voice/config` needs no
+token and carries no model where none was named:
+
+```json
+{"status":"ok",
+ "tts":{"default_model":null,"default_voice":"Yuna",
+        "available_voices":["Yuna"],"available_models":[], …},
+ "stt":{"default_model":"…/ggml-large-v3-turbo.bin", …}}
+```
+
+`null` and `[]`, not `""` and `[""]` — a model named `""` would read as a
+model that exists.
+
+### What each route refuses, measured
+
+| Request | Answer |
+|---|---|
+| `voices` with no bearer token | `401` |
+| `voices` with `{"kind":"kokoro"}` | `400` — the kind is quoted back with the five that exist |
+| `probe/tts` with `{}` | `400 a probe needs a non-empty "message" …` |
+| `probe/stt` with an empty body | `400` |
+
+Every one of them is a sentence rather than a shape, and none of them is an
+empty success: a probe of the empty sentence and a transcript of silence are
+both answers a reader would believe.
+
+The audio goes in the **raw body**, not as multipart — the same as
+`/voice/transcribe`, and the same trap that costs time to rediscover.
+
+`state` is one of `answered`, `refused`, `skipped`. A reader that meets a
+fourth has a result this path did not write, and should say so rather than
+treating it as a success.
+
+Both probe routes and the catalogue are `CanAdmin`, for the reason
+`/voice/transcribe` is: a TTS probe synthesizes for real, and on a metered
+provider that spends a credit. The catalogue reaches a provider with the
+operator's credential. Only `GET /api/v1/voice/config` and the clip URL are
+open, and the clip URL is a 128-bit unguessable token.
+
+A catalogue request carries the kind and, at most, the **name** of the
+variable holding the provider's key — never a value, because `runtime.toml`
+is committed. It carries no address and no command path: a route cannot check
+where one points, so the read uses the kind's own destination.
 
 ## Incident: voice was down for six days and said nothing
 

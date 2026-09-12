@@ -81,6 +81,15 @@ type converter = Sips | Image_magick | Ffmpeg
 type conversion_failure = (converter * decode_failure) list
 val conversion_failure_text : conversion_failure -> string
 
+val input_path : cache_dir:string -> string -> string
+(** Where a URL's downloaded bytes live. Derived from the URL, so every worker
+    on one URL names this one file -- which is why a download publishes by
+    renaming its own attempt over it rather than writing it in place. *)
+
+val png_path : cache_dir:string -> string -> string
+(** Where a downloaded input's converted frame lives, derived from the input
+    path the same way and published the same way. *)
+
 val download :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->
   (string, download_error) result

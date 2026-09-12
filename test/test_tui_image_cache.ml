@@ -361,10 +361,67 @@ let test_explicit_refresh_replaces_a_refused_body () =
     check string "one initial and one explicit fetch" "xx"
       (read_file (Filename.concat cache_dir "fetches")))
 
+(* Two workers on one URL name the same cache file, because the name is derived
+   from the URL. The [r] retry deletes that file while a [v] render may be
+   downloading or converting into it, and two downloads would otherwise curl into
+   one path. These two cases delete the shared path from inside the fetch and the
+   conversion -- which is what a concurrent retry does -- and check that the work
+   still lands whole. Writing in place fails both: the delete takes the attempt's
+   own half-written output with it. *)
+let test_a_delete_during_the_fetch_does_not_take_the_download () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/raced.png" in
+    let shared = Cache.input_path ~cache_dir url in
+    executable cache_dir "curl"
+      (Printf.sprintf
+         "printf %%b %s > \"$7\"\n/bin/rm -f %s\nprintf %%b %s >> \"$7\""
+         (shell_bytes (String.sub png_header 0 4))
+         (Filename.quote shared)
+         (shell_bytes (String.sub png_header 4 (String.length png_header - 4))));
+    let path = unwrap (Cache.download ~run ~cache_dir url) in
+    check string "the published file is the whole body" png_header (read_file path);
+    check string "and it is the shared path the readers look at" shared path)
+
+let test_a_delete_during_the_conversion_does_not_take_the_frame () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/raced.bmp" in
+    serve cache_dir bmp_header;
+    let input = unwrap (Cache.download ~run ~cache_dir url) in
+    let shared = Cache.png_path ~cache_dir input in
+    executable cache_dir "sips"
+      (Printf.sprintf
+         "for output do :; done\nprintf %%b %s > \"$output\"\n/bin/rm -f %s\nprintf %%b %s >> \"$output\""
+         (shell_bytes (String.sub png_header 0 4))
+         (Filename.quote shared)
+         (shell_bytes (String.sub png_header 4 (String.length png_header - 4))));
+    match Cache.convert_to_png ~run ~cache_dir input with
+    | Error failures -> failf "conversion failed: %s" (Cache.conversion_failure_text failures)
+    | Ok path ->
+      check string "the published frame is whole" png_header (read_file path);
+      check string "and it is the shared path" shared path)
+
+(* A body the sniffer refuses must not be left in the cache for the next reader
+   to find and discard: it is never published in the first place. *)
+let test_a_refused_body_never_reaches_the_cache_path () =
+  with_cache (fun cache_dir run ->
+    let url = "https://fixture.invalid/notice.txt" in
+    serve cache_dir "";
+    let shared = Cache.input_path ~cache_dir url in
+    (match Cache.download ~run ~cache_dir url with
+     | Ok _ -> fail "an empty body must be refused"
+     | Error _ -> ());
+    check bool "nothing was left at the shared path" false (Sys.file_exists shared))
+
 let () =
   run "tui image cache"
     [ ( "workflows"
-      , [ test_case "mosaic failure retains input and can recover" `Quick
+      , [ test_case "a delete during the fetch does not take the download" `Quick
+            test_a_delete_during_the_fetch_does_not_take_the_download
+        ; test_case "a delete during the conversion does not take the frame" `Quick
+            test_a_delete_during_the_conversion_does_not_take_the_frame
+        ; test_case "a refused body never reaches the cache path" `Quick
+            test_a_refused_body_never_reaches_the_cache_path
+        ; test_case "mosaic failure retains input and can recover" `Quick
             test_mosaic_failure_retains_input_and_can_recover
         ; test_case "view retains input when all converters are missing" `Quick
             test_v_missing_converters_retains_input

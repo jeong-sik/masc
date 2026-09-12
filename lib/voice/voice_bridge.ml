@@ -28,6 +28,21 @@ let transcriber_of_kind = function
      voice_mcp carries a tool call, not audio. *)
   | Voice_config.Voice_mcp | Voice_config.Macos_say -> Does_not_transcribe
 
+(* What an endpoint reached over HTTP answered. A body carrying no [text]
+   string is not a silent microphone -- it is an answer this code does not
+   read -- and the probe reports the empty transcript as having heard nothing.
+   Kept apart here so that the one distinction the probe exists to draw is not
+   erased by a body it did not understand. *)
+let transcript_of_stt_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String transcript) -> Ok transcript
+     | Some _ -> Error "the endpoint answered with a text field that is not a string"
+     | None -> Error "the endpoint answered without a text field")
+  | _ -> Error "the endpoint answered with something that is not an object"
+;;
+
 (* One voice as an endpoint names it. The id is what a configuration stores;
    the name and the language are what let a person pick it. *)
 type catalogue_voice =
@@ -458,13 +473,9 @@ let probe_stt ~audio_file () =
                   | Over_http ->
                     (match transcribe_via_http_stt endpoint ~audio_file ~model with
                      | Ok json ->
-                       heard
-                         (match json with
-                          | `Assoc fields ->
-                            (match List.assoc_opt "text" fields with
-                             | Some (`String text) -> text
-                             | Some _ | None -> "")
-                          | _ -> "")
+                       (match transcript_of_stt_json json with
+                        | Ok transcript -> heard transcript
+                        | Error reason -> Refused reason)
                      | Error reason -> Refused reason)
                   | By_command ->
                     (match transcribe_via_command endpoint ~audio_file ~model with

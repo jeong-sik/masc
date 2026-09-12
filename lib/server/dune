@@ -114,6 +114,7 @@
   masc.keeper_toml
   masc.voice_setup
   masc.voice_config
+  masc.voice_runtime_overlay
 
   masc.runtime_model
   masc.runtime

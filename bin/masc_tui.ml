@@ -2619,10 +2619,27 @@ let voice_wizard_probe_lines json =
               | `Assoc entry ->
                   let text key =
                     match List.assoc_opt key entry with
-                    | Some (`String value) -> value
+                    (* A refusal is whatever the probed endpoint wrote, and
+                       [box_line] keeps escape sequences rather than stripping
+                       them. An endpoint that answers with control bytes would
+                       otherwise redraw the screen from inside this row. *)
+                    | Some (`String value) -> Terminal_text.single_line value
                     | Some _ | None -> "?"
                   in
-                  Some (Printf.sprintf "%-20s %s" (text "endpoint_id") (text "detail"))
+                  (* The state is the answer the wizard was opened to get. Left
+                     out, an endpoint that refused drew in the same shape as one
+                     that answered. The same three words the CLI prints, so the
+                     two readings of one probe agree. *)
+                  let state =
+                    match List.assoc_opt "state" entry with
+                    | Some (`String "answered") -> "answered"
+                    | Some (`String "refused") -> "refused"
+                    | Some (`String "skipped") -> "not asked"
+                    | Some _ | None -> "?"
+                  in
+                  Some
+                    (Printf.sprintf "%-20s %-10s %s" (text "endpoint_id") state
+                       (text "detail"))
               | _ -> None)
             items
       | Some _ | None -> [])
@@ -11023,7 +11040,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Voice_wizard_saved result ->
       (match (state.voice_wizard, result) with
        | None, _ -> ()
-       | Some session, Ok _ ->
+       | Some session, Ok response ->
+           (* The revision this save produced. The wizard stays open, so a
+              reader who goes back to change a field and saves again sends a
+              revision -- and the one from before the save is now stale
+              against this session's own write, which came back as a
+              configuration-changed conflict every time. *)
+           let session =
+             match response with
+             | `Assoc fields ->
+                 (match List.assoc_opt "revision" fields with
+                  | Some (`String revision) when String.trim revision <> "" ->
+                      { session with vws_revision = revision }
+                  | Some _ | None -> session)
+             | _ -> session
+           in
            (* The pane is reloaded: what it was showing is now one revision
               behind. The session stays open to report what answers. *)
            launch_voice_config_load state ~mailbox;

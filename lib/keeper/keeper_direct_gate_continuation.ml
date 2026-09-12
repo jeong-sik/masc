@@ -308,13 +308,13 @@ let complete_native ~config ~keeper_name ~operation_id admission =
   match admission.authority with
   | Agent_core _ -> Ok ()
   | Official_client checkpoint ->
-    let* () = validate_native ~base_path:config.Workspace.base_path ~keeper_name checkpoint in
-    let* stored = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
-    (match admission.transmitted_input, stored with
-     | Some _, Some {Native.phase=Native.Settled {turn_id; _}; _} when turn_id <> checkpoint.turn_id ->
-       Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
-         ~obligation:admission.selected.obligation |> owner
-     | _ -> Error "native Gate continuation has no settled transmitted-input receipt")
+    let* () = match admission.transmitted_input with
+      | Some _ -> Ok ()
+      | None -> Error "native Gate continuation has no transmitted-input receipt" in
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* () = Native.validate_completed_continuation ~checkpoint ~expected in
+    Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
+      ~obligation:admission.selected.obligation |> owner
 
 let load ~config ~meta ~operation_id ~session_dir =
   match load_ready ~config ~meta ~operation_id ~session_dir with

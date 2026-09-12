@@ -529,54 +529,22 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             raise (Managed_agent_translation_failed msg))
     | Full | Operator_remote -> requested_name, admitted_arguments
   in
-  (* Attribute retention using the same canonical caller resolution as the
-     executor: bearer fallback, resolved session binding and workspace alias
-     are authorization inputs, not raw telemetry names. *)
-  let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
-  let cached_resolved_agent =
-    Option.bind mcp_session_id Client_registry_eio.get_resolved_name
-  in
-  let direct_call_authority =
-    match profile with
-    | Full -> Mcp_server_eio_caller_identity.Catalog_policy
-    | Managed_agent | Operator_remote ->
-      if Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile name
-      then Mcp_server_eio_caller_identity.Restricted_profile
-      else Mcp_server_eio_caller_identity.Catalog_policy
-  in
-  let caller_identity =
-    try Ok (Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
-      ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-      ~direct_call_authority
-      ~workspace_initialized:(fun () -> Workspace.is_initialized config)
-      ~log_mcp_exn)
-    with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Error exn
-  in
-  let agent_name = match caller_identity with
-    | Ok caller -> caller.agent_name
-    | Error _ -> identity.Client_identity.agent_name
-  in
-  (* Classify call source: Keeper_internal only when the resolved agent_name
-     matches a keeper in the admission workspace.  A process-global lookup
-     could select an identically named keeper from the newly current scope
-     after [masc_start], tearing tool-usage persistence from this call's
-     observation generation.  Missing identity falls through to External_mcp.
-     Issue #8915. *)
-  let keeper_entry =
-    match caller_identity with
-    | Error _ -> None
-    | Ok _ ->
+  (* The executor supplies its actual resolved identity before effects. Capture
+     the corresponding Keeper entry at that boundary; neither session rebinding
+     nor workspace alias changes can reinterpret the receipt afterwards. *)
+  let resolved_caller = ref None in
+  let on_caller_resolved (caller : Mcp_server_eio_caller_identity.t) =
+    let keeper_entry =
       Keeper_registry.all ~base_path:config.base_path ()
       |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
-        String.equal entry.name agent_name)
+        String.equal entry.name caller.agent_name)
+    in
+    resolved_caller := Some (caller, keeper_entry)
   in
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
   let execute () =
     try
-      (* Identity failures retain the dispatcher's typed error handling and
-         cannot acquire observation ownership from an unverified name. *)
-      (match caller_identity with Error exn -> raise exn | Ok _ -> ());
       execute_tool_eio
         ~sw
         ~clock
@@ -586,6 +554,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ?invocation_ref
         ?auth_token
         ?internal_keeper_runtime:(Some internal_keeper_runtime)
+        ?on_caller_resolved:(Some on_caller_resolved)
         state
         ~name
         ~arguments
@@ -631,8 +600,13 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
            ~tool_name:name ~start_time
            (Printf.sprintf "Internal error: %s" err_detail))
   in
-  let result = execute () |> retain_runtime_mcp_observation
-      ~keeper_entry ~tool_name:name ~arguments ~start_time in
+  let execution_result = execute () in
+  let agent_name, keeper_entry = match !resolved_caller with
+    | Some (caller, entry) -> caller.agent_name, entry
+    | None -> "unknown", None
+  in
+  let result = retain_runtime_mcp_observation ~keeper_entry ~tool_name:name
+      ~arguments ~start_time execution_result in
   let attempts = 1 in
   let success = not (Tool_result.is_failed result)
   and message = Tool_result.message result

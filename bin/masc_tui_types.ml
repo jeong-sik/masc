@@ -7122,17 +7122,10 @@ let keeper_message_status_rows (state : state) =
          List.length
            (keeper_message_visible_status_rows state live.tl_transcript
               ~now:(Unix.gettimeofday ())))
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name
-       when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->
-         2
-     | Some _ | None -> 0)
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name ->
-         Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-           ~keeper_name
-         |> keeper_message_pending_status_rows
-     | None -> 0)
+  (* The promoted line and the queued ones are entries in the history now --
+     the chat pane appends them to the same stream it scrolls, so the
+     conversation holds one time axis. Nothing is reserved for them here:
+     rows the history owns are the history's to budget. *)
   (* Pending input owns one USER-shaped header/body slot below the causal
      transcript. When its turn starts those two rows are handed to the active
      USER one-for-one, so the text does not jump through an older turn's

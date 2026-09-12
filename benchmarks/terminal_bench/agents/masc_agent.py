@@ -19,7 +19,12 @@ from harbor.models.agent.context import AgentContext
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_ROOT / "configs"))
 
-from render_configs import ARMS, PROVIDERS, render_arm  # noqa: E402
+from render_configs import (  # noqa: E402
+    ARMS,
+    PROVIDERS,
+    effective_runtime_id,
+    render_arm,
+)
 
 REMOTE = "/opt/masc-bench"
 
@@ -58,7 +63,10 @@ class MascAgent(BaseInstalledAgent):
             raise RuntimeError(f"{key_env} not set in harbor process env")
         env = {
             key_env: key,
-            "BENCH_RUNTIME_ID": self.runtime_id,
+            # masc resolves `<provider>.<binding id>`, and the binding id is a
+            # slug when the wire model carries a slash (OpenRouter). Rendering
+            # takes the wire form; keeper_up takes this one.
+            "BENCH_RUNTIME_ID": effective_runtime_id(self.runtime_id),
             "KEEPER_COUNT": str(ARMS[self.arm]["keepers"]),
             # Must fire before harbor's agent timeout (task default 900s x
             # multiplier) or the exec is killed and result.json never lands.

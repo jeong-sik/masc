@@ -37,7 +37,11 @@ MASC 하네스 자체를 벤치마크한다. 스펙: docs/superpowers/specs/2026
   project has no credits and lacks gpt-5.5, so this lane is unverified past
   the request-build stage.
 - `openrouter/<vendor>/<model>` — 스윕 레인. `OPENROUTER_API_KEY`(크레딧 충전됨).
-  `BENCH_MODEL=openrouter/z-ai/glm-5.3 ./run_matrix.sh b,c,e 3` 처럼 쓴다.
+  `BENCH_MODEL=openrouter/z-ai/glm-4.7-flash ./run_matrix.sh b,c,e 3` 처럼 쓴다.
+  와이어 id 의 슬래시는 runtime.toml 의 model id 로 못 쓴다(`[A-Za-z0-9._-]+`).
+  렌더러가 바인딩을 슬러그로 만들고 와이어 이름을 `api-name` 에 넣으므로,
+  masc 가 해소하는 runtime id 는 `openrouter.z-ai-glm-4.7-flash` 다.
+  2026-09-12 실측: `runtime-verify` verified (response·tool_called·tool_roundtrip).
   glm/deepseek 계열 단가($0.09~1.4/1M)로 fable($10/$50) 매트릭스 전부를
   돌리는 대신 넓게 여러 번 돌리는 용도. capabilities_base="openai" 라
   reasoning_effort 노선으로 렌더된다.

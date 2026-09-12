@@ -7,6 +7,7 @@ from render_configs import (  # noqa: E402
     ARMS,
     COMPOSITION_FENCE,
     REPO_ROOT,
+    effective_runtime_id,
     composition_skill_names,
     instruction_skill_names,
     keeper_toml,
@@ -183,3 +184,47 @@ def test_claude_code_lane_rejects_minimal_effort():
     import pytest
     with pytest.raises(ValueError, match="minimal"):
         render_arm("b", runtime_id="claude_code.claude-sonnet-5", effort="minimal")
+
+
+def test_a_slashed_wire_model_binds_by_slug_and_keeps_the_wire_name():
+    # runtime_toml.ml refuses a model id outside [A-Za-z0-9._-]+, and the
+    # OpenRouter wire id carries a vendor slash. Rendering it verbatim made
+    # the whole config fail to load ("model id must match"), which surfaced
+    # as masc_keeper_up answering "no valid initialized runtime" — measured
+    # 2026-09-12 against release 0.35.8.
+    out = render_arm("b", runtime_id="openrouter.z-ai/glm-4.7-flash", effort="high")
+    rt = (out / "runtime.toml").read_text()
+    assert 'default = "openrouter.z-ai-glm-4.7-flash"' in rt
+    assert '[models."z-ai-glm-4.7-flash"]' in rt
+    assert '[openrouter."z-ai-glm-4.7-flash"]' in rt
+    # The wire name survives, because that is what reaches the provider.
+    assert 'api-name = "z-ai/glm-4.7-flash"' in rt
+    assert '[models."z-ai/glm-4.7-flash"]' not in rt
+    # Capability lookup reads api_name, so the overlay row keeps the wire name.
+    overlay = (out / "agent-core-models-overlay.toml").read_text()
+    assert 'id_prefix = "z-ai/glm-4.7-flash"' in overlay
+
+
+def test_effective_runtime_id_is_what_masc_resolves():
+    assert effective_runtime_id("openrouter.z-ai/glm-4.7-flash") == (
+        "openrouter.z-ai-glm-4.7-flash"
+    )
+    # A model with no slash is untouched, so the existing lanes keep their ids.
+    assert effective_runtime_id("anthropic.claude-sonnet-5") == (
+        "anthropic.claude-sonnet-5"
+    )
+    for bad in ("no-dot", ".leading", "trailing."):
+        try:
+            effective_runtime_id(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} should be rejected, not guessed at")
+
+
+def test_http_lanes_declare_tool_calling():
+    # `masc runtime-verify` refuses a binding without tools-support, so the
+    # offline readiness check answered tools_not_declared for lanes that do
+    # deliver tools (the Agent_core arm reads the catalog capability instead).
+    for runtime_id in ("anthropic.claude-sonnet-5", "openrouter.z-ai/glm-4.7-flash"):
+        rt = (render_arm("b", runtime_id=runtime_id, effort="high") / "runtime.toml")
+        assert "tools-support = true" in rt.read_text(), runtime_id

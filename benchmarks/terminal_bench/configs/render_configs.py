@@ -17,6 +17,7 @@ Arm A는 Harbor 빌트인 terminus-2라 여기서 렌더하지 않는다.
 """
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -112,10 +113,19 @@ endpoint = "{endpoint}"
 type = "env"
 key = "{api_key_env}"
 
-[models."{model_alias}"]
+[models."{binding_id}"]
+api-name = "{model_alias}"
+# HTTP lanes deliver tools off the catalog capability, not this key
+# (keeper_effective_tool_surface: the Agent_core arm reads
+# capabilities.supports_tools; only the Claude_code arm reads
+# runtime.model.tools_support). It is declared anyway because it is true, and
+# because `masc runtime-verify` refuses a binding without it — without this
+# line the offline readiness check answers tools_not_declared for a lane that
+# does deliver tools.
+tools-support = true
 {effort_lines}
 
-[{provider}."{model_alias}"]
+[{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
 
 # Boot gate (server_runtime_bootstrap.require_explicit_mandatory_exact_output_
@@ -160,7 +170,7 @@ protocol = "{protocol}"
 command = "{command}"
 is-non-interactive = true
 
-[models."{model_alias}"]
+[models."{binding_id}"]
 api-name = "{model_alias}"
 max-context = 1000000
 max-prompt-bytes = 524288
@@ -169,7 +179,7 @@ streaming = true
 reasoning-effort = "{effort}"
 turn-timeout-s = {turn_timeout_s}
 
-[{provider}."{model_alias}"]
+[{provider}."{binding_id}"]
 max-concurrent = {max_concurrent}
 
 [runtime.exact_output_lanes.hitl_auto_judge]
@@ -239,6 +249,27 @@ supports_native_streaming = true
 accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
 {thinking_control}{sampling_lines}{max_output_lines}supports_parallel_tool_calls = {parallel}
 """
+
+def model_binding_id(wire_model: str) -> str:
+    """runtime.toml 의 model id 로 쓸 수 있는 이름.
+
+    파서가 `[A-Za-z0-9._-]+` 만 받는다 (runtime_toml.ml: "model id must match").
+    OpenRouter 의 와이어 id 는 `z-ai/glm-4.7-flash` 처럼 vendor 슬래시를 달고
+    오므로 그대로 쓰면 설정 로드가 실패한다. 바인딩 id 는 슬러그로 두고 와이어
+    이름은 `api-name` 이 나른다. capability 조회도 api-name 을 읽으므로
+    (runtime_adapter: `~model_id:spec.api_name`) overlay 의 id_prefix 는 와이어
+    이름 그대로 둔다.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]", "-", wire_model)
+
+
+def effective_runtime_id(runtime_id: str) -> str:
+    """masc 가 실제로 해소하는 runtime id (`<provider>.<binding id>`)."""
+    provider, _, wire_model = runtime_id.partition(".")
+    if not provider or not wire_model:
+        raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
+    return f"{provider}.{model_binding_id(wire_model)}"
+
 
 # provider 프로토콜 매핑. 새 provider 추가 시 여기만 고친다.
 PROVIDERS = {
@@ -360,6 +391,10 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     if not provider or not model_alias:
         raise ValueError(f"runtime_id must be '<provider>.<model>', got {runtime_id!r}")
     pcfg = PROVIDERS[provider]
+    # The binding is named by a slug; the wire name stays in api-name and in
+    # the overlay's id_prefix. See model_binding_id.
+    binding_id = model_binding_id(model_alias)
+    runtime_id = f"{provider}.{binding_id}"
     if is_official_client(provider) and effort not in CLAUDE_CODE_EFFORTS:
         raise ValueError(
             f"effort {effort!r} is not admitted by Claude Code; "
@@ -375,6 +410,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     if is_official_client(provider):
         runtime_toml = OFFICIAL_CLIENT_RUNTIME_TOML.format(
             runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+            binding_id=binding_id,
             protocol=pcfg["protocol"], command=pcfg["command"], effort=effort,
             turn_timeout_s=OFFICIAL_CLIENT_TURN_TIMEOUT_S,
             fusion=str(spec["fusion"]).lower(),
@@ -394,6 +430,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
 
     runtime_toml = RUNTIME_TOML.format(
         runtime_id=runtime_id, provider=provider, model_alias=model_alias,
+        binding_id=binding_id,
         effort=effort, fusion=str(spec["fusion"]).lower(),
         max_concurrent=4 if spec["parallel"] else 1,
         effort_lines=(

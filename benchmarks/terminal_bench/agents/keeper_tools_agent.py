@@ -41,7 +41,11 @@ from harbor.environments.base import BaseEnvironment
 BENCH_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH_ROOT / "configs"))
 
-from render_configs import ARMS, render_arm  # noqa: E402
+from render_configs import (  # noqa: E402
+    ARMS,
+    effective_runtime_id,
+    render_arm,
+)
 
 REMOTE = "/opt/masc-bench"
 MASC_MCP_URL = "http://127.0.0.1:8935/mcp"
@@ -123,7 +127,10 @@ class KeeperToolsAgent(ClaudeCode):
             raise RuntimeError(f"{key_env} not set in harbor process env")
         env = {
             key_env: key,
-            "BENCH_RUNTIME_ID": self.keeper_runtime_id,
+            # masc resolves `<provider>.<binding id>`, and the binding id is a
+            # slug when the wire model carries a slash (OpenRouter). Rendering
+            # takes the wire form; keeper_up takes this one.
+            "BENCH_RUNTIME_ID": effective_runtime_id(self.keeper_runtime_id),
             # Names the pool bootstrap pre-approves; no keeper is started.
             "BENCH_KEEPER_POOL": ",".join(self.pool_names),
         }

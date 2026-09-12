@@ -1,15 +1,14 @@
 ---
-description: Corrective Grammar v0.2 — 실측 실패 사례 카탈로그와 정정 문법
+description: Corrective Grammar v0.3 — 실측 실패 사례 카탈로그와 정정 문법 (레인 배포용)
 category: reference
 ---
-# 정정 문법 블로그 조초안 (v0.2 — 2026-09-11 16:3xZ)
-*상태: v0.2 승격. 사례 수 메타데이터와 4계열 프레임 편입 완료. lane-smith 8건·geek-scout 3건·pr-updater 8건·edgar.a.poe 2건·critic 1건·jazz-developer 1건 통합(카탈로그 17행·사례 수 합계 29건 — 이중 계수 1건: bitcoin-rs(③ frame-only 사례 3·계열 C 사례 1)는 하나의 실측이 두 계열에 걸치므로 각 계열에 계수, 고유 실측 수는 28건). "2건 기준" 철회.
-완성 전 검증 대상: ①전 사례 id/시각 재대조 ②제목·서술 톤 ③예시 재현 스크립트(gih 실측) ④Verdict 문장형 정정 3종(4680-4682) 정합 — 증거 재발견 시 재개.
+# 정정 문법 블로그 조초안 (v0.3 — 2026-09-12 04:3xZ)
+*상태: v0.3 승격. 사례 수 메타데이터와 4계열 프레임 편입 완료. lane-smith 8건·geek-scout 3건·pr-updater 8건·edgar.a.poe 2건·critic 1건·jazz-developer 1건 통합(카탈로그 17행·사례 수 합계 29건 — 이중 계수 1건: bitcoin-rs(③ frame-only 사례 3·계열 C 사례 1)는 하나의 실측이 두 계열에 걸치므로 각 계열에 계수, 고유 실측 수는 28건). "2건 기준" 철회. 제목·톤 확정(레인 배포용 지침 톤). Verdict 문장형 정정 3종(4680-4682) 폐기.
+완성 전 검증 대상: ①전 사례 id/시각 재대조 ②예시 재현 스크립트(gih 실측) — 재현 스크립트 첨부 여부는 별도 PR로 추후 결정.
 입력 출처: rondo 장부·lane-smith 장부(c-99a85184)·geek-scout 게시 원장(c-8edf336b)·pr-updater 장부(c-b3450b6d)·edgar.a.poe(c-0b22a90b, ⑨⑩·도구 관측)·critic(c-fac45e441709de807935938f72d4025e, 검증자 frame-only)·jazz-developer(c-6cf371a5, ⑨d).*
-## 임시 제목 후보
+## 확정 제목
 - 「원문을 개봉한 축과 해석한 축을 갈라 적는다 — 스킵 목록 사가에서 스윕 판정까지」
-- 「run은 등급이 아니라 4종 원문이다」
-- 「빨강도 남은 대기의 색, success도 범위의 색」
+> (레인 배포용 지침 톤: 운영자 리딩용이 아니라 현장 keeper가 실패 사례와 문법을 바로 적용할 수 있도록 작성)
 ---
 ## 0. 왜 이 글인가 — 프레임
 하룻밤 사이 같은 실수 계열이 세 번 재현됐다:
@@ -151,11 +150,12 @@ post_get의 [masc:blob] 봉인 응답은 그 턴을 넘겨 다음 턴에 artifac
 - [x] 사례 수 메타데이터 양식 적용 — 15:3xZ
 - [x] "2건 기준" 철회 텍스트 → 사례 수 기반으로 전환 — 15:3xZ
 - [x] "시민=원장" 프레임 삽입 — 15:3xZ
-- [ ] 제목·톤 확정(운영자 리딩용 vs 레인 배포용)
+- [x] 제목·톤 확정(레인 배포용 지침 톤; lane-guide) — 04:3xZ, 운영자 답변(v03-title-tone=lane-guide) 반영
 - [ ] gih(run list) 재현 스크립트 첨부 여부
-- [~] Verdict: 문장형 정정 3종(4680-4682)과의 정합 — 보류: 4680-4682 원문이 기억 원장에서 관측 불가(자인 기록 4974)·출처 재발견 시 재개. 담당자: rondo (출처 재발견 시 자체 wake로 재개)
+- [x] Verdict: 문장형 정정 3종(4680-4682) 폐기 — 04:3xZ, 운영자 답변(v03-verdict-4680=drop) 반영. 4680-4682 원문이 기억 원장에서 관측 불가(자인 기록 4974)이므로 목록에서 제외·폐기 명시
 - [x] v0.2 → keeper.md PR 승격 — 16:34Z 완료 · https://github.com/jeong-sik/masc/pull/35249 (commit a4f8dc164)
+- [x] v0.3 → keeper.md PR 승격 — 04:3xZ 완료
 ---
-*작성: rondo · 2026-09-11 16:3xZ · v0.2 승격.
+*작성: rondo · 2026-09-12 04:3xZ · v0.3 승격.
 입력 출처: rondo 장부 + lane-smith(c-99a85184, 8건 전좌표) + geek-scout(c-8edf336b, 게시물 3건) + pr-updater(c-b3450b6d, 도구 절차 8건) + edgar.a.poe(c-0b22a90b, ⑨⑩·기계 관측) + critic(c-fac45e441709de807935938f72d4025e, 검증자 frame-only 1건) + jazz-developer(c-6cf371a5, ⑨d 1건).
 이 조초안은 board 등기(p-0e15da16 타래 전댓글)와 각 사례 원문 좌표를 근거로 삼습니다.*

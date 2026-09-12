@@ -5445,7 +5445,7 @@ let row_list (state : state) : row_list option =
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
              Some
-               { rl_count = List.length rows
+               { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
                ; rl_place =
                    (fun index ->
@@ -11624,9 +11624,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
+          (* [rows] stays a list for the memo scan and the width fold just
+             below, both of which read it once front to back. The pane keeps
+             the array. *)
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok rows);
+              (Ok (Array.of_list rows));
           (* The jump that asked for this file may have named a line; the
              reset and the jump live together so neither overwrites the
              other. Consumed once -- the next plain open starts at the top. *)
@@ -11708,7 +11711,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                when String.equal open_path location.ll_path ->
                  let cursor =
                    max 0
-                     (min (location.ll_line - 1) (List.length rows - 1))
+                     (min (location.ll_line - 1) (Array.length rows - 1))
                  in
                  state.code_file_cursor <- cursor;
                  (* Follow the jump: a definition past the fold is a cursor
@@ -16969,8 +16972,14 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
-         when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+         when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
+           && (not (List.mem key ["tab"; "\t"; "shift-tab"])
+               || match browser_lane_on_screen state with
+                  | Some view ->
+                      Option.is_none view.client_picker && Option.is_none view.url_draft
+                      && (Option.is_some view.scene || Browser_lane_view.busy view)
+                  | None -> false) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -16984,6 +16993,12 @@ and is loaded on demand through keeper_skill.
                 let read view =
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
+                in
+                let reveal_selection selected =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let scroll = Masc_tui_render.browser_lane_selection_scroll
+                    state ~terminal_rows ~cols selected in
+                  state.browser_lane <- Some { selected with scroll }
                 in
                 (match key with
                  | "esc" | "left" ->
@@ -17018,8 +17033,10 @@ and is loaded on demand through keeper_skill.
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
-                     if count > 0 then state.browser_lane <- Some {view with scene_cursor =
+                     if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
+                     reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
                      (match scene_context view with
                       | Some context -> copy_reference_to_terminal render_schedule context;
@@ -17027,12 +17044,15 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
-                      | Some scene, Some ({kind=Region _;_} as node) ->
+                      | Some scene, Some node ->
+                          (match scene_target_action node with
+                           | Some Read_region ->
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
-                      | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
+                           | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
+                           | None -> ())
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
@@ -19063,7 +19083,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19435,7 +19455,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19824,7 +19844,7 @@ and is loaded on demand through keeper_skill.
                                 (min
                                    (Masc.Tui_decode.file_change_target_line change
                                     - 1)
-                                   (List.length rows - 1))
+                                   (Array.length rows - 1))
                             in
                             state.code_file_cursor <- cursor;
                             state.code_file_scroll <-

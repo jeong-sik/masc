@@ -3160,6 +3160,11 @@
  (libraries alcotest masc_tui_runtime_config_receipt yojson))
 
 (test
+ (name test_tui_runtime_config_summary)
+ (modules test_tui_runtime_config_summary)
+ (libraries alcotest masc_tui_runtime_config_view yojson))
+
+(test
  (name test_tui_connection_status)
  (modules test_tui_connection_status)
  (libraries alcotest masc masc_tui_types))

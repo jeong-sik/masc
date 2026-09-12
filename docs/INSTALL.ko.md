@@ -21,12 +21,12 @@
 확인해야 설치 검증이 완료된 것입니다.
 
 Linux 바이너리는 Ubuntu 22.04 컨테이너에서 빌드하므로 **glibc 2.35 이상**이
-필요합니다. Ubuntu 22.04, Debian 12, RHEL 9 그리고 그 이후 배포판이 해당합니다.
+필요합니다. Ubuntu 22.04, Debian 12, RHEL 10 그리고 그 이후 배포판이 해당합니다.
 더 높은 버전을 요구하는 바이너리가 나오면 릴리스가 실패하므로, 이 기준은
 의도가 아니라 검사 대상입니다(`scripts/check-glibc-floor.sh`). glibc 기준과
 아래 공유 라이브러리 목록은 별개이며, 라이브러리는 배포판마다 따로 갖춰야
-합니다. Alpine을 비롯한 musl 배포판과 위보다 오래된 macOS는 검증 대상이
-아닙니다. Intel Mac은 Apple
+합니다. RHEL 9는 glibc 2.34라서 이 기준에 못 미칩니다. Alpine을 비롯한 musl
+배포판과 위보다 오래된 macOS는 검증 대상이 아닙니다. Intel Mac은 Apple
 Container 기반 microVM을 제공하지 않으므로 Docker 또는 remote SSH를 선택합니다.
 Runner 이름은 [GitHub 공식 목록](https://github.com/actions/runner-images)을 따릅니다.
 

@@ -22,12 +22,13 @@ have checked the successful `Release` run for that release and the actual
 assets.
 
 The Linux binaries are built inside an Ubuntu 22.04 container, so they need
-**glibc 2.35 or newer** — Ubuntu 22.04, Debian 12, RHEL 9 and anything later.
+**glibc 2.35 or newer** — Ubuntu 22.04, Debian 12, RHEL 10 and anything later.
 The release fails rather than publishing a binary that asks for more, so this
 floor is checked and not merely intended (`scripts/check-glibc-floor.sh`). The
 glibc floor is separate from the shared libraries listed below, which each
-distribution still has to provide. Alpine and other musl distributions are not
-covered, and neither is macOS older than the versions above. An Intel Mac offers no Apple
+distribution still has to provide. RHEL 9 ships glibc 2.34 and is below the
+floor. Alpine and other musl distributions are not covered, and neither is
+macOS older than the versions above. An Intel Mac offers no Apple
 Container based microVM, so choose Docker or remote SSH there. Runner names
 follow the [official GitHub list](https://github.com/actions/runner-images).
 

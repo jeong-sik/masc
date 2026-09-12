@@ -78,6 +78,32 @@ appears at all.
 For speech in the wizard leads with whisper-cli, which is asked for the model
 and nothing else.
 
+### Giving each keeper its own voice
+
+`a` on the voice pane. Two lists: the keepers this workspace has, and the
+voices the section's **first** endpoint answers to — first rather than chosen,
+because a section's endpoints are a fallback chain for one voice and the one in
+front is whose vocabulary the assignment has to speak.
+
+```
+keeper  (up/down)          voice  (left/right)
+  ▸ alpha                    ▸ Korean Bright Voice  (ko)
+    beta                       Han Aim  (ko)
+    gamma                      English Narrator
+```
+
+The axes move separately, so an assignment cannot be made by moving one and
+hoping the other followed. `enter` writes one line of
+`[voice.tts.agent_voices]`; `esc` leaves.
+
+Each save carries the revision the pane read and takes back the one it answers
+with, so assigning several voices in a row does not tell the second one it is
+stale.
+
+This was worth building only once voices were free: with nine Korean voices in
+the base system, a workspace where every keeper sounds the same is a choice
+nobody made rather than a cost they avoided.
+
 ### What the configuration then says
 
 ```toml
@@ -88,7 +114,7 @@ default_voice = "Yuna"       # no default_model: nothing in this section is aske
 id = "macos-say"
 kind = "macos_say"
 
-[voice.tts.agent_voices]
+[voice.tts.agent_voices]      # what `a` on the voice pane writes
 alpha = "Yuna"
 beta = "Eddy (한국어(한국))"
 

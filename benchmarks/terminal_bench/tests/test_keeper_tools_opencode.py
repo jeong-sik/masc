@@ -45,6 +45,9 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    # bootstrap writes the keeper's gh hosts.yml from this, and keeper_up's
+    # remote_ssh preflight refuses without it.
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
 
 
 def make_agent(tmp_path, **kw):
@@ -163,9 +166,18 @@ def test_install_adds_masc_on_top_of_opencode(tmp_path, monkeypatch):
 def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
     """What the keepers spent is the number the arm is compared on."""
     rows = [
-        '{"input_tokens": 100, "output_tokens": 10, "cost_usd": 0.25,'
+        '{"usage_projection": "resolved_delta", "input_tokens": 100,'
+        ' "output_tokens": 10, "cost_usd": 0.25,'
         ' "cache_read_tokens": 7, "cache_creation_tokens": 3}',
-        '{"input_tokens": 50, "output_tokens": 5, "cost_usd": 0.75, "usage_missing": true}',
+        '{"usage_projection": "resolved_delta", "input_tokens": 50,'
+        ' "output_tokens": 5, "cost_usd": 0.75, "usage_missing": true}',
+        # The same request MASC also writes as a raw observation. Counting it
+        # beside the settlement doubles a single-request turn.
+        '{"usage_projection": "raw_observation", "input_tokens": 100,'
+        ' "output_tokens": 10, "cost_usd": 0.25}',
+        # A row with no projection at all is not a valid ledger row; it is
+        # counted rather than folded into the total on a guess.
+        '{"input_tokens": 900, "output_tokens": 90, "cost_usd": 9.0}',
         "not json",
         "",
     ]
@@ -191,7 +203,14 @@ def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
         "harbor.agents.installed.opencode.OpenCode.run", fake_super_run
     )
     context = AgentContext()
-    asyncio.run(make_agent(tmp_path).run("solve the task", LedgerEnv(), context))
+    env = LedgerEnv()
+    asyncio.run(make_agent(tmp_path).run("solve the task", env, context))
+    # The read has to be able to fail. `2>/dev/null || true` made every
+    # outcome exit 0, which put the read_failed branch below out of reach and
+    # reported an unreadable ledger as a run with no keeper spend.
+    ledger_command = next(c for c in env.commands if "costs" in c)
+    assert "2>/dev/null" not in ledger_command
+    assert "|| true" not in ledger_command
     # Added to what the agent reported, not replacing it.
     assert context.n_input_tokens == 1_150
     assert context.n_output_tokens == 15
@@ -203,6 +222,52 @@ def test_the_run_adds_keeper_spend_to_the_episode(tmp_path, monkeypatch):
     # zero: a total that quietly omits turns is worse than one that says so.
     assert keeper["rows_without_reported_usage"] == 1
     assert keeper["unparseable_rows"] == 1
+    # Neither the raw observation nor the projectionless row reached the total.
+    assert keeper["raw_observation_rows"] == 1
+    assert keeper["rows_without_projection"] == 1
+    # Harbor reported both token fields this run, so the total is whole.
+    assert keeper["parent_fields_unreported"] == [
+        "n_cache_tokens",
+        "n_output_tokens",
+    ]
+
+
+def test_an_unreadable_ledger_is_a_failure_not_a_zero(tmp_path, monkeypatch):
+    """A collection failure must not read as a run with no keeper spend."""
+
+    class BrokenEnv(FakeEnv):
+        async def exec(self, command, **kw):
+            self.commands.append(command)
+
+            class R:
+                stdout = ""
+                stderr = "find: /root/.masc/costs: Permission denied"
+                returncode = 1
+                return_code = 1
+
+            return R()
+
+    async def fake_super_run(self, instruction, environment, context):
+        context.n_input_tokens = 7
+
+    monkeypatch.setattr(
+        "harbor.agents.installed.opencode.OpenCode.run", fake_super_run
+    )
+    context = AgentContext()
+    asyncio.run(make_agent(tmp_path).run("solve the task", BrokenEnv(), context))
+    keeper = context.metadata["keeper_usage"]
+    assert "Permission denied" in keeper["read_failed"]
+    assert "rows" not in keeper
+    # The agent's own figure is left exactly as harbor reported it.
+    assert context.n_input_tokens == 7
+
+
+def test_the_env_refuses_without_a_github_credential(tmp_path, monkeypatch):
+    """keeper_up refuses a remote_ssh keeper with no gh identity, and
+    bootstrap runs under set -e: the missing credential is named here."""
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="GH_TOKEN"):
+        make_agent(tmp_path).masc_container_env()
 
 
 def test_a_run_without_a_ledger_leaves_the_totals_alone(tmp_path, monkeypatch):

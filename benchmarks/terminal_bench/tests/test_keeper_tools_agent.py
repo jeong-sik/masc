@@ -37,6 +37,9 @@ class FakeEnv:
 @pytest.fixture(autouse=True)
 def _provider_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # keeper_up's remote_ssh preflight refuses without a gh identity, and
+    # bootstrap writes the keeper's hosts.yml from this token.
+    monkeypatch.setenv("GH_TOKEN", "test-gh-token")
 
 
 def make_agent(tmp_path, **kw):

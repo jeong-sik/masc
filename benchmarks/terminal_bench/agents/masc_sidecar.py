@@ -145,10 +145,21 @@ class MascSidecar:
             # for, before any of them is addressed. See the module docstring.
             "BENCH_KEEPER_POOL": ",".join(self.pool_names),
         }
-        # keeper_up's remote_ssh preflight runs `gh auth status` and refuses
-        # without a GitHub identity.
-        if os.environ.get("GH_TOKEN"):
-            env["GH_TOKEN"] = os.environ["GH_TOKEN"]
+        # Required, not optional. bootstrap.sh brings the pool up with
+        # masc_keeper_up under `set -euo pipefail`, and keeper_up's remote_ssh
+        # preflight runs `gh auth status` against <keeper root>/.config/gh --
+        # which bootstrap only writes when this token is present. Left
+        # optional, a host with just the model-provider key fails setup inside
+        # keeper_up, where the message names a keeper rather than the missing
+        # credential.
+        gh_token = os.environ.get("GH_TOKEN")
+        if not gh_token:
+            raise RuntimeError(
+                "GH_TOKEN not set in harbor process env; the keeper pool's "
+                "remote_ssh preflight runs `gh auth status` and keeper_up "
+                "refuses without a GitHub identity"
+            )
+        env["GH_TOKEN"] = gh_token
         return env
 
     async def install_masc(self, environment: BaseEnvironment) -> None:
@@ -201,8 +212,14 @@ async def merge_keeper_usage(
     # AgentContext starts with no metadata at all rather than an empty mapping.
     if context.metadata is None:
         context.metadata = {}
+    # `2>/dev/null || true` made every outcome exit 0, so the read_failed
+    # branch below was unreachable and an unreadable ledger reported as a run
+    # with no keeper spend. An absent directory is the one real zero -- no
+    # keeper has written yet -- so it exits 0 on its own; anything else keeps
+    # its status and its stderr.
     ledger = await environment.exec(
-        f"cat {KEEPER_COSTS}/*/*.jsonl 2>/dev/null || true"
+        f"test -d {KEEPER_COSTS} || exit 0; "
+        f"find {KEEPER_COSTS} -name '*.jsonl' -type f -exec cat {{}} +"
     )
     if ledger.return_code != 0:
         context.metadata["keeper_usage"] = {"read_failed": ledger.stderr[-400:]}
@@ -212,6 +229,8 @@ async def merge_keeper_usage(
     rows = 0
     unreported = 0
     unparseable = 0
+    raw_observations = 0
+    without_projection = 0
     for line in ledger.stdout.splitlines():
         line = line.strip()
         if not line:
@@ -220,6 +239,21 @@ async def merge_keeper_usage(
             row = json.loads(line)
         except json.JSONDecodeError:
             unparseable += 1
+            continue
+        # MASC writes two rows for one request: a raw_observation per provider
+        # response (keeper_hooks_agent_core_cost_events.ml) and the turn's
+        # accounted figure as resolved_delta
+        # (keeper_unified_turn_success.ml). Summing both counts a
+        # single-request turn twice, which is why the inference-metrics reader
+        # drops the raw rows too (model_inference_metrics_reader.ml). The field
+        # is required of a valid row, so a row without one is not a projection
+        # this can classify and is counted rather than assumed.
+        projection = row.get("usage_projection")
+        if projection == "raw_observation":
+            raw_observations += 1
+            continue
+        if projection != "resolved_delta":
+            without_projection += 1
             continue
         rows += 1
         if row.get("usage_missing"):
@@ -230,6 +264,16 @@ async def merge_keeper_usage(
             row.get("cache_creation_tokens") or 0
         )
         cost += float(row.get("cost_usd") or 0.0)
+    parent_unreported = sorted(
+        name
+        for name, value in (
+            ("n_input_tokens", context.n_input_tokens),
+            ("n_output_tokens", context.n_output_tokens),
+            ("n_cache_tokens", context.n_cache_tokens),
+            ("cost_usd", context.cost_usd),
+        )
+        if value is None
+    )
     # The agent's own usage is already here; these are additional requests, so
     # they add rather than replace.
     context.n_input_tokens = (context.n_input_tokens or 0) + totals["input"]
@@ -244,6 +288,15 @@ async def merge_keeper_usage(
         "cost_usd": cost,
         "rows_without_reported_usage": unreported,
         "unparseable_rows": unparseable,
+        "raw_observation_rows": raw_observations,
+        "rows_without_projection": without_projection,
+        # aggregate.py reads None as unmeasured and 0 as measured, so a parent
+        # field harbor never reported cannot be told apart from a measured
+        # zero once the keeper spend is added to it. The sum is kept -- losing
+        # the keeper figure is worse on the one axis the arm is compared on --
+        # and the fields it rests on are named here, so a total that is only
+        # the keeper's half says so.
+        "parent_fields_unreported": parent_unreported,
     }
 
 

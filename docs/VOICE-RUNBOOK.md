@@ -542,6 +542,25 @@ token and carries no model where none was named:
 `null` and `[]`, not `""` and `[""]` — a model named `""` would read as a
 model that exists.
 
+### The clip is served as whatever it is
+
+`GET /api/v1/voice/audio/<token>` needs no bearer token — the 128-bit
+filename is the capability, because a browser's `<audio>` element cannot put
+a header on its request. What it answers is the format that is on disk, not a
+fixed one. Both clips planted by hand and fetched, 2026-09-13:
+
+| On disk | Answer |
+|---|---|
+| `<token>.wav` (a real `say` clip) | `200`, `content-type: audio/wav`, `content-length: 77580` |
+| `<token>.mp3` | `200`, `content-type: audio/mpeg` |
+| a token nobody wrote | `404` |
+| `not-a-token` | `400` |
+
+This is the reading half of the container fix: for a while every clip was
+named `.mp3` whatever was in it, so a say clip either did not exist (16 bytes
+of silence) or would have been announced as MP3. A player told the wrong
+type either refuses or plays nothing, and neither says why.
+
 ### What each route refuses, measured
 
 | Request | Answer |

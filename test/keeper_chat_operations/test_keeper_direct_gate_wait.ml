@@ -177,6 +177,8 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
      | Error (Store.Invalid_input _) -> ()
      | Error error -> fail ("wrong scope poisoned store: " ^ Store.error_to_string error)
      | Ok _ -> fail "another operation's native scope was persisted");
+    check bool "rejected binding preserves the original running operation" true
+      ((get store) = operation);
     Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
       ~execution_digest:operation.execution_digest ~binding ~diagnostic:"retention fsync was not confirmed" |> ok |> ignore);
   with_store path (fun store ->

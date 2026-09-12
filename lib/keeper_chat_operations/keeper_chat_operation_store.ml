@@ -1594,7 +1594,14 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
                  ~input ~sources:[] ~now |> Result.map_error (fun e -> Invalid_input (Semantic.error_to_string e)) in
              let* ready = semantic_transition ~now Semantic.Confirm_sources created in
              semantic_transition ~now Semantic.Begin_execution ready) in
-      let* suspended = semantic_transition ~now (Semantic.Suspend_gate_reconciliation (binding, diagnostic)) execution in
+      (* This is admission of a caller-supplied binding. Refusing its scope,
+         obligations, or diagnostic does not mean the stored execution is corrupt. *)
+      let* suspended = Semantic.apply ~now
+          (Semantic.Suspend_gate_reconciliation (binding, diagnostic)) execution
+        |> Result.map_error (function
+          | Semantic.Invalid_transition _ as error -> Invalid_input (Semantic.error_to_string error)
+          | (Semantic.Invalid_record _ | Semantic.Revision_exhausted) as error ->
+            Integrity_error (Semantic.error_to_string error)) in
       let* () = match current with None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
       requeue_runtime_retry_with_db store.db operation) in

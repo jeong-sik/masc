@@ -2196,7 +2196,8 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
         | "primary.test_model" ->
           ( Error (retryable_network_error "primary failed after possible effect")
           , None
-          , effect_disposition )
+          , effect_disposition
+          , Masc.Keeper_attempt_dispatch.Dispatched )
         | "fallback.test_model" ->
           Alcotest.failf "%s allowed duplicate-capable fallback" label
         | other -> Alcotest.failf "unexpected candidate %s" other)

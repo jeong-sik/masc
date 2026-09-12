@@ -213,7 +213,8 @@ type record_outcome =
   | Record_failed of { record : string; reason : string }
 
 val record_default_base_path : string -> record_outcome
-(** Record [path] as the default for later commands. Callers do this after the
+(** Record the absolute canonical identity of the existing [path] as the
+    default for later commands. Callers do this after the
     workspace has actually served a command, so a path that failed to boot is
     not remembered. Failure is returned, never raised: not recording a default
     must not fail the command that succeeded. *)

@@ -11495,12 +11495,10 @@ let render_acting (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (* Same gap as Config's: this row named no way out. Esc does two
-            things here and the help sheet gives it two rows -- it closes the
-            evidence pane when one is open, and otherwise leaves for Overview
-            -- so the hint says "back", the word that is true either way. *)
-         "j/k:select/scroll  Enter:evidence  g:newest  G:oldest  \
-          f:turns/actions/everything  Esc:back  q:quit");
+         (* Same straggler, same fix. The literal named five of this surface's
+            nine keys: 1/2 (Events / Logs), l (logs), Esc and q never reached
+            the screen they work on. *)
+         (Masc_tui_keys.footer_hints Acting));
   let clamped = match state.acting_filter with
     | Acting.Turns -> Acting scroll
     | Actions | Everything -> Acting_selection (scroll, cursor) in
@@ -13691,12 +13689,12 @@ let render_config (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (* Esc and q last, which is where every other converted footer puts
-            them. Without them this row named no way out at all -- and it is
-            not a row that ran out of cells: at 150 columns it spent 78 of
-            them. The help sheet's own word for Esc here is "overview". *)
-         "j/k:value field  v:read status  PgUp/PgDn:page  e:edit (preview-checked)  \
-          r:reload  Esc:overview  q:quit");
+         (* Projected from the key table rather than spelled here. The literal
+            named five keys and no way out -- not because the row ran out of
+            cells (78 of 150 at the time) but because nobody wrote Esc or q
+            into it. It also named PgUp/PgDn, which the table did not have, so
+            the two had drifted in both directions. *)
+         (Masc_tui_keys.footer_hints Config));
   finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
 
 let render_surface (state : state) =

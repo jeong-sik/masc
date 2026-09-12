@@ -103,7 +103,7 @@ let for_surface = function
       ; b Navigate "g / G" "newest / oldest"
       ; b Navigate "l" "logs"
           ~help:"the server's own log lines, off the ring under Activity"
-      ; b Act "f" "filter" ~help:"cycle the filter"
+      ; b Act "f" "turns / actions / everything" ~help:"cycle the filter"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -422,9 +422,20 @@ let for_surface = function
       [ b Navigate "j/k" "select / scroll"
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
-      ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
-      ; b Navigate "v" "runtime.toml read status"
-          ~help:"source revision, validation issues, and application/restart details"
+        (* The pane names are help, not a label. Spelled as the label they
+           cost 45 cells in one footer item -- more than most whole footers --
+           and being near the front of the row they pushed every key behind
+           them out before giving way themselves. The header already draws
+           "p:next" beside the pane strip, which is where the names belong. *)
+      ; b Navigate "p" "next pane"
+          ~help:"runtime.toml / models / params / prompts / themes"
+      ; b Navigate "PgUp/PgDn" "page"
+        (* "read status", not "runtime.toml read status": the pane strip one
+           row up already says which file is open, and the footer row is the
+           one place where a repeated filename costs another key its seat. The
+           hand-written literal this replaced had already made that call. *)
+      ; b Navigate "v" "read status"
+          ~help:"runtime.toml: source revision, validation issues, and application/restart details"
       ; b Navigate "9" "Runtime"
           ~help:"runtime status, lane routing, probes and connected clients"
       ; b Navigate "s" "resources"
@@ -445,6 +456,7 @@ let for_surface = function
       ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
+      ; b Meta "q" "quit"
       ]
   | Resources ->
       [ b Navigate "j/k" "move"

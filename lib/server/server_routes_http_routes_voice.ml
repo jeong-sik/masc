@@ -217,7 +217,11 @@ let probe_failed request reqd reason =
    and a dead fallback looks healthy until the one in front of it goes away. *)
 let handle_probe_tts request reqd body =
   match Yojson.Safe.from_string body with
-  | exception _ -> probe_failed request reqd "the request body is not JSON"
+  (* Narrowed to what the parser throws: a wildcard here would swallow
+     Eio.Cancel.Cancelled and leave a cancelled fiber reporting a parse
+     failure. *)
+  | exception Yojson.Json_error _ ->
+    probe_failed request reqd "the request body is not JSON"
   | json ->
     let message =
       match json with

@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import sys
 import threading
 import zlib
@@ -110,11 +111,13 @@ def scenario(binary: str, columns: int) -> None:
             }), flush=True)
         finally:
             release.set()
-        h.escape_to_keeper_detail(process, master, output, name=b"alpha")
-        os.write(master, b"q")
+        # End the isolated process through its normal signal cleanup. Chat
+        # navigation after an intentionally unfinished stream is not this
+        # scenario's assertion, and its parent surface depends on layout.
+        os.killpg(process.pid, signal.SIGTERM)
 
     h.run_terminal_scenario(binary, description=f"approval and other work coexist ({columns} columns)",
-                            interact=interact, http_fixtures=fixtures)
+                            interact=interact, http_fixtures=fixtures, confirm_exit=b"")
 
 
 if __name__ == "__main__":

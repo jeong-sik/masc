@@ -6226,6 +6226,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   in
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
+      ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)
@@ -6234,6 +6235,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
+      ~keeper:(Terminal_text.single_line k.k_name)
       ~notice:
         (attempt @ started @ Masc_tui_types.identity_app_form_rows state.identity_app_form
         @ filter_rows)

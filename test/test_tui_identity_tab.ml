@@ -124,7 +124,7 @@ let test_the_provider_row_sits_below_the_preamble () =
      Both sides read the preamble rather than counting it, so a line added
      to the header moves the cursor's target with it. *)
   let preamble =
-    List.length (Masc_tui_types.identity_preamble ~notice:[])
+    List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[])
   in
   check Alcotest.int "first provider" preamble
     (Masc_tui_types.identity_provider_line ~notice:[] ~index:0);
@@ -146,13 +146,14 @@ let test_a_notice_pushes_the_list_down () =
 let test_no_notice_reserves_no_room () =
   (* Nothing is held back for a message there is none of. A blank line kept
      "just in case" is a row the list is pushed down by on every screen that
-     has nothing to report -- and the sentence that used to sit here said the
-     keys the tab's hint row already names. *)
-  check Alcotest.int "nothing to carry, nothing drawn" 0
-    (List.length (Masc_tui_types.identity_preamble ~notice:[]));
-  (* The keys belong to the hint row. Spelled in both places, this copy was
-     the one that got cut. *)
-  check Alcotest.bool "no keys are spelled above the list" false
+     has nothing to report.
+
+     The sentence above it stays because the tab's hint row does not reach the
+     screen: at 150 columns the title is cut inside "Automation", 79 cells of
+     tab labels before the hint begins. Measured 2026-09-12. *)
+  check Alcotest.int "the hint and one blank, and that is all" 2
+    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]));
+  check Alcotest.bool "and the keys are named there" true
     (List.exists
        (fun line ->
          List.exists
@@ -164,7 +165,7 @@ let test_no_notice_reserves_no_room () =
              in
              seek 0)
            [ "arrows"; "filter"; "refresh"; "toggle" ])
-       (Masc_tui_types.identity_preamble ~notice:[ "a provider refused" ]))
+       (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]))
 
 (* ── typing to narrow the list ──────────────────────────────────────── *)
 

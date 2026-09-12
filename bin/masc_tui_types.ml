@@ -2009,18 +2009,21 @@ let identity_filter_rows ~providers filter =
     ; ""
     ]
 
-(* What sits between the divider and the provider list. Only the notice now:
-   the keys were spelled out here in a sentence that the tab's own hint row
-   already carries -- [ ]:tab, arrows+enter:connect, T:toggle, A:app, /:filter,
-   R:refresh -- and of the two copies this was the one that got cut, at
-   eighty columns and at a hundred and fifty. The keeper it connects to is
-   named in the title row two lines above. What only the sentence said, that A
-   asks for a Client ID, moved into that binding's help.
+(* Each block above the list brings its own trailing blank, so two of them
+   do not stack two blanks and none of them leaves the list flush against
+   the hint.
 
-   Still a function rather than the notice itself: [identity_provider_line]
-   reads it to know which row the list starts on, so a block added here moves
-   the cursor's target with it instead of drifting from a count written twice. *)
-let identity_preamble ~notice = notice
+   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
+   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
+   dropped on that ground, until a 150-column frame showed the hint row does
+   not reach the screen at all: the row spends 79 cells on nine tab labels
+   before the hint starts, so the title is cut inside "Automation" and the
+   keys are never drawn. Until that row is fixed this sentence is the only
+   place an operator can read them -- #35539. *)
+let identity_preamble ~keeper ~notice =
+  ("  Move with arrows, enter to connect " ^ keeper
+   ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
+  :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -2029,7 +2032,7 @@ let identity_preamble ~notice = notice
     fifty-odd rows they would have to scroll past. It moves the list down,
     so the row a keypress scrolls to moves with it. *)
 let identity_provider_line ~notice ~index =
-  List.length (identity_preamble ~notice) + index
+  List.length (identity_preamble ~keeper:"" ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no

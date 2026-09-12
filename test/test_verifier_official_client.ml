@@ -105,7 +105,8 @@ let test_review mode =
     ; root_layout = ["proof.txt"] } in
   let command, capture = fixture_script root ~mode in
   let config_path = Filename.concat root "runtime.toml" in
-  write config_path (runtime_config command);
+  let runtime_text = runtime_config command in
+  write config_path runtime_text;
   (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
   if mode = "valid" then (
     let refused = Keeper_turn_driver.run_named ~runtime_id:"official.verifier"
@@ -118,8 +119,20 @@ let test_review mode =
      | Error e -> fail (Agent_core.Error.to_string e)
      | Ok _ -> fail "arbitrary provider transform was silently dropped");
     check bool "unsupported arbitrary transform never spawned client" false (Sys.file_exists capture));
+  let declarations = match Runtime_toml.parse_string runtime_text with
+    | Ok config -> config.Runtime_schema.exact_output_lane_decls
+    | Error _ -> fail "fixture runtime declarations failed to parse" in
+  let io : Agent_core.Exact_output.resolver_io = {getenv=(fun _ -> Ok None)} in
+  let snapshot = match Agent_core.Exact_output.load_resolver_snapshot ~io () with
+    | Ok snapshot -> snapshot | Error _ -> fail "embedded resolver snapshot unavailable" in
+  (match Runtime.publish_exact_output_registry ~lanes:declarations snapshot with
+   | Ok _ -> () | Error detail -> fail detail);
+  let previous_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn in
+  Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn Runtime.verifier_exact_lane_slot_ids;
+  Eio.Switch.on_release sw (fun () ->
+    Atomic.set Workspace_hooks.get_verifier_exact_lane_slot_ids_fn previous_slots);
   let calls = ref [] in
-  let review () = AR.run ~evaluator_runtime:"official.verifier" ~sw:(Some sw)
+  let review () = AR.run ~sw:(Some sw)
     ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
     ~render_prompt:(fun () -> Ok "Verify the supplied image and read proof.txt before reporting.")
     ~goal_blocks:[Agent_core.Types.Image

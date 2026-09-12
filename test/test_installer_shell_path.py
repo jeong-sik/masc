@@ -162,5 +162,55 @@ printf 'SCRIPT_REMAINDER_RAN\\n' >&2
             os.close(master)
 
 
+    def test_piped_installer_hands_the_setup_journey_the_terminal(self):
+        # The journey asks for a model and a sandbox. Read from a pipe without
+        # this, it reads the pipe instead and the wizard reports a cancellation
+        # the operator never asked for.
+        probe = self.prefix/'masc-journey-probe'
+        probe.write_text('#!/bin/sh\n'
+                         'if [ -t 0 ]; then printf "JOURNEY_STDIN=terminal\\n" >&2\n'
+                         'else printf "JOURNEY_STDIN=pipe\\n" >&2; fi\n')
+        probe.chmod(0o755)
+        master, slave = pty.openpty()
+        def session():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        code = ('. '+shlex.quote(str(self.library))+'\n'
+                'RUN_SETUP_JOURNEY=1\n'
+                'DRY_RUN=0\n'
+                'DEST='+shlex.quote(str(probe))+'\n'
+                'BASE_PATH='+shlex.quote(str(self.home))+'\n'
+                'MASC_PORT=8945\n'
+                'finish_setup_journey\n'
+                "printf 'JOURNEY_RETURNED\\n' >&2\n")
+        process = subprocess.Popen(['/bin/bash'], stdin=subprocess.PIPE, stdout=slave, stderr=slave,
+                                   env=self.env, preexec_fn=session)
+        os.close(slave)
+        try:
+            process.stdin.write(code.encode())
+            process.stdin.close()
+            output = b''
+            deadline = time.monotonic()+15
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    output += data
+                if process.poll() is not None:
+                    break
+            self.assertEqual(process.wait(timeout=5), 0, output.decode())
+            self.assertIn(b'JOURNEY_STDIN=terminal', output)
+            self.assertIn(b'JOURNEY_RETURNED', output)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
+
 if __name__ == '__main__':
     unittest.main()

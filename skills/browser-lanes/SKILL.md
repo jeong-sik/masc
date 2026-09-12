@@ -16,7 +16,8 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 현재 페이지를 더 읽어야 하면 전달받은 범위를 사용해 필요한 관측으로 바로 이어간다.
 
 - `documentId`·`nodeId`는 선택한 요소다. `scope`는 그 요소가 속한 읽기 범위다.
-  `scope`가 있으면 후속 BrowserRead에도 그대로 전달한다. 선택한 요소를 영역으로 바꾸지 않는다.
+  `scope` 객체가 있으면 후속 BrowserRead에도 그대로 전달하고, null이거나 없으면 생략한다.
+  선택한 요소를 영역으로 바꾸지 않는다.
 - `view=content`는 BrowserRead `mode=scene`, `view=regions`는 `mode=regions`에 해당한다.
   읽기에는 `url`을 `expectedUrl`로 사용하고, 실제 도구 스키마의 필드만 골라 전달한다.
   복사된 JSON 전체나 없는 필드를 요청 인자로 넣지 않는다.

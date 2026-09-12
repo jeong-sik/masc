@@ -27,13 +27,13 @@ memory_bytes=67108864
 pids=16
 max_reply_bytes=4096
 |}
-let declaration ?(id="observer") ?(value="first") () = Printf.sprintf {|id=%S
+let declaration ?(id="observer") ?(manifest_path="../../package.toml") ?(value="first") () = Printf.sprintf {|id=%S
 run_id="editor-world"
-manifest_path="../../package.toml"
+manifest_path=%S
 [binding]
 sources=[]
 value=%S
-|} id value
+|} id manifest_path value
 let request ?revision ~mode ~file_name source_text =
   `Assoc (["mode",`String mode;"file_name",`String file_name;"source_text",`String source_text]
     @ Option.fold ~none:[] ~some:(fun value -> ["expected_source_revision",`String value]) revision)
@@ -174,7 +174,31 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
     (member "valid" (member "validation" missing_manifest) |> Yojson.Safe.Util.to_bool);
   Unix.unlink package_path;
   let missing = read config directory "broken.toml" in
-  check string "missing package still permits reading declaration bytes" (declaration ()) (text "source_text" missing))
+  check string "missing package still permits reading declaration bytes" (declaration ()) (text "source_text" missing);
+  check bool "a missing dependency does not hide the declaration inventory" true
+    (Lane_addon_config.load ~directory).complete;
+  write (Filename.concat root ".masc/replacement-package.toml") manifest;
+  let repaired_source = declaration ~manifest_path:"../../replacement-package.toml" () in
+  let repaired = save config (request ~revision:(text "source_revision" missing) ~mode:"save"
+    ~file_name:"broken.toml" repaired_source) |> member "document" in
+  check bool "saving another manifest repairs the declaration" true
+    (member "valid" (member "validation" repaired) |> Yojson.Safe.Util.to_bool);
+  check string "replacement declaration bytes are committed" repaired_source
+    (read config directory "broken.toml" |> text "source_text");
+  check bool "replacement manifest has a new semantic revision" true
+    (text "desired_revision" repaired <> text "desired_revision" (member "document" saved));
+  check bool "repair did not recreate the missing dependency" false (Sys.file_exists package_path);
+  let unreadable = Filename.concat directory "unreadable.toml" in
+  Unix.mkdir unreadable 0o700;
+  Fun.protect ~finally:(fun () -> Unix.rmdir unreadable) (fun () ->
+    check bool "an unreadable declaration makes inventory incomplete" false
+      (Lane_addon_config.load ~directory).complete;
+    match Runtime.save_declaration ~config (request ~revision:(text "source_revision" repaired)
+      ~mode:"save" ~file_name:"broken.toml" ("# cannot inventory peers\n" ^ repaired_source)) with
+    | Error error -> check bool "unreadable inventory still blocks publication" true (error.code=Editor.Io_error)
+    | Ok _ -> fail "saved without a readable declaration inventory");
+  check string "unreadable inventory did not change committed bytes" repaired_source
+    (read config directory "broken.toml" |> text "source_text"))
 
 let test_request_paths_and_create_are_exact () = with_fixture (fun _clock config directory root _started ->
   let bytes = declaration () in

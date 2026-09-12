@@ -494,6 +494,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_lane_status", keeper_shard_read);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
+    ("keeper_artifact_transfer", keeper_shard_write);
     ("keeper_analyze_image", keeper_shard_read);
     ("masc_browser_tabs", keeper_shard_read);
     ("masc_browser_read", keeper_shard_read);

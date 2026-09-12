@@ -891,7 +891,11 @@ let help_sections ?current () =
            read it. Its shape is already the sheet's: a mark, and what it
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
-        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend) ])
+        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Board's first column is the only place these three appear, and
+             the column has no room for a legend of its own: its header already
+             spends three rows and the hearth row is cut at 150 columns. *)
+          ; ("Board marks", Masc_tui_board_kind_mark.legend) ])
 
 let footer_hints_browser_lane =
   hints_of_bindings

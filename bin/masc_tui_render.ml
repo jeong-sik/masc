@@ -9072,13 +9072,7 @@ let render_changes_tree_diff (state : state)
    is held as an index, so a refresh that shortens the list closes the diff
    rather than drawing a change the answer no longer holds. *)
 let render_changes (state : state) =
-  let opened =
-    match (state.changes_diff_row, state.changes) with
-    | Some row, Some snapshot ->
-        List.nth_opt snapshot.Masc.Tui_decode.fcs_changes row
-    | Some _, None | None, (Some _ | None) -> None
-  in
-  match opened with
+  match Masc_tui_types.opened_file_change state with
   | Some change ->
       (* A path being read names the tree reading. Both readings of the same
          row exist at once; which one is drawn is the operator's last key, not

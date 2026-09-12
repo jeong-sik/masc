@@ -1493,6 +1493,41 @@ let test_detail_search_counts_follow_the_active_pane () =
   check_pane "System logs" System_logs
     (fun detail -> state.system_logs_detail_seq <- if detail then Some 1 else None)
 
+let test_changes_diff_uses_visible_search_rows () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let payload = Yojson.Safe.from_string {|{
+    "keeper":"alpha", "window_hours":24, "calls_in_window":1,
+    "over_budget":0, "malformed":0,
+    "changes":[{"at":1, "keeper":"alpha", "turn":1, "task_id":"task-1",
+      "execution_id":"exec-change", "line_evidence":null,
+      "location":{"kind":"repo","repo_id":"masc","path":"needle.ml"},
+      "change":{"kind":"write","content":"let value = 1"}, "succeeded":true}]
+  }|} in
+  state.changes <- Some (match Tui_decode.decode_file_change_snapshot payload with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  state.view <- Changes;
+  state.search_last <- "needle";
+  let check_list label =
+    Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
+      (surface_search_count state Changes ~query:state.search_last);
+    Alcotest.(check bool) (label ^ " cursor available") true
+      (Option.is_some (scrolled_surface_rows state Changes)) in
+  check_list "list";
+  state.changes_diff_row <- Some 0;
+  Alcotest.(check (option (list string))) "diff has no hidden search rows" None
+    (surface_row_texts state Changes);
+  Alcotest.(check (option int)) "diff has no hidden list count" None
+    (surface_search_count state Changes ~query:state.search_last);
+  Alcotest.(check bool) "diff cannot move a hidden list cursor" false
+    (Option.is_some (scrolled_surface_rows state Changes));
+  state.changes_diff_row <- None;
+  check_list "return";
+  state.changes_diff_row <- Some 1;
+  Alcotest.(check bool) "stale index does not open a diff" false
+    (Option.is_some (opened_file_change state));
+  check_list "refresh removed open row";
+  Alcotest.(check string) "settled query survives" "needle" state.search_last
+
 let test_workspace_activity_offers_no_row_search () =
   (* [h] on a repository row replaces the list with that repository's own
      activity rows and its own cursor, and the handler there takes every key
@@ -1704,6 +1739,8 @@ let () =
             `Quick test_every_searchable_surface_names_its_search
         ; Alcotest.test_case "Code search counts follow immutable fetched rows"
             `Quick test_code_search_count_tracks_fetched_source
+        ; Alcotest.test_case "Changes diff uses visible search rows" `Quick
+            test_changes_diff_uses_visible_search_rows
         ; Alcotest.test_case "detail search counts follow the active pane"
             `Quick test_detail_search_counts_follow_the_active_pane
         ; Alcotest.test_case "Workspace Activity offers no row search"

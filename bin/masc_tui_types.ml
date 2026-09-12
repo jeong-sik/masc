@@ -6087,6 +6087,14 @@ let apply_clamped_scroll (state : state) = function
    works the split out from it. *)
 let changes_preview_keep_rows = 5
 
+(* The renderer and navigation must agree when a valid diff replaces the list.
+   A stale index after refresh falls back to the current list. *)
+let opened_file_change (state : state) =
+  match state.changes_diff_row, state.changes with
+  | Some row, Some snapshot -> List.nth_opt snapshot.Tui_decode.fcs_changes row
+  | Some _, None | None, (Some _ | None) -> None
+
+
 (* The over-budget note and its divider, which the Changes drawing puts above
    the list. Chrome the drawing adds conditionally has to be counted here too
    -- a bound worked out from fewer chrome rows than the frame uses lets the
@@ -6682,6 +6690,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
           (List.length (memory_fact_rows state))
       else
         Some (memory_overview_scrolled state)
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes ->
       Some
         { sc_count =
@@ -7132,6 +7141,7 @@ let surface_row_texts (state : state) : surface -> string list option =
                          evidence.Tui_decode.fhe_post_id ^ " "
                          ^ evidence.Tui_decode.fhe_title)
                    entries)))
+  | Changes when Option.is_some (opened_file_change state) -> None
   | Changes -> (
       match state.changes with
       | None -> None

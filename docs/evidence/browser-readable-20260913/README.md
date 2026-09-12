@@ -22,7 +22,10 @@ separate native fixture runs, not additional Keeper turns or this screenshot.
 The browser-lanes instruction was copied from mutable worktree body
 `d56dae645b` during setup. It is **not the same instruction** as the preceding
 guided-content run. The exact received keeper_skill body remains in
-raw-tool-results.json. This experiment does not isolate rendering from instruction
+raw-tool-results.json. browser-lanes.SKILL.md is the committed d56dae645b file
+(13,391 bytes, SHA-256 6e3ea26f00a79eee164488476ecd4bcdb3e348fcd903a3bfe191e747e66576df).
+The audit verifies its exact 13,159-byte delivered body against the first raw result
+(body SHA-256 1a085c9cdf6752cf4193541ad2bbff3a9dd7ca06ef8c0a1c7a968238ef076b1c). This experiment does not isolate rendering from instruction
 changes. No Slack session or token was used.
 
 ## Rechecking

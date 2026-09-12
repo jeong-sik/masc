@@ -22,6 +22,12 @@ for recorded in a['outer_calls']:
    assert receipt['tool_use_id']==node['tool_use_id'] and receipt['input']==node['input']
    assert receipt['success'] and node['result']['disposition']=='completed'
   assert actions[1]['input']['expectedUrl']==actions[0]['result']['data']['url']
+skill=(p/'browser-lanes.SKILL.md').read_bytes()
+assert len(skill)==13391 and hashlib.sha256(skill).hexdigest()=='6e3ea26f00a79eee164488476ecd4bcdb3e348fcd903a3bfe191e747e66576df'
+# The native parser excludes the frontmatter closing-line newline, preserves body whitespace.
+delivered=skill.split(b'---',2)[2][1:]
+assert len(delivered)==13159 and hashlib.sha256(delivered).hexdigest()=='1a085c9cdf6752cf4193541ad2bbff3a9dd7ca06ef8c0a1c7a968238ef076b1c'
+assert outputs[0].encode()==delivered
 assert sum(len(s.encode()) for s in outputs)==a['outer_result_bytes']==36199
 assert a['outer_errors']==0 and a['composition_invocations']==3
 lifetime=load('tui-lifetime.json');report=load('report.json');tui=load('tui-follow-audit.json')

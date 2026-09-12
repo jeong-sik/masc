@@ -1,0 +1,29 @@
+{
+  "file": "test/fixtures/verifier-video.mp4",
+  "bytes": 13215,
+  "sha256": "ec70db5cf73581dcf736f75fe65471ce8e199efb9b06247d842b7908ddb81226",
+  "generation": [
+    "ffmpeg",
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=64x48:rate=4:duration=1",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:duration=1",
+    "-c:v",
+    "mpeg4",
+    "-c:a",
+    "aac",
+    "-movflags",
+    "+faststart",
+    "-y",
+    "test/fixtures/verifier-video.mp4"
+  ],
+  "standalone_valid_decode_exit": 0,
+  "standalone_half_truncated_decode_exit": 183,
+  "native_dispatch_tests": "requested at CI boundary"
+}

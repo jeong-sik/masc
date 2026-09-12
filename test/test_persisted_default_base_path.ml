@@ -106,7 +106,7 @@ let test_explicit_input_wins_over_the_record () =
     check
       (option string)
       "with no env, the record answers"
-      (Some recorded)
+      (Some (Unix.realpath recorded))
       (Option.map snd (EC.base_path_source_opt ()));
     Unix.putenv "MASC_BASE_PATH" explicit;
     (match EC.base_path_source_opt () with
@@ -117,6 +117,22 @@ let test_explicit_input_wins_over_the_record () =
        failf "the record %s should not win over an explicit env value" record
      | None -> fail "an explicit env value was set");
     Unix.putenv "MASC_BASE_PATH" "")
+
+let test_relative_record_cannot_select_the_callers_workspace () =
+  with_config_home (fun config_home ->
+    let workspace = workspace_with_masc_dir () in
+    let _ = recorded_path (EC.record_default_base_path workspace) in
+    let record = Filename.concat (Filename.concat config_home "masc") "default-base-path" in
+    Out_channel.with_open_text record (fun channel -> output_string channel ".\n");
+    let original_cwd = Sys.getcwd () in
+    Fun.protect ~finally:(fun () -> Sys.chdir original_cwd) (fun () ->
+      Sys.chdir workspace;
+      (match EC.persisted_default_base_path () with
+       | EC.Stale _ -> ()
+       | EC.No_record | EC.Usable _ | EC.Unread_under_test _ ->
+         fail "a relative record cannot identify the workspace chosen by another process");
+      check (option string) "relative record does not select the caller's workspace"
+        None (Option.map snd (EC.base_path_source_opt ()))))
 
 (* Removing the record is the uninstall path's job and it is a file delete, so
    this checks the reader against that observable state rather than exporting a
@@ -194,6 +210,10 @@ let () =
             "explicit input wins over the record"
             `Quick
             test_explicit_input_wins_over_the_record
+        ; test_case
+            "a relative record cannot select the caller's workspace"
+            `Quick
+            test_relative_record_cannot_select_the_callers_workspace
         ; test_case
             "a deleted record reads as absent"
             `Quick

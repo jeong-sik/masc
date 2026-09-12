@@ -452,9 +452,9 @@ let apply ~base_path json =
   let path = runtime_config_path ~base_path in
   match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
   | Error error -> Error (Setup_failed error)
-  (* The revision this write produced, so a caller can keep editing without
-     reading again -- and out of the commit rather than a read after it, which
-     could answer a different writer's revision. *)
+  (* The revision comes out of the write itself, not from reading the file
+     again afterwards: a second read can see someone else's commit and hand
+     the caller a revision its own change is not in. *)
   | Ok revision -> Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ])
 
 (* The endpoint a catalogue read is taken against. It is not an endpoint anyone

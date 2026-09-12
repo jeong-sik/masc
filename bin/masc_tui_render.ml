@@ -13210,13 +13210,15 @@ let render_palette (state : state) =
      prompt is a filter over those names, not a jump query. *)
   let title, prompt, action =
     match state.palette_mode with
-    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "Jump")
+    (* The action reads as a footer label now, so it is spelled like one:
+       lower case, the way every other [key:label] item is. *)
+    | Masc_tui_types.Palette_jump -> (" Quick Jump & Navigation", ":", "jump")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_types.code_cursor_line_symbols state) in
         ( Printf.sprintf " %s \xc2\xb7 %d name%s on line %d" choice_question names
             (if names = 1 then "" else "s") choice_line
         , "filter:"
-        , "Ask" )
+        , "ask" )
   in
   framed_shadow_line buf cols
     (screen_title title ^ "  "
@@ -13243,8 +13245,16 @@ let render_palette (state : state) =
   framed_shadow_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
+       (* [key:label] items, two spaces apart, the way every other footer is
+          written. In the dotted form this row was one item with no colon, so
+          {!Masc_tui_footer} could shed no whole key and keep no door: it fell
+          through to the cell cut, where [Esc] survived only when the budget
+          happened to reach it. test_a_row_in_another_grammar_loses_its_door
+          measures that across widths. The count keeps no colon on purpose --
+          it is not a key, and it is the first thing a narrow row should give
+          up. *)
        ~hints:
-         (Printf.sprintf "%d/%d · [Enter] %s · [Up/Down] Navigate · [Esc] Close"
+         (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
             (if total = 0 then 0 else cursor + 1)
             total action));
   finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
@@ -13459,7 +13469,13 @@ let render_help (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:scroll  h:hints  Esc:close");
+       (* The sheet that names every other surface's keys did not name its own.
+          It is longer than any terminal -- at 150x78 the later sections are
+          still off screen -- so [G] is the difference between reading them and
+          pressing [j] forty times, and nothing said [G] exists. The keys are
+          handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
+       ~hints:
+         "j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds

@@ -438,6 +438,16 @@ check_rule "R17-tui-board-sort-token-on-screen" 2 \
   'bin/masc_tui_types\.ml:' \
   bin
 
+# Pane focus. Four panes across the Code and Resources surfaces mark which one
+# has the cursor, and three marked it by printing the key that moves it while
+# the fourth printed the glyph the tab strip uses. The weight beside it is not
+# a second signal: NO_COLOR empties bold and dim, so the glyph is what is left.
+check_rule "R18-tui-pane-focus-key-marker" 0 \
+  "the marker the Code tree uses" \
+  '"  \[j/k\]"' \
+  '' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

@@ -37,9 +37,35 @@ val cache_store : og_preview -> unit
 val get_preview : string -> og_preview
 val clear_cache : unit -> unit
 
-val mosaic_store : string -> string list -> unit
-(** Store rendered mosaic lines for an image URL. Called off the render loop
-    once the preview's image has been downloaded and decoded. *)
+type mosaic_refusal =
+  | Fetch_failed of { detail : string }
+      (** curl delivered no body: an HTTP error status, a timeout, no host. *)
+  | Empty_body  (** The image URL answered with zero bytes. *)
+  | Cache_unreadable of { detail : string }
+      (** The downloaded file could not be read back. *)
+  | Decode_failed of { detail : string }
+      (** The body reached the decoder and no frame came out. *)
+
+type mosaic_entry =
+  | Mosaic of string list
+      (** Rendered half-block mosaic lines for the image URL. *)
+  | Refused of mosaic_refusal
+      (** Why there is no mosaic. Recorded so the background fetch does not
+          download and decode the same URL again on every preview parse, and
+          said on the card so a missing picture is not mistaken for a page
+          with no og:image. *)
+
+val mosaic_refusal_text : mosaic_refusal -> string
+(** The refusal as one line for the card. *)
+
+val mosaic_lookup : string -> mosaic_entry option
+(** What the background fetch decided about an image URL, or [None] while it
+    has not decided yet. An entry lasts the session; [v] and /image fetch on
+    their own and do not read or clear it. *)
+
+val mosaic_store : string -> mosaic_entry -> unit
+(** Record the decision for an image URL. Called off the render loop once the
+    preview's image has been downloaded and decoded, or refused. *)
 
 val parse_og_html : url:string -> body:string -> og_preview
 (** Merge a fetched page's <title> and og:* meta tags onto the URL-synthesized

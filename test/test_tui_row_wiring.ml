@@ -30,6 +30,11 @@ let reads_in ~module_path ~binding_name ~fields =
 let reads ~binding_name ~fields =
   reads_in ~module_path:render ~binding_name ~fields
 
+(* A row two surfaces share is drawn by the primitives, not by either of
+   them, so the guard over it names that file. *)
+let reads_prim ~binding_name ~fields =
+  reads_in ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name ~fields
+
 (* The detail under the list is three rows, and [boxed_surface_chrome_rows]
    budgets one for the selected row's own line. Every kind takes that one
    except a held tool call, which answers two questions -- what is being asked,
@@ -332,7 +337,8 @@ let test_repository_changes_keep_the_git_axes () =
   List.iter
     (fun field ->
       Alcotest.(check bool) ("renderer reads " ^ field) true
-        (reads ~binding_name:"repository_change_status" ~fields:[ field ] > 0))
+        (reads_prim ~binding_name:"repository_change_status" ~fields:[ field ]
+         > 0))
     [ "rc_staged"; "rc_unstaged"; "rc_untracked"; "rc_conflicted" ]
 
 let test_project_changes_use_the_requested_workspace_root () =

@@ -9,6 +9,112 @@ run locally, and the two calls an external device makes. Everything here was
 measured on one workstation (M3 Max, macOS) on 2026-09-03/04; numbers are from
 that machine and say so where they matter.
 
+## Starting from nothing on a new mac
+
+Measured on macOS 26 / M3 Max, 2026-09-12. A machine that has just been
+unboxed can speak without installing anything, and needs two downloads to
+hear.
+
+### What is already there
+
+`/usr/bin/say` is in the base system and carries **nine Korean voices** among
+184 total. Nothing in the base system transcribes: macOS dictation is not
+scriptable, so hearing is the half that has to be fetched.
+
+### The two downloads
+
+```
+masc prerequisite-actions whisper
+```
+
+answers with both steps and asks before running either:
+
+| Step | What it fetches |
+|---|---|
+| `brew install whisper-cpp` | 8.9MB bottle; its `whisper-cli` transcribes a file |
+| the model | `ggml-large-v3-turbo.bin`, 1,624,555,275 bytes |
+
+Neither starts a server. `say` and `whisper-cli` each run once and exit, so
+masc runs them the way it runs `curl` for the endpoints that are addresses:
+there is no port to pick, nothing to start before speaking, and nothing left
+running afterwards. Installing them is still the operator's step, which is what
+`prerequisite-actions` is — it names the commands and asks.
+
+Without a `HOME` to build a cache path from, the second step opens the model
+downloads page instead of offering a command with nowhere to write. On Linux
+both steps are a link: whisper.cpp is built rather than packaged, and naming an
+apt package would install something else or nothing.
+
+### What the configuration then says
+
+```toml
+[voice.tts]
+default_model = "-"          # say takes no model; the section still needs the key
+default_voice = "Yuna"
+
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+
+[voice.tts.agent_voices]
+alpha = "Yuna"
+beta = "Eddy (한국어(한국))"
+
+[voice.stt]
+default_model = "/Users/you/.cache/whisper/ggml-large-v3-turbo.bin"
+
+[[voice.stt.endpoints]]
+id = "whisper-local"
+kind = "whisper_cli"
+```
+
+`default_model` on the speech-in section is a **file path** here rather than a
+name, which is what the model means to a command that takes `-m`. A blank one
+is refused by name rather than defaulted to a path that may not exist.
+
+A `base_url` on either endpoint is refused when the configuration loads. These
+kinds run a command; an address on one would be read by nothing, and a field
+that is silently dropped reads as a setting that took.
+
+### What it costs, measured
+
+```
+say -v Yuna -o out.aiff "안녕하세요 키퍼입니다"        →  84KB, immediate
+whisper-cli -m ggml-large-v3-turbo -l auto -nt -f out.wav
+  → auto-detected language: ko (p = 0.998641)
+  → " 안녕하세요. 키퍼입니다."                          →  5.1s wall
+```
+
+The recording masc makes is already 16 kHz mono 16-bit WAV, which is what
+whisper.cpp requires, so nothing is converted between the microphone and the
+transcript. And `-l auto` detects Korean, so there is no language to configure.
+
+### The trap: a wrong voice name is silent
+
+`say` does not fail on a voice it does not have. It exits 0 and speaks in the
+system voice. Worse, a name that exists in several languages picks one of them
+without saying which:
+
+| Command | Result on a Korean sentence |
+|---|---|
+| `say -v NoSuchVoice` | exits 0, 91,028 bytes in the system voice |
+| `say -v Eddy` | 4.7KB — an English voice reading Korean |
+| `say -v "Eddy (한국어(한국))"` | 72KB — the Korean voice |
+
+So a voice name typed from memory is a coin flip. Take it from the list:
+
+```
+say -v '?'
+```
+
+The id to put in the configuration is the **whole printed label**, parentheses
+included. `say` adds them to names that exist in several languages; trimming
+them selects a different language without saying so.
+
+Two shapes in that list will break a parser written from one example: the
+columns are space-padded rather than tabbed, and the locale is not always two
+letters and two letters — `ar_001` is in it.
+
 ## Configuration
 
 One section in `runtime.toml`, read by `Voice_config`:
@@ -382,7 +488,6 @@ as a success.
 
 The audio goes in the **raw body**, not as multipart — the same as
 `/voice/transcribe`, and the same trap that costs time to rediscover.
-
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.

@@ -1954,15 +1954,23 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~callee:"Masc_tui_termios.disable_discard_output");
   check int "terminal restoration returns the original discard key" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal" ~callee:"Masc_tui_termios.set_discard_output");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.set_discard_output");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal" ~callee:"Frame_presenter.cleanup");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Frame_presenter.cleanup");
   check int "terminal restoration reapplies old termios" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
-       ~module_path:main_path ~binding_name:"restore_terminal"
+       ~module_path:main_path ~binding_name:"restore_terminal_outcome"
        ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"old_term");
+  check int "unit restore delegates to the outcome-bearing restore" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"restore_terminal" ~callee:"restore_terminal_outcome");
+  check int "exit output receives the terminal restoration outcome" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"cleanup"
+       ~callee:"Terminal_restore.finish_after_restore"
+       ~arguments:[ "restore", "restore_terminal_outcome" ]);
   check int "suspend restores the shell terminal first" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"suspend" ~callee:"restore_terminal");

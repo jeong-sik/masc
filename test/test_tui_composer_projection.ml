@@ -151,11 +151,17 @@ let test_state_projection_has_one_structural_owner () =
      second reading of the same state, which is what this suite exists to
      stop. *)
   List.iter
-    (fun binding_name ->
-       check int (binding_name ^ " is not drawn a second time") 0
-         (Ast_grep.count_value_bindings
-            ~module_path:"bin/masc_tui_render.ml" ~name:binding_name))
-    [ "composer_line"; "composer_cursor" ]
+    (fun (module_path, binding_name) ->
+       check int
+         (binding_name ^ " is not drawn a second time in "
+          ^ Filename.basename module_path)
+         0
+         (Ast_grep.count_value_bindings ~module_path ~name:binding_name))
+    [ ("bin/masc_tui_render.ml", "composer_line")
+    ; ("bin/masc_tui_render.ml", "composer_cursor")
+    ; ("bin/masc_tui_render_chat.ml", "composer_line")
+    ; ("bin/masc_tui_render_chat.ml", "composer_cursor")
+    ]
 
 let () =
   run "tui-composer-projection"

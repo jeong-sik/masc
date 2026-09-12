@@ -2,6 +2,7 @@ open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
 open Masc_tui_render_prim
+open Masc_tui_render_chat
 open Masc_tui_loader
 
 (* How long the pane waits on [gh pr view --web] before reporting it. The
@@ -7630,7 +7631,7 @@ let seek_in_chat state ~target ~restart =
          [msg_find] keeps what they typed, because that is what the pane
          echoes back to them. *)
       match
-        Masc_tui_render.keeper_message_find_scroll state ~keeper_name
+        keeper_message_find_scroll state ~keeper_name
           ~needle:(String.trim state.msg_find)
           ~older_than
       with
@@ -15483,7 +15484,7 @@ and is loaded on demand through keeper_skill.
               && (not state.palette_open)
               && (not state.context_inspector_open)
               && Option.is_none state.search
-              && Masc_tui_render.chat_row_action_at ~row
+              && chat_row_action_at ~row
                  = Masc_tui_message_layout.Action_unfold_argument ->
            state.msg_tool_visibility <- Tools_full
        (* A left press on the Lanes overview moves the row cursor (and opens
@@ -17587,7 +17588,7 @@ and is loaded on demand through keeper_skill.
             state.keeper_message_focus <- Right_pane
        | Some "left"
          when message_mode
-              && Masc_tui_render.keeper_roster_pane_shown state
+              && keeper_roster_pane_shown state
                    ~cols:terminal_columns ->
            state.keeper_message_focus <- Left_pane
        | Some "down"

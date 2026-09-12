@@ -1145,6 +1145,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
             200,
             {
                 "goals": [],
+                "goal_history": {"unlisted": []},
                 "rollup": {
                     "active_count": 0,
                     "verifying_count": 0,
@@ -1251,6 +1252,20 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
         200,
         {
             "goals": goals,
+            # Include retained history so resize tests account for its two
+            # non-selectable rows above the active goal list.
+            "goal_history": {
+                "unlisted": [
+                    {
+                        "goal_id": "goal-history-29424",
+                        "title": "earlier-plan-29424",
+                        "opened_at": "2026-08-20T00:00:00Z",
+                        "closed_at": "2026-08-21T00:00:00Z",
+                        "final_phase": "completed",
+                        "lifetime_hours": 24.0,
+                    }
+                ]
+            },
             "rollup": {
                 "active_count": len(goals),
                 "verifying_count": 0,
@@ -3801,6 +3816,8 @@ def planning_resize_budget_interaction(
             final_cursor=b"\x1b[?25l",
         )
         assert_planning_goal_selected(frame, b"plan-alpha-29424")
+        if b"earlier-plan-29424" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Planning lost retained goal history: {frame!r}")
         footer_row = frame_row_of(frame, b"j/k:move")
         goal_row = frame_row_of(frame, b"plan-alpha-29424")
         # Row addresses include the prepended surface strip; the footer sits

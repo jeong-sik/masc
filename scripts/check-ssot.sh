@@ -365,10 +365,16 @@ check_rule "R13-tui-footer-fact-literal" 0 \
 # rows) that was 169.8 ms of every second spent walking. Masc_tui_rows cuts
 # the window once instead; #35307 converted the fifty-odd sites.
 #
-# The pattern is the index, not the call: `List.nth <list> (<a> + <b>)` and
-# the `let idx = i + scroll in` that precedes one. A point lookup -- the row
-# under a cursor, the surface ring's ten entries -- does not match and is not
-# what this rule is about.
+# The pattern is the index, not the call: `List.nth <list> (<a> + <b>)`, the
+# sum written at the call. A point lookup -- the row under a cursor, the
+# surface ring's ten entries -- does not match and is not what this rule is
+# about.
+#
+# It does not match `let idx = i + scroll in ... List.nth_opt rows idx`, one
+# line apart, which this comment used to claim. Three of those stood in the
+# Memory and Metrics renderers while this reported zero. That shape is held
+# by test_tui_row_wiring instead, which parses the file and counts the call
+# inside the loop body rather than matching text.
 r14_pattern='List\.nth(_opt)?\s+[A-Za-z_][A-Za-z0-9_.'"'"']*\s+\((scroll|first|offset|[a-z_]*scroll[a-z_]*|[a-z_]*offset)\s*\+|List\.nth(_opt)?\s+[A-Za-z_][A-Za-z0-9_.'"'"']*\s+\([a-z_]+\s*\+\s*(scroll|first|offset|[a-z_]*scroll[a-z_]*|[a-z_]*offset)\)'
 # Plant one, the way the other rules self-test: a shape that must match, and
 # one that must not, so a pattern that quietly stops matching is caught here

@@ -27,7 +27,7 @@ let source : Layout.source =
   { content = Layout.Scene nodes; scene_cursor = 0; columns = 100 }
 ;;
 
-(* A stand-in for browser_lane_page_lines: one row per node, and the cursor
+(* A stand-in for browser_lane_page_layout: one row per node, and the cursor
    marks one of them, so the rows depend on every field of the source. *)
 let render (source : Layout.source) () =
   match source.content with
@@ -40,9 +40,9 @@ let render (source : Layout.source) () =
            (index + 1)
            source.columns
            node.text)
-      nodes
-  | Layout.Page text -> [ text ]
-  | Layout.Empty -> []
+      nodes, Some source.scene_cursor
+  | Layout.Page text -> [ text ], None
+  | Layout.Empty -> [], None
 ;;
 
 (* Scrolling moves the viewport; a check tick that finds the page unchanged
@@ -70,7 +70,7 @@ let test_reading_one_page_lays_it_out_once () =
   Alcotest.(check int) "every node retained" 200 (Layout.count first);
   Alcotest.(check string)
     "the last row is reachable"
-    (List.nth (render source ()) 199)
+    (List.nth (fst (render source ())) 199)
     (Layout.line first 199)
 ;;
 
@@ -107,7 +107,7 @@ let test_a_changed_input_replaces_the_rows () =
        List.iteri
          (fun index expected ->
             Alcotest.(check string) (label ^ " row") expected (Layout.line rows index))
-         (render changed ()))
+         (fst (render changed ())))
     cases
 ;;
 

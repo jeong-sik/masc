@@ -157,7 +157,12 @@ open Alcotest
    (+979 bytes). What it bought: a Keeper hands a generated binary to a peer
    through the workspace blob store, without either side touching the other's
    host paths. *)
-let ceiling_bytes = 106_394
+(* 2026-09-12: 107,631 across 124 tools. PR adds keeper_constitution_write and
+   keeper_constitution_remove (+1,237 bytes). What it bought: the keepers of a
+   world write the norms they agreed on into the one place every keeper there
+   reads, instead of an operator pasting them into a prompt override from the
+   dashboard -- the only path that existed (RFC-0442). *)
+let ceiling_bytes = 107_631
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -236,6 +241,8 @@ let all_surface_golden_names =
   ; "keeper_memory_search"
   ; "keeper_memory_retract"
   ; "keeper_memory_write"
+  ; "keeper_constitution_write"
+  ; "keeper_constitution_remove"
   ; "keeper_person_note_set"
   ; "keeper_spawn"
   ; "keeper_spawn_read"

@@ -90,6 +90,33 @@ The setup screen inspects sandbox services, explains what is missing, and offers
 
 If startup fails, use the executable path and raw stderr shown by the installer to diagnose it. A signal such as `SIGABRT` alone does not identify a missing library. `--force` refreshes the release files while preserving workspace configuration; it does not make an unsupported OS version compatible.
 
+### PDF evidence inspection
+
+Task and Goal verification can inspect PDF text and rendered pages when the MASC
+host has Poppler's `pdftotext` and `pdftoppm`. Poppler is a host dependency; the
+portable release archive does not include it.
+
+Open `masc setup`, then choose **PDF document inspection** in **Prepare imp’s
+workspace**. Setup shows whether both commands can start and offers an explicit
+installation action. On macOS this uses an existing Homebrew installation
+([`brew install poppler`](https://formulae.brew.sh/formula/poppler)); on Debian and
+Ubuntu it uses `sudo apt-get` to install
+[`poppler-utils`](https://packages.debian.org/stable/poppler-utils). Other Linux
+distributions require installation through their own package manager. The default
+MASC bootstrap does not install Homebrew or PDF tools automatically.
+
+The same action is available without the setup screen:
+
+```bash
+masc prerequisite-actions pdf-tools                        # inspect tools and actions
+masc prerequisite-actions pdf-tools --execute poppler_install
+```
+
+After installation, MASC runs both commands with `-v`. The result describes the
+current process environment; it does not claim that a PDF has been inspected or
+accepted. If MASC runs as a service, make the tools available on that service's
+PATH before requesting PDF verification.
+
 ## Install
 
 The quick start above covers a normal install. Name the workspace directly when

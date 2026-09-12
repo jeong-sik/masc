@@ -489,9 +489,9 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
             bundle))
 ;;
 
-(* The live PDF and PNG lookups returned binary text slices. Exercise the
-   descriptor/owned-file path, then the same observation persistence and API
-   projection used by the completion reviewer. No model verdict is simulated. *)
+(* Unsupported binary lookups must retain their encoding failure through the
+   descriptor/owned-file path, observation persistence and API projection used
+   by the completion reviewer. No model verdict is simulated. *)
 let test_binary_lookup_failures_survive_observation_replay () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -515,9 +515,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
     ~producer:producer_name ~authority_kind:"system_llm_agent"
     ~authority_actor:"verifier_exact" ~started_at:1.0;
   let fixtures =
-    [ "booklet.pdf", "%PDF-1.3\n%\147\140\139\158\n1 0 obj\n<<>>\nendobj\n"
-    ; "unsupported.bin", "\000\255\147\140"
-    ]
+    [ "unsupported.bin", "\000\255\147\140" ]
   in
   let tools = List.map (fun (name, bytes) ->
     Out_channel.with_open_bin (Filename.concat playground name)
@@ -555,7 +553,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
     (String_util.is_valid_utf8 (Yojson.Safe.to_string api_json));
   match run.status with
   | Registry.Completed { tools; _ } ->
-    Alcotest.(check int) "both failures retained" 2 (List.length tools);
+    Alcotest.(check int) "binary failure retained" 1 (List.length tools);
     List.iter (fun (tool : Registry.tool_observation) ->
       match tool.disposition with
       | Tool_result.Failed () -> ()
@@ -912,6 +910,84 @@ let test_goal_and_task_read_deliver_full_png () =
     (In_channel.with_open_bin image_path In_channel.input_all)
 ;;
 
+let test_goal_and_task_inspect_real_pdf () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Masc_test_deps.init_eio_clock ~sw env;
+  let dir = temp_dir () in
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Process_eio.init ~cwd_default:Eio.Path.(env#fs / dir)
+    ~proc_mgr:env#process_mgr ~clock:env#clock;
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "pdf-test"));
+  let producer_name = "pdf-producer" in
+  let root = workspace_producer_playground config producer_name in
+  let fixture = Filename.concat (Masc_test_deps.find_project_root ())
+    "docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf" in
+  let bytes = In_channel.with_open_bin fixture In_channel.input_all in
+  let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
+  let source = Filename.concat root "booklet.pdf" in
+  Out_channel.with_open_bin source (fun out -> output_string out bytes);
+  Out_channel.with_open_bin (Filename.concat root "broken.pdf")
+    (fun out -> output_string out "%PDF-1.7\nnot a PDF document\n");
+  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let read surface path = VAT.dispatch surface ~name:"tool_read_file"
+    ~args:(`Assoc ["file_path",`String path]) in
+  List.iter (fun (surface,prefix) ->
+    let result = read surface (prefix ^ "booklet.pdf") in
+    (match result with
+     | Tool_result.Completed {data;content_blocks=Some blocks;_} ->
+       let open Yojson.Safe.Util in
+       Alcotest.(check int) "exact original PDF byte count" (String.length bytes)
+         (member "bytes" data |> to_int);
+       Alcotest.(check string) "exact original PDF SHA-256" sha
+         (member "sha256" data |> to_string);
+       Alcotest.(check int) "Poppler parsed three pages" 3 (member "page_count" data |> to_int);
+       let pages = member "pages" data |> to_list in
+       Alcotest.(check int) "all page metadata delivered" 3 (List.length pages);
+       let images = List.filter_map (function
+         | Llm_provider.Types.Image {media_type="image/png";data;source_type=Base64} ->
+           Some (Base64.decode_exn data)
+         | _ -> None) blocks in
+       Alcotest.(check int) "all three parsed pages actually rendered" 3 (List.length images);
+       List.iteri (fun i (page,png) ->
+         Alcotest.(check int) "page identity" (i+1) (member "page" page |> to_int);
+         Alcotest.(check string) "rendered bytes tied to metadata"
+           Digestif.SHA256.(digest_string png |> to_hex)
+           (member "rendered_sha256" page |> to_string);
+         Alcotest.(check bool) "A4 width from parsed PDF geometry" true
+           (abs_float ((member "width_points" page |> to_float) -. 595.2756) < 0.001);
+         Alcotest.(check bool) "A4 height from parsed PDF geometry" true
+           (abs_float ((member "height_points" page |> to_float) -. 841.8898) < 0.001))
+         (List.combine pages images);
+       Alcotest.(check bool) "Korean text was extracted from original PDF" true
+         (List.exists (fun page -> String_util.contains_substring
+           (member "text" page |> to_string) "기억의 정원") pages)
+     | _ -> Alcotest.fail (Tool_result.message result));
+    Alcotest.(check bool) "malformed PDF never becomes successful metadata" true
+      (Tool_result.is_failed (read surface (prefix ^ "broken.pdf")));
+    let partial = VAT.dispatch surface ~name:"tool_read_file"
+      ~args:(`Assoc ["file_path",`String (prefix ^ "booklet.pdf");"limit",`Int 1]) in
+    Alcotest.(check bool) "line windows do not masquerade as complete PDF" true
+      (Tool_result.failure_class partial = Some Tool_result.Workflow_rejection))
+    [task,"";goal,producer_name ^ "/"];
+  let outside = Filename.concat dir "outside.pdf" in
+  Out_channel.with_open_bin outside (fun out -> output_string out bytes);
+  Unix.symlink outside (Filename.concat root "escape.pdf");
+  List.iter (fun (surface,path) ->
+    Alcotest.(check bool) "PDF access keeps the same owned root" true
+      (Tool_result.is_failed (read surface path)))
+    [task,outside;goal,outside;task,"escape.pdf";goal,producer_name ^ "/escape.pdf"];
+  with_env "PATH" (Filename.concat dir "no-poppler") (fun () ->
+    let result = read task "booklet.pdf" in
+    Alcotest.(check bool) "missing parser is an explicit infrastructure failure" true
+      (Tool_result.is_failed result && String_util.contains_substring
+        (Tool_result.message result) "pdf_dependency_unavailable"));
+  Alcotest.(check string) "read-only inspection preserves original PDF" bytes
+    (In_channel.with_open_bin source In_channel.input_all)
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -933,7 +1009,9 @@ let () =
             test_keeper_surface_uses_the_effective_sandbox_root
         ] )
     ; ( "dispatch"
-      , [ Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
+      , [ Alcotest.test_case "Goal and Task inspect actual PDF pages, bytes and text" `Quick
+            test_goal_and_task_inspect_real_pdf
+        ; Alcotest.test_case "Goal and Task receive complete visual PNG" `Quick
             test_goal_and_task_read_deliver_full_png
         ; Alcotest.test_case "Keeper endpoint read keeps exact PNG bytes" `Quick
             test_keeper_endpoint_read_preserves_png_bytes

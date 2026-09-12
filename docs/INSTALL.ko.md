@@ -88,6 +88,32 @@ macOS는 **Apple Silicon에서 macOS 14.0 이상**, **Intel에서 macOS 15.0 이
 
 시작에 실패하면 설치기가 표시하는 실행 파일 경로와 stderr 원문을 확인하세요. `SIGABRT` 같은 종료 신호만으로 누락 라이브러리라고 단정할 수는 없습니다. `--force`는 workspace 설정을 보존하면서 릴리스 파일을 다시 설치하며, 지원하지 않는 OS를 호환되게 만들지는 않습니다.
 
+### PDF 증거 검사
+
+MASC 호스트에 Poppler의 `pdftotext`와 `pdftoppm`이 있으면 Task·Goal 검증에서
+PDF 텍스트와 렌더링된 페이지를 읽을 수 있습니다. Poppler는 호스트 의존성이며
+portable 릴리스 파일에는 포함되지 않습니다.
+
+`masc setup`의 **Prepare imp’s workspace** 화면에서 **PDF document inspection**을
+선택하세요. 두 명령의 실행 가능 여부를 표시하고, 사용자가 선택하면 설치합니다.
+macOS에서는 기존 Homebrew의
+[`brew install poppler`](https://formulae.brew.sh/formula/poppler)를 사용하고,
+Debian·Ubuntu에서는 `sudo apt-get`으로
+[`poppler-utils`](https://packages.debian.org/stable/poppler-utils)를 설치합니다.
+다른 Linux 배포판은 해당 패키지 관리자로 직접 설치하세요. 기본 MASC 설치 과정은
+Homebrew나 PDF 도구를 자동으로 설치하지 않습니다.
+
+설정 화면 없이 같은 동작을 실행할 수도 있습니다.
+
+```bash
+masc prerequisite-actions pdf-tools                        # 도구와 설치 동작 확인
+masc prerequisite-actions pdf-tools --execute poppler_install
+```
+
+설치 후에는 두 명령을 `-v`로 실제 실행합니다. 결과는 현재 프로세스 환경의 가용성을
+나타내며, PDF 검사나 검증 통과를 뜻하지 않습니다. MASC를 서비스로 실행한다면 PDF
+검증을 요청하기 전에 서비스의 PATH에서도 두 명령을 찾을 수 있게 설정하세요.
+
 ## 설치
 
 위의 빠른 시작이 보통의 설치입니다. 묻는 과정 없이 workspace를 정하려면 이렇게

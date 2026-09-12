@@ -1,0 +1,35 @@
+ Overview  Activity  Keepers  Memory  Board  Planning  Fusion  Workspace  ▸Config
+
+   MASC Browser Lane · browser-handoff-proof-15958000 · retained observations                                                     
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    Observation 1/4 · from 100 recent tool calls                                                                                  
+    Historical read · browser actions and live screenshots are inactive here                                                      
+    2026-09-12T15:48:19Z · exec-1789228099847-000d                                                                                
+    Gamma · Team Channels · http://127.0.0.1:63795/gamma.html · observed viewport                                                 
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [>1] Channels                                                                                                                 
+    [2 button/link] Alpha                                                                                                         
+    [3 button/link] Beta                                                                                                          
+    [4 button/link] Gamma                                                                                                         
+    Gamma channel                                                                                                                 
+    Sora                                                                                                                          
+    2026-09-12 10:15                                                                                                              
+    Current decision: run Cedar end-to-end QA Wednesday against schema v4. Owner: Sora. No additional request for Mina in this    
+    channel.                                                                                                                      
+    [9 button/link] Message link                                                                                                  
+    Coverage: currently displayed messages only.                                                                                  
+    Navigation summary                                                                                                            
+    Old cached snippet: @Mina ship Cedar on Friday.                                                                               
+    This is not the channel message list.                                                                                         
+    Text 1/14                                                                                                                     
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+                                                                                                                                  
+
+  [/]:observation  j/k:scroll  y:copy record  r:reload list  h/Esc:back to browser  | Port: 50002
+Browser Lane · automation · browser page reader                                                                                   

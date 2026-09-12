@@ -19,3 +19,7 @@ let open_url url =
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> attempt rest)
   in
   attempt openers
+
+type undrawn_image = { title : string; page_url : string; image_url : string }
+
+let browser_url { title = _; page_url; image_url = _ } = page_url

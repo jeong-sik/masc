@@ -998,6 +998,36 @@ let load_owned_regular_file ~ownership_root path =
   |> Result.map (Option.map (fun contents -> contents.content))
 ;;
 
+let sha256_owned_regular_file_blocking ~ownership_root path =
+  load_owned_regular_file_blocking_with ~ownership_root
+    ~read_descriptor:(fun ~path fd descriptor ->
+      try
+        (* Fixed I/O buffer; file size does not determine memory allocation. *)
+        let buffer = Bytes.create 65536 in
+        let rec feed context remaining =
+          if remaining = 0 then Ok Digestif.SHA256.(to_hex (get context))
+          else match Unix.read fd buffer 0 (min remaining (Bytes.length buffer)) with
+            | 0 -> owned_file_error (Filesystem_identity_changed { path })
+            | count -> feed (Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer) (remaining - count)
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> feed context remaining
+        in
+        feed Digestif.SHA256.empty descriptor.Unix.st_size
+      with
+      | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+      | cause -> owned_file_operation_error ~path Read_contents cause)
+    path
+;;
+
+let sha256_owned_regular_file ~ownership_root path =
+  with_fs_or_fallback ~path
+    ~fallback:(fun () -> sha256_owned_regular_file_blocking ~ownership_root path)
+    (fun _fs ->
+      let result = Eio_unix.run_in_systhread ~label:(labelled "fs-compat-hash-owned-file" path)
+        (fun () -> sha256_owned_regular_file_blocking ~ownership_root path) in
+      Eio.Fiber.check ();
+      result)
+;;
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
@@ -1147,6 +1177,14 @@ let file_mtime (path : string) : float option =
        try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
        | Unix.Unix_error _ -> None)
 ;;
+
+external publish_paths_raw : bool -> string -> string -> unit = "caml_masc_publish_paths"
+let publish_paths exchange left right =
+  if String.contains left '\000' || String.contains right '\000' then
+    invalid_arg "filesystem publication paths cannot contain NUL";
+  publish_paths_raw exchange left right
+let exchange_paths left right = publish_paths true left right
+let rename_noreplace src dst = publish_paths false src dst
 
 let rename (src : string) (dst : string) : unit =
   with_fs_or_fallback

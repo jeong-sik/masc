@@ -173,11 +173,18 @@ let run (ctx : ctx)
        None
    in
    let deferred_runtime_lane_ref = ref None in
-   (* Last candidate to error, as the runtime walk names it. Written on every
-      failed attempt so the final value is the candidate the turn ends on.
-      Mirrors [deferred_runtime_lane_ref]: the walk runs below this scope and
-      only the callback crosses back. *)
-   let last_dispatched_runtime_id_ref = ref None in
+   (* Every candidate to error, as the runtime walk names it, newest first,
+      with whether the walk invoked it. Written on every failed attempt so
+      the head is the candidate the turn ends on. Mirrors
+      [deferred_runtime_lane_ref]: the walk runs below this scope and only
+      the callback crosses back. *)
+   let runtime_attempt_errors_ref : runtime_attempt_error list ref = ref [] in
+   (* The candidate error the walk returned as the lane's error, with the
+      candidate that produced it. Written once per walk that ends on a
+      candidate's error. *)
+   let lane_terminal_error_ref : Keeper_turn_driver.lane_terminal_error option ref =
+     ref None
+   in
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -262,8 +269,12 @@ let run (ctx : ctx)
                  ~on_runtime_retry_deferred:
                    (fun hint -> deferred_runtime_lane_ref := Some hint)
                  ~on_runtime_attempt_failed:
-                   (fun ~runtime_id ->
-                      last_dispatched_runtime_id_ref := Some runtime_id)
+                   (fun ~runtime_id ~dispatch ~error ->
+                      runtime_attempt_errors_ref
+                      := ({ runtime_id; dispatch; error } : runtime_attempt_error)
+                         :: !runtime_attempt_errors_ref)
+                 ~on_runtime_lane_terminal_error:
+                   (fun terminal -> lane_terminal_error_ref := Some terminal)
                  ?on_deferred_runtime_consumed:
                    (if is_retry then None else on_deferred_runtime_consumed)
                  ~temperature:execution.temperature
@@ -372,7 +383,8 @@ let run (ctx : ctx)
       in
       let turn_state =
         { turn_state with
-          last_dispatched_runtime_id = !last_dispatched_runtime_id_ref
+          runtime_attempt_errors = List.rev !runtime_attempt_errors_ref
+        ; lane_terminal_error = !lane_terminal_error_ref
         }
       in
       let checkpoint_observed =

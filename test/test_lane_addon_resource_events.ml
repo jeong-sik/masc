@@ -47,6 +47,8 @@ let make_backend () =
       Hashtbl.add state.modes instance_id package.id;
       let connection : Runtime.For_testing.connection = {
         container_id = Store.digest instance_id;
+        action_schema = (fun () -> None);
+        act = (fun ~arguments:_ -> Error "read-only fixture");
         observe = (fun ~binding:_ ~sources:_ ->
           Hashtbl.replace state.calls instance_id
             (1 + Option.value ~default:0 (Hashtbl.find_opt state.calls instance_id));
@@ -67,7 +69,7 @@ let make_backend () =
         on_created connection;
         Ok connection
       end);
-    acquire = (fun ~store:_ ~package:_ ~binding:_ ->
+    acquire = (fun ~store:_ ~package:_ ~resolve_lane_output:_ ~binding:_ ->
       Ok (`List [`Assoc ["original_bytes", `String "captured source before rotation"]]));
     recover_stop = (fun ~instance_id ~container_id ~max_reply_bytes:_ ->
       match container_id with

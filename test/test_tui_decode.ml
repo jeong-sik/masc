@@ -609,6 +609,7 @@ let decoded_proof ?verification ?last_review_note ?(extra = []) () =
                   ; "done", `Int 0
                   ; "cancelled", `Int 0
                   ] )
+            ; "goal_history", `Assoc [ "unlisted", `List [] ]
             ; "generated_at", `String "2026-08-23T13:25:01Z"
             ])
   with
@@ -773,6 +774,28 @@ let planning_snapshot_json ?(running_key = "in_progress") () =
           ; "done", `Int 9
           ; "cancelled", `Int 10
           ] )
+    ; ( "goal_history"
+      , `Assoc
+          [ ( "unlisted"
+            , `List
+                [ `Assoc
+                    [ "goal_id", `String "goal-departed"
+                    ; "title", `String "Left the store"
+                    ; "opened_at", `String "2026-08-20T00:00:00Z"
+                    ; "closed_at", `String "2026-08-20T06:00:00Z"
+                    ; "final_phase", `String "completed"
+                    ; "lifetime_hours", `Float 6.0
+                    ]
+                ; `Assoc
+                    [ "goal_id", `String "goal-nameless"
+                    ; "title", `Null
+                    ; "opened_at", `Null
+                    ; "closed_at", `Null
+                    ; "final_phase", `String "verifying"
+                    ; "lifetime_hours", `Null
+                    ]
+                ] )
+          ] )
     ; "generated_at", `String "2026-08-21T05:06:07Z"
     ]
 
@@ -818,6 +841,55 @@ let test_decode_planning_snapshot_current_contract () =
       Alcotest.(check int) "cancelled" 10 snapshot.pl_backlog.pb_cancelled;
       Alcotest.(check string) "generated at" "2026-08-21T05:06:07Z"
         snapshot.pl_generated_at
+
+(* goals.json holds only the current set, so what the log says about a goal
+   that left it is the only record it existed. Every field past the id is
+   nullable: a goal opened before the server recorded openings has no opening
+   time, and reading that as a zero would date something that never happened. *)
+let test_decode_planning_snapshot_reads_unlisted_history () =
+  match Tui_decode.decode_planning_snapshot (planning_snapshot_json ()) with
+  | Error detail -> Alcotest.fail ("planning snapshot did not decode: " ^ detail)
+  | Ok snapshot ->
+    (match snapshot.Tui_decode.pl_goal_history with
+     | [ departed; nameless ] ->
+       Alcotest.(check string) "the departed goal is named" "goal-departed"
+         departed.Tui_decode.pgh_goal_id;
+       Alcotest.(check (option string)) "its title survived the store"
+         (Some "Left the store") departed.Tui_decode.pgh_title;
+       Alcotest.(check (option string)) "its opening is known"
+         (Some "2026-08-20T00:00:00Z") departed.Tui_decode.pgh_opened_at;
+       Alcotest.(check (option string)) "its ending is known"
+         (Some "2026-08-20T06:00:00Z") departed.Tui_decode.pgh_closed_at;
+       Alcotest.(check (option string)) "its final phase is carried"
+         (Some "completed") departed.Tui_decode.pgh_final_phase;
+       Alcotest.(check bool) "its lifetime is carried" true
+         (match departed.Tui_decode.pgh_lifetime_hours with
+          | Some hours -> Float.abs (hours -. 6.0) < 0.001
+          | None -> false);
+       Alcotest.(check (option string)) "a goal with no creation row has no title"
+         None nameless.Tui_decode.pgh_title;
+       Alcotest.(check (option string)) "nor an opening" None
+         nameless.Tui_decode.pgh_opened_at;
+       Alcotest.(check (option string)) "a non-terminal phase closes nothing" None
+         nameless.Tui_decode.pgh_closed_at;
+       Alcotest.(check bool) "and spans nothing" true
+         (Option.is_none nameless.Tui_decode.pgh_lifetime_hours)
+     | rows ->
+       Alcotest.fail
+         (Printf.sprintf "expected two unlisted goals, got %d" (List.length rows)))
+;;
+
+let test_decode_planning_snapshot_requires_the_history_field () =
+  let without_history =
+    match planning_snapshot_json () with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (key, _) -> key <> "goal_history") fields)
+    | json -> json
+  in
+  Alcotest.(check bool) "a planning payload without the history field is refused"
+    true
+    (Result.is_error (Tui_decode.decode_planning_snapshot without_history))
+;;
 
 let test_decode_planning_snapshot_rejects_running_alias () =
   Alcotest.(check bool) "retired running alias rejected" true
@@ -8868,6 +8940,10 @@ let () =
           test_goal_link_source_unavailable_preserves_detail;
         Alcotest.test_case "rejects running alias" `Quick
           test_decode_planning_snapshot_rejects_running_alias;
+        Alcotest.test_case "planning snapshot reads unlisted history" `Quick
+          test_decode_planning_snapshot_reads_unlisted_history;
+        Alcotest.test_case "planning snapshot requires the history field" `Quick
+          test_decode_planning_snapshot_requires_the_history_field;
         Alcotest.test_case "goal carries the judge verdict" `Quick
           test_planning_goal_carries_the_judge_verdict;
         Alcotest.test_case "unreadable is not unreviewed" `Quick

@@ -474,7 +474,15 @@ class Journey(unittest.TestCase):
                             break
                         captured += chunk
                 self.assertIn(b'Your workspace', captured, captured.decode(errors='replace'))
-                os.write(fd, b'q')
+                # Esc, not q. Since the picker gained type-to-filter (#35206)
+                # every printable byte types into the query -- a model id can
+                # start with any letter -- and the picker's own hint line says
+                # so: "type to filter · Esc clears · Ctrl-C cancels". Measured
+                # on this build: q leaves the picker showing `Filter: q / no
+                # matches`, Esc on an empty filter exits 1 writing nothing, and
+                # Ctrl-C is taken by the terminal as SIGINT before the loop
+                # sees it, so the process dies by signal rather than exiting.
+                os.write(fd, b'\x1b')
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
                     waited, status = os.waitpid(pid, os.WNOHANG)
@@ -552,6 +560,12 @@ class Journey(unittest.TestCase):
                 os.write(fd, str(chosen).encode() + b'\n')
                 until(b'Connect a model')
                 os.write(fd, b'q\n')
+                # Cancelling the connection question no longer ends the
+                # journey: it offers the workspace back rather than losing it.
+                # Leaving by the second option is what ends setup, and the
+                # exit code is still 1 -- the model connection was not saved.
+                until(b'Connection setup')
+                os.write(fd, b'2\n')
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
                     waited, status = os.waitpid(pid, os.WNOHANG)

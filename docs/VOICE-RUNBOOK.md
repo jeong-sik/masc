@@ -459,27 +459,27 @@ says.
 
 ### The same probes over HTTP
 
-The wizard calls these rather than shelling out. Both are admin-gated, for the
-reason `/voice/transcribe` is: a TTS probe spends a credit on a metered
-provider.
+The CLI and the routes ask the same two functions, so a dashboard or a wizard
+sees what `masc voice-verify` prints. Both are `CanAdmin`: a probe synthesizes
+for real, and on a metered provider that spends a credit — the same reason
+`/api/v1/voice/transcribe` carries no public capability.
 
 ```sh
-TOKEN=$(cat "${MASC_BASE_PATH:?}/.masc/auth/admin.token")
-
-curl -sX POST "$MASC/api/v1/voice/probe/tts" \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/tts \
+  -H "authorization: Bearer $MASC_TOKEN" \
+  -H 'content-type: application/json' \
   -d '{"message":"음성 연결을 확인합니다"}'
 
-curl -sX POST "$MASC/api/v1/voice/probe/stt" \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: audio/wav' \
-  --data-binary @probe.wav
+curl -sS -X POST http://127.0.0.1:<port>/api/v1/voice/probe/stt \
+  -H "authorization: Bearer $MASC_TOKEN" \
+  -H 'content-type: audio/wav' --data-binary @probe.wav
 ```
 
-Both answer one shape:
+Both answer the same object:
 
 ```json
-{"endpoints":[{"endpoint_id":"whisper-local","kind":"openai_compat",
-               "state":"answered","detail":"heard 음성 연결을 확인합니다."}]}
+{"endpoints":[{"endpoint_id":"macos-say","kind":"macos_say",
+               "state":"answered","detail":"113528 bytes of audio"}]}
 ```
 
 `state` is one of `answered`, `refused`, `skipped`. A reader that meets a fourth
@@ -488,6 +488,10 @@ as a success.
 
 The audio goes in the **raw body**, not as multipart — the same as
 `/voice/transcribe`, and the same trap that costs time to rediscover.
+
+A TTS probe with no `"message"` is a 400 that says so rather than a probe of
+an empty sentence, and an empty STT body is a 400 rather than a transcript of
+silence: those two are different answers and the report keeps them apart.
 
 ## Setting voice up from the TUI
 

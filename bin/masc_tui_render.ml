@@ -5147,7 +5147,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let line =
         match error with
         | None -> Ansi.dim, "  (loading exact run record)"
-        | Some _ -> Ansi.dim, "  (load failed; nothing here is a reading)"
+        | Some _ -> Ansi.dim, page_failed_note
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
       for _ = 2 to content_height do
@@ -8263,7 +8263,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None -> [ Ansi.dim, "  (loading exact Fusion detail)" ]
-         | None, Some _ -> [ Ansi.dim, "  (load failed; nothing here is a reading)" ]
+         | None, Some _ -> [ Ansi.dim, page_failed_note ]
          | Some detail, (Some _ | None) -> fusion_detail_lines ~width:(max 1 (cols - 8)) detail)
   in
   let total = List.length lines in

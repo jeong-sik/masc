@@ -150,6 +150,18 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match Tool_schemas_misc.misc_operation_of_tool_name name with
   | None -> None
+  | Some (Tool_schemas_misc.Misc_lane_declaration_read | Tool_schemas_misc.Misc_lane_declaration_save as operation) ->
+      let result = match operation with
+        | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~config:ctx.config args
+        | _ -> Lane_addon_runtime.save_declaration ~config:ctx.config args in
+      Some (match result with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error ->
+            let class_ = match error.Lane_addon_declaration.code with
+              | Io_error -> Tool_result.Runtime_failure
+              | Invalid_request | Invalid_declaration | Revision_conflict | Not_found -> Tool_result.Workflow_rejection in
+            Tool_result.make_err ~tool_name:name ~start_time:start ~class_
+              ~data:(Lane_addon_declaration.error_to_json error) error.message)
   | Some Tool_schemas_misc.Misc_lane_action_status ->
       Some (match Lane_addon_runtime.dispatch ~caller:ctx.agent_name ~config:ctx.config ~operation:Lane_addon_runtime.Action_status args with
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
@@ -277,6 +289,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* ================================================================ *)
 
 let is_read_only = function
+  | Tool_schemas_misc.Misc_lane_declaration_read -> true
+  | Tool_schemas_misc.Misc_lane_declaration_save -> false
   | Tool_schemas_misc.Misc_lane_action_status
   | Tool_schemas_misc.Misc_lane_inspect
   | Tool_schemas_misc.Misc_lane_slice -> true

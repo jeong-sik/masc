@@ -71,6 +71,10 @@ val demote_order :
     place — an unresolved id is not evidence of exhaustion.  Returns the
     input unchanged when no candidate is demoted. *)
 
+(** The scope's own label, for operator-facing projections: which provider
+    row or credential the exhaustion belongs to. *)
+val scope_to_string : scope -> string
+
 val scope_of_credential :
   provider_id:string -> Runtime_schema.credential option -> scope
 (** Non-secret quota-scope identity for a provider row.  Provider hard quota

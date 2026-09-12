@@ -2,11 +2,15 @@
 
 Uses an isolated HTTP fixture and the real TUI; no website or Keeper is run.
 """
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import threading
+import zlib
 
 import test_tui_keyboard_input as h
 
@@ -18,6 +22,19 @@ def run(binary):
     scenes, actions = [], []
     first_scene_release = threading.Event()
     fixtures = h.overview_event_http_fixtures()
+    binary_digest = hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+
+    def record_terminal(label, output):
+        # Preserve actual emitted frames through their last complete boundary.
+        # Replaying the stream also retains cells from incremental frames.
+        end = output.rfind(h.FRAME_END)
+        assert end >= 0
+        recording = bytes(output[:end + len(h.FRAME_END)])
+        print("BROWSER_ACTION_PTY " + json.dumps({
+            "label": label, "columns": 100, "rows": 30,
+            "binary_sha256": binary_digest, "encoding": "zlib+base64",
+            "pty": base64.b64encode(zlib.compress(recording)).decode(),
+        }), flush=True)
 
     def node(identity, kind, text, **fields):
         return {"nodeId": identity, "kind": kind, "tag": "section" if kind == "region" else "p",
@@ -56,7 +73,7 @@ def run(binary):
                 nodes = [node("done", "text", "CLICK RESULT VERIFIED")]
         return 200, {"ok": True, "data": {"source": "live", "clientId": client, "tabId": 2,
             "elapsed_ms": 1, "schema": "masc.browser.scene.v1", "view": view, "scope": scope,
-            "documentId": "document", "url": url, "title": "Article", "truncated": False,
+            "documentId": "document", "url": url, "title": "Article", "truncated": scope is not None,
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}, "nodes": nodes}}
 
     def click(body):
@@ -93,6 +110,7 @@ def run(binary):
             h.send_and_wait(process, fd, output, b"\t", b"[>2 button/link] FIRST LINK")
             h.send_and_wait(process, fd, output, b"\x1b[Z", b"[>5 button/link] SECOND LINK")
             assert len(scenes) == 1 and not actions, "selection must not send browser requests"
+            record_terminal("selected-action", output)
             h.send_and_wait(process, fd, output, b"\r", b"CLICK RESULT VERIFIED")
             assert len(scenes) == 2 and len(actions) == 1
             frame = h.send_and_wait(process, fd, output, b"v", b"Article body")
@@ -100,6 +118,15 @@ def run(binary):
             h.send_and_wait(process, fd, output, b"\t", b"[>2 region")
             frame = h.send_and_wait(process, fd, output, b"\r", b"SELECTED ARTICLE CONTENT")
             assert b"Selected region" in h.screen_text(frame), frame
+            clipboard = re.compile(rb"\x1b\]52;c;([A-Za-z0-9+/=]+)\x07")
+            frame = h.send_and_wait(process, fd, output, b"y", clipboard)
+            copied = json.loads(base64.b64decode(clipboard.search(frame).group(1), validate=True))
+            assert {k: copied[k] for k in target} == target
+            assert copied["view"] == "content" and copied["truncated"] is True
+            assert copied["scope"] == {"documentId": "document", "nodeId": "article"}
+            assert copied["nodeId"] == "text", "region and selected element must remain distinct"
+            assert copied["viewport"] == {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}
+            record_terminal("copied-region", output)
             focused = scenes[-1]
             h.send_and_wait(process, fd, output, b"r", b"SELECTED ARTICLE CONTENT")
             assert scenes[-1] == focused and len(actions) == 1
@@ -109,6 +136,13 @@ def run(binary):
             h.resize_and_wait(process, fd, output, rows=30, columns=101,
                               needle=b"SELECTED ARTICLE CONTENT", controls=(h.FULL_REDRAW,))
             assert scenes[-1] == focused and len(actions) == 1
+            # Retain an actionable region scene behind the picker. Tab must
+            # use the existing Config-family surface cycle, not its hidden targets.
+            h.send_and_wait(process, fd, output, b"v", b"Article body")
+            h.send_and_wait(process, fd, output, b"b", b"Choose a connected browser")
+            requests_before_picker_tab = (len(scenes), len(actions))
+            h.send_and_wait(process, fd, output, b"\t", b"MASC Overview")
+            assert (len(scenes), len(actions)) == requests_before_picker_tab
             os.write(fd, b"q")
         finally:
             first_scene_release.set()

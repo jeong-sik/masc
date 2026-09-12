@@ -104,6 +104,8 @@ control and reads a fresh scene, or reads the selected region. The footer names
 the selected action. `v` lists page regions; the context row distinguishes page
 content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
 the same page or region again.
+`y` copies the selected element together with its observed region, viewport,
+and truncation flag, so a Keeper can preserve the same reading scope.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 

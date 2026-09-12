@@ -3140,6 +3140,14 @@ module Browser_lane_view = struct
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;
           "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "view",`String (match scene.content.view with Content -> "content" | Regions -> "regions");
+          "scope",(match scene.content.scope with
+            | None -> `Null
+            | Some target -> `Assoc ["documentId",`String target.document_id;
+                "nodeId",`String target.node_id]);
+          "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
+            "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
+          "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;"source",source]))
     | _ -> None
 

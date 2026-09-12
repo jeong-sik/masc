@@ -16914,7 +16914,9 @@ and is loaded on demand through keeper_skill.
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
                || match browser_lane_on_screen state with
-                  | Some view -> Option.is_some view.scene || Browser_lane_view.busy view
+                  | Some view ->
+                      Option.is_none view.client_picker && Option.is_none view.url_draft
+                      && (Option.is_some view.scene || Browser_lane_view.busy view)
                   | None -> false) ->
            (match state.browser_lane with
             | None -> ()

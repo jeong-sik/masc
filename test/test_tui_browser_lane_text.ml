@@ -111,7 +111,23 @@ let () =
        let open Yojson.Safe.Util in
        let json=Yojson.Safe.from_string text in
        assert (json |> member "nodeId" |> to_string = mapped.node_id);
-       assert (json |> member "source" |> member "sha256" |> to_string = located.digest));
+       assert (json |> member "source" |> member "sha256" |> to_string = located.digest);
+       assert (json |> member "scope" = `Null);
+       assert (json |> member "truncated" = `Bool false));
+  let focused_view = {view with scene=Some {scene with content={content with
+    nodes=[mapped];scope=Some target;scroll_y=240.;truncated=true}}} in
+  (match Lane.scene_context focused_view with
+   | None -> failwith "scoped element context missing"
+   | Some text ->
+       let open Yojson.Safe.Util in
+       let json=Yojson.Safe.from_string text in
+       assert (json |> member "view" = `String "content");
+       (* The copied scope is accepted by the browser read boundary, keeping
+          the region distinct from the selected element within it. *)
+       assert (Masc.Browser_scene.scope_of_json (json |> member "scope") = Ok target);
+       assert (json |> member "nodeId" = `String mapped.node_id);
+       assert (json |> member "viewport" |> member "scrollY" = `Float 240.);
+       assert (json |> member "truncated" = `Bool true));
   print_endline "PASS scene wrapping, source handoff, node deduplication and asynchronous ownership"
 
 (* Repeated ids are what the target index is for: a scene can hold the same

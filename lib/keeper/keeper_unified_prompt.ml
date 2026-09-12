@@ -1299,11 +1299,25 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults () in
+  (* The world's own articles (RFC-0442). An unreadable ledger is reported and
+     the turn proceeds without the block: a world that cannot read its norms
+     still has work to do, and a keeper blocked on its own constitution would
+     be a worse failure than one that does not see it. *)
+  let constitution =
+    match World_constitution_store.load ~base_path:config.Workspace.base_path with
+    | Ok ledger -> World_constitution_render.articles ledger.articles
+    | Error error ->
+      Log.Misc.error
+        "world constitution ledger unreadable, rendering no articles: %s"
+        (World_constitution_store.read_error_to_string error);
+      ""
+  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~instructions
       ~keeper_name:meta.name
       ~workspace_root:(Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
+      ~constitution
       ()
   in
   (* A second prompt asset used to be appended here as [## Turn Intent] on

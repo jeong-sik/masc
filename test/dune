@@ -5645,3 +5645,10 @@
  (name test_world_constitution_store)
  (modules test_world_constitution_store)
  (libraries alcotest masc yojson unix fs_compat))
+
+(test
+ (name test_world_constitution_prompt)
+ (modules test_world_constitution_prompt)
+ (deps
+  (source_tree %{workspace_root}/config/prompts))
+ (libraries alcotest masc_test_deps))

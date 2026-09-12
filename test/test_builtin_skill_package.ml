@@ -66,13 +66,22 @@ let test_created_directory_parent_sync () = with_base (fun base ->
   get (Package.For_testing.ensure_directory ~sync_parent directory);
   check (list string) "new entry syncs containing directory" [base] !synced;
   get (Package.For_testing.ensure_directory ~sync_parent directory);
-  check (list string) "existing directory does not invent a new entry" [base] !synced;
+  check (list string) "existing entry also syncs containing directory" [base;base] !synced;
   let unsynced = Filename.concat base "unsynced-state" in
   (match Package.For_testing.ensure_directory
      ~sync_parent:(fun path -> raise (Unix.Unix_error (Unix.EIO,"fsync",path))) unsynced with
    | Error (Package.Io_error _) -> ()
    | _ -> fail "parent sync failure must not report success");
-  check bool "failed sync leaves real created entry visible" true (Sys.is_directory unsynced))
+  check bool "failed sync leaves real created entry visible" true (Sys.is_directory unsynced);
+  let retries = ref 0 in
+  (match Package.For_testing.ensure_directory ~sync_parent:(fun path ->
+       incr retries; raise (Unix.Unix_error (Unix.EIO,"fsync",path))) unsynced with
+   | Error (Package.Io_error _) -> ()
+   | _ -> fail "retry must not bypass parent sync for an existing entry");
+  check int "failed retry attempted sync" 1 !retries;
+  get (Package.For_testing.ensure_directory ~sync_parent:(fun path ->
+    check string "retry syncs containing parent" base path; incr retries) unsynced);
+  check int "successful retry confirms parent sync" 2 !retries)
 
 let test_hard_link_preserved () = with_base (fun base ->
   ignore (install base Package.Automatic first);

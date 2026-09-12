@@ -68,12 +68,15 @@ let sync_dir path =
 let ensure_dir_with_sync ~sync_parent path =
   (match stat path with
    | None ->
-     (try Unix.mkdir path 0o700; sync_parent (Filename.dirname path) with Unix.Unix_error (Unix.EEXIST, _, _) ->
+     (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) ->
        match stat path with
        | Some info when info.Unix.st_kind = Unix.S_DIR -> ()
        | None | Some _ -> raise (Rejected (Invalid_path path)))
    | Some info when info.Unix.st_kind = Unix.S_DIR -> ()
-   | Some _ -> raise (Rejected (Invalid_path path)))
+   | Some _ -> raise (Rejected (Invalid_path path)));
+  (* Existing entries may come from a previous failed sync or a racing mkdir.
+     Their presence alone does not prove the parent entry is durable. *)
+  sync_parent (Filename.dirname path)
 
 let ensure_dir = ensure_dir_with_sync ~sync_parent:sync_dir
 

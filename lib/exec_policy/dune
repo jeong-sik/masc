@@ -17,9 +17,6 @@
   ; cycle-free.
   masc.prompt_registry
   masc.masc_log
-  masc.repo_manager
   masc.config_dir_resolver
   unix
-  yojson
-  eio
-  eio.unix))
+  yojson))

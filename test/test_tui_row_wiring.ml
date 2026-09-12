@@ -494,6 +494,28 @@ let test_the_window_is_measured_where_the_cursor_lands () =
        ~binding_name:"surface_body_height_at"
        ~callee:"memory_overview_scrolled")
 
+(* A lookup in the body of a drawing loop is paid once per visible row. The
+   count is over the whole renderer rather than one binding, because the
+   shape returns wherever a loop draws rows; a call to the same function
+   outside a loop runs once a frame and is fine, which is why this is not
+   [count_calls].
+
+   What it does not see: a helper defined beside the loop and called from
+   inside it, which is where the Code diff pane kept its own walk. Nothing
+   lexically inside the loop named [List.nth_opt] there. That one is held by
+   the type instead -- the open file is an array, so there is no list left to
+   walk -- and the compiler is the stronger guard of the two. This one earns
+   its place on the sites where the index really is written in the loop:
+   three stood when it was added. *)
+let test_no_row_of_a_drawing_loop_walks_a_list () =
+  let inside_for callee =
+    Ast_grep.count_calls_inside_for ~module_path:render ~callee
+  in
+  Alcotest.(check int) "no row walks a list to find itself" 0
+    (inside_for "List.nth_opt");
+  Alcotest.(check int) "and none walks one unguarded either" 0
+    (inside_for "List.nth")
+
 let () =
   Alcotest.run "masc_tui_row_wiring"
     [ ( "approvals"
@@ -538,5 +560,7 @@ let () =
             test_the_row_cursor_has_one_source
         ; Alcotest.test_case "the window is measured where the cursor lands"
             `Quick test_the_window_is_measured_where_the_cursor_lands
+        ; Alcotest.test_case "no row of a drawing loop walks a list" `Quick
+            test_no_row_of_a_drawing_loop_walks_a_list
         ] )
     ]

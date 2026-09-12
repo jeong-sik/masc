@@ -1,6 +1,6 @@
 (** Optional observers run in independent server-owned fibers. No Keeper tool
     set, input queue, turn switch or environment owner is replaced. *)
-type operation = Attach | Inspect | Observe | Detach | Slice | Evidence
+type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
@@ -39,6 +39,8 @@ module For_testing : sig
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
+    action_schema : unit -> Yojson.Safe.t option;
+    act : arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, string) result;
     stop : unit -> (unit, string) result;
     container_id : string;
   }
@@ -46,10 +48,16 @@ module For_testing : sig
     start : sw:Eio.Switch.t -> instance_id:string -> package:Lane_addon_types.package ->
       on_created:(connection -> unit) -> (connection, string) result;
     acquire : store:Lane_addon_store.t -> package:Lane_addon_types.package ->
+      resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : instance_id:string -> container_id:string option -> max_reply_bytes:int ->
       (unit, string) result;
   }
   val with_backend : backend -> (unit -> 'a) -> 'a
+  val with_action_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> request_id:string -> Yojson.Safe.t ->
+      (unit, string) result) -> (unit -> 'a) -> 'a
+  (** Fiber-local persistence replacement captured before filesystem offload.
+      Allows the existing strict writer to inject a real post-rename failure. *)
   val reset : unit -> unit
 end

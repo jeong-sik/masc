@@ -1,6 +1,6 @@
 (** Optional cross-lane observations. Domain meanings belong to packages;
     these types describe provenance, presentation and worker ownership only. *)
-type contribution = Observe | Derive
+type contribution = Observe | Derive | Act
 type row_kind = Event | Value | Relation
 type evidence = { uri : string; sha256 : string option }
 type clock = { domain : string; value : string }
@@ -39,6 +39,7 @@ type package = {
   image : string;
   command : string list;
   directory : string;
+  action_tool : string option;
   skills_directory : Skill_resource_path.t option;
   resources : resources;
 }
@@ -47,6 +48,7 @@ val row_to_json : row -> Yojson.Safe.t
 val row_of_json : Yojson.Safe.t -> (row, string) result
 val output_to_json : output -> Yojson.Safe.t
 val output_of_json : Yojson.Safe.t -> (output, string) result
+val coverage_to_json : coverage -> Yojson.Safe.t
 val phase_to_json : phase -> Yojson.Safe.t
 val phase_of_json : Yojson.Safe.t -> (phase, string) result
 val package_to_json : package -> Yojson.Safe.t

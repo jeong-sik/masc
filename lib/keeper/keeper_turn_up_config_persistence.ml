@@ -533,6 +533,46 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
       let journal_path =
         Keeper_config_journal.journal_path_for_base_path ~base_path
       in
+      (* Operator re-review 2026-09-12 (#35366, #2-a): never stage a fresh
+         journal over an unresolved one — that would silently destroy the
+         earlier write's before-images, leaving the earlier request
+         unrecoverable. A leftover journal means an interrupted request is
+         still unreconciled: refuse the new write and direct the caller to
+         startup recovery. This runs before the before-image reads below,
+         so nothing about the old write is touched. *)
+      let* () =
+        (match Keeper_config_journal.load ~journal_path with
+         | Ok None -> Ok ()
+         | Ok (Some record) ->
+           Error
+             (Io_error
+                (Printf.sprintf
+                   "stale keeper-config journal exists before write (tx=%s keeper=%s; phase=%s); run startup recovery first"
+                   record.tx_id
+                   record.keeper_name
+                   (Keeper_config_journal.phase_to_string record.phase)))
+         | Error detail ->
+           Error
+             (Io_error
+                (Printf.sprintf
+                   "cannot read keeper-config journal before write: %s"
+                   detail)))
+      in
+      let runtime_toml =
+        Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+      in
+      let* runtime_before =
+        if Fs_compat.file_exists runtime_toml
+        then
+          Safe_ops.read_file_safe runtime_toml
+          |> Result.map (fun bytes -> Some (Keeper_config_journal.Runtime_bytes bytes))
+          |> Result.map_error (fun detail ->
+               Io_error
+                 (Printf.sprintf
+                    "cannot read runtime.toml before write: %s"
+                    detail))
+        else Ok (Some Keeper_config_journal.Runtime_absent)
+      in
       let journal_record : Keeper_config_journal.record =
         { tx_id = Printf.sprintf "tx-%.0f" (Time_compat.now () *. 1000.0)
         ; keeper_name = meta.name
@@ -540,20 +580,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
             (match snapshot with
              | Absent -> Keeper_config_journal.Manifest_absent
              | Present bytes -> Keeper_config_journal.Manifest_bytes bytes)
-        ; runtime_before =
-            (* The transaction type is abstract by design; the before
-               image is simply the file's current bytes, read while the
-               runtime lock is held and before any write happens. *)
-            (let runtime_toml =
-               Config_dir_resolver.runtime_toml_path_for_base_path
-                 ~base_path:config.base_path
-             in
-             if Fs_compat.file_exists runtime_toml
-             then (
-               match Safe_ops.read_file_safe runtime_toml with
-               | Ok bytes -> Some bytes
-               | Error _ -> None)
-             else None)
+        ; runtime_before
         ; manifest_path = path
         ; runtime_path =
             Runtime.keeper_assignment_transaction_path runtime_transaction
@@ -579,6 +606,12 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
            else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
         |> strict_write_result
       in
+      let clear_journal () =
+        match Keeper_config_journal.clear ~journal_path with
+        | Ok () -> Ok ()
+        | Error detail -> Error (Io_error detail)
+      in
+
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
         (* Mark the journal rolling back BEFORE restoring, so a crash
@@ -637,9 +670,14 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              pre-request state: the journal's authority ends here too.
              Keeping it would let startup recovery overwrite LATER
              successful writes with this request's stale before-images. *)
-          Keeper_config_journal.clear ~journal_path;
-          Error error
-        | Error reconciliation -> Error reconciliation
+          (match clear_journal () with
+           | Ok () -> Error error
+           | Error (Io_error detail) ->
+             Error
+               (Io_error
+                  (Printf.sprintf "%s (original error: %s)" detail
+                     (error_to_string error)))
+           | Error other -> Error other)        | Error reconciliation -> Error reconciliation
       in
       (match read_revision path with
        | Error detail ->
@@ -666,7 +704,7 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
              Printexc.raise_with_backtrace exn backtrace
            | exception exn ->
              let backtrace = Printexc.get_raw_backtrace () in
-             Error
+             rollback
                (Publication_exception
                   { path
                   ; detail =
@@ -681,18 +719,18 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
             (* Both files now carry the request's after-state: the crash
                window is closed and the journal's authority ends. *)
-            Keeper_config_journal.clear ~journal_path;
+            let* () = clear_journal () in
             Ok { value; warnings = write_warnings }
           | Ok (Commit_with_warnings (value, publication_warnings)) ->
             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-            Keeper_config_journal.clear ~journal_path;
+            let* () = clear_journal () in
             Ok
               { value
               ; warnings = write_warnings @ publication_warnings
               }
           | Ok (Rollback value) ->
             let* () = restore_publication_state () in
-            Keeper_config_journal.clear ~journal_path;
+            let* () = clear_journal () in
             Ok { value; warnings = [] })))
     with
     | Error detail -> Error (Io_error detail)

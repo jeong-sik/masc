@@ -1625,6 +1625,16 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  (* Ensure any interrupted composite keeper config write is converged before
+     we claim lock-backed keeper persistence. Startup recovery wins over
+     claim/start ordering.
+
+     This keeps startup idempotent when an interrupted request died after
+     manifest replace and before journal-clear. *)
+  let _ =
+    Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path
+  in
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own

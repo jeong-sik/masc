@@ -18,11 +18,15 @@ type rollback_result =
   ; runtime_restored : bool
   }
 
+type runtime_before_image =
+  | Runtime_absent
+  | Runtime_bytes of string
+
 type record =
   { tx_id : string
   ; keeper_name : string
   ; manifest_before : manifest_before_image
-  ; runtime_before : string option
+  ; runtime_before : runtime_before_image option
   ; manifest_path : string
   ; runtime_path : string option
   ; started_at_unix : float
@@ -85,12 +89,24 @@ let string_option_of_yojson = function
   | `String value -> Ok (Some value)
   | _ -> Error "expected string or null"
 
+let runtime_before_image_to_yojson = function
+  | None -> `Null
+  | Some Runtime_absent -> `String "absent"
+  | Some (Runtime_bytes bytes) -> `String bytes
+;;
+
+let runtime_before_image_option_of_yojson = function
+  | `Null -> Ok None
+  | `String "absent" -> Ok (Some Runtime_absent)
+  | `String bytes -> Ok (Some (Runtime_bytes bytes))
+  | _ -> Error "expected string or null"
+
 let record_to_yojson (record : record) =
   `Assoc
     [ "tx_id", `String record.tx_id
     ; "keeper_name", `String record.keeper_name
     ; "manifest_before", manifest_snapshot_to_yojson record.manifest_before
-    ; "runtime_before", string_option_to_yojson record.runtime_before
+    ; "runtime_before", runtime_before_image_to_yojson record.runtime_before
     ; "manifest_path", `String record.manifest_path
     ; "runtime_path", string_option_to_yojson record.runtime_path
     ; "started_at_unix", `Float record.started_at_unix
@@ -122,7 +138,7 @@ let record_of_yojson = function
     in
     let* runtime_before =
       let* value = field "runtime_before" in
-      string_option_of_yojson value
+      runtime_before_image_option_of_yojson value
     in
     let* manifest_path =
       let* value = field "manifest_path" in
@@ -152,7 +168,9 @@ let record_of_yojson = function
 ;;
 
 let journal_path_for_base_path ~base_path =
-  Filename.concat base_path journal_filename
+  Filename.concat
+    (Config_dir_resolver.resolve_for_base_path ~base_path).config_root.path
+    journal_filename
 ;;
 
 let encode record = Yojson.Safe.to_string (record_to_yojson record)
@@ -185,7 +203,17 @@ let load ~journal_path =
 ;;
 
 let clear ~journal_path =
-  (try Sys.remove journal_path with Sys_error _ | Unix.Unix_error _ -> ())
+  if not (Fs_compat.file_exists journal_path)
+  then Ok ()
+  else
+    try
+      Sys.remove journal_path;
+      Ok ()
+    with
+    | Sys_error message -> Error message
+    | Unix.Unix_error (error, action, detail) ->
+      Error
+        (Printf.sprintf "%s %s (%s)" action detail (Unix.error_message error))
 ;;
 
 let apply_rollback record ~manifest_restore ~runtime_restore =
@@ -208,8 +236,14 @@ let apply_rollback record ~manifest_restore ~runtime_restore =
   let runtime_failures = ref [] in
   let runtime_restored =
     match record.runtime_before, record.runtime_path with
-    | Some source_text, Some path ->
-      (match runtime_restore path source_text with
+    | Some (Runtime_bytes source_text), Some path ->
+      (match runtime_restore path (Runtime_bytes source_text) with
+       | Ok () -> true
+       | Error detail ->
+         runtime_failures := detail :: !runtime_failures;
+         false)
+    | Some Runtime_absent, Some path ->
+      (match runtime_restore path Runtime_absent with
        | Ok () -> true
        | Error detail ->
          runtime_failures := detail :: !runtime_failures;
@@ -234,13 +268,31 @@ let recover_interrupted ~base_path ~manifest_restore ~runtime_restore =
   | Ok (Some record) ->
     (match apply_rollback record ~manifest_restore ~runtime_restore with
      | Ok { manifest_restored; runtime_restored } ->
-       clear ~journal_path;
-       { outcome =
-           Recovered_rolled_back
-             { manifest_restored; runtime_restored; notes = [] }
-       ; journal_path
-       ; record = Some record
-       }
+       (match clear ~journal_path with
+        | Ok () ->
+          { outcome =
+              Recovered_rolled_back
+                { manifest_restored; runtime_restored; notes = [] }
+          ; journal_path
+          ; record = Some record
+          }
+        | Error detail ->
+          { outcome =
+              Recovery_failed
+                { detail =
+                    Printf.sprintf "journal clear failed after rollback: %s" detail
+                ; notes =
+                    [
+                      Printf.sprintf
+                        "journal_path=%s manifest_restored=%b runtime_restored=%b"
+                        journal_path
+                        manifest_restored
+                        runtime_restored
+                    ]
+                }
+          ; journal_path
+          ; record = Some record
+          })
      | Error (detail, notes) ->
        { outcome = Recovery_failed { detail; notes }
        ; journal_path

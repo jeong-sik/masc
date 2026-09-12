@@ -1413,15 +1413,22 @@ let test_config_journal_recovery_recovers_composite_write () =
       (try Ok (Fs_compat.save_file path source)
        with exn -> Error (Printexc.to_string exn))
   in
-  let restore_runtime path source =
-    try Ok (Fs_compat.save_file path source)
-    with exn -> Error (Printexc.to_string exn)
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
   in
   let journal_record : Keeper_config_journal.record =
     { tx_id = "journal-recovery-composite"
     ; keeper_name = name
     ; manifest_before = Keeper_config_journal.Manifest_bytes manifest_before
-    ; runtime_before = Some runtime_before
+    ; runtime_before = Some (Keeper_config_journal.Runtime_bytes runtime_before)
     ; manifest_path
     ; runtime_path = Some runtime_path
     ; started_at_unix = Time_compat.now ()
@@ -1457,6 +1464,117 @@ let test_config_journal_recovery_recovers_composite_write () =
   check bool "journal was cleared" false (Sys.file_exists report.journal_path)
 ;;
 
+(* Operator re-review 2026-09-12 (#35366, #2-a): a request-scoped write
+   used to stage a fresh journal over an unresolved one, silently
+   destroying the earlier write's before-images. Pins that persist
+   refuses to run while an unresolved journal exists. *)
+let test_publish_rejected_while_unresolved_journal_exists () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "unresolved-journal-guard-fixture" in
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (name ^ ".toml")
+  in
+  let journal_record : Keeper_config_journal.record =
+    { tx_id = "unresolved-guard-tx"
+    ; keeper_name = name
+    ; manifest_before = Keeper_config_journal.Manifest_absent
+    ; runtime_before = None
+    ; manifest_path
+    ; runtime_path = None
+    ; started_at_unix = Time_compat.now ()
+    ; phase = Keeper_config_journal.Prepared
+    }
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (name ^ ".toml")
+  in
+  (match Keeper_config_journal.stage ~base_path journal_record with
+   | Ok () -> ()
+   | Error error -> fail ("journal stage failed: " ^ error));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "next" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "next" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Ok _ -> fail "expected persist to be rejected while an unresolved journal exists"
+   | Error (Keeper_turn_up_config_persistence.Io_error detail) as outcome ->
+     if
+       try
+         ignore (Str.search_forward (Str.regexp "stale keeper-config journal") detail 0);
+         true
+       with Not_found -> false
+     then ignore outcome
+     else
+       fail ("expected stale-journal rejection, got: " ^ detail)
+   | Error other ->
+     fail
+       ("expected Io_error, got: "
+       ^ Keeper_turn_up_config_persistence.error_to_string other));
+  check bool "manifest untouched by the rejected write" true
+    (let bytes = Fs_compat.load_file manifest_path in
+     try
+       ignore
+         (Str.search_forward
+            (Str.regexp "instructions = \"initial\"")
+            bytes
+            0);
+       true
+     with Not_found -> false)
+;;
+
 let test_config_journal_recovery_ignores_missing_journal () =
   with_persisting_context @@ fun ctx ->
   let base_path = ctx.config.Workspace.base_path in
@@ -1476,9 +1594,16 @@ let test_config_journal_recovery_ignores_missing_journal () =
       (try Ok (Fs_compat.save_file path source)
        with exn -> Error (Printexc.to_string exn))
   in
-  let restore_runtime path source =
-    try Ok (Fs_compat.save_file path source)
-    with exn -> Error (Printexc.to_string exn)
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
   in
   Fs_compat.mkdir_p manifest_dir;
   Fs_compat.mkdir_p (Filename.dirname runtime_path);
@@ -1522,9 +1647,16 @@ let test_config_journal_recovery_corrupt_journal_flags_error () =
       (try Ok (Fs_compat.save_file path source)
        with exn -> Error (Printexc.to_string exn))
   in
-  let restore_runtime path source =
-    try Ok (Fs_compat.save_file path source)
-    with exn -> Error (Printexc.to_string exn)
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
   in
   Fs_compat.mkdir_p manifest_dir;
   Fs_compat.mkdir_p (Filename.dirname runtime_path);
@@ -2324,6 +2456,10 @@ let () =
             "post-write revision failure restores missing manifest"
             `Quick
             test_post_write_revision_failure_restores_missing_manifest
+        ; test_case
+            "publish rejected while unresolved journal exists"
+            `Quick
+            test_publish_rejected_while_unresolved_journal_exists
         ; test_case
             "compensated rollback clears the crash journal"
             `Quick

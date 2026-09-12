@@ -35,11 +35,20 @@ type manifest_before_image =
   | Manifest_absent
   | Manifest_bytes of string
 
+(** [Some Runtime_absent] pins that runtime.toml did not exist before
+    the interrupted write; [None] means the write never recorded a
+    runtime before-image. Presence-vs-absence used to collapse into the
+    same [None], so a write that created runtime.toml could not roll it
+    back. *)
+type runtime_before_image =
+  | Runtime_absent
+  | Runtime_bytes of string
+
 type record =
   { tx_id : string
   ; keeper_name : string
   ; manifest_before : manifest_before_image
-  ; runtime_before : string option
+  ; runtime_before : runtime_before_image option
   ; manifest_path : string
   ; runtime_path : string option
   ; started_at_unix : float
@@ -92,8 +101,8 @@ val stage : base_path:string -> record -> (unit, string) result
     journal file exists. *)
 val load : journal_path:string -> (record option, string) result
 
-(** Remove the journal file. Idempotent. *)
-val clear : journal_path:string -> unit
+(** Remove the journal file if present. Returns an error when deletion fails. *)
+val clear : journal_path:string -> (unit, string) result
 
 (** Roll both files back to the record's before-images. Best effort per
     file: each restore's result is reported independently so a partial
@@ -109,7 +118,7 @@ val apply_rollback :
   -> manifest_restore:
        (string -> manifest_before_image -> (unit, string) result)
   -> runtime_restore:
-       (string -> string -> (unit, string) result)
+       (string -> runtime_before_image -> (unit, string) result)
   -> (rollback_result, string * string list) result
 
 (** Startup recovery: if a journal exists for the workspace, converge
@@ -122,5 +131,5 @@ val recover_interrupted :
   -> manifest_restore:
        (string -> manifest_before_image -> (unit, string) result)
   -> runtime_restore:
-       (string -> string -> (unit, string) result)
+       (string -> runtime_before_image -> (unit, string) result)
   -> report

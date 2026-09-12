@@ -5003,9 +5003,12 @@ let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
   if not (List.mem_assoc key state.detail_read_started_at) then
     state.detail_read_started_at <- (key, now_ns) :: state.detail_read_started_at
 
-(* The wait is over: this tab has its answer for this Keeper. Called where the
-   view is populated, not where a request completes -- a poll that completes
-   with nothing to show has not ended the operator's wait. *)
+(* The wait is over: this tab has something on it for this Keeper. Called where
+   the view is populated and where the read's refusal is put on screen -- a
+   refusal is an answer the operator can read and act on, so the tab is no
+   longer blank. What does not end a wait is a poll that completes with nothing
+   to show: the Identity tab polls while an OAuth attachment settles, and those
+   rounds leave the tab as empty as they found it. *)
 let clear_detail_read (state : state) ~tab ~keeper =
   state.detail_read_started_at <-
     List.remove_assoc (tab, keeper) state.detail_read_started_at

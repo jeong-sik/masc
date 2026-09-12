@@ -11488,7 +11488,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_config_view <- Some (keeper_name, lines);
             Masc_tui_types.clear_detail_read state ~tab:Detail_instructions ~keeper:keeper_name;
             state.keeper_config_view_error <- None
-        | Error detail -> state.keeper_config_view_error <- Some detail)
+        | Error detail ->
+            Masc_tui_types.clear_detail_read state ~tab:Detail_instructions
+              ~keeper:keeper_name;
+            state.keeper_config_view_error <- Some detail)
   | Keeper_sandbox_view_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -11501,7 +11504,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.keeper_sandbox_view <- Some (keeper_name, reading);
             Masc_tui_types.clear_detail_read state ~tab:Detail_sandbox ~keeper:keeper_name;
             state.keeper_sandbox_view_error <- None
-        | Error detail -> state.keeper_sandbox_view_error <- Some detail)
+        | Error detail ->
+            Masc_tui_types.clear_detail_read state ~tab:Detail_sandbox
+              ~keeper:keeper_name;
+            state.keeper_sandbox_view_error <- Some detail)
   | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
       let is_current =
         match state.keeper_sandbox_logs_inflight with
@@ -11923,7 +11929,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             state.github_identity_view <- Some (keeper_name, lines);
             Masc_tui_types.clear_detail_read state ~tab:Detail_github ~keeper:keeper_name;
             state.github_identity_view_error <- None
-        | Error detail -> state.github_identity_view_error <- Some detail)
+        | Error detail ->
+            Masc_tui_types.clear_detail_read state ~tab:Detail_github
+              ~keeper:keeper_name;
+            state.github_identity_view_error <- Some detail)
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
       (match result with
        | Ok () ->
@@ -11959,7 +11968,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                when Masc_tui_types.identity_login_landed ~providers ~login ->
                  state.identity_login <- None
              | Some _ | None -> ())
-        | Error detail -> state.identity_view_error <- Some detail)
+        | Error detail ->
+            Masc_tui_types.clear_detail_read state ~tab:Detail_identity
+              ~keeper:keeper_name;
+            state.identity_view_error <- Some detail)
   | Identity_login_started (keeper_name, result) -> (
       match result with
       | Login_started { provider_id; label; url } ->
@@ -21354,10 +21366,23 @@ and is loaded on demand through keeper_skill.
          lane can be running while no keeper turn is, and a frame counter
          that only watched turns would leave that mark frozen on whatever
          quarter it stopped at -- which reads as a lane stuck there. *)
+      (* A detail tab the operator is watching with nothing on it yet. The stamp
+         exists exactly while that is true -- it is taken on the first ask and
+         dropped when the tab gets a reading or a refusal -- so its presence is
+         the whole condition. *)
+      let awaiting_detail_read =
+        state.view = Keepers Keeper_detail
+        && (match Masc_tui_types.selected_keeper state with
+            | None -> false
+            | Some keeper ->
+                Option.is_some
+                  (Masc_tui_types.detail_read_started state
+                     ~tab:state.detail_tab ~keeper:keeper.k_name))
+      in
       let anything_running =
         Masc_tui_answering.anything_running ~turns:state.keeper_turns
           ~live_transcript:(Option.is_some state.msg_live)
-          ~lanes:state.standalone_lanes
+          ~lanes:state.standalone_lanes ~awaiting_detail_read
       in
       if not anything_running then begin
         if state.activity_frame >= 0 then begin

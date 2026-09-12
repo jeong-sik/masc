@@ -1,6 +1,7 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
 module Metrics_tail = Masc_tui_metrics_tail
+module Rows = Masc_tui_rows
 
 (* A poll shares the current read; an explicit refresh owns a new one.
    Only the owning response can settle that source and publish its result. *)
@@ -4037,8 +4038,12 @@ type state = {
      pair of options: the pair could not say "reading", so a file being
      fetched drew the same blank pane an empty file draws -- and nothing
      matched an arriving answer against the path still on screen, so a slow
-     read of one file could replace another the operator had since opened. *)
-  mutable code_file: (string, (string * string) list list) Masc_tui_fetched.t;
+     read of one file could replace another the operator had since opened.
+
+     An array, not a list: the diff pane resolves a drawn row's colouring by
+     that row's line number in the whole file, so the lookups are scattered
+     rather than sequential and a list walked from the front on every one. *)
+  mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -6738,9 +6743,10 @@ let surface_row_texts (state : state) : surface -> string list option = function
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
-             (List.map
-                (fun segments -> String.concat "" (List.map fst segments))
-                rows)
+             (Array.to_list
+                (Array.map
+                   (fun segments -> String.concat "" (List.map fst segments))
+                   rows))
          (* Nothing to search through while the file is still being read, and
             nothing to search through if it failed. *)
          | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
@@ -7003,7 +7009,7 @@ type palette_action =
 let code_cursor_line_symbols (state : state) =
   match Masc_tui_fetched.current state.code_file with
   | Some (_, Masc_tui_fetched.Ready rows) -> (
-      match List.nth_opt rows state.code_file_cursor with
+      match Rows.at (Rows.of_array rows) state.code_file_cursor with
       | None -> []
       | Some segments ->
           let name_kind kind =

@@ -339,7 +339,7 @@ let test_dynamic_tool_callback () =
         (fun ~call_id:id input ->
           call_id := Some id;
           arguments := input;
-          { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
+          { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
     }
   in
   with_fixture
@@ -433,6 +433,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
         (fun ~call_id:_ _ ->
           { success = false
           ; content = "same deterministic failure"
+          ; content_blocks = None
           ; abort_turn =
               Some
                 (Repeated_tool_call
@@ -462,7 +463,7 @@ let test_context_error_records_prior_tool_effect () =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
           ; content = "effect applied"
-          ; abort_turn = None
+          ; content_blocks = None; abort_turn = None
           })
     }
   in
@@ -869,7 +870,7 @@ let test_thread_resume_sends_dynamic_tools () =
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; call =
              (fun ~call_id:_ _ ->
-               { success = true; content = "unused"; abort_turn = None })
+               { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
        with_fixture
@@ -924,7 +925,7 @@ let test_dynamic_tools_are_declared_deferred_under_one_namespace () =
          ; input_schema = `Assoc [ "type", `String "object" ]
          ; call =
              (fun ~call_id:_ _ ->
-               { success = true; content = "unused"; abort_turn = None })
+               { success = true; content = "unused"; content_blocks = None; abort_turn = None })
          }
        in
        with_fixture
@@ -1111,7 +1112,7 @@ let test_elicitation_cancel_then_dynamic_tool () =
         { name = "masc_probe"; description = "MASC tool after unavailable host input";
           input_schema = `Assoc ["type", `String "object"];
           call = (fun ~call_id:_ _ -> incr calls;
-            { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None }) } in
+            { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None }) } in
       (match run_fixture ~dynamic_tools:[tool]
         ~on_stream_event:(fun event -> observed := event :: !observed) path with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -1330,7 +1331,7 @@ let test_dynamic_tool_bytes_counts_name_description_and_schema () =
         (fun ~call_id:_ _ ->
           { Runtime_codex_app_server.success = true
           ; content = ""
-          ; abort_turn = None
+          ; content_blocks = None; abort_turn = None
           })
     }
   in
@@ -1594,7 +1595,7 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
         (fun ~call_id:_ _ ->
           { success = true
           ; content = String.make (1024 * 1024) 'x'
-          ; abort_turn = None
+          ; content_blocks = None; abort_turn = None
           })
     }
   in
@@ -4160,7 +4161,7 @@ let test_live_dynamic_tool_subscription () =
       ; call =
           (fun ~call_id:_ _ ->
             incr tool_calls;
-            { success = true; content = "MASC_TOOL_RESULT"; abort_turn = None })
+            { success = true; content = "MASC_TOOL_RESULT"; content_blocks = None; abort_turn = None })
       }
     in
     let result =

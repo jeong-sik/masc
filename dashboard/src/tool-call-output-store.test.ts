@@ -10,7 +10,7 @@ import {
   toolCallOutputHydrationContract,
   toolCallOutputHydrationFailureReason,
   toolCallOutputHydrationStatus,
-  toolCallOutputsByExecutionId,
+  toolCallOutputsByIdentity,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
@@ -35,42 +35,53 @@ describe('tool-call-output-store', () => {
 
   it('records entries keyed by canonical execution_id', () => {
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'hello' })])
-    expect(toolCallOutputsByExecutionId.value.get('exec-abc')?.output).toBe('hello')
+    expect(toolCallOutputsByIdentity.value.get(JSON.stringify(['sangsu', 'exec-abc']))?.output).toBe('hello')
   })
 
   it('looks up by canonical execution_id', () => {
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'hello' })])
-    expect(lookupToolCallOutput('exec-abc')?.output).toBe('hello')
+    expect(lookupToolCallOutput('sangsu', 'exec-abc')?.output).toBe('hello')
   })
 
   it('preserves canonical identity bytes after rejecting blank values', () => {
     recordToolCallOutputs([
       toolCall({ execution_id: '  exec-abc \t', output: 'hello' }),
     ])
-    expect(lookupToolCallOutput('  exec-abc \t')?.output).toBe('hello')
-    expect(lookupToolCallOutput('exec-abc')).toBeNull()
-    expect(toolCallOutputsByExecutionId.value.has('  exec-abc \t')).toBe(true)
+    expect(lookupToolCallOutput('sangsu', '  exec-abc \t')?.output).toBe('hello')
+    expect(lookupToolCallOutput('sangsu', 'exec-abc')).toBeNull()
+    expect(toolCallOutputsByIdentity.value.has(JSON.stringify(['sangsu', '  exec-abc \t']))).toBe(true)
   })
 
   it('returns null for an unknown id', () => {
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc' })])
-    expect(lookupToolCallOutput('exec-missing')).toBeNull()
+    expect(lookupToolCallOutput('sangsu', 'exec-missing')).toBeNull()
+  })
+
+  it('keeps colliding execution IDs separate by exact Keeper identity', () => {
+    recordToolCallOutputs([
+      toolCall({ keeper: 'writer', execution_id: 'shared', output: 'writer output', duration_ms: 12 }),
+      toolCall({ keeper: 'peer', execution_id: 'shared', output: 'peer output', success: false, duration_ms: 9000 }),
+    ])
+    expect(lookupToolCallOutput('writer', 'shared')?.output).toBe('writer output')
+    expect(lookupToolCallOutput('peer', 'shared')?.success).toBe(false)
+    expect(lookupToolCallOutput(null, 'shared')).toBeNull()
+    expect(lookupToolCallOutput('unrelated', 'shared')).toBeNull()
   })
 
   it('skips entries without an execution_id', () => {
     recordToolCallOutputs([toolCall({ execution_id: undefined, tool_use_id: 'provider-only' })])
-    expect(toolCallOutputsByExecutionId.value.size).toBe(0)
+    expect(toolCallOutputsByIdentity.value.size).toBe(0)
   })
 
   it('skips entries with a whitespace-only execution_id', () => {
     recordToolCallOutputs([toolCall({ execution_id: ' \t ' })])
-    expect(toolCallOutputsByExecutionId.value.size).toBe(0)
+    expect(toolCallOutputsByIdentity.value.size).toBe(0)
   })
 
   it('overwrites an earlier entry for the same execution (idempotent re-hydration)', () => {
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'first' })])
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'second' })])
-    expect(lookupToolCallOutput('exec-abc')?.output).toBe('second')
+    expect(lookupToolCallOutput('sangsu', 'exec-abc')?.output).toBe('second')
   })
 
   it('does not collide when a provider id is reused', () => {
@@ -78,20 +89,20 @@ describe('tool-call-output-store', () => {
       toolCall({ execution_id: 'exec-first', tool_use_id: 'reused', output: 'first' }),
       toolCall({ execution_id: 'exec-second', tool_use_id: 'reused', output: 'second' }),
     ])
-    expect(lookupToolCallOutput('exec-first')?.output).toBe('first')
-    expect(lookupToolCallOutput('exec-second')?.output).toBe('second')
+    expect(lookupToolCallOutput('sangsu', 'exec-first')?.output).toBe('first')
+    expect(lookupToolCallOutput('sangsu', 'exec-second')?.output).toBe('second')
   })
 
   it('replaces the map reference on change so signal subscribers re-render', () => {
-    const before = toolCallOutputsByExecutionId.value
+    const before = toolCallOutputsByIdentity.value
     recordToolCallOutputs([toolCall({ execution_id: 'exec-abc' })])
-    expect(toolCallOutputsByExecutionId.value).not.toBe(before)
+    expect(toolCallOutputsByIdentity.value).not.toBe(before)
   })
 
   it('does not replace the map reference when nothing changed', () => {
-    const before = toolCallOutputsByExecutionId.value
+    const before = toolCallOutputsByIdentity.value
     recordToolCallOutputs([toolCall({ execution_id: undefined })])
-    expect(toolCallOutputsByExecutionId.value).toBe(before)
+    expect(toolCallOutputsByIdentity.value).toBe(before)
   })
 
   it('preserves an externalised blob output descriptor', () => {
@@ -101,7 +112,7 @@ describe('tool-call-output-store', () => {
         output: { _blob: { sha256: 'abc', bytes: 9000, mime: 'application/json', preview: 'preview…' } },
       }),
     ])
-    const stored = lookupToolCallOutput('exec-blob')?.output
+    const stored = lookupToolCallOutput('sangsu', 'exec-blob')?.output
     expect(typeof stored).toBe('object')
     expect(stored).toMatchObject({ _blob: { preview: 'preview…' } })
   })

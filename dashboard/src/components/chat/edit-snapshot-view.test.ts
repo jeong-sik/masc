@@ -5,6 +5,7 @@ import { fetchEditSnapshots } from '../../api/edit-snapshots'
 import { computeEditSnapshotDiff } from './edit-snapshot-diff-engine'
 import { ChatEditEvidence } from './edit-evidence'
 import type { ToolCallEntry } from '../../api/dashboard'
+import { ApiRequestError } from '../../api/core'
 
 vi.mock('../../api/edit-snapshots', async importOriginal => ({
   ...await importOriginal<typeof import('../../api/edit-snapshots')>(),
@@ -63,6 +64,16 @@ it('shows retrieval failure and lets the operator close and retry', async () => 
   vi.mocked(fetchEditSnapshots).mockResolvedValueOnce({ before: 'old', after: 'new' })
   fireEvent.click(view.getByRole('button'))
   await waitFor(() => expect(view.getByLabelText('편집 후 전체 원본').textContent).toBe('new'))
+})
+
+it.each([401, 403])('requires administrator credentials for snapshot HTTP %i without retry', async status => {
+  vi.mocked(fetchEditSnapshots).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status }))
+  const view = render(html`<${ChatEditEvidence} output=${receipt} />`)
+  fireEvent.click(view.getByRole('button', { name: '편집 전후 원본 보기' }))
+  await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+  expect(view.queryByRole('button')).toBeNull()
+  expect(view.queryByLabelText('편집 전 전체 원본')).toBeNull()
+  expect(fetchEditSnapshots).toHaveBeenCalledTimes(1)
 })
 
 it('shows a final-newline-only edit in the verified originals diff', async () => {

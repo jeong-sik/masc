@@ -20,9 +20,13 @@ function nonBlankExecutionId(executionId: string | null | undefined): string | n
   return executionId?.trim() ? executionId : null
 }
 
-// Global join table: canonical execution_id → tool-call IO entry.
+// Global join table: (Keeper, canonical execution_id) → tool-call IO entry.
 // Replaced (not mutated) on each merge so signal subscribers re-render.
-export const toolCallOutputsByExecutionId = signal<Map<string, ToolCallEntry>>(new Map())
+export const toolCallOutputsByIdentity = signal<Map<string, ToolCallEntry>>(new Map())
+
+function outputKey(keeper: string, executionId: string): string {
+  return JSON.stringify([keeper, executionId])
+}
 
 interface ToolCallOutputHydrationState {
   inFlight: number
@@ -181,30 +185,31 @@ export function toolCallOutputHydrationContract(
   }
 }
 
-/** Merge tool-call entries by exact canonical execution_id. */
+/** Merge tool-call entries by exact Keeper and canonical execution_id. */
 export function recordToolCallOutputs(entries: readonly ToolCallEntry[]): void {
   let changed = false
-  const next = new Map(toolCallOutputsByExecutionId.value)
+  const next = new Map(toolCallOutputsByIdentity.value)
   for (const entry of entries) {
     const executionId = nonBlankExecutionId(entry.execution_id)
-    if (!executionId) continue
-    next.set(executionId, entry)
+    if (!executionId || !entry.keeper.trim()) continue
+    next.set(outputKey(entry.keeper, executionId), entry)
     changed = true
   }
-  if (changed) toolCallOutputsByExecutionId.value = next
+  if (changed) toolCallOutputsByIdentity.value = next
 }
 
-/** Look up output by canonical execution_id. */
+/** Look up output only within its explicit Keeper scope. */
 export function lookupToolCallOutput(
+  keeper: string | null | undefined,
   executionId: string | null | undefined,
 ): ToolCallEntry | null {
   const id = nonBlankExecutionId(executionId)
-  if (!id) return null
-  return toolCallOutputsByExecutionId.value.get(id) ?? null
+  if (!id || !keeper?.trim()) return null
+  return toolCallOutputsByIdentity.value.get(outputKey(keeper, id)) ?? null
 }
 
 /** Test/teardown helper: drop all recorded outputs. */
 export function resetToolCallOutputs(): void {
-  toolCallOutputsByExecutionId.value = new Map()
+  toolCallOutputsByIdentity.value = new Map()
   toolCallOutputHydrationByKeeper.value = {}
 }

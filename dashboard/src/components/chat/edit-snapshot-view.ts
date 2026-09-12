@@ -2,10 +2,12 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchEditSnapshots, type EditSnapshots } from '../../api/edit-snapshots'
 import { editSnapshotDiff } from './edit-snapshot-diff'
+import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 
 type State = { kind: 'idle' } | { kind: 'loading' }
   | { kind: 'loaded'; before: string; after: string; diff: string }
   | { kind: 'error'; message: string }
+  | { kind: 'admin-required' }
 
 export function EditSnapshotView({ refs }: { refs: EditSnapshots }) {
   const [requested, setRequested] = useState(false)
@@ -18,10 +20,13 @@ export function EditSnapshotView({ refs }: { refs: EditSnapshots }) {
       ...result, diff: await editSnapshotDiff(result.before, result.after, controller.signal),
     })).then(
       result => { if (!controller.signal.aborted) setState({ kind: 'loaded', ...result }) },
-      error => { if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) }) },
+      error => { if (!controller.signal.aborted) setState(isAdminRequired(error)
+        ? { kind: 'admin-required' }
+        : { kind: 'error', message: error instanceof Error ? error.message : String(error) }) },
     )
     return () => controller.abort()
   }, [requested, refs.before.sha256, refs.before.bytes, refs.after.sha256, refs.after.bytes])
+  if (state.kind === 'admin-required') return html`<p role="alert" data-access-state="admin-required" class="my-2 text-xs">${ADMIN_REQUIRED_MESSAGE}</p>`
   return html`<div class="my-2" data-edit-snapshot-view>
     <button type="button" class="rounded border border-border px-2 py-1 text-xs"
       aria-expanded=${requested} onClick=${() => setRequested(value => !value)}>

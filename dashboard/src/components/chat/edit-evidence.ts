@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks'
 import { fetchVerifiedToolBlobText } from '../../api/verified-tool-blob'
+import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
 import { html } from 'htm/preact'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { parseEditSnapshots } from '../../api/edit-snapshots'
@@ -13,6 +14,7 @@ function object(value: unknown): Record<string, unknown> | null {
 type ManifestState = { key: string; kind: 'loading' }
   | { key: string; kind: 'loaded'; result: Record<string, unknown> }
   | { key: string; kind: 'failed'; message: string }
+  | { key: string; kind: 'admin-required' }
 
 function decodedEditResult(text: string, manifest: boolean): Record<string, unknown> {
   const json: unknown = JSON.parse(text)
@@ -47,8 +49,9 @@ export function ChatEditEvidence({ output }: { output: ToolCallEntry | null }) {
     ).then(result => {
       if (!controller.signal.aborted) setManifest({ key, kind: 'loaded', result })
     }, error => {
-      if (!controller.signal.aborted) setManifest({ key, kind: 'failed',
-        message: error instanceof Error ? error.message : '저장된 편집 결과를 불러오지 못했습니다.' })
+      if (!controller.signal.aborted) setManifest(isAdminRequired(error)
+        ? { key, kind: 'admin-required' }
+        : { key, kind: 'failed', message: error instanceof Error ? error.message : '저장된 편집 결과를 불러오지 못했습니다.' })
     })
     return () => controller.abort()
   }, [key, attempt])
@@ -59,6 +62,7 @@ export function ChatEditEvidence({ output }: { output: ToolCallEntry | null }) {
     if (manifest?.key !== key || manifest.kind === 'loading') {
       return html`<p role="status" class="m-2 text-xs">저장된 편집 결과를 확인하고 있습니다.</p>`
     }
+    if (manifest.kind === 'admin-required') return html`<p role="alert" data-access-state="admin-required" class="m-2 text-xs">${ADMIN_REQUIRED_MESSAGE}</p>`
     if (manifest.kind === 'failed') return html`<div role="alert" class="m-2 text-xs">${manifest.message}
       <button type="button" class="ml-2 underline" onClick=${() => retry(value => value + 1)}>편집 결과 다시 조회</button>
     </div>`

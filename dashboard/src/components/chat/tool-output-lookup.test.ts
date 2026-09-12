@@ -32,6 +32,42 @@ const openTurn = (view: { container: Element }) => fireEvent.click(view.containe
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); resetToolCallOutputs(); _resetTraceCardOpenChoicesForTests() })
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); resetToolCallOutputs() })
 describe('historical autonomous tool outputs', () => {
+  it.each([401, 403])('requires administrator access for HTTP %i without a futile lookup retry', async status => {
+    vi.mocked(get).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/tool-calls', status }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    expect(view.queryByRole('button', { name: '다시 조회' })).toBeNull()
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+  it.each([401, 403])('reports administrator-only manifests on HTTP %i without retry', async status => {
+    const payload = response()
+    vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry,
+      output: { _blob: { sha256: 'a'.repeat(64), bytes: 3, mime: 'application/vnd.masc.tool-result-manifest+json', preview: '' } } } })
+    vi.mocked(fetchToolBlob).mockRejectedValue(new ApiRequestError({ method: 'GET', path: '/artifacts/sha', status }))
+    const view = render(transcript()); openTurn(view)
+    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('관리자 권한'))
+    expect(view.queryByRole('button', { name: '편집 결과 다시 조회' })).toBeNull()
+    expect(fetchToolBlob).toHaveBeenCalledTimes(1)
+  })
+  it('keeps same-execution timeline status and duration scoped to each Keeper', async () => {
+    vi.mocked(get).mockImplementation(async path => {
+      const keeper = new URL(path, 'http://localhost').pathname.includes('/writer/') ? 'writer' : 'peer'
+      const payload = response(keeper)
+      return { ...payload, entry: { ...payload.entry, success: keeper === 'writer', duration_ms: keeper === 'writer' ? 12 : 9000 } }
+    })
+    const view = render(html`<div>
+      <section data-testid="writer">${transcript('writer')}</section>
+      <section data-testid="peer">${transcript('peer')}</section>
+    </div>`)
+    const writer = view.getByTestId('writer'), peer = view.getByTestId('peer')
+    openTurn({ container: writer }); openTurn({ container: peer })
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+    const header = '[data-chat-work-trace] .chat-block-trace-meta'
+    await waitFor(() => expect(peer.querySelector(header)?.textContent).toContain('실패 1'))
+    expect(writer.querySelector(header)?.textContent).not.toContain('실패')
+    expect(writer.querySelector(`${header} .tnum`)?.textContent).toBe('12ms')
+    expect(peer.querySelector(`${header} .tnum`)?.textContent).not.toBe('12ms')
+  })
   it.each(['Read', 'Shell'].flatMap(tool => ['tail', 'historical'].map(source => ({ tool, source }))))(
     'withholds $tool raw results from $source while retaining execution provenance', async ({ tool, source }) => {
       const secret = `private-${tool}-result-must-not-render`
@@ -47,7 +83,7 @@ describe('historical autonomous tool outputs', () => {
       }])
       const view = render(html`<${ChatTranscript} keeperName="writer" entries=${activity} emptyText="empty" />`)
       openTurn(view)
-      await waitFor(() => expect(lookupToolCallOutput(id)?.output).toBe(secret))
+      await waitFor(() => expect(lookupToolCallOutput('writer', id)?.output).toBe(secret))
       const step = view.container.querySelector<HTMLElement>('[data-chat-trace-step="tool"]')!
       expect(step.getAttribute('data-chat-trace-execution-id')).toBe(id)
       expect(step.getAttribute('data-chat-trace-provenance')).toBe('execution_id')
@@ -81,7 +117,7 @@ describe('historical autonomous tool outputs', () => {
     fireEvent.click(step.querySelector<HTMLElement>('.chat-block-tstep-row')!)
     expect(step.querySelector('.chat-block-tool-body')).toBeNull()
     expect(view.container.textContent).not.toContain('masc.tool-result-artifact-manifest.v1')
-    expect(lookupToolCallOutput(id)?.keeper).toBe('writer'); expect(get).toHaveBeenCalledTimes(1)
+    expect(lookupToolCallOutput('writer', id)?.keeper).toBe('writer'); expect(get).toHaveBeenCalledTimes(1)
   })
   it.each([[404, '저장된 실행 기록을 찾지 못했습니다.'], [409, '실행 기록이 중복되어'], [503, '저장된 실행 기록을 불러오지 못했습니다.']])('shows HTTP %i and retries only on operator action', async (status, message) => {
     vi.mocked(get).mockRejectedValueOnce(new ApiRequestError({ method: 'GET', path: '/tool-calls', status: status as number })).mockResolvedValueOnce(response())
@@ -96,7 +132,7 @@ describe('historical autonomous tool outputs', () => {
     vi.mocked(get).mockResolvedValue({ ...payload, entry: { ...payload.entry, ...(axis === 'keeper' ? { keeper: 'peer' } : { execution_id: 'other' }) } })
     const view = render(transcript()); openTurn(view)
     await waitFor(() => expect(view.getByRole('alert').textContent).toContain('불러오지 못했습니다'))
-    expect(view.queryByLabelText('편집 변경 기록')).toBeNull(); expect(lookupToolCallOutput(id)).toBeNull()
+    expect(view.queryByLabelText('편집 변경 기록')).toBeNull(); expect(lookupToolCallOutput('writer', id)).toBeNull()
   })
   it('does not display an old response after switching Keeper', async () => {
     let resolveOld!: (value: unknown) => void
@@ -104,7 +140,7 @@ describe('historical autonomous tool outputs', () => {
     const view = render(transcript()); openTurn(view); await waitFor(() => expect(get).toHaveBeenCalledTimes(1))
     view.rerender(transcript('peer')); await waitFor(() => expect(view.getByText('peer.md · 1곳 편집')).toBeTruthy())
     resolveOld(response()); await Promise.resolve()
-    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull(); expect(lookupToolCallOutput(id)?.keeper).toBe('peer')
+    expect(view.queryByText('writer.md · 1곳 편집')).toBeNull(); expect(lookupToolCallOutput('peer', id)?.keeper).toBe('peer')
   })
   it('keeps concurrent Keeper results isolated without refetching after peer hydration', async () => {
     vi.mocked(get).mockImplementation(async path => response(

@@ -97,10 +97,12 @@ Post/comment count, content bytes, write latency, and disk use are observed and
 reported. Fixed counts, age windows, author classes, or content similarity do
 not reject a Board mutation. Typed ids, valid encoding, exact expected version,
 and persistence success remain objective write invariants.
-| max_ttl_hours | 720 (30일) | |
-| sweeper_interval_sec | 10 | |
-| sweeper_batch_size | 100 | Backpressure |
-| max_jsonl_bytes | 10 MB | 초과 시 rotation |
+
+| 설정 항목 | 기본값 | 설명 |
+|-----------|--------|------|
+| `sweeper_interval_sec` | 10 | 스위퍼 실행 주기 (초, `MASC_BOARD_SWEEPER_INTERVAL_SEC`) |
+| `sweeper_batch_size` | 100 | 스위퍼 배치 크기 (`MASC_BOARD_SWEEPER_BATCH_SIZE`) |
+| `max_jsonl_bytes` | 10 MiB | 초과 시 rotation (`Board_paths.max_jsonl_bytes`) |
 
 ---
 

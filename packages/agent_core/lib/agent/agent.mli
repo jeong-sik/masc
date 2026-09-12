@@ -498,18 +498,6 @@ val run_stream_blocks
   -> Types.content_block list
   -> (Types.api_response, Error.t) result
 
-(** Detailed counterpart of {!run_stream_blocks}. *)
-val run_stream_blocks_detailed
-  :  sw:Eio.Switch.t
-  -> ?clock:_ Eio.Time.clock
-  -> on_event:(Types.sse_event -> unit)
-  -> ?on_yield:(unit -> unit)
-  -> ?on_resume:(unit -> unit)
-  -> ?execution_store:execution_store
-  -> t
-  -> Types.content_block list
-  -> (Types.api_response, detailed_error) result
-
 (** Stream one agent turn. Non-fatal exceptions raised by [on_event] are
     logged and do not abort the turn. *)
 val run_turn_stream
@@ -558,16 +546,6 @@ val run_with_handoffs
   -> string
   -> (Types.api_response, Error.t) result
 
-(** Detailed counterpart of {!run_with_handoffs}. *)
-val run_with_handoffs_detailed
-  :  sw:Eio.Switch.t
-  -> ?clock:_ Eio.Time.clock
-  -> ?execution_store:execution_store
-  -> t
-  -> targets:Handoff.handoff_target list
-  -> string
-  -> (Types.api_response, detailed_error) result
-
 val run_with_handoffs_blocks
   :  sw:Eio.Switch.t
   -> ?clock:_ Eio.Time.clock
@@ -576,16 +554,6 @@ val run_with_handoffs_blocks
   -> targets:Handoff.handoff_target list
   -> Types.content_block list
   -> (Types.api_response, Error.t) result
-
-(** Detailed counterpart of {!run_with_handoffs_blocks}. *)
-val run_with_handoffs_blocks_detailed
-  :  sw:Eio.Switch.t
-  -> ?clock:_ Eio.Time.clock
-  -> ?execution_store:execution_store
-  -> t
-  -> targets:Handoff.handoff_target list
-  -> Types.content_block list
-  -> (Types.api_response, detailed_error) result
 
 (** {1 Checkpoint / Resume} *)
 

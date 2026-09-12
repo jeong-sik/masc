@@ -238,11 +238,6 @@ type failure_cause =
       }
 [@@deriving yojson, show]
 
-(** Text projection of a typed participant failure for reports and projected
-    session state. Runtime events retain {!failure_cause} as their only failure
-    representation. *)
-val failure_cause_to_string : failure_cause -> string
-
 (** Identity and trace fields shared by every participant lifecycle event.
     The lifecycle-specific wrappers below keep completion and failure evidence
     disjoint in the type system and in canonical runtime JSON. *)
@@ -410,12 +405,5 @@ val request_to_json : request -> Yojson.Safe.t
 val request_of_json : Yojson.Safe.t -> (request, string) result
 val response_to_json : response -> Yojson.Safe.t
 val response_of_json : Yojson.Safe.t -> (response, string) result
-val protocol_message_to_json : protocol_message -> Yojson.Safe.t
-val protocol_message_of_json : Yojson.Safe.t -> (protocol_message, string) result
-val request_to_string : request -> string
-val response_to_string : response -> string
-val protocol_message_to_string : protocol_message -> string
-val request_of_string : string -> (request, string) result
-val response_of_string : string -> (response, string) result
-val protocol_message_of_string : string -> (protocol_message, string) result
 val protocol_version : string
+

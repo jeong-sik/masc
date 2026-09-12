@@ -92,8 +92,8 @@ type transfer_projection_result = State.transfer_projection_result =
    (see [note_checkpoint_retention_result]), so a restart must not reset it and
    v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
    so both files hard-cut together; there is no compatibility decoder. *)
-let snapshot_filename = "event-queue-v19.json"
-let transition_wal_filename = "event-queue-transitions-v8.jsonl"
+let snapshot_filename = Keeper_event_queue_schema.snapshot_filename
+let transition_wal_filename = Keeper_event_queue_schema.transition_wal_filename
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
 
@@ -304,7 +304,22 @@ let read_json_if_present ~after_read path =
 let schema_field = function
   | `Assoc fields ->
     (match List.assoc_opt "schema" fields with
-     | Some (`String schema) -> Ok schema
+     | Some (`String schema) ->
+       (* #25867: the payload marker IS the store generation. Read it into
+          the registry type and compare against what this binary writes, so
+          a foreign-generation store fails here with the two generations
+          named — not as a generic shape error rows later, and not as a
+          silent discard of current bytes. *)
+       if String.equal schema Keeper_event_queue_schema.state
+       then Ok ()
+       else
+         Error
+           (Keeper_event_queue_schema.describe_mismatch
+              { store = "snapshot"
+              ; path = "state payload"
+              ; actual = schema
+              ; expected = Keeper_event_queue_schema.state
+              })
      | Some _ -> Error "snapshot schema must be a string"
      | None -> Error "snapshot missing required field schema")
   | _ -> Error "snapshot must be a JSON object"
@@ -336,7 +351,7 @@ let read_primary_current_unlocked ?(after_read = fun () -> ()) owner =
     in
     (match schema_field json with
      | Error message -> decode_error message
-     | Ok _ ->
+     | Ok () ->
        (match State.of_yojson json with
         | Ok state ->
           remember_snapshot ~stat path state;
@@ -352,7 +367,7 @@ let bump_revision state =
   else Ok (State.with_revision (Int64.succ (State.revision state)) state)
 ;;
 
-let transition_wal_schema = "masc.keeper_event_queue.transition.v8"
+let transition_wal_schema = Keeper_event_queue_schema.transition_wal
 
 type transition_wal_row =
   { pre_state : State.t
@@ -1724,7 +1739,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
      Emitting a verdict here too produced two answers for one question, and the
      surface then read this one back and cancelled its own policy. *)
   `Assoc
-    [ "schema", `String "masc.keeper_event_queue.fleet_summary.v4"
+    [ "schema", `String Keeper_event_queue_schema.fleet_summary
     ; "base_path", `String projection_base_path
     ; ( "keepers_runtime_dir"
       , `String (Common.keepers_runtime_dir_of_base ~base_path:projection_base_path) )

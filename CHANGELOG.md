@@ -1,6 +1,82 @@
 # Changelog
 
 
+## [0.35.14] - 2026-09-12
+
+### Added
+
+- World constitution: articles, the append-only ledger they fold from, and the prompt slot every keeper in a world reads (RFC-0442) (#35327).
+- Tools inventory shows each tool's exact description, expanded in place (#35390).
+- The resident local Qwen3.8-27B is a runtime a lane can name (#35325).
+- TUI: browser actions are navigable and the selection stays visible (#35383).
+
+### Fixed
+
+- Nested Keeper tool schemas reach the model wire intact instead of being rebuilt from flat parameters, which dropped enum, bounds and nested properties (#35385).
+- TUI: ongoing work is shown alongside pending approvals (#35360).
+- TUI: two chat guards were answering about a file they no longer read (#35371).
+- Lanes: recent slice rows stay ahead of historical coverage (#35367).
+- A failed Claude Code turn logs why it failed, not only its kind (#35342).
+- Benchmark arm A runs harbor's kimi-cli; terminus-2 is retired (#35343).
+
+### Performance
+
+- TUI Code diff colouring no longer walks the open file to find a row: 107ms to 0.007ms (#35341).
+
+### Changed
+
+- TUI chat surface moved into its own library (#35334).
+
+### Docs
+
+- RFC-0442: a world's norms are ratified by keeper agreement rather than by a PR, kept in a base_path ledger and projected through the system prompt (#35322).
+- RFC-0443: runtime lifecycle is not a provider stream event (#35355).
+- corrective-grammar v0.3: title and tone settled for lane distribution (#35315).
+
+## [0.35.13] - 2026-09-12
+
+### Added
+
+- TUI: the open question reaches its own ends (#35332).
+- TUI: the Fusion runs and the Changes list answer `/` (#35324).
+- TUI: jump to the first and last row, and page keys move a full page (#35317).
+- One registry type for durable event-queue store generations (#35308).
+- The resolved runtime list carries each runtime's quota life state (#35312).
+- G1 matrix harness execution mode and its checker CLI (#35297).
+- Terminal-Bench harness with MASC arms, a Claude Code model lane, and arm K that offers the keeper fleet as MCP tools (#35311).
+- CI gates wire field and variant removals that arrive without a compatibility story (#35285).
+
+### Fixed
+
+- The TUI chat view stated four things that did not match the run (#35326).
+- Exact preflights are no longer rejected over the injected default header (#35279).
+- `verifier_exact` is excluded from `cli_slots`, and CLI runtimes are rejected at completion authority (#35300).
+- A finished-but-broken structured reply advances the candidate walk instead of ending it (#35301).
+- Named routing lanes accept a `runtime_ids` array body (#35298).
+- The dashboard probes with the provider's own auth header and states the Vertex skip (#35296).
+- The setup journey names each invalid check with its own reason instead of restarting the questions, and a save that died in validation no longer reports a saved workspace (#35336).
+
+### Performance
+
+- TUI list windowing slices once: 170ms to 4ms per second of scrolling at 21k rows (#35331).
+- TUI row search: 297ms to 5ms per key at 21k rows (#35320).
+
+### Changed
+
+- Dead dependencies purged across activity_graph, ag_ui, backend, model_inference_metrics, operator, autonomous, exec, local_runtime_pool, task, tool_surface, dashboard_utils, board_types, keeper_contract, keeper_metrics, ide, pulse, exec_policy, benchmark, discovery_cache, and agent_core (#35318, #35316, #35313, #35310, #35302).
+- Dead runtime store methods, serializations, unused exports, and legacy graphql environment variables removed, 338 lines (#35294).
+- Dummy `Relation_materializer`, dead callbacks, and a fake portal spec removed (#35299).
+- Phantom graphql route removed and spec typos fixed (#35329).
+- Stale fictions purged from keeper specs, snapshot defaults, and invariants (#35328).
+- gRPC default-off truth aligned and the obsolete workspace pause spec retired (#35323).
+- Rubric taxonomy and spec inventory drift reconciled (#35330).
+- Rejection constructors named in the llm_provider preflight inline tests (#35284).
+
+### Docs
+
+- RFC: TOML as the declarative system and the wire vocabulary authority (#35314).
+- RFC: a runtime load failure keeps its shape until the screen (#35339).
+
 ## [0.35.12] - 2026-09-12
 
 ### Added

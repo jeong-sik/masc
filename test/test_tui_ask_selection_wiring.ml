@@ -11,7 +11,20 @@
     "the operator is answering" as one state. *)
 
 let render = "bin/masc_tui_render.ml"
+let render_prim = "bin/masc_tui_render_prim.ml"
 let executable = "bin/masc_tui.ml"
+
+(* The drawing is three files. A count that means "one surface spells it this
+   way and no other does" has to read all of them, or a label answers by
+   moving between them rather than by changing. *)
+let render_family =
+  [ render; render_prim; "bin/masc_tui_render_chat.ml" ]
+
+let literals_in_the_drawing ~needle =
+  List.fold_left
+    (fun total module_path ->
+       total + Ast_grep.count_string_literals ~module_path ~needle)
+    0 render_family
 
 (* [j]/[k] belong to the approval queue above this panel, so the asks are
    walked with the two keys that do not collide. Before this there was no
@@ -37,11 +50,11 @@ let test_the_ask_list_can_be_walked_before_answering () =
 let test_the_two_modes_give_the_walk_one_name () =
   Alcotest.(check int) "the browsing footer and the answering one share a name"
     1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
        ~binding_name:"question_hints" ~needle:"[/]:ask");
   Alcotest.(check int)
     "and no second spelling survives beside it" 0
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
        ~binding_name:"question_hints" ~needle:"[/]:question")
 ;;
 
@@ -54,13 +67,34 @@ let test_the_bracket_keys_keep_one_vocabulary () =
   List.iter
     (fun name ->
        Alcotest.(check int) (name ^ " is the name one surface uses") 1
-         (Ast_grep.count_string_literals ~module_path:render ~needle:name))
+         (literals_in_the_drawing ~needle:name))
     names;
   Alcotest.(check int) "the question reader explains the same ask walk" 1
-    (Ast_grep.count_string_literals ~module_path:render
-       ~needle:"[/]: previous/next ask");
+    (literals_in_the_drawing ~needle:"[/]: previous/next ask");
   Alcotest.(check int) "three footer labels and one reader explanation" 4
-    (Ast_grep.count_string_literals ~module_path:render ~needle:"[/]:")
+    (literals_in_the_drawing ~needle:"[/]:")
+;;
+
+(* The question reader takes every key while it is open, so the surface-wide
+   Home and End never reach it -- and reaching it would move the approvals
+   cursor under a reader drawing something else. It answers them itself,
+   against the same limit its page keys clamp to, and says so: a key that
+   works and is not named is the drift the footers already taught. *)
+let test_the_reader_reaches_its_own_ends () =
+  let writes field =
+    Ast_grep.count_field_writes_in_module ~module_path:executable ~field
+  in
+  Alcotest.(check bool) "the reader moves its own scroll" true
+    (writes "ask_question_scroll" > 0);
+  (* The page keys and End, and nothing else: both ask the renderer where the
+     text ends rather than counting the lines a second time. *)
+  Alcotest.(check int) "both movers ask the renderer for the end" 2
+    (Ast_grep.count_calls ~module_path:executable
+       ~callee:"Masc_tui_render.ask_question_scroll_limit");
+  Alcotest.(check int) "the reader names the ends it answers" 1
+    (literals_in_the_drawing ~needle:"Home/End: top/bottom");
+  Alcotest.(check int) "and the page it already answered" 1
+    (literals_in_the_drawing ~needle:"PgUp/PgDn: page")
 ;;
 
 (* The panel is drawn by [draw_ask_questions], and the caret it draws is the
@@ -151,10 +185,10 @@ let test_typing_outranks_the_choice_digits () =
    are only offered when that question has choices. *)
 let test_the_footer_names_the_editor_key () =
   Alcotest.(check int) "the write key is named once" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
        ~binding_name:"question_hints" ~needle:"t:write  ");
   Alcotest.(check int) "and the digits keep their own label" 1
-    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render
+    (Ast_grep.count_exact_string_literals_in_value_binding ~module_path:render_prim
        ~binding_name:"question_hints" ~needle:"1-9:pick  ")
 ;;
 
@@ -202,6 +236,10 @@ let () =
     ; ( "budget"
       , [ Alcotest.test_case "the panel draws against a budget" `Quick
             test_the_panel_draws_against_a_budget
+        ] )
+    ; ( "ends"
+      , [ Alcotest.test_case "the reader reaches its own ends" `Quick
+            test_the_reader_reaches_its_own_ends
         ] )
     ]
 ;;

@@ -17,5 +17,4 @@
   eio
   unix
   yojson
-  re
-  logs))
+  re))

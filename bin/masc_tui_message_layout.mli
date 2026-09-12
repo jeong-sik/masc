@@ -196,11 +196,12 @@ type origin_display =
   | Origin_inline
       (** The origin folds into the body's left margin, clock included. *)
   | Origin_bare  (** The same margin without the clock. *)
-(** Where a message's origin is drawn. [Origin_bare] is the chat default.
-    [Origin_inline] adds its clock; [Origin_row] adds a full timestamp and
-    request-id heading. Folding headings into the gutter hands their rows back
-    to the conversation: eight speakers taking turns otherwise spend eight
-    rows of a forty-row pane on headings.
+(** Where a message's origin is drawn. [Origin_inline] is the chat default
+    (see [Masc_tui_types.create_state]); its clock is drawn only on the rows
+    where the minute moved. [Origin_bare] drops that clock, and [Origin_row]
+    adds a full timestamp and request-id heading. Folding headings into the
+    gutter hands their rows back to the conversation: eight speakers taking
+    turns otherwise spend eight rows of a forty-row pane on headings.
 
     Every layout and scroll function takes this, and passing it to one but not
     another would measure the pane against a height it does not draw. *)

@@ -302,8 +302,6 @@ harness_seed_server_config "$REPO_ROOT" "$BASE_PATH" >/dev/null 2>&1 || true
   export MASC_KEEPER_AUTONOMOUS_ENABLED="true"
   export MASC_ORCHESTRATOR_ENABLED="1"
   export MASC_KEEPER_HEARTBEAT_INTERVAL_SEC="$HEARTBEAT_SEC"
-  export GRAPHQL_API_KEY=""
-  export GRAPHQL_URL="http://127.0.0.1:9/graphql"
   exec "$(harness_find_server_exe "$REPO_ROOT")" --port "$PORT" --base-path "$BASE_PATH"
 ) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!

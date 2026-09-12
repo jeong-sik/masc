@@ -15,6 +15,14 @@
 
 open Alcotest
 open Masc
+
+(* These tests assert on the operator-facing wording, so the typed failure is
+   rendered once here instead of at every call below. *)
+let load_list_text ~config_path =
+  Runtime.load_list ~config_path
+  |> Result.map_error (Runtime.to_diagnostic_text ~config_path)
+;;
+
 module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
@@ -912,13 +920,22 @@ let check_first_run_lanes path runtime_id ~cli =
     List.iter (fun id ->
       match List.find_opt (fun (lane : Runtime_schema.exact_output_lane_decl) -> String.equal lane.id id)
         config.exact_output_lane_decls with
-      | None -> Alcotest.failf "missing first-run lane %s" id
+      | None ->
+        if cli && not (Option.fold ~none:true ~some:Runtime.exact_lane_supports_cli_tail (Runtime.exact_lane_of_id id))
+        then ()
+        else Alcotest.failf "missing first-run lane %s" id
       | Some lane ->
-        Alcotest.(check (list string)) (id ^ " HTTP slots")
-          (if cli then [] else [ runtime_id ]) lane.slot_ids;
-        Alcotest.(check (list string)) (id ^ " CLI slots")
-          (if cli then [ runtime_id ] else []) lane.cli_slot_ids)
-      [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+        let expected_http = if cli then [] else [ runtime_id ] in
+        let expected_cli =
+          if cli then
+            match Runtime.exact_lane_of_id id with
+            | Some lane when not (Runtime.exact_lane_supports_cli_tail lane) -> []
+            | _ -> [ runtime_id ]
+          else []
+        in
+        Alcotest.(check (list string)) (id ^ " HTTP slots") expected_http lane.slot_ids;
+        Alcotest.(check (list string)) (id ^ " CLI slots") expected_cli lane.cli_slot_ids)
+      (List.map Runtime.exact_lane_id Runtime.all_exact_lanes)
 ;;
 
 let test_first_run_runtime_binds_supporting_lanes () =
@@ -943,7 +960,13 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
       (match Runtime.set_first_run_runtime ~runtime_config_path:path ~runtime_id:"codex.codex" () with
        | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
-      check_first_run_lanes path "codex.codex" ~cli:true))
+      check_first_run_lanes path "codex.codex" ~cli:true;
+      (match Runtime.verifier_exact_lane_slot_ids () with
+       | Error _ -> ()
+       | Ok slots ->
+         Alcotest.failf
+           "CLI first run must not give verifier_exact admitted slots, got: %s"
+           (String.concat ", " slots))))
 ;;
 
 let test_first_run_fallback_order_and_preservation () =
@@ -2278,7 +2301,7 @@ let load_list_error content =
   with_temp_dir "runtime-materialize-diag" @@ fun dir ->
   let path = Filename.concat dir "runtime.toml" in
   write_file path content;
-  match Runtime.load_list ~config_path:path with
+  match load_list_text ~config_path:path with
   | Ok _ ->
     Alcotest.fail "expected load_list to reject the assignment; got Ok"
   | Error msg -> msg

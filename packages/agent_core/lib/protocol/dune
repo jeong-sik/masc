@@ -10,8 +10,6 @@
   yojson
   eio
   eio.unix
-  cohttp
-  cohttp-eio
   uri
   unix
   mcp_protocol_bundle)

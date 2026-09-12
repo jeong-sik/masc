@@ -10,33 +10,20 @@ type scenario =
   | Retry_success
   | Usage_unreported
 
-val scenario_to_string : scenario -> string
-val scenario_of_string : string -> (scenario, string) result
-val scenario_of_string_opt : string -> scenario option
-
 type live_scenario =
   | Live_success
   | Live_negative
   | Live_retry_success
 
-val live_scenario_to_string : live_scenario -> string
-val live_scenario_of_string : string -> (live_scenario, string) result
-val live_scenario_of_string_opt : string -> live_scenario option
-
 type run_scenario =
   | Matrix_scenario of scenario
   | Live_scenario of live_scenario
 
-val run_scenario_to_string : run_scenario -> string
 val run_scenario_of_string : execution_mode:string -> string -> (run_scenario, string) result
 
 type usage_scope =
   | Per_request
   | Cumulative_request_snapshot
-
-val usage_scope_to_string : usage_scope -> string
-val usage_scope_of_string : string -> (usage_scope, string) result
-val usage_scope_of_string_opt : string -> usage_scope option
 
 type reported_usage =
   { input_tokens : int
@@ -165,3 +152,11 @@ val run_observation_of_json : Yojson.Safe.t -> (run_observation, string) result
 
 val checker_summary_to_json : checker_summary -> Yojson.Safe.t
 val checker_summary_of_json : Yojson.Safe.t -> (checker_summary, string) result
+
+val summary_to_json : checker_summary -> Yojson.Safe.t
+
+val load_manifest_file : string -> (manifest, string) result
+val load_observations_file : string -> (run_observation list, string) result
+
+val write_checker_file : string -> checker_summary -> (unit, string) result
+val write_summary_file : string -> checker_summary -> (unit, string) result

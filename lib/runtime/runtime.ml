@@ -375,52 +375,6 @@ let partition_bindings (cfg : config) (bindings : binding list)
    runtimes" wording. The result is the suffix that follows the quoted id in
    each caller's message, so the existing prefix ("[runtime.assignments].<k> =
    <id>") is preserved and the typo case stays byte-for-byte unchanged. *)
-let unresolved_runtime_suffix ~(dropped_bindings : (string * drop_reason) list)
-    ~(runtime_count : int) (id : string) : string =
-  match List.assoc_opt id dropped_bindings with
-  | Some reason ->
-    Printf.sprintf
-      ": binding is defined but could not be materialized as a runtime — %s"
-      (string_of_drop_reason reason)
-  | None -> Printf.sprintf " not found among %d runtimes" runtime_count
-;;
-
-(* A dangling reference is an operator typo, and unlike every other drop reason
-   it is not survivable by ignoring the binding: the runtime the operator
-   declared simply does not exist, and nothing downstream will say so unless the
-   id happens to be referenced by an assignment, route, or lane. Reporting it
-   here — at load, over the whole binding list — is what makes the absence
-   visible without a reference to hang the message on (masc#28403). The other
-   three reasons stay non-fatal: they keep the RFC-0206 §2.1 contract that a
-   binding MASC cannot run is excluded rather than fatal. *)
-let dangling_reference_reason = function
-  | Provider_not_declared id ->
-    Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)
-  | Model_not_declared id ->
-    Some (Printf.sprintf "names model %S, which has no [models.%s] row" id id)
-  | Binding_disabled | Provider_disabled _ | Execution_unbuildable _ -> None
-;;
-
-let validate_no_dangling_bindings ~(config_path : string)
-    ~(dropped_bindings : (string * drop_reason) list) : (unit, string) result =
-  match
-    List.filter_map
-      (fun (id, reason) ->
-        Option.map
-          (fun why -> Printf.sprintf "  %s %s" id why)
-          (dangling_reference_reason reason))
-      dropped_bindings
-  with
-  | [] -> Ok ()
-  | dangling ->
-    Error
-      (Printf.sprintf
-         "%s: %d binding(s) reference a provider or model that is not declared, \
-          so the runtime they define does not exist:\n%s"
-         config_path
-         (List.length dangling)
-         (String.concat "\n" dangling))
-;;
 
 (** TOML 에서 Runtime 목록과 default Runtime 을 로드한다.
 
@@ -459,10 +413,179 @@ type runtime_reference =
   ; domain : reference_domain
   }
 
-let validate_runtime_references ~(config_path : string)
+(* Why an id named in runtime.toml did not become a runtime. [reason] carries
+   the binding's own drop reason when something was declared under that id;
+   [None] means nothing declared it, and [runtime_count] is what the message
+   counts against. *)
+type resolution_failure =
+  { unresolved_id : string
+  ; declared_drop : drop_reason option
+  ; runtime_count : int
+  }
+
+(* The ways loading runtime.toml fails, closed so a consumer decides per case
+   instead of matching rendered text — the contract [drop_reason] already keeps
+   one level down. [Toml_unparsable] is the single case whose text comes from
+   the parser and can quote what the operator wrote; every other case names ids
+   and config keys this repository authored. *)
+type load_failure =
+  | Toml_unparsable of Runtime_toml.parse_error list
+  | Undeclared_bindings of (string * drop_reason) list
+  | Default_runtime_absent
+  | Default_runtime_unresolved of resolution_failure
+  | Reference_unresolved of
+      { site : string
+      ; shape : reference_shape
+      ; resolution : resolution_failure
+      }
+  | Lane_candidate_unresolved of
+      { lane_id : string
+      ; resolution : resolution_failure
+      }
+  | Max_context_absent of
+      { runtime_id : string
+      ; execution_model : string
+      ; declared_model : string
+      }
+
+(* A dangling reference is an operator typo, and unlike every other drop reason
+   it is not survivable by ignoring the binding: the runtime the operator
+   declared simply does not exist, and nothing downstream will say so unless the
+   id happens to be referenced by an assignment, route, or lane. Reporting it
+   here — at load, over the whole binding list — is what makes the absence
+   visible without a reference to hang the message on (masc#28403). The other
+   three reasons stay non-fatal: they keep the RFC-0206 §2.1 contract that a
+   binding MASC cannot run is excluded rather than fatal. *)
+let dangling_reference_reason = function
+  | Provider_not_declared id ->
+    Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)
+  | Model_not_declared id ->
+    Some (Printf.sprintf "names model %S, which has no [models.%s] row" id id)
+  | Binding_disabled | Provider_disabled _ | Execution_unbuildable _ -> None
+;;
+
+let resolution_of ~(dropped_bindings : (string * drop_reason) list)
+    ~(runtime_count : int) (id : string) : resolution_failure =
+  { unresolved_id = id; declared_drop = List.assoc_opt id dropped_bindings; runtime_count }
+;;
+
+(* Rendering lives here now, and only here. Every message below is the one the
+   failing site used to build inline, kept byte for byte: it is the operator's
+   whole account of a refused configuration, and a reworded one would read as a
+   different failure. *)
+let resolution_suffix (resolution : resolution_failure) : string =
+  match resolution.declared_drop with
+  | Some reason ->
+    Printf.sprintf
+      ": binding is defined but could not be materialized as a runtime — %s"
+      (string_of_drop_reason reason)
+  | None -> Printf.sprintf " not found among %d runtimes" resolution.runtime_count
+;;
+
+let to_diagnostic_text ~(config_path : string) : load_failure -> string = function
+  | Toml_unparsable errors ->
+    let detail =
+      errors
+      |> List.map (fun (e : Runtime_toml.parse_error) ->
+        Printf.sprintf "  - %s: %s" e.path e.message)
+      |> String.concat "\n"
+    in
+    Printf.sprintf
+      "runtime config parse failed (%s): %d error(s):\n%s"
+      config_path
+      (List.length errors)
+      detail
+  | Undeclared_bindings dropped ->
+    let dangling =
+      List.filter_map
+        (fun (id, reason) ->
+          Option.map
+            (fun why -> Printf.sprintf "  %s %s" id why)
+            (dangling_reference_reason reason))
+        dropped
+    in
+    Printf.sprintf
+      "%s: %d binding(s) reference a provider or model that is not declared, \
+       so the runtime they define does not exist:\n%s"
+      config_path
+      (List.length dangling)
+      (String.concat "\n" dangling)
+  | Default_runtime_absent ->
+    Printf.sprintf
+      "%s: [runtime].default is required (no default runtime configured; \
+       silent fallback removed)"
+      config_path
+  | Default_runtime_unresolved resolution ->
+    Printf.sprintf
+      "%s: [runtime].default = %S%s"
+      config_path
+      resolution.unresolved_id
+      (resolution_suffix resolution)
+  | Reference_unresolved { site; shape; resolution } ->
+    let named =
+      match shape with
+      | Scalar -> Printf.sprintf "%s = %S" site resolution.unresolved_id
+      | List_entry -> Printf.sprintf "%s entry %S" site resolution.unresolved_id
+    in
+    Printf.sprintf "%s: %s%s" config_path named (resolution_suffix resolution)
+  | Lane_candidate_unresolved { lane_id; resolution } ->
+    Printf.sprintf
+      "%s: [runtime.lanes.%s] candidate %S%s"
+      config_path
+      lane_id
+      resolution.unresolved_id
+      (resolution_suffix resolution)
+  | Max_context_absent { runtime_id; execution_model; declared_model } ->
+    Printf.sprintf
+      "%s: runtime %S (model=%s) has no [models.%s].max-context override \
+       and no AGENT_CORE capability catalog max-context; set the override or add \
+       the model to the capability catalog (no silent default — \
+       RFC-0206 §2.1)"
+      config_path
+      runtime_id
+      execution_model
+      declared_model
+;;
+
+(* The same account, minus the one part this repository did not write. A parse
+   error's text comes from the TOML parser and can quote the line it choked on,
+   which on an operator surface may be a value rather than a key. Every other
+   case names ids and config keys, so it reads identically to the diagnostic.
+   Listed case by case on purpose: a new failure has to decide where it
+   belongs instead of falling into a default. *)
+let to_operator_text ~(config_path : string) (failure : load_failure) : string =
+  match failure with
+  | Toml_unparsable errors ->
+    Printf.sprintf
+      "%s: %d parse error(s) in the file itself. Run masc runtime-probe for the \
+       parser's own report."
+      config_path
+      (List.length errors)
+  | Undeclared_bindings _
+  | Default_runtime_absent
+  | Default_runtime_unresolved _
+  | Reference_unresolved _
+  | Lane_candidate_unresolved _
+  | Max_context_absent _ -> to_diagnostic_text ~config_path failure
+;;
+
+(* The list is carried out whole rather than counted here: the caller decides
+   whether an operator sees it, and how much of it. *)
+let validate_no_dangling_bindings
+    ~(dropped_bindings : (string * drop_reason) list) : (unit, load_failure) result =
+  match
+    List.filter
+      (fun (_, reason) -> Option.is_some (dangling_reference_reason reason))
+      dropped_bindings
+  with
+  | [] -> Ok ()
+  | dangling -> Error (Undeclared_bindings dangling)
+;;
+
+let validate_runtime_references
     ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lanes : Runtime_lane.t list) (references : runtime_reference list)
-  : (unit, string) result
+  : (unit, load_failure) result
   =
   let resolves_as_runtime id =
     List.exists (fun (r : t) -> String.equal r.id id) runtimes
@@ -479,18 +602,13 @@ let validate_runtime_references ~(config_path : string)
   match List.find_opt (fun reference -> not (resolves reference)) references with
   | None -> Ok ()
   | Some { site; shape; id; domain = _ } ->
-    let named =
-      match shape with
-      | Scalar -> Printf.sprintf "%s = %S" site id
-      | List_entry -> Printf.sprintf "%s entry %S" site id
-    in
     Error
-      (Printf.sprintf
-         "%s: %s%s"
-         config_path
-         named
-         (unresolved_runtime_suffix ~dropped_bindings
-            ~runtime_count:(List.length runtimes) id))
+      (Reference_unresolved
+         { site
+         ; shape
+         ; resolution =
+             resolution_of ~dropped_bindings ~runtime_count:(List.length runtimes) id
+         })
 ;;
 
 (* Reference constructors keep each site string next to the field it names, so a
@@ -520,10 +638,10 @@ let media_failover_references (media_failover : string list) =
 (* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
    Empty candidate lists are rejected at parse time; here we reject unknown ids
    as operator typos (mirrors [runtime].default validation). *)
-let validate_lanes ~(config_path : string)
+let validate_lanes
     ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
-  : (unit, string) result
+  : (unit, load_failure) result
   =
   let runtime_exists id =
     List.exists (fun (r : t) -> String.equal r.id id) runtimes
@@ -539,13 +657,11 @@ let validate_lanes ~(config_path : string)
   | None -> Ok ()
   | Some (lane_id, id) ->
     Error
-      (Printf.sprintf
-         "%s: [runtime.lanes.%s] candidate %S%s"
-         config_path
-         lane_id
-         id
-         (unresolved_runtime_suffix ~dropped_bindings
-            ~runtime_count:(List.length runtimes) id))
+      (Lane_candidate_unresolved
+         { lane_id
+         ; resolution =
+             resolution_of ~dropped_bindings ~runtime_count:(List.length runtimes) id
+         })
 ;;
 
 (* [runtime].default is required, so every lane can end somewhere. Without this
@@ -559,13 +675,13 @@ let with_terminal_default ~default_runtime_id candidates =
   else candidates @ [ default_runtime_id ]
 ;;
 
-let lanes_of_decls ~(config_path : string)
+let lanes_of_decls
     ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
     (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
-  : (Runtime_lane.t list, string) result
+  : (Runtime_lane.t list, load_failure) result
   =
-  let* () = validate_lanes ~config_path ~dropped_bindings runtimes lane_decls in
+  let* () = validate_lanes ~dropped_bindings runtimes lane_decls in
   Ok
     (List.map
        (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
@@ -804,8 +920,8 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
    runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
    fallback window (RFC-0206 §2.1 no silent fallback). *)
-let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
-  : (unit, string) result
+let validate_runtime_max_context (runtimes : t list)
+  : (unit, load_failure) result
   =
   match
     List.find_opt
@@ -815,17 +931,14 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
   | None -> Ok ()
   | Some r ->
     Error
-      (Printf.sprintf
-         "%s: runtime %S (model=%s) has no [models.%s].max-context override \
-          and no AGENT_CORE capability catalog max-context; set the override or add \
-          the model to the capability catalog (no silent default — \
-          RFC-0206 §2.1)"
-         config_path
-         r.id
-         (match Runtime_execution.model_id r.execution with
-          | Some model_id -> model_id
-          | None -> "<official-client-selected>")
-         r.model.id)
+      (Max_context_absent
+         { runtime_id = r.id
+         ; execution_model =
+             (match Runtime_execution.model_id r.execution with
+              | Some model_id -> model_id
+              | None -> "<official-client-selected>")
+         ; declared_model = r.model.id
+         })
 ;;
 
 type request_body_cap_error = Non_positive_request_body_cap of
@@ -907,6 +1020,34 @@ let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
    declaration order, fail over in that order. *)
 let verifier_exact_lane_id = "verifier_exact"
 
+type exact_lane =
+  | Librarian
+  | Hitl_auto_judge
+  | Board_attention
+  | Verifier
+
+let all_exact_lanes = [ Librarian; Hitl_auto_judge; Board_attention; Verifier ]
+
+let exact_lane_id = function
+  | Librarian -> "librarian_exact"
+  | Hitl_auto_judge -> "hitl_auto_judge"
+  | Board_attention -> "board_attention_exact"
+  | Verifier -> verifier_exact_lane_id
+;;
+
+let exact_lane_of_id = function
+  | "librarian_exact" -> Some Librarian
+  | "hitl_auto_judge" -> Some Hitl_auto_judge
+  | "board_attention_exact" -> Some Board_attention
+  | "verifier_exact" -> Some Verifier
+  | _ -> None
+;;
+
+let exact_lane_supports_cli_tail = function
+  | Librarian | Hitl_auto_judge | Board_attention -> true
+  | Verifier -> false
+;;
+
 let verifier_exact_slot_ids_of_lane_decls
       (decls : Runtime_schema.exact_output_lane_decl list)
   =
@@ -917,7 +1058,7 @@ let verifier_exact_slot_ids_of_lane_decls
       decls
   with
   | None -> []
-  | Some lane -> lane.slot_ids @ lane.cli_slot_ids
+  | Some lane -> lane.slot_ids
 ;;
 
 (* [verifier_exact] is the one exact-output lane whose slot ids are read
@@ -1286,7 +1427,6 @@ let degrade_loaded_for_missing_catalog
 
 let materialize_config
     ?(validate_max_context = true)
-    ~(config_path : string)
     (cfg : config)
   : ( (t list
        * t
@@ -1295,32 +1435,24 @@ let materialize_config
        * Runtime_lane.t list
        * (string * (string * string list)) list)
       * Runtime_schema.exact_output_lane_decl list
-    , string )
+    , load_failure )
     result
   =
   let runtimes, dropped_bindings = partition_bindings cfg cfg.bindings in
   (* Ahead of default / assignment / route validation on purpose: a dangling
      binding makes a runtime the operator declared not exist, and the messages
      below can only describe an id something else referenced. *)
-  let* () = validate_no_dangling_bindings ~config_path ~dropped_bindings in
+  let* () = validate_no_dangling_bindings ~dropped_bindings in
   let assignments = cfg.keeper_assignments in
   let* rt =
     match cfg.default_runtime_id with
-    | None ->
-      Error
-        (Printf.sprintf
-           "%s: [runtime].default is required (no default runtime configured; \
-            silent fallback removed)"
-           config_path)
+    | None -> Error Default_runtime_absent
     | Some did ->
       (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
        | None ->
          Error
-           (Printf.sprintf
-              "%s: [runtime].default = %S%s"
-              config_path
-              did
-              (unresolved_runtime_suffix ~dropped_bindings
+           (Default_runtime_unresolved
+              (resolution_of ~dropped_bindings
                  ~runtime_count:(List.length runtimes) did))
        | Some rt -> Ok rt)
   in
@@ -1331,28 +1463,25 @@ let materialize_config
      admissible at this site, which is the assignment contract runtime.mli
      documents and Keeper_turn_driver's lane-aware dispatch relies on. *)
   let* () =
-    validate_runtime_references ~config_path ~dropped_bindings runtimes []
+    validate_runtime_references ~dropped_bindings runtimes []
       (assignment_references assignments)
   in
   (* Lanes are materialized before every route validation so any route id can
      name a lane (#25394); candidate resolution is enforced by [validate_lanes]
      inside [lanes_of_decls]. *)
   let* lanes =
-    lanes_of_decls ~config_path ~dropped_bindings ~default_runtime_id:rt.id runtimes
-      cfg.lane_decls
+    lanes_of_decls ~dropped_bindings ~default_runtime_id:rt.id runtimes cfg.lane_decls
   in
   let* () =
-    validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
+    validate_runtime_references ~dropped_bindings runtimes lanes
       (media_failover_references cfg.media_failover)
   in
   let* () =
-    validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
+    validate_runtime_references ~dropped_bindings runtimes lanes
       (verifier_exact_slot_references cfg.exact_output_lane_decls)
   in
   let* () =
-    if validate_max_context
-    then validate_runtime_max_context ~config_path runtimes
-    else Ok ()
+    if validate_max_context then validate_runtime_max_context runtimes else Ok ()
   in
   (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
@@ -1377,44 +1506,24 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * Runtime_lane.t list
        * (string * (string * string list)) list)
       * Runtime_schema.exact_output_lane_decl list
-    , string )
+    , load_failure )
     result
   =
   let* cfg =
     Runtime_toml.parse_file config_path
-    |> Result.map_error (fun errs ->
-      let detail =
-        errs
-        |> List.map (fun (e : Runtime_toml.parse_error) ->
-          Printf.sprintf "  - %s: %s" e.path e.message)
-        |> String.concat "\n"
-      in
-      Printf.sprintf
-        "runtime config parse failed (%s): %d error(s):\n%s"
-        config_path
-        (List.length errs)
-        detail)
+    |> Result.map_error (fun errs -> Toml_unparsable errs)
   in
-  materialize_config ~validate_max_context ~config_path cfg
+  materialize_config ~validate_max_context cfg
 ;;
 
-let load_list_internal_text ~(config_path : string) ~content ~validate_max_context =
+(* The path is still the caller's label for this content; nothing in the typed
+   failure needs it, so it is accepted and not read. *)
+let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_context =
   let* cfg =
     Runtime_toml.parse_string content
-    |> Result.map_error (fun errs ->
-      let detail =
-        errs
-        |> List.map (fun (e : Runtime_toml.parse_error) ->
-          Printf.sprintf "  - %s: %s" e.path e.message)
-        |> String.concat "\n"
-      in
-      Printf.sprintf
-        "runtime config parse failed (%s): %d error(s):\n%s"
-        config_path
-        (List.length errs)
-        detail)
+    |> Result.map_error (fun errs -> Toml_unparsable errs)
   in
-  materialize_config ~validate_max_context ~config_path cfg
+  materialize_config ~validate_max_context cfg
 ;;
 
 (* The public five-tuple stays as its callers destructure it; the operator's
@@ -1505,6 +1614,7 @@ let set_loaded
 let init_default ~config_path =
   let* loaded, _exact_output_lane_decls =
     load_list_internal ~config_path ~validate_max_context:true
+    |> Result.map_error (to_diagnostic_text ~config_path)
   in
   set_loaded ~config_path loaded;
   Ok ()
@@ -1528,7 +1638,7 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
    so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
-  | Error msg -> Error (Runtime_config_error msg)
+  | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
   | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
@@ -1561,7 +1671,10 @@ let prepare_degraded_loaded ~config_path
         Ok (loaded, Some degradation)
   in
   let active_runtimes, _, _, _, _, _ = loaded in
-  let* () = validate_runtime_max_context ~config_path active_runtimes in
+  let* () =
+    validate_runtime_max_context active_runtimes
+    |> Result.map_error (to_diagnostic_text ~config_path)
+  in
   let* () = validate_keeper_dispatch_request_caps ~config_path
       ~verifier_exact_slot_ids:(verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
       loaded in
@@ -1569,7 +1682,11 @@ let prepare_degraded_loaded ~config_path
 ;;
 
 let initialize_degraded_loaded ~config_path parsed =
-  let* parsed = Result.map_error (fun msg -> Runtime_config_error msg) parsed in
+  let* parsed =
+    Result.map_error
+      (fun failure -> Runtime_config_error (to_diagnostic_text ~config_path failure))
+      parsed
+  in
   let* loaded, _, startup_degradation =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
@@ -1663,13 +1780,19 @@ let verifier_exact_lane_slot_ids () =
          registry
          ~lane_id:verifier_exact_lane_id
      with
-     | Ok { selected_slots; cli_slots } ->
-       Ok
-         (List.map
-            (fun (slot : Runtime_exact_output_registry.selected_slot) ->
-               slot.slot_id)
-            selected_slots
-          @ cli_slots)
+     | Ok { selected_slots; _ } ->
+       (match selected_slots with
+        | [] ->
+          Error
+            (Runtime_exact_output_registry.lane_resolution_error_to_string
+               (Runtime_exact_output_registry.No_admitted_lane_slots
+                  { lane_id = verifier_exact_lane_id }))
+        | slots ->
+          Ok
+            (List.map
+               (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                  slot.slot_id)
+               slots))
      | Error error ->
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
@@ -2275,7 +2398,8 @@ let materialize_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  materialize_config ~validate_max_context:false ~config_path cfg
+  materialize_config ~validate_max_context:false cfg
+  |> Result.map_error (to_diagnostic_text ~config_path)
 ;;
 
 let runtime_config_commit_order = ref Int64.zero
@@ -2914,12 +3038,21 @@ let set_first_run_runtime ?runtime_config_path ?(fallback_runtime_ids = []) ?(bi
         in
         let next =
           List.fold_left
-            (fun content lane_id ->
+            (fun content lane ->
+              let lane_id = exact_lane_id lane in
               let path = "runtime.exact_output_lanes." ^ lane_id in
-              let content = Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots in
-              Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:cli_slots)
+              let lane_cli_slots =
+                if exact_lane_supports_cli_tail lane then cli_slots else []
+              in
+              if slots = [] && lane_cli_slots = []
+              then content
+              else
+                let content =
+                  Toml_line_editor.edit_table_multiline_array content ~path ~key:"slots" ~values:slots
+                in
+                Toml_line_editor.edit_table_multiline_array content ~path ~key:"cli_slots" ~values:lane_cli_slots)
             next
-            [ "librarian_exact"; "hitl_auto_judge"; "board_attention_exact"; "verifier_exact" ]
+            all_exact_lanes
         in
         commit_runtime_config_text ~path next)
     in

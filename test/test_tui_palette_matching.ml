@@ -19,6 +19,43 @@ let test_contains_is_a_substring_over_a_lowercased_haystack () =
   check_bool "needle longer than haystack" false (palette_contains ~needle:"keeper" "kee")
 ;;
 
+(* [palette_contains] stopped taking a lowercase copy of the haystack and a
+   [String.sub] of it per position, and folds case a byte at a time instead.
+   The row search calls it once per row per keystroke, so on a large file the
+   copies were the cost. These pin the answers the copies used to give --
+   including the bytes a byte-wise fold must leave alone, which is every byte
+   a UTF-8 sequence is made of. *)
+let test_the_fold_is_ascii_only_and_leaves_other_bytes_alone () =
+  check_bool "a Hangul needle finds itself" true
+    (palette_contains ~needle:"\xed\x95\x9c" "\xed\x95\x9c\xea\xb5\xad");
+  check_bool "a Hangul needle the row lacks" false
+    (palette_contains ~needle:"\xea\xb0\x9c" "\xed\x95\x9c\xea\xb5\xad");
+  check_bool "mixed script, ASCII folded" true
+    (palette_contains ~needle:"KEEPER-\xed\x95\x9c" "keeper-\xed\x95\x9c 3");
+  (* The boundary characters either side of A-Z in ASCII. A fold written as
+     an arithmetic shift catches these if its range is off by one. *)
+  check_bool "the byte below A is not folded into a letter" false
+    (palette_contains ~needle:"@" "`");
+  check_bool "the byte above Z is not folded into a letter" false
+    (palette_contains ~needle:"[" "{");
+  check_bool "A folds to a" true (palette_contains ~needle:"A" "a");
+  check_bool "Z folds to z" true (palette_contains ~needle:"Z" "z")
+;;
+
+(* A scan that walks forward one position at a time has to keep trying after a
+   partial match, and a scan that stops at the first byte that differs has to
+   resume from the next position rather than past the whole attempt. *)
+let test_a_partial_match_does_not_consume_the_row () =
+  check_bool "the match begins inside a failed attempt" true
+    (palette_contains ~needle:"aab" "aaab");
+  check_bool "repeated prefixes do not hide the match" true
+    (palette_contains ~needle:"abab" "ababab");
+  check_bool "a prefix that never completes" false
+    (palette_contains ~needle:"aab" "aaa");
+  check_bool "the match sits at the very end" true
+    (palette_contains ~needle:"race" "keeper adm-race")
+;;
+
 let test_subsequence_takes_the_characters_in_order () =
   (* The comment on the function names this exact case. *)
   check_bool "kadm finds keeper adm-race" true
@@ -156,14 +193,16 @@ let test_friendly_runtime_param_editing () =
     (advanced.rpe_mode = Advanced_json)
 ;;
 
-(* A file that has landed, which is the state these names are read from. *)
+(* A file that has landed, which is the state these names are read from.
+   Written as a list of rows and stored as an array, the way the load does. *)
 let landed ~path rows =
   match
     Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path
   with
   | Masc_tui_fetched.Already_loading -> Alcotest.fail "the fixture did not start"
   | Masc_tui_fetched.Started (t, request) ->
-    Masc_tui_fetched.complete ~equal:String.equal t request (Ok rows)
+    Masc_tui_fetched.complete ~equal:String.equal t request
+      (Ok (Array.of_list rows))
 ;;
 
 let check_names = Alcotest.(check (list string))
@@ -336,6 +375,10 @@ let () =
             test_the_matcher_owns_the_needle_case
         ; Alcotest.test_case "a label starting with the query leads" `Quick
             test_a_label_starting_with_the_query_leads
+        ; Alcotest.test_case "the fold is ASCII only" `Quick
+            test_the_fold_is_ascii_only_and_leaves_other_bytes_alone
+        ; Alcotest.test_case "a partial match does not consume the row" `Quick
+            test_a_partial_match_does_not_consume_the_row
         ] )
     ; ( "sources"
       , [ Alcotest.test_case "the palette lists tasks and posts" `Quick

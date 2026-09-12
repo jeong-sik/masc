@@ -1391,17 +1391,17 @@ let find_task config task_id =
 (* === RFC-0323 G-3: completion side effects are state-keyed === *)
 
 (* Records done-hook dispatch targets while [f] runs, restoring the previous
-   hook.  Observes [relation_on_task_done_fn] because it receives the assignee
+   hook.  Observes [hebbian_on_task_done_fn] because it receives the assignee
    the completion side effects are keyed on. *)
 let with_done_hook_recorder f =
   let recorded = ref [] in
   let prev =
-    Atomic.exchange Workspace_hooks.relation_on_task_done_fn
-      (fun ~assignee ~active_agents:_ ->
+    Atomic.exchange Workspace_hooks.hebbian_on_task_done_fn
+      (fun _config ~assignee ~active_agents:_ ->
         recorded := assignee :: !recorded)
   in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Workspace_hooks.relation_on_task_done_fn prev)
+    ~finally:(fun () -> Atomic.set Workspace_hooks.hebbian_on_task_done_fn prev)
     (fun () -> f recorded)
 
 let with_verdict_projection_recorders f =

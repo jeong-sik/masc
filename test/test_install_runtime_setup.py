@@ -791,7 +791,10 @@ class MultipleSelection(unittest.TestCase):
              patch.object(SETUP, 'select_connections', side_effect=OSError('private endpoint diagnostics')), \
              patch.object(SETUP, 'pick', return_value=[1]), contextlib.redirect_stderr(io.StringIO()) as terminal:
             result = SETUP.wizard('/fixture', '/workspace', 10)
-        self.assertEqual(result['readiness'], 'deferred')
+        # Leaving through the recovery menu after a failure is not the operator
+        # deferring the step: nothing was saved, so the journey must not report
+        # a saved workspace or exit 0.
+        self.assertEqual(result['readiness'], 'failed')
         self.assertNotIn('private endpoint diagnostics', terminal.getvalue())
 
     def test_invalid_existing_workspace_can_choose_unused_sibling_without_writes(self):
@@ -947,7 +950,6 @@ class CompiledRuntimeSetup(unittest.TestCase):
                     second = SETUP.configure(BINARY, base, selected)
                     self.assertEqual(second['runtime_id'], result['runtime_id'])
                     self.assertEqual(before, [(config / name).read_bytes() for name in ('runtime.toml', 'agent-core-models-overlay.toml')])
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -127,6 +127,39 @@ let%test "timeout validation preserves the invalid value" =
   | Ok () -> false
 ;;
 
+(* Inline %tests that match on [error] must surface the constructor they hit
+   instead of folding it into [false]: an unlabeled rejection reads as "the
+   happy path failed", which is what hid the caller-supplied-header gate
+   defect in "freezes refreshed credentials" for its whole lifetime on main. *)
+let[@warning "-32"] rejection_name = function
+  | Explicit_capability_snapshot_required -> "explicit_capability_snapshot_required"
+  | Unsupported_output_contract _ -> "unsupported_output_contract"
+  | Unsupported_exact_cross_feature -> "unsupported_exact_cross_feature"
+  | Global_admission_not_allowed -> "global_admission_not_allowed"
+  | Invalid_connect_timeout _ -> "invalid_connect_timeout"
+  | Invalid_body_timeout _ -> "invalid_body_timeout"
+  | Caller_supplied_header_not_allowed name ->
+    "caller_supplied_header_not_allowed:" ^ name
+  | Unsupported_image_input -> "unsupported_image_input"
+  | Unsupported_document_input -> "unsupported_document_input"
+  | Unsupported_audio_input -> "unsupported_audio_input"
+  | Unsupported_system_prompt -> "unsupported_system_prompt"
+  | Provider_request_rejected _ -> "provider_request_rejected"
+  | Request_body_too_large _ -> "request_body_too_large"
+  | Request_serialization_rejected _ -> "request_serialization_rejected"
+;;
+
+(* Same treatment for [output_normalization_error]: the JsonMode provenance
+   test's arms must name which constructor fired. *)
+let[@warning "-32"] normalization_error_name = function
+  | Incomplete_structured_response stop_reason ->
+    "incomplete_structured_response:" ^ Types.stop_reason_to_string stop_reason
+  | Missing_structured_text -> "missing_structured_text"
+  | Ambiguous_structured_text count -> "ambiguous_structured_text:" ^ string_of_int count
+  | Unexpected_structured_content -> "unexpected_structured_content"
+  | Invalid_json detail -> "invalid_json:" ^ detail
+;;
+
 let content_uses_exact_cross_feature = function
   | Types.ToolUse _
   | Types.ToolResult _
@@ -179,9 +212,23 @@ let request_uses_exact_cross_feature (request : Llm_transport.completion_request
        request.messages
 ;;
 
-let caller_supplied_header_name = function
-  | [] -> None
-  | (name, _) :: _ -> Some name
+let is_wire_default_header (name, value) =
+  String.lowercase_ascii (String.trim name) = "content-type"
+  && String.lowercase_ascii (String.trim value) = "application/json"
+;;
+
+let caller_supplied_header_name headers =
+  (* The default header list [Provider_config.make] injects when the caller
+     passes no ~headers is configuration, not caller supply: it is the wire-owned
+     application/json pair (matched case-insensitively) and carries no caller
+     identity. Treating it as caller-supplied rejects every exact preflight,
+     including the credential-freeze preflight #35091 added.
+     We filter out wire-default headers so that any genuinely caller-supplied
+     header (including custom Content-Type values or extra headers alongside
+     defaults) is accurately identified and blamed regardless of list order. *)
+  match List.find_opt (fun h -> not (is_wire_default_header h)) headers with
+  | None -> None
+  | Some (name, _) -> Some name
 ;;
 
 let rec content_capability_rejection capabilities = function
@@ -603,6 +650,7 @@ let normalize_response response_format (response : Types.api_response) =
 let normalize (plan : t) response = normalize_response plan.response_format response
 
 let%test "JsonMode records syntax-only validation provenance" =
+  let fail fmt = Printf.ksprintf failwith ("JsonMode provenance test: " ^^ fmt) in
   let response : Types.api_response =
     { id = "json-mode"
     ; model = "fixture"
@@ -618,7 +666,10 @@ let%test "JsonMode records syntax-only validation provenance" =
          { value = `Assoc [ ("accepted", `Bool true) ]
          ; validation = Json_syntax_validated
          }) -> true
-  | Ok _ | Error _ -> false
+  | Ok _ ->
+    fail "returned a different plan than expected (non-Json_output arm)"
+  | Error e ->
+    fail "normalize_response unexpectedly failed: %s" (normalization_error_name e)
 ;;
 
 let%test "canonical fingerprint is sensitive to the frozen response codec" =
@@ -692,15 +743,46 @@ let%test "exact preflight freezes refreshed credentials until a new plan is prep
   let prepare () = preflight ~config ~messages:[Types.user_msg "Hello"]
     ~body_timeout_s:None ~anthropic_thinking_control:None in
   match prepare () with
-  | Error _ -> false
+  | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
   | Ok first ->
     token := "second-fixture-token";
     let frozen = List.assoc_opt "Authorization" first.wire.headers in
     let unchanged_without_new_preflight = !calls = 1 in
     match prepare () with
-    | Error _ -> false
+    | Error e -> failwith ("preflight unexpectedly rejected: " ^ rejection_name e)
     | Ok second ->
       unchanged_without_new_preflight && !calls = 2
       && frozen = Some "Bearer first-fixture-token"
       && List.assoc_opt "Authorization" second.wire.headers = Some "Bearer second-fixture-token"
+;;
+
+let%test "exact preflight still rejects genuinely caller-supplied headers" =
+  let test_headers expected_err headers =
+    let config =
+      Provider_config.make ~kind:OpenAI_compat ~model_id:"fixture"
+        ~base_url:"https://example.test" ~max_tokens:16
+        ~model_capabilities_override:Capabilities.default_capabilities
+        ~auth_scheme:Bearer_token ~headers () in
+    match
+      preflight ~config ~messages:[Types.user_msg "Hello"]
+        ~body_timeout_s:None ~anthropic_thinking_control:None
+    with
+    | Error (Caller_supplied_header_not_allowed reported) ->
+      expected_err = Some reported
+    | Error _ -> false
+    | Ok _ -> expected_err = None in
+  test_headers None []
+  && test_headers None [ ("Content-Type", "application/json") ]
+  && test_headers None [ ("content-type", "application/json") ]
+  && test_headers None [ ("CONTENT-TYPE", "application/json") ]
+  && test_headers (Some "X-Custom") [ ("X-Custom", "v") ]
+  && test_headers (Some "Content-Type") [ ("Content-Type", "text/event-stream") ]
+  && test_headers (Some "X-Custom")
+       [ ("Content-Type", "application/json"); ("X-Custom", "v") ]
+  && test_headers (Some "X-Custom")
+       [ ("X-Custom", "v"); ("Content-Type", "application/json") ]
+  && test_headers (Some "X-Custom")
+       [ ("content-type", "application/json"); ("X-Custom", "v") ]
+  && test_headers (Some "X-First")
+       [ ("Content-Type", "application/json"); ("X-First", "1"); ("X-Second", "2") ]
 ;;

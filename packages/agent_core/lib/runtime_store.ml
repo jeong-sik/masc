@@ -59,22 +59,6 @@ let raw_traces_dir store session_id =
   Filename.concat (session_dir store session_id) "raw-traces"
 ;;
 
-let report_json_path store session_id =
-  Filename.concat (artifacts_dir store session_id) "report.json"
-;;
-
-let report_md_path store session_id =
-  Filename.concat (artifacts_dir store session_id) "report.md"
-;;
-
-let proof_json_path store session_id =
-  Filename.concat (artifacts_dir store session_id) "proof.json"
-;;
-
-let proof_md_path store session_id =
-  Filename.concat (artifacts_dir store session_id) "proof.md"
-;;
-
 let ensure_dir = Fs_result.ensure_dir
 
 let ensure_tree store session_id =
@@ -468,47 +452,3 @@ let save_artifact_text store session_id ~name ~kind ~content =
   Ok path
 ;;
 
-let save_report store (report : report) =
-  let* () = ensure_tree store report.session_id in
-  let* () =
-    save_text
-      (report_json_path store report.session_id)
-      (report |> report_to_yojson |> Yojson.Safe.pretty_to_string)
-  in
-  save_text (report_md_path store report.session_id) report.markdown
-;;
-
-let save_proof store (proof : proof) =
-  let* () = ensure_tree store proof.session_id in
-  let* () =
-    save_text
-      (proof_json_path store proof.session_id)
-      (proof |> proof_to_yojson |> Yojson.Safe.pretty_to_string)
-  in
-  let markdown =
-    let checks =
-      proof.checks
-      |> List.map (fun check ->
-        Printf.sprintf "- [%s] %s" (if check.passed then "x" else " ") check.name)
-      |> String.concat "\n"
-    in
-    let evidence =
-      proof.evidence |> List.map (fun line -> "- " ^ line) |> String.concat "\n"
-    in
-    String.concat
-      "\n"
-      [ "# Runtime Proof"
-      ; ""
-      ; Printf.sprintf "- Session ID: %s" proof.session_id
-      ; Printf.sprintf "- Overall OK: %b" proof.ok
-      ; ""
-      ; "## Checks"
-      ; checks
-      ; ""
-      ; "## Evidence"
-      ; evidence
-      ; ""
-      ]
-  in
-  save_text (proof_md_path store proof.session_id) markdown
-;;

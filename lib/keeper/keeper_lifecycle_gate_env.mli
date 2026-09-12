@@ -5,8 +5,9 @@
     through {!enabled}, so the enabled decision is never re-derived inline. *)
 
 (** Global lifecycle kill-switches read from the feature-flag registry
-    (MASC_KEEPER_REACTIVE_ENABLED / _PROACTIVE_ENABLED / _AUTONOMOUS_ENABLED /
-    _BOOTSTRAP_ENABLED). Every flag defaults to [true]. *)
+    ([MASC_KEEPER_REACTIVE_ENABLED] for reactive turns, and
+    [MASC_KEEPER_AUTONOMOUS_ENABLED] governing autonomous/proactive/bootstrap).
+    Both flags default to [true]. *)
 val global : unit -> Keeper_lifecycle_gate.flags
 
 

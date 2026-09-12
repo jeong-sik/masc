@@ -263,8 +263,6 @@ start_live_server() {
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-    export GRAPHQL_API_KEY=""
-    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
@@ -277,8 +275,6 @@ start_live_server() {
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-    export GRAPHQL_API_KEY=""
-    export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &

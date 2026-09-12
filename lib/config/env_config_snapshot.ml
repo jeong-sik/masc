@@ -119,7 +119,7 @@ let storage_entries =
 let transport_entries =
   [
     entry ~default:"8936" "MASC_GRPC_PORT" "gRPC server port";
-    entry ~default:"true" "MASC_GRPC_ENABLED" "Enable gRPC transport";
+    entry ~default:"false" "MASC_GRPC_ENABLED" "Enable gRPC transport";
     entry ~default:"(derived)" "MASC_GRPC_TARGET" "gRPC client target address";
     entry ~default:"48" "MASC_GRPC_STREAM_MAX_BUFFER"
       "Per-subscriber outbound buffer drop threshold.  When the stream has \
@@ -253,7 +253,7 @@ let decision_entries =
 
 let docker_playground_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_DOCKER_PLAYGROUND"
+    entry ~default:"false" "MASC_KEEPER_DOCKER_PLAYGROUND"
       "Route Execute through Docker container (feature flag)";
   ]
 
@@ -413,7 +413,7 @@ let worker_entries =
   [
     entry ~default:"(none)" "MASC_LOCAL_RUNTIME_COOLDOWN_SEC"
       "Local runtime cooldown (seconds); None when unset";
-    entry ~default:"(none)" "MASC_LOCAL_RUNTIME_DEBUG"
+    entry ~default:"false" "MASC_LOCAL_RUNTIME_DEBUG"
       "Local runtime debug logging (feature flag)";
   ]
 

@@ -396,10 +396,15 @@ let warn_rejected_exact_output_bindings resolver_snapshot =
 ;;
 
 let warn_optional_exact_output_lane registry ~lane_id ~feature =
+  let supports_cli =
+    match Runtime.exact_lane_of_id lane_id with
+    | Some lane -> Runtime.exact_lane_supports_cli_tail lane
+    | None -> true
+  in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots = _ :: _; _ }
-  | Ok { cli_slots = _ :: _; _ } -> ()
-  | Ok { selected_slots = []; cli_slots = [] }
+  | Ok { selected_slots = _ :: _; _ } -> ()
+  | Ok { cli_slots = _ :: _; _ } when supports_cli -> ()
+  | Ok { selected_slots = []; _ }
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Log.Server.warn
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
@@ -1503,12 +1508,12 @@ let resume_model_configuration () =
       match Runtime.init_default_degraded_report ~config_path:path with
       | Error _ -> Error "configuration unavailable"
       | Ok _ ->
-        let authority_available =
+        let registry_published =
           try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
           with Env_config_core.Config_error _ -> false
         in
         let withdrawn =
-          if authority_available then Ok ()
+          if registry_published then Ok ()
           else Runtime_exact_output_registry.unpublish ()
         in
         match withdrawn with
@@ -1516,6 +1521,9 @@ let resume_model_configuration () =
         | Ok () ->
           Runtime_startup_state.set Available;
           Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          let authority_available =
+            registry_published && Result.is_ok (Runtime.verifier_exact_lane_slot_ids ())
+          in
           Ok authority_available)
     in
     Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed
@@ -1640,7 +1648,7 @@ let activate_owner_state
   }
 ;;
 
-let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantine
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
     ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
   let resolved_auth_config =
     match Server_auth_config.resolve (Server_auth_config.read_env ()) with
@@ -1705,6 +1713,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
   Transport_metrics.set_ws_same_origin_runtime_ready false;
   clear_server_state ();
   Server_startup_state.reset ();
+  let listener_bound, publish_listener_bound = Eio.Promise.create () in
 
   (* 2. Run owner initialization outside the accept loop. The state and
      long-lived owner fibers attach to the parent switch because HTTP request
@@ -1757,6 +1766,13 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
       (match mark_owner_state_ready () with
        | Ok () -> ()
        | Error error -> raise (Owner_initialization_failed error));
+      (* The owner and HTTP listener initialize independently. A successful
+         start requires both before publishing caller-owned startup effects. *)
+      (match on_ready with
+       | None -> ()
+       | Some on_ready ->
+         Eio.Promise.await listener_bound;
+         on_ready ());
       (* The lag probe forks here, on the main domain, so its ring reports
          the scheduler every handler on this domain shares. It starts at the
          readiness boundary rather than at process start so the boot replay
@@ -1839,7 +1855,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
       (* Auxiliary transports start after owner readiness and report their own
          availability. They must not gain lifecycle authority over HTTP or
          unrelated Keeper lanes. *)
-      (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
+      (* gRPC workspace transport (default-off, opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher tool_name args_json =
       Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
           let workspace_scope = Mcp_server.workspace_scope state in
@@ -2067,6 +2083,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
+    Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
      | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)

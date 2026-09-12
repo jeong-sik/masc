@@ -8,15 +8,6 @@ type scenario =
   | Retry_success
   | Usage_unreported
 
-let scenario_to_string = function
-  | Success -> "success"
-  | Exit_nonzero -> "exit-nonzero"
-  | Stale_revision -> "stale-revision"
-  | Missing_artifact -> "missing-artifact"
-  | Retry_success -> "retry-success"
-  | Usage_unreported -> "usage-unreported"
-;;
-
 let scenario_of_string = function
   | "success" -> Ok Success
   | "exit-nonzero" -> Ok Exit_nonzero
@@ -27,22 +18,10 @@ let scenario_of_string = function
   | other -> Error ("unknown scenario: " ^ other)
 ;;
 
-let scenario_of_string_opt s =
-  match scenario_of_string s with
-  | Ok sc -> Some sc
-  | Error _ -> None
-;;
-
 type live_scenario =
   | Live_success
   | Live_negative
   | Live_retry_success
-
-let live_scenario_to_string = function
-  | Live_success -> "success"
-  | Live_negative -> "negative"
-  | Live_retry_success -> "retry-success"
-;;
 
 let live_scenario_of_string = function
   | "success" -> Ok Live_success
@@ -51,20 +30,9 @@ let live_scenario_of_string = function
   | other -> Error ("unknown live scenario: " ^ other)
 ;;
 
-let live_scenario_of_string_opt s =
-  match live_scenario_of_string s with
-  | Ok sc -> Some sc
-  | Error _ -> None
-;;
-
 type run_scenario =
   | Matrix_scenario of scenario
   | Live_scenario of live_scenario
-
-let run_scenario_to_string = function
-  | Matrix_scenario sc -> scenario_to_string sc
-  | Live_scenario lsc -> live_scenario_to_string lsc
-;;
 
 let run_scenario_of_string ~execution_mode s =
   match execution_mode with
@@ -91,12 +59,6 @@ let usage_scope_of_string = function
   | "per-request" -> Ok Per_request
   | "cumulative-request-snapshot" -> Ok Cumulative_request_snapshot
   | other -> Error ("invalid or unknown usage_scope: " ^ other)
-;;
-
-let usage_scope_of_string_opt s =
-  match usage_scope_of_string s with
-  | Ok scope -> Some scope
-  | Error _ -> None
 ;;
 
 type reported_usage =
@@ -473,6 +435,25 @@ let check_observations
   (* 1. Manifest completeness check *)
   List.iter
     (fun expected_case_id ->
+       if not (List.mem_assoc expected_case_id manifest.required_entities_by_case) then (
+         incr required_join_missing;
+         add_finding "missing_required_entities_declaration"
+           (Printf.sprintf "manifest missing required_entities_by_case declaration for %s" expected_case_id)
+           false
+           (Some expected_case_id)
+       );
+       if not (List.mem_assoc expected_case_id manifest.phase_boundaries_by_case) then (
+         add_finding "missing_phase_boundaries_declaration"
+           (Printf.sprintf "manifest missing phase_boundaries_by_case declaration for %s" expected_case_id)
+           false
+           (Some expected_case_id)
+       );
+       if not (List.mem_assoc expected_case_id manifest.expected_outcomes) then (
+         add_finding "missing_expected_outcome_declaration"
+           (Printf.sprintf "manifest missing expected_outcomes declaration for %s" expected_case_id)
+           false
+           (Some expected_case_id)
+       );
        for rep = 1 to 3 do
          if not (List.exists (fun (c, r) -> c = expected_case_id && r = rep) run_keys_matrix)
          then (
@@ -559,67 +540,113 @@ let check_observations
            (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
        );
 
-       (* Check required entities from manifest *)
-       let case_manifest_opt =
-         List.find_opt (fun (c : case_manifest) -> c.case_id = case_id) manifest.cases
+       (* Check required entities from manifest map required_entities_by_case *)
+       let required_entities =
+         match List.assoc_opt case_id manifest.required_entities_by_case with
+         | Some entities -> entities
+         | None ->
+           incr required_join_missing;
+           run_valid := false;
+           add_finding "missing_required_entities_declaration"
+             (Printf.sprintf "manifest lacks required_entities_by_case for %s" case_id)
+             false
+             (Some case_id);
+           []
        in
-       (match case_manifest_opt with
-        | Some cm ->
-          List.iter
-            (fun req_entity ->
-               match req_entity with
-               | "request_or_task_identity" ->
-                 if Option.is_none final_attempt.request_or_task_identity then (
-                   incr required_join_missing;
-                   run_valid := false;
-                   add_finding "missing_required_join"
-                     (Printf.sprintf "missing request_or_task_identity in %s[%d]" case_id repeat_index)
-                     false
-                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
-                 )
-               | "run_turn_attempt_identity" ->
-                 if Option.is_none final_attempt.run_turn_attempt_identity then (
-                   incr required_join_missing;
-                   run_valid := false;
-                   add_finding "missing_required_join"
-                     (Printf.sprintf "missing run_turn_attempt_identity in %s[%d]" case_id repeat_index)
-                     false
-                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
-                 )
-               | "target_revision" ->
-                 if Option.is_none final_attempt.target_revision then (
-                   incr required_join_missing;
-                   run_valid := false;
-                   add_finding "missing_required_join"
-                     (Printf.sprintf "missing target_revision in %s[%d]" case_id repeat_index)
-                     false
-                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
-                 )
-               | "artifact_references" ->
-                 if final_attempt.artifact_references = [] && cm.scenario <> Missing_artifact then (
-                   incr required_join_missing;
-                   run_valid := false;
-                   add_finding "missing_required_join"
-                     (Printf.sprintf "missing artifact_references in %s[%d]" case_id repeat_index)
-                     false
-                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
-                 )
-               | "verdict_run_identity" ->
-                 if Option.is_none final_attempt.verdict_run_identity then (
-                   incr required_join_missing;
-                   run_valid := false;
-                   add_finding "missing_required_join"
-                     (Printf.sprintf "missing verdict_run_identity in %s[%d]" case_id repeat_index)
-                     false
-                     (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
-                 )
-               | _ -> ())
-            cm.required_entities
-        | None -> ());
+       List.iter
+         (fun req_entity ->
+            match req_entity with
+            | "request_or_task_identity" ->
+              if Option.is_none final_attempt.request_or_task_identity then (
+                incr required_join_missing;
+                run_valid := false;
+                add_finding "missing_required_join"
+                  (Printf.sprintf "missing request_or_task_identity in %s[%d]" case_id repeat_index)
+                  false
+                  (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+              )
+            | "run_turn_attempt_identity" ->
+              if Option.is_none final_attempt.run_turn_attempt_identity then (
+                incr required_join_missing;
+                run_valid := false;
+                add_finding "missing_required_join"
+                  (Printf.sprintf "missing run_turn_attempt_identity in %s[%d]" case_id repeat_index)
+                  false
+                  (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+              )
+            | "target_revision" ->
+              if Option.is_none final_attempt.target_revision then (
+                incr required_join_missing;
+                run_valid := false;
+                add_finding "missing_required_join"
+                  (Printf.sprintf "missing target_revision in %s[%d]" case_id repeat_index)
+                  false
+                  (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+              )
+            | "artifact_references" ->
+              if final_attempt.artifact_references = [] then (
+                incr required_join_missing;
+                run_valid := false;
+                add_finding "missing_required_join"
+                  (Printf.sprintf "missing artifact_references in %s[%d]" case_id repeat_index)
+                  false
+                  (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+              )
+            | "verdict_run_identity" ->
+              if Option.is_none final_attempt.verdict_run_identity then (
+                incr required_join_missing;
+                run_valid := false;
+                add_finding "missing_required_join"
+                  (Printf.sprintf "missing verdict_run_identity in %s[%d]" case_id repeat_index)
+                  false
+                  (Some (Printf.sprintf "%s[%d]" case_id repeat_index))
+              )
+            | other ->
+              incr required_join_missing;
+              run_valid := false;
+              add_finding "unknown_required_entity"
+                (Printf.sprintf "unknown required entity %s in %s[%d]" other case_id repeat_index)
+                false
+                (Some other))
+         required_entities;
 
-       (* Check phase timestamps monotonicity *)
+       (* Check phase timestamps presence and monotonicity using phase_boundaries_by_case *)
+       let required_phase_boundaries =
+         match List.assoc_opt case_id manifest.phase_boundaries_by_case with
+         | Some boundaries -> boundaries
+         | None ->
+           run_valid := false;
+           add_finding "missing_phase_boundaries_declaration"
+             (Printf.sprintf "manifest lacks phase_boundaries_by_case for %s" case_id)
+             false
+             (Some case_id);
+           []
+       in
        List.iter
          (fun (o : run_observation) ->
+            List.iter
+              (fun b ->
+                 let present =
+                   match b with
+                   | "queue_started_at" -> Option.is_some o.phase_timestamps.queue_started_at
+                   | "model_started_at" -> Option.is_some o.phase_timestamps.model_started_at
+                   | "model_ended_at" -> Option.is_some o.phase_timestamps.model_ended_at
+                   | "tool_started_at" -> Option.is_some o.phase_timestamps.tool_started_at
+                   | "tool_ended_at" -> Option.is_some o.phase_timestamps.tool_ended_at
+                   | "verification_started_at" -> Option.is_some o.phase_timestamps.verification_started_at
+                   | "verification_ended_at" -> Option.is_some o.phase_timestamps.verification_ended_at
+                   | "cleanup_ended_at" -> Option.is_some o.phase_timestamps.cleanup_ended_at
+                   | _ -> false
+                 in
+                 if not present then (
+                   run_valid := false;
+                   add_finding "missing_phase_boundary"
+                     (Printf.sprintf "missing required phase boundary %s in %s[%d] run %s"
+                        b case_id repeat_index o.run_id)
+                     false
+                     (Some (Printf.sprintf "%s:%s" o.run_id b))
+                 ))
+              required_phase_boundaries;
             if not (check_phase_boundary_order o.phase_timestamps) then (
               run_valid := false;
               add_finding "phase_boundary_order"
@@ -628,6 +655,46 @@ let check_observations
                 (Some o.run_id)
             ))
          run_obs;
+
+       (* Check expected outcomes from manifest expected_outcomes map *)
+       (match List.assoc_opt case_id manifest.expected_outcomes with
+        | None ->
+          run_valid := false;
+          add_finding "missing_expected_outcome_declaration"
+            (Printf.sprintf "manifest lacks expected_outcomes for %s" case_id)
+            false
+            (Some case_id)
+        | Some expected_outcome ->
+          let outcome_matches =
+            match expected_outcome with
+            | "verified" ->
+              final_attempt.external_verified
+              && final_attempt.verdict_passed
+              && final_attempt.command_exit_code = Some 0
+            | "command_exit_nonzero" ->
+              (not final_attempt.external_verified)
+              && final_attempt.command_exit_code <> Some 0
+            | "stale_revision_rejected" ->
+              not final_attempt.external_verified
+            | "missing_artifact_rejected" ->
+              (not final_attempt.external_verified)
+              && final_attempt.artifact_references = []
+            | "verified_after_retry" ->
+              (not first_attempt.external_verified)
+              && final_attempt.external_verified
+            | "unreported_usage_preserved" ->
+              (not final_attempt.external_verified)
+              && (match final_attempt.usage with Usage_missing _ -> true | _ -> false)
+            | _ -> false
+          in
+          if not outcome_matches then (
+            run_valid := false;
+            add_finding "manifest_expected_outcome_mismatch"
+              (Printf.sprintf "run %s[%d] outcome did not match manifest expected outcome %s"
+                 case_id repeat_index expected_outcome)
+              false
+              (Some (Printf.sprintf "expected=%s case=%s[%d]" expected_outcome case_id repeat_index))
+          ));
 
        (* Check scenario-specific outcome rules using typed scenario variant *)
        (match final_attempt.scenario with
@@ -815,6 +882,7 @@ let check_observations
     && !unknown_coerced_to_zero = 0
     && !duplicated_usage = 0
     && !totals_mismatch = 0
+    && List.for_all (fun (f : check_finding) -> f.passed) !findings
   in
 
   { matrix_expected
@@ -886,7 +954,42 @@ let manifest_of_json (json : Yojson.Safe.t) : (manifest, string) result =
       |> to_assoc
       |> List.map (fun (k, v) -> k, to_list v |> List.map to_string)
     in
-    let cases = default_case_manifests () in
+    let cases =
+      List.filter_map
+        (fun cid ->
+           match scenario_of_string cid with
+           | Error _ -> None
+           | Ok sc ->
+             let exp_out =
+               match List.assoc_opt cid expected_outcomes with
+               | Some v -> v
+               | None -> ""
+             in
+             let req_ent =
+               match List.assoc_opt cid required_entities_by_case with
+               | Some v -> v
+               | None -> []
+             in
+             let ph_bnd =
+               match List.assoc_opt cid phase_boundaries_by_case with
+               | Some v -> v
+               | None -> []
+             in
+             let exp_ver =
+               match sc with
+               | Success | Retry_success -> true
+               | Exit_nonzero | Stale_revision | Missing_artifact | Usage_unreported -> false
+             in
+             Some
+               { scenario = sc
+               ; case_id = cid
+               ; expected_verified = exp_ver
+               ; expected_outcome = exp_out
+               ; required_entities = req_ent
+               ; phase_boundaries = ph_bnd
+               })
+        case_ids
+    in
     Ok
       { contract_sha256
       ; source_commit
@@ -1288,3 +1391,95 @@ let checker_summary_of_json (json : Yojson.Safe.t) : (checker_summary, string) r
   | Invalid_argument msg -> Error msg
   | Not_found -> Error "Key or element not found"
 ;;
+
+let summary_to_json (s : checker_summary) : Yojson.Safe.t =
+  `Assoc
+    [ "matrix_expected", `Int s.matrix_expected
+    ; "matrix_observed", `Int s.matrix_observed
+    ; "matrix_passed", `Int s.matrix_passed
+    ; "live_expected", `Int s.live_expected
+    ; "live_observed", `Int s.live_observed
+    ; "live_passed", `Int s.live_passed
+    ; "false_verified_count", `Int s.false_verified_count
+    ; "required_join_missing_count", `Int s.required_join_missing_count
+    ; ( "unknown_usage_coerced_to_zero_count"
+      , `Int s.unknown_usage_coerced_to_zero_count )
+    ; "duplicated_usage_count", `Int s.duplicated_usage_count
+    ; ( "reported_usage_totals_mismatch_count"
+      , `Int s.reported_usage_totals_mismatch_count )
+    ; "overall_passed", `Bool s.overall_passed
+    ]
+;;
+
+let write_file_string (path : string) (contents : string) : (unit, string) result =
+  match open_out_bin path with
+  | exception Sys_error msg -> Error (Printf.sprintf "cannot open %s for writing: %s" path msg)
+  | oc ->
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () ->
+         output_string oc contents;
+         Ok ())
+;;
+
+let write_checker_file (path : string) (s : checker_summary) : (unit, string) result =
+  let json = checker_summary_to_json s in
+  write_file_string path (Yojson.Safe.pretty_to_string json ^ "\n")
+;;
+
+let write_summary_file (path : string) (s : checker_summary) : (unit, string) result =
+  let json = summary_to_json s in
+  write_file_string path (Yojson.Safe.pretty_to_string json ^ "\n")
+;;
+
+let load_manifest_file (path : string) : (manifest, string) result =
+  match open_in_bin path with
+  | exception Sys_error msg -> Error (Printf.sprintf "cannot open %s: %s" path msg)
+  | ic ->
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         let content = really_input_string ic len in
+         let json_res =
+           try Ok (Yojson.Safe.from_string content) with
+           | Yojson.Json_error msg -> Error (Printf.sprintf "%s: JSON syntax error: %s" path msg)
+           | Failure msg -> Error (Printf.sprintf "%s: %s" path msg)
+         in
+         match json_res with
+         | Error _ as err -> err
+         | Ok json -> manifest_of_json json)
+;;
+
+let load_observations_file (path : string) : (run_observation list, string) result =
+  match open_in_bin path with
+  | exception Sys_error msg -> Error (Printf.sprintf "cannot open %s: %s" path msg)
+  | ic ->
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let rec loop line_num acc =
+           match input_line ic with
+           | exception End_of_file -> Ok (List.rev acc)
+           | line ->
+             let trimmed = String.trim line in
+             if trimmed = "" then loop (line_num + 1) acc
+             else
+               let json_res =
+                 try Ok (Yojson.Safe.from_string trimmed) with
+                 | Yojson.Json_error msg ->
+                   Error (Printf.sprintf "%s:%d: JSON parse error: %s" path line_num msg)
+                 | Failure msg ->
+                   Error (Printf.sprintf "%s:%d: %s" path line_num msg)
+               in
+               match json_res with
+               | Error _ as err -> err
+               | Ok json ->
+                 match run_observation_of_json json with
+                 | Error err ->
+                   Error (Printf.sprintf "%s:%d: invalid run observation: %s" path line_num err)
+                 | Ok obs -> loop (line_num + 1) (obs :: acc)
+         in
+         loop 1 [])
+;;
+

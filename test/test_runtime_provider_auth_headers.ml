@@ -371,8 +371,9 @@ max-concurrent = 1
             && String.equal err.message
                  "unknown protocol \"future-wire\": expected one of \
                   messages-cli, messages-http, openai-compatible-cli, \
-                  openai-compatible-http, ollama-http, codex-app-server, \
-                  claude-code, antigravity-cli")
+                  openai-compatible-http, ollama-http, gemini-http, \
+                  vertex-gemini, codex-app-server, claude-code, \
+                  antigravity-cli")
          errors)
 
 let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
@@ -409,6 +410,8 @@ let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
     [ "messages-http:endpoint:http_provider:optional:false::"
     ; "openai-compatible-http:endpoint:http_provider:optional:false::"
     ; "ollama-http:endpoint:http_provider:optional:false::"
+    ; "gemini-http:endpoint:http_provider:optional:false::"
+    ; "vertex-gemini:endpoint:http_provider:optional:false::"
     ; "codex-app-server:command:official_client:forbidden:true::"
     ; "claude-code:command:official_client:forbidden:true::"
     ; "antigravity-cli:command:official_client:file_required:true:agent,effort,timeout-s:timeout-s"
@@ -1672,6 +1675,88 @@ let test_dashboard_runtime_probe_reachability_contracts () =
   let runtime = runtime_or_fail ~provider () in
   assert_dashboard_runtime_probe_missing_auth runtime
 
+(* The probe used to send every credential as a Bearer token. A Gemini runtime
+   the keepers were using fine therefore answered auth_failed on the health
+   surface, because the Generative Language API reads the key from
+   x-goog-api-key. The header now comes from the same per-kind table the
+   transport uses. *)
+let test_dashboard_runtime_probe_auth_header_follows_provider_kind () =
+  let provider =
+    { runpod_provider with
+      id = "runpod_mtp"
+    ; display_name = "Gemini"
+    ; protocol = "gemini-http"
+    ; api_format = Runtime_schema.Gemini_api
+    ; transport = Runtime_schema.Http "https://generativelanguage.googleapis.com/v1beta"
+    ; credentials = Some (Runtime_schema.Inline "gm-test-key")
+    }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url ~headers ~timeout_sec:_ ->
+         check bool "models probe URL" true
+           (String.ends_with ~suffix:"/v1beta/models" url);
+         check (option string) "gemini key rides x-goog-api-key" (Some "gm-test-key")
+           (normalized_header_value "x-goog-api-key" headers);
+         check (option string) "no bearer token for a gemini key" None
+           (normalized_header_value "authorization" headers);
+         Ok (200, [ "content-type", "application/json" ], {|{"models":[{"name":"m"}]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check string "provider status" "reachable"
+    Yojson.Safe.Util.(member "status" provider |> to_string);
+  check int "model count" 1
+    Yojson.Safe.Util.(member "model_count" provider |> to_int)
+
+(* Vertex authenticates with Application Default Credentials the probe cannot
+   mint. It used to fall into the only unprobed arm, which answered
+   invalid_execution_transport with the codex-app-server message; a correctly
+   configured Vertex runtime showed as a broken transport. *)
+let test_dashboard_runtime_probe_vertex_is_a_stated_skip () =
+  let base_url =
+    match
+      Llm_provider.Vertex_endpoint.base_url
+        ~project:"proj"
+        ~location:(Llm_provider.Vertex_endpoint.Regional "us-central1")
+    with
+    | Ok url -> url
+    | Error detail -> failf "vertex base url: %s" detail
+  in
+  let provider =
+    { runpod_provider with
+      display_name = "Vertex"
+    ; protocol = "vertex-gemini"
+    ; api_format = Runtime_schema.Vertex_gemini_api
+    ; transport = Runtime_schema.Http base_url
+    ; credentials = None
+    }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  let calls = ref 0 in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+         incr calls;
+         Ok (200, [], "{}"))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check int "no HTTP request is made without a credential to send" 0 !calls;
+  check string "provider status" "skipped_native_auth"
+    Yojson.Safe.Util.(member "status" provider |> to_string);
+  check bool "reachable is unknown, not false" true
+    (Yojson.Safe.Util.(member "reachable" provider) = `Null);
+  check bool "the error names the credential, not codex-app-server" true
+    (String_util.contains_substring
+       Yojson.Safe.Util.(member "error" provider |> to_string)
+       "Application Default Credentials")
+
 let test_dashboard_runtime_probe_groups_models_by_provider () =
   let second_model =
     { qwen_model with Runtime_schema.id = "qwen-2"; api_name = "qwen-2" }
@@ -2833,6 +2918,14 @@ let () =
             "dashboard runtime probe groups models by provider"
             `Quick
             test_dashboard_runtime_probe_groups_models_by_provider
+        ; test_case
+            "dashboard runtime probe auth header follows the provider kind"
+            `Quick
+            test_dashboard_runtime_probe_auth_header_follows_provider_kind
+        ; test_case
+            "dashboard runtime probe reports Vertex as a stated skip"
+            `Quick
+            test_dashboard_runtime_probe_vertex_is_a_stated_skip
         ; test_case
             "clock fail-fast raises when idle set without clock (Agent Core contract)"
             `Quick

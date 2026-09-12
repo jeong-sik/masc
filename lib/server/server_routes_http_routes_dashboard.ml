@@ -620,12 +620,12 @@ let parse_runtime_route_body body_str =
          | Error _ as err -> err
          | Ok parsed_lane ->
            (match parsed_lane with
-            | Runtime_media_failover | Runtime_exact_lane _ ->
+            | Runtime_named_lane _ | Runtime_media_failover | Runtime_exact_lane _ ->
               (match required_string_array_field json "runtime_ids" with
                | Error _ as err -> err
                | Ok runtime_ids ->
                  Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
-            | _ ->
+            | Runtime_default ->
               (match optional_string_field json "runtime_id" with
                | Error _ as err -> err
                | Ok runtime_id ->
@@ -970,6 +970,25 @@ let gate_mode_change_json change recovery =
 ;;
 
 module For_testing = struct
+  (* The routing body parser is private to the route; the named-lane array
+     shape it accepts is a wire contract, so the parser test asserts it
+     directly instead of through an HTTP round trip. *)
+  let lane_string = function
+    | Runtime_default -> "default"
+    | Runtime_media_failover -> "media_failover"
+    | Runtime_exact_lane name -> "exact/" ^ name
+    | Runtime_named_lane id -> id
+
+  let parse_runtime_route_body body =
+    match parse_runtime_route_body body with
+    | Error detail -> Error detail
+    | Ok (Runtime_route_runtime_id (lane, runtime_id)) ->
+        Ok
+          ( lane_string lane
+          , "runtime_id"
+          , match runtime_id with None -> [] | Some value -> [ value ] )
+    | Ok (Runtime_route_runtime_ids (lane, runtime_ids)) ->
+        Ok (lane_string lane, "runtime_ids", runtime_ids)
   type nonrec gate_mode_recovery = gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report
     | Recovery_failed of string

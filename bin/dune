@@ -9,12 +9,23 @@
  (libraries masc.config masc_core masc.masc_log eio eio_main cohttp cohttp-eio yojson uri unix uuidm))
 
 (executable
+ (name masc_reliable_change_g1_check)
+ (modules masc_reliable_change_g1_check)
+ (public_name masc-reliable-change-g1-check)
+ (package masc)
+ (libraries
+  masc.masc_goal
+  unix
+  yojson))
+
+(executable
  (name main_eio)
  (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
  (public_name masc)
  (package masc)
  (libraries
   masc.workspace_connection
+  masc.voice_config
   masc
   masc.masc_goal
   masc.keeper_toml
@@ -474,6 +485,11 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_rows)
+ (wrapped false)
+ (modules masc_tui_rows))
+
+(library
  (name masc_tui_retained_view)
  (wrapped false)
  (modules masc_tui_retained_view)
@@ -501,7 +517,9 @@
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
- (libraries masc_tui_types))
+ ; masc_tui_keeper_mark owns the marks the roster draws, and the sheet this
+ ; module builds is where a reader looks up what one means.
+ (libraries masc_tui_types masc_tui_keeper_mark))
 
 (library
  (name masc_tui_esc_interrupt)
@@ -517,6 +535,16 @@
  (name masc_tui_exit_signals)
  (wrapped false)
  (modules masc_tui_exit_signals))
+
+;; The exit-time tcsetattr on a descriptor that is no longer a terminal:
+;; ENOTTY and EIO mean the terminal is gone and the rest of the at_exit chain
+;; still runs; any other refusal propagates. Own library so the rule runs
+;; under a test with no terminal.
+(library
+ (name masc_tui_terminal_restore)
+ (wrapped false)
+ (modules masc_tui_terminal_restore)
+ (libraries unix))
 
 (library
  (name masc_tui_file_icon)
@@ -704,7 +732,7 @@
  (name masc_tui_metrics_tail)
  (wrapped false)
  (modules masc_tui_metrics_tail)
- (libraries masc dated_jsonl masc_tui_scroll))
+ (libraries masc dated_jsonl masc_tui_scroll masc_tui_rows))
 
 (library
  (name masc_tui_context_state)
@@ -1050,6 +1078,7 @@
   masc_tui_paste
   masc_tui_paste_spill
   masc_tui_scroll
+  masc_tui_rows
   masc_tui_utf8_input
   masc_tui_send_disposition
   unix
@@ -1127,6 +1156,7 @@
   masc_tui_ansi
   masc_tui_chart
   masc_tui_context_inspector
+  masc_tui_rows
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1143,6 +1173,7 @@
   masc_tui_context_inspector
   masc_tui_frame
   masc_tui_scroll
+  masc_tui_rows
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1176,6 +1207,97 @@
  (wrapped false)
  (modules masc_tui_msx_tick)
  (libraries masc_tui_types yojson base64 threads))
+
+; The primitives every surface draws through. Its own library so the
+; direction is enforced rather than agreed to: nothing here may reach back
+; into a single surface's code, and the linker says so if it tries.
+; (wrapped false) matches every other module in this directory -- the names
+; already carry the masc_tui_ prefix by hand, which is the case dune's manual
+; names as the reason the option exists.
+(library
+ (name masc_tui_render_prim)
+ (wrapped false)
+ (modules masc_tui_render_prim)
+ (libraries
+  masc_tui_answering
+  masc_tui_composer_projection
+  masc_tui_roster_pane
+  masc_tui_rows
+  masc_tui_code_lexer
+  masc.masc_goal
+  masc_tui_pr_ref
+  masc_tui_context_bars
+  masc.masc_types
+  masc_tui_keys
+  masc_tui_runtime_config_view
+  masc_tui_context_inspector
+  masc_tui_command
+  yojson
+  eio.unix
+  masc_tui_ask_projection
+  masc_tui_browser_lane_layout
+  masc_tui_chart
+  masc_tui_diff
+  masc_tui_keeper_chat_projection
+  masc_tui_magnitude
+  masc_tui_render_schedule
+  masc_tui_retained_view
+  masc_tui_span
+  masc_tui_keeper_mark
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_control
+  masc
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_theme
+  masc_tui_acting
+  masc_tui_acting_pane
+  masc_tui_message_layout
+  masc_tui_composer
+  masc_tui_footer
+  masc_tui_frame_presenter
+  masc_tui_fetched
+  masc_tui_markdown
+  masc_tui_agenda
+  unix))
+
+; The Keeper chat surface as its own library. Its dependency list may name
+; masc_tui_render_prim but never masc_tui_render: the definitions moved here
+; are the ones no other screen reaches, so the direction holds.
+(library
+ (name masc_tui_render_chat)
+ (wrapped false)
+ (modules masc_tui_render_chat)
+ (libraries
+  masc_tui_render_prim
+  masc_tui_ansi
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout
+  masc_tui_tool_detail
+  masc_tui_theme
+  masc_tui_gate_text
+  masc_tui_link_preview
+  masc_tui_terminal_palette
+  masc_tui_roster_pane
+  masc_tui_keeper_chat_queue
+  masc_tui_answering
+  masc_tui_esc_interrupt
+  mtime.clock.os
+  masc_tui_keeper_selection
+  masc_tui_command
+  masc_tui_footer
+  masc_tui_context_state
+  masc_tui_frame_presenter
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_diff
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_control
+  masc_tui_markdown
+  masc_tui_observation_layout
+  masc
+  masc_tui_keys
+  masc_tui_types
+  unix))
 
 (executable
  (name masc_tui)
@@ -1229,6 +1351,8 @@
   base64
   masc_tui_credential
   masc_tui_types
+  masc_tui_render_prim
+  masc_tui_render_chat
   masc_tui_interactive
   masc_tui_msx
   masc_tui_msx_tick
@@ -1239,6 +1363,7 @@
   masc_tui_interrupt_signal
   masc_tui_esc_interrupt
   masc_tui_exit_signals
+  masc_tui_terminal_restore
   masc.runtime
   masc.keeper_registry
   masc_skill_reference
@@ -1288,12 +1413,14 @@
   masc_tui_link_label
   masc_tui_link_preview
   masc_tui_image_mosaic
+  masc_tui_image_cache
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
   masc_tui_paste_spill
   masc_tui_utf8_input
   masc_tui_scroll
+  masc_tui_rows
   masc_tui_send_disposition
   masc_tui_metrics_tail
   masc_tui_observation_layout
@@ -1437,6 +1564,15 @@
  (wrapped false)
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
+
+;; Decides, by magic bytes, whether a downloaded body may sit in the preview
+;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
+;; the TUI executable so every decision is testable without a process.
+(library
+ (name masc_tui_image_cache)
+ (wrapped false)
+ (modules masc_tui_image_cache)
+ (libraries masc unix))
 (library
  (name masc_tui_interactive)
 ;; An interactive surface contract plus the MSX backend: renderer-independent

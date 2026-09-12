@@ -17,6 +17,18 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+(* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
+   The terminal used to take this byte for flow control -- raw mode clears
+   IXON now, which is what makes it bindable at all. A letter would not do:
+   in the composer every letter is text.
+
+   The byte and the printed name sit together because the chat pane prints
+   the name on the folded line while masc_tui.ml matches the byte. Apart,
+   one of them drifts and the line names a key that does nothing. *)
+let expand_turn_key = "\019"
+let expand_turn_label = "^S"
+
+
 let keepers_jump =
   b Meta "2" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 2"
@@ -33,7 +45,10 @@ let global =
   ; b Meta "&"
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
-  ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
+  ; b Meta "Ctrl-B" "keeper roster beside the chat — put away until you ask"
+      ~help:"the Activity pane (Ctrl-L) answers the same question for every \
+             keeper, so the column starts hidden; this brings it back on a \
+             terminal wide enough to hold it"
   ; b Meta "Ctrl-L"
       "show or hide the Activity pane: what every keeper is doing right now, and \
        on its Changes tab the selected keeper's files (press the header to switch)"
@@ -63,6 +78,19 @@ let keeper_actions =
   ; b Navigate "D" "deletions" ~help:"durable deletion records, failures and cleanup retry"
 
   ]
+
+(* The keys that move a row list by more than a step. Shared rather than
+   retyped per surface: they answer wherever [row_list] in masc_tui.ml finds a
+   list, and that is one decision, so the table should not be able to claim
+   them for one listing and forget them on the next. *)
+let row_list_jumps =
+  [ b Navigate "PgUp/PgDn" "page"
+  ; b Navigate "Home/End" "top/bottom"
+  ]
+
+(* The same two, minus the page key, for the surfaces whose own entry already
+   spells one because a detail pane under them pages too. *)
+let row_list_edges = [ b Navigate "Home/End" "top/bottom" ]
 
 let for_surface = function
   | Overview ->
@@ -109,7 +137,7 @@ let for_surface = function
         ; b Search "n / N" "next / previous match"
         ; b Act "Esc" "overview"
         ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
       ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
@@ -146,6 +174,10 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act expand_turn_label "turn detail"
+          ~help:
+            "unfold the running turn's status rows, or fold them back to the \
+             progress line"
       ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",
@@ -183,7 +215,7 @@ let for_surface = function
                  and a run's detail carry no searchable rows"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Clients ->
       [ b Navigate "j/k" "move" ~help:"move the roster cursor"
       ; b Navigate "p" "runtime"
@@ -193,7 +225,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching attached name"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
@@ -220,12 +252,14 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching post id, author or title"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Approvals ->
       [ b Navigate "j/k" "move"
         (* The list draws each ask on one row. Enter is where a multi-line
            argument is readable before y answers it. *)
-      ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
+      ; b Act "Enter" "read the whole ask"
+          ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
+                 Home/End reach its ends, [ / ] step asks, Esc goes back"
       ; b Act "y" "confirm"
       ; b Act "n" "deny"
       ; b Act "R" "retry Auto Judge"
@@ -237,7 +271,7 @@ let for_surface = function
       ; b Act "e" "external Gate lane"
           ~help:"choose how calls into outside services are reviewed; Enter applies"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
       ; b Navigate "v" "next Planning tab"
@@ -258,7 +292,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Navigate "PgUp/PgDn" "page"
@@ -272,7 +306,7 @@ let for_surface = function
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Verification ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Planning tab"
@@ -288,7 +322,7 @@ let for_surface = function
                  the queue answers this, an open detail does not"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Harness ->
       [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Planning tab" ~help:"back round to Goals"
@@ -305,7 +339,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
@@ -318,9 +352,13 @@ let for_surface = function
       ; b Navigate "K" "calling Keeper"
       ; b Navigate "B" "Board evidence"
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching run id, Keeper or preset; an \
+                 open run's detail carries no searchable rows"
+      ; b Search "n / N" "next / previous match"
       ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Memory ->
       [ b Navigate "j/k" "move" ~help:"move the keeper row"
       ; b Act "Enter" "facts"
@@ -332,7 +370,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Repositories ->
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
@@ -348,7 +386,7 @@ let for_surface = function
                  path while Git changes is open"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Changes ->
       (* "move", not "scroll": the keys move the marked row and the window
          follows it, which is also what the surface's own footer says. *)
@@ -361,9 +399,12 @@ let for_surface = function
       ; b Act "v" "view code"
           ~help:"the file on the Code surface, read from the keeper's own \
                  workspace"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching written path"
+      ; b Search "n / N" "next / previous match"
       ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Connectors ->
       [ b Navigate "B" "Browser Lane"
           ~help:"read browser tabs and page text; select live / automation inside Browser"
@@ -375,7 +416,7 @@ let for_surface = function
       ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Runtime ->
       [ b Navigate "j/k" "move / scroll"
       ; b Navigate "PgUp/PgDn" "detail page"
@@ -392,7 +433,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching lane id or runtime id"
       ; b Search "n / N" "next / previous match"
       ]
-      @ listing_meta
+      @ row_list_edges @ listing_meta
   | Config ->
       [ b Navigate "j/k" "select / scroll"
         (* Config combines persisted files, typed live params, and the local
@@ -422,6 +463,10 @@ let for_surface = function
       ; b Meta "Tab" "next"
       ]
   | Resources ->
+      (* Two panes with two meanings, and the keys below say so once rather
+         than per row: with the list focused the cursor moves and [/] lands
+         it on a match; with the text focused the same keys move the reading.
+         Both ends answer to Home and End. *)
       [ b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
@@ -429,9 +474,16 @@ let for_surface = function
       ; b Navigate "J / K" "scroll text"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while the detail is focused, read the adjacent resource"
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"a page of the list, or of the text when it is focused"
+      ; b Navigate "Home/End" "top/bottom"
+          ~help:"the first or last resource, or the ends of the text when it                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "back"
           ~help:"the text hands back to the list; the list leaves for Config"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching resource name; the list has to                  be focused for there to be a cursor to land"
+      ; b Search "n / N" "next / previous match"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
@@ -490,7 +542,7 @@ let for_surface = function
           ~help:"the commits that touched the open file, newest first \
                  (H or Esc closes)"
       ]
-      @ listing_meta
+      @ row_list_jumps @ listing_meta
   | Tools ->
       [ b Navigate "j/k" "scroll"
       ; b Navigate "Home/End" "top/bottom"
@@ -596,6 +648,12 @@ let footer_hints_code ~pane =
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources
+  (* The row search needs a cursor to land on, and with the text focused
+     there is none -- [surface_row_texts] says so too. Dropped here rather
+     than listed and silent. *)
+  |> List.filter (fun binding ->
+         (not detail_focus)
+         || not (String.equal binding.key "/" || String.equal binding.key "n / N"))
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            { binding with label = (if detail_focus then "scroll text" else "move") }
@@ -701,7 +759,7 @@ let footer_hints_memory_facts =
      ; b Search "n / N" "next / previous match"
      ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
      ]
-     @ listing_meta)
+     @ row_list_edges @ listing_meta)
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
@@ -778,7 +836,8 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
            list is a declaration directory that can hold more. *)
         b Navigate "arrows+enter" "connect"
       ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
-      ; b Act "A" "app" ~help:"open the app-registration form for it"
+      ; b Act "A" "app"
+          ~help:"open the app-registration form for it -- it asks for a Client ID"
       ; b Search "/" "filter"
       ; b Meta "R" "refresh"
       ]
@@ -834,7 +893,22 @@ let help_sections ?current () =
   in
   List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
   @ ("Global", entries global)
-    :: List.map (fun (_, section) -> section) rest
+    :: (List.map (fun (_, section) -> section) rest
+        (* The marks last, as reference, the way the slash commands read as
+           reference. One reader of them has no words beside it: the Keepers
+           rows draw each glyph with its status word and so does the chat
+           header, but the roster pane beside the chat is 34 cells wide and
+           draws the glyph alone (masc_tui_render_prim.ml: "Without it the pane
+           says a keeper exists and nothing else"). Selecting keepers until
+           every state has been seen was the only way that reader could learn
+           the eight, and two of them -- stale and zombie -- may never be
+           selected.
+
+           Masc_tui_keeper_mark carried this list for exactly this and nothing
+           read it. Its shape is already the sheet's: a mark, and what it
+           means. Last rather than beside Global because the section order up
+           to there is asserted. *)
+        @ [ ("Keeper marks", Masc_tui_keeper_mark.legend) ])
 
 let footer_hints_browser_lane =
   hints_of_bindings

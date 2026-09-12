@@ -66,13 +66,8 @@ val sessions_dir : t -> string
 val session_dir : t -> string -> string
 val session_path : t -> string -> string
 val events_path : t -> string -> string
-val snapshots_dir : t -> string -> string
 val artifacts_dir : t -> string -> string
 val raw_traces_dir : t -> string -> string
-val report_json_path : t -> string -> string
-val report_md_path : t -> string -> string
-val proof_json_path : t -> string -> string
-val proof_md_path : t -> string -> string
 
 (** {1 Text I/O} *)
 
@@ -121,8 +116,3 @@ val save_artifact_text
   -> kind:string
   -> content:string
   -> (string, Error.t) result
-
-(** {1 Reports and proofs} *)
-
-val save_report : t -> Runtime.report -> (unit, Error.t) result
-val save_proof : t -> Runtime.proof -> (unit, Error.t) result

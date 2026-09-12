@@ -1,6 +1,7 @@
 [@@@warning "-32-69"]
 module Tui_decode = Masc.Tui_decode
 module Metrics_tail = Masc_tui_metrics_tail
+module Rows = Masc_tui_rows
 
 (* A poll shares the current read; an explicit refresh owns a new one.
    Only the owning response can settle that source and publish its result. *)
@@ -1425,12 +1426,14 @@ type runtime_probe_annotation =
 
 let runtime_probe_status_label = function
   | Tui_decode.Runtime_provider_skipped_cli -> "CLI not probed"
+  | Tui_decode.Runtime_provider_skipped_native_auth -> "ADC not probed"
   | status -> Tui_decode.runtime_provider_status_to_string status
 
 let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
-    | Tui_decode.Runtime_provider_skipped_cli -> Runtime_probe_note detail
+    | Tui_decode.Runtime_provider_skipped_cli
+    | Tui_decode.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
     | _ -> Runtime_probe_failure detail) detail
 
 (** Planning surface sub-mode *)
@@ -1660,11 +1663,22 @@ type fleet_safety = Tui_decode.fleet_safety
   fs_completion_authority_pending_count: int;
 }
 
+type planning_goal_history = Tui_decode.planning_goal_history
+  = {
+  pgh_goal_id: string;
+  pgh_title: string option;
+  pgh_opened_at: string option;
+  pgh_closed_at: string option;
+  pgh_final_phase: string option;
+  pgh_lifetime_hours: float option;
+}
+
 type planning_snapshot = Tui_decode.planning_snapshot
   = {
   pl_goals: planning_goal list;
   pl_rollup: planning_rollup;
   pl_backlog: planning_backlog;
+  pl_goal_history: planning_goal_history list;
   pl_generated_at: string;
 }
 
@@ -1875,16 +1889,32 @@ type identity_provider =
 (** The providers a key can act on, in the order the screen numbers them.
     Both the renderer and the key handler read this, so the number an
     operator sees and the provider a keypress starts cannot drift apart. *)
+(* Case-insensitive substring, read rather than rebuilt.
+
+   This used to take a lowercase copy of the haystack and then a [String.sub]
+   of it at every position it tried. The row search calls it once per row per
+   keystroke, so on a twenty-thousand-line file a single keypress asked the
+   allocator for the file again and then for a slice per character of it.
+
+   Folding case per byte the way [String.lowercase_ascii] does -- ASCII A-Z
+   and nothing else, so a UTF-8 continuation byte is left alone -- keeps the
+   same answers without the copies. *)
+let lowercase_byte c =
+  if c >= 'A' && c <= 'Z' then Char.unsafe_chr (Char.code c + 32) else c
+
 let lowercase_contains ~needle haystack =
-  let needle = String.lowercase_ascii needle in
-  let haystack = String.lowercase_ascii haystack in
   let n = String.length needle and h = String.length haystack in
-  if n = 0
-  then true
+  if n = 0 then true
+  else if n > h then false
   else
-    let rec at i =
-      i + n <= h && (String.equal (String.sub haystack i n) needle || at (i + 1))
+    let rec matches_at i k =
+      k >= n
+      || Char.equal
+           (lowercase_byte (String.unsafe_get haystack (i + k)))
+           (lowercase_byte (String.unsafe_get needle k))
+         && matches_at i (k + 1)
     in
+    let rec at i = i + n <= h && (matches_at i 0 || at (i + 1)) in
     at 0
 
 (** Whether a query names this provider.
@@ -1992,7 +2022,15 @@ let identity_filter_rows ~providers filter =
 
 (* Each block above the list brings its own trailing blank, so two of them
    do not stack two blanks and none of them leaves the list flush against
-   the hint. *)
+   the hint.
+
+   The sentence reads as a duplicate of the tab's own hint row -- [ ]:tab,
+   arrows+enter:connect, T:toggle, A:app, /:filter, R:refresh -- and it was
+   dropped on that ground, until a 150-column frame showed the hint row does
+   not reach the screen at all: the row spends 79 cells on nine tab labels
+   before the hint starts, so the title is cut inside "Automation" and the
+   keys are never drawn. Until that row is fixed this sentence is the only
+   place an operator can read them -- #35539. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with arrows, enter to connect " ^ keeper
    ^ ", A: custom app (Client ID), /: filter, R: refresh, T: toggle on/off.")
@@ -2851,18 +2889,24 @@ module Browser_lane_view = struct
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
+    | Read_refresh
     | Scene_read of int
     | Scene_regions of int
+    | Scene_refresh of { tab_id : int; scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
+  type read_view = Text_view | Scene_view of {
+    scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
   type t = {
     clients : client list; selected_client : client option; client_picker : int option;
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int;
+    read_view : read_view;
+    refresh_pending : int option;
   }
 
   let source_name = function Live -> "live" | Automation -> "automation"
@@ -2879,9 +2923,9 @@ module Browser_lane_view = struct
   let create () =
     { clients = []; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0 }
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None }
   let switch_source source _t = { (create ()) with source }
-  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0 }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; read_view = Text_view }
   let fail_action detail t =
     let url_draft = match t.load with
       | Loading (_, Goto url) -> Some url
@@ -2897,15 +2941,26 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, Read), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _)), _ -> Reading
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
+  (* The badge in the Browser Lane title. Five of these six name the read the
+     lane makes over HTTP, so the sixth -- the one for a browser that is not
+     there at all -- is the only one that speaks of something else, and it
+     says so.
+
+     Read_failed used to read "Read/action failed", which did two things. It
+     left the HTTP family its four siblings belong to, so the badge changed
+     shape rather than value when a read failed. And the status line three
+     rows down already opens "Read/action failed: " and then gives the
+     detail, so the operator read the same phrase twice and only the second
+     one told them anything. *)
   let read_status_label = function
     | Unread -> "HTTP unread"
     | Reading -> "HTTP reading"
     | Operating -> "HTTP action"
     | Read_ok -> "HTTP read ok"
-    | Read_failed -> "Read/action failed"
+    | Read_failed -> "HTTP failed"
     | Browser_missing -> "Browser not connected"
   let busy t = match t.load with Loading _ -> true | Idle | No_browser | Failed _ -> false
   let request_body t =
@@ -2916,9 +2971,30 @@ module Browser_lane_view = struct
     | Automation, _ -> true
     | Live, None -> false
     | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
+  let cadence_operation t =
+    if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
+       || not (selected_client_available t) then None
+    else match t.selected_tab, t.read_view with
+      | None, _ -> None
+      | Some tab_id, Scene_view {scene_view;scope} ->
+          Some (Scene_refresh {tab_id;scene_view;scope})
+      | Some _, Text_view -> Some Read_refresh
+  let yield_refresh_to_input t =
+    match t.load with
+    | Loading (_, (Read_refresh | Scene_refresh _)) -> {t with load = Idle}
+    | Loading _ | Idle | No_browser | Failed _ -> t
+  let read_view_for_operation operation previous =
+    match operation with
+    | Read | Read_refresh | Open_session | Close_session | Goto _ -> Text_view
+    | Scene_read _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
+    | Scene_regions _ -> Scene_view {scene_view = Browser_lane.Regions; scope = None}
+    | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
+    | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
+    | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
+    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None }
+      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
@@ -3053,23 +3129,6 @@ module Browser_lane_view = struct
       let* content = Masc.Browser_scene.of_json data in
       Ok {source;client_id;tab_id;content;elapsed_ms}
 
-  let accept_scene ~generation (result : (scene, string) result) t =
-    match t.load with
-    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
-        let expected_view, expected_scope = match operation with
-          | Scene_regions _ -> Browser_lane.Regions, None
-          | Scene_focus {target;_} -> Browser_lane.Content, Some target
-          | Scene_click {scope;_} -> Browser_lane.Content, scope
-          | _ -> Browser_lane.Content, None in
-        (match result with
-         | Ok scene when scene.source = t.source && scene.client_id = client_id t
-                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
-                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
-             {t with scene = Some scene; load = Idle; scene_cursor = 0; scroll = 0}
-         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
-         | Error detail -> {t with scene = None; load = Failed detail})
-    | _ -> t
-
   (* Deduplicate through a table rather than [List.mem] over what has been
      seen. A scene carries up to 200 nodes (browser_scene_script.ml's
      nodeLimit), and the membership walk made this quadratic in a function
@@ -3086,6 +3145,96 @@ module Browser_lane_view = struct
 
   let selected_scene_target t = List.nth_opt (scene_targets t) t.scene_cursor
 
+
+  let region_observed (target : Browser_lane.node_ref) (scene : scene) =
+    scene.content.document_id = target.document_id
+    && List.exists (fun (node : Masc.Browser_scene.node) ->
+      node.node_id = target.node_id && match node.kind with Region _ -> true | _ -> false)
+      scene.content.nodes
+
+  let publish_scene (scene : scene) t =
+    let same_observation = match t.scene with
+      | Some previous -> previous.source = scene.source
+        && previous.client_id = scene.client_id && previous.tab_id = scene.tab_id
+        && previous.content.document_id = scene.content.document_id
+        && previous.content.url = scene.content.url
+        && previous.content.view = scene.content.view && previous.content.scope = scene.content.scope
+      | None -> false in
+    let selected_id = if same_observation then
+      Option.map (fun (node : Masc.Browser_scene.node) -> node.node_id)
+        (selected_scene_target t)
+      else None in
+    let selected_index = match selected_id with
+      | None -> None
+      | Some selected ->
+        let rec find index = function
+          | [] -> None
+          | (node : Masc.Browser_scene.node) :: _ when node.node_id = selected -> Some index
+          | _ :: rest -> find (index + 1) rest in
+        find 0 (scene_targets {t with scene = Some scene}) in
+    let reading = Option.map (fun (reading : reading) ->
+      { reading with page = None; tabs = List.map (fun (tab : tab) ->
+          if tab.id = scene.tab_id then
+            {tab with title = scene.content.title; url = scene.content.url}
+          else tab) reading.tabs }) t.reading in
+    {t with scene = Some scene; reading; load = Idle;
+      read_view = Scene_view {scene_view = scene.content.view; scope = scene.content.scope};
+      scene_cursor = Option.value ~default:0 selected_index;
+      scroll = if Option.is_some selected_index then t.scroll else 0}
+
+  let accept_scene ~generation (result : (scene, string) result) t =
+    (* Operator input can supersede a cadence result, but the actual request
+       remains in flight until this completion. Do not start another cadence
+       read merely because its foreground load label was withdrawn. *)
+    let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
+    match t.load with
+    | Loading (current, Scene_refresh {tab_id;scene_view;scope}) when current = generation ->
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && ((scene.content.view = scene_view && scene.content.scope = scope)
+                             || (scene.content.view = Browser_lane.Regions && scene.content.scope = None
+                                 && match scope with Some target -> not (region_observed target scene) | None -> false)) ->
+             publish_scene scene t
+         | Ok _ -> {t with scene = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; load = Failed detail})
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
+        let expected_view, expected_scope = match operation with
+          | Scene_regions _ -> Browser_lane.Regions, None
+          | Scene_focus {target;_} -> Browser_lane.Content, Some target
+          | Scene_click {scope;_} -> Browser_lane.Content, scope
+          | _ -> Browser_lane.Content, None in
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && scene.content.view = expected_view && scene.content.scope = expected_scope ->
+             publish_scene scene t
+         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
+         | Error detail -> {t with scene = None; load = Failed detail})
+    | _ -> t
+
+
+  type scene_action = Read_region | Click_control
+
+  let scene_target_action (node : Masc.Browser_scene.node) =
+    match node.kind with
+    | Region _ -> Some Read_region
+    | Control { clickable = true; disabled = false; _ } -> Some Click_control
+    | Text | Raster | Control _ -> None
+
+  let move_scene_action ~backwards t =
+    let actions = scene_targets t |> List.mapi (fun index node -> index, node)
+      |> List.filter_map (fun (index, node) ->
+        Option.map (fun _ -> index) (scene_target_action node)) in
+    let ordered = if backwards then List.rev actions else actions in
+    match ordered with
+    | [] -> t
+    | first :: _ ->
+        let next = List.find_opt
+          (fun index -> if backwards then index < t.scene_cursor else index > t.scene_cursor)
+          ordered in
+        { t with scene_cursor = Option.value ~default:first next }
+
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
@@ -3101,6 +3250,14 @@ module Browser_lane_view = struct
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;
           "documentId",`String scene.content.document_id;"nodeId",`String node.node_id;
+          "view",`String (match scene.content.view with Content -> "content" | Regions -> "regions");
+          "scope",(match scene.content.scope with
+            | None -> `Null
+            | Some target -> `Assoc ["documentId",`String target.document_id;
+                "nodeId",`String target.node_id]);
+          "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
+            "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
+          "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;"source",source]))
     | _ -> None
 
@@ -3130,11 +3287,21 @@ module Browser_lane_view = struct
     | Loading _ | Idle | No_browser | Failed _ -> t, None
 
   let accept ~generation (result : (reading, string) result) t =
+    let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, Read) when current = generation ->
+    | Loading (current, (Read | Read_refresh)) when current = generation ->
         (match result with
          | Ok reading when reading.source = t.source && reading.client_id = client_id t ->
-             { t with reading = Some reading; load = Idle;
+             let same_page = match t.reading, reading.page with
+               | Some previous, Some page ->
+                   previous.source = reading.source
+                   && previous.client_id = reading.client_id
+                   && (match previous.page with
+                       | Some prior -> prior.tab_id = page.tab_id && prior.url = page.url
+                       | None -> false)
+               | _ -> false in
+             { t with reading = Some reading; load = Idle; read_view = Text_view;
+               scroll = (if same_page then t.scroll else 0);
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
          | Error detail -> { t with load = Failed detail })
@@ -3155,10 +3322,10 @@ module Browser_lane_view = struct
         let index = (current + direction + count) mod count in
         match List.nth_opt reading.tabs index with
         | None -> t
-        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle }
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle; read_view = Text_view }
 end
 
-let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
+let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
   let wrap text =
     String.split_on_char '\n'
       (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true text)
@@ -3176,27 +3343,46 @@ let browser_lane_page_lines ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    List.concat_map (fun (node : Masc.Browser_scene.node) ->
+    let reversed, _, selected = List.fold_left
+      (fun (reversed, offset, selected) (node : Masc.Browser_scene.node) ->
+      let index = Hashtbl.find_opt target_index node.node_id in
+      (* Text is the reading surface. DOM tags do not help read a paragraph,
+         author or timestamp; the selected text still has its observed index
+         for n/p and context copying. Controls and regions retain their action
+         labels and the same indices as the interaction model. *)
       let label = match node.kind with
-        | Text -> node.tag | Raster -> "image · Ctrl-O" | Region role -> "region · " ^ role
-        | Control {disabled=true;_} -> "disabled"
-        | Control {editable=true;_} -> "input" | Control _ -> "button/link" in
-      let prefix = match Hashtbl.find_opt target_index node.node_id with
-        | None -> ""
-        | Some i -> Printf.sprintf "[%s%d %s] "
-            (if i = view.scene_cursor then ">" else "") (i + 1) label in
-      wrap (prefix ^ node.text)) scene.content.nodes
+        | Text -> None
+        | Raster -> Some "image · Ctrl-O"
+        | Region role -> Some ("region · " ^ role)
+        | Control {disabled=true;_} -> Some "disabled"
+        | Control {editable=true;_} -> Some "input"
+        | Control _ -> Some "button/link" in
+      let prefix = match label, index with
+        | _, None -> ""
+        | None, Some i ->
+            if i = view.scene_cursor then Printf.sprintf "[>%d] " (i + 1) else ""
+        | Some label, Some i ->
+            Printf.sprintf "[%s%d %s] "
+              (if i = view.scene_cursor then ">" else "") (i + 1) label in
+      let lines = wrap (prefix ^ node.text) in
+      let selected = match selected, index with
+        | None, Some i when i = view.scene_cursor -> Some offset
+        | _ -> selected in
+      List.rev_append lines reversed, offset + List.length lines, selected)
+      ([], 0, None) scene.content.nodes in
+    List.rev reversed, selected
   | None -> match view.reading with
-  | None -> []
+  | None -> [], None
   | Some reading ->
       match reading.page with
-      | None -> []
+      | None -> [], None
       | Some page ->
-          String.split_on_char '\n'
+          let lines = String.split_on_char '\n'
             (Masc_tui_keeper_chat_projection.terminal_safe_text ~preserve_newlines:true page.text)
           |> List.concat_map (fun line ->
               if line = "" then [""] else
-              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line)
+              Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 6)) line) in
+          lines, None
 
 let browser_lane_url_line ~cols draft =
   let safe = Masc_tui_keeper_chat_projection.terminal_safe_text draft in
@@ -3981,8 +4167,12 @@ type state = {
      pair of options: the pair could not say "reading", so a file being
      fetched drew the same blank pane an empty file draws -- and nothing
      matched an arriving answer against the path still on screen, so a slow
-     read of one file could replace another the operator had since opened. *)
-  mutable code_file: (string, (string * string) list list) Masc_tui_fetched.t;
+     read of one file could replace another the operator had since opened.
+
+     An array, not a list: the diff pane resolves a drawn row's colouring by
+     that row's line number in the whole file, so the lookups are scattered
+     rather than sequential and a list walked from the front on every one. *)
+  mutable code_file: (string, (string * string) list array) Masc_tui_fetched.t;
   mutable code_file_scroll: int;
   (* The line the pane's cursor is on (0-based), the anchor a language-server
      question is asked at. j/k move it; the scroll follows to keep it
@@ -4247,6 +4437,13 @@ type state = {
   mutable msg_reasoning_visibility: reasoning_visibility;
   mutable msg_origin_display: Masc_tui_message_layout.origin_display;
   mutable msg_tool_visibility: tool_visibility;
+  (* Whether the turn dashboard is folded to its progress line. Folded is the
+     default: the block below the conversation grew a row per thing the
+     runtime had to say, and those rows sat between the reader and what they
+     typed, so the composer read as though the input had not left the
+     screen. Folded, the turn keeps one line; the rows that ask the operator
+     for something stay whatever this says. *)
+  mutable msg_turn_folded: bool;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
      request, so a second Enter used to be answered with "already in progress"
@@ -4964,7 +5161,13 @@ let create_state
   context_inspector_detail_scroll = 0;
   context_inspector_focus = Left_pane;
   context_inspector_turn_back = 0;
-  roster_pane_hidden = false;
+  (* The roster comes when it is asked for. Ctrl-L's Activity pane already
+     answers "what is every keeper doing right now", and a name-only column
+     beside the chat repeated that answer while taking 34 of the
+     conversation's cells. Ctrl-B brings it back, and that press is the whole
+     cost of being wrong here -- whereas the column was drawn on every frame
+     whether or not anyone read it. *)
+  roster_pane_hidden = true;
   acting_pane_hidden = false;
   acting_pane_scroll = 0;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
@@ -5433,6 +5636,7 @@ let create_state
      metadata when the operator needs to trace a turn. *)
   msg_origin_display = Masc_tui_message_layout.Origin_inline;
   msg_tool_visibility = tool_visibility;
+  msg_turn_folded = true;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
   msg_inflight = [];
@@ -5707,6 +5911,14 @@ type clamped_scroll =
      climbing, so coming back up took one keypress per step taken past the
      end. Same report the diff already makes. *)
   | Resource_scroll of int
+  (* The telemetry sections are lines the drawing formats out of the readings
+     it holds, so their count is not knowable at the keypress either. This
+     surface was the last one clamping for display without reporting: its
+     page key climbed without a ceiling, and coming back from past the end
+     took one press per step taken beyond it. Named here so End can reach the
+     bottom of a section at all -- without a report there is nothing to
+     correct the row it names. *)
+  | Metrics_scroll of int
   | Approval_detail_scroll of int
   (* Both modals draw over a surface rather than being one, and both counted
      their rows the same way the diff does: the patch modal out of the recorded
@@ -5716,6 +5928,32 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+
+(* What End names on a surface whose rows the drawing counts: a row past any
+   real end, so the frame's own clamp reports the last one back. The keypress
+   cannot work the number out -- that is what a {!clamped_scroll} is -- and a
+   value it can name has to be larger than any surface's rows.
+
+   [max_int] rather than a number someone judged large enough. An MCP resource
+   reading carries whatever text the server sent and the frame wraps it, so
+   the row count has no ceiling to sit above; a finite sentinel is a row the
+   reader can be left at, and it would be left there silently.
+
+   Arithmetic on this value is safe because it does not survive a frame. The
+   drawing clamps with [min state.resource_scroll max_scroll] and reports the
+   result back through [Resource_scroll], so by the time a page key adds to
+   [resource_scroll] it holds the real last row, not this. *)
+let clamped_scroll_end = max_int
+
+(* Moving down from [clamped_scroll_end]. The sentinel waits for a frame to
+   count the real rows and report them back, and some frames pass without
+   counting: a reading that has not arrived, and -- on a narrow terminal with
+   the list focused -- a frame that draws no reading at all. A key pressed
+   in between would carry the sentinel into [+], so the addition stops here
+   instead of wrapping negative and throwing the reader to the top. Moving up
+   needs no such care: [max 0] already holds that end. *)
+let scroll_down_from scroll ~by =
+  if scroll > max_int - by then max_int else scroll + by
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -5740,6 +5978,7 @@ let apply_clamped_scroll (state : state) = function
   | Repository_changes_diff_scroll value ->
       state.repository_changes_diff_scroll <- value
   | Resource_scroll value -> state.resource_scroll <- value
+  | Metrics_scroll value -> state.metrics_scroll <- value
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
@@ -6287,6 +6526,15 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       ; sc_preview_keep = None
       }
   in
+  (* One spelling for the overlay's rows. It draws the same list over three
+     surfaces, and the count the keys move through has to be the count the
+     frame draws, whichever surface it is over. *)
+  let repository_changes_listing () =
+    listing ~error:state.repository_changes_error
+      (match state.repository_changes with
+       | None -> 0
+       | Some s -> List.length s.Tui_decode.rcs_changes)
+  in
   function
   | System_logs ->
       if Option.is_some state.system_logs_detail_seq then None
@@ -6323,11 +6571,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
            | None -> 0
            | Some s -> List.length s.Tui_decode.hs_verdicts)
   | Repositories ->
-      if state.repository_changes_open then
-        listing ~error:state.repository_changes_error
-          (match state.repository_changes with
-           | None -> 0
-           | Some s -> List.length s.Tui_decode.rcs_changes)
+      if state.repository_changes_open then repository_changes_listing ()
       else
         listing ~error:state.repositories_error
           (match state.repositories with
@@ -6351,11 +6595,16 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
-  | Code when state.repository_changes_open ->
-      listing ~error:state.repository_changes_error
-        (match state.repository_changes with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.rcs_changes)
+  | Code when state.repository_changes_open -> repository_changes_listing ()
+  (* [d] on the roster, the detail and the chat pane opens the overlay
+     without leaving the Keepers surface, and the frame draws it there. With
+     no arm here the surface read as unlisted, so the up-key added its delta
+     to the scroll with no bound and stored a negative one; the frame then
+     indexed the list with it and the process exited (four times between
+     2026-09-05 and 2026-09-11). The three modes are the ones the frame
+     draws the overlay over. *)
+  | Keepers (Keeper_list | Keeper_detail | Keeper_message)
+    when state.repository_changes_open -> repository_changes_listing ()
   | Connectors when Option.is_some (browser_lane_on_screen state) -> None
   | Connectors ->
       listing ~error:state.connectors_error
@@ -6676,9 +6925,10 @@ let surface_row_texts (state : state) : surface -> string list option = function
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
            Some
-             (List.map
-                (fun segments -> String.concat "" (List.map fst segments))
-                rows)
+             (Array.to_list
+                (Array.map
+                   (fun segments -> String.concat "" (List.map fst segments))
+                   rows))
          (* Nothing to search through while the file is still being read, and
             nothing to search through if it failed. *)
          | Some (_, (Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
@@ -6731,8 +6981,57 @@ let surface_row_texts (state : state) : surface -> string list option = function
      approval instead of stepping to the next match. Verification met the
      same collision and moved its rejection to [x]; until Approvals makes
      that call, the safe answer is no row search. *)
+  (* Two lists that grew a row cursor with the jump keys and had no way to be
+     searched. Each is named by what an operator has in mind reaching for the
+     key: the run and who called it, the file that was written.
+
+     Approvals and Schedules are not here, and the reason is [n]. The key
+     that steps to the next match is the key those two surfaces give to
+     "deny this approval" and "write a new schedule". A search whose own
+     follow-through refuses an approval is worse than no search, so offering
+     it there needs a different step key rather than another arm here
+     (#35306). *)
+  | Fusion -> (
+      match state.fusion_mode with
+      | Fusion_detail _ | Fusion_historical_detail _ -> None
+      | Fusion_list -> (
+          match fusion_list_entries state with
+          | [] -> None
+          | entries ->
+              Some
+                (List.map
+                   (fun entry ->
+                     match entry with
+                     | Tui_decode.Fusion_retained_run run ->
+                         run.Tui_decode.fur_run_id ^ " "
+                         ^ run.Tui_decode.fur_keeper ^ " "
+                         ^ run.Tui_decode.fur_preset
+                     | Tui_decode.Fusion_historical_evidence evidence ->
+                         evidence.Tui_decode.fhe_post_id ^ " "
+                         ^ evidence.Tui_decode.fhe_title)
+                   entries)))
+  | Changes -> (
+      match state.changes with
+      | None -> None
+      | Some snapshot -> (
+          match snapshot.Tui_decode.fcs_changes with
+          | [] -> None
+          | changes ->
+              (* The address the row is drawn under, read from the one place
+                 that spells it. A second match here would find a row under an
+                 address the pane never shows. *)
+              Some
+                (List.map
+                   (fun change -> Tui_decode.file_change_address change)
+                   changes)))
+  (* The list pane only. With the text focused j/k scrolls the reading and
+     there is no row cursor for a match to land on, so the same condition the
+     cursor arm reads answers here: a search offered on one focus and silent
+     on the other would be the drift this pairing exists to prevent. *)
+  | Resources when state.resource_focus = Left_pane ->
+      Option.map (List.map Masc_tui_mcp.display_name) state.resources_list
   | Overview | Acting | Metrics | Keepers _ | Approvals | Schedules
-  | Fusion | Resources | Changes | Config | Tools ->
+  | Resources | Config | Tools ->
       None
 
 (* Whether the chat pane is parked somewhere other than the newest row.
@@ -6793,6 +7092,29 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
       String.equal pending.gp_keeper keeper_name)
     state.gate_pending
 
+(* The turn's status rows as the pane will draw them, folding included.
+
+   One function rather than two readings: the budget below counts what this
+   returns and the pane draws what this returns, which is the arrangement that
+   kept the unavailable row from going missing while the send hint still read
+   Enter:send. Folding would have been a second place to disagree. *)
+let keeper_message_visible_status_rows (state : state) live ~now =
+  let rows = Masc_tui_keeper_chat_transcript.status_rows ~now live in
+  if state.msg_turn_folded then
+    List.filter
+      (fun (kind, _) ->
+        Masc_tui_keeper_chat_transcript.status_row_survives_folding kind)
+      rows
+  else rows
+
+(* How many rows the fold took, which the folded progress line reports so the
+   count is never a thing the reader has to notice is missing. *)
+let keeper_message_folded_status_count (state : state) live ~now =
+  if not state.msg_turn_folded then 0
+  else
+    List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
+    - List.length (keeper_message_visible_status_rows state live ~now)
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -6815,19 +7137,12 @@ let keeper_message_status_rows (state : state) =
             progress row changes the text, never the row count, so the
             two clock reads cannot disagree on the number. *)
          List.length
-           (Masc_tui_keeper_chat_transcript.status_rows
-              ~now:(Unix.gettimeofday ()) live.tl_transcript))
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name
-       when Option.is_some (promoted_inflight_for_keeper state keeper_name) ->
-         2
-     | Some _ | None -> 0)
-  + (match state.msg_target_keeper_name with
-     | Some keeper_name ->
-         Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-           ~keeper_name
-         |> keeper_message_pending_status_rows
-     | None -> 0)
+           (keeper_message_visible_status_rows state live.tl_transcript
+              ~now:(Unix.gettimeofday ())))
+  (* The promoted line and the queued ones are entries in the history now --
+     the chat pane appends them to the same stream it scrolls, so the
+     conversation holds one time axis. Nothing is reserved for them here:
+     rows the history owns are the history's to budget. *)
   (* Pending input owns one USER-shaped header/body slot below the causal
      transcript. When its turn starts those two rows are handed to the active
      USER one-for-one, so the text does not jump through an older turn's
@@ -6835,9 +7150,13 @@ let keeper_message_status_rows (state : state) =
   (* One row whatever the queue holds, so the reservation cannot drift from
      the drawing: the pane names as many effects as fit on it and truncates
      the rest, the way every other single-line status row does. *)
+  (* Folded, the queue is a count on the progress line rather than a row of
+     its own -- which is the row #6 asked about, always there whether or not
+     anything was waiting on the operator. *)
   + (match state.msg_target_keeper_name with
      | Some keeper_name
-       when keeper_effects_at_the_gate state ~keeper_name <> [] ->
+       when (not state.msg_turn_folded)
+            && keeper_effects_at_the_gate state ~keeper_name <> [] ->
          1
      | Some _ | None -> 0)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
@@ -6898,7 +7217,7 @@ type palette_action =
 let code_cursor_line_symbols (state : state) =
   match Masc_tui_fetched.current state.code_file with
   | Some (_, Masc_tui_fetched.Ready rows) -> (
-      match List.nth_opt rows state.code_file_cursor with
+      match Rows.at (Rows.of_array rows) state.code_file_cursor with
       | None -> []
       | Some segments ->
           let name_kind kind =

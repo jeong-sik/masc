@@ -116,11 +116,13 @@ MASC는 단일 public library(`masc`)로 구성된다. `lib/` 아래 기능별 �
 | `masc_cost` | `masc-cost` | `bin/masc_cost.ml` | Token 사용량 집계, 비용 계산 CLI. |
 | `masc_tui` | `masc-tui` | `bin/masc_tui.ml` | Terminal UI. Keeper 목록, 상태, 연결 인터페이스. |
 
-낮부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):
+내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):
 
 | Executable | Entry Point | 역할 |
 |------------|-------------|------|
 | `public_tool_manifest` | `bin/public_tool_manifest.ml` | Tool manifest 생성 |
+| `keeper_store_layout_manifest` | `bin/keeper_store_layout_manifest.ml` | Keeper 런타임 저장소 레이아웃 manifest 생성 |
+| `gen_board_tool_registry` | `bin/gen_board_tool_registry.ml` | Board 도구 레지스트리 미러 코드 생성 |
 
 ## 7. Canonical Front Door and Internal Supporting Substrates
 

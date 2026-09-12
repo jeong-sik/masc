@@ -3809,6 +3809,12 @@
  (libraries alcotest masc_tui_render_memory masc_tui_types))
 
 (test
+ (name test_tui_planning_proof_mark)
+ (modules test_tui_planning_proof_mark)
+ (libraries alcotest masc masc_tui_planning_proof_mark masc_tui_ansi
+  masc_tui_message_layout masc_tui_theme))
+
+(test
  (name test_tui_esc_interrupt)
  (modules test_tui_esc_interrupt)
  (libraries alcotest masc_tui_esc_interrupt masc_tui_keeper_chat_transcript))

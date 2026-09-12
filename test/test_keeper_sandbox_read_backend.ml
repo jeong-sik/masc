@@ -2589,9 +2589,35 @@ let test_complete_binary_failure_has_safe_diagnostic () =
           (String_util.contains_substring detail "binary_bytes=4");
         Alcotest.(check bool) "exit preserved" true (String_util.contains_substring detail "exit=1")))
 
+let test_raw_prefix_bounds_command_and_preserves_binary () =
+  let script = {|#!/bin/sh
+case "$1" in
+  info|image) printf '[]\n'; exit 0;;
+  run)
+    while [ "$#" -gt 0 ] && [ "$1" != head ]; do shift; done
+    [ "$#" -eq 4 ] && [ "$2" = -c ] && [ "$3" = 4 ] || exit 2
+    printf '\377PNG'
+    exit 0;;
+  *) exit 2;;
+esac
+|} in
+  with_fake_docker script (fun () ->
+    let base_path = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let config = Workspace.default_config base_path in
+      let meta = { (make_meta ~name:"raw-prefix" ~sandbox:Keeper_types_profile_sandbox.Docker)
+        with sandbox_image = Some "alpine:test" } in
+      let path = Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) "capture" in
+      match Keeper_sandbox_read_backend.read_raw_prefix ~config ~meta ~host_path:path
+          ~max_bytes:4 ~timeout_sec:5. () with
+      | Ok bytes -> Alcotest.(check string) "binary prefix unchanged" "\255PNG" bytes
+      | Error detail -> Alcotest.fail detail))
+
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
+      ( "raw_prefix", [Alcotest.test_case "command bounded before binary transport" `Quick
+            test_raw_prefix_bounds_command_and_preserves_binary] );
       ( "should_route_read",
         [
           Alcotest.test_case "docker keeper routes" `Quick

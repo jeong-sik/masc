@@ -7,6 +7,8 @@ val digest : string -> string
 val write_blob : t -> string -> (Lane_addon_types.evidence, string) result
 val read_blob : t -> Lane_addon_types.evidence -> (string, string) result
 val save_binding : t -> instance_id:string -> Yojson.Safe.t -> (unit, string) result
+val save_action : t -> instance_id:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
+val load_action : t -> instance_id:string -> request_id:string -> (Yojson.Safe.t option, string) result
 val bindings : t -> (Yojson.Safe.t list, string) result
 val append_observation : t -> instance_id:string -> seq:int ->
   sources:Yojson.Safe.t -> Lane_addon_types.output -> (unit, string) result
@@ -16,8 +18,12 @@ val query_observations : t -> instance_id:string -> expected_seq:int -> max_byte
   since:float option -> until:float option -> lane_id:string option ->
   (Lane_addon_types.output, string) result
 (** Streams retained sequence files with bounded response and per-record reads.
-    Coverage records the scan cursor and an explicit incomplete result when the
-    response bound is reached or a retained interval cannot be read. *)
+    Matching rows have priority over source coverage. A second pass over the
+    inspected prefix returns coverage for selected records first, then other
+    source coverage, including observations without rows. Each coverage buffer
+    is bounded by the space remaining after rows. The query receipt identifies
+    the inspected prefix and explicitly reports omitted rows, omitted coverage,
+    or unreadable observations; source coverage is not a chronological ledger. *)
 val freeze : t -> instance_id:string -> binding:Yojson.Safe.t ->
   row_ids:string list -> (Yojson.Safe.t, string) result
 val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->

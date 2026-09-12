@@ -28,7 +28,8 @@ let render_instruction key vars =
   | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
 
 let build_keeper_system_prompt
-    ~instructions ?(keeper_name = "") ?(workspace_root = "") () =
+    ~instructions ?(keeper_name = "") ?(workspace_root = "")
+    ?(constitution = "") () =
   let custom =
     let s = String.trim instructions in
     if s = "" then ""
@@ -36,6 +37,17 @@ let build_keeper_system_prompt
       "\n"
       ^ render_instruction Prompt_names.keeper_instructions_custom [ "instructions", s ]
       ^ "\n"
+  in
+  (* The world's own articles (RFC-0442). Every keeper in a world reads the
+     same ones, so this sits ahead of the keeper-specific blocks and the shared
+     prefix stays maximal. A world that has written none renders nothing, which
+     is why adding this moved no bytes for worlds that do not use it. *)
+  let constitution_block =
+    let s = String.trim constitution in
+    if s = "" then ""
+    else
+      String.trim (render_instruction Prompt_names.keeper_constitution
+        [ "articles", s ]) ^ "\n\n"
   in
   let workspace_block =
     if workspace_root = "" then ""
@@ -66,6 +78,8 @@ let build_keeper_system_prompt
     ; "\n"
     ; render_instruction Prompt_names.keeper_tags_system_close []
     ; "\n\n"
+    ; (* ── World-shared block ─────────────────────────────────── *)
+      constitution_block
     ; (* ── Keeper-specific blocks ─────────────────────────────── *)
       identity_block
     ; workspace_block

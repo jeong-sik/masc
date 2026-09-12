@@ -12,6 +12,10 @@ type mount = { source : string; destination : string }
 type t = {
   id : string;
   name : string;
+  instance_id : string;
+  package : package;
+  artifact_store : Lane_addon_store.t option;
+  mutable action_schema : Yojson.Safe.t option;
   mutable client : Agent_core.Mcp.t option;
   cleanup : unit -> (unit, error) result;
   mutex : Eio.Mutex.t;
@@ -30,6 +34,7 @@ let error_to_string = function
 let ( let* ) = Result.bind
 let container_id t = t.id
 let container_name t = t.name
+let action_schema t = t.action_schema
 let owned_name instance_id =
   "masc-lane-" ^ Digestif.SHA256.(to_hex (digest_string instance_id))
 let valid_container_id id =
@@ -227,10 +232,13 @@ let stop t =
     Ok ()
 
 let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
-    ?(docker_command = "docker") ?(on_created = fun _ -> ()) () =
+    ?(docker_command = "docker") ?(on_created = fun _ -> ()) ?artifact_store () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
   let* () = validate_package package in
+  let* () = match package.action_tool, artifact_store with
+    | Some _, None -> Error (Invalid_package "action worker requires its owned artifact store")
+    | _ -> Ok () in
   let* package_mount = mount_argument
       { source = package.directory; destination = "/addon" } in
   let* mounted = List.fold_left (fun acc mount ->
@@ -300,7 +308,8 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
         try Eio.Flow.close source with Eio.Io _ | Unix.Unix_error _ -> ()) !stderr_source;
       stderr_source := None;
       Ok () in
-    let worker = { id; name; client = None; cleanup = worker_cleanup;
+    let worker = { id; name; instance_id; package; artifact_store; action_schema = None;
+                   client = None; cleanup = worker_cleanup;
                    mutex = Eio.Mutex.create (); stopping = false; removed = false } in
     let result = try
       on_created worker;
@@ -330,7 +339,17 @@ let start ~sw ~mgr ~instance_id ~(package : package) ?(mounts = [])
             String.equal tool.name "lane_observe") tools) then
           Error (Protocol_failed "package must advertise lane_observe in its initial tools/list page")
         else if worker.stopping then Error Stopped
-        else Ok worker
+        else
+          let* () = match package.action_tool with
+            | None -> Ok ()
+            | Some name ->
+                (match List.filter (fun (tool : Mcp_protocol.Mcp_types.tool) -> tool.name = name) tools with
+                 | [tool] ->
+                     let* () = Lane_addon_action.validate_schema tool.input_schema
+                       |> Result.map_error (fun detail -> Protocol_failed detail) in
+                     worker.action_schema <- Some tool.input_schema; Ok ()
+                 | _ -> Error (Protocol_failed "package must advertise exactly one configured action tool")) in
+          Ok worker
       with
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
         | Invalid_argument _) as exn -> Error (Protocol_failed (Printexc.to_string exn))
@@ -354,7 +373,9 @@ let observe t ~binding ~sources =
         let* client = match t.client with
           | Some client -> Ok client | None -> Error (Protocol_failed "worker initialization pending") in
         let* result = Agent_core.Mcp.call_tool_full client ~name:"lane_observe"
-            ~arguments:(`Assoc [ "binding", binding; "sources", sources ])
+            ~arguments:(`Assoc ([ "binding", binding; "sources", sources ] @
+              match t.package.action_tool with None -> []
+              | Some _ -> ["context", Lane_addon_action.context t.instance_id]))
           |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
         if t.stopping then Error Stopped
         else match result.Mcp_protocol.Mcp_types.is_error with
@@ -364,10 +385,43 @@ let observe t ~binding ~sources =
           | Some false | None ->
               match result.structured_content with
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
-              | Some json -> output_of_json json |> Result.map_error (fun detail -> Invalid_observation detail)
+              | Some json ->
+                  Eio_unix.run_in_systhread (fun () ->
+                    Lane_addon_packet.decode ?store:t.artifact_store
+                      ~max_bytes:t.package.resources.max_reply_bytes json)
+                  |> Result.map_error (fun detail -> Invalid_observation detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _
         | Invalid_argument _) as exn ->
           if t.stopping then Error Stopped
           else Error (Protocol_failed (Printexc.to_string exn)))
+
+(* This call only reports transport success or the package's explicit outcome.
+   Once dispatched, errors never establish that the environment was unchanged. *)
+let act t ~arguments =
+  if t.stopping then Error Stopped
+  else Eio.Mutex.use_ro t.mutex (fun () ->
+    if t.stopping then Error Stopped
+    else try
+      let* client = match t.client with Some client -> Ok client
+        | None -> Error (Protocol_failed "worker initialization pending") in
+      let* name, schema, store = match t.package.action_tool, t.action_schema, t.artifact_store with
+        | Some name, Some schema, Some store -> Ok (name, schema, store)
+        | _ -> Error (Protocol_failed "worker does not advertise an available action port") in
+      let* arguments = Lane_addon_action.validate ~schema ~name arguments
+        |> Result.map_error (fun detail -> Protocol_failed detail) in
+      let* result = Agent_core.Mcp.call_tool_full client ~name ~arguments
+        |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
+      match result.Mcp_protocol.Mcp_types.is_error with
+      | Some true -> Error (Protocol_failed (Agent_core.Mcp.text_of_tool_result result))
+      | None | Some false ->
+          (match result.structured_content with
+           | None -> Error (Protocol_failed "action tool must return structuredContent")
+           | Some json -> Eio_unix.run_in_systhread (fun () ->
+               Lane_addon_action.decode_result ~store ~max_bytes:t.package.resources.max_reply_bytes json)
+               |> Result.map_error (fun detail -> Protocol_failed detail))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> t.stopping <- true; raise exn
+    | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
+        Error (Protocol_failed (Printexc.to_string exn)))

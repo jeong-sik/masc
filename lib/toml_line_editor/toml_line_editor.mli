@@ -56,3 +56,94 @@ val edit_table_multiline_array :
 
 val edit_table_int : string -> path:string -> key:string -> value:int -> string
 (** Set a typed integer while retaining unrelated lines and comments. *)
+
+(** {1 Array-of-tables entries} *)
+
+type value =
+  | String of string
+  | Int of int
+  | Float of float
+  | Bool of bool
+(** A typed entry field. One [\[\[a.b\]\]] entry mixes types — a voice endpoint
+    carries [id] and [kind] strings, an [enabled] bool and a [timeout_seconds]
+    float in the same table — so a writer that rendered every field as a string
+    would quote the bool and the loader would refuse it by type. *)
+
+val value_line : key:string -> value:value -> string
+(** Render [key = value] in TOML's spelling for the type. A [Float] always keeps
+    a point or an exponent, so it does not read back as an integer. *)
+
+type entry_error =
+  | Inline_key_at_path of string
+      (** The parent table already assigns this path as a key. An empty endpoint
+          list is spelled [endpoints = []] today, and opening
+          [[[...endpoints]]] beside it makes the file refuse to load: a table
+          duplicated by an array of tables. *)
+  | Standard_table_at_path of string
+      (** The path already exists as a standard table [[a.b]]. One path cannot
+          be both spellings, and a line editor cannot merge them. *)
+
+val entry_error_message : entry_error -> string
+
+val is_table_array : path:string -> string -> bool
+(** Return [true] when [line] opens the array-of-tables [\[\[path\]\]], compared
+    by the key path the grammar reads from each. The array-of-tables counterpart
+    of {!is_table}, which answers [false] for the same path. *)
+
+val table_array_entry_ids : string -> path:string -> id_key:string -> string list
+(** The [id_key] value of every [\[\[path\]\]] entry, in file order. An entry
+    carrying no [id_key] line, or one whose value is not a string, is skipped:
+    {!upsert_table_array_entry} cannot address it either. *)
+
+val upsert_table_array_entry
+  :  string
+  -> path:string
+  -> id_key:string
+  -> id:string
+  -> fields:(string * value option) list
+  -> (string, entry_error) result
+(** Set [fields] on the [\[\[path\]\]] entry whose [id_key] is [id], appending a
+    new entry after the last existing one when no entry carries that id.
+
+    Only the lines named in [fields] are written. Every other line in the entry —
+    comments, blanks, fields not named — passes through unchanged, and a named
+    field the entry does not have yet is appended to the end of its body.
+
+    A field whose value is [None] is dropped from the entry, the way
+    {!edit_table_scalar} removes a key. Switching an endpoint from a hosted
+    provider to a local one has to drop [api_key_env]: left behind, it would
+    send an Authorization header the local server never asked for, and the
+    endpoint would answer 401 rather than fall through the chain.
+
+    [id_key] is skipped if it also appears in [fields]: [id] is the one source of
+    the entry's identity, and writing a second spelling of it from the field list
+    would let the two disagree.
+
+    Refused, writing nothing, when the path already exists in another shape --
+    see {!entry_error}. A line editor can add an entry beside other entries; it
+    cannot reconcile an array-of-tables with a key or a standard table of the
+    same path, and producing a file the loader rejects is worse than saying so.
+
+    Every entry carrying [id] is addressed, not only the first. Two entries
+    claiming one id is already a configuration this editor cannot choose
+    between, and applying to each keeps the call meaning what it says rather
+    than picking one silently and leaving the other to be found later. *)
+
+val remove_table_array_entry
+  :  string
+  -> path:string
+  -> id_key:string
+  -> id:string
+  -> string
+(** Drop the [\[\[path\]\]] entry whose [id_key] is [id]: its header, its body,
+    and any table named under its path, which is that entry's own.
+
+    Two things are left where they are. Comments above the header: an operator
+    wrote them about the endpoint, nothing in the text says where that block
+    begins, and the whisper endpoint in a live runtime.toml carries twelve lines
+    of measured notes above its header -- a rule that swallowed them would
+    delete the reason the setting exists. And a comment block sitting just above
+    the NEXT header, with the blank lines separating it: that block documents
+    the header below it, not this entry.
+
+    Every entry carrying [id] is dropped, not only the first. *)

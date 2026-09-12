@@ -190,6 +190,9 @@ printf '\n# install-smoke operator setting must survive reinstall\n' >> "$runtim
 printf 'operator-owned install-smoke bytes\n' > "$operator_file"
 cp "$runtime_config" "$work/runtime-before-upgrade.toml"
 cp "$operator_file" "$work/operator-before-upgrade.txt"
+cp -R "$base/.masc/skills/browser-lanes" "$work/browser-skill-bundled"
+printf '\nOperator install-smoke instruction.\n' >> "$base/.masc/skills/browser-lanes/SKILL.md"
+rm "$base/.masc/skills/browser-lanes/references/advanced.md"
 cp -R "$base/.masc/skills/browser-lanes" "$work/browser-skill-before-upgrade"
 rm "$optional_config"
 commit_before="$("$prefix/masc" build-commit)"
@@ -213,6 +216,52 @@ def files(root):
 assert files(base / '.masc/skills/browser-lanes') == files(work / 'browser-skill-before-upgrade'), 'installed builtin Skill package changed'
 PYUPGRADE
 echo "install-smoke: actual-artifact force reinstall preserved config, removed optional theme, and builtin Skills"
+
+# Explicit reviewed package replacement uses the actual native CLI. The whole
+# package can be diffed even when the installed binary has no source checkout.
+python3 - "$prefix/masc" "$base" "$work" <<'PYSKILL'
+from pathlib import Path
+import subprocess
+import sys
+binary, base_arg, work_arg = sys.argv[1:]
+base, work = Path(base_arg), Path(work_arg)
+args = [binary, 'skills-refresh', 'browser-lanes', '--base-path', base_arg]
+def cli(*extra):
+    return subprocess.run([*args, *extra], capture_output=True, text=True)
+def inspect_revisions():
+    result = cli()
+    assert result.returncode == 0, result.stderr
+    fields = dict(line.split(': ', 1) for line in result.stdout.splitlines() if ': ' in line)
+    return fields['installed revision'], fields['bundled revision']
+reviewed, reviewed_bundle = inspect_revisions()
+exported = work / 'browser-skill-export'
+result = cli('--export-to', str(exported))
+assert result.returncode == 0, result.stderr
+export_fields = dict(line.split(': ', 1) for line in result.stdout.splitlines() if ': ' in line)
+reviewed_bundle = export_fields['bundled revision']
+def files(root):
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+assert files(exported) == files(work / 'browser-skill-bundled'), 'export differs from binary seed'
+active = base / '.masc/skills/browser-lanes'
+(active / 'operator-race.txt').write_text('resource edited after review')
+result = cli('--apply', '--expected-revision', reviewed, '--expected-bundle-revision', reviewed_bundle)
+assert result.returncode != 0, 'stale package revision accepted'
+assert (active / 'operator-race.txt').read_text() == 'resource edited after review'
+previous = files(active)
+reviewed, reviewed_bundle = inspect_revisions()
+wrong_bundle = '0' * len(reviewed_bundle)
+assert reviewed_bundle != wrong_bundle
+result = cli('--apply', '--expected-revision', reviewed, '--expected-bundle-revision', wrong_bundle)
+assert result.returncode != 0, 'unreviewed bundle accepted'
+assert files(active) == previous, 'bundle rejection changed active package'
+result = cli('--apply', '--expected-revision', reviewed, '--expected-bundle-revision', reviewed_bundle)
+assert result.returncode == 0, result.stderr
+assert files(active) == files(exported), 'explicit update did not publish the whole package'
+backups = [p for p in (base / '.masc/skill-packages').iterdir() if p.is_dir()]
+assert any(files(p) == previous for p in backups), 'operator package backup missing'
+print('install-smoke: reviewed native package update, stale resource rejection, and backup verified')
+PYSKILL
+
 
 PORT="${INSTALL_SMOKE_PORT:-18946}"
 log="$work/server.log"

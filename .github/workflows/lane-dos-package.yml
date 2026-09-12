@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build the owned DOS environment and homebrew program
         run: |
           set -euo pipefail
@@ -41,6 +43,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: dos-lane-package-${{ matrix.arch }}-${{ github.sha }}
+          name: dos-lane-package-${{ matrix.arch }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: proof/
           if-no-files-found: error

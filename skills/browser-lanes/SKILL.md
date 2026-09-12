@@ -11,9 +11,10 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
 ## TUI 관측을 이어받기
 
 운영자가 Browser Lane의 `y`로 복사한 관측을 주면, 먼저 그 안의 `lane`·`clientId`·
-`tabId`·`url`과 요청을 함께 읽는다. 선택한 요소를 설명하는 데 충분한 `text`가
-이미 있다면 그대로 사용한다. 같은 탭을 다시 찾기 위해 BrowserTabs부터 반복하지 않는다.
-현재 페이지를 더 읽어야 하면 전달받은 범위를 사용해 필요한 관측으로 바로 이어간다.
+`tabId`·`url`과 요청을 함께 읽는다. 복사된 당시의 관측을 설명하는 요청이고 충분한
+`text`가 있으면 그 시점의 자료로 답한다. 현재 상태·변경 여부·최신 내용 요청이면
+복사된 text만으로 답하지 않고 같은 탭·범위를 재관측한다. 같은 탭을 다시 찾기 위해
+BrowserTabs부터 반복하지 않는다. 더 읽어야 하면 전달받은 범위에서 이어간다.
 
 `documentId`·`nodeId`는 선택 요소, `scope`는 관측의 읽기 범위다. 요청 의도에 따라 고른다.
 
@@ -30,7 +31,9 @@ description: Use MASC Browser tools to read or operate Firefox/Zen tabs, inspect
   `mode=regions` 읽기에서만 지원된다. 이 읽기에서는 받은 `url`을 expectedUrl로 쓴다.
   text/elements/screenshot/frames/dialog/downloads 및 `framePath`로 프레임 내부를 읽을 때는
   이 세 필드를 넣지 않는다. expectedUrl을 넣으면 `expectedUrl supports top-document scene or regions only`로
-  거절한다. 그런 읽기에는 받은 URL을 반환 결과와 대조하는 데 쓰고 탭·문맥·범위도 확인한다.
+  거절한다. 반환 스키마에 URL이 있는 관측만 받은 URL과 대조하고, 제공된 탭·문맥·범위를 확인한다.
+  dialog/downloads처럼 페이지 URL이 없는 응답에 URL 비교를 요구하거나 URL을 만들어 넣지 않는다.
+  페이지 정체성 확인이 별도로 필요할 때만 지원되는 페이지 읽기를 추가한다.
 - 실제 도구 스키마의 필드만 골라 전달한다. 복사된 JSON 전체나 없는 필드를 요청 인자로 넣지 않는다.
 - `viewport`와 `truncated`는 당시 관측의 범위다. 선택한 요소의 `text`를 영역 전체나
   화면 밖의 기록으로 확대하지 않는다. 복사된 좌표만으로 현재 화면에 클릭·드래그하지 않는다.
@@ -108,8 +111,11 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 - 먼저 다음 결정에 필요한 정보를 정한다. 내용 확인은 `mode=text`, 화면 안의 조작 대상과
   참조는 지원되는 `mode=scene`, 추가 컨트롤 정보는 `mode=elements`로 읽는다.
-  세 mode를 관례적으로 모두 호출하지 않는다. `truncated=true`이면 읽지 못한 부분까지
-  확인한 것으로 판단하지 않는다.
+  세 mode를 관례적으로 모두 호출하지 않는다. `truncated=true`이면 같은 scope·같은 한도의
+  읽기를 그대로 반복하지 않는다. 잘림 원인이 출력 한도이면 스키마가 허용하는 더 큰 maxChars로
+  읽거나, 관측한 더 작은 영역을 선택한다. 화면 밖 내용은 요청 범위 안에서 스크롤 후 재관측한다.
+  추가 관측이 불가능하거나 여전히 잘렸으면 실제 읽은 범위와 미확인 부분을 명시한다.
+  한도를 늘렸다는 사실만으로 화면 밖 기록까지 확인했다고 하지 않는다.
 - 화면 안의 텍스트·버튼·입력과 CSS 좌표를 함께 볼 때는 관측한 `tabId`로
   `BrowserRead mode=scene`을 사용한다. click/fill은 scene의 `documentId`와
   `nodeId` 쌍을 `BrowserInteract`에 전달할 수 있다. 이때 selector는 섞지 않는다.

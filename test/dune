@@ -5850,3 +5850,8 @@
  (name test_lane_addon_actions)
  (modules test_lane_addon_actions)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+(test
+ (name test_verification_pdf_inspection_budgets)
+ (modules test_verification_pdf_inspection_budgets)
+ (libraries masc_test_deps))

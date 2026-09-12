@@ -76,6 +76,29 @@ def run(executable: str) -> None:
         interact=interact,
         http_fixtures=fixtures)
 
+    def memory_interact(process, fd, _slave, output, _base):
+        h.tab_until(process, fd, output, b"MASC Memory")
+        h.wait_for_output(process, fd, output, b"Total 3 facts", start=0, timeout=5)
+        h.send_and_wait(process, fd, output, b"\r", b"\xe2\x96\xb8 alpha")
+        h.wait_for_output(
+            process, fd, output, b"the deploy needs assets", start=0, timeout=5)
+        h.send_and_wait(process, fd, output, b"/", b"/")
+        # Origin is a searchable field, even when the claim does not name it.
+        h.send_and_wait(process, fd, output, b"authored", b"/authored (1)")
+        h.send_and_wait(process, fd, output, b"\x7f" * len("authored"), b"/\xe2\x96\x8c")
+        h.send_and_wait(process, fd, output, b"unmatched-fact", b"/unmatched-fact (none)")
+        h.send_and_wait(process, fd, output, b"\r", b"/unmatched-fact (none) n/N")
+        # An empty filtered listing remains searchable, not an unsupported pane.
+        h.send_and_wait(process, fd, output, b"/", b"/")
+        h.send_and_wait(process, fd, output, b"deploy", b"/deploy (1)")
+        os.write(fd, b"\x1bq")
+
+    h.run_terminal_scenario(
+        executable,
+        description="Memory search distinguishes zero matches from an unavailable pane",
+        interact=memory_interact,
+        http_fixtures=h.memory_facts_http_fixtures())
+
 
 if __name__ == "__main__":
     run(os.path.abspath(sys.argv[1]))

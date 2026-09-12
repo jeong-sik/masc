@@ -6859,10 +6859,9 @@ let surface_row_texts (state : state) : surface -> string list option = function
           state.repositories
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
-        (match memory_fact_rows state with
-         | [] -> None
-         | rows ->
-             Some
+        Option.map
+          (fun _ ->
+             let rows = memory_fact_rows state in
                (List.map
                   (* The same fields [memory_fact_rows] filters on. A row the
                      filter kept for a field this projection left out is on
@@ -6881,6 +6880,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
                         row.Tui_decode.mi_source_path ^ " "
                         ^ row.Tui_decode.mi_reason)
                   rows))
+          state.memory_facts
       else
         Option.map
           (* Keeper id and the state label, which is the pair

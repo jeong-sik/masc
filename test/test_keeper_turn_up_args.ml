@@ -1753,6 +1753,23 @@ let test_actor_publication_starts_after_config_commit () =
   | Error error -> fail (P.error_to_string error)
 ;;
 
+let test_no_journal_startup_preserves_read_only_config () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let config_root = Filename.dirname runtime_path in
+  Fs_compat.mkdir_p config_root;
+  let permissions = (Unix.stat config_root).Unix.st_perm in
+  Eio.Switch.on_release ctx.sw (fun () -> Unix.chmod config_root permissions);
+  Unix.chmod config_root 0o500;
+  let report = Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path in
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | _ -> fail "read-only configuration without a journal requires no recovery write");
+  check bool "no transaction lock is created for a read-only no-op" false
+    (Sys.file_exists (runtime_path ^ ".lock"))
+;;
+
 let test_config_journal_recovery_corrupt_journal_flags_error () =
   with_persisting_context @@ fun ctx ->
   let base_path = ctx.config.Workspace.base_path in
@@ -2595,6 +2612,8 @@ let () =
             test_journal_rejects_foreign_paths_and_unreadable_files
         ; test_case "actor publication follows durable configuration commit" `Quick
             test_actor_publication_starts_after_config_commit
+        ; test_case "no-journal startup preserves read-only configuration" `Quick
+            test_no_journal_startup_preserves_read_only_config
         ; test_case
             "journal recovery recovers interrupted dual-write"
             `Quick

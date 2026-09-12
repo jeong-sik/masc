@@ -230,6 +230,17 @@ let recover_keeper_config_journal_on_startup ~base_path =
     ; record = None }
   in
   let report =
+    match Keeper_config_journal.load
+            ~journal_path:(Keeper_config_journal.journal_path_for_base_path ~base_path) with
+    | Ok None ->
+      { Keeper_config_journal.outcome = No_journal
+      ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+      ; record = None }
+    | Error detail ->
+      { Keeper_config_journal.outcome = Journal_corrupt detail
+      ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+      ; record = None }
+    | Ok (Some _) ->
     try
       Fs_compat.mkdir_p (Filename.dirname runtime_path);
       match File_lock_eio.with_durable_lock_observed

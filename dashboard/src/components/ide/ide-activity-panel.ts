@@ -65,9 +65,16 @@ interface ApiActivityEvent {
 interface ApiActivityResponse {
   readonly events?: ReadonlyArray<ApiActivityEvent>
   readonly latest_seq?: number
+  readonly total_matching_events?: unknown
+}
+
+interface ActivityHistoryWindow {
+  readonly loaded: number
+  readonly total: number | null
 }
 
 interface GraphFetchResult {
+  readonly history: ActivityHistoryWindow | null
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly workspaceId: string
   readonly ok: boolean
@@ -205,6 +212,7 @@ async function fetchActivityEvents(
   const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase)
   return {
     workspaceId: graph.workspaceId,
+    history: graph.history,
     // A bridge fetch failure must degrade the refresh tone instead of
     // rendering an empty-but-"live" feed: an operator cannot distinguish
     // "no keeper activity" from "the activity source is broken" otherwise.
@@ -217,14 +225,16 @@ async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
   try {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
-    if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: true }
-    }
-    const workspaceId = rawEvents[0].workspace_id || DEFAULT_WORKSPACE_ID
+    if (!Array.isArray(rawEvents)) throw new Error('Activity events are unavailable')
+    const reportedTotal = data.total_matching_events
+    const total = typeof reportedTotal === 'number' && Number.isSafeInteger(reportedTotal)
+      && reportedTotal >= rawEvents.length ? reportedTotal : null
+    const history = { loaded: rawEvents.length, total }
+    const workspaceId = rawEvents[0]?.workspace_id || DEFAULT_WORKSPACE_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, workspaceId))
-    return { events: mapped, workspaceId, ok: true }
+    return { events: mapped, workspaceId, ok: true, history }
   } catch {
-    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false }
+    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false, history: null }
   }
 }
 
@@ -456,6 +466,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const bridgeScoped = hasActivityBridgeScope(codebase)
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
   const loadedScopeKeyRef = useRef<string | null>(null)
+  const [historyWindow, setHistoryWindow] = useState<ActivityHistoryWindow | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
@@ -476,11 +487,12 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents(codebase)
+      const { events, workspaceId, ok, history } = await fetchActivityEvents(codebase)
       if (cancelled) return
       if (ok) {
         store.reset(workspaceId)
         store.seed(events)
+        setHistoryWindow(history)
         loadedScopeKeyRef.current = requestedScopeKey
         setLoadedScopeKey(requestedScopeKey)
         setRefreshState({
@@ -592,6 +604,15 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
             />
           ` : null}
         </div>
+      ` : null}
+      ${snapshotMatchesScope && historyWindow ? html`
+        <p class="ide-rail-meta" data-testid="ide-workspace-history-window" role="status">
+          ${historyWindow.total === null
+            ? `Workspace history: ${historyWindow.loaded} loaded · total unavailable`
+            : `Workspace history: ${historyWindow.loaded} of ${historyWindow.total} loaded`}
+          ${historyWindow.total !== null && historyWindow.total > historyWindow.loaded
+            ? html`<span> · older events are not loaded</span>` : null}
+        </p>
       ` : null}
       <ol
         class="ide-rail-list ide-activity-list"

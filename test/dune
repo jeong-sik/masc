@@ -1,3 +1,19 @@
+(rule
+ (alias runtest-test_dashboard_observation_quota)
+ (deps test_dashboard_observation_quota.py ../bin/main_eio.exe
+  ../scripts/fixtures/release-evidence/runtime.toml
+  ../scripts/fixtures/release-evidence/agent-core-models-overlay.toml)
+ (action (run python3 %{dep:test_dashboard_observation_quota.py} --binary %{dep:../bin/main_eio.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_dashboard_observation_quota)))
+
+(test
+ (name test_keeper_codex_current_context)
+ (modules test_keeper_codex_current_context)
+ (libraries masc_test_deps))
+
 (test
  (name test_keeper_vision_official_client)
  (modules test_keeper_vision_official_client)

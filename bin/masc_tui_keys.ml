@@ -447,6 +447,10 @@ let for_surface = function
       ; b Meta "Tab" "next"
       ]
   | Resources ->
+      (* Two panes with two meanings, and the keys below say so once rather
+         than per row: with the list focused the cursor moves and [/] lands
+         it on a match; with the text focused the same keys move the reading.
+         Both ends answer to Home and End. *)
       [ b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
@@ -454,9 +458,16 @@ let for_surface = function
       ; b Navigate "J / K" "scroll text"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while the detail is focused, read the adjacent resource"
+      ; b Navigate "PgUp/PgDn" "page"
+          ~help:"a page of the list, or of the text when it is focused"
+      ; b Navigate "Home/End" "top/bottom"
+          ~help:"the first or last resource, or the ends of the text when it                  is focused"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "back"
           ~help:"the text hands back to the list; the list leaves for Config"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a matching resource name; the list has to                  be focused for there to be a cursor to land"
+      ; b Search "n / N" "next / previous match"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
@@ -621,6 +632,12 @@ let footer_hints_code ~pane =
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources
+  (* The row search needs a cursor to land on, and with the text focused
+     there is none -- [surface_row_texts] says so too. Dropped here rather
+     than listed and silent. *)
+  |> List.filter (fun binding ->
+         (not detail_focus)
+         || not (String.equal binding.key "/" || String.equal binding.key "n / N"))
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            { binding with label = (if detail_focus then "scroll text" else "move") }

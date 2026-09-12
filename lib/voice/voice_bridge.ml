@@ -335,6 +335,20 @@ let probe_stt ~audio_file () =
                   match endpoint.Voice_config.kind with
                   | Voice_config.Voice_mcp ->
                     Skipped "this endpoint kind does not transcribe"
+                  (* The two below are skipped for different reasons, and one
+                     sentence for both would state something false. say speaks
+                     and has no transcription at all. Whisper does transcribe --
+                     [list_voices] says so in as many words -- but by running a
+                     command, while this probe only posts audio to an HTTP
+                     endpoint. No command transcription path exists yet:
+                     [transcribe_audio] posts over HTTP for every kind, so
+                     calling Whisper "does not transcribe" here would send the
+                     next reader looking for it in the wrong place. *)
+                  | Voice_config.Macos_say ->
+                    Skipped "this endpoint kind speaks and does not transcribe"
+                  | Voice_config.Whisper_cli ->
+                    Skipped
+                      "this endpoint transcribes by command, which this probe does not run"
                   | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
                     (match
                        transcribe_via_http_stt

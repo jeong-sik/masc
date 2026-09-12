@@ -37,9 +37,12 @@ SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수
 이미 적용된 클릭을 재실행하지 않는다.
 
 관측된 같은 탭 HTTP(S) 링크를 따라갈 때 현재 도구 목록에 있는
-`keeper_compose_browser-live-click-regions`를 호출할 수 있다. 이 경로는 실제 href를
+`keeper_compose_browser-live-click-content`로 목적지의 보이는 본문을 바로 읽을 수 있다.
+영역을 먼저 골라야 하는 화면에서는 `keeper_compose_browser-live-click-regions`를
+선택한다. 본문이 요청한 내용을 충족하면 추가 영역 읽기를 관례적으로 실행하지 않는다.
+두 경로는 실제 href를
 검증하고 직접 이동하므로 클릭 핸들러를 실행하지 않는다. 새 창 대상·다운로드는
-이동 전에 거절된다. 후속 영역 읽기는 `destinationUrl`을 `expectedUrl`로 확인한다.
+이동 전에 거절된다. 후속 본문 또는 영역 읽기는 `destinationUrl`을 `expectedUrl`로 확인한다.
 전환 오류이면 같은 clientId/tabId를 expectedUrl 없이 읽어 실제 URL과 내용을
 확인한다. 원래 urlBefore이면 아직 이동 중일 수 있다. 다른 URL이면 리다이렉트·
 정규화·로그인 화면일 수 있으므로 자동 승인하지 않는다. 사이트 Skill로 workspace·

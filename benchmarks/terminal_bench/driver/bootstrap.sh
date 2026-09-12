@@ -67,8 +67,13 @@ install -d -m 0700 "$MASC_BASE_PATH/.masc/ssh/known_hosts.d"
 ssh-keyscan -t ed25519 127.0.0.1 2>/dev/null \
   > "$MASC_BASE_PATH/.masc/ssh/known_hosts.d/local"
 chmod 600 "$MASC_BASE_PATH/.masc/ssh/known_hosts.d/local"
+# Verify through the pin, not around it. With StrictHostKeyChecking=no and
+# UserKnownHostsFile=/dev/null this read neither file, so an empty pin — a
+# keyscan that raced sshd — passed bootstrap and failed later inside the
+# keeper_up preflight, attributed to the keeper.
 ssh -i "$BENCH/ssh/id_ed25519" \
-  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile="$MASC_BASE_PATH/.masc/ssh/known_hosts.d/local" \
   root@127.0.0.1 true
 
 # --- token BEFORE server start (minting against a live base path makes the

@@ -56,8 +56,20 @@ def test_runtime_id_kwarg_wins(tmp_path):
     assert a.runtime_id == "kimi_coding.kimi-k2.7"
 
 
-def test_install_uploads_binary_driver_config(tmp_path):
+def test_install_uploads_binary_driver_config(tmp_path, monkeypatch):
+    # dist/ is gitignored, so calling the real install() made this fail rather
+    # than skip on a clean checkout, and it rendered into the repo tree as a
+    # side effect. Same fixture shape as the vendored-gh test below.
+    import agents.masc_agent as m
+
+    root = tmp_path / "bench"
+    (root / "dist").mkdir(parents=True)
+    for name in ("masc", "masc-exec-shim"):
+        (root / "dist" / name).write_text("")
+    (root / "driver").mkdir()
+
     async def go():
+        monkeypatch.setattr(m, "BENCH_ROOT", root)
         a = make_agent(tmp_path, arm="b")
         env = FakeEnv()
         await a.install(env)

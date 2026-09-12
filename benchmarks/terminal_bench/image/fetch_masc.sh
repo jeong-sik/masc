@@ -31,6 +31,15 @@ curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_
 chmod +x "${DIST_DIR}/gh"
 
 
+# Record what was downloaded. A release asset can be replaced or truncated,
+# and nothing else here would notice.
+( cd "${DIST_DIR}" && shasum -a 256 masc masc-exec-shim gh 2>/dev/null > SHA256SUMS ) || true
+
+# Verify by running it, and let that verdict stand. The old form was
+#   bash -c 'masc --version || masc --help | head -5'
+# whose inner shell inherits no errexit and ends in `head`, so it exits 0 for a
+# truncated download, a wrong-arch asset, or a binary missing every library —
+# while its comment claimed to verify the binary runs.
 docker run --rm --platform "${PLATFORM}" \
   -v "${DIST_DIR}:/opt/dist:ro" \
-  ubuntu:24.04 bash -c '/opt/dist/masc --version || /opt/dist/masc --help | head -5'
+  ubuntu:24.04 /opt/dist/masc --version

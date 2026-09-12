@@ -53,7 +53,10 @@ def test_aggregate_rows(tmp_path, monkeypatch, capsys):
     assert row2[2] == "fix-git__Def456" and row2[3] == "0"
 
 
-def test_aggregate_skips_malformed_json(tmp_path, monkeypatch, capsys):
+def test_a_malformed_trial_keeps_its_row(tmp_path, monkeypatch, capsys):
+    # It used to be dropped. A trial killed mid-write is still a trial, and
+    # removing it from the CSV shrinks the arm's denominator, which moves the
+    # pass rate up for free.
     jobs = tmp_path / "jobs"
     make_trial(jobs, "arm-b-20260910-1200/fix-git__Abc123")
     bad = jobs / "arm-b-20260910-1200" / "fix-git__Bad999"
@@ -64,4 +67,59 @@ def test_aggregate_skips_malformed_json(tmp_path, monkeypatch, capsys):
     aggregate.main()
 
     lines = capsys.readouterr().out.strip().splitlines()
-    assert len(lines) == 2
+    assert len(lines) == 3
+    marked = [line for line in lines if "fix-git__Bad999" in line]
+    assert len(marked) == 1
+    assert "unparseable" in marked[0]
+    assert marked[0].split(",")[3] == "", "a broken trial must not carry a reward"
+
+
+def test_zero_is_a_measurement_not_a_blank(tmp_path, monkeypatch, capsys):
+    # `or ""` rendered 0 as empty, so an agent that emitted nothing — the
+    # interesting failure — was indistinguishable from one nobody measured.
+    jobs = tmp_path / "jobs"
+    make_trial(
+        jobs, "arm-b-20260910-1200/fix-git__Zero",
+        agent_result={
+            "metadata": {"duration_ms": 0, "tool_calls": 0,
+                         "duplicate_tool_calls": 0, "masc_state": "Failed"},
+            "n_input_tokens": 0, "n_output_tokens": 0,
+            "n_cache_tokens": 0, "cost_usd": 0.0,
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+
+    row = capsys.readouterr().out.strip().splitlines()[1].split(",")
+    assert row[4] == "0"           # duration_ms
+    assert row[5:9] == ["0", "0", "0", "0.0"]
+    assert row[9:11] == ["0", "0"]
+
+
+def test_a_missing_measurement_stays_blank(tmp_path, monkeypatch, capsys):
+    jobs = tmp_path / "jobs"
+    make_trial(jobs, "arm-b-20260910-1200/fix-git__None",
+               agent_result={"metadata": {}})
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+    row = capsys.readouterr().out.strip().splitlines()[1].split(",")
+    assert row[4:] == ["", "", "", "", "", "", "", ""]
+
+
+def test_a_comma_in_a_field_does_not_shift_the_columns(tmp_path, monkeypatch, capsys):
+    # Rows were joined by hand, so any comma in task_name or masc_state moved
+    # every later column one place left.
+    import csv as _csv
+    import io
+
+    jobs = tmp_path / "jobs"
+    make_trial(jobs, "arm-b-20260910-1200/odd__Abc123",
+               task_name="fix,git",
+               agent_result={"metadata": {"masc_state": "Failed, no runtime"}})
+    monkeypatch.setattr(sys, "argv", ["aggregate.py", str(jobs)])
+    aggregate.main()
+
+    rows = list(_csv.reader(io.StringIO(capsys.readouterr().out)))
+    assert rows[1][1] == "fix,git"
+    assert rows[1][-1] == "Failed, no runtime"
+    assert len(rows[1]) == len(rows[0])

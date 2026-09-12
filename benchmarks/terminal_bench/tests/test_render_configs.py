@@ -74,7 +74,7 @@ def test_arm_b_skills_off():
 
 
 def test_arm_c_skills_on_no_composition():
-    keeper = keeper_toml("c", 1)
+    keeper = keeper_toml("c")
     # composition OFF = skills.names를 비-composition skill로 명시 제한한다.
     # (tools.attached_allow는 built-in을 gate하지 못하는 no-op이라 폐기.)
     assert "skills.names = [" in keeper
@@ -129,18 +129,18 @@ def test_tools_deny_maps_spawn_to_parallel_and_delegate_to_keepers():
     # spawn = parallel 기구 → parallel=False arm(b, c, d)에서 deny.
     # delegate = 다 keeper 위임 → keepers=1 arm(b-e)에서 deny.
     for arm in ("b", "c", "d"):
-        keeper = keeper_toml(arm, 1)
+        keeper = keeper_toml(arm)
         assert "tools.deny = [" in keeper
         for name in SPAWN + DELEGATE:
             assert f'"{name}"' in keeper, f"arm {arm} must deny {name}"
-    keeper_e = keeper_toml("e", 1)
+    keeper_e = keeper_toml("e")
     assert "tools.deny = [" in keeper_e
     for name in SPAWN:
         assert f'"{name}"' not in keeper_e, f"arm e keeps {name}"
     for name in DELEGATE:
         assert f'"{name}"' in keeper_e, f"arm e denies {name}"
     for arm in ("f", "g", "h"):
-        assert "tools.deny" not in keeper_toml(arm, 1), f"arm {arm} denies nothing"
+        assert "tools.deny" not in keeper_toml(arm), f"arm {arm} denies nothing"
 
 
 def test_claude_code_lane_renders_official_client_provider():
@@ -228,3 +228,14 @@ def test_http_lanes_declare_tool_calling():
     for runtime_id in ("anthropic.claude-sonnet-5", "openrouter.z-ai/glm-4.7-flash"):
         rt = (render_arm("b", runtime_id=runtime_id, effort="high") / "runtime.toml")
         assert "tools-support = true" in rt.read_text(), runtime_id
+
+
+def test_two_renders_of_one_arm_do_not_share_a_directory():
+    # harbor runs several trials of the same arm at once and each calls
+    # render_arm through install(). A shared configs/out/<arm> meant one
+    # trial's rmtree ran while another was mid-upload.
+    a = render_arm("b", runtime_id="anthropic.claude-sonnet-5", effort="high")
+    b = render_arm("b", runtime_id="anthropic.claude-sonnet-5", effort="high")
+    assert a != b
+    assert a.exists() and b.exists()
+    assert (a / "runtime.toml").read_text() == (b / "runtime.toml").read_text()

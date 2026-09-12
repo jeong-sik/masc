@@ -98,6 +98,9 @@ bench_install_deps() {
   # Everything perform_preflight probes, checked here by name instead of
   # surfacing one at a time as a keeper_up policy_rejection minutes later.
   missing=""
+  # Everything the operational install is for, not only what preflight probes:
+  # ca-certificates and a working sshd are equally load-bearing, and their
+  # absence used to surface as a TLS error from an unrelated curl.
   for tool in git rg gh df jq curl ssh; do
     command -v "${tool}" >/dev/null 2>&1 || missing="${missing} ${tool}"
   done

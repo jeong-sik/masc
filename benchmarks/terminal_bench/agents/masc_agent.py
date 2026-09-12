@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -57,6 +58,9 @@ class MascAgent(BaseInstalledAgent):
 
     def _container_env(self) -> dict[str, str]:
         provider = self.runtime_id.split(".", 1)[0]
+        if provider not in PROVIDERS:
+            raise ValueError(
+                f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
         key = os.environ.get(key_env)
         if not key:
@@ -95,7 +99,13 @@ class MascAgent(BaseInstalledAgent):
         for binary in binaries:
             await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
         await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
-        await environment.upload_dir(config_dir, f"{REMOTE}/config")
+        try:
+            await environment.upload_dir(config_dir, f"{REMOTE}/config")
+        finally:
+            # render_arm hands back a directory of its own so that
+            # concurrent trials of one arm cannot delete each other's
+            # config mid-upload. Whoever asked for it removes it.
+            shutil.rmtree(config_dir, ignore_errors=True)
         await self.exec_as_root(
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "
@@ -123,24 +133,48 @@ class MascAgent(BaseInstalledAgent):
             # Harbor가 agent error로 기록하도록 예외는 삼키지 않되, 그 전에
             # result.json을 회수해 context에 싣는다. 에피소드 실패 시 파일이
             # 없을 수 있어 || true로 회수 자체는 실패하지 않게 한다.
-            result = await self.exec_as_root(
-                environment, f"cat {REMOTE}/result.json 2>/dev/null || true")
-            if result.stdout and result.stdout.strip():
-                (Path(self.logs_dir) / "result.json").write_text(result.stdout)
-            self.populate_context_post_run(context)
+            # Nothing in here may raise. It runs in `finally`, so an
+            # exception raised while recovering the result would replace the
+            # episode failure this block exists to preserve — a truncated
+            # result.json would surface as a JSONDecodeError from the
+            # recovery path instead of as the run error.
+            try:
+                result = await self.exec_as_root(
+                    environment, f"cat {REMOTE}/result.json 2>/dev/null || true")
+                if result.stdout and result.stdout.strip():
+                    (Path(self.logs_dir) / "result.json").write_text(result.stdout)
+                self.populate_context_post_run(context)
+            except Exception:  # noqa: BLE001 - see above
+                self.logger.exception("recovering the episode result failed")
 
     def populate_context_post_run(self, context: AgentContext) -> None:
         result_path = Path(self.logs_dir) / "result.json"
         if not result_path.exists():
             return
-        data = json.loads(result_path.read_text())
+        try:
+            data = json.loads(result_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            # A truncated result.json is a fact about the run, not a reason to
+            # lose it.
+            context.metadata = {**(context.metadata or {}),
+                                "masc_state": f"result_unreadable: {exc}",
+                                "arm": self.arm, "runtime_id": self.runtime_id}
+            return
         final = data.get("final") or {}
         fallback = final.get("usage") or {}
-        # run_episode.sh emits episode-summed usage at the top level (from the
-        # keeper_chat_events journal); final.usage.* is the older fallback.
-        context.n_input_tokens = data.get("input_tokens", fallback.get("input_tokens"))
-        context.n_cache_tokens = data.get("cache_tokens", fallback.get("cache_tokens"))
-        context.n_output_tokens = data.get("output_tokens", fallback.get("output_tokens"))
+
+        def usage(key: str):
+            # run_episode.sh emits episode-summed usage at the top level, read
+            # from the agent-core trace dumps under .masc/traces. It always
+            # writes the keys, using null when there was nothing to sum, so
+            # `data.get(key, fallback)` never reaches the fallback — the key is
+            # present and the value is None. final.usage.* is the older shape.
+            value = data.get(key)
+            return fallback.get(key) if value is None else value
+
+        context.n_input_tokens = usage("input_tokens")
+        context.n_cache_tokens = usage("cache_tokens")
+        context.n_output_tokens = usage("output_tokens")
         context.metadata = {
             **(context.metadata or {}),
             "masc_state": data.get("state"),

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import shlex
 import sys
 from pathlib import Path
@@ -43,6 +44,7 @@ sys.path.insert(0, str(BENCH_ROOT / "configs"))
 
 from render_configs import (  # noqa: E402
     ARMS,
+    PROVIDERS,
     effective_runtime_id,
     render_arm,
 )
@@ -118,9 +120,10 @@ class KeeperToolsAgent(ClaudeCode):
         return f"{provider}.{name}"
 
     def _container_env(self) -> dict[str, str]:
-        from render_configs import PROVIDERS
-
         provider = self.keeper_runtime_id.split(".", 1)[0]
+        if provider not in PROVIDERS:
+            raise ValueError(
+                f"unknown provider {provider!r}; expected one of {sorted(PROVIDERS)}")
         key_env = PROVIDERS[provider]["api_key_env"]
         key = os.environ.get(key_env)
         if not key:
@@ -157,7 +160,13 @@ class KeeperToolsAgent(ClaudeCode):
         for binary in binaries:
             await environment.upload_file(binary, f"{REMOTE}/bin/{binary.name}")
         await environment.upload_dir(BENCH_ROOT / "driver", f"{REMOTE}/driver")
-        await environment.upload_dir(config_dir, f"{REMOTE}/config")
+        try:
+            await environment.upload_dir(config_dir, f"{REMOTE}/config")
+        finally:
+            # render_arm hands back a directory of its own so that
+            # concurrent trials of one arm cannot delete each other's
+            # config mid-upload. Whoever asked for it removes it.
+            shutil.rmtree(config_dir, ignore_errors=True)
         await self.exec_as_root(
             environment,
             f"chmod +x {REMOTE}/bin/masc {REMOTE}/driver/*.sh && "

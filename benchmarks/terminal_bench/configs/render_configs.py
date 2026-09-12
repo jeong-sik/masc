@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 BENCH_ROOT = Path(__file__).resolve().parents[1]
@@ -351,7 +352,8 @@ def seed_skills_block() -> str:
     return "\n".join(lines[start:end]).rstrip() + "\n"
 
 
-def keeper_toml(arm: str, index: int) -> str:
+def keeper_toml(arm: str) -> str:
+    """Every keeper in an arm gets the same profile; only the filename differs."""
     spec = ARMS[arm]
     lines = [
         "[keeper]",
@@ -402,9 +404,22 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
             f"effort {effort!r} is not admitted by Claude Code; "
             f"expected one of {CLAUDE_CODE_EFFORTS}")
 
-    root = (out_root or OUT_ROOT) / arm
-    if root.exists():
-        shutil.rmtree(root)
+    if out_root is not None:
+        root = out_root / arm
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True, exist_ok=True)
+        root.rmdir()
+    else:
+        # Never a shared path. harbor runs several trials of the same arm at
+        # once (run_matrix.sh passes -n ${CONCURRENCY:-2}) and each calls
+        # install() -> render_arm(); rendering into configs/out/<arm> meant one
+        # trial's rmtree ran while another was mid-upload, so a half-copied
+        # config could be uploaded as though it were complete. The caller owns
+        # the returned directory and removes it when the upload is done.
+        OUT_ROOT.mkdir(parents=True, exist_ok=True)
+        root = Path(tempfile.mkdtemp(prefix=f"{arm}-", dir=OUT_ROOT))
+        root.rmdir()
     shutil.copytree(REPO_ROOT / "config", root, ignore=shutil.ignore_patterns(
         "keepers", "keepers-default", "runtime.toml", "*.env",
         "agent-core-models-overlay.toml"))
@@ -427,7 +442,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
         keepers = root / "keepers"
         keepers.mkdir(exist_ok=True)
         for i in range(1, spec["keepers"] + 1):
-            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, i))
+            (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm))
         return root
 
     runtime_toml = RUNTIME_TOML.format(
@@ -505,7 +520,7 @@ def render_arm(arm: str, runtime_id: str, effort: str, out_root: Path | None = N
     keepers = root / "keepers"
     keepers.mkdir(exist_ok=True)
     for i in range(1, spec["keepers"] + 1):
-        (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm, i))
+        (keepers / f"bench-{i}.toml").write_text(keeper_toml(arm))
     return root
 
 

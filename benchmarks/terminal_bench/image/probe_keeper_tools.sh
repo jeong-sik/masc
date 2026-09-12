@@ -40,7 +40,11 @@ case "${provider}" in
   claude_code) key_env=CLAUDE_CODE_OAUTH_TOKEN ;;
   *) echo "unknown provider ${provider} in ${RUNTIME_ID}" >&2; exit 2 ;;
 esac
-key="$(eval printf '%s' "\${${key_env}:-}")"
+# Indirect expansion, not eval: `eval printf '%s' "\${VAR}"` expands the value
+# unquoted inside the eval, so a key containing whitespace loses it and a key
+# containing a glob is expanded against cwd. The corrupted value then reaches
+# the provider as an auth failure.
+key="${!key_env:-}"
 [[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
 [[ -x "${BENCH_DIR}/dist/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
 
@@ -117,12 +121,18 @@ mcp() {
 }
 
 echo "== masc_keeper_up ${KEEPER}"
-up="$(mcp 10 masc_keeper_up "$(printf '{"name":"%s","runtime_id":"%s","activation_mode":"manual","instructions":"You run shell commands in this container. Do exactly what you are asked, then stop."}' "${KEEPER}" "${EFFECTIVE_RUNTIME_ID}")" 180)"
+# The script runs without `set -e`, so this has to be checked. It also used to
+# grep the result for '"isError":true', which can never match: mcp_call already
+# returns non-zero on an error result and otherwise prints the unwrapped text,
+# which never carries the envelope key. A wiring failure was therefore reported
+# 300 seconds later as "keeper-did-not-act", blaming the model.
+up="$(mcp 10 masc_keeper_up "$(printf '{"name":"%s","runtime_id":"%s","activation_mode":"manual","instructions":"You run shell commands in this container. Do exactly what you are asked, then stop."}' "${KEEPER}" "${EFFECTIVE_RUNTIME_ID}")" 180)" \
+  || { echo "STAGE_FAIL keeper_up" >&2; exit 1; }
 echo "${up}" | head -c 600; echo
-grep -q '"isError":true' <<<"${up}" && { echo "STAGE_FAIL keeper_up" >&2; exit 1; }
 
 echo "== masc_keeper_msg -> write ${MARKER}"
-msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run exactly one command and then stop: touch %s . Your Execute tool takes an argv list and runs it without a shell, so do not use redirection, pipes, or any shell syntax."}' "${KEEPER}" "${MARKER}")" 300)"
+msg="$(mcp 11 masc_keeper_msg "$(printf '{"name":"%s","message":"Run exactly one command and then stop: touch %s . Your Execute tool takes an argv list and runs it without a shell, so do not use redirection, pipes, or any shell syntax."}' "${KEEPER}" "${MARKER}")" 300)" \
+  || { echo "STAGE_FAIL keeper_msg" >&2; exit 1; }
 echo "${msg}" | head -c 600; echo
 
 echo "== wait for the marker the keeper was asked to write"

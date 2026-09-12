@@ -954,11 +954,11 @@ let test_first_run_cli_runtime_binds_supporting_lanes () =
        | Error detail -> Alcotest.fail detail);
       check_first_run_lanes path "codex.codex" ~cli:true;
       (match Runtime.verifier_exact_lane_slot_ids () with
-       | Error _ -> ()
+       | Error detail -> Alcotest.fail detail
        | Ok slots ->
-         Alcotest.failf
-           "CLI first run must not give verifier_exact admitted slots, got: %s"
-           (String.concat ", " slots))))
+         Alcotest.(check (list string))
+           "CLI first run routes completion verification to configured client"
+           [ "codex.codex" ] slots)))
 ;;
 
 let test_first_run_fallback_order_and_preservation () =

@@ -1596,8 +1596,12 @@ def journey(binary, base_path, port, timeout, resume=False):
     print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
     configured = wizard(binary, base, timeout)
     if configured.get('readiness') == 'failed':
-        print('The model connection was not saved. Repair the workspace '
-              'configuration and run masc again.', file=sys.stderr)
+        # The reason is already on screen, printed where it was raised. Naming
+        # a cause here would be a guess: this path is reached by an unreadable
+        # workspace, an unreachable server and a refused credential alike.
+        print('The model connection was not saved, so nothing in this workspace '
+              'changed. Run masc again once the problem above is resolved.',
+              file=sys.stderr)
         return 1
     if configured.get('readiness') != 'verified':
         print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)

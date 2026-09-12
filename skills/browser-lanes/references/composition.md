@@ -20,6 +20,15 @@ composition은 `keeper_skill`의 Available instruction 목록에서 읽는 문�
 필요할 때 읽는다. 도구가 없으면 composition 지원을 가정하거나 `keeper_skill`로
 composition을 읽으려 하지 않는다.
 
+관측한 automation 탭에서 이미 아는 HTTP(S) URL의 본문을 바로 읽을 때는
+`keeper_compose_browser-navigate-content`를 사용할 수 있다. 이동 결과의 실제 URL을
+이어지는 `scene` 읽기에 전달한다. 반환된 본문이 요청한 내용을 충족하면 그 결과를
+사용하고, 범위가 부족하거나 잘렸을 때 필요한 영역을 다시 관측한다. 영역 선택이 먼저
+필요한 화면에서는 `keeper_compose_browser-navigate-regions`로 영역 목록부터 읽는다.
+두 도구를 관례적으로 연달아 호출하지 않는다. 이들은 automation 전용이며 live 로그인
+세션을 대신하지 않는다. 본문 읽기만 실패했다면 성공한 이동을 반복하지 않고 같은
+탭에서 BrowserRead만 재시도한다. 제목·대상·범위를 확인하는 사이트 판단은 유지한다.
+
 BrowserInteract 클릭 응답은 조작 접수와 원래 탭 정체를 나타낸다. 목적지 로딩 완료나
 SPA 채널 내용 전환을 증명하지 않는다. 링크가 새 탭을 열 수 있으므로 BrowserTabs와
 페이지 관측에서 목적지를 식별한 후 그 탭의 영역을 읽는다. URL만 바뀌어도 메시지는

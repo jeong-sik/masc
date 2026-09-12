@@ -31,6 +31,12 @@ val say_catalogue_of_output : string -> catalogue_voice list
     to show, in words meant for a reader who will type the name instead. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
+val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
+(** The container a kind's clips are written in. [say] encodes WAVE and has no
+    MP3 encoder at all; everything reached over a wire answers MP3. The clip
+    filename carries this, and every reader resolves a token by it, so the two
+    sides cannot disagree about what the bytes are. *)
+
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string

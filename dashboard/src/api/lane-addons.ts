@@ -28,9 +28,14 @@ const configurationSchema = Schema.Struct({
     applied_revision: nullableText, instance_id: nullableText,
   })),
 })
+const outputSelectionSchema = Schema.Union(
+  Schema.Struct({ lanes: Schema.NonEmptyArray(text), all_lanes: Schema.optional(Schema.Never) }),
+  Schema.Struct({ all_lanes: Schema.Literal(true), lanes: Schema.optional(Schema.Never) }),
+)
 const instanceSchema = Schema.Struct({
   instance_id: text, run_id: text, addon_id: text, title: text, revision: text,
   incarnation: text, action_schema: Schema.NullOr(jsonObject),
+  package: Schema.Struct({ outputs: Schema.Record({ key: text, value: outputSelectionSchema }) }),
   configuration: Schema.NullOr(instanceConfigurationSchema),
   phase: Schema.Struct({
     kind: Schema.Literal('attached', 'observing', 'failed', 'detaching', 'detached'),

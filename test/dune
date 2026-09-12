@@ -3510,6 +3510,16 @@
  (libraries alcotest masc_tui_frame))
 
 (test
+ (name test_tui_keeper_legend)
+ (modules test_tui_keeper_legend)
+ (libraries
+  alcotest
+  masc_tui_footer
+  masc_tui_render_prim
+  masc_tui_theme
+  masc_tui_types))
+
+(test
  (name test_tui_help_banner)
  (modules test_tui_help_banner)
  (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
@@ -5813,3 +5823,8 @@
  (name test_lane_addon_actions)
  (modules test_lane_addon_actions)
  (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+
+(test
+ (name test_verification_pdf_inspection_budgets)
+ (modules test_verification_pdf_inspection_budgets)
+ (libraries masc_test_deps))

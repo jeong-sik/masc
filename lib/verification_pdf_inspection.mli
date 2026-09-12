@@ -27,9 +27,13 @@ type error =
           too large: the pages are held together and base64-encoded into one
           response. [bytes] is zero when the page count alone refused it, before
           anything was rendered. *)
+  | Payload_budget_exceeded of { bytes : int; limit : int }
   | Storage_failed of string
 
 val error_to_string : error -> string
+val max_source_bytes : int
+val max_extracted_bytes : int
+val max_page_pixels : int
 val max_pages : int
 val max_total_image_bytes : int
 (** The defaults [inspect] applies. Submitted evidence is not trusted input, and
@@ -39,6 +43,7 @@ val max_total_image_bytes : int
 val inspect :
   ?max_pages:int ->
   ?max_total_image_bytes:int ->
+  ?max_extracted_bytes:int ->
   base_path:string ->
   max_image_bytes:int ->
   bytes:string ->

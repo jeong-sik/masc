@@ -375,6 +375,7 @@ type candidate_failure =
   | Candidate_timeout
   | Candidate_provider_error of Llm_provider.Http_client.http_error
   | Candidate_output_limit
+  | Candidate_invalid_output of string
 
 (* One walk shrinks the image at most once per distinct edge it is asked
    for. The live fleet declares three distinct caps, so a 4K screenshot costs
@@ -516,6 +517,7 @@ let run_candidates_outcome
        | None -> Vo_no_runtime "no schema-capable image runtime configured"
        | Some Candidate_timeout -> Vo_timeout
        | Some Candidate_output_limit -> Vo_truncated
+       | Some (Candidate_invalid_output detail) -> Vo_invalid_structured_response detail
        | Some (Candidate_provider_error err) ->
          Vo_provider
            { failure_class = failure_class_of_http_error err
@@ -638,6 +640,43 @@ let run_candidates_outcome
                  ~last_error:(Some Candidate_output_limit)
                  ~attempt_index:(attempt_index + 1)
                  rest
+             | Vo_invalid_structured_response detail
+               when (match response.Agent_core.Types.stop_reason with
+                     | EndTurn | StopSequence | Unknown _ -> true
+                     | StopToolUse | MaxTokens | Refusal | ContentFilter
+                     | RepetitionTruncation | PauseTurn | Compaction
+                     | ContextWindowExceeded | UnmatchedToolCalls -> false) ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"error"
+                 ~reason:"invalid_structured_output";
+               (* A finished reply whose JSON broke mid-string is the
+                  json_object flake, not a verdict: which backends break
+                  escaping differs per model, exactly as token ceilings do
+                  (2026-09-12, msx-retro-mania: one broken reply ended the
+                  whole vision call and the terminal composition killed the
+                  turn). A Refusal or ContentFilter stop is the model
+                  answering "no" -- the branch below returns that as the
+                  walk's final outcome instead of re-rolling the same
+                  pixels elsewhere. The detail names the runtime so an
+                  exhausted walk reports who answered. *)
+               continue_with
+                 (Candidate_invalid_output
+                    (Printf.sprintf "%s: %s" runtime_id detail))
+             | Vo_invalid_structured_response _ as final ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"error"
+                 ~reason:"invalid_structured_response";
+               final
+             | Vo_empty ->
+               record_vision_candidate_attempt
+                 ~runtime_id
+                 ~result:"error"
+                 ~reason:"empty_extraction";
+               continue_with
+                 (Candidate_invalid_output
+                    (Printf.sprintf "%s: empty extraction" runtime_id))
              | outcome ->
                record_vision_candidate_attempt
                  ~runtime_id

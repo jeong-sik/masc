@@ -2,6 +2,29 @@
 
 원래 목표는 사용자가 지적한 18개 문제를 해결하여 Keeper가 목표에 집중하고, 서로 협업하며, 기억과 작업을 이어가는 제품을 만드는 것이다. 아래 상태는 완료율이 아니다. 9월 10일 보존 기록과 9월 12일 실행 결과를 구분한다. 전체 목표는 진행 중이다.
 
+## 재점검과 다음 작업 준비 (2026-09-13, 현재 상태 직접 조회)
+
+전체 목표는 18개 문제와 첨부 계약의 제품 동작이다. 지금은 구현·검증 인프라의 진전과 사용자에게 보이는 완료 사이에 간격이 있다. 다음 작업은 실제 자율 Edit의 Chat 표시와 독립 원본 검사에 집중한다. 18개 항목의 완료율을 산출하지 않는다.
+
+- 원래 목표: Goal/Task에 집중하는 Keeper 팀이 비코드 산출물을 만들고, Fusion·동료 반론·기억을 실제 판단에 사용하며, 그 과정을 Dashboard/TUI/IDE에서 볼 수 있어야 한다. 모든 runtime의 10턴 및 1/2/4/24시간 연속성도 포함한다.
+- 누적 시나리오: 전시·연작·참여형 전시 산출물과 동료 검토 기록을 확보했다. 현재 저장소에서 세 Goal 모두 `awaiting_confirmation`을 다시 확인했다. task-004의 승인 기록은 있지만 원본 PPTX/MP4 Read 실패 뒤 렌더/제작자 검사 로그를 이용한 승인이다. 독립 바이너리 검사를 완료했다고 세지 않는다.
+- 현재 설치본: 포트18951은 `aad94bbf3fb90a4600496bf56d7590f02ff385ad`, version0.35.14, health ok다. 새 Chat 조회·Board/Fusion 검증·PPTX prerequisite 변경은 이 바이너리에 설치되지 않았다.
+- Chat: 실행 식별자 연결 #35547 및 오래된 출력/manifest 조회 #35567 구현을 제출했다. 이전 UI 191건/타입 검사 기록은 존재하지만, `26ee98cf40`의 Test34702833667과 Release34702835195는 `Keeper_tool_call_index` unbound module로 실패했다. 현재 원격 #35567은 다른 세션의 부모 병합을 포함한 `72bd4de4ee`이며 검사 진행/대기였다. 이 새 head의 성공은 아직 확인하지 않았다.
+- Board/Fusion 검증: `206c447685`의 Test34702739701은 foreign workspace source 조회가 예상과 달리 성공하는 case에서 6건 중 1건 실패했다. 단순 fixture 문제로 단정하지 않는다. 원격 #35536은 `707680884f`로 변경돼 있어 수정 전에 원격 구현과 대조해야 한다.
+- PPTX prerequisite: #35565 `449743276f`의 Test34702828002는 CLI 구현의 `base_path` 인자와 mli 선언 불일치로 실패했다. Python 검사 통과만으로 native 기능 완료를 선언하지 않는다. 실제 PPTX 원본 파서와 렌더 기반 독립 검사는 별도 미완료다.
+- MP4: #35532 `60f948bd80`의 PR build/release-check/typecheck는 성공, lint는 실패 상태였다. 이전 feature Test 성공과 현재 PR 전체 성공을 구별한다. 설치된 검증자의 실제 MP4 검사 증거는 아직 없다.
+- 증거 #35363의 이전 push는 성공했다. 원격과 로컬 `b6f0aa4b34`를 확인했으며 다른 세션의 main 병합을 보존했다. 제품 소스 변경은 각각 worktree에 있다.
+
+### 실행 순서와 완료 조건
+
+1. **Chat 사용자 흐름 완결.** #35567 현재 원격 변경을 먼저 수용·검토하고 실제 직접 라이브러리 의존성을 확인한다. 같은 source의 Test/Release 산출물로 소유한 격리 설치본을 교체한 뒤, 실제 자율 Edit의 execution_id → 출력 manifest → before/after SHA → 화면 diff가 이어지는지 desktop/mobile 스크린샷과 로그로 확인한다. 기존 실패한 전체 펼침 검사를 동일하게 반복하지 않는다.
+2. **독립 검증 완결.** Board/Fusion foreign-source 실패의 제품/fixture 원인을 분리한다. PPTX CLI 계약을 맞추고 workspace 관리 parser와 렌더를 연결한다. 설치된 검증자가 실제 PPTX를 파싱하고 실제 MP4를 디코딩하며 원문 Board/Fusion을 읽은 기록을 확보한다. 기존 task-004 승인을 뒤집거나 동일 증거를 재제출할 이유로 삼지 않는다.
+3. **남은 제품 경험 확장.** 11–14 통계·Tools/Skills·설정·Preset의 설치본/TUI 통합 수용, 15–16 LSP·Workspace·주석·메모·누적 이력의 IDE 흐름, 17–18 공유 기억의 의미 정확성·Local LLM 결과의 자발적 재사용을 진행한다. 1–10의 자율 협업을 다른 runtime과 과제에서 재현하고 장기 연속성과 failover 조건을 별도 측정한다.
+
+기존 산출물을 다시 만드는 새 과제보다 위 완료 조건을 먼저 닫는다. 사람 최종 확인은 세 시나리오 모두 별도이며 이번 gogo를 완료 확인으로 기록하지 않았다. 이번 점검에서 runtime 교체나 새로운 제품 소스 수정은 하지 않았다.
+
+직접 조회 근거: [설치본과 세 Goal](reassessment-20260913-next/runtime-and-goals.json), [Chat Test 실패](reassessment-20260913-next/ci-34702833667-failure-excerpt.txt), [Chat Release 실패](reassessment-20260913-next/ci-34702835195-failure-excerpt.txt), [Board/Fusion 실패](reassessment-20260913-next/ci-34702739701-failure-excerpt.txt), [PPTX prerequisite 실패](reassessment-20260913-next/ci-34702828002-failure-excerpt.txt). 아래 절은 각각 당시 관측이며 이 절의 현재 CI 결과를 대신하지 않는다.
+
 ## 현재 구현과 시나리오 상태 (2026-09-13 00:45 KST)
 
 - 오래된 자율턴 출력과 blob-backed 편집 manifest를 연결한 PR #35567 head `26ee98cf40`를 제출했다. Keeper별 정확한 execution_id GET 조회, 없음404·중복409·저장소503, 취소/동시Keeper 캐시 경계, 검증된 manifest의 before/after로 원본 버튼 표시를 구현했다. UI191개·Dashboard 타입 검사·선택 ESLint·OCaml파싱·독립 리뷰를 통과했고 Test34702833667과 Release34702835195를 요청했다. 설치본브라우저 수용은 남는다.

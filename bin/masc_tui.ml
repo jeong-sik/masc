@@ -5445,7 +5445,7 @@ let row_list (state : state) : row_list option =
         (match Masc_tui_fetched.current state.code_file with
          | Some (_, Masc_tui_fetched.Ready rows) ->
              Some
-               { rl_count = List.length rows
+               { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
                ; rl_place =
                    (fun index ->
@@ -11168,7 +11168,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
               if state.acting_scroll > 0 then begin
-                state.acting_scroll <- state.acting_scroll + 1;
+                state.acting_scroll <- Masc_tui_types.scroll_down_from state.acting_scroll ~by:1;
                 state.acting_unseen <- state.acting_unseen + 1
               end
           | Masc_tui_observer.Undecodable reason ->
@@ -11701,9 +11701,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  (List.map (fun (text, kind) ->
                       (Masc.Tui_decode.sanitize_terminal_text text, kind)))
           in
+          (* [rows] stays a list for the memo scan and the width fold just
+             below, both of which read it once front to back. The pane keeps
+             the array. *)
           state.code_file <-
             Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-              (Ok rows);
+              (Ok (Array.of_list rows));
           (* The jump that asked for this file may have named a line; the
              reset and the jump live together so neither overwrites the
              other. Consumed once -- the next plain open starts at the top. *)
@@ -11785,7 +11788,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                when String.equal open_path location.ll_path ->
                  let cursor =
                    max 0
-                     (min (location.ll_line - 1) (List.length rows - 1))
+                     (min (location.ll_line - 1) (Array.length rows - 1))
                  in
                  state.code_file_cursor <- cursor;
                  (* Follow the jump: a definition past the fold is a cursor
@@ -16402,11 +16405,13 @@ and is loaded on demand through keeper_skill.
            (match k with
             | "esc" | "q" | "Q" -> close ()
             | "j" | "down" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 1
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
             | "k" | "up" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
             | "d" | "pagedown" ->
-                state.link_modal_scroll <- state.link_modal_scroll + 5
+                state.link_modal_scroll <-
+                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:5
             | "u" | "pageup" ->
                 state.link_modal_scroll <- max 0 (state.link_modal_scroll - 5)
             | "g" | "home" ->
@@ -17047,8 +17052,14 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "\r" | "\n" | "enter") as key)
-         when state.view = Connectors && Option.is_some (browser_lane_on_screen state) ->
+               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+         when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
+           && (not (List.mem key ["tab"; "\t"; "shift-tab"])
+               || match browser_lane_on_screen state with
+                  | Some view ->
+                      Option.is_none view.client_picker && Option.is_none view.url_draft
+                      && (Option.is_some view.scene || Browser_lane_view.busy view)
+                  | None -> false) ->
            (match state.browser_lane with
             | None -> ()
             | Some view ->
@@ -17062,6 +17073,12 @@ and is loaded on demand through keeper_skill.
                 let read view =
                   state.browser_lane <- Some view;
                   launch_browser_lane state ~mailbox:async_messages Read
+                in
+                let reveal_selection selected =
+                  let terminal_rows, cols = get_terminal_size () in
+                  let scroll = Masc_tui_render.browser_lane_selection_scroll
+                    state ~terminal_rows ~cols selected in
+                  state.browser_lane <- Some { selected with scroll }
                 in
                 (match key with
                  | "esc" | "left" ->
@@ -17096,8 +17113,10 @@ and is loaded on demand through keeper_skill.
                       | _ -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
-                     if count > 0 then state.browser_lane <- Some {view with scene_cursor =
+                     if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
+                     reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
                      (match scene_context view with
                       | Some context -> copy_reference_to_terminal render_schedule context;
@@ -17105,12 +17124,15 @@ and is loaded on demand through keeper_skill.
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
-                      | Some scene, Some ({kind=Region _;_} as node) ->
+                      | Some scene, Some node ->
+                          (match scene_target_action node with
+                           | Some Read_region ->
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
-                      | Some scene, Some ({kind=Control {clickable=true;disabled=false;_};_} as node) -> launch_browser_lane state ~mailbox:async_messages
+                           | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
+                           | None -> ())
                       | _ -> ())
                  | "g" when view.source = Automation && not (busy view) ->
                      state.browser_lane <- Some { view with url_draft = Some "" }
@@ -17552,7 +17574,8 @@ and is loaded on demand through keeper_skill.
        | Some "\r" when state.view = Resources ->
            open_selected_resource state ~mailbox:async_messages
        | Some "J" when state.view = Resources ->
-           state.resource_scroll <- state.resource_scroll + 1
+           state.resource_scroll <-
+             Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
@@ -17658,7 +17681,14 @@ and is loaded on demand through keeper_skill.
                 let delta = match move with
                   | "j" | "down" -> 1 | "k" | "up" -> -1
                   | "pageup" -> -page | _ -> page in
-                state.acting_detail_scroll <- max 0 (state.acting_detail_scroll + delta))
+                (* G above leaves the sentinel here, and a frame that drew no
+                   evidence pane reports no clamp to replace it, so a step
+                   down in between would carry it into [+]. *)
+                state.acting_detail_scroll <-
+                  (if delta > 0 then
+                     Masc_tui_types.scroll_down_from state.acting_detail_scroll
+                       ~by:delta
+                   else max 0 (state.acting_detail_scroll + delta)))
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
          when state.view = Acting && state.acting_filter <> Masc_tui_acting.Turns ->
            let terminal_rows, _ = get_terminal_size () in
@@ -18395,9 +18425,9 @@ and is loaded on demand through keeper_skill.
                 (match state.repository_changes_diff_path with
                  | Some _ ->
                      state.repository_changes_diff_scroll <-
-                       max 0
-                         (state.repository_changes_diff_scroll
-                         + (direction * page))
+                       (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:page
+                   else max 0 (state.repository_changes_diff_scroll + (direction * page)))
                  | None ->
                      let cursor, scroll =
                        move_row_cursor state ~delta:(direction * page)
@@ -18422,7 +18452,9 @@ and is loaded on demand through keeper_skill.
                             ~delta:(direction * page)
                       | Right_pane ->
                           state.board_scroll <-
-                            max 0 (state.board_scroll + (direction * page)))
+                            (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.board_scroll ~by:page
+                   else max 0 (state.board_scroll + (direction * page))))
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with
@@ -18435,11 +18467,15 @@ and is loaded on demand through keeper_skill.
                          (min (count - 1) (state.fusion_cursor + (direction * page)))
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <-
-                       max 0 (state.fusion_scroll + (direction * page)))
+                       (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.fusion_scroll ~by:page
+                   else max 0 (state.fusion_scroll + (direction * page))))
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then
                   state.schedule_scroll <-
-                    max 0 (state.schedule_scroll + (direction * page))
+                    (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.schedule_scroll ~by:page
+                   else max 0 (state.schedule_scroll + (direction * page)))
                 else
                   let count =
                     match state.schedules with
@@ -18453,8 +18489,9 @@ and is loaded on demand through keeper_skill.
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
-                    max 0
-                      (state.verification_detail_scroll + (direction * page))
+                    (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:page
+                   else max 0 (state.verification_detail_scroll + (direction * page)))
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -18466,7 +18503,9 @@ and is loaded on demand through keeper_skill.
             | Harness ->
                 if Option.is_some state.harness_detail then
                   state.harness_detail_scroll <-
-                    max 0 (state.harness_detail_scroll + (direction * page))
+                    (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:page
+                   else max 0 (state.harness_detail_scroll + (direction * page)))
                 else
                   let cursor, scroll =
                     move_row_cursor state ~delta:(direction * page)
@@ -18482,16 +18521,24 @@ and is loaded on demand through keeper_skill.
                   ~target:(state.runtime_config_cursor + (direction * page))
             | Runtime when Option.is_some state.runtime_detail_target ->
                 state.runtime_detail_scroll <-
-                  max 0 (state.runtime_detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:page
+                   else max 0 (state.runtime_detail_scroll + (direction * page)))
             | System_logs when Option.is_some state.system_logs_detail_seq ->
                 state.system_logs_detail_scroll <-
-                  max 0 (state.system_logs_detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:page
+                   else max 0 (state.system_logs_detail_scroll + (direction * page)))
             | Keepers Keeper_detail when state.detail_tab = Detail_channels ->
                 state.detail_scroll <-
-                  max 0 (state.detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
+                   else max 0 (state.detail_scroll + (direction * page)))
             | Keepers Keeper_detail ->
                 state.detail_scroll <-
-                  max 0 (state.detail_scroll + (direction * page))
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.detail_scroll ~by:page
+                   else max 0 (state.detail_scroll + (direction * page)))
             (* The log pane owns its own height, so it pages by that rather
                than by [page]: the generic surface size counts chrome this
                pane does not have, and a page that overshoots the window skips
@@ -18519,8 +18566,9 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
-                       max 0
-                         (state.lane_run_detail_scroll + (direction * page))
+                       (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:page
+                   else max 0 (state.lane_run_detail_scroll + (direction * page)))
                  | Lanes_run_list _ ->
                      let count =
                        match state.lane_runs with
@@ -18568,7 +18616,10 @@ and is loaded on demand through keeper_skill.
                  (match state.resource_focus with
                   | Right_pane ->
                       state.resource_scroll <-
-                        max 0 (state.resource_scroll + (direction * page))
+                        (if direction > 0 then
+                          Masc_tui_types.scroll_down_from state.resource_scroll
+                            ~by:page
+                        else max 0 (state.resource_scroll + (direction * page)))
                   | Left_pane ->
                       move_list_by_rows state ~delta:(direction * page))
              (* No row list to page. Overview's two panes and Activity's ring
@@ -19116,7 +19167,7 @@ and is loaded on demand through keeper_skill.
            (match state.repository_changes_diff_path with
             | Some _ ->
                 state.repository_changes_diff_scroll <-
-                  state.repository_changes_diff_scroll + 1
+                  Masc_tui_types.scroll_down_from state.repository_changes_diff_scroll ~by:1
             | None ->
                 let cursor, scroll =
                   move_row_cursor state ~delta:1
@@ -19165,7 +19216,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_down
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19214,7 +19265,7 @@ and is loaded on demand through keeper_skill.
                   state.connectors_binding_cursor <- 0;
                   state.detail_scroll <- 0
                 end
-                else state.detail_scroll <- state.detail_scroll + 1
+                else state.detail_scroll <- Masc_tui_types.scroll_down_from state.detail_scroll ~by:1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
                   Metrics_tail.scroll_down
@@ -19222,7 +19273,7 @@ and is loaded on demand through keeper_skill.
                     ~content_height:(keeper_log_content_height state)
                     state.log_scroll
             | Keepers Keeper_calls ->
-                state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
+                state.keeper_calls_scroll <- Masc_tui_types.scroll_down_from state.keeper_calls_scroll ~by:1
             | Config when state.config_pane = Config_themes ->
                 let last = List.length (filtered_theme_entries ()) - 1 in
                 state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1);
@@ -19269,7 +19320,7 @@ and is loaded on demand through keeper_skill.
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
                       | Right_pane ->
-                          state.board_scroll <- state.board_scroll + 1)
+                          state.board_scroll <- Masc_tui_types.scroll_down_from state.board_scroll ~by:1)
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -19284,7 +19335,7 @@ and is loaded on demand through keeper_skill.
                      if state.planning_cursor < List.length goals - 1 then
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
-                     state.planning_scroll <- state.planning_scroll + 1)
+                     state.planning_scroll <- Masc_tui_types.scroll_down_from state.planning_scroll ~by:1)
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->
@@ -19294,10 +19345,10 @@ and is loaded on demand through keeper_skill.
                      if state.fusion_cursor < count - 1 then
                        state.fusion_cursor <- state.fusion_cursor + 1
                  | Fusion_detail _ | Fusion_historical_detail _ ->
-                     state.fusion_scroll <- state.fusion_scroll + 1)
+                     state.fusion_scroll <- Masc_tui_types.scroll_down_from state.fusion_scroll ~by:1)
             | Schedules ->
                 if Option.is_some state.schedule_detail_id then
-                  state.schedule_scroll <- state.schedule_scroll + 1
+                  state.schedule_scroll <- Masc_tui_types.scroll_down_from state.schedule_scroll ~by:1
                 else
                   let count =
                     match state.schedules with
@@ -19308,7 +19359,7 @@ and is loaded on demand through keeper_skill.
                     state.schedule_cursor <- state.schedule_cursor + 1
             | Overview ->
                 if Option.is_some state.task_detail_id then
-                  state.task_detail_scroll <- state.task_detail_scroll + 1
+                  state.task_detail_scroll <- Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
                 else if state.task_focus = Right_pane then begin
                   if state.task_cursor < List.length state.tasks - 1 then
                     state.task_cursor <- state.task_cursor + 1
@@ -19330,7 +19381,7 @@ and is loaded on demand through keeper_skill.
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then
                   state.verification_detail_scroll <-
-                    state.verification_detail_scroll + 1
+                    Masc_tui_types.scroll_down_from state.verification_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19351,7 +19402,7 @@ and is loaded on demand through keeper_skill.
                 (match state.lanes_mode with
                  | Lanes_run_detail _ ->
                      state.lane_run_detail_scroll <-
-                       state.lane_run_detail_scroll + 1
+                       Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
                  | Lanes_run_list _ ->
                      (let cursor, scroll =
                         move_row_cursor state ~delta:1
@@ -19369,7 +19420,7 @@ and is loaded on demand through keeper_skill.
                             (state.lanes_standalone_cursor + 1)))
             | Harness ->
                 if Option.is_some state.harness_detail then
-                  state.harness_detail_scroll <- state.harness_detail_scroll + 1
+                  state.harness_detail_scroll <- Masc_tui_types.scroll_down_from state.harness_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19419,7 +19470,7 @@ and is loaded on demand through keeper_skill.
                    cannot see. *)
                 match state.changes_diff_row with
                 | Some _ ->
-                    state.changes_diff_scroll <- state.changes_diff_scroll + 1
+                    state.changes_diff_scroll <- Masc_tui_types.scroll_down_from state.changes_diff_scroll ~by:1
                 | None ->
                     let cursor, scroll =
                       move_row_cursor state ~delta:1 ~cursor:state.changes_cursor
@@ -19436,7 +19487,7 @@ and is loaded on demand through keeper_skill.
                  state.connectors_scroll <- scroll)
             | Runtime ->
                 if Option.is_some state.runtime_detail_target then
-                  state.runtime_detail_scroll <- state.runtime_detail_scroll + 1
+                  state.runtime_detail_scroll <- Masc_tui_types.scroll_down_from state.runtime_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19464,7 +19515,8 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
-                  state.resource_scroll <- state.resource_scroll + 1
+                  state.resource_scroll <-
+                    Masc_tui_types.scroll_down_from state.resource_scroll ~by:1
                 else
                   let total =
                     match state.resources_list with
@@ -19473,12 +19525,12 @@ and is loaded on demand through keeper_skill.
                   in
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
-            | Acting -> state.acting_scroll <- state.acting_scroll + 1
+            | Acting -> state.acting_scroll <- Masc_tui_types.scroll_down_from state.acting_scroll ~by:1
             | Metrics -> state.metrics_scroll <- state.metrics_scroll + 1
             | System_logs ->
                 if Option.is_some state.system_logs_detail_seq then
                   state.system_logs_detail_scroll <-
-                    state.system_logs_detail_scroll + 1
+                    Masc_tui_types.scroll_down_from state.system_logs_detail_scroll ~by:1
                 else
                   (let cursor, scroll =
                      move_row_cursor state ~delta:1
@@ -19537,7 +19589,7 @@ and is loaded on demand through keeper_skill.
                     | Some (_, Masc_tui_fetched.Ready rows) ->
                         let cursor =
                           Masc_tui_scroll.cursor_up
-                            ~count:(List.length rows)
+                            ~count:(Array.length rows)
                             state.code_file_cursor
                         in
                         state.code_file_cursor <- cursor;
@@ -19926,7 +19978,7 @@ and is loaded on demand through keeper_skill.
                                 (min
                                    (Masc.Tui_decode.file_change_target_line change
                                     - 1)
-                                   (List.length rows - 1))
+                                   (Array.length rows - 1))
                             in
                             state.code_file_cursor <- cursor;
                             state.code_file_scroll <-

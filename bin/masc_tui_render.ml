@@ -258,8 +258,12 @@ let workspace_health_color = function
   | Workspace_health_unknown -> (Theme.warn ())
   | Workspace_health_ok -> (Theme.ok ())
 
+(* Syslog's own names for these levels, which is why "crit" is the word and
+   not a short spelling of one. The level used to read "critical" and the
+   badge fitted it to five cells, so the row that most needed reading was the
+   only one drawn cut: [crit~]. *)
 let attention_severity_label = function
-  | Attention_critical -> "critical"
+  | Attention_critical -> "crit"
   | Attention_bad -> "bad"
   | Attention_warning -> "warn"
   | Attention_info -> "info"
@@ -268,6 +272,36 @@ let attention_severity_color = function
   | Attention_critical | Attention_bad -> (Theme.bad ())
   | Attention_warning -> (Theme.warn ())
   | Attention_info -> (Theme.info ())
+
+(* The badge column, measured from the vocabulary rather than chosen for it.
+   Fitting the label to a fixed five cells did two things: it cut the longest
+   level, and it padded the shorter ones inside their own brackets, which drew
+   [bad  ] and [warn ] -- a gap before a closing bracket reads as a typo, not
+   as a column. Taking the width from the labels means a level added or
+   renamed later widens the column instead of being cut by it.
+
+   Critical and bad share a colour (see above), so the word is the only thing
+   that tells those two rows apart. That is the reason the word may not be
+   cut, and the reason this is measured instead of assumed. *)
+let attention_severity_badge_cells =
+  let bracket_cells = 2 in
+  bracket_cells
+  + List.fold_left
+      (fun widest severity ->
+        max widest
+          (Message_layout.display_width (attention_severity_label severity)))
+      0
+      [ Attention_critical; Attention_bad; Attention_warning; Attention_info ]
+
+(* [level] in its colour, padded to the column outside the colour so a theme
+   that paints a background does not paint the gap. *)
+let attention_severity_badge severity =
+  let drawn = "[" ^ attention_severity_label severity ^ "]" in
+  attention_severity_color severity
+  ^ drawn ^ Ansi.reset
+  ^ String.make
+      (max 0 (attention_severity_badge_cells - Message_layout.display_width drawn))
+      ' '
 
 (* Compact "how long" text three surfaces share: the Attention panel's item
    age, the Lanes table's idle column, and the Keeper operations preview --
@@ -605,14 +639,19 @@ let render_overview (state : state) =
     events_title);
 
   let attention_items_window = Rows.of_list ~first:0 ~height:row_budget.attention_rows attention_items in
+  let collapsed_events_window =
+    Rows.of_list ~first:event_window.oew_offset
+      ~height:row_budget.attention_rows collapsed_events
+  in
   for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
-      if i < List.length attention_items then
-        match Rows.at attention_items_window i with
-        | None -> ""
-        | Some a ->
-        let sev_color = attention_severity_color a.ai_severity in
-        let severity_label = attention_severity_label a.ai_severity in
+      (* No length guard: the window already answers [None] past the end,
+         which is the blank this drew. The guard that stood here counted the
+         whole list once per row. *)
+      match Rows.at attention_items_window i with
+      | None -> ""
+      | Some a ->
+        let severity_badge = attention_severity_badge a.ai_severity in
         (* The age answers "why is this still here": a stamped item shows how
            long ago its evidence happened, an unstamped one (a paused keeper,
            a waiting confirmation) shows an em dash because its producer put
@@ -631,18 +670,18 @@ let render_overview (state : state) =
              spends, and the events column beside this one guessed one too
              many: every event row came out a cell over its budget and was
              marked truncated whether or not anything was cut. The severity
-             label keeps its own fit -- that one is a fixed column, not a
-             guess at the rest of the row. *)
-          Printf.sprintf "%s[%s]%s %s%s%s %s"
-            sev_color (fit_width severity_label 5) Ansi.reset
+             badge pads itself to its own column, which is measured from the
+             level names rather than guessed at -- so it is the one part of
+             the row that is finished before it gets here. *)
+          Printf.sprintf "%s %s%s%s %s" severity_badge
             Ansi.dim (fit_width age_label 3) Ansi.reset
             (Terminal_text.single_line a.ai_summary)
-      else ""
     in
     let event_str =
       let event_index = i + event_window.oew_offset in
-      if event_index < event_count then
-        let e, run = List.nth collapsed_events event_index in
+      match Rows.at collapsed_events_window event_index with
+      | None -> ""
+      | Some (e, run) ->
         let tail =
           if run > 1 then Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
           else ""
@@ -651,7 +690,6 @@ let render_overview (state : state) =
           Ansi.dim e.timestamp Ansi.reset
           (Terminal_text.single_line e.content)
           tail
-      else ""
     in
     Buffer.add_string buf (Printf.sprintf "  %s %s%s%s %s\n"
       (fit_width attention_str (panel_width - 2))
@@ -991,7 +1029,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:"j/k:scroll  x:cancel  left/esc:back  r:refresh");
+       ~hints:"j/k:scroll  x:cancel  Left / Esc:back  r:refresh");
 
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
@@ -1556,7 +1594,7 @@ let question_hints (state : state) =
     match state.ask_answer_mode with
     | Ask_browsing ->
         Printf.sprintf
-          "j/k:move  y/n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
+          "j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  %s  a:answer a question  \
            r:refresh  Tab:next"
           walk_asks
     | Ask_answering { aam_ask_id } -> (
@@ -2434,7 +2472,7 @@ let board_read_layout = Board_read_layout.create ()
 let browser_lane_layout = Browser_lane_layout.create ()
 
 let browser_lane_rows ~cols (view : Browser_lane_view.t) =
-  (* The same three branches browser_lane_page_lines takes, so the key holds
+  (* The same three branches browser_lane_page_layout takes, so the key holds
      every input that decides a row. *)
   let content =
     match view.Browser_lane_view.scene with
@@ -2451,7 +2489,7 @@ let browser_lane_rows ~cols (view : Browser_lane_view.t) =
     }
   in
   Browser_lane_layout.get browser_lane_layout ~source ~render:(fun () ->
-    browser_lane_page_lines ~cols view)
+    browser_lane_page_layout ~cols view)
 ;;
 
 (** Render the Board surface (read view). *)
@@ -9821,7 +9859,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
   finish_surface state ~clamped:(Changes_diff_scroll scroll)
     ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
@@ -10022,7 +10060,7 @@ let render_changes_tree_diff (state : state)
     ; ds_scroll = state.changes_diff_scroll
     ; ds_unchanged = "  (this file matches its last commit)"
     ; ds_esc_hint = "esc closes"
-    ; ds_footer_hints = "j/k:scroll  left/esc:back  o:open in editor  q:quit"
+    ; ds_footer_hints = "j/k:scroll  Left / Esc:back  o:open in editor  q:quit"
     ; ds_surface_key = "changes"
     ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)
     }
@@ -10053,10 +10091,39 @@ let render_changes (state : state) =
    different actions: one is a setup gap, the other is something that was
    working and is not. A connector that is set up but unreachable is the row
    an operator acts on. *)
-let browser_lane_scroll_limit (state : state) ~terminal_rows ~cols view =
+let browser_lane_source_hint view =
+  match Browser_lane_view.selected_scene_target view with
+  | None -> None
+  | Some node ->
+      (match node.Masc.Browser_scene.source_context with
+       | Masc.Browser_source_context.Unmapped -> None
+       | (Located _ | Invalid _) as source ->
+           Some (Masc.Browser_source_context.label source))
+
+let browser_lane_fixed_rows view =
+  (* Status, selection, tab, URL, divider and text position are always drawn.
+     A source hint contributes a row only when the selected node has one. *)
+  6 + (if Option.is_some (browser_lane_source_hint view) then 1 else 0)
+
+let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let room = max 0 (max 1 (body_rows - 5) - (if Option.is_some view.Browser_lane_view.scene then 7 else 6)) in
+  max 0 (max 1 (body_rows - 5) - browser_lane_fixed_rows view)
+
+let browser_lane_scroll_limit state ~terminal_rows ~cols view =
+  let room = browser_lane_visible_rows state ~terminal_rows view in
   max 0 (Browser_lane_layout.count (browser_lane_rows ~cols view) - room)
+
+let browser_lane_selection_scroll state ~terminal_rows ~cols view =
+  let rows = browser_lane_rows ~cols view in
+  let room = browser_lane_visible_rows state ~terminal_rows view in
+  let limit = max 0 (Browser_lane_layout.count rows - room) in
+  let scroll = min limit view.Browser_lane_view.scroll in
+  match Browser_lane_layout.selected_row rows with
+  | None -> scroll
+  | Some _ when room = 0 -> scroll
+  | Some row when row < scroll -> row
+  | Some row when row >= scroll + room -> min limit (row - room + 1)
+  | Some _ -> scroll
 
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
@@ -10076,7 +10143,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some _, _ -> "j/k:choose  Enter:connect  r:reload connections  a:automation  Esc:back"
       | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
       | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None, None when Option.is_some view.scene -> "s:text  n/p:element  y:copy context  Enter:click  j/k:scroll text  r:observe  Ctrl-O:image"
+      | None, None when Option.is_some view.scene ->
+          let action = match Option.bind (selected_scene_target view) scene_target_action with
+            | Some Read_region -> "Enter:read region  "
+            | Some Click_control -> "Enter:click  "
+            | None -> "" in
+          action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -10133,8 +10205,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
          | Some draft -> browser_lane_url_line ~cols draft
          | None when Option.is_some view.scene ->
              (match List.nth_opt (scene_targets view) view.scene_cursor with
-              | Some node -> Printf.sprintf "  Element %d/%d: %s • n/p:select • y:copy context"
-                  (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
+              | Some node ->
+                  let label = match node.kind with Region _ -> "Region" | _ -> "Element" in
+                  Printf.sprintf "  %s %d/%d: %s • n/p:select • y:copy context"
+                    label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
          | None -> match view.source with
              | Live -> "  Live " ^ browser_label view ^ " • b:choose browser • a:automation"
@@ -10159,22 +10233,25 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              (if tab.active then " (active)" else ""));
       c.push_styled ~style:(Theme.recede ())
         (match view.scene, page with
-         | Some scene, _ -> "  " ^ Terminal_text.single_line scene.content.url ^ " • DOM order · viewport only · Ctrl-O:painted image"
+         | Some scene, _ ->
+             let scope = match scene.content.view, scene.content.scope with
+               | Browser_lane.Regions, _ -> "Page regions"
+               | Content, Some _ -> "Selected region"
+               | Content, None -> "Page content" in
+             "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
          | None, Some page -> Printf.sprintf "  %s • %d chars%s%s"
              (Terminal_text.single_line page.url) page.chars
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
-      (match view.scene with
+      (match browser_lane_source_hint view with
        | None -> ()
-       | Some _ -> c.push_styled ~style:(Theme.recede ())
-           (match selected_scene_target view with
-            | None -> "  Source unavailable"
-            | Some node -> "  " ^ Terminal_text.single_line (Masc.Browser_source_context.label node.source_context)));
+       | Some hint -> c.push_styled ~style:(Theme.recede ())
+           ("  " ^ Terminal_text.single_line hint));
       c.push_divider ();
       let lines = browser_lane_rows ~cols view in
       let total = Browser_lane_layout.count lines in
-      let room = max 0 (budget - (if Option.is_some view.scene then 7 else 6)) in
+      let room = max 0 (budget - browser_lane_fixed_rows view) in
       let max_scroll = max 0 (total - room) in
       let scroll = min max_scroll view.scroll in
       (* Read the window out of the retained array. [List.filteri] walked every
@@ -11937,12 +12014,13 @@ let render_code (state : state) =
                   which was never lexed; it keeps the plain red band. Each
                   lexed segment's reset is followed by re-opening the diff
                   background, so the band survives the lexer's own resets. *)
-               let lexed_line index =
+               let lexed_rows =
                  match Masc_tui_fetched.current state.code_file with
                  | Some (_, Masc_tui_fetched.Ready file_rows) ->
-                   List.nth_opt file_rows (index - 1)
-                 | Some (_, _) | None -> None
+                     Rows.of_array file_rows
+                 | Some (_, _) | None -> Rows.of_array [||]
                in
+               let lexed_line index = Rows.at lexed_rows (index - 1) in
                for i = 0 to content_height - 1 do
                  match Rows.at rows_window (scroll + i) with
                  | Some row ->
@@ -12108,7 +12186,7 @@ let render_code (state : state) =
              box_empty pane_buf pane_cols
            done
        | Some (open_path, Masc_tui_fetched.Ready file_rows) ->
-           let total_lines = List.length file_rows in
+           let total_lines = Array.length file_rows in
            let max_scroll = max 0 (total_lines - content_height) in
            let scroll = max 0 (min state.code_file_scroll max_scroll) in
            let hscroll =
@@ -12187,7 +12265,7 @@ let render_code (state : state) =
                      Ansi.reset
                | Some (_, false) | None -> String.make blame_margin_cells ' ')
            in
-           let file_rows_window = Rows.of_list ~first:scroll ~height:content_height file_rows in
+           let file_rows_window = Rows.of_array file_rows in
            for i = 0 to content_height - 1 do
              match Rows.at file_rows_window (scroll + i) with
              | Some segments ->
@@ -15594,7 +15672,7 @@ let render_answering (state : state) =
   framed_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"[j/k] Move · [Enter] Open Chat · [Esc] Close");
+       ~hints:"j/k:move  Enter:open chat  Esc:close");
   finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -15634,7 +15712,7 @@ let render_agenda (state : state) =
   |> List.iter (fun line -> framed_line buf cols (paint line));
   framed_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"[j/k] Scroll · [Esc] Close");
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
   finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
 ;;
 

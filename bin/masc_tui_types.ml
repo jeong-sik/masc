@@ -3507,6 +3507,15 @@ type sandbox_logs_request = {
   slr_started_ns: int64;
 }
 
+(* Each read has a generation; overlapping reads retain the pending interval's
+   start, but only the newest response may clear it or populate the view. *)
+type detail_read_request = {
+  drr_tab: keeper_detail_tab;
+  drr_keeper: string;
+  drr_generation: int;
+  drr_started_ns: int64;
+}
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -3773,30 +3782,8 @@ type state = {
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable keeper_run_cursor: int;
-  (* When the detail screen last asked for the tab it is on. The tabs that
-     read over HTTP draw "(loading...)" until their answer lands, and without
-     a start there is no way to say how long that has been.
-
-     Monotonic nanoseconds from [Mtime_clock.elapsed_ns], not a wall clock: the
-     only question asked of this stamp is how long a read has been pending, and
-     NTP or an operator moving the system clock makes a wall clock answer that
-     wrongly -- backwards it suppresses the count, forwards it reports an
-     arbitrary wait. The clock is the caller's because this module does not
-     depend on one.
-
-     One stamp per tab and Keeper, not one for the screen and not one per tab. A
-     background read finishing elsewhere launches its own detail read, and that
-     read is often the same tab for a different Keeper: Identity_switch_set
-     relaunches Identity for the Keeper whose switch landed, which may no longer
-     be the selected one. Keyed by tab alone, that write rewrote the stamp under
-     the Keeper on screen and restarted an elapsed count for a read that never
-     restarted.
-
-     Entries are not removed when a read lands. The loading row is only drawn
-     while a read is pending, and every way of reaching a tab relaunches its
-     read, so a landed stamp is never read; the list is bounded by the four tabs
-     that read times the Keepers visited. *)
-  mutable detail_read_started_at: ((keeper_detail_tab * string) * int64) list;
+  mutable detail_reads: detail_read_request list;
+  mutable detail_read_generation: int;
   mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
   mutable keeper_sandbox_view_error: string option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
@@ -5085,29 +5072,55 @@ let pending_elapsed_s ~now_ns started_ns =
       Int64.to_int (Int64.div (Int64.sub now_ns since) nanoseconds_per_second))
     started_ns
 
-(* When the read this tab is waiting for, for this Keeper, was asked for. *)
-let detail_read_started (state : state) ~tab ~keeper =
-  List.assoc_opt (tab, keeper) state.detail_read_started_at
+let pending_detail_read (state : state) ~tab ~keeper =
+  List.find_opt
+    (fun request -> request.drr_tab = tab && String.equal request.drr_keeper keeper)
+    state.detail_reads
 
-(* The first ask wins. What this stamp answers is how long the operator has been
-   looking at a tab with nothing on it, and that wait does not restart when the
-   TUI asks again: the Identity tab polls while an OAuth attachment settles, so a
-   stamp replaced on every ask sat at zero for as long as the polling lasted.
-   {!clear_detail_read} is what ends a wait -- the answer arriving. *)
+let detail_read_started state ~tab ~keeper =
+  Option.map (fun request -> request.drr_started_ns)
+    (pending_detail_read state ~tab ~keeper)
+
+(* A refresh supersedes the response, not the elapsed interval. Periodic OAuth
+   polling waits for an in-flight read; explicit refreshes and service switches
+   may still supersede it so a pre-mutation response cannot win. *)
 let mark_detail_read_started (state : state) ~tab ~keeper ~now_ns =
-  let key = (tab, keeper) in
-  if not (List.mem_assoc key state.detail_read_started_at) then
-    state.detail_read_started_at <- (key, now_ns) :: state.detail_read_started_at
+  let started_ns =
+    match pending_detail_read state ~tab ~keeper with
+    | Some request -> request.drr_started_ns
+    | None -> now_ns
+  in
+  state.detail_read_generation <- state.detail_read_generation + 1;
+  let request =
+    { drr_tab = tab; drr_keeper = keeper;
+      drr_generation = state.detail_read_generation; drr_started_ns = started_ns }
+  in
+  state.detail_reads <- request :: List.filter
+      (fun pending -> pending.drr_tab <> tab || not (String.equal pending.drr_keeper keeper))
+      state.detail_reads;
+  request
 
-(* The wait is over: this tab has something on it for this Keeper. Called where
-   the view is populated and where the read's refusal is put on screen -- a
-   refusal is an answer the operator can read and act on, so the tab is no
-   longer blank. What does not end a wait is a poll that completes with nothing
-   to show: the Identity tab polls while an OAuth attachment settles, and those
-   rounds leave the tab as empty as they found it. *)
-let clear_detail_read (state : state) ~tab ~keeper =
-  state.detail_read_started_at <-
-    List.remove_assoc (tab, keeper) state.detail_read_started_at
+(* A current terminal answer retires its wait, even off screen or on error.
+   Superseded responses cannot retire or populate a newer read. The caller
+   still checks selection before putting an accepted answer on screen. *)
+let finish_detail_read (state : state) request =
+  let current =
+    match pending_detail_read state ~tab:request.drr_tab ~keeper:request.drr_keeper with
+    | Some pending -> pending.drr_generation = request.drr_generation
+    | None -> false
+  in
+  if current then
+    state.detail_reads <-
+      List.filter (fun pending -> pending.drr_generation <> request.drr_generation)
+        state.detail_reads;
+  current
+
+let detail_read_waiting state ~tab ~keeper =
+  Option.is_some (pending_detail_read state ~tab ~keeper)
+  || (tab = Detail_sandbox
+      && match state.keeper_sandbox_logs_inflight with
+         | Some request -> String.equal request.slr_keeper keeper
+         | None -> false)
 
 let selected_keeper (state : state) =
   List.nth_opt state.keepers state.keeper_cursor
@@ -5434,7 +5447,8 @@ let create_state
   config_scroll = 0;
   detail_tab = Detail_info;
   keeper_run_cursor = 0;
-  detail_read_started_at = [];
+  detail_reads = [];
+  detail_read_generation = 0;
   keeper_sandbox_view = None;
   keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;

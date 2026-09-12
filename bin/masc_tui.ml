@@ -2023,9 +2023,9 @@ type async_msg =
   | Task_cancel_done of string * (string, string) result
   | Verification_evidence_loaded of
       string * (Masc.Tui_decode.verification_evidence, string) result
-  | Keeper_config_view_loaded of string * (string list, string) result
+  | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Keeper_sandbox_view_loaded of
-      string * (Masc_tui_keeper_sandbox.t, string) result
+      Masc_tui_types.detail_read_request * (Masc_tui_keeper_sandbox.t, string) result
   | Keeper_sandbox_logs_loaded of
       string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Runtime_config_view_loaded of
@@ -2077,9 +2077,9 @@ type async_msg =
       string * string * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of
       string * (Masc_tui_mcp.resource_content list, string) result
-  | Github_identity_view_loaded of string * (string list, string) result
+  | Github_identity_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
   | Identity_providers_loaded of
-      string * (Masc_tui_types.identity_provider list, string) result
+      Masc_tui_types.detail_read_request * (Masc_tui_types.identity_provider list, string) result
   | Identity_switch_set of
       string * string * bool * (unit, string) result
       (** keeper, provider, the state the operator asked for, and whether
@@ -3954,7 +3954,7 @@ let mark_detail_read_started state ~tab ~keeper =
     ~now_ns:(Mtime_clock.elapsed_ns ())
 
 let launch_keeper_config_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name;
+  let request = mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3963,7 +3963,7 @@ let launch_keeper_config_view state ~mailbox keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_config_view_loaded (keeper_name, result))
+    enqueue_async mailbox (Keeper_config_view_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3973,10 +3973,10 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_config_view_loaded
-           (keeper_name, Error "Eio switch is unavailable"))
+           (request, Error "Eio switch is unavailable"))
 
 let launch_keeper_sandbox_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name;
+  let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -3985,7 +3985,7 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_sandbox_view_loaded (keeper_name, result))
+    enqueue_async mailbox (Keeper_sandbox_view_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3995,7 +3995,7 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_sandbox_view_loaded
-           (keeper_name, Error "Eio switch is unavailable"))
+           (request, Error "Eio switch is unavailable"))
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -4031,7 +4031,7 @@ let launch_keeper_sandbox_logs state ~mailbox keeper_name =
          (keeper_name, generation, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name;
+  let request = mark_detail_read_started state ~tab:Detail_github ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4043,7 +4043,7 @@ let launch_github_identity_view state ~mailbox keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Github_identity_view_loaded (keeper_name, result))
+    enqueue_async mailbox (Github_identity_view_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4053,10 +4053,10 @@ let launch_github_identity_view state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Github_identity_view_loaded
-           (keeper_name, Error "Eio switch is unavailable"))
+           (request, Error "Eio switch is unavailable"))
 
 let launch_identity_view state ~mailbox keeper_name =
-  mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name;
+  let request = mark_detail_read_started state ~tab:Detail_identity ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -4065,7 +4065,7 @@ let launch_identity_view state ~mailbox keeper_name =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Identity_providers_loaded (keeper_name, result))
+    enqueue_async mailbox (Identity_providers_loaded (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -4074,7 +4074,7 @@ let launch_identity_view state ~mailbox keeper_name =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Identity_providers_loaded (keeper_name, Error "Eio switch is unavailable"))
+        (Identity_providers_loaded (request, Error "Eio switch is unavailable"))
 
 (* Throw or clear one attached service's switch. Off keeps the token and
    catalog; the keeper's turns stop being handed that provider's tools. *)
@@ -9321,8 +9321,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        && state.identity_login <> None
      then
        match selected_keeper state with
-       | Some keeper -> launch_identity_view state ~mailbox keeper.k_name
-       | None -> ());
+       | Some keeper when Option.is_none
+           (Masc_tui_types.pending_detail_read state ~tab:Detail_identity
+              ~keeper:keeper.k_name) ->
+           launch_identity_view state ~mailbox keeper.k_name
+       | Some _ | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
        there would be worse than none. The payload is a handful of rows. The
@@ -11599,37 +11602,35 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if refresh_pending && still_visible then
           launch_keeper_calls_load ~force:true state ~mailbox keeper_name
       end)
-  | Keeper_config_view_loaded (keeper_name, result) -> (
+  | Keeper_config_view_loaded (request, result) -> (
+      let keeper_name = request.drr_keeper in
+      let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if still_selected then
+      if current && still_selected then
         match result with
         | Ok lines ->
             state.keeper_config_view <- Some (keeper_name, lines);
-            Masc_tui_types.clear_detail_read state ~tab:Detail_instructions ~keeper:keeper_name;
             state.keeper_config_view_error <- None
         | Error detail ->
-            Masc_tui_types.clear_detail_read state ~tab:Detail_instructions
-              ~keeper:keeper_name;
             state.keeper_config_view_error <- Some detail)
-  | Keeper_sandbox_view_loaded (keeper_name, result) -> (
+  | Keeper_sandbox_view_loaded (request, result) -> (
+      let keeper_name = request.drr_keeper in
+      let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if still_selected then
+      if current && still_selected then
         match result with
         | Ok reading ->
             state.keeper_sandbox_view <- Some (keeper_name, reading);
-            Masc_tui_types.clear_detail_read state ~tab:Detail_sandbox ~keeper:keeper_name;
             state.keeper_sandbox_view_error <- None
         | Error detail ->
-            Masc_tui_types.clear_detail_read state ~tab:Detail_sandbox
-              ~keeper:keeper_name;
             state.keeper_sandbox_view_error <- Some detail)
   | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
       let is_current =
@@ -12040,21 +12041,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            | Error detail ->
                state.resource_content_error <- Some (uri, detail))
       | Some _ | None -> ())
-  | Github_identity_view_loaded (keeper_name, result) -> (
+  | Github_identity_view_loaded (request, result) -> (
+      let keeper_name = request.drr_keeper in
+      let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if still_selected then
+      if current && still_selected then
         match result with
         | Ok lines ->
             state.github_identity_view <- Some (keeper_name, lines);
-            Masc_tui_types.clear_detail_read state ~tab:Detail_github ~keeper:keeper_name;
             state.github_identity_view_error <- None
         | Error detail ->
-            Masc_tui_types.clear_detail_read state ~tab:Detail_github
-              ~keeper:keeper_name;
             state.github_identity_view_error <- Some detail)
   | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
       (match result with
@@ -12070,17 +12070,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              Some
                ( Masc_tui_types.Notice_bad
                , Printf.sprintf "switch %s: %s" provider_id detail ))
-  | Identity_providers_loaded (keeper_name, result) -> (
+  | Identity_providers_loaded (request, result) -> (
+      let keeper_name = request.drr_keeper in
+      let current = Masc_tui_types.finish_detail_read state request in
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
         | Some keeper -> String.equal keeper.k_name keeper_name
         | None -> false
       in
-      if still_selected then
+      if current && still_selected then
         match result with
         | Ok providers ->
             state.identity_view <- Some (keeper_name, providers);
-            Masc_tui_types.clear_detail_read state ~tab:Detail_identity ~keeper:keeper_name;
             state.identity_view_error <- None;
             (* The login this TUI started has landed once the service it was
                for reports tools. Clearing it is what stops the tick from
@@ -12092,8 +12093,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                  state.identity_login <- None
              | Some _ | None -> ())
         | Error detail ->
-            Masc_tui_types.clear_detail_read state ~tab:Detail_identity
-              ~keeper:keeper_name;
             state.identity_view_error <- Some detail)
   | Identity_login_started (keeper_name, result) -> (
       match result with
@@ -21604,18 +21603,15 @@ and is loaded on demand through keeper_skill.
          lane can be running while no keeper turn is, and a frame counter
          that only watched turns would leave that mark frozen on whatever
          quarter it stopped at -- which reads as a lane stuck there. *)
-      (* A detail tab the operator is watching with nothing on it yet. The stamp
-         exists exactly while that is true -- it is taken on the first ask and
-         dropped when the tab gets a reading or a refusal -- so its presence is
-         the whole condition. *)
+      (* Status and container-log reads have separate lifetimes. A log read
+         still needs repaints after the Sandbox status has already arrived. *)
       let awaiting_detail_read =
         state.view = Keepers Keeper_detail
         && (match Masc_tui_types.selected_keeper state with
             | None -> false
             | Some keeper ->
-                Option.is_some
-                  (Masc_tui_types.detail_read_started state
-                     ~tab:state.detail_tab ~keeper:keeper.k_name))
+                Masc_tui_types.detail_read_waiting state
+                  ~tab:state.detail_tab ~keeper:keeper.k_name)
       in
       let anything_running =
         Masc_tui_answering.anything_running ~turns:state.keeper_turns

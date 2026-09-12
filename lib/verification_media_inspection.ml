@@ -55,7 +55,8 @@ let presentation_result ~base_path ~name ~path ~bytes ~start_time ~max_image_byt
   | Error error ->
     let failure_class = match error with
       | Verification_presentation_inspection.Policy_rejected _
-      | Pdf_inspection_failed (Verification_pdf_inspection.Image_policy_rejected _) ->
+      | Pdf_inspection_failed (Verification_pdf_inspection.Image_policy_rejected _
+                            | Too_many_pages _ | Rendered_bytes_exceeded _) ->
         Tool_result.Policy_rejection
       | Dependency_unavailable _ | Command_failed _ | Invalid_output _
       | Storage_failed _ | Pdf_inspection_failed _ -> Tool_result.Runtime_failure in

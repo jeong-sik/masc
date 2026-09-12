@@ -702,6 +702,86 @@ let test_actionable_conflicts_outrank_worktree_provenance () =
   check_bool "wrong-workspace diagnosis has first claim" true
     (contains ~needle:"MISMATCH local /other (r:retry)" three)
 
+let keeper_control_hints =
+  "j/k:move  p:pause  w:wake  s:shutdown  d:delete  r:refresh  q:quit"
+
+let test_keys_come_back_with_the_cells_a_dropped_notice_gave_up () =
+  (* Two notices and the keys do not fit together, so the lower-ranked notice
+     goes. The cells it hands back belong to the keys it had crowded out: the
+     row is fitted again from the whole key row rather than from what was left
+     when the notice was still there. At 95 cells a single greedy pass ended
+     with the door alone. *)
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Server_worktree_binary
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:95 ~port:8935
+      ~hints:"j/k:move  p:pause  w:wake  s:shutdown  q:quit" ()
+  in
+  check_at_most_cells "the row respects its cells" 95 row;
+  check_bool "the notice that says what to do stays" true
+    (contains ~needle:"redeploy)" row);
+  check_bool "the one that only says where the binary came from goes" false
+    (contains ~needle:"WORKTREE" row);
+  check_bool "and two keys come back into its cells" true
+    (contains ~needle:"j/k:move" row && contains ~needle:"p:pause" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
+let test_a_notice_too_wide_to_draw_hands_its_cells_back () =
+  (* A notice wider than the row cannot be drawn whole, and this one is never
+     cut into a different path. Dropping every key first to make room for it and
+     then dropping it too left the row with nothing but the door. *)
+  let path = "/Users/someone/work/a-very-long-workspace-name/masc-checkout" in
+  let row =
+    Masc_tui_footer.line ~status:[ Masc_tui_footer.Workspace_mismatch path ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:keeper_control_hints ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice is not drawn" false (contains ~needle:"MISMATCH" row);
+  check_bool "and not drawn in pieces either" false (contains ~needle:path row);
+  check_bool "the keys it could not make room for are back" true
+    (contains ~needle:"j/k:move" row);
+  check_bool "more than the door survives" true
+    (contains ~needle:"p:pause" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row);
+  (* Whole keys, not a cell cut. The row used to fall through to truncation
+     here and end mid-word, which the footer's own contract forbids. *)
+  List.iter
+    (fun item ->
+      check_bool ("a whole key: " ^ item) true
+        (List.mem item (Str.split_delim (Str.regexp_string "  ")
+                          keeper_control_hints)))
+    (List.filter
+       (fun item -> not (String.equal item "") && not (contains ~needle:"Port" item))
+       (Str.split_delim (Str.regexp_string "  ")
+          (List.hd (Str.split_delim (Str.regexp_string Masc_tui_footer.cut_marker)
+                      (String.trim row)))))
+
+let test_a_short_diagnosis_is_not_starved_by_a_long_one () =
+  (* The wrong-workspace notice ranks above the build mismatch, but at this
+     width it cannot be drawn at all. Reading priority before drawability let it
+     take the row down with it and hid the mismatch that fits and says what to
+     do about it. *)
+  let path = "/Users/someone/work/a-very-long-workspace-name/masc-checkout" in
+  let row =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Workspace_mismatch path
+        ; Masc_tui_footer.Tui_build_mismatch
+            { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server }
+        ]
+      ~dim:"" ~reset:"" ~max_cells:80 ~port:8935 ~hints:keeper_control_hints ()
+  in
+  check_at_most_cells "the row respects its cells" 80 row;
+  check_bool "the notice that fits is drawn" true
+    (contains ~needle:"redeploy)" row);
+  check_bool "the one that does not is not" false
+    (contains ~needle:"MISMATCH" row);
+  check_bool "the door survives" true (contains ~needle:"q:quit" row)
+
 let test_ansi_keeper_keys_remain_individually_droppable () =
   (* The key:label/two-space grammar supplied by #35401, including colour
      resets between a key and its colon and dimmed whole exit items. *)
@@ -739,6 +819,12 @@ let tests =
           test_actionable_conflicts_outrank_worktree_provenance
       ; Alcotest.test_case "ANSI Keeper controls drop individually and keep q" `Quick
           test_ansi_keeper_keys_remain_individually_droppable
+      ; Alcotest.test_case "keys come back with a dropped notice's cells" `Quick
+          test_keys_come_back_with_the_cells_a_dropped_notice_gave_up
+      ; Alcotest.test_case "a notice too wide hands its cells back" `Quick
+          test_a_notice_too_wide_to_draw_hands_its_cells_back
+      ; Alcotest.test_case "a short diagnosis is not starved by a long one" `Quick
+          test_a_short_diagnosis_is_not_starved_by_a_long_one
       ; Alcotest.test_case "extra facts precede port" `Quick
           test_extra_facts_precede_port
       ; Alcotest.test_case "build reads before the port" `Quick

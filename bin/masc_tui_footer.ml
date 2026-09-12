@@ -298,44 +298,65 @@ let item_is_pinned item =
             && String.equal (String.sub key (String.length key - 4) 4) " Esc"))
       never_dropped_keys
 
-type leading_item = Hint of string | Conflict of projected_status
+(* The last key this row may give up, by index. [None] once only pinned keys
+   are left. *)
+let last_droppable kept =
+  List.fold_left
+    (fun (index, found) item ->
+      (index + 1, if item_is_pinned item then found else Some index))
+    (0, None)
+    kept
+  |> snd
 
-let leading_text = function Hint text -> text | Conflict status -> status.text
+let rec without_lowest_priority = function
+  | [] | [ _ ] -> []
+  | conflict :: rest -> conflict :: without_lowest_priority rest
 
+(* Keys give way before a notice does, and a notice gives way before the keys
+   it crowded out stay gone: every attempt starts from the whole key row again,
+   so the cells a dropped notice hands back are offered to the keys.
+
+   One greedy pass could not do that. It dropped every droppable key to make
+   room for a long notice, dropped the notice too, and left [q:quit  ...?] on a
+   row where several controls would have fit once the notice was gone.
+
+   A notice too wide to be drawn beside the keys that cannot be dropped is not
+   drawable at this width at all, and is put aside before priority is read.
+   Otherwise one long path would starve a short, actionable build mismatch that
+   ranks below it and fits on its own. *)
 let drop_hint_items ~max_cells ~conflicts hints =
-  let items =
-    List.map (fun status -> Conflict status) conflicts
-    @ (split_on_double_space hints
-       |> List.filter (fun item -> not (String.equal (String.trim item) ""))
-       |> List.map (fun hint -> Hint hint))
+  let keys =
+    split_on_double_space hints
+    |> List.filter (fun item -> not (String.equal (String.trim item) ""))
   in
-  let text kept = String.concat "  " (List.map leading_text kept) in
-  let fits kept =
-    let candidate = "  " ^ text kept ^ "  " ^ cut_marker in
-    Masc_tui_message_layout.display_width candidate <= max_cells
+  let row conflicts kept =
+    "  "
+    ^ String.concat "  "
+        (List.map (fun conflict -> conflict.text) conflicts @ kept)
+    ^ "  " ^ cut_marker
   in
-  (* The last item that may be dropped, by index. [None] once only pinned
-     items are left, which is when this gives up and the caller truncates by
-     cells instead. *)
-  let last_droppable kept =
-    List.fold_left
-      (fun (index, found) item ->
-        let pinned = match item with Hint hint -> item_is_pinned hint | Conflict _ -> false in
-        (index + 1, if pinned then found else Some index))
-      (0, None)
-      kept
-    |> snd
+  let fits conflicts kept =
+    Masc_tui_message_layout.display_width (row conflicts kept) <= max_cells
   in
-  let rec fit kept =
-    match kept with
-    | [] -> None
-    | _ when fits kept -> Some ("  " ^ text kept ^ "  " ^ cut_marker)
-    | _ ->
-      (match last_droppable kept with
-       | None -> None
-       | Some index -> fit (List.filteri (fun i _ -> i <> index) kept))
+  let undroppable_keys = List.filter item_is_pinned keys in
+  let drawable = List.filter (fun conflict -> fits [ conflict ] undroppable_keys) conflicts in
+  let rec drop_keys conflicts kept =
+    if fits conflicts kept then Some (row conflicts kept)
+    else
+      match last_droppable kept with
+      | None -> None
+      | Some index ->
+        drop_keys conflicts (List.filteri (fun i _ -> i <> index) kept)
   in
-  fit items
+  let rec attempt conflicts =
+    match drop_keys conflicts keys with
+    | Some fitted -> Some fitted
+    | None ->
+      (match conflicts with
+       | [] -> None
+       | _ :: _ -> attempt (without_lowest_priority conflicts))
+  in
+  attempt drawable
 
 let rec fit_body ~max_cells ~conflicts ~hints ~omissions statuses =
   let leading =

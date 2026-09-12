@@ -212,8 +212,9 @@ let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
   let first =
     if selected < content_height then 0 else selected - content_height + 1
   in
+  let labels_window = Rows.of_list ~first:first ~height:content_height labels in
   for i = 0 to content_height - 1 do
-    match List.nth_opt labels (first + i) with
+    match Rows.at labels_window (first + i) with
     | Some label ->
       (* A separate name for the sanitized text. Shadowing [label] left four
          uses that read as raw ones to anything checking by name, the reader
@@ -3472,8 +3473,9 @@ let render_question_reader (state : state) =
     if Option.is_some state.ask_text_entry then limit
     else max 0 (min state.ask_question_scroll limit)
   in
+  let lines_window = Rows.of_list ~first:scroll ~height:room lines in
   for i = 0 to room - 1 do
-    match List.nth_opt lines (scroll + i) with
+    match Rows.at lines_window (scroll + i) with
     | Some line -> Buffer.add_string buf (line ^ "\n")
     | None -> box_empty buf cols
   done;
@@ -7310,6 +7312,7 @@ let render_lane_run_detail (state : state) ~run_id =
               , Printf.sprintf "%s  %s" output_title
                   (lane_run_pane_progress ~scroll:output_scroll
                      ~height:content_height (List.length output_lines)) );
+            let output_lines_window = Rows.of_list ~first:output_scroll ~height:content_height output_lines in
           for index = 0 to content_height - 1 do
             let left =
               Option.value
@@ -7318,7 +7321,7 @@ let render_lane_run_detail (state : state) ~run_id =
             in
             let right =
               Option.value
-                (List.nth_opt output_lines (index + output_scroll))
+                (Rows.at output_lines_window (index + output_scroll))
                 ~default:(Ansi.reset, "")
             in
             lane_run_split_line buf cols ~left_width ~left ~right
@@ -8404,8 +8407,9 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
     if state.keeper_cursor < content_height then 0
     else state.keeper_cursor - content_height + 1
   in
+  let keepers_window = Rows.of_list ~first:first ~height:content_height state.keepers in
   for i = 0 to content_height - 1 do
-    match List.nth_opt state.keepers (first + i) with
+    match Rows.at keepers_window (first + i) with
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in
@@ -12211,6 +12215,7 @@ let render_fusion_list (state : state) =
       state.fusion_cursor - content_height + 1
     else 0
   in
+  let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
   if shown = 0 then begin
     let empty =
       match
@@ -12230,7 +12235,7 @@ let render_fusion_list (state : state) =
   else
     for index = 0 to content_height - 1 do
       let row_index = index + scroll in
-      match List.nth_opt entries row_index with
+      match Rows.at entries_window row_index with
       | None -> box_empty buf cols
       | Some (Tui_decode.Fusion_historical_evidence evidence) ->
           let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
@@ -13510,9 +13515,10 @@ let render_repository_changes (state : state) =
                | Some _, None -> "  (working tree clean)"
                | _, Some _ -> "  (Git changes unavailable)")
           else
+            let changes_window = Rows.of_list ~first:state.repository_changes_scroll ~height:room changes in
             for i = 0 to room - 1 do
               let idx = state.repository_changes_scroll + i in
-              match List.nth_opt changes idx with
+              match Rows.at changes_window idx with
               | None -> c.push_empty ()
               | Some row ->
                   let attr =
@@ -13954,8 +13960,9 @@ let render_changes_list (state : state) =
             (Terminal_text.single_line (change_row_address change))
             removed added);
        let body_height = preview_height - 2 in
+       let diff_rows_window = Rows.of_list ~first:0 ~height:body_height diff_rows in
        for i = 0 to body_height - 1 do
-         match List.nth_opt diff_rows i with
+         match Rows.at diff_rows_window i with
          | Some row ->
              box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
          | None -> box_empty buf cols
@@ -14653,6 +14660,7 @@ let render_runtime (state : state) =
   let content_height = max 0 (rows - chrome_rows) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
+  let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   let scroll_hint =
     if shown > content_height then Printf.sprintf "[%d rows, scroll %d]  " shown scroll else ""
   in
@@ -14747,7 +14755,7 @@ let render_runtime (state : state) =
     for index = 0 to content_height - 1 do
       match state.runtime_mode with
       | Masc_tui_types.Runtime_all ->
-          (match List.nth_opt all_runtimes (index + scroll) with
+          (match Rows.at all_runtimes_window (index + scroll) with
            | None -> c.push_empty ()
            | Some (runtime, lanes) ->
                let open Masc.Tui_decode in
@@ -15508,9 +15516,10 @@ let render_runtime_pick (state : state) =
       state.runtime_pick_cursor - content_height + 1
     else 0
   in
+  let options_window = Rows.of_list ~first:scroll_offset ~height:content_height options in
   for i = 0 to content_height - 1 do
     let idx = i + scroll_offset in
-    match List.nth_opt options idx with
+    match Rows.at options_window idx with
     | Some option ->
         let is_selected = idx = state.runtime_pick_cursor in
         let line =
@@ -15609,8 +15618,9 @@ let render_code (state : state) =
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in
+    let entries_window = Rows.of_list ~first:first ~height:list_rows_budget entries in
     for i = 0 to list_rows_budget - 1 do
-      match List.nth_opt entries (first + i) with
+      match Rows.at entries_window (first + i) with
       | Some node ->
           let name =
             Terminal_text.single_line node.Masc.Tui_decode.wt_label
@@ -15888,6 +15898,7 @@ let render_code (state : state) =
                let scroll =
                  max 0 (min state.code_diff_scroll max_scroll)
                in
+               let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
                (* An add or context row is the working tree's own line, so
                   the lexed row the pane already holds is its exact
                   colouring -- resolved by the row's new-line number, not by
@@ -15902,7 +15913,7 @@ let render_code (state : state) =
                  | Some (_, _) | None -> None
                in
                for i = 0 to content_height - 1 do
-                 match List.nth_opt rows (scroll + i) with
+                 match Rows.at rows_window (scroll + i) with
                  | Some row ->
                      let open Masc.Tui_decode in
                      let gutter =
@@ -16145,8 +16156,9 @@ let render_code (state : state) =
                      Ansi.reset
                | Some (_, false) | None -> String.make blame_margin_cells ' ')
            in
+           let file_rows_window = Rows.of_list ~first:scroll ~height:content_height file_rows in
            for i = 0 to content_height - 1 do
-             match List.nth_opt file_rows (scroll + i) with
+             match Rows.at file_rows_window (scroll + i) with
              | Some segments ->
                  let body =
                    String.concat "" (List.map span segments)
@@ -16345,8 +16357,9 @@ let render_resources (state : state) =
     let first =
       if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
     in
+    let rows_list_window = Rows.of_list ~first:first ~height:list_rows_budget rows_list in
     for i = 0 to list_rows_budget - 1 do
-      match List.nth_opt rows_list (first + i) with
+      match Rows.at rows_list_window (first + i) with
       | Some resource ->
           let selected = first + i = cursor in
           let name = resource_display_name resource in
@@ -16615,8 +16628,9 @@ let render_runtime_params (state : state) =
          else if cursor_display < content_height then 0
          else min (total - content_height) (cursor_display - content_height + 1)
        in
+       let display_window = Rows.of_list ~first:first ~height:content_height display in
        for index = 0 to content_height - 1 do
-         match List.nth_opt display (first + index) with
+         match Rows.at display_window (first + index) with
          | None -> box_empty buf cols
          | Some (`Header (id, description)) ->
            let label = if String.equal id "" then "(unfiled)" else id in

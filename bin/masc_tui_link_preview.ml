@@ -36,14 +36,28 @@ let cache_store preview =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
       Masc_tui_lru.set !preview_cache preview.url preview)
 
+type mosaic_refusal =
+  | Fetch_failed of { detail : string }
+  | Empty_body
+  | Cache_unreadable of { detail : string }
+  | Decode_failed of { detail : string }
+
 type mosaic_entry =
   | Mosaic of string list
-  | Not_an_image of { reason : string }
+  | Refused of mosaic_refusal
+
+let mosaic_refusal_text = function
+  | Fetch_failed { detail } -> "the image URL could not be fetched: " ^ detail
+  | Empty_body -> "the image URL answered with an empty body"
+  | Cache_unreadable { detail } -> "the cached image could not be read: " ^ detail
+  | Decode_failed { detail } -> "the image could not be decoded: " ^ detail
 
 (* What the background fetch decided about an image URL, keyed by that URL and
    filled asynchronously off the render loop. Read by [render_modal_card]; a
-   miss simply draws no preview. A [Not_an_image] entry is kept so the same URL
-   is not downloaded and decoded again on every preview parse. *)
+   miss simply draws no preview. Every entry, a mosaic or a refusal, is kept
+   for the session so the same URL is not downloaded and decoded again on
+   every preview parse; [v] and /image fetch on their own, outside this
+   store. *)
 let mosaic_cache_mu = Stdlib.Mutex.create ()
 let mosaic_cache : (string, mosaic_entry) Hashtbl.t = Hashtbl.create 64
 
@@ -589,10 +603,10 @@ let render_modal_card ~width ~height:_ p =
            add "  preview";
            List.iter (fun l -> add ("  " ^ l)) mosaic;
            add ""
-       | Some (Not_an_image _) ->
+       | Some (Refused refusal) ->
            (* Said out loud, so a card with no picture is not mistaken for a
               page with no og:image. *)
-           add "  preview: the image URL did not answer with an image";
+           add ("  preview: " ^ mosaic_refusal_text refusal);
            add ""
        | Some (Mosaic _) | None -> ())
    | None -> ());

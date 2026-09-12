@@ -1530,12 +1530,13 @@
  (libraries masc_tui_theme))
 
 ;; Decides, by magic bytes, whether a downloaded body may sit in the preview
-;; image cache. Kept apart from the TUI executable so the decision is testable.
+;; image cache, and what a curl or ffmpeg exit status means. Kept apart from
+;; the TUI executable so every decision is testable without a process.
 (library
  (name masc_tui_image_cache)
  (wrapped false)
  (modules masc_tui_image_cache)
- (libraries masc))
+ (libraries masc unix))
 (library
  (name masc_tui_interactive)
 ;; An interactive surface contract plus the MSX backend: renderer-independent

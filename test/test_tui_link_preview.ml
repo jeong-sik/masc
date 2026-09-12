@@ -176,19 +176,42 @@ let test_render_modal_card () =
   check bool "modal card has content lines" true (List.length modal_lines > 0)
 
 (* A URL the background fetch refused stays refused: the store keeps the
-   answer, and the card says so instead of showing nothing. *)
+   answer, and the card says why instead of showing nothing. One case per
+   refusal, so a fetch failure, an empty body, an unreadable cache file and a
+   decoder rejection each reach the card with their own words. *)
+let card_says ~url sub =
+  let lines = render_modal_card ~width:80 ~height:20 (synthesize_preview url) in
+  List.exists (fun l -> Option.is_some (Astring.String.find_sub ~sub l)) lines
+
 let test_a_refused_image_url_is_remembered_and_said () =
   clear_cache ();
   let url = "https://example.com/photo.png" in
-  mosaic_store url (Not_an_image { reason = "no image signature" });
-  (match mosaic_lookup url with
-   | Some (Not_an_image { reason }) -> check string "reason kept" "no image signature" reason
-   | Some (Mosaic _) | None -> fail "the refusal was not kept");
-  let lines = render_modal_card ~width:60 ~height:20 (synthesize_preview url) in
-  check bool "the card says the image URL did not answer with an image" true
-    (List.exists
-       (fun l -> Option.is_some (Astring.String.find_sub ~sub:"did not answer with an image" l))
-       lines);
+  let cases =
+    [ ( Fetch_failed { detail = "the server answered with an HTTP error status" }
+      , "could not be fetched: the server answered with an HTTP error status" )
+    ; (Empty_body, "answered with an empty body")
+    ; (Cache_unreadable { detail = "EACCES" }, "could not be read: EACCES")
+    ; (Decode_failed { detail = "ffmpeg rejected the body (exit 1)" }, "could not be decoded: ffmpeg rejected the body (exit 1)")
+    ]
+  in
+  List.iter
+    (fun (refusal, said) ->
+      mosaic_store url (Refused refusal);
+      (match mosaic_lookup url with
+       | Some (Refused kept) ->
+           check string "refusal kept" (mosaic_refusal_text refusal) (mosaic_refusal_text kept)
+       | Some (Mosaic _) | None -> fail "the refusal was not kept");
+      check bool ("the card says: " ^ said) true (card_says ~url said))
+    cases;
+  clear_cache ()
+
+(* Until the background fetch has answered, the store holds nothing and the
+   card says nothing about a preview: a missing entry is not a refusal. *)
+let test_an_undecided_image_url_says_nothing () =
+  clear_cache ();
+  let url = "https://example.com/undecided.png" in
+  check bool "no entry" true (Option.is_none (mosaic_lookup url));
+  check bool "no preview line" false (card_says ~url "  preview");
   clear_cache ()
 
 (* ---- parse_og_html: real fetched metadata (pure, no network) ---- *)
@@ -301,6 +324,8 @@ let () =
         ; test_case "modal card" `Quick test_render_modal_card
         ; test_case "a refused image url is remembered and said" `Quick
             test_a_refused_image_url_is_remembered_and_said
+        ; test_case "an undecided image url says nothing" `Quick
+            test_an_undecided_image_url_says_nothing
         ] )
     ; ( "fetch (og parse)"
       , [ test_case "og full" `Quick test_parse_og_full

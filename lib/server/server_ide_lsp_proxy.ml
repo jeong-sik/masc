@@ -694,7 +694,9 @@ let ensure_lsp_process cs lang_id =
              [ "rootUri", `String ("file://" ^ workspace_root)
              ; "rootPath", `String workspace_root
              ; "processId", `Int (Unix.getpid ())
-             ; "capabilities", `Assoc []
+             ; "capabilities", `Assoc
+                 [ "textDocument", `Assoc
+                     [ "publishDiagnostics", `Assoc [ "versionSupport", `Bool true ] ] ]
              ]
          in
          let promise =

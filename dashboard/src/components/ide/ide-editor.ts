@@ -25,7 +25,7 @@ import {
   syntaxHighlightExt,
   type EditorKeeperTraceLine,
 } from './ide-editor-extensions'
-import { lspDiagnosticSnapshot, lspExtension } from './ide-lsp-client'
+import { lspDiagnosticSnapshot, lspExtension, lspScopeKey, lspScopeSnapshot } from './ide-lsp-client'
 import { SplitDiffView, UnifiedDiffView } from './ide-diff-view'
 import { filterTraceEventsByReplay, keeperTraceState, type KeeperTraceEvent } from './keeper-trace-store'
 import { globalPresenceSnapshot } from './keeper-presence-store'
@@ -296,8 +296,13 @@ function CodeMirrorEditor({
       const mountDocument = documentStore.document()
       const mountFilePath = mountDocument.file_path
       if (mountFilePath === null) return
+      if (mountDocument.lsp_scope !== undefined
+        && mountDocument.lsp_scope !== lspScopeKey(lspScopeSnapshot())) return
       const lang = await languageExt(mountFilePath)
       if (destroyed) return
+      if (documentStore.document().lsp_scope !== mountDocument.lsp_scope
+        || (mountDocument.lsp_scope !== undefined
+          && mountDocument.lsp_scope !== lspScopeKey(lspScopeSnapshot()))) return
 
       const blameExts = showOwnership ? blameExtensions() : []
       const state = EditorState.create({
@@ -365,7 +370,7 @@ function CodeMirrorEditor({
       editorRef.current = null
       setReady(false)
     }
-  }, [document.file_path, documentStore, ownershipStore, onKeeperLineSelect, showOwnership, traceActive])
+  }, [document.file_path, document.lsp_scope, documentStore, ownershipStore, onKeeperLineSelect, showOwnership, traceActive])
 
   // Push document updates. The first file response can arrive before
   // the CM6 instance is ready or before this component subscribes, so

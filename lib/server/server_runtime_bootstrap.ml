@@ -1847,7 +1847,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~accept_store_quarantin
       (* Auxiliary transports start after owner readiness and report their own
          availability. They must not gain lifecycle authority over HTTP or
          unrelated Keeper lanes. *)
-      (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
+      (* gRPC workspace transport (default-off, opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher tool_name args_json =
       Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
           let workspace_scope = Mcp_server.workspace_scope state in

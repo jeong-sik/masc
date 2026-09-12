@@ -6,15 +6,16 @@ are the ones where it could wrongly say yes: a version comparison that reads
 binary that is not there at all. Each of those would report a clean floor for
 a binary that breaks on the distros the floor exists to cover.
 
-Real ELF binaries are not needed to test any of that — the script's whole
-input is objdump's text — so a stub objdump on PATH supplies it, and these
-tests run anywhere in milliseconds.
+Stub output covers version comparisons on any host. Linux also links tiny
+real ELF fixtures so inspection failures and ABI requirements are measured
+with the binutils used by the release jobs.
 """
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -118,6 +119,20 @@ class GlibcFloorCheckTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('no dynamic glibc references', result.stdout)
 
+    def test_a_named_abi_requirement_is_not_ignored(self):
+        env = self.stub_objdump('Version References:\n  GLIBC_ABI_DT_RELR\n')
+        result = self.run_check('2.35', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('GLIBC_ABI_DT_RELR needs GLIBC_2.36', result.stderr)
+        result = self.run_check('2.36', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_an_unknown_glibc_requirement_is_refused(self):
+        env = self.stub_objdump('Version References:\n  GLIBC_FUTURE_ABI\n')
+        result = self.run_check('2.35', env=env)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('unknown glibc requirement GLIBC_FUTURE_ABI', result.stderr)
+
     def test_every_named_binary_is_checked_not_just_the_first(self):
         second = self.root / 'masc-tui'
         second.write_bytes(b'\x7fELF not really')
@@ -207,6 +222,55 @@ class GlibcFloorCheckTest(unittest.TestCase):
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('usage:', result.stderr)
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'real ELF fixtures require Linux')
+class GlibcFloorRealElfTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.compiler = shutil.which(os.environ.get('CC', 'cc'))
+        self.assertIsNotNone(self.compiler, 'Linux checker tests require a C compiler')
+        source = self.root / 'fixture.c'
+        source.write_text('static int value; int *pointer = &value;\n'
+                          'int main(void) { return *pointer; }\n')
+        self.source = source
+
+    def link(self, name: str, *flags: str) -> Path:
+        binary = self.root / name
+        subprocess.run([str(self.compiler), str(self.source), '-o', str(binary), *flags],
+                       check=True, capture_output=True, text=True)
+        return binary
+
+    def check_binary(self, floor: str, binary: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([BASH, str(SCRIPT), floor, str(binary)],
+                              capture_output=True, text=True)
+
+    def test_real_static_elf_passes_without_a_dynamic_symbol_table(self) -> None:
+        binary = self.link('static', '-static')
+        dynamic = subprocess.run(['objdump', '-T', str(binary)],
+                                 capture_output=True, text=True)
+        self.assertNotEqual(dynamic.returncode, 0, 'fixture exercises objdump -T refusal')
+        result = self.check_binary('2.35', binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('no dynamic glibc references', result.stdout)
+
+    def test_real_relr_requirement_obeys_its_glibc_236_floor(self) -> None:
+        binary = self.link('relr', '-fPIE', '-pie', '-Wl,-z,pack-relative-relocs')
+        versions = subprocess.run(['objdump', '-p', str(binary)],
+                                  check=True, capture_output=True, text=True)
+        self.assertIn('GLIBC_ABI_DT_RELR', versions.stdout)
+        result = self.check_binary('2.35', binary)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('GLIBC_ABI_DT_RELR', result.stderr)
+        result = self.check_binary('2.36', binary)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_real_non_elf_file_is_refused(self) -> None:
+        result = self.check_binary('2.35', self.source)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('could not read', result.stderr)
 
 
 if __name__ == '__main__':

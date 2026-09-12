@@ -69,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml
+          sudo apt-get install -y --no-install-recommends ripgrep jq python3-yaml gcc libc6-dev binutils
 
       # Runs before the lints because it answers whether this run is about the
       # current head at all. The payload carries the sha the run was created

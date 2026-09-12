@@ -224,13 +224,13 @@ docker exec "$container" bash -lc '
 # --with-test, matching release.yml. The support binaries below are test
 # executables and need the test dependency set; --with-bisect on the pin step
 # above exists so that this stays solvable on OCaml 5.5.
-echo "== opam install --deps-only --with-test"
+echo "== opam install --deps-only --with-test --locked"
 docker exec "$container" bash -lc '
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
   for attempt in 1 2 3; do
-    opam install . --deps-only --with-test -y && break
+    opam install . --deps-only --with-test --locked -y && break
     if [ "$attempt" -eq 3 ]; then echo "opam install failed after 3 attempts" >&2; exit 1; fi
     echo "opam install failed (attempt $attempt); retrying in 15s"
     sleep 15

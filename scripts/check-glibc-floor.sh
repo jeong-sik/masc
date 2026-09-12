@@ -59,7 +59,7 @@ fi
 floor_tag="GLIBC_${floor}"
 status=0
 
-# Every GLIBC_x.y referenced in the symbol table $1, one per line, oldest
+# Every GLIBC_x.y referenced in the private headers $1, one per line, oldest
 # first. `sort -V` orders 2.9 below 2.10, which a lexical sort does not — that
 # difference decides this check for every floor past 2.9.
 #
@@ -87,19 +87,37 @@ for binary in "$@"; do
     continue
   fi
 
-  # objdump's exit status is kept rather than discarded. "This binary has no
-  # glibc references" and "objdump could not read this file" both come out as
-  # an empty symbol list, and the first of those is a pass — so a truncated
-  # file, a file built for another architecture, or anything that is not an ELF
-  # would be reported as a static binary and shipped. Refusing a missing
-  # objdump above while accepting an unreadable file here is the same hole
-  # twice, and packaging is exactly where a wrong file arrives.
-  if ! table="$(objdump -T "$binary" 2>&1)"; then
+  # Private headers include the version requirements, including ABI tags
+  # without an imported symbol. Unlike -T, -p also succeeds on a real static
+  # ELF. A nonzero status still means no valid measurement was obtained.
+  if ! table="$(objdump -p "$binary" 2>&1)"; then
     echo "check-glibc-floor: objdump could not read $binary" >&2
     printf '%s\n' "$table" | sed 's/^/       /' >&2
     status=1
     continue
   fi
+
+  # Named ABI requirements are not numeric symbol versions. DT_RELR was
+  # introduced in glibc 2.36; unknown requirements must not silently pass.
+  # https://sourceware.org/pipermail/libc-alpha/2022-August/141193.html
+  abi_refs="$(printf '%s\n' "$table" | grep -oE 'GLIBC_[A-Z][A-Z0-9_]*' | sort -u || true)"
+  abi_failed=0
+  while IFS= read -r ref; do
+    case "$ref" in
+      '') ;;
+      GLIBC_ABI_DT_RELR)
+        if above_floor GLIBC_2.36; then
+          echo "FAIL $binary — $ref needs GLIBC_2.36, above the floor $floor_tag" >&2
+          abi_failed=1
+        fi
+        ;;
+      *)
+        echo "FAIL $binary — unknown glibc requirement $ref" >&2
+        abi_failed=1
+        ;;
+    esac
+  done <<< "$abi_refs"
+  if [ "$abi_failed" -eq 1 ]; then status=1; continue; fi
 
   refs="$(glibc_refs "$table")"
   highest="$(printf '%s\n' "$refs" | tail -1)"
@@ -117,6 +135,13 @@ for binary in "$@"; do
   echo "FAIL $binary — needs $highest, above the floor $floor_tag" >&2
   # Name the symbols. Without them the next reader has to rediscover that the
   # cause is two stray references and not a deliberate dependency.
+  # This is diagnostic only: a numeric version violation is already proven
+  # by the version requirements, even if its symbol table cannot be read.
+  if ! table="$(objdump -T "$binary" 2>&1)"; then
+    printf '%s\n' "$table" | sed 's/^/       /' >&2
+    status=1
+    continue
+  fi
   above="$(printf '%s\n' "$refs" | while IFS= read -r ref; do
     if [ -n "$ref" ] && above_floor "$ref"; then printf '%s\n' "$ref"; fi
   done)"

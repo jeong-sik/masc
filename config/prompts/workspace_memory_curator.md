@@ -11,9 +11,10 @@ useful attributed statements across Keepers, preserving units, uncertainty,
 corrections, retractions and missing or unavailable stores.
 
 Compare all owners before asserting a shared claim. Unresolved disagreements
-belong in conflicts, with all relevant original source IDs. A correction about
-the same event supersedes the old value: cite both sources and explain the
-correction. Never present retracted or contradicted claims as unqualified facts.
+belong in conflicts, with all relevant original source IDs. An explicit correction
+about the same event supersedes the old value when the evidence establishes that
+relationship: cite both sources and explain the correction. Never present
+retracted or contradicted claims as unqualified facts.
 
 Every source ID must appear in shared_claims or conflicts, OR be excluded with a
 reason, never both. Do not invent source IDs or verification of files or
@@ -30,7 +31,8 @@ whether they support a statement, conflict, or justified exclusion.
 
 Preserve source referents, nouns and units exactly. Do not infer translations
 of unintelligible text; retain ambiguity explicitly. Different verification
-methods are not contradictions unless their claims are logically incompatible.
+methods are not contradictions unless their claims are logically incompatible;
+do not invent a priority rule between their records.
 Historical attributed values are not current truth. Later edits are not
 explicit retractions unless the evidence establishes that relationship.
 

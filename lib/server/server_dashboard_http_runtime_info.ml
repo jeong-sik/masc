@@ -2525,12 +2525,6 @@ let dashboard_tools_warming_json () =
           ; "top_20", `List []
           ; "never_called_count", `Int 0
           ; "registered_count", `Int 0
-          ; "source", `String "dashboard_cache_warming"
-          ; "health", `String "warming"
-          ; "latest_age_s", `Null
-          ; "entry_count", `Int 0
-          ; "stale_reason", `String "warming"
-          ; "actor", `String "dashboard"
           ] )
     ]
 ;;
@@ -2571,8 +2565,11 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
           ~public_names:
             Keeper_tool_descriptor_resolution.public_names_for_internal
           ()
-        |> Tool_usage_log.attach_source_metadata
+        |> fun metrics ->
+        `Assoc (("non_public_call_log",
+          Tool_usage_log.source_metadata_json
              ~masc_root:(Workspace.masc_root_dir config))
+          :: Yojson.Safe.Util.to_assoc metrics))
     in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())

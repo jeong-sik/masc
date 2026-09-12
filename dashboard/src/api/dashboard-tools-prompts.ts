@@ -50,7 +50,20 @@ export interface ToolMetricsTopEntry {
   call_count: number
 }
 
-export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
+export interface ToolMetricsResponse {
+  metrics_source?: {
+    kind: 'tool_metrics'
+    scope: 'retained_snapshot_and_current_process'
+    persistence: 'sqlite'
+  }
+  catalog_usage?: {
+    visible_total: number
+    visible_called: number
+    visible_without_observed_call: number
+    hidden_called: number
+    outside_catalog_called: number
+  }
+  non_public_call_log?: TelemetryFreshnessMetadata
   total_calls: number
   distinct_tools_called: number
   top_20: ToolMetricsTopEntry[]

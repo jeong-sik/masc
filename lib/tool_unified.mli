@@ -30,7 +30,10 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
 (** [summary_report ?runtime_metrics ()] aggregates call counts and latency
     from {!Tool_metrics}, plus never-called tools, visibility distribution,
     dispatch registration counts, and optional runtime metrics for the
-    dashboard.
+    dashboard. [catalog_usage] partitions called names by current visible,
+    hidden and outside-catalog membership. Only the visible partition shares
+    a denominator with [never_called]. [metrics_source] identifies the
+    retained metrics plus current process snapshot, without claiming log health.
 
     Every per-tool row carries [public_names] beside [name]: the counters are
     keyed by the internal name, and that is the one name a request never
@@ -43,7 +46,7 @@ val tool_info_to_json : tool_info -> Yojson.Safe.t
     called. Deciding which schemas are worth their place in a request needs the
     whole distribution, not its head, so both are reported: [top_20] keeps its
     existing shape for readers that only want the busiest tools. [never_called]
-    names the visible tools with no calls at all, which [never_called_count]
+    names the visible tools absent from the observed metrics snapshot, which [never_called_count]
     previously only counted. *)
 val summary_report :
   ?runtime_metrics:(unit -> Yojson.Safe.t) ->

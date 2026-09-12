@@ -439,6 +439,7 @@ describe('Tools', () => {
         registered_count: 0,
         distinct_tools_called: 0,
         never_called_count: 0,
+        non_public_call_log: {
         source: 'tool_usage',
         health: 'coverage_gap',
         stale_reason: 'tool_usage_append_failed',
@@ -455,6 +456,7 @@ describe('Tools', () => {
             error: 'synthetic append failure',
           },
         ],
+        },
       },
     }
 

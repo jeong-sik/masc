@@ -1,0 +1,9 @@
+{
+  "scope": "local Vite fixture using actual 53203 counts and proposed projection",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "errors": [],
+  "text": "53203 실제 관측 수치 · 새 표시 검증 fixture\n\n도구 사용 현황\n현재 프로세스 호출과 복원에 성공한 SQLite 보존 기록을 합산합니다. 이 응답은 복원·저장 상태를 확인하지 않습니다. 보존 범위 밖의 과거 사용 여부는 알 수 없습니다.\n총 호출 수\n775\n사용이 관측된 전체 도구\n50\n현재 비숨김 도구 103개: 사용 관측 26개 · 현재 집계에 호출 없음 77개\n별도 사용 관측: 숨김 도구 24개 · 현재 카탈로그 밖 도구 0개\n도구 분포\n공개 MCP\n48\n30.4%\n내부 전용\n55\n34.8%\n숨김\n55\n34.8%\n전체 158개 (공개 48 + 내부 55 + 숨김 55)\n상위 20 도구\n전체\n20\ntool\n6\nedit\n3\nsearch\n3\nboard\n3\nread\n2\nstatus\n1\nmemory\n1\nworkspace\n1\nR\nkeeper_artifact_read\nread\n87\nE\nkeeper_memory_write\nedit\n86\nE\ntool_edit_file\nedit\n83\nR\ntool_read_file\nread\n65\nS\nkeeper_memory_search\nsearch\n64\nT\ntool_execute\ntool\n61\nD\nmasc_keeper_delegate_status\nstatus\n24\nB\nmasc_board_post_get\nboard\n24\nT\nkeeper_analyze_image\ntool\n24\nE\ntool_write_file\nedit\n22\nS\ntool_search_files\nsearch\n22\nM\nkeeper_memory_retract\nmemory\n18\nT\nmasc_keeper_delegate\ntool\n14\nC\nkeeper_tasks_list\nworkspace\n14\nB\nmasc_board_comment\nboard\n13\nT\nmasc_ask\ntool\n13\nB\nmasc_board_list\nboard\n12\nT\nmasc_keeper_msg\ntool\n10\nT\nmasc_goal_list\ntool\n9\nS\nkeeper_capability_search\nsearch\n9"
+}

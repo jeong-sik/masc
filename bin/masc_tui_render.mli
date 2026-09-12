@@ -124,6 +124,11 @@ val browser_lane_scroll_limit :
   Masc_tui_types.state -> terminal_rows:int -> cols:int ->
   Masc_tui_types.Browser_lane_view.t -> int
 
+val browser_lane_selection_scroll :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int ->
+  Masc_tui_types.Browser_lane_view.t -> int
+(** Reveal the selected node's first wrapped row after explicit selection. *)
+
 val ask_question_scroll_limit : Masc_tui_types.state -> int
 val ask_question_page_size : Masc_tui_types.state -> int
 

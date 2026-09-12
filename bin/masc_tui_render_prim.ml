@@ -524,8 +524,12 @@ let composer_cursor state ~rows ~cols =
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
 let surface_strip (state : state) ~cols =
-  let ring = Masc_tui_types.visible_surface_ring state in
-  let n = List.length ring in
+  (* An array because the strip is drawn by index: the width probe, the
+     label and the cell each read entry [i], and a list answers that by
+     walking. Ten entries make that cost nothing -- it is an array so the
+     renderer holds no row lookup that walks, with no exception to carry. *)
+  let ring = Array.of_list (Masc_tui_types.visible_surface_ring state) in
+  let n = Array.length ring in
   let active = Masc_tui_types.visible_surface_ring_index state state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
@@ -544,7 +548,7 @@ let surface_strip (state : state) ~cols =
     | _ -> ""
   in
   let label i =
-    let surface, name = List.nth ring i in
+    let surface, name = ring.(i) in
     name ^ badge surface
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
@@ -590,7 +594,7 @@ let surface_strip (state : state) ~cols =
       (Printf.sprintf "%s\xe2\x80\xb9%d%s " Ansi.dim lo Ansi.reset);
   for i = lo to hi do
     if i > lo then Buffer.add_string parts "  ";
-    let surface, _ = List.nth ring i in
+    let surface, _ = ring.(i) in
     let is_alert =
       match surface with
       | Approvals -> List.length (Masc_tui_types.approval_items state) > 0
@@ -1632,7 +1636,7 @@ let browser_lane_layout = Browser_lane_layout.create ()
 
 
 let browser_lane_rows ~cols (view : Browser_lane_view.t) =
-  (* The same three branches browser_lane_page_lines takes, so the key holds
+  (* The same three branches browser_lane_page_layout takes, so the key holds
      every input that decides a row. *)
   let content =
     match view.Browser_lane_view.scene with
@@ -1649,7 +1653,7 @@ let browser_lane_rows ~cols (view : Browser_lane_view.t) =
     }
   in
   Browser_lane_layout.get browser_lane_layout ~source ~render:(fun () ->
-    browser_lane_page_lines ~cols view)
+    browser_lane_page_layout ~cols view)
 
 
 (* A shared, deliberately small status vocabulary for operational surfaces.

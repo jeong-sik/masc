@@ -224,7 +224,7 @@ val board_score_style : int -> string
 val magnitude_tone : Magnitude.band -> string
 
 val browser_lane_rows :
-  cols:int -> Masc_tui_types.Browser_lane_view.t -> string array
+  cols:int -> Masc_tui_types.Browser_lane_view.t -> Browser_lane_layout.rows
 
 val semantic_status_color : string -> string
 

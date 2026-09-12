@@ -1,0 +1,7 @@
+; What the catalogue route builds to ask with. The endpoint it makes is never
+; configured -- it exists for one request -- so what it carries is the whole
+; contract.
+
+(test
+ (name test_voice_catalogue_request)
+ (libraries alcotest astring yojson masc.server masc.voice_config))

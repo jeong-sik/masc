@@ -14,7 +14,7 @@ let is_sensitive_name name =
         else contains_at (i + 1)
       in
       contains_at 0)
-    [ "token"; "password"; "secret"; "key"; "credential"; "supabase" ]
+    [ "token"; "password"; "secret"; "key"; "credential" ]
 
 type spec =
   { env_name : string

@@ -62,12 +62,6 @@ val fit_decision : (string * slot_projection) list -> lane_fit
     all-slots-refused error. *)
 val slot_reason_pairs : ?sep:string -> (string * string) list -> string
 
-val project_lane
-  :  selected_slots:Runtime_exact_output_registry.selected_slot list
-  -> messages:Agent_core.Types.message list
-  -> lane_fit
-(** One real projection per admitted slot. *)
-
 val fitted_messages
   :  selected_slots:Runtime_exact_output_registry.selected_slot list
   -> full_messages:Agent_core.Types.message list

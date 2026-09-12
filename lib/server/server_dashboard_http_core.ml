@@ -23,7 +23,6 @@ let state_dashboard_runtime_caps = Server_dashboard_http_core_runtime.state_dash
 (* ================================================================ *)
 
 include Dashboard_http_helpers
-include Dashboard_http_monitoring
 include Dashboard_http_keeper
 
 let shell_warmed = Server_dashboard_http_core_cache.shell_warmed

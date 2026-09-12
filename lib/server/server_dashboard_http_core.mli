@@ -4,13 +4,12 @@
     snapshot/digest, mission, and shell dashboard endpoints.
 
     Re-exports from [Server_dashboard_http_cache], [Dashboard_http_helpers],
-    [Dashboard_http_monitoring], and [Dashboard_http_keeper]. *)
+    and [Dashboard_http_keeper]. *)
 
 (** {1 Re-exported sub-modules} *)
 
 include module type of Server_dashboard_http_cache
 include module type of Dashboard_http_helpers
-include module type of Dashboard_http_monitoring
 include module type of Dashboard_http_keeper
 
 (** {1 Executor Pool} *)

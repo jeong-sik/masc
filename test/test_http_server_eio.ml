@@ -286,7 +286,14 @@ let test_voice_routes_present () =
   Alcotest.(check bool)
     "POST /api/v1/voice/probe/stt route"
     true
-    (has_route `POST "/api/v1/voice/probe/stt")
+    (has_route `POST "/api/v1/voice/probe/stt");
+  (* A voice id is provider vocabulary, and say does not fail on one it does
+     not have. The catalogue is how a surface offers real ids instead of
+     asking someone to type one. *)
+  Alcotest.(check bool)
+    "POST /api/v1/voice/voices route"
+    true
+    (has_route `POST "/api/v1/voice/voices")
 ;;
 
 (* A browser's <audio> element cannot put a bearer token in its request

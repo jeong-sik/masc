@@ -195,18 +195,45 @@ let transcribe_audio ~audio_file ?language_code () =
              "all enabled STT endpoints failed: %s"
              (String.concat " | " (List.rev attempted)))
       | endpoint :: rest ->
-        (match transcribe_via_http_stt endpoint ~audio_file ~model with
-         | Ok json ->
-           let text =
-             Option.value
-               (Json_util.get_string json "text")
-               ~default:(Yojson.Safe.to_string json)
-           in
+        (* Asked the way this endpoint answers. The command kinds were wired
+           into the probe and not into this loop, so a configured whisper_cli
+           endpoint -- the only kind that transcribes without a server -- was
+           sent an HTTP request it has no address for and reported as failed,
+           while [voice-verify --audio] on the same configuration worked.
+           [transcriber_of_kind] is the same closed answer the probe reads, so
+           a kind added later stops this compiling until it has one. *)
+        let heard =
+          match transcriber_of_kind endpoint.Voice_config.kind with
+          | Does_not_transcribe ->
+            (* Named rather than attempted. An endpoint that speaks, listed
+               under [voice.stt], is a configuration to correct; an HTTP
+               attempt reported it as a network failure instead. *)
+            Error "this endpoint kind speaks and does not transcribe"
+          | By_command ->
+            (* The command answers with its own output and knows no language
+               field; [language_code] is then the caller's or unknown. *)
+            Result.map
+              (fun transcript -> transcript, None)
+              (transcribe_via_command endpoint ~audio_file ~model)
+          | Over_http ->
+            (match transcribe_via_http_stt endpoint ~audio_file ~model with
+             | Ok json ->
+               Result.map
+                 (fun text -> text, Json_util.get_string json "language_code")
+                 (transcript_of_stt_json json)
+             | Error error -> Error error)
+        in
+        (match heard with
+         | Ok (text, reported_language) ->
            let lang =
              match language_code with
              | Some lc -> lc
              | None ->
-               (match Json_util.get_string json "language_code" with
+               (* The endpoint says which language it heard, or does not. A
+                  command answers with its transcript and no such field, so
+                  "unknown" here is the endpoint having been silent about it
+                  -- the same word this loop has always used. *)
+               (match reported_language with
                 | Some lc -> lc
                 | None -> "unknown")
            in

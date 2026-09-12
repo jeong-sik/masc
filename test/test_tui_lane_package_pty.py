@@ -141,10 +141,24 @@ def main(executable: str) -> None:
             terminal.wait_for_output(process, master_fd, output, b"Retained server observations",
                                      start=after_release, timeout=5)
             state["delay"] = False
-            key(b"r", b"TOML draft second.toml")
+            # Inspect leaves the selected draft unchanged, so an incremental
+            # frame need not print its title again. Join the new request and
+            # its completion, then inspect B in a freshly opened pane below.
+            refreshed = terminal.GatedHttpResponse(inspect())
+            fixtures["/api/v1/lane-addons"] = refreshed
+            key(b"r", b"Request pending")
+            if not terminal.wait_for_fixture_event(process, master_fd, output, refreshed.requested, timeout=5):
+                raise AssertionError("refresh request did not reach fixture")
+            terminal.release_and_wait_for_frame(process, master_fd, output, refreshed,
+                                                b"Retained server observations")
+            if not refreshed.completed.is_set():
+                raise AssertionError("refresh fixture did not complete")
+            fixtures["/api/v1/lane-addons"] = inspect
             # Close the whole pane, revisit, then return to the regular TUI.
             key(b"q", b"MASC Overview")
-            key(b":go lane add-ons\r", b"TOML draft second.toml")
+            reopened = key(b":go lane add-ons\r", b"TOML draft second.toml")
+            if b"# second draft retained" not in terminal.CSI_RE.sub(b"", reopened):
+                raise AssertionError("late save or refresh discarded the second draft")
             key(b"\x1b", b"TOML installations")
             key(b":act " + json.dumps(action_request).encode() + b"\r", b"state queued")
             key(b"t", b"state confirmed")

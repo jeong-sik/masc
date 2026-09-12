@@ -143,6 +143,7 @@ type host_stop = Runtime_official_client_tool.host_stop =
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
   { success : bool
   ; content : string
+  ; content_blocks : Agent_core.Types.content_block list option
   ; abort_turn : host_stop option
   }
 
@@ -541,7 +542,7 @@ let handle_control_request
                 (Printexc.to_string exn);
               { success = false
               ; content = "MASC tool handler raised"
-              ; abort_turn = None
+              ; content_blocks = None; abort_turn = None
               }
           in
           abort_turn := result.abort_turn;
@@ -549,6 +550,7 @@ let handle_control_request
           Some
             { Runtime_official_client_mcp.success = result.success
             ; content = result.content
+            ; content_blocks = result.content_blocks
             }
       in
       let* dispatch =

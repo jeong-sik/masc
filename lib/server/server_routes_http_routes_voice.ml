@@ -170,6 +170,40 @@ let handle_transcribe _state request reqd body =
         respond_json ~status:`Bad_request ~request reqd
           (`Assoc [ ("error", `String err) ]))
 
+
+(* A voice setup failure carries its own sentence; the status says what kind of
+   failure it was. A revision that moved under the caller is a conflict, not a
+   bad request: the caller did nothing wrong, it just read before someone else
+   wrote. *)
+let respond_voice_setup_error request reqd error =
+  let status =
+    match error with
+    | Server_voice_setup_actions.Invalid_request _ -> `Bad_request
+    | Server_voice_setup_actions.Setup_failed Voice_setup.Configuration_changed ->
+      `Conflict
+    | Server_voice_setup_actions.Setup_failed
+        (Voice_setup.Configuration_unavailable _) -> `Internal_server_error
+    | Server_voice_setup_actions.Setup_failed
+        ( Voice_setup.Voice_section_invalid _
+        | Voice_setup.Endpoint_path_unusable _
+        | Voice_setup.Configuration_rejected _ ) -> `Bad_request
+  in
+  respond_json_value_with_cors ~status request reqd
+    (`Assoc
+      [ "error", `String (Server_voice_setup_actions.error_message error) ])
+
+let handle_voice_setup ~base_path ~act request reqd body =
+  match Yojson.Safe.from_string body with
+  (* Narrowed to what the parser throws: a wildcard here would swallow
+     Eio.Cancel.Cancelled and answer a cancelled fiber with a parse error. *)
+  | exception Yojson.Json_error _ ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (`Assoc [ "error", `String "the request body is not JSON" ])
+  | json ->
+    (match act ~base_path json with
+     | Ok result -> respond_json_value_with_cors ~status:`OK request reqd result
+     | Error error -> respond_voice_setup_error request reqd error)
+
 let add_routes router =
   router
   |> Http.Router.prefix_get Masc_network_defaults.voice_audio_path_prefix
@@ -219,4 +253,33 @@ let add_routes router =
          (fun state _agent_name _req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_transcribe state request reqd body))
+         request reqd)
+  (* Voice setup: read what is configured, see what a change would do, commit
+     it. All three are CanAdmin -- they read and rewrite the workspace's
+     runtime.toml, which GET /api/v1/voice/config deliberately does not expose
+     (it answers three booleans and no endpoint identity, because it is a public
+     read). *)
+  |> Http.Router.get "/api/v1/voice/setup" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           match Server_voice_setup_actions.observe ~base_path with
+           | Ok json -> respond_json_value_with_cors ~status:`OK request reqd json
+           | Error error -> respond_voice_setup_error request reqd error)
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/setup/preview" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Request.read_body_async reqd (fun body ->
+             handle_voice_setup ~base_path
+               ~act:Server_voice_setup_actions.preview request reqd body))
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/setup" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           Http.Request.read_body_async reqd (fun body ->
+             handle_voice_setup ~base_path ~act:Server_voice_setup_actions.apply request
+               reqd body))
          request reqd)

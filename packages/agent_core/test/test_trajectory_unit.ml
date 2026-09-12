@@ -20,6 +20,7 @@ let mk_tool_call
   : Trajectory.tool_call
   =
   { tool_use_id = Some id
+  ; source_seq = None
   ; tool_name = name
   ; tool_input = `Assoc [ "cmd", `String "ls" ]
   ; tool_result = result

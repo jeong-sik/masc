@@ -61,6 +61,25 @@ let log_channel_label = function
   | Tui_decode.Log_channel_scheduled_autonomous -> "sched"
   | Tui_decode.Log_channel_heartbeat -> "hb"
 
+(* Two of the three channels say the same word as the kind they belong to, so
+   the CHANNEL column mostly repeated KIND -- sixteen of sixteen rows in a live
+   keeper's log. Drawing the agreement gave the one channel that disagrees,
+   [sched], no more weight than the rest of the column.
+
+   Every pair is named rather than matched with a wildcard: a channel added to
+   the wire has to be decided here before this compiles, which is the whole
+   point of asking the question of the variants instead of the two labels. *)
+let channel_repeats_kind ~(kind : Tui_decode.log_kind)
+    ~(channel : Tui_decode.log_channel) =
+  match kind, channel with
+  | Tui_decode.Log_turn, Tui_decode.Log_channel_turn -> true
+  | Tui_decode.Log_heartbeat, Tui_decode.Log_channel_heartbeat -> true
+  | Tui_decode.Log_turn, Tui_decode.Log_channel_scheduled_autonomous -> false
+  | Tui_decode.Log_turn, Tui_decode.Log_channel_heartbeat -> false
+  | Tui_decode.Log_heartbeat, Tui_decode.Log_channel_turn -> false
+  | Tui_decode.Log_heartbeat, Tui_decode.Log_channel_scheduled_autonomous ->
+      false
+
 let message_count_label = function
   | Some count -> string_of_int count
   | None -> "--"
@@ -106,7 +125,10 @@ let log_row_indent = "  "
 
 let log_cells (entry : Tui_decode.log_entry) =
   { kind = log_kind_label entry.le_kind;
-    channel = log_channel_label entry.le_channel;
+    channel =
+      (if channel_repeats_kind ~kind:entry.le_kind ~channel:entry.le_channel
+       then ""
+       else log_channel_label entry.le_channel);
     messages = message_count_label entry.le_message_count;
     usage =
       usage_label ~input:entry.le_input_tokens ~output:entry.le_output_tokens;

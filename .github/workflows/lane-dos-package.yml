@@ -1,0 +1,46 @@
+name: DOS Lane package proof
+on:
+  pull_request:
+    paths:
+      - 'addons/dos-world/**'
+      - '.github/workflows/lane-dos-package.yml'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  actual-dos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the owned DOS environment and homebrew program
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          git rev-parse HEAD > proof/SOURCE_COMMIT
+          docker build --tag masc-lane-dos-world:0.1.0 addons/dos-world 2>&1 | tee proof/build.log
+          docker image inspect masc-lane-dos-world:0.1.0 > proof/image.json
+      - name: Prove actual DOS input and artifacts through MCP
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --cpus 1 --memory 536870912 --pids-limit 64 \
+            --user "$(id -u):$(id -g)" --mount "type=bind,src=$PWD/proof,dst=/verification" \
+            --workdir /verification masc-lane-dos-world:0.1.0 \
+            node --test /opt/dos-world/test/world.test.mjs 2>&1 | tee proof/package-test.log
+      - name: Retain the exact worker image for host qualification
+        run: docker save masc-lane-dos-world:0.1.0 | gzip > proof/dos-world-image.tar.gz
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dos-lane-package-${{ matrix.arch }}-${{ github.sha }}
+          path: proof/
+          if-no-files-found: error

@@ -541,6 +541,14 @@ val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
     lane id (RFC-0361 D7(a)). *)
 
+val verifier_runtime_admission : t -> (unit, string) result
+(** Actual verifier candidates must expose mediated tools without native reads.
+    Agent Core and Claude Code meet this boundary; other official clients do not. *)
+
+val verifier_cli_slot_admission : runtime_id:string -> (unit, string) result
+(** Admit a direct official-client runtime with required tool support. Lane IDs,
+    Agent Core runtimes, and clients without native-tool suppression are refused. *)
+
 val verifier_exact_lane_slot_ids : unit -> (string list, string) result
 (** Admitted API slot ids followed by declared official-client slot ids from the
     published exact-output registry — the single provider-selection SSOT for

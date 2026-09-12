@@ -8182,7 +8182,6 @@ let test_peer_delegate_schema_reaches_model_wires () =
       | Ok _ -> fail "expected one official-client delegate definition"
       | Error error -> fail (Agent_core.Error.to_string error))
       ["actual Keeper bundle", bundled; "plain MASC bridge", plain])
-
 let test_binary_write_reference_survives_replay () =
   with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in

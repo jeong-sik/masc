@@ -396,10 +396,15 @@ let warn_rejected_exact_output_bindings resolver_snapshot =
 ;;
 
 let warn_optional_exact_output_lane registry ~lane_id ~feature =
+  let supports_cli =
+    match Runtime.exact_lane_of_id lane_id with
+    | Some lane -> Runtime.exact_lane_supports_cli_tail lane
+    | None -> true
+  in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Ok { selected_slots = _ :: _; _ }
-  | Ok { cli_slots = _ :: _; _ } -> ()
-  | Ok { selected_slots = []; cli_slots = [] }
+  | Ok { selected_slots = _ :: _; _ } -> ()
+  | Ok { cli_slots = _ :: _; _ } when supports_cli -> ()
+  | Ok { selected_slots = []; _ }
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Log.Server.warn
       "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
@@ -1503,12 +1508,12 @@ let resume_model_configuration () =
       match Runtime.init_default_degraded_report ~config_path:path with
       | Error _ -> Error "configuration unavailable"
       | Ok _ ->
-        let authority_available =
+        let registry_published =
           try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
           with Env_config_core.Config_error _ -> false
         in
         let withdrawn =
-          if authority_available then Ok ()
+          if registry_published then Ok ()
           else Runtime_exact_output_registry.unpublish ()
         in
         match withdrawn with
@@ -1516,6 +1521,9 @@ let resume_model_configuration () =
         | Ok () ->
           Runtime_startup_state.set Available;
           Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          let authority_available =
+            registry_published && Result.is_ok (Runtime.verifier_exact_lane_slot_ids ())
+          in
           Ok authority_available)
     in
     Result.map_error (fun _ -> Server_model_setup_resume.Configuration_unavailable) resumed

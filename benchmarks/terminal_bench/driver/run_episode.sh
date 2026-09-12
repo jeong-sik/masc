@@ -135,7 +135,11 @@ if [[ -d "$tool_log_dir" ]]; then
   # makes jq exit non-zero, and under `set -euo pipefail` an unguarded
   # assignment aborted the script here — after the episode state was known and
   # before result.json was written, so harbor recorded no result at all.
-  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -s 'length')" \
+  # Counted as a stream (`jq -c . | wc -l`): every entry carries multi-KB
+  # output blobs, and `jq -s` materializes all of them just to take a length.
+  # Equivalent under the same guard: verified on a synthetic store — clean
+  # N, malformed-mixed and empty all agree, pipefail keeps the 0-degrade.
+  tool_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + | jq -c . | wc -l | tr -d ' ')" \
     || tool_calls=0
   dup_calls="$(find "$tool_log_dir" -name '*.jsonl' -exec cat {} + \
     | jq -s 'group_by([.tool, ((.input // .arguments // {})|tostring)]) | map(select(length>1) | (length-1)) | add // 0')" \

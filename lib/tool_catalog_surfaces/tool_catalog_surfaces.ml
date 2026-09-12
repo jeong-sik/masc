@@ -101,13 +101,15 @@ let public_mcp_surface_tools =
   @
   [ (* Agent discovery *)
     "masc_agent_card"
-  ; (* Optional observation layers, shared with the existing Keeper runtime. *)
+  ; (* Optional world layers, shared with the existing Keeper runtime. *)
     "masc_lane_attach"
   ; "masc_lane_inspect"
   ; "masc_lane_observe"
   ; "masc_lane_slice"
   ; "masc_lane_detach"
   ; "masc_lane_evidence"
+  ; "masc_lane_act"
+  ; "masc_lane_action_status"
   ; (* Utility *)
     "masc_tool_help"
   ; "masc_check"

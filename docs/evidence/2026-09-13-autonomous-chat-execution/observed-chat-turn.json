@@ -1,0 +1,36 @@
+{
+  "id": "autonomous:trace-1789042595401-00001#428",
+  "role": "assistant",
+  "ts": 1789223399.647408,
+  "content": null,
+  "autonomous_turn": {
+    "turn_id": "trace-1789042595401-00001#428"
+  },
+  "blocks": [
+    {
+      "t": "trace",
+      "trace": [
+        {
+          "kind": "think",
+          "text": "",
+          "content_withheld": true,
+          "ts": "2026-09-12T14:30:30Z"
+        },
+        {
+          "kind": "tool",
+          "name": "Edit",
+          "status": "ok",
+          "dur": "132ms",
+          "ts": "2026-09-12T14:30:30Z"
+        },
+        {
+          "kind": "tool",
+          "name": "Edit",
+          "status": "ok",
+          "dur": "55ms",
+          "ts": "2026-09-12T14:30:31Z"
+        }
+      ]
+    }
+  ]
+}

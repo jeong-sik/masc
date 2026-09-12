@@ -8663,7 +8663,7 @@ let render_memory (state : state) =
 let render_memory_facts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
-  let keeper_name = Option.value state.memory_facts_keeper ~default:"" in
+  let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -8674,27 +8674,29 @@ let render_memory_facts (state : state) =
   let filter_label =
     Masc_tui_types.memory_category_filter_label state.memory_facts_category
   in
-  let sort_label = Masc_tui_types.memory_sort_order_label state.memory_facts_sort in
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
-        Printf.sprintf " · find \"%s\"" (Terminal_text.single_line (String.trim q))
-    | Some _ -> " · find \"\""
+        Printf.sprintf " \xc2\xb7 find \"%s\"" (Terminal_text.single_line (String.trim q))
+    | Some _ -> " \xc2\xb7 find \"\""
     | None ->
         if String.length (String.trim state.search_last) > 0 then
-          Printf.sprintf " · filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
+          Printf.sprintf " \xc2\xb7 filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
         else ""
   in
   let title =
-    match state.memory_facts with
-    | None ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s"
-          (screen_title " MASC Memory") keeper_name (title_missing_reading ~error:state.memory_facts_error) timestamp
-          (connection_badge state)
-    | Some _ ->
-        Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts · %s · sort: %s%s)  %s  %s"
-          (screen_title " MASC Memory") keeper_name total filter_label sort_label query_label
-          timestamp (connection_badge state)
+    Render_memory.facts_title
+      ~screen:(screen_title " MASC Memory")
+      ~keeper:keeper_name
+      ~reading:
+        (match state.memory_facts with
+         | None ->
+           Render_memory.Facts_unread
+             { reading = title_missing_reading ~error:state.memory_facts_error }
+         | Some _ ->
+           Render_memory.Facts_loaded { total; filter_label; query_label })
+      ~timestamp
+      ~badge:(connection_badge state)
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~hints:Masc_tui_keys.footer_hints_memory_facts
@@ -10885,8 +10887,8 @@ let render_code (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.code_focus_file = Right_pane then "  [j/k]" else "")
+       ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
@@ -11413,9 +11415,10 @@ let render_resources (state : state) =
     framed_top pane_buf pane_cols;
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim) ^ " Resources"
+      ((if list_focused then Ansi.bold else Ansi.dim)
+       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ "Resources"
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
-       ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
     (* The status line spends one of the budgeted rows, not an extra one:
@@ -11486,8 +11489,8 @@ let render_resources (state : state) =
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ " " ^ title
-       ^ (if state.resource_focus = Right_pane then "  [j/k]" else "")
+       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = framed_content_height ~rows in

@@ -327,7 +327,9 @@ let observe_native_input ?blocks ~(prepared : Keeper_gate_replay.model_message) 
         let* durable_identity = input_identity durable in
         if prepared_identity <> durable_identity then Error "native Gate input does not identify the durable replay receipt"
         else Ok ()
-      | Semantic.Gate_denied _, None, None -> Ok ()
+      | Semantic.Gate_denied _, None, None ->
+        if prepared.denied_resolution = Some admission.resolution then Ok ()
+        else Error "native Gate input does not identify the admitted denial"
       | Semantic.Gate_approved, None, (None | Some _)
       | Semantic.Gate_approved, Some _, None
       | Semantic.Gate_denied _, Some _, (None | Some _)

@@ -740,5 +740,44 @@ class InvalidWorkspaceDiagnostic(unittest.TestCase):
         self.assertEqual(code, 0)
         pick.assert_called_once()
 
+
+class FailedSaveReporting(unittest.TestCase):
+    """A save that died in validation is not the operator deferring the step.
+
+    Both paths leave the wizard without a model connection, but only one of
+    them wrote anything. Reporting a saved workspace and exit 0 for the other
+    makes the last line the operator reads a false one.
+    """
+
+    def run_journey(self, wizard_result):
+        fresh = observation(None, (
+            ('workspace', 'needs_setup'),
+            ('model_connection', 'needs_setup')))
+        errors = io.StringIO()
+        with patch.object(SETUP, 'onboarding_status', return_value=fresh), \
+                patch.object(SETUP, 'pick', return_value=[0]), \
+                patch.object(SETUP, 'workspace_check', return_value={'base_path': '/workspace'}), \
+                patch.object(SETUP, 'workspace_port', return_value=8935), \
+                patch.object(SETUP, 'select_setup_server', return_value=8935), \
+                patch.object(SETUP, 'wizard', return_value=wizard_result), \
+                patch.object(SETUP.subprocess, 'run',
+                             return_value=subprocess.CompletedProcess([], 0)), \
+                contextlib.redirect_stderr(errors):
+            code = SETUP.journey('masc', '/workspace', None, 30, resume=True)
+        return code, errors.getvalue()
+
+    def test_failed_save_is_not_reported_as_saved(self):
+        code, errors = self.run_journey(
+            dict(configured=False, readiness='failed', base_path='/workspace'))
+        self.assertEqual(code, 1)
+        self.assertIn('was not saved', errors)
+        self.assertNotIn('workspace is saved', errors)
+
+    def test_deferred_step_still_reports_the_saved_workspace(self):
+        code, errors = self.run_journey(
+            dict(configured=False, readiness='deferred', base_path='/workspace'))
+        self.assertEqual(code, 0)
+        self.assertIn('workspace is saved', errors)
+
 if __name__ == '__main__':
     unittest.main()

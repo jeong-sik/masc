@@ -9,6 +9,24 @@ let make_audio_file = Voice_bridge_transport.make_audio_file
 let run_voice_status = Voice_bridge_transport.run_voice_status
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
+let transcribe_via_command = Voice_bridge_transport.transcribe_via_command
+
+(* How an endpoint transcribes, if it does. Written as a type rather than read
+   off the kind at each site: the two command kinds reached main while the STT
+   probe still matched on three, and a kind added to
+   {!Voice_config.endpoint_kind} now stops this function compiling until it has
+   an answer here. *)
+type transcriber =
+  | Over_http
+  | By_command
+  | Does_not_transcribe
+
+let transcriber_of_kind = function
+  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct -> Over_http
+  | Voice_config.Whisper_cli -> By_command
+  (* Both of these speak. Neither listens: [macos_say] is the say command, and
+     voice_mcp carries a tool call, not audio. *)
+  | Voice_config.Voice_mcp | Voice_config.Macos_say -> Does_not_transcribe
 
 (* One voice as an endpoint names it. The id is what a configuration stores;
    the name and the language are what let a person pick it. *)
@@ -332,74 +350,48 @@ let probe_stt ~audio_file () =
                 if not endpoint.Voice_config.enabled
                 then Skipped "disabled in the configuration"
                 else (
-                  match endpoint.Voice_config.kind with
-                  | Voice_config.Voice_mcp ->
+                  (* A transcript is read by a person deciding whether the
+                     endpoint heard them. %S escapes UTF-8 into byte numbers,
+                     which for any language but English is unreadable --
+                     measured on a Korean utterance. A transcript also arrives
+                     with its own line breaks, which would break the
+                     one-line-per-endpoint report.
+
+                     An empty transcript is an answer, not a failure: the
+                     endpoint was reached and heard nothing. Saying which it was
+                     keeps a silent microphone apart from a dead endpoint. *)
+                  let heard transcript =
+                    let spoken =
+                      String.trim
+                        (String.map
+                           (function
+                             | '\n' | '\r' | '\t' -> ' '
+                             | character -> character)
+                           transcript)
+                    in
+                    Answered
+                      (if String.equal spoken ""
+                       then "reached, and heard nothing in the audio"
+                       else Printf.sprintf "heard %s" spoken)
+                  in
+                  let model = stt.Voice_config.default_model in
+                  match transcriber_of_kind endpoint.Voice_config.kind with
+                  | Does_not_transcribe ->
                     Skipped "this endpoint kind does not transcribe"
-                  (* The command kinds arrived on main while this branch was
-                     open. Speaking is not transcribing, and the transcribing
-                     one is reached by running a command rather than over
-                     HTTP -- wired where that transport lives. *)
-                  | Voice_config.Macos_say ->
-                    Skipped "this endpoint speaks and does not listen"
-                  | Voice_config.Whisper_cli ->
-                    (match
-                       Voice_bridge_transport.transcribe_via_command
-                         endpoint
-                         ~audio_file
-                         ~model:stt.Voice_config.default_model
-                     with
-                     | Ok text ->
-                       let spoken =
-                         String.trim
-                           (String.map
-                              (function
-                                | '\n' | '\r' | '\t' -> ' '
-                                | character -> character)
-                              text)
-                       in
-                       Answered
-                         (if String.equal spoken ""
-                          then "reached, and heard nothing in the audio"
-                          else Printf.sprintf "heard %s" spoken)
-                     | Error reason -> Refused reason)
-                  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct ->
-                    (match
-                       transcribe_via_http_stt
-                         endpoint
-                         ~audio_file
-                         ~model:stt.Voice_config.default_model
-                     with
+                  | Over_http ->
+                    (match transcribe_via_http_stt endpoint ~audio_file ~model with
                      | Ok json ->
-                       let text =
-                         match json with
-                         | `Assoc fields ->
-                           (match List.assoc_opt "text" fields with
-                            | Some (`String text) -> text
-                            | Some _ | None -> "")
-                         | _ -> ""
-                       in
-                       (* An empty transcript is an answer, not a failure: the
-                          endpoint was reached and heard nothing. Saying which
-                          it was keeps a silent microphone apart from a dead
-                          endpoint. *)
-                       (* A transcript is read by a person deciding whether
-                          the endpoint heard them. %S escapes UTF-8 into byte
-                          numbers, which for any language but English is
-                          unreadable -- measured on a Korean utterance. A
-                          transcript also arrives with its own line breaks,
-                          which would break the one-line-per-endpoint report. *)
-                       let spoken =
-                         String.trim
-                           (String.map
-                              (function
-                                | '\n' | '\r' | '\t' -> ' '
-                                | character -> character)
-                              text)
-                       in
-                       Answered
-                         (if String.equal spoken ""
-                          then "reached, and heard nothing in the audio"
-                          else Printf.sprintf "heard %s" spoken)
+                       heard
+                         (match json with
+                          | `Assoc fields ->
+                            (match List.assoc_opt "text" fields with
+                             | Some (`String text) -> text
+                             | Some _ | None -> "")
+                          | _ -> "")
+                     | Error reason -> Refused reason)
+                  | By_command ->
+                    (match transcribe_via_command endpoint ~audio_file ~model with
+                     | Ok transcript -> heard transcript
                      | Error reason -> Refused reason))
               in
               { endpoint_id = endpoint.Voice_config.id

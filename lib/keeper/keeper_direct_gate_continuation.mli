@@ -22,8 +22,10 @@ type pending = Bound_checkpoint of Keeper_checkpoint_ref.t | Bound_official_clie
 val pending : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   (pending option, string) result
 
-(** Record exact replay evidence only after the client transmitted its current input. *)
-val observe_native_input : ?blocks:Agent_core.Types.content_block list -> config:Workspace.config -> user_message:string -> admission -> transmitted:string -> (unit, string) result
+(** Called by the official adapter's post-write callback. The inputs are the
+    prepared arguments passed to that adapter, not serialized wire bytes. The
+    complete Gate message and stable replay identity must remain in those inputs. *)
+val observe_native_input : ?blocks:Agent_core.Types.content_block list -> prepared:Keeper_gate_replay.model_message -> config:Workspace.config -> user_message:string -> admission -> transmitted:string -> (unit, string) result
 (** Discharge only after transmitted input and a later native turn settled in the original session. *)
 val complete_native : config:Workspace.config -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   admission -> (unit, string) result

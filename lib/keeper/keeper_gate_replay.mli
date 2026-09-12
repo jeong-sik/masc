@@ -77,7 +77,7 @@ val outcome_to_string : outcome -> string
 
 type model_evidence
 
-type model_message =
+type model_message = private
   { text : string
   ; replay_evidence : model_evidence option
   }

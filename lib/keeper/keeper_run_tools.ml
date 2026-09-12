@@ -50,7 +50,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; agent_cell : Agent_core.Agent.t option ref
   ; cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
-  ; user_message : string
+  ; model_message : Keeper_gate_replay.model_message
   ; hooks : Agent_core.Hooks.hooks
   ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; model_input_projection : Agent_core.Agent.model_input_projection
@@ -64,7 +64,6 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; observe_official_client_native_action :
       runtime_id:string -> official_turn:int ->
       identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
-  ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list

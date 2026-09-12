@@ -76,11 +76,21 @@ class MascAgent(BaseInstalledAgent):
             # multiplier) or the exec is killed and result.json never lands.
             "EPISODE_TIMEOUT_SEC": str(self.episode_timeout_sec),
         }
-        # keeper_up preflight (remote_ssh) runs `gh auth status` and refuses
-        # without a GitHub identity (remote_github_identity_missing);
-        # run_episode.sh seeds hosts.yml from GH_TOKEN when present.
-        if os.environ.get("GH_TOKEN"):
-            env["GH_TOKEN"] = os.environ["GH_TOKEN"]
+        # Required, not optional. keeper_up's remote_ssh preflight runs `gh
+        # auth status` and refuses without a GitHub identity
+        # (remote_github_identity_missing). run_episode.sh seeds hosts.yml
+        # from this token and then calls masc_keeper_up unconditionally under
+        # `set -euo pipefail`, so an absent token kills the episode there
+        # instead of naming the missing credential here. README.md already
+        # calls it needed; this is the code saying the same.
+        gh_token = os.environ.get("GH_TOKEN")
+        if not gh_token:
+            raise RuntimeError(
+                "GH_TOKEN not set in harbor process env; keeper_up's "
+                "remote_ssh preflight runs `gh auth status` and refuses "
+                "without a GitHub identity"
+            )
+        env["GH_TOKEN"] = gh_token
         return env
 
     async def install(self, environment: BaseEnvironment) -> None:

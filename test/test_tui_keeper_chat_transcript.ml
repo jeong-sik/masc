@@ -726,12 +726,22 @@ let test_the_row_says_how_long_the_open_call_has_been_open () =
      check bool "the call age is stated" true (contains ~needle:"in this call 45s" text);
      check bool "the turn age is still stated" true (contains ~needle:"55s" text)
    | got -> failf "expected a progress row, got %d rows" (List.length got));
-  (* Once the call ends there is no open call to age. *)
+  (* TOOL_CALL_END closes the argument stream; the result is still pending. *)
   feed ~now:(origin +. 56.) t
     [ Live.Tool_ended { occurrence = occurrence "call-1" } ];
-  match rows ~now:(origin +. 60.) t with
+  (match rows ~now:(origin +. 60.) t with
+   | (Transcript.Progress, text) :: _ ->
+     check bool "a pending result keeps the call age" true
+       (contains ~needle:"in this call 50s" text);
+     check bool "the row names the pending result" true
+       (contains ~needle:"awaiting results: Execute" text)
+   | got -> failf "expected a progress row, got %d rows" (List.length got));
+  feed ~now:(origin +. 61.) t [ tool_result "call-1" "exec-call-1" ];
+  match rows ~now:(origin +. 65.) t with
   | (Transcript.Progress, text) :: _ ->
-    check bool "a finished call is not aged" false (contains ~needle:"in this call" text)
+    check bool "a returned call is not aged" false (contains ~needle:"in this call" text);
+    check bool "a returned call is not pending" false
+      (contains ~needle:"awaiting results" text)
   | got -> failf "expected a progress row, got %d rows" (List.length got)
 
 let test_progress_row_carries_the_turn_age () =
@@ -992,6 +1002,15 @@ let test_approval_does_not_hide_other_current_work () =
   feed t [tool_result "c2" "exec-browser"];
   check bool "completed other work is no longer pending" false
     (contains ~needle:"awaiting results:" (progress ()));
+  check bool "approval remains explicit after other calls complete" true
+    (contains ~needle:"approval pending: Edit" (progress ()));
+  check bool "no pending tool does not imply the model is blocked" false
+    (contains ~needle:"waiting for your answer" (progress ()));
+  feed t [tool_started "c4" "Search"];
+  check bool "new independent work remains visible after the pending-only interval" true
+    (contains ~needle:"preparing: Search" (progress ()));
+  check bool "the separate approval stays actionable" true
+    (List.exists (contains ~needle:"approval for Edit:") (approval_rows t));
   feed t
     [ Live.Runtime_attempt_started {runtime_id = Some "other-runtime"; attempt_index = Some 1}
     ; tool_started "c3" "Read"
@@ -1002,6 +1021,20 @@ let test_approval_does_not_hide_other_current_work () =
     (contains ~needle:"other-runtime" (progress ()));
   check bool "approval does not declare the entire Keeper stopped" false
     (contains ~needle:"held at a tool call" (progress ()))
+;;
+
+let test_approval_controls_precede_variable_text () =
+  let t = fresh () in
+  feed t [requested ~call_id:"long" ~tool_name:(String.make 120 'T')
+    ~question:(String.make 160 'Q')];
+  match approval_rows t with
+  | [row] ->
+      let narrow = Masc_tui_message_layout.fit_width row 36 in
+      check bool "allow and deny fit before long tool/question text" true
+        (String.starts_with ~prefix:"[y] allow  [n] deny" narrow);
+      check bool "narrow approval keeps both answer controls" true
+        (contains ~needle:"[y]" narrow && contains ~needle:"[n]" narrow)
+  | _ -> fail "expected one approval attention row"
 ;;
 
 let test_an_answer_clears_the_prompt () =
@@ -2187,6 +2220,8 @@ let () =
               test_the_reason_a_reader_is_asked_is_drawn_under_the_question
         ; test_case "approval and other work coexist" `Quick
             test_approval_does_not_hide_other_current_work
+        ; test_case "approval controls survive narrow panes" `Quick
+            test_approval_controls_precede_variable_text
         ; test_case "an answer clears the prompt" `Quick
             test_an_answer_clears_the_prompt
         ; test_case "a timeout clears the prompt too" `Quick

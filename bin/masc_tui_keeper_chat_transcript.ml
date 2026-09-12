@@ -1022,8 +1022,6 @@ let approval_outcome_to_string = function
   | Displaced -> "displaced"
   | Approval_other other -> safe_line other
 
-(* The oldest call still open. Two calls in flight are rare and the older one
-   is the one a watcher is waiting on. *)
 let phase_text ~now t =
   match t.phase with
   | Waiting -> (
@@ -1088,6 +1086,16 @@ let phase_text ~now t =
         describe_pending "preparing" Started
         ^ describe_pending "awaiting results" Awaiting_result
       in
+      (* No pending tool does not prove that the model has stopped. Report the
+         outstanding approval as its own fact while preserving turn activity. *)
+      let has_pending_activity = List.exists
+        (fun activity -> match activity.outcome with
+          | Started | Awaiting_result -> true
+          | Returned | Failed | Never_returned | Outcome_unrecorded -> false)
+        activities_now in
+      let approval_pending = match t.awaiting, has_pending_activity with
+        | Some awaiting, false -> "approval pending: " ^ awaiting.tool_name ^ " · "
+        | Some _, true | None, _ -> "" in
       (* Keep the age beside the current pending calls. A held approval's
          age belongs to the approval surface, not another call's progress. *)
       let in_this_call =
@@ -1151,6 +1159,7 @@ let phase_text ~now t =
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed
          the difference between that and a stall. *)
+      let work = approval_pending ^ work in
       if t.checkpoints = 0 then work
       else
         Printf.sprintf "%s, continued past %d context checkpoint(s)" work
@@ -1210,7 +1219,7 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      let base = Printf.sprintf "approval for %s: %s  [y] allow  [n] deny"
+      let base = Printf.sprintf "[y] allow  [n] deny · approval for %s: %s"
         awaiting.tool_name awaiting.question in
       match awaiting.because with
       | "" -> base

@@ -883,7 +883,16 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check bool "native MCP logger retains the producer observation" true
         (List.exists (fun (root : Tool_output.artifact_ref) -> root.sha256=reference.sha256) roots);
       check string "native row keeps inline body" (Tool_result.message observed)
-        (observed_row |> U.member "output" |> U.to_string)))
+        (observed_row |> U.member "output" |> U.to_string));
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      let failed = try
+        Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+          ~typed_result:observed entry ~tool_name:"BrowserRead" ~arguments:(`Assoc [])
+          ~message:(Tool_result.message observed) ~disposition:(Tool_result.Completed ())
+          ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
+        false
+      with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
+      check bool "native retained receipt requires successful log commit" true failed)
 
 let () =
   run "mcp_server_eio_call_tool"

@@ -713,7 +713,6 @@ let test_retained_observation_commits_through_production_hook () =
           ~meta_ref:(ref (make_meta "observation-reader"))
           ~turn_ctx_cell:(Log.create_turn_ctx_cell ())
           ~trace_id:"observation-trace" ~keeper_turn_id:1
-          ~tool_result_commit_required:(fun () -> true)
           ~on_after_turn_ordinal:ignore () in
       let post = match hooks.Agent_core.Hooks.post_tool_use with
         | Some hook -> hook | None -> fail "post tool hook missing" in

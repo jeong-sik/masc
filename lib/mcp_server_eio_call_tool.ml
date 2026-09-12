@@ -800,7 +800,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ~execution_id
             ~duration_ms
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
+          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn;
+          if Tool_result.retained_artifacts result <> [] then raise exn)
    | Some _, None | None, _ -> ());
   let status = status_of_result result in
   let envelope =

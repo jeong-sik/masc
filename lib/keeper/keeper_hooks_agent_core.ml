@@ -711,7 +711,7 @@ let make_hooks
              Log.Keeper.warn ~keeper_name:(!meta_ref).name
                "tool=%s log_call write failed: %s"
                tool_name (Printexc.to_string exn);
-             if tool_result_commit_required () then raise exn);
+             if tool_result_commit_required () || retained_artifacts <> [] then raise exn);
         (match trajectory_acc with
          | None -> ()
          | Some acc ->

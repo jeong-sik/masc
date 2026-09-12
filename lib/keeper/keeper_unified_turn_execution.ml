@@ -173,11 +173,13 @@ let run (ctx : ctx)
        None
    in
    let deferred_runtime_lane_ref = ref None in
-   (* Last candidate to error, as the runtime walk names it. Written on every
-      failed attempt so the final value is the candidate the turn ends on.
-      Mirrors [deferred_runtime_lane_ref]: the walk runs below this scope and
-      only the callback crosses back. *)
-   let last_dispatched_runtime_id_ref = ref None in
+   (* Every candidate to error, as the runtime walk names it, newest first.
+      Written on every failed attempt so the head is the candidate the turn
+      ends on. Mirrors [deferred_runtime_lane_ref]: the walk runs below this
+      scope and only the callback crosses back. *)
+   let dispatched_runtime_attempts_ref : dispatched_runtime_attempt list ref =
+     ref []
+   in
   let do_run
         ~(execution : runtime_execution)
         ~run_meta
@@ -262,8 +264,10 @@ let run (ctx : ctx)
                  ~on_runtime_retry_deferred:
                    (fun hint -> deferred_runtime_lane_ref := Some hint)
                  ~on_runtime_attempt_failed:
-                   (fun ~runtime_id ->
-                      last_dispatched_runtime_id_ref := Some runtime_id)
+                   (fun ~runtime_id ~error ->
+                      dispatched_runtime_attempts_ref
+                      := ({ runtime_id; error } : dispatched_runtime_attempt)
+                         :: !dispatched_runtime_attempts_ref)
                  ?on_deferred_runtime_consumed:
                    (if is_retry then None else on_deferred_runtime_consumed)
                  ~temperature:execution.temperature
@@ -372,7 +376,7 @@ let run (ctx : ctx)
       in
       let turn_state =
         { turn_state with
-          last_dispatched_runtime_id = !last_dispatched_runtime_id_ref
+          dispatched_runtime_attempts = List.rev !dispatched_runtime_attempts_ref
         }
       in
       let checkpoint_observed =

@@ -542,7 +542,7 @@ let run_keeper_cycle
     ; runtime_rotation_attempts = []
     ; failure_reason = None
     ; retry_phase_started_at = None
-    ; last_dispatched_runtime_id = None
+    ; dispatched_runtime_attempts = []
     }
   in
   let turn_state =
@@ -1293,22 +1293,33 @@ let run_keeper_cycle
                      so this log named the untried lane key instead of the
                      runtime that actually errored).
                      [keeper_cycle_failed_runtime_attribution] reports the
-                     dispatched candidate's own id when a same-turn
-                     deferral hint is available. *)
+                     last candidate the walk dispatched, taken from
+                     [turn_state.dispatched_runtime_attempts]; the lane key
+                     is reported as its own [lane=] field. Without an
+                     attempt list the hinted branch alone was fixed and every
+                     unhinted failure still named the lane key — 62 lines of
+                     "runtime=claude_code… error=Payment required" on
+                     2026-09-10/11 for a 402 that deepseek answered
+                     (audit-adversarial-20260912 L3). *)
                   let runtime_attribution =
                     keeper_cycle_failed_runtime_attribution
                       ~deferred_runtime_lane:turn_state.deferred_runtime_lane
-                      ~execution_runtime_id:final_execution.runtime_id
+                      ~lane_runtime_id:final_execution.runtime_id
+                      ~dispatched_attempts:turn_state.dispatched_runtime_attempts
                   in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
                     ~category:Log.Turn
-                    "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
+                    "%s: keeper cycle FAILED runtime=%s lane=%s attempts=%s \
+                     deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
                      latency=%dms%s error=%s"
                     meta.name
-                    runtime_attribution.reported_runtime_id
+                    (keeper_cycle_failed_runtime_to_string
+                       runtime_attribution.reported_runtime)
+                    runtime_attribution.lane_runtime_id
+                    (dispatched_runtime_attempts_to_string runtime_attribution.attempts)
                     runtime_attribution.deferred_next_runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
@@ -1365,12 +1376,14 @@ let run_keeper_cycle
                     ~error:e_str
                     ~terminal_reason
                     (* The runtime walk's own name for the candidate that
-                       answered with this error. [runtime_attribution] above
-                       resolves the same question for the log line, but only
-                       from a deferral hint; without one it falls back to the
-                       lane id. The record takes the walk's report or nothing
+                       answered with this error: the same attempt list
+                       [runtime_attribution] above reports on the log line.
+                       The record takes the walk's report or nothing
                        (masc#35043). *)
-                    ?executed_runtime_id:turn_state.last_dispatched_runtime_id
+                    ?executed_runtime_id:
+                      (match runtime_attribution.reported_runtime with
+                       | Dispatched_candidate runtime_id -> Some runtime_id
+                       | No_candidate_dispatched -> None)
                     ();
                   commit_turn_runtime_or_raise
                     ~config

@@ -7,6 +7,15 @@
 
 module StringMap = Set_util.StringMap
 
+(** One candidate the runtime walk dispatched and that answered with an
+    error. Carried on the turn in dispatch order so a failure report can name
+    the candidate that actually errored; the lane the turn was budgeted under
+    is a different fact (masc#35043, audit-adversarial-20260912 L3). *)
+type dispatched_runtime_attempt =
+  { runtime_id : string
+  ; error : Agent_core.Error.t
+  }
+
 (** Immutable per-turn accumulator that replaces the casual [ref] cells
     previously threaded through [run_keeper_cycle] and the retry loop. *)
 type turn_state =
@@ -19,7 +28,7 @@ type turn_state =
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
-  ; last_dispatched_runtime_id : string option
+  ; dispatched_runtime_attempts : dispatched_runtime_attempt list
   }
 
 let require_last_execution_for_finalize ~keeper_name turn_state =
@@ -34,19 +43,53 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
     Error err
 ;;
 
+type keeper_cycle_failed_runtime =
+  | Dispatched_candidate of string
+  | No_candidate_dispatched
+
 type keeper_cycle_failed_runtime_attribution =
-  { reported_runtime_id : string
+  { reported_runtime : keeper_cycle_failed_runtime
+  ; lane_runtime_id : string
   ; deferred_next_runtime_id : string
+  ; attempts : dispatched_runtime_attempt list
   }
 
-let keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane ~execution_runtime_id =
-  match deferred_runtime_lane with
-  | Some (hint : Keeper_turn_driver.deferred_runtime_lane) ->
-    { reported_runtime_id = hint.failed_runtime_id
-    ; deferred_next_runtime_id = hint.next_runtime_id
-    }
-  | None ->
-    { reported_runtime_id = execution_runtime_id; deferred_next_runtime_id = "none" }
+let keeper_cycle_failed_runtime_attribution
+      ~deferred_runtime_lane
+      ~lane_runtime_id
+      ~(dispatched_attempts : dispatched_runtime_attempt list)
+  =
+  let reported_runtime =
+    match List.rev dispatched_attempts with
+    | last :: _ -> Dispatched_candidate last.runtime_id
+    | [] -> No_candidate_dispatched
+  in
+  let deferred_next_runtime_id =
+    match deferred_runtime_lane with
+    | Some (hint : Keeper_turn_driver.deferred_runtime_lane) -> hint.next_runtime_id
+    | None -> "none"
+  in
+  { reported_runtime
+  ; lane_runtime_id
+  ; deferred_next_runtime_id
+  ; attempts = dispatched_attempts
+  }
+;;
+
+let keeper_cycle_failed_runtime_to_string = function
+  | Dispatched_candidate runtime_id -> runtime_id
+  | No_candidate_dispatched -> "none"
+;;
+
+let dispatched_runtime_attempts_to_string (attempts : dispatched_runtime_attempt list) =
+  attempts
+  |> List.map (fun (attempt : dispatched_runtime_attempt) ->
+       Printf.sprintf
+         "%s=%s"
+         attempt.runtime_id
+         (Keeper_types_profile.short_preview (Agent_core.Error.to_string attempt.error)))
+  |> String.concat ", "
+  |> Printf.sprintf "[%s]"
 ;;
 
 (** Whether the deferred lane a previous turn hinted at was the lane this turn

@@ -6,6 +6,14 @@
     Keeper_unified_turn. Re-included by it so existing callers continue
     to use [Keeper_unified_turn.<name>] unchanged. *)
 
+(** One candidate the runtime walk dispatched and that answered with an
+    error. [runtime_id] is the candidate's own id as the walk named it, never
+    the lane it was routed under. *)
+type dispatched_runtime_attempt =
+  { runtime_id : string
+  ; error : Agent_core.Error.t
+  }
+
 (** Immutable per-turn accumulator that replaces the casual [ref] cells
     previously threaded through [run_keeper_cycle] and the retry loop. *)
 type turn_state =
@@ -18,14 +26,15 @@ type turn_state =
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
   ; retry_phase_started_at : float option
-  ; last_dispatched_runtime_id : string option
-    (** The candidate that actually dispatched and errored, as the runtime
-        walk saw it. [last_execution] and [deferred_runtime_lane] both name
-        the lane the turn was budgeted under, which sticky ordering can route
-        to a different candidate; a failure with no deferral hint left no
-        record of who answered at all. The decision record named the keeper's
-        head runtime in that case, so 162 payment-required errors were filed
-        against a provider that was serving normally (masc#35043). [None]
+  ; dispatched_runtime_attempts : dispatched_runtime_attempt list
+    (** Every candidate that dispatched and errored this turn, in dispatch
+        order, each with its own error. [last_execution] and
+        [deferred_runtime_lane] both name the lane the turn was budgeted
+        under, which sticky ordering can route to a different candidate; a
+        failure with no deferral hint left no record of who answered at all.
+        The decision record and the "keeper cycle FAILED" line named the
+        lane key in that case, so payment-required errors from deepseek were
+        filed against claude_code (masc#35043, audit L3 2026-09-12). Empty
         until a candidate errors. *)
   }
 
@@ -34,34 +43,58 @@ val require_last_execution_for_finalize :
   turn_state ->
   (Keeper_turn_runtime_budget.runtime_execution, Agent_core.Error.t) result
 
-(** Which runtime a "keeper cycle FAILED" report should name, and what the
-    (possibly different) next-attempt hint is. See
-    [keeper_cycle_failed_runtime_attribution] (masc#28762). *)
+(** The runtime a "keeper cycle FAILED" report names. *)
+type keeper_cycle_failed_runtime =
+  | Dispatched_candidate of string
+    (** The last candidate the runtime walk dispatched and that errored. *)
+  | No_candidate_dispatched
+    (** The turn failed before any candidate was dispatched, so there is no
+        candidate to name. Rendered as ["none"]; the lane is still reported
+        separately. *)
+
+(** Which runtime a "keeper cycle FAILED" report should name, the lane it
+    was budgeted under, and what the (possibly different) next-attempt hint
+    is. See [keeper_cycle_failed_runtime_attribution] (masc#28762,
+    masc#35043). *)
 type keeper_cycle_failed_runtime_attribution =
-  { reported_runtime_id : string
-    (** The runtime that actually dispatched and failed this cycle. *)
+  { reported_runtime : keeper_cycle_failed_runtime
+    (** The candidate that actually dispatched and failed this cycle, taken
+        from the attempt list — never from the execution record. *)
+  ; lane_runtime_id : string
+    (** The deferred-lane assignment this cycle was budgeted under
+        ([execution.runtime_id]). Distinct fact from [reported_runtime]. *)
   ; deferred_next_runtime_id : string
     (** The runtime a same-turn deferral queued for the *next* cycle, or
         ["none"] when no deferral occurred. Distinct fact from
-        [reported_runtime_id]; never conflate the two into one field. *)
+        [reported_runtime]; never conflate the two into one field. *)
+  ; attempts : dispatched_runtime_attempt list
+    (** Every candidate that dispatched and errored, in dispatch order. *)
   }
 
 (** [keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane
-    ~execution_runtime_id] resolves the runtime a failure report should
-    name. [execution_runtime_id] (typically [execution.runtime_id]) names
-    the deferred-lane assignment this cycle was budgeted under, not
+    ~lane_runtime_id ~dispatched_attempts] resolves the runtime a failure
+    report should name. [lane_runtime_id] (typically [execution.runtime_id])
+    names the deferred-lane assignment this cycle was budgeted under, not
     necessarily the concrete candidate [attempt_runtime_candidates] actually
     dispatched: [Runtime_lane_preference] sticky ordering can route a lane
-    keyed by one runtime id to a different candidate first. When
-    [deferred_runtime_lane] is [Some hint] (a same-turn deferral was
-    recorded), [hint.failed_runtime_id] is the dispatched candidate's own id
-    and is reported as [reported_runtime_id]; otherwise
-    [execution_runtime_id] is used as-is (no rotation occurred, so it is
-    already the dispatched candidate). *)
+    keyed by one runtime id to a different candidate first. The reported
+    runtime is the last entry of [dispatched_attempts] (the candidate the
+    walk ended on); with no attempt it is [No_candidate_dispatched]. The
+    lane id is never substituted for a candidate. [deferred_runtime_lane]
+    only supplies [deferred_next_runtime_id]. *)
 val keeper_cycle_failed_runtime_attribution :
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
-  execution_runtime_id:string ->
+  lane_runtime_id:string ->
+  dispatched_attempts:dispatched_runtime_attempt list ->
   keeper_cycle_failed_runtime_attribution
+
+(** Log rendering of [keeper_cycle_failed_runtime]: the candidate id, or
+    ["none"] for [No_candidate_dispatched]. *)
+val keeper_cycle_failed_runtime_to_string : keeper_cycle_failed_runtime -> string
+
+(** Log rendering of the attempt list:
+    ["[<runtime_id>=<error preview>, ...]"], in dispatch order. *)
+val dispatched_runtime_attempts_to_string : dispatched_runtime_attempt list -> string
 
 val degraded_retry_applied_for_turn :
   degraded_retry_info:Keeper_error_classify.degraded_retry option ->

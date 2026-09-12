@@ -126,8 +126,10 @@ export class DosWorld {
     const events = this.ci.events();
     events.onMessage((kind, ...details) => {
       // Engine diagnostics must never corrupt MCP stdout.
+      // Diagnostic severity is not machine lifecycle: even ordinary DOS
+      // execution messages can use the error channel. Startup rejection and
+      // onExit below report actual environment failure.
       console.error(JSON.stringify({ engine_message: kind, details }));
-      if (kind === 'error') this.fail(new Error(details.join(' ')));
     });
     events.onExit(() => this.fail(new Error('DOS machine exited')));
     events.onFrame((rgb, rgba) => {

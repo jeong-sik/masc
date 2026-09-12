@@ -35,3 +35,6 @@ val lane_observe : Masc_domain.tool_schema
 val lane_slice : Masc_domain.tool_schema
 val lane_detach : Masc_domain.tool_schema
 val lane_evidence : Masc_domain.tool_schema
+
+val lane_act : Masc_domain.tool_schema
+val lane_action_status : Masc_domain.tool_schema

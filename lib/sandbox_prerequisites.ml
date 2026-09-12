@@ -1,5 +1,6 @@
 type distribution = Debian | Ubuntu | Other
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
+  | Whisper_cli
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -24,6 +25,18 @@ let docker_mac_source = "https://docs.docker.com/desktop/setup/install/mac-insta
 let docker_linux_source = "https://docs.docker.com/engine/install/"
 let codex_source = "https://developers.openai.com/codex/cli/"
 let claude_source = "https://code.claude.com/docs/en/setup"
+let whisper_source = "https://github.com/ggml-org/whisper.cpp"
+let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
+let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
+
+(* The model masc asks whisper for by default. Measured 2026-09-12: this file
+   is 1,624,555,275 bytes, and on an M3 Max it transcribed a Korean sentence in
+   5.1s with the language auto-detected at p = 0.998641. The smaller models
+   download faster and hear Korean worse. *)
+let whisper_model_file = "ggml-large-v3-turbo.bin"
+
+let whisper_model_url =
+  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" ^ whisper_model_file
 
 let open_action ~host ~id ~label ~detail ~source_url url =
   let argv = match host with
@@ -40,10 +53,48 @@ let install_cli client =
    detail="Download and run the vendor's native installer for this account. It may manage its own client files and shell integration. No sudo or Homebrew is requested. Sign-in and model verification follow separately.";
    source_url=Runtime_official_cli_install.source_url client; requires_admin=false;
    action_effect=Install_official_cli client}
-let catalog ~host ~distribution dependency =
+let catalog ?model_dir ~host ~distribution dependency =
   let open_ = open_action ~host in
   match dependency, host with
   | _, Sandbox_readiness.Unsupported -> []
+  (* Hearing is the only half of voice a fresh mac cannot already do: say is in
+     the base system, and nothing transcribes. Both steps here are one-shot --
+     a package and a file -- because the endpoint that uses them runs a command
+     rather than a server. *)
+  | Whisper_cli, Macos _ ->
+    let install =
+      commands ~id:"whisper_cli_brew_install"
+        ~label:"Install whisper.cpp with Homebrew"
+        ~detail:"Installs the whisper-cpp formula, an 8.9MB bottle whose whisper-cli transcribes an audio file. Requires Homebrew; nothing is started and no service is registered."
+        ~source_url:whisper_formula_source ~requires_admin:false
+        [["brew";"install";"whisper-cpp"]]
+    in
+    let model =
+      match model_dir with
+      (* Without somewhere to put it there is no command to offer, so the page
+         is opened instead of a download being faked. *)
+      | None ->
+        [open_ ~id:"whisper_model_page"
+           ~label:"Open the whisper.cpp model downloads"
+           ~detail:"Choose a ggml model and note where it lands: the voice configuration names that path."
+           ~source_url:whisper_models_source whisper_models_source]
+      | Some dir ->
+        [commands ~id:"whisper_model_download"
+           ~label:"Download the whisper model masc asks for"
+           ~detail:"Fetches ggml-large-v3-turbo (1.6GB), which auto-detects Korean. The voice configuration names this path as the section's model."
+           ~source_url:whisper_models_source ~requires_admin:false
+           [["curl";"-L";"--create-dirs";"-o";Filename.concat dir whisper_model_file;
+             whisper_model_url]]]
+    in
+    (install :: model)
+  (* Homebrew is the only route this catalog can name a command for. Elsewhere
+     the build is the project's own, and guessing a package would install
+     something that may not exist. *)
+  | Whisper_cli, Linux _ ->
+    [open_ ~id:"whisper_cli_build_instructions"
+       ~label:"Open whisper.cpp build instructions"
+       ~detail:"Build whisper.cpp for this machine, then point the voice configuration at the binary and a ggml model."
+       ~source_url:whisper_source whisper_source]
   | Codex_cli, _ -> [install_cli Codex; open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."
       ~source_url:codex_source codex_source]

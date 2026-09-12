@@ -285,6 +285,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0442 | 세계 헌법: 규범은 PR이 아니라 합의로 굳는다 — base_path 원장에 쌓고 시스템 프롬프트로 투영한다 | Draft | - |
 | 0443 | Runtime lifecycle is not a provider stream event — a turn before its first to... | Draft | - |
 | 0444 | goal store 를 못 읽으면 빈 목록이 아니라 typed 상태다 | Draft | - |
+| 0445 | 'deferred' 대신 다음 행위자를 말한다 — 누가 다시 움직이는지가 닫힌 합으로 기록에 남는다 | Draft | - |
+| 0446 | 계약 없는 제출은 검증에 들어가지 않는다 | Draft | - |
+| 0447 | 서버는 영속 포트에 붙거나 기동을 거부한다 | Draft | - |
+| 0448 | manual keeper 는 부팅 없인 돌지 않고, 대기 작업은 보인다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-attached-service-tool-scoping | 도구 스키마를 매 턴 전량 싣는 것을 그만둔다 | Accepted | - |

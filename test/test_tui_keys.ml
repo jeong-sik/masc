@@ -1151,6 +1151,10 @@ let planning_state () =
       ; pl_backlog =
           { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_done = 0
           ; pb_cancelled = 0 }
+      (* This surface's key tests are about the rows the cursor walks, and the
+         history lines sit above the divider outside them. Empty keeps the
+         fixture about that. *)
+      ; pl_goal_history = []
       ; pl_generated_at = "2026-09-04T00:00:00Z"
       };
   state

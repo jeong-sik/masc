@@ -43,7 +43,7 @@ let denied surface name args code =
 let post ~author ~visibility ?origin ?meta_json content =
   Board_dispatch.create_post ~author ~content ~post_kind:Board.System_post
     ~visibility ~ttl_hours:0 ?origin ?meta_json () |> require "post"
-let post_args post = `Assoc ["post_id", `String (Board.Post_id.to_string post.Board.id)]
+let post_args (post : Board.post) = `Assoc ["post_id", `String (Board.Post_id.to_string post.id)]
 let run_args id = `Assoc ["run_id", `String id]
 let metadata = `Assoc
   [ "source_context", `Assoc ["question", `String "compare the designs"; "task", `Null; "goals", `List []]
@@ -90,6 +90,46 @@ let test_direct_authority_and_unknown () = with_fixture (fun _config task goal -
     let shared = post ~author:"peer" ~visibility "Shared evidence" in
     ignore (read task "masc_board_post_get" (post_args shared));
     ignore (read goal "masc_board_post_get" (post_args shared))) [Board.Public; Board.Unlisted; Board.Internal])
+
+let test_pagination_input_contract () = with_fixture (fun _config task goal ->
+  let p = post ~author:"peer" ~visibility:Board.Internal "Paginated review evidence" in
+  let id = Board.Post_id.to_string p.id in
+  let comments = List.init (Board.Limits.default_comment_page_limit + 1) (fun i ->
+    Board_dispatch.add_comment ~post_id:id ~author:"peer"
+      ~content:(Printf.sprintf "Evidence entry %d" i) ~ttl_hours:0 () |> require "comment") in
+  let args fields = `Assoc (("post_id", `String id) :: fields) in
+  let open Yojson.Safe.Util in
+  List.iter (fun surface ->
+    let first = read surface "masc_board_post_get" (args []) in
+    check int "omitted offset starts at zero" 0
+      (first |> member "pagination" |> member "offset" |> to_int);
+    check int "omitted limit uses the descriptor default" Board.Limits.default_comment_page_limit
+      (first |> member "comments" |> to_list |> List.length);
+    let next = first |> member "pagination" |> member "next_offset" |> to_int in
+    let rest = read surface "masc_board_post_get" (args ["comment_offset", `Int next]) in
+    check bool "default pages preserve every original comment in order" true
+      (to_list (member "comments" first) @ to_list (member "comments" rest)
+       = List.map Board.comment_to_yojson comments);
+    let all = read surface "masc_board_post_get"
+      (args ["comment_limit", `Int Board.Limits.max_comment_page_limit]) in
+    check bool "maximum descriptor limit is accepted" true
+      (member "comments" all = `List (List.map Board.comment_to_yojson comments));
+    let past_end = read surface "masc_board_post_get" (args ["comment_offset", `Int max_int]) in
+    check bool "valid offset beyond the thread produces an empty final page" true
+      (member "comments" past_end = `List [] &&
+       member "next_offset" (member "pagination" past_end) = `Null);
+    List.iter (fun field ->
+      List.iter (fun value ->
+        denied surface "masc_board_post_get" (args [field, value])
+          "verification_source_invalid_request")
+        [`Null; `String "1"; `Float 1.; `Bool true; `List []; `Assoc [];
+         `Intlit "999999999999999999999999999999"])
+      ["comment_offset"; "comment_limit"];
+    List.iter (fun (field, value) ->
+      denied surface "masc_board_post_get" (args [field, `Int value])
+        "verification_source_invalid_request")
+      ["comment_offset", -1; "comment_limit", 0;
+       "comment_limit", Board.Limits.max_comment_page_limit + 1]) [task; goal])
 
 let test_fusion_original_and_separate_decision () = with_fixture (fun config task goal ->
   let id = "opaque-source-id" in
@@ -146,6 +186,7 @@ let test_corrupt_decision_storage () = with_fixture (fun config task _goal ->
 let () = run "Verifier collaboration sources" ["dispatch", [
   test_case "unreadable decision journal remains a storage failure" `Quick test_corrupt_decision_storage;
   test_case "shared peer post and exact paginated comments" `Quick test_shared_thread_and_pagination;
+  test_case "pagination defaults apply only to omitted fields" `Quick test_pagination_input_contract;
   test_case "Direct authority and missing source remain explicit" `Quick test_direct_authority_and_unknown;
   test_case "original Fusion source and separate recorded decision" `Quick test_fusion_original_and_separate_decision;
   test_case "foreign source, wrong origin and no write authority" `Quick test_fusion_foreign_wrong_origin_and_no_write]]

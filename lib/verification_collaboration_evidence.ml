@@ -44,6 +44,15 @@ let required_id args field =
   | Some value when String.trim value <> "" -> Ok value
   | Some _ | None -> Error (Invalid_request (field ^ " is required for an exact source lookup"))
 
+let optional_integer args field ~default =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt field fields with
+     | None -> Ok default
+     | Some (`Int value) -> Ok value
+     | Some _ -> Error (Invalid_request (field ^ " must be an integer when provided")))
+  | _ -> Error (Invalid_request "source lookup arguments must be an object")
+
 let board_error = function
   | Board.Post_not_found _ -> Source_unavailable "referenced Board post was not found; no deletion or expiry is inferred"
   | (Board.Invalid_id _ | Board.Validation_error _) as error ->
@@ -56,15 +65,16 @@ let board_error = function
 let read_board ~config ~authority ~args = protect (fun () ->
   let* () = require_workspace config in
   let* post_id = required_id args "post_id" in
+  let* offset = optional_integer args "comment_offset" ~default:0 in
+  let* limit = optional_integer args "comment_limit"
+      ~default:Board.Limits.default_comment_page_limit in
+  let* () =
+    if offset < 0 || limit < 1 || limit > Board.Limits.max_comment_page_limit then
+      Error (Invalid_request "comment pagination is outside the Board descriptor contract")
+    else Ok () in
   let* post, comments = Board_dispatch.get_post_and_comments ~post_id ()
     |> Result.map_error board_error in
   let* () = require_visible authority post in
-  let offset = Option.value (Json_util.get_int args "comment_offset") ~default:0 in
-  let limit = Option.value (Json_util.get_int args "comment_limit")
-      ~default:Board.Limits.default_comment_page_limit in
-  if offset < 0 || limit < 1 || limit > Board.Limits.max_comment_page_limit then
-    Error (Invalid_request "comment pagination is outside the Board descriptor contract")
-  else
     let total = List.length comments in
     let offset = min offset total in
     let selected = List.filteri (fun index _ -> index >= offset && index - offset < limit) comments in

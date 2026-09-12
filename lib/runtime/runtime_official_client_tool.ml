@@ -48,6 +48,9 @@ let dynamic_tool_bytes tools =
 type content_transport = Codex | Mcp
 
 let project_content transport ~content ~content_blocks =
+  (* DET-OK: None is the producer's text-only result, whose explicit content
+     is preserved here; Some blocks is authoritative, including an empty list.
+     This is not a default for unknown or unsupported media, which fail below. *)
   let blocks = Option.value ~default:[Agent_core.Types.Text content] content_blocks in
   let text value = match transport with
     | Codex -> `Assoc ["type", `String "inputText"; "text", `String value]

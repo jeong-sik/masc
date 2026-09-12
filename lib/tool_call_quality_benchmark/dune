@@ -16,4 +16,4 @@
  (name masc_tool_call_quality_benchmark)
  (public_name masc.tool_call_quality_benchmark)
  (wrapped false)
- (libraries yojson masc_core time_compat))
+ (libraries yojson masc_core))

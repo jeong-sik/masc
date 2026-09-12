@@ -245,6 +245,13 @@ let explicit_metadata : (string * metadata) list =
     ("masc_msx_step_until_change", mutating_tool);
     ("masc_msx_peek", read_state_tool);
     ("masc_msx_ram_diff", read_state_tool);
+    ("masc_dos_screen", read_state_tool);
+    ("masc_dos_peek", read_state_tool);
+    ("masc_dos_load", mutating_tool);
+    ("masc_dos_eject", mutating_tool);
+    ("masc_dos_step", mutating_tool);
+    ("masc_dos_press", mutating_tool);
+    ("masc_dos_type", mutating_tool);
     ("masc_agent_card", read_state_tool);
     ("masc_dashboard", read_state_tool);
     ("masc_board_list", read_state_tool);

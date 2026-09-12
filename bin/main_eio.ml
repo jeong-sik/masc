@@ -1375,35 +1375,38 @@ let init_cmd =
       const init_cmd_exit $ base_path $ init_force $ init_skills_only
       $ init_record_default)
 
-let skills_refresh_exit base_path name apply expected_revision export_to =
+let skills_refresh_exit base_path name apply expected_revision expected_bundle_revision export_to =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   match List.find_opt (fun package -> Builtin_skill_package.name package = name)
           (Server_runtime_config_root_bootstrap.builtin_skills ()) with
   | None -> Printf.eprintf "Unknown builtin Skill package: %s\n" name; 1
   | Some package ->
     if Option.is_some export_to then
-      match apply, expected_revision, export_to with
-      | false, None, Some destination ->
+      match apply, expected_revision, expected_bundle_revision, export_to with
+      | false, None, None, Some destination ->
         (match Builtin_skill_package.export ~destination package with
-         | Ok () -> Printf.printf "Bundled package exported to %s\n" destination; 0
+         | Ok () ->
+           Printf.printf "Bundled package exported to %s\nbundled revision: %s\n"
+             destination (Builtin_skill_package.bundled_revision package); 0
          | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
-      | (true, _, _) | (false, Some _, _) | (false, None, None) ->
-        prerr_endline "--export-to cannot be combined with --apply or --expected-revision"; 1
+      | (true, _, _, _) | (false, Some _, _, _) | (false, None, Some _, _) | (false, None, None, None) ->
+        prerr_endline "--export-to cannot be combined with --apply or expected revisions"; 1
     else if apply then
-      match expected_revision with
-      | None -> prerr_endline "--apply requires --expected-revision from a reviewed package"; 1
-      | Some revision ->
+      match expected_revision, expected_bundle_revision with
+      | (None, _) | (Some _, None) ->
+        prerr_endline "--apply requires --expected-revision and --expected-bundle-revision from a reviewed package"; 1
+      | Some installed_revision, Some bundled_revision ->
         (match Builtin_skill_package.install ~base_path
-                 ~request:(Builtin_skill_package.Replace_if_revision revision) package with
+                 ~request:(Builtin_skill_package.Replace_if_revisions { installed_revision; bundled_revision }) package with
          | Ok (Builtin_skill_package.Updated { backup }) ->
            Printf.printf "Updated %s; previous package: %s\nRefresh the running Skill catalog before a new instruction invocation.\n" name backup; 0
          | Ok Builtin_skill_package.Current -> print_endline "Package is current"; 0
          | Ok (Builtin_skill_package.Installed | Builtin_skill_package.Already_present
-               | Builtin_skill_package.Preserved _ | Builtin_skill_package.Preserved_invalid_path _) ->
+               | Builtin_skill_package.Preserved _ | Builtin_skill_package.Preserved_uninspectable _) ->
            prerr_endline "Package was not replaced"; 1
          | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1)
-    else if Option.is_some expected_revision then (
-      prerr_endline "--expected-revision requires --apply"; 1)
+    else if Option.is_some expected_revision || Option.is_some expected_bundle_revision then (
+      prerr_endline "Expected revisions require --apply"; 1)
     else
       match Builtin_skill_package.inspect ~base_path package with
       | Error error -> prerr_endline (Builtin_skill_package.error_message error); 1
@@ -1414,7 +1417,7 @@ let skills_refresh_exit base_path name apply expected_revision export_to =
           | Builtin_skill_package.Untracked -> "untracked; review operator changes before replacement"
           | Builtin_skill_package.Modified -> "modified since installation; review operator changes before replacement"
         in
-        Printf.printf "package: %s\ninstalled revision: %s\nbundled revision: %s\nownership: %s\nReview the complete package, then use --apply --expected-revision %s.\n" name revision bundled_revision ownership revision;
+        Printf.printf "package: %s\ninstalled revision: %s\nbundled revision: %s\nownership: %s\nReview the complete package, then use --apply --expected-revision %s --expected-bundle-revision %s.\n" name revision bundled_revision ownership revision bundled_revision;
         0
 
 let skills_refresh_cmd =
@@ -1422,10 +1425,12 @@ let skills_refresh_cmd =
   let apply = Arg.(value & flag & info [ "apply" ] ~doc:"Replace the reviewed package and retain its complete previous directory") in
   let expected = Arg.(value & opt (some string) None & info [ "expected-revision" ] ~docv:"SHA256"
     ~doc:"Reviewed whole-package revision; edits after inspection reject the update") in
+  let expected_bundle = Arg.(value & opt (some string) None & info [ "expected-bundle-revision" ] ~docv:"SHA256"
+    ~doc:"Reviewed bundled package revision; a different executable bundle rejects the update") in
   let export_to = Arg.(value & opt (some string) None & info [ "export-to" ] ~docv:"NEW_DIRECTORY"
     ~doc:"Export the bundled package to a new directory so its complete changes can be reviewed with diff") in
   Cmd.v (Cmd.info "skills-refresh" ~doc:"Inspect or explicitly replace one installed builtin Skill package")
-    Term.(const skills_refresh_exit $ base_path $ name $ apply $ expected $ export_to)
+    Term.(const skills_refresh_exit $ base_path $ name $ apply $ expected $ expected_bundle $ export_to)
 
 let runtime_config_path_for_base_path base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in

@@ -23,24 +23,33 @@ type ownership = Recorded | Untracked | Modified
 type inspection =
   | Missing
   | Present of { revision : string; bundled_revision : string; ownership : ownership }
-type request = Seed_missing | Automatic | Replace_if_revision of string
+type request = Seed_missing | Automatic
+  | Replace_if_revisions of { installed_revision : string; bundled_revision : string }
 type outcome = Installed | Already_present | Current | Preserved of inspection
-  | Preserved_invalid_path of string | Updated of { backup : string }
+  | Preserved_uninspectable of { reason : string } | Updated of { backup : string }
 type error =
   | Invalid_path of string
   | Revision_conflict of inspection
+  | Bundled_revision_conflict of { actual_revision : string }
   | Io_error of string
   | Published_but_unrecorded of { backup : string option; reason : string }
+  | Exported_but_unsynced of { destination : string; reason : string }
 
 let error_message = function
   | Invalid_path path -> "Skill package path is not an owned regular tree: " ^ path
   | Revision_conflict Missing -> "Skill package disappeared; inspect it again"
   | Revision_conflict (Present { revision; _ }) ->
     "Skill package changed; inspect it again (revision=" ^ revision ^ ")"
+  | Bundled_revision_conflict { actual_revision } ->
+    "Bundled Skill package changed; export and review it again (revision=" ^ actual_revision ^ ")"
   | Io_error reason -> reason
   | Published_but_unrecorded { backup; reason } ->
     "Skill package was published but not recorded: " ^ reason
     ^ (match backup with None -> "" | Some path -> "; previous package: " ^ path)
+  | Exported_but_unsynced { destination; reason } ->
+    "Skill package was exported to " ^ destination
+    ^ " but its parent directory was not synced: " ^ reason
+    ^ "; inspect the existing export before choosing a new destination"
 
 exception Rejected of error
 
@@ -173,7 +182,7 @@ let stage ~parent package =
     directory
   with exn -> Fs_compat.remove_tree directory; raise exn
 
-let export ~destination package =
+let export_with_sync ~sync_parent ~destination package =
   protect (fun () ->
     let parent = Unix.realpath (Filename.dirname destination) in
     let leaf = Filename.basename destination in
@@ -182,7 +191,16 @@ let export ~destination package =
     let directory = stage ~parent package in
     Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
       Fs_compat.rename_noreplace directory destination;
-      sync_dir parent))
+      match protect (fun () -> sync_parent parent) with
+      | Ok () -> ()
+      | Error error -> raise (Rejected (Exported_but_unsynced {
+          destination; reason = error_message error }))))
+
+let export = export_with_sync ~sync_parent:sync_dir
+
+module For_testing = struct
+  let export = export_with_sync
+end
 
 (* lockf is process-owned. This mutex also excludes another synchronous
    installer on a different systhread in this process. No Eio effects inside. *)
@@ -245,26 +263,30 @@ let install ~base_path ~request package =
   protect (fun () ->
     (match request with
      | Seed_missing | Automatic -> Fs_compat.mkdir_p base_path
-     | Replace_if_revision _ -> ());
+     | Replace_if_revisions { bundled_revision = expected; _ } ->
+       let actual_revision = bundled_revision package in
+       if expected <> actual_revision then
+         raise (Rejected (Bundled_revision_conflict { actual_revision })));
     let paths = locations ~base_path package in
     match request, stat paths.target with
     | Seed_missing, Some _ -> Already_present
-    | (Seed_missing, None) | ((Automatic | Replace_if_revision _), _) ->
+    | (Seed_missing, None) | ((Automatic | Replace_if_revisions _), _) ->
     with_lock paths (fun () ->
       match request, stat paths.target with
       | Seed_missing, Some _ -> Already_present
-      | (Seed_missing, None) | ((Automatic | Replace_if_revision _), _) ->
+      | (Seed_missing, None) | ((Automatic | Replace_if_revisions _), _) ->
       match request, protect (fun () -> observe paths package) with
-      | Automatic, Error (Invalid_path path) -> Preserved_invalid_path path
+      | Automatic, Error ((Invalid_path _ | Io_error _) as error) ->
+        Preserved_uninspectable { reason = error_message error }
       | _, Error error -> raise (Rejected error)
       | _, Ok before ->
       match request, before with
-      | Replace_if_revision _, Missing -> raise (Rejected (Revision_conflict Missing))
-      | Replace_if_revision expected, Present { revision; _ } when expected <> revision ->
+      | Replace_if_revisions _, Missing -> raise (Rejected (Revision_conflict Missing))
+      | Replace_if_revisions { installed_revision = expected; _ }, Present { revision; _ } when expected <> revision ->
         raise (Rejected (Revision_conflict before))
       | (Seed_missing | Automatic), Missing -> publish paths package before
       | Seed_missing, Present _ -> Already_present
       | Automatic, Present { ownership = (Untracked | Modified); _ } -> Preserved before
-      | (Automatic | Replace_if_revision _), Present { revision; bundled_revision; ownership = Recorded }
+      | (Automatic | Replace_if_revisions _), Present { revision; bundled_revision; ownership = Recorded }
         when revision = bundled_revision -> Current
-      | (Automatic | Replace_if_revision _), Present _ -> publish paths package before))
+      | (Automatic | Replace_if_revisions _), Present _ -> publish paths package before))

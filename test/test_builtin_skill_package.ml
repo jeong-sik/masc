@@ -13,6 +13,10 @@ let read path = Fs_compat.load_file path
 let install base request value = get (Package.install ~base_path:base ~request value)
 let inspect base value = get (Package.inspect ~base_path:base value)
 let revision = function Package.Present { revision; _ } -> revision | Package.Missing -> fail "missing package"
+let reviewed_request = function
+  | Package.Present { revision; bundled_revision; _ } ->
+    Package.Replace_if_revisions { installed_revision=revision; bundled_revision }
+  | Package.Missing -> fail "cannot review a missing installation"
 let with_base test =
   let base = Filename.temp_dir "masc-skill-package-test-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () -> test base)
@@ -56,7 +60,7 @@ let test_preserve_operator_changes () =
 let test_untracked_reviewed_update () = with_base (fun base ->
   ignore (install base Package.Automatic first);
   Unix.unlink (receipt base);
-  let before = revision (inspect base second) in
+  let request = reviewed_request (inspect base second) in
   (match install base Package.Automatic second with
    | Package.Preserved (Package.Present { ownership = Package.Untracked; _ }) -> ()
    | _ -> fail "untracked installation must wait for review");
@@ -71,17 +75,74 @@ let test_untracked_reviewed_update () = with_base (fun base ->
   (match Package.export ~destination:occupied second with
    | Error _ -> () | Ok () -> fail "export overwrote an empty operator directory");
   check int "operator directory remains empty" 0 (Array.length (Sys.readdir occupied));
-  ignore (install base (Package.Replace_if_revision before) second);
+  ignore (install base request second);
   assert_second base)
+
+let test_export_parent_sync_failure_retains_published_package () = with_base (fun base ->
+  let destination = Filename.concat (Unix.realpath base) "exported-despite-sync-error" in
+  let sync_parent path = raise (Unix.Unix_error (Unix.EIO, "fsync", path)) in
+  (match Package.For_testing.export ~sync_parent ~destination second with
+   | Error (Package.Exported_but_unsynced {destination=actual;_}) ->
+     check string "post-publication error identifies the exported directory" destination actual
+   | Error error -> fail ("wrong export failure phase: " ^ Package.error_message error)
+   | Ok () -> fail "injected parent sync failure must be reported");
+  check string "published instruction remains available" "short instruction"
+    (read (Filename.concat destination "SKILL.md"));
+  check string "published reference remains available" "new resource"
+    (read (Filename.concat destination "references/lazy.md"));
+  check (list string) "complete package root survives cleanup" ["SKILL.md";"references"]
+    (Sys.readdir destination |> Array.to_list |> List.sort String.compare))
 
 let test_stale_resource_revision () = with_base (fun base ->
   ignore (install base Package.Automatic first);
-  let before = revision (inspect base second) in
+  let request = reviewed_request (inspect base second) in
   Fs_compat.save_file (file base "references/old.md") "edited after preview";
-  (match Package.install ~base_path:base ~request:(Package.Replace_if_revision before) second with
+  (match Package.install ~base_path:base ~request second with
    | Error (Package.Revision_conflict _) -> ()
    | _ -> fail "body-only revision must not authorize resource overwrite");
   check string "resource edit survives rejection" "edited after preview" (read (file base "references/old.md")))
+
+let test_bundle_changed_after_review () = with_base (fun base ->
+  ignore (install base Package.Automatic first);
+  let reviewed = inspect base second in
+  let request = reviewed_request reviewed in
+  let original = revision reviewed in
+  let third = package [ "SKILL.md", "unreviewed third instruction"; "third.md", "new bytes" ] in
+  let third_revision = match inspect base third with
+    | Package.Present {bundled_revision;_} -> bundled_revision
+    | Package.Missing -> fail "installed package missing" in
+  (match Package.install ~base_path:base ~request third with
+   | Error (Package.Bundled_revision_conflict {actual_revision}) ->
+     check string "conflict identifies the unreviewed distribution" third_revision actual_revision
+   | _ -> fail "same installed revision must not authorize a different bundled package");
+  check string "active tree unchanged after distribution mismatch" original (revision (inspect base first));
+  check string "active instruction retained" "old instruction" (read (file base "SKILL.md"));
+  check bool "unreviewed resource never published" false (Sys.file_exists (file base "third.md")))
+
+let test_unreadable_operator_directory () = with_base (fun base ->
+  ignore (install base Package.Automatic first);
+  let directory = file base "references" in
+  let previous_mode = (Unix.stat directory).Unix.st_perm in
+  let original_receipt = read (receipt base) in
+  Fun.protect ~finally:(fun () -> Unix.chmod directory previous_mode) (fun () ->
+    Unix.chmod directory 0;
+    (* Root and some privileged environments can still inspect chmod(000).
+       Check the actual capability rather than claiming an EACCES test ran. *)
+    let unreadable =
+      try ignore (Sys.readdir directory); false with
+      | Sys_error _ -> true
+      | Unix.Unix_error ((Unix.EACCES | Unix.EPERM), _, _) -> true in
+    let outcome = install base Package.Automatic second in
+    (match unreadable, outcome with
+     | true, Package.Preserved_uninspectable {reason} ->
+       check bool "preservation exposes the inspection failure" true (reason <> "")
+     | false, Package.Preserved (Package.Present {ownership=Package.Modified;_}) ->
+       Printf.printf "permission denial unavailable; verified privileged chmod-edit preservation instead\n%!"
+     | _ -> fail "uninspectable or chmod-edited operator directory must be preserved");
+    check string "instruction remains active" "old instruction" (read (file base "SKILL.md"));
+    check string "receipt was not advanced" original_receipt (read (receipt base)));
+  check string "old resource remains after restoring access" "old resource" (read (file base "references/old.md"));
+  check bool "new distribution resource absent" false (Sys.file_exists (file base "references/lazy.md")))
 
 let test_symlink_is_not_a_package () = with_base (fun base ->
   ignore (install base Package.Automatic first);
@@ -90,7 +151,7 @@ let test_symlink_is_not_a_package () = with_base (fun base ->
   Unix.unlink (file base "references/old.md");
   Unix.symlink outside (file base "references/old.md");
   (match install base Package.Automatic second with
-   | Package.Preserved_invalid_path _ -> () | _ -> fail "symlink must not be followed");
+   | Package.Preserved_uninspectable _ -> () | _ -> fail "symlink must not be followed");
   (match install base Package.Seed_missing second with
    | Package.Already_present -> () | _ -> fail "startup must not inspect operator resources");
   check string "outside file untouched" "outside bytes" (read outside);
@@ -123,7 +184,10 @@ let () = run "Builtin Skill package updates"
   [ "installation", [ test_case "whole package update and backup" `Quick test_update_complete_package
                     ; test_case "operator edits remain active" `Quick test_preserve_operator_changes
                     ; test_case "untracked package review and explicit update" `Quick test_untracked_reviewed_update
+                    ; test_case "export sync failure retains complete published package" `Quick test_export_parent_sync_failure_retains_published_package
                     ; test_case "stale resource revision rejects replacement" `Quick test_stale_resource_revision
+                    ; test_case "changed bundled revision rejects replacement" `Quick test_bundle_changed_after_review
+                    ; test_case "unreadable operator directory is preserved" `Quick test_unreadable_operator_directory
                     ; test_case "symlink resource rejected" `Quick test_symlink_is_not_a_package
                     ; test_case "startup does not upgrade" `Quick test_startup_does_not_upgrade
                     ; test_case "same-process installers serialize" `Quick test_parallel_installers ] ]

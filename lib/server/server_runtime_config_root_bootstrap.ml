@@ -299,15 +299,15 @@ let install_builtin_skills ~base_path ~request =
         Printf.printf "updated Skill %s (previous package: %s)\n" name backup;
         installed + 1
       | Ok (Builtin_skill_package.Current | Builtin_skill_package.Already_present) -> installed
-      | Ok (Builtin_skill_package.Preserved_invalid_path path) ->
-        Printf.printf "preserved Skill %s (cannot inspect package path: %s)\n" name path;
+      | Ok (Builtin_skill_package.Preserved_uninspectable { reason }) ->
+        Printf.printf "preserved Skill %s (cannot inspect package: %s)\n" name reason;
         installed
       | Ok (Builtin_skill_package.Preserved inspection) ->
         (match request, inspection with
          | Builtin_skill_package.Automatic, Builtin_skill_package.Present { revision; _ } ->
            Printf.printf "preserved Skill %s (revision=%s; inspect with masc skills-refresh %s --base-path BASE)\n"
              name revision name
-         | (Builtin_skill_package.Seed_missing | Builtin_skill_package.Replace_if_revision _), _
+         | (Builtin_skill_package.Seed_missing | Builtin_skill_package.Replace_if_revisions _), _
          | Builtin_skill_package.Automatic, Builtin_skill_package.Missing -> ());
         installed
       | Error error -> raise (Sys_error (Builtin_skill_package.error_message error)))

@@ -611,7 +611,10 @@ let handle_keeper_turn_interrupt state request reqd =
              let interrupt_token_result =
                match List.assoc_opt "interrupt_token" fields with
                | None -> Ok None
-               | Some (`String token) when Option.is_some (Uuidm.of_string token) -> Ok (Option.map Uuidm.to_string (Uuidm.of_string token))
+               | Some (`String token) ->
+                 (match Uuidm.of_string token with
+                  | Some token -> Ok (Some (Uuidm.to_string token))
+                  | None -> Error "interrupt_token must be a UUID")
                | Some _ -> Error "interrupt_token must be a UUID"
              in
              (match request_id_result, interrupt_token_result with
@@ -636,8 +639,8 @@ let handle_keeper_turn_interrupt state request reqd =
       then
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
-      else if Option.is_some interrupt_token then
-        let token = Option.get interrupt_token in
+      else match interrupt_token with
+      | Some token ->
         let fields = match Keeper_registry.interrupt_observed_turn ~base_path keeper_name ~interrupt_token:token with
           | Keeper_registry.Observed_turn_signalled -> ["signalled", `Bool true]
           | Observed_turn_changed -> ["signalled", `Bool false; "reason", `String "observed_turn_changed"]
@@ -646,7 +649,7 @@ let handle_keeper_turn_interrupt state request reqd =
         in
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc (("interrupt_token", `String token) :: fields))
-      else
+      | None ->
         match request_id with
         | Some request_id ->
           (match Keeper_chat_operation.Operation_id.of_string request_id with

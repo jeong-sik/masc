@@ -54,5 +54,10 @@ module For_testing : sig
       (unit, string) result;
   }
   val with_backend : backend -> (unit -> 'a) -> 'a
+  val with_action_writer :
+    (store:Lane_addon_store.t -> instance_id:string -> request_id:string -> Yojson.Safe.t ->
+      (unit, string) result) -> (unit -> 'a) -> 'a
+  (** Fiber-local persistence replacement captured before filesystem offload.
+      Allows the existing strict writer to inject a real post-rename failure. *)
   val reset : unit -> unit
 end

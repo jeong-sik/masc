@@ -179,14 +179,22 @@ let namespace e seq output =
   { output with rows = List.map (fun (row : row) -> { row with
       id = prefix row.id; lane_id = e.instance_id ^ "/" ^ row.lane_id;
       related_ids = List.map prefix row.related_ids }) output.rows }
+type action_writer = store:Lane_addon_store.t -> instance_id:string -> request_id:string ->
+  Yojson.Safe.t -> (unit, string) result
+let action_writer_key : action_writer Eio.Fiber.key = Eio.Fiber.create_key ()
 let save_action_unlocked m (receipt : Lane_addon_action.receipt) =
-  offload (fun () -> Lane_addon_store.save_action m.store ~instance_id:receipt.instance_id
+  let write = match Eio.Fiber.get action_writer_key with
+    | None -> (fun ~store ~instance_id ~request_id json ->
+        Lane_addon_store.save_action store ~instance_id ~request_id json)
+    | Some write -> write in
+  offload (fun () -> write ~store:m.store ~instance_id:receipt.instance_id
     ~request_id:receipt.request_id (Lane_addon_action.to_json receipt))
 let save_action m receipt = Eio.Mutex.use_ro m.action_mutex (fun () -> save_action_unlocked m receipt)
 let finalize_actions m e =
   (* The worker's lifetime owns dispatch. Cleanup never replays work against a
      replacement incarnation. Remaining queued work is known not to have run. *)
-  let finish receipt state detail =
+  let finish (receipt : Lane_addon_action.receipt) state detail =
+    let detail = match receipt.detail with None -> detail | Some previous -> previous ^ "; " ^ detail in
     let receipt = {receipt with Lane_addon_action.state; detail = Some detail} in
     match save_action m receipt with Ok () -> ()
     | Error message -> Log.Misc.error "Lane action finalization persistence: %s" message in
@@ -230,26 +238,38 @@ let perform_action m e c (queued : Lane_addon_action.receipt) =
         | Error message -> {running with state = Lane_addon_action.Outcome_unknown;
             detail = Some ("dispatched action has no valid package result: " ^ message)}
         | Ok package_result ->
+            let received = {running with state = Lane_addon_action.Outcome_unknown;
+              result = Some package_result.result;
+              detail = Some "package result received; evidence and receipt durability not yet established"} in
+            (* Filesystem publication can fail after rename. Preserve the
+               received payload before either evidence or receipt writes yield. *)
+            e.current_action <- Some received;
             let sources = `Assoc ["kind", `String "lane_action";
               "request", Lane_addon_action.to_json running;
               "package_status", `String (match package_result.Lane_addon_action.status with
                 | Package_confirmed -> "confirmed" | Package_failed_before_effect -> "failed_before_effect"
                 | Package_outcome_unknown -> "outcome_unknown")] in
             (match commit_output m e ~sources package_result.output with
-             | Error message -> {running with state = Lane_addon_action.Outcome_unknown;
+             | Error message -> {received with
                  detail = Some ("package returned a result but its evidence was not committed: " ^ message)}
              | Ok () ->
                  let state = match package_result.status with
                    | Package_confirmed -> Lane_addon_action.Confirmed
                    | Package_failed_before_effect -> Lane_addon_action.Failed_before_effect
                    | Package_outcome_unknown -> Lane_addon_action.Outcome_unknown in
-                 {running with state; result = Some package_result.result;
+                 {received with state;
                    detail = Some "outcome reported by the package; interpret its result and retained evidence"}) in
+      e.current_action <- Some finished;
       (match save_action m finished with
        | Ok () -> e.current_action <- None
        | Error message ->
-           (* Keep current_action until finalization; the durable running record
-              must never be promoted by an in-memory-only package response. *)
+           (* A renamed result may already be visible despite failed fsync.
+              Retain that observation, while refusing to assert durability. *)
+           let detail = match finished.detail with
+             | None -> "action result persistence failed: " ^ message
+             | Some previous -> previous ^ "; action result persistence failed: " ^ message in
+           e.current_action <- Some {finished with state = Lane_addon_action.Outcome_unknown;
+             detail = Some detail};
            raise (Action_persistence_failed ("action result persistence: " ^ message)))
 let run ~sw backend m e =
   fork_isolated ~sw (fun () ->
@@ -902,6 +922,7 @@ module For_testing = struct
   }
   let with_backend backend f = let previous = !override in override := Some backend;
     Fun.protect ~finally:(fun () -> override := previous) f
+  let with_action_writer write f = Eio.Fiber.with_binding action_writer_key write f
   let reset () =
     Hashtbl.iter (fun _ stop -> stop ()) configuration_services;
     Hashtbl.clear configuration_services; Hashtbl.clear managers;

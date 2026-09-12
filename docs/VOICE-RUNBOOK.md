@@ -121,12 +121,35 @@ One section in `runtime.toml`, read by `Voice_config`:
 
 ```toml
 [voice.tts]             default_model, default_voice, agent_voices, endpoints
-[voice.stt]             default_model, endpoints
+[voice.stt]             default_model, endpoints, send_on_stop
 [voice.session]         endpoints          # realtime; empty unless configured
 [voice.local_playback]  enabled, agents
 [voice.capture]         calibration_seconds, trigger_margin_db, trailing_silence_seconds, speech_margin_db, noise_reduction
 [voice.gate]            always_allow, exempt_agents
 ```
+
+### `[voice.stt] send_on_stop`
+
+Whether ending a capture also sends what was heard, instead of leaving it in
+the draft for the operator to press Enter on. Off by default: the draft is
+also where a spoken half-sentence waits for typing, so sending without a
+confirmation step is something to ask for.
+
+A configuring surface can set it, which is the point of it living here:
+
+```json
+{"changes":[{"change":"set_send_on_stop","send":true}]}
+```
+
+through `POST /api/v1/voice/setup` — the same revision-guarded writer every
+other voice change goes through.
+
+> Until 2026-09-13 this setting had two spellings that never met. The TUI read
+> `[tui] voice_send_on_stop`, which no surface published; `[voice.stt]
+> send_on_stop` was published by `GET /api/v1/voice/config` and by the setup
+> route and read by nothing. Both arrived in the same commit, each side had
+> tests, and both sides passed. A file that still carries the `[tui]` one now
+> gets the default — move the line into `[voice.stt]`.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. Present, each must name its

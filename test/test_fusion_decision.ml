@@ -124,6 +124,17 @@ let test_bad_source_and_storage () = with_fixture (fun config task_id _ ->
    | Error (Fusion_decision.Rejected _) | Ok _ -> fail "corrupt storage misclassified"))
 
 let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _ ->
+  let rejection run_id =
+    match Fusion_decision.source ~keeper:"foreign" ~run_id with
+    | Error (Fusion_decision.Rejected detail) -> detail
+    | Error (Fusion_decision.Storage_failure _) | Ok _ -> fail "expected hidden source"
+  in
+  check string "foreign and absent sources are indistinguishable"
+    (rejection "unknown-run") (rejection "run-advice");
+  let workspace_source = Fusion_decision.source_in_workspace ~run_id:"run-advice"
+    |> require "workspace verifier can still inspect the original source" in
+  check string "workspace lookup preserves the original author" "fusion-keeper"
+    (Board.Agent_id.to_string workspace_source.author);
   let meta name = Masc_test_deps.meta_of_json_fixture (`Assoc ["name", `String name]) |> require "meta" in
   let invoke keeper run_id =
     Keeper_tool_in_process_runtime.handle_masc_fusion_status ~config ~meta:(meta keeper)

@@ -263,7 +263,7 @@ Fusion deliberation failed (run {{run_id}})
 Fusion deliberation cancelled (run {{run_id}})
 
 ### world.event_rows.fusion_result_lookup (vars: run_id)
-This is a preview. Read the original panel answers, judge advice and source context with masc_fusion_status({"run_id":"{{run_id}}"}). Keep the judge's advice distinct from your own adopted, rejected or modified choice; record your choice and reasons with masc_fusion_decision after reviewing the evidence.
+This is a preview. Read the original panel answers, judge advice and source context with masc_fusion_status({"run_id":"{{run_id}}"}). Keep the judge's advice distinct from your own adopted, rejected or modified choice. If that lookup reports the evidence as available, record your choice and reasons with masc_fusion_decision after reviewing it; if it reports unavailable, the deliberation left no durable evidence and masc_fusion_decision refuses the run, so there is nothing to record.
 
 ### world.event_rows.fusion_cancelled_preview
 The asynchronous Fusion run was structurally cancelled before producing a result.

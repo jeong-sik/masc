@@ -401,6 +401,22 @@ check_rule "R14-tui-row-walk" 0 \
   '' \
   bin
 
+# SSOT-R15 — a surface title says which of the two empty readings it has.
+#
+# A read nobody asked for and a read that failed both leave the snapshot empty.
+# The title is the row on top, so it is the answer that gets read: spelled by
+# hand it says "not loaded" after a failure and sends the operator to [r] while
+# the server's reason sits in red two rows below. The Memory header was taught
+# the difference in #35457; twelve other surfaces still said "not loaded" for
+# both until the words moved into Masc_tui_render_prim.
+#
+# title_missing_reading ~error:<the surface's error> chooses between them.
+check_rule "R15-tui-title-not-loaded-literal" 0 \
+  "title_missing_reading ~error:state.<surface>_error" \
+  '\(not loaded' \
+  'bin/masc_tui_render_prim\.mli?:' \
+  bin
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch

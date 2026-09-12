@@ -160,6 +160,14 @@ docker run --rm "$image" bash -lc 'ldd --version | head -1; ocaml -version'
 docker rm -f "$container" >/dev/null 2>&1 || true
 docker run -d --name "$container" "$image" sleep infinity >/dev/null
 
+# libncurses-dev and libprotobuf-dev are here for the opam solve, not for the
+# link. conf-ncurses runs `pkg-config ncurses`, which needs the .pc file that
+# only libncurses-dev carries, and its depext name for Ubuntu is
+# "lib64ncurses-dev" -- not a package here, so opam cannot repair the miss on
+# its own. Dockerfile.keeper-sandbox records the same solve failing that way
+# (exit 20 out of the opam stage, measured 2026-08-26). conf-protoc lists
+# libprotobuf-dev and protobuf-compiler as its depexts; naming them keeps the
+# apt run here instead of somewhere inside `opam install`.
 echo "== system dependencies"
 docker exec -u root "$container" bash -c '
   set -e
@@ -168,7 +176,8 @@ docker exec -u root "$container" bash -c '
   apt-get install -y -qq --no-install-recommends \
     pkg-config m4 git curl ca-certificates unzip binutils python3 \
     libgmp-dev libssl-dev libzstd-dev libsqlite3-dev libpq-dev \
-    libev-dev libffi-dev zlib1g-dev
+    libev-dev libffi-dev zlib1g-dev libncurses-dev \
+    libprotobuf-dev protobuf-compiler
 '
 
 echo "== protoc $protoc_version"
@@ -179,7 +188,12 @@ docker exec -u root "$container" bash -c "
   unzip -q -o /tmp/protoc.zip -d /usr/local
   chmod +x /usr/local/bin/protoc
   rm -f /tmp/protoc.zip
+  # apt just put 22.04's protoc 3.12 in /usr/bin as one of conf-protoc's
+  # depexts. /usr/local/bin comes first on PATH, so the pinned copy is what
+  # dune runs -- asserted rather than assumed, because the 3.12 failure is a
+  # proto parse error far from here.
   protoc --version
+  protoc --version | grep -q '${protoc_version}\$'
 "
 
 echo "== copy tracked sources"

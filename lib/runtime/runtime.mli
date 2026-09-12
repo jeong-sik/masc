@@ -222,8 +222,8 @@ type reference_shape =
           from telling an operator a list field equals one id. *)
 
 type resolution_failure =
-  { id : string
-  ; reason : drop_reason option
+  { unresolved_id : string
+  ; declared_drop : drop_reason option
   ; runtime_count : int
   }
 (** Why an id did not resolve to a runtime. [reason] is the binding's own drop

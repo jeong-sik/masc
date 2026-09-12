@@ -418,8 +418,8 @@ type runtime_reference =
    [None] means nothing declared it, and [runtime_count] is what the message
    counts against. *)
 type resolution_failure =
-  { id : string
-  ; reason : drop_reason option
+  { unresolved_id : string
+  ; declared_drop : drop_reason option
   ; runtime_count : int
   }
 
@@ -466,7 +466,7 @@ let dangling_reference_reason = function
 
 let resolution_of ~(dropped_bindings : (string * drop_reason) list)
     ~(runtime_count : int) (id : string) : resolution_failure =
-  { id; reason = List.assoc_opt id dropped_bindings; runtime_count }
+  { unresolved_id = id; declared_drop = List.assoc_opt id dropped_bindings; runtime_count }
 ;;
 
 (* Rendering lives here now, and only here. Every message below is the one the
@@ -474,7 +474,7 @@ let resolution_of ~(dropped_bindings : (string * drop_reason) list)
    whole account of a refused configuration, and a reworded one would read as a
    different failure. *)
 let resolution_suffix (resolution : resolution_failure) : string =
-  match resolution.reason with
+  match resolution.declared_drop with
   | Some reason ->
     Printf.sprintf
       ": binding is defined but could not be materialized as a runtime — %s"
@@ -519,13 +519,13 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
     Printf.sprintf
       "%s: [runtime].default = %S%s"
       config_path
-      resolution.id
+      resolution.unresolved_id
       (resolution_suffix resolution)
   | Reference_unresolved { site; shape; resolution } ->
     let named =
       match shape with
-      | Scalar -> Printf.sprintf "%s = %S" site resolution.id
-      | List_entry -> Printf.sprintf "%s entry %S" site resolution.id
+      | Scalar -> Printf.sprintf "%s = %S" site resolution.unresolved_id
+      | List_entry -> Printf.sprintf "%s entry %S" site resolution.unresolved_id
     in
     Printf.sprintf "%s: %s%s" config_path named (resolution_suffix resolution)
   | Lane_candidate_unresolved { lane_id; resolution } ->
@@ -533,7 +533,7 @@ let to_diagnostic_text ~(config_path : string) : load_failure -> string = functi
       "%s: [runtime.lanes.%s] candidate %S%s"
       config_path
       lane_id
-      resolution.id
+      resolution.unresolved_id
       (resolution_suffix resolution)
   | Max_context_absent { runtime_id; execution_model; declared_model } ->
     Printf.sprintf

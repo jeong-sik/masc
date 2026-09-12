@@ -7253,24 +7253,51 @@ let ensure_img_cache_dir () =
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   dir
 
+(* The cached file for a remote image URL, or why there is none. A hit is
+   decided by the bytes (Masc_tui_image_cache.verdict_of_bytes), never by the
+   file being non-empty: a rate-limit notice or an HTML page that landed in
+   the cache is removed on sight instead of failing in the decoder on every
+   later preview. curl runs with --fail so an HTTP error status writes no body
+   in the first place. *)
 let download_remote_image url =
   let cache_dir = ensure_img_cache_dir () in
   let hash = Digest.to_hex (Digest.string url) in
   let target_file = Filename.concat cache_dir ("img_" ^ hash) in
-  if Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 then
-    Ok target_file
-  else
+  let discard () =
+    try Sys.remove target_file with _ -> ()  (* @observe-allowed: removing a body that will not be cached; the caller's error names why it was refused, not this *)
+  in
+  let verdict_of_cached () =
+    match read_file_bytes target_file with
+    | Error detail ->
+        discard ();
+        Error (Masc_tui_image_cache.Download_failed detail)
+    | Ok bytes -> (
+        match Masc_tui_image_cache.verdict_of_bytes bytes with
+        | Masc_tui_image_cache.Cached_image _ -> Ok target_file
+        | Masc_tui_image_cache.Not_an_image { reason } ->
+            discard ();
+            Error (Masc_tui_image_cache.Body_not_an_image { reason }))
+  in
+  let fetch () =
     let cmd =
-      Printf.sprintf "curl -s -L --max-time 5 -o %s %s"
+      Printf.sprintf "curl -s -L --fail --max-time 5 -o %s %s"
         (Filename.quote target_file)
         (Filename.quote url)
     in
     match Unix.system cmd with
-    | Unix.WEXITED 0 when Sys.file_exists target_file && (Unix.stat target_file).st_size > 0 ->
-        Ok target_file
-    | _ ->
-        (try Sys.remove target_file with _ -> ())  (* @observe-allowed: removing a partial download on the failure path; the caller's error is the download failure, not this *);
-        Error "could not download remote image"
+    | Unix.WEXITED 0 when Sys.file_exists target_file -> verdict_of_cached ()
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        discard ();
+        Error (Masc_tui_image_cache.Download_failed "could not download remote image")
+  in
+  if Sys.file_exists target_file then
+    match verdict_of_cached () with
+    | Ok path -> Ok path
+    | Error (Masc_tui_image_cache.Download_failed _ | Masc_tui_image_cache.Body_not_an_image _) ->
+        (* A body cached before this check existed: it is gone now, so ask the
+           URL again rather than report the stale answer. *)
+        fetch ()
+  else fetch ()
 
 let convert_to_png input_path =
   let cache_dir = ensure_img_cache_dir () in
@@ -7310,12 +7337,17 @@ let convert_to_png input_path =
    a narrow terminal skips it rather than wrapping. Decode/draw stay a few ms. *)
 let mosaic_cols = 120
 
-(* Download a preview image and decode it into half-block mosaic lines, or None.
-   Blocking (curl + ffmpeg through Unix.system): the caller runs it off the
-   render loop inside run_in_systhread. *)
-let image_url_to_mosaic ~cols url =
+(* Download a preview image and decode it into half-block mosaic lines. [None]
+   means nothing durable was learned (transport failure, decoder failure) and a
+   later preview may try again; a [Not_an_image] entry is a durable answer the
+   caller records so the URL is not fetched again. Blocking (curl + ffmpeg
+   through Unix.system): the caller runs it off the render loop inside
+   run_in_systhread. *)
+let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry option =
   match download_remote_image url with
-  | Error _ -> None
+  | Error (Masc_tui_image_cache.Download_failed _) -> None
+  | Error (Masc_tui_image_cache.Body_not_an_image { reason }) ->
+      Some (Masc_tui_link_preview.Not_an_image { reason })
   | Ok local_path -> (
       let raw =
         Filename.concat
@@ -7342,19 +7374,24 @@ let image_url_to_mosaic ~cols url =
             let rows = String.length data / (cols * 3) in
             match Masc_tui_image_mosaic.render ~cols ~rows data with
             | [] -> None
-            | lines -> Some lines
+            | lines -> Some (Masc_tui_link_preview.Mosaic lines)
           with _ -> None)
       | _ -> None)
 
 let () =
   compute_and_store_mosaic :=
     fun img ->
-      match
-        Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
-            image_url_to_mosaic ~cols:mosaic_cols img)
-      with
-      | Some lines -> Masc_tui_link_preview.mosaic_store img lines
-      | None -> ()
+      match Masc_tui_link_preview.mosaic_lookup img with
+      | Some (Masc_tui_link_preview.Mosaic _ | Masc_tui_link_preview.Not_an_image _) ->
+          (* Already decided this session; a refused URL is not fetched again. *)
+          ()
+      | None -> (
+          match
+            Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
+                image_url_to_mosaic ~cols:mosaic_cols img)
+          with
+          | Some entry -> Masc_tui_link_preview.mosaic_store img entry
+          | None -> ())
 
 let open_image state ~notice path =
   let refuse reason =
@@ -7382,7 +7419,7 @@ let open_image state ~notice path =
              notice ~role:Message_local
                (Printf.sprintf "Image download failed. Opened in browser (%s): %s" opener path)
          | Error _ ->
-             refuse dl_err)
+             refuse (Masc_tui_image_cache.download_error_text dl_err))
     | Ok local_path -> (
         match !terminal_draws_images with
         | Some false -> refuse terminal_draws_no_images
@@ -7422,7 +7459,7 @@ let open_image state ~notice path =
    so it is safe to run on a systhread. *)
 let prepare_remote_image_bytes url =
   match download_remote_image url with
-  | Error e -> Error e
+  | Error e -> Error (Masc_tui_image_cache.download_error_text e)
   | Ok local_path -> (
       match read_file_bytes local_path with
       | Error detail -> Error detail

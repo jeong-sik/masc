@@ -175,6 +175,22 @@ let test_render_modal_card () =
   let modal_lines = render_modal_card ~width:60 ~height:20 p in
   check bool "modal card has content lines" true (List.length modal_lines > 0)
 
+(* A URL the background fetch refused stays refused: the store keeps the
+   answer, and the card says so instead of showing nothing. *)
+let test_a_refused_image_url_is_remembered_and_said () =
+  clear_cache ();
+  let url = "https://example.com/photo.png" in
+  mosaic_store url (Not_an_image { reason = "no image signature" });
+  (match mosaic_lookup url with
+   | Some (Not_an_image { reason }) -> check string "reason kept" "no image signature" reason
+   | Some (Mosaic _) | None -> fail "the refusal was not kept");
+  let lines = render_modal_card ~width:60 ~height:20 (synthesize_preview url) in
+  check bool "the card says the image URL did not answer with an image" true
+    (List.exists
+       (fun l -> Option.is_some (Astring.String.find_sub ~sub:"did not answer with an image" l))
+       lines);
+  clear_cache ()
+
 (* ---- parse_og_html: real fetched metadata (pure, no network) ---- *)
 
 let test_parse_og_full () =
@@ -283,6 +299,8 @@ let () =
         ; test_case "notion 2-column card alignment" `Quick test_render_notion_card_2column_alignment
         ; test_case "notion narrow fallback" `Quick test_render_notion_card_narrow_fallback
         ; test_case "modal card" `Quick test_render_modal_card
+        ; test_case "a refused image url is remembered and said" `Quick
+            test_a_refused_image_url_is_remembered_and_said
         ] )
     ; ( "fetch (og parse)"
       , [ test_case "og full" `Quick test_parse_og_full

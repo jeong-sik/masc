@@ -37,9 +37,21 @@ val cache_store : og_preview -> unit
 val get_preview : string -> og_preview
 val clear_cache : unit -> unit
 
-val mosaic_store : string -> string list -> unit
-(** Store rendered mosaic lines for an image URL. Called off the render loop
-    once the preview's image has been downloaded and decoded. *)
+type mosaic_entry =
+  | Mosaic of string list
+      (** Rendered half-block mosaic lines for the image URL. *)
+  | Not_an_image of { reason : string }
+      (** The image URL answered with bytes that are not an image (an HTML
+          page, a rate-limit notice). Recorded so the background fetch does
+          not download and decode the same URL again on every preview parse. *)
+
+val mosaic_lookup : string -> mosaic_entry option
+(** What the background fetch decided about an image URL, or [None] while it
+    has not decided yet. *)
+
+val mosaic_store : string -> mosaic_entry -> unit
+(** Record the decision for an image URL. Called off the render loop once the
+    preview's image has been downloaded and decoded, or refused. *)
 
 val parse_og_html : url:string -> body:string -> og_preview
 (** Merge a fetched page's <title> and og:* meta tags onto the URL-synthesized

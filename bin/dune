@@ -1338,6 +1338,7 @@
   masc_tui_link_label
   masc_tui_link_preview
   masc_tui_image_mosaic
+  masc_tui_image_cache
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste
@@ -1488,6 +1489,14 @@
  (wrapped false)
  (modules masc_tui_image_mosaic)
  (libraries masc_tui_theme))
+
+;; Decides, by magic bytes, whether a downloaded body may sit in the preview
+;; image cache. Kept apart from the TUI executable so the decision is testable.
+(library
+ (name masc_tui_image_cache)
+ (wrapped false)
+ (modules masc_tui_image_cache)
+ (libraries masc))
 (library
  (name masc_tui_interactive)
 ;; An interactive surface contract plus the MSX backend: renderer-independent

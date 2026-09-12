@@ -137,6 +137,7 @@ let test_turn_scoped_capability_and_protocol () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let image_data = Base64.encode_string "exact MCP image fixture bytes" in
   let calls = ref [] in
   let responses_sent = ref [] in
   let tool_specs () =
@@ -153,6 +154,9 @@ let test_turn_scoped_capability_and_protocol () =
       { Runtime_official_client_mcp_http.outcome =
           { Runtime_official_client_mcp.success = true
           ; content = "MASC_TOOL_OK"
+          ; content_blocks = Some
+              [ Agent_core.Types.Text "MASC_TOOL_OK"
+              ; Agent_core.Types.Image { media_type="image/png"; data=image_data; source_type=Base64 } ]
           }
       ; after_response_sent =
           (fun () -> responses_sent := call_id :: !responses_sent)
@@ -358,6 +362,13 @@ let test_turn_scoped_capability_and_protocol () =
      |> List.hd
      |> member "text"
      |> Yojson.Safe.Util.to_string);
+  let content = Yojson.Safe.from_string called.body |> member "result" |> member "content"
+    |> Yojson.Safe.Util.to_list in
+  check int "MCP returns text and image" 2 (List.length content);
+  let image = List.nth content 1 in
+  check string "MCP image kind" "image" (member "type" image |> Yojson.Safe.Util.to_string);
+  check string "MCP image media type" "image/png" (member "mimeType" image |> Yojson.Safe.Util.to_string);
+  check string "MCP image bytes survive HTTP bridge" image_data (member "data" image |> Yojson.Safe.Util.to_string);
   let duplicate_key =
     {|{"jsonrpc":"2.0","id":6,"method":"tools/call","method":"tools/call","params":{"name":"masc_probe"}}|}
   in
@@ -547,6 +558,33 @@ let test_unknown_notification_is_ignored_and_session_survives () =
      |> Yojson.Safe.Util.to_int)
 ;;
 
+let test_unsupported_media_is_a_delivery_error () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
+    ~secure_random:env#secure_random ~server_name:"masc"
+    ~tool_specs:(fun () -> [`Assoc ["name", `String "artifact"]])
+    ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ -> Some
+      { Runtime_official_client_mcp_http.outcome =
+          { Runtime_official_client_mcp.success = true
+          ; content = "persisted artifact receipt"
+          ; content_blocks = Some [Agent_core.Types.Document
+              {media_type="application/pdf"; data="Zml4dHVyZQ=="; source_type=Base64}]
+          }
+      ; after_response_sent = (fun () -> ()) }) () in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version = initialize_session ~sw ~net:env#net ~endpoint ~authorization in
+  let response = request ~protocol_version ~sw ~net:env#net ~endpoint ~authorization
+    (json_request 2 "tools/call" (`Assoc ["name",`String "artifact";"arguments",`Assoc []])) in
+  check int "delivery error remains an MCP tool result" 200 response.status;
+  let result = Yojson.Safe.from_string response.body |> member "result" in
+  check bool "unsupported media never reports text-only success" true
+    (member "isError" result = `Bool true);
+  let content = member "content" result |> Yojson.Safe.Util.to_list in
+  check (list string) "delivery failure retains prior artifact receipt"
+    ["official-client tool result cannot deliver document content";"persisted artifact receipt"]
+    (List.map (fun item -> member "text" item |> Yojson.Safe.Util.to_string) content)
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -555,6 +593,8 @@ let () =
             "capability, protocol, phase, and tool callback"
             `Quick
             test_turn_scoped_capability_and_protocol
+        ; test_case "unsupported media is an explicit delivery error" `Quick
+            test_unsupported_media_is_a_delivery_error
         ] )
     ; ( "effect boundary"
       , [ test_case

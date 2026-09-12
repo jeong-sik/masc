@@ -31,7 +31,6 @@ import {
 import {
   focusIdeContextAnchor,
   normalizeIdeContextFilePath,
-  normalizeIdeContextLine,
 } from './ide-state'
 import {
   createRunActivityStore,
@@ -40,6 +39,7 @@ import {
   type RunActivityVerb,
 } from './run-activity-store'
 import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
+import { activityFileContext } from './ide-activity-file-context'
 import { isRecord } from '../../lib/type-guards'
 
 const FALLBACK_VERB_MAP: Readonly<Record<string, RunActivityVerb>> = {
@@ -253,14 +253,14 @@ async function fetchIdeBridgeRunActivityEvents(
   // No codebase is set: there is nothing to query, not a request that
   // happened to find zero events. The caller derives the visible no-scope
   // state from the current props, before any asynchronous response arrives.
-  if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
+  if (!scoped) return { events: EMPTY_ACTIVITY, ok: true }
   const settled = await Promise.allSettled(sources)
   const events: RunActivityEvent[] = []
   let ok = true
   for (const result of settled) {
     if (result.status === 'fulfilled') {
       for (const event of result.value) {
-        events.push(mapIdeBridgeEvent(event, workspaceId, events.length))
+        events.push(mapIdeBridgeEvent(event, workspaceId, events.length, scoped))
       }
     } else {
       ok = false
@@ -282,9 +282,11 @@ function mapIdeBridgeEvent(
   event: IdeBridgeEvent,
   workspaceId: string,
   index: number,
+  codebase: string,
 ): RunActivityEvent {
   return {
     id: `ide-${event.type}-${event.turn_id}-${event.timestamp_ms}-${index}`,
+    codebase,
     run_id: workspaceId,
     timestamp_ms: event.timestamp_ms,
     keeper_id: event.keeper_id,
@@ -534,11 +536,13 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const diagnostics = activeFilePath === null
     ? EMPTY_DIAGNOSTICS
     : lspDiagnosticSnapshot.value.get(activeFilePath) ?? EMPTY_DIAGNOSTICS
-  const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value)
+  const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value, codebase)
 
   useEffect(() => {
-    emittedTraceIds.current = bridgeRunActivityEventsToTrace(events, emittedTraceIds.current)
-  }, [events])
+    emittedTraceIds.current = bridgeRunActivityEventsToTrace(
+      events.filter(event => activityFileContext(event, codebase) !== null), emittedTraceIds.current,
+    )
+  }, [events, codebase])
 
   return html`
     <div
@@ -567,6 +571,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         <${RunProgressStrip} summary=${progress} />
         <${IdeContextLens}
           filePath=${activeFile}
+          codebase=${codebase}
           diffRows=${diffRows}
           events=${events}
           threads=${threads}
@@ -597,6 +602,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
             <${RunProgressStrip} summary=${progress} />
             <${IdeContextLens}
               filePath=${activeFile}
+              codebase=${codebase}
               diffRows=${diffRows}
               events=${events}
               threads=${threads}
@@ -621,7 +627,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           ? bridgeScoped
             ? html`<li class="ide-rail-empty">no recent activity</li>`
             : html`<li class="ide-rail-empty" data-testid="ide-activity-no-scope">관측 스코프(저장소/keeper)가 선택되지 않았습니다</li>`
-          : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} />`)}
+          : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} codebase=${codebase} />`)}
       </ol>
     </div>
   `
@@ -632,14 +638,12 @@ export function deriveIdeRunProgressSummary(
   activeFile: string,
   goalList: ReadonlyArray<Goal> = goals.value,
   taskList: ReadonlyArray<Task> = tasks.value,
+  codebase?: string | null,
 ): IdeRunProgressSummary {
   const activeFilePath = normalizeIdeContextFilePath(activeFile)
   const currentFileEvents = activeFilePath === null
     ? 0
-    : events.filter(event =>
-      event.context?.file_path !== undefined
-      && normalizeIdeContextFilePath(event.context.file_path) === activeFilePath,
-    ).length
+    : events.filter(event => activityFileContext(event, codebase)?.filePath === activeFilePath).length
   const linkedEvents = events.filter(event => event.context !== undefined).length
   const linkedCoveragePercent = events.length === 0
     ? 0
@@ -939,16 +943,16 @@ function compareRunActivityEvents(left: RunActivityEvent, right: RunActivityEven
   return left.id.localeCompare(right.id)
 }
 
-function activityRouteLinks(item: RunActivityEvent): ReadonlyArray<IdeContextRouteLink> {
-  return routeLinksForContext(activityRouteContext(item))
+function activityRouteLinks(item: RunActivityEvent, codebase?: string | null): ReadonlyArray<IdeContextRouteLink> {
+  return routeLinksForContext(activityRouteContext(item, codebase))
 }
 
-function activityRouteContext(item: RunActivityEvent): IdeContextRouteContext {
-  const eventContextFile = item.context?.file_path
-  const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
+function activityRouteContext(item: RunActivityEvent, codebase?: string | null): IdeContextRouteContext {
+  const fileContext = activityFileContext(item, codebase)
+  const eventFocusFile = fileContext?.filePath ?? null
   return {
     filePath: eventFocusFile ?? undefined,
-    line: normalizeIdeContextLine(item.context?.line),
+    line: fileContext?.line,
     surface: activityContextSurface(item),
     label: item.detail ?? `${item.verb} ${item.target}`,
     sourceId: item.id,
@@ -985,19 +989,21 @@ function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | n
 const ActivityRow = memo(function ActivityRow({
   item,
   presence,
+  codebase,
 }: {
   item: RunActivityEvent
   presence: KeeperPresenceSnapshot | null
+  codebase?: string | null
 }) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
   const entry = presenceEntries(presence).find(e => e.keeper_id === item.keeper_id)
   const statusDot = entry ? PRESENCE_DOT[entry.status] : null
-  const eventContextFile = item.context?.file_path
-  const eventFocusFile = eventContextFile === undefined ? null : normalizeIdeContextFilePath(eventContextFile)
-  const eventFocusLine = normalizeIdeContextLine(item.context?.line)
+  const fileContext = activityFileContext(item, codebase)
+  const eventFocusFile = fileContext?.filePath ?? null
+  const eventFocusLine = fileContext?.line
   const hasEventContextFocus = eventFocusFile !== null
-  const routeLinks = activityRouteLinks(item)
+  const routeLinks = activityRouteLinks(item, codebase)
 
   return html`
     <li

@@ -684,18 +684,26 @@ let pending_board_event_of_fusion_completion
           []
           ~fallback:"" )
   in
+  (* The lookup line is offered only when the sink actually wrote an evidence
+     post. A terminal failure or a cancellation wakes with board_post_id = "",
+     and masc_fusion_status has nothing to answer for such a run -- sending the
+     Keeper there spends a turn to be told the evidence is unavailable. *)
   let lookup =
-    event_row_text Prompt_names.keeper_world_event_rows_fusion_result_lookup
-      [ "run_id", fc.run_id ]
-      ~fallback:(Yojson.Safe.to_string
-        (`Assoc [ "tool", `String "masc_fusion_status"
-                ; "arguments", `Assoc [ "run_id", `String fc.run_id ] ]))
+    if String.equal fc.board_post_id "" then ""
+    else
+      event_row_text Prompt_names.keeper_world_event_rows_fusion_result_lookup
+        [ "run_id", fc.run_id ]
+        ~fallback:(Yojson.Safe.to_string
+          (`Assoc [ "tool", `String "masc_fusion_status"
+                  ; "arguments", `Assoc [ "run_id", `String fc.run_id ] ]))
   in
   { event_kind = Fusion_completed
   ; post_id
   ; author = meta.name
   ; title
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len message ^ "\n" ^ lookup
+  ; preview =
+      (let body = short_preview ~max_len:fusion_result_preview_max_len message in
+       if String.equal lookup "" then body else body ^ "\n" ^ lookup)
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

@@ -25,3 +25,8 @@ disconnected h/older-select/Q scenario. Those fixture results are not extra real
 Keeper executions. capture-original.py preserves the actual authenticated capture
 procedure with historical scratch-path prerequisites; credentials/config are not
 included. This addendum leaves the earlier 3e4 evidence and its workaround intact.
+
+The later `refresh-isolation.log` and `fixture-verification.json` record the full
+native PTY fixture with uppercase `R` included, pinning the test/harness and native
+TUI bytes. This uses synthetic HTTP fixtures; the real API capture above is a
+separate execution.

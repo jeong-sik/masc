@@ -1,0 +1,13 @@
+{
+  "recorded_evidence_files": 209,
+  "api_response_hashes": 57,
+  "browser_response_hashes": 13,
+  "host_blobs": 21,
+  "evidence_reference_checks": 383,
+  "guest_transitions": [
+    "0->1",
+    "0->1"
+  ],
+  "full_pixel_checks": 6,
+  "fresh_runtime_execution": false
+}

@@ -106,7 +106,10 @@ The running native binary SHA-256 was
 `9f7f6896946c51dcf0fc3bad3ef847f62dd1cd0ef5560cef5e306d070d939a0c`.
 These CI links identify the tested package and host inputs; the following host
 results came from isolated local executions, with retained raw API responses,
-Dashboard screenshots, guest bytes, hashes and cleanup records.
+Dashboard screenshots, guest bytes, hashes and cleanup records. The
+[committed evidence bundle](../../docs/evidence/lane-dos-packages-2026-09-13/README.md)
+contains the original responses, referenced blobs, guest files, screenshots and
+an offline verifier for both probes.
 
 The first host probe installed DOS and an independent controlled-capture observer
 through TOML, with no Attach request or DOS-specific host/UI change. It read the

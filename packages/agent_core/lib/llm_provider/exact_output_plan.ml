@@ -131,7 +131,7 @@ let%test "timeout validation preserves the invalid value" =
    instead of folding it into [false]: an unlabeled rejection reads as "the
    happy path failed", which is what hid the caller-supplied-header gate
    defect in "freezes refreshed credentials" for its whole lifetime on main. *)
-let rejection_name = function
+let[@warning "-32"] rejection_name = function
   | Explicit_capability_snapshot_required -> "explicit_capability_snapshot_required"
   | Unsupported_output_contract _ -> "unsupported_output_contract"
   | Unsupported_exact_cross_feature -> "unsupported_exact_cross_feature"
@@ -151,7 +151,7 @@ let rejection_name = function
 
 (* Same treatment for [output_normalization_error]: the JsonMode provenance
    test's arms must name which constructor fired. *)
-let normalization_error_name = function
+let[@warning "-32"] normalization_error_name = function
   | Incomplete_structured_response stop_reason ->
     "incomplete_structured_response:" ^ Types.stop_reason_to_string stop_reason
   | Missing_structured_text -> "missing_structured_text"

@@ -2,6 +2,8 @@ type endpoint_kind =
   | Openai_compat
   | Elevenlabs_direct
   | Voice_mcp
+  | Macos_say
+  | Whisper_cli
 
 type endpoint = {
   id : string;
@@ -13,6 +15,7 @@ type endpoint = {
   enabled : bool;
   timeout_seconds : float option;
   default_voice : string option;
+  command : string option;
 }
 
 type voice_tuning = {
@@ -201,16 +204,20 @@ let endpoint_kind_of_string = function
   | "openai_compat" -> Ok Openai_compat
   | "elevenlabs_direct" -> Ok Elevenlabs_direct
   | "voice_mcp" -> Ok Voice_mcp
+  | "macos_say" -> Ok Macos_say
+  | "whisper_cli" -> Ok Whisper_cli
   | value ->
       Error
         (Printf.sprintf
-           "endpoint.kind must be one of openai_compat|elevenlabs_direct|voice_mcp (got %s)"
+           "endpoint.kind must be one of             openai_compat|elevenlabs_direct|voice_mcp|macos_say|whisper_cli (got %s)"
            value)
 
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
   | Elevenlabs_direct -> "elevenlabs_direct"
   | Voice_mcp -> "voice_mcp"
+  | Macos_say -> "macos_say"
+  | Whisper_cli -> "whisper_cli"
 
 let parse_endpoint ~ctx json =
   let open Result in
@@ -226,6 +233,7 @@ let parse_endpoint ~ctx json =
         ; "enabled"
         ; "timeout_seconds"
         ; "default_voice"
+        ; "command"
         ]
       json
   in
@@ -243,6 +251,11 @@ let parse_endpoint ~ctx json =
   (* A voice id is provider vocabulary, so it belongs to the endpoint that
      answers to it rather than to the workspace (#24068). *)
   let default_voice = Json_util.get_string_nonempty json "default_voice" in
+  (* Which executable answers, for the kinds that are a command rather than an
+     address. Optional: each command kind knows the name it is normally
+     installed under, and this overrides it for a path the PATH does not
+     carry. *)
+  let command = Json_util.get_string_nonempty json "command" in
   let base_url =
     match kind, base_url with
     | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
@@ -255,6 +268,15 @@ let parse_endpoint ~ctx json =
         else Error (Printf.sprintf "%s.base_url is required for openai_compat" ctx)
     | Elevenlabs_direct -> Ok ()
     | Voice_mcp -> Ok ()
+    (* A command kind needs no address, and an address on one would be read by
+       nothing. Refused rather than ignored: a field that is silently dropped
+       reads as a setting that took. *)
+    | Macos_say | Whisper_cli ->
+        if Option.is_none base_url then Ok ()
+        else
+          Error
+            (Printf.sprintf "%s.base_url means nothing for %s, which runs a command"
+               ctx (string_of_endpoint_kind kind))
   in
   Ok
     {
@@ -267,6 +289,7 @@ let parse_endpoint ~ctx json =
       enabled;
       timeout_seconds;
       default_voice;
+      command;
     }
 
 let rec parse_endpoints ~ctx acc = function
@@ -606,34 +629,54 @@ let runtime_toml_path () : string option =
     if Sys.file_exists path then Some path else None
   else None
 
-(** Try loading voice config from the [\[voice\]] section of
-    runtime.toml.  Returns:
+(** Parse the [\[voice\]] section out of runtime.toml source text.
+    Returns:
     - [Ok (Some config)] when the section exists and parses cleanly;
-    - [Ok None] when runtime.toml or the [\[voice\]] section is
-      absent (expected — caller falls back to JSON);
-    - [Error _] when the section exists but is broken (TOML parse
-      error, read failure, or schema error) — surfaced to the
-      caller, NOT silently swallowed, so the operator knows the
-      TOML is broken. *)
+    - [Ok None] when the [\[voice\]] section is absent (expected —
+      caller falls back to JSON);
+    - [Error _] when the text does not parse as TOML, or the section
+      exists but is broken — surfaced to the caller, NOT silently
+      swallowed, so the operator knows the TOML is broken.
+
+    Taking text rather than a path is what lets a writer check its own
+    edit before committing it. The parser that will load the file is
+    the one that answers whether the edit is loadable, so a voice
+    section cannot reach disk in a shape that only fails later, at the
+    first speak or transcribe. *)
+let parse_runtime_toml_text text =
+  match Otoml.Parser.from_string text with
+  | exception Otoml.Parse_error (_, msg) ->
+    Error (Printf.sprintf "runtime.toml parse error: %s" msg)
+  | toml -> (
+    match Otoml.find_opt toml Fun.id [ "voice" ] with
+    | None -> Ok None
+    | Some voice_value -> (
+      (* Fun.id returns the raw Otoml.t value; toml_to_json
+         pattern-matches on its constructors. *)
+      match parse_json (toml_to_json voice_value) with
+      | Ok config -> Ok (Some config)
+      | Error msg -> Error (Printf.sprintf "runtime.toml [voice]: %s" msg)))
+
+(** Try loading voice config from the [\[voice\]] section of
+    runtime.toml.  An absent runtime.toml reads as [Ok None], the same
+    as an absent section: neither is a fault, and the caller falls back
+    to the standalone JSON. *)
 let load_from_runtime_toml () =
   match runtime_toml_path () with
   | None -> Ok None
   | Some path -> (
-    try
-      let toml = Otoml.Parser.from_file path in
-      match Otoml.find_opt toml Fun.id [ "voice" ] with
-      | None -> Ok None
-      | Some voice_value -> (
-        (* Fun.id returns the raw Otoml.t value; toml_to_json
-           pattern-matches on its constructors. *)
-        match parse_json (toml_to_json voice_value) with
-        | Ok config -> Ok (Some config)
-        | Error msg -> Error (Printf.sprintf "runtime.toml [voice]: %s" msg))
+    match
+      try Ok (Fs_compat.load_file path) with
+      | Sys_error error ->
+        Error (Printf.sprintf "runtime.toml read failed: %s" error)
+      | Eio.Io _ as exn ->
+        Error
+          (Printf.sprintf
+             "runtime.toml Eio read failed: %s"
+             (Printexc.to_string exn))
     with
-    | Otoml.Parse_error (_, msg) ->
-      Error (Printf.sprintf "runtime.toml parse error: %s" msg)
-    | Sys_error msg ->
-      Error (Printf.sprintf "runtime.toml read failed: %s" msg))
+    | Error msg -> Error msg
+    | Ok text -> parse_runtime_toml_text text)
 
 let load_detailed () =
   (* Prefer runtime.toml [voice] section over standalone JSON.

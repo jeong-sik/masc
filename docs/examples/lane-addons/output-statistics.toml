@@ -1,0 +1,13 @@
+# Install with msx-frames.toml, or replace its installation ID and run ID with
+# any other producer installation. Paths resolve from this file's directory.
+id = "output-statistics"
+run_id = "existing-msx-observations"
+manifest_path = "../../../addons/output-statistics/lane.toml"
+
+[binding]
+
+[[binding.sources]]
+source_id = "upstream-output"
+kind = "lane_output"
+installation_id = "msx-frames"
+selection = "latest_completed"

@@ -1806,6 +1806,9 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
 fi
 # --- end committed builtin Skill refresh ------------------------------------
 configure_shell_path
+# Setup can start a runtime and write workspace state. Run it only after the
+# installed bundle is committed, so cancelling setup cannot roll the binary back.
+finish_setup_journey
 catalog_hint=$(model_catalog_env_value)
 # Keep the copy-paste start command aligned with runtime base/catalog env, but
 # do not default-disable Runtime_events. If the operator supplied an override,

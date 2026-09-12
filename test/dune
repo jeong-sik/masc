@@ -181,6 +181,7 @@
   test_keeper_memory_os_events
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
+  test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_running_reconcile_attempt
@@ -531,6 +532,7 @@
   test_keeper_memory_os_events
   test_server_dashboard_http_keeper_api_trace
   test_server_dashboard_http_keeper_chat_page
+  test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_running_reconcile_attempt
@@ -1716,6 +1718,7 @@
   test_set_util
   test_board_core_payload)
  (libraries
+  masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
  masc_test_deps
@@ -2224,6 +2227,8 @@
 
 
 (include stanzas/test_msx_tools.inc)
+
+(include stanzas/test_dos_tools.inc)
 
 (include stanzas/test_msx_frame_route.inc)
 
@@ -4591,7 +4596,9 @@
  (modules test_tui_metrics_tail)
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_keeper_chat_projection
+  masc_tui_message_layout
   masc_tui_metrics_tail
   masc
   dated_jsonl
@@ -5072,6 +5079,11 @@
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
  (libraries alcotest masc_tui_types))
+
+(test
+ (name test_tui_log_channel_column)
+ (modules test_tui_log_channel_column)
+ (libraries alcotest masc masc_tui_observation_layout))
 
 (test
  (name test_tui_board_kind_mark)
@@ -5731,6 +5743,7 @@
 (test
  (name test_lane_addon_composition)
  (modules test_lane_addon_composition)
+ (deps ../addons/protocol.py ../addons/output-statistics/server.py)
  (libraries masc_test_deps eio eio_main yojson unix))
 
 (test
@@ -5746,6 +5759,9 @@
   (source_tree ../addons/msx-observer/skills))
  (libraries masc_test_deps masc_server masc.skill_reference masc.skill_config
   masc.skill_snapshot masc.skill_snapshot_service))
+
+(include stanzas/test_browser_observation.inc)
+(include stanzas/test_browser_observation_composition.inc)
 
 (test
  (name test_lane_addon_actions)

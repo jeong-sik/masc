@@ -85,7 +85,10 @@ val unit_disposition_of_string
     is an opaque one-way boundary projection; MASC consumers must branch on
     {!disposition}, never recover semantics by inspecting it. *)
 type output_payload =
-  { data : Yojson.Safe.t
+  { retained_artifacts : Tool_output.artifact_ref list
+    (** Durable observer roots. Intentionally omitted from [to_json] so nested
+        composition serialization does not force model artifact retrieval. *)
+  ; data : Yojson.Safe.t
   ; content_blocks : Llm_provider.Types.content_block list option
     (** Model-visible media, separate from the UTF-8 observation data.
         [to_json] emits observations only; Tool_bridge preserves these blocks. *)
@@ -126,6 +129,12 @@ val to_json : result -> Yojson.Safe.t
 val tool_name : result -> string
 val duration_ms : result -> float
 val data : result -> Yojson.Safe.t
+
+val retained_artifacts : result -> Tool_output.artifact_ref list
+(** Observer-owned durable artifacts, separate from model-facing [data]. *)
+val with_retained_artifacts : Tool_output.artifact_ref list -> result -> result
+(** Attach already-persisted artifacts to a completed/deferred result. A failed
+    result is unchanged. This does not rewrite model content or imply authority. *)
 
 val metadata : result -> Yojson.Safe.t option
 

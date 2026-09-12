@@ -78,15 +78,19 @@ let test_click_then_regions ~fail_click ~fail_read () =
       check (list string) "exact ordered browser route" ["BrowserInteract";"BrowserRead"] !calls))
 
 type navigation_case = Navigated | Navigation_failed | Read_failed | Invalid_receipt
+type observation = Regions | Content
 
-let test_navigate_then_regions case () =
+let test_navigate_then_read observation case () =
   Eio_main.run (fun _ ->
+    let skill_name, read_mode = match observation with
+      | Regions -> "browser-navigate-regions", "regions"
+      | Content -> "browser-navigate-content", "scene" in
     let requested_url = "https://example.org/start" in
     let landing_url = "https://example.org/redirected" in
     let args = `Assoc [ "tabId", `Int 7; "url", `String requested_url ] in
-    let entry = skill_entry "browser-navigate-regions" in
+    let entry = skill_entry skill_name in
     check string "native callable skill name"
-      "keeper_compose_browser-navigate-regions" (Catalog.tool_name entry);
+      ("keeper_compose_" ^ skill_name) (Catalog.tool_name entry);
     let plan =
       match Catalog.instantiate
         ~descriptors:(Masc.Keeper_tool_descriptor.all_descriptors ()) ~args entry with
@@ -114,12 +118,12 @@ let test_navigate_then_regions case () =
           check string "explicit automation lane" "automation"
             (input |> member "lane" |> to_string);
           check int "same observed tab" 7 (input |> member "tabId" |> to_int);
-          check string "regions precede the site decision" "regions"
+          check string "the selected observation precedes the site decision" read_mode
             (input |> member "mode" |> to_string);
           check string "guard follows the actual redirect receipt" landing_url
             (input |> member "expectedUrl" |> to_string);
           (match case with
-           | Read_failed -> rejected "region observation unavailable"
+           | Read_failed -> rejected "observation unavailable"
            | Navigated -> ok (`Assoc [ "url", `String landing_url; "nodes", `List [] ])
            | Navigation_failed | Invalid_receipt -> fail "read ran without a valid receipt")
         | name -> fail ("unexpected composition tool: " ^ name)
@@ -154,7 +158,11 @@ let () = run "browser composition" ["native skill",[
   test_case "observed click then region read" `Quick (test_click_then_regions ~fail_click:false ~fail_read:false);
   test_case "failed click stops without replay" `Quick (test_click_then_regions ~fail_click:true ~fail_read:false);
   test_case "read failure retains successful click without replay" `Quick (test_click_then_regions ~fail_click:false ~fail_read:true);
-  test_case "navigation uses redirected landing URL" `Quick (test_navigate_then_regions Navigated);
-  test_case "navigation failure stops before read" `Quick (test_navigate_then_regions Navigation_failed);
-  test_case "read failure retains navigation receipt" `Quick (test_navigate_then_regions Read_failed);
-  test_case "malformed navigation receipt stops before read" `Quick (test_navigate_then_regions Invalid_receipt)]]
+  test_case "navigation uses redirected landing URL" `Quick (test_navigate_then_read Regions Navigated);
+  test_case "navigation failure stops before read" `Quick (test_navigate_then_read Regions Navigation_failed);
+  test_case "read failure retains navigation receipt" `Quick (test_navigate_then_read Regions Read_failed);
+  test_case "malformed navigation receipt stops before read" `Quick (test_navigate_then_read Regions Invalid_receipt);
+  test_case "content uses redirected landing URL" `Quick (test_navigate_then_read Content Navigated);
+  test_case "content navigation failure stops before read" `Quick (test_navigate_then_read Content Navigation_failed);
+  test_case "content read failure retains navigation receipt" `Quick (test_navigate_then_read Content Read_failed);
+  test_case "content rejects malformed navigation receipt" `Quick (test_navigate_then_read Content Invalid_receipt)]]

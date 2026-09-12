@@ -8,48 +8,8 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
-module Frame_presenter = Masc_tui_frame_presenter
-module Ask_projection = Masc_tui_ask_projection
-module Ask_layout = Masc_tui_ask_layout
-module Board_read_layout = Masc_tui_board_read_layout
-module Browser_lane_layout = Masc_tui_browser_lane_layout
-module Board_detail = Masc_tui_board_detail
-module Magnitude = Masc_tui_magnitude
-module Board_comment_thread = Masc_tui_board_comment_thread
-module Message_layout = Masc_tui_message_layout
-module Tool_detail = Masc_tui_tool_detail
-module Retained_view = Masc_tui_retained_view
-module Metrics_tail = Masc_tui_metrics_tail
-module Observation_layout = Masc_tui_observation_layout
-module Context_state = Masc_tui_context_state
-module Keeper_activity = Masc_tui_keeper_activity
-module Keeper_chat = Masc_tui_keeper_chat_projection
-module Keeper_chat_diff = Masc_tui_keeper_chat_diff
-module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
-module Render_schedule = Masc_tui_render_schedule
-module Agenda = Masc_tui_agenda
-module Markdown = Masc_tui_markdown
-module Markdown_cache = Masc_tui_markdown_render_cache
-module Composer = Masc_tui_composer
-module Composer_projection = Masc_tui_composer_projection
-module Keeper_control = Masc_tui_keeper_control
-module Task_selection = Masc_tui_task_selection
-module Tool_tree = Masc_tui_tool_tree
-module Theme_choice = Masc_tui_theme_choice
-module File_icon = Masc_tui_file_icon
-module Approval_detail = Masc_tui_approval_detail
-module Planning_detail = Masc_tui_planning_detail
-module Link = Masc_tui_link
-module Status = Masc.Keeper_status_runtime
-module Render_tools = Masc_tui_render_tools
-module Span = Masc_tui_span
-module Diff = Masc_tui_diff
-module Chart = Masc_tui_chart
-module Render_metrics = Masc_tui_render_metrics
-module Render_memory = Masc_tui_render_memory
 
 
-module Board_composer = Masc_tui_board_composer
 
 
 (* Every surface lays out against a viewport one row shorter than the
@@ -64,6 +24,16 @@ module Board_composer = Masc_tui_board_composer
    layer's paging math (which reads the same probe) agrees with the drawn
    frame. Zero when the pane is hidden, too narrow, or the surface is the
    Activity feed itself. *)
+
+module Agenda = Masc_tui_agenda
+module Composer = Masc_tui_composer
+module Composer_projection = Masc_tui_composer_projection
+module Frame_presenter = Masc_tui_frame_presenter
+module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
+module Keeper_control = Masc_tui_keeper_control
+module Markdown = Masc_tui_markdown
+module Message_layout = Masc_tui_message_layout
+
 let acting_pane_reserved_cols = ref 0
 
 

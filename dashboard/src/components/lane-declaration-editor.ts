@@ -96,6 +96,10 @@ export function LaneDeclarationEditor({ target, onClose, onSaved }: {
         }
         const remaining = { ...all }
         delete remaining[key]
+        // The file can be discovered and opened before its create response
+        // reaches this session. That destination owns its newer draft, read
+        // revision, comparison, and any in-flight save.
+        if (savedKey !== key && all[savedKey] !== undefined) return remaining
         return { ...remaining, [savedKey]: next }
       })
       onSaved(key, receipt.document)
@@ -128,7 +132,7 @@ export function LaneDeclarationEditor({ target, onClose, onSaved }: {
     ${draft.document && html`<div class="space-y-1 break-all">
       <p>File source revision: <code>${draft.document.source_revision}</code></p>
       <p>Parsed declaration revision: <code>${draft.document.desired_revision ?? 'Unavailable'}</code></p>
-      <p>The file source revision protects concurrent edits. Parsed and applied declaration revisions describe Lane configuration.</p>
+      <p>Dashboard and Keeper saves check this source revision. Direct filesystem writes do not share the editor lock. Parsed and applied declaration revisions describe Lane configuration.</p>
       ${!draft.document.validation.valid && html`<div role="alert">The current file is invalid. Its original text is available for correction.
         ${draft.document.validation.messages.map((text, index) => html`<p key=${index}>${text}</p>`)}
       </div>`}

@@ -86,6 +86,35 @@ describe('Lane declaration editing through the status surface', () => {
     await waitFor(() => expect(source(screen).value).toBe(newer))
     expect(files.fetchLaneDeclaration).not.toHaveBeenCalled()
   })
+  it('preserves the reopened file draft when an earlier create response arrives late', async () => {
+    let finishCreate: ((value: unknown) => void) | undefined
+    files.saveLaneDeclaration.mockImplementationOnce(() => new Promise(resolve => { finishCreate = resolve }))
+    lane.fetchLaneAddons.mockResolvedValueOnce({ ...snapshot,
+      configuration: { ...snapshot.configuration, declarations: [] } })
+    const current = { ...document, source_revision: 'raw-read-after-create' }
+    files.fetchLaneDeclaration.mockResolvedValue(current)
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('No readable TOML declarations.')
+    fireEvent.click(screen.getByRole('button', { name: 'New TOML' }))
+    fireEvent.input(await screen.findByLabelText('File name'), { target: { value: 'custom.toml' } })
+    fireEvent.input(source(screen), { target: { value: original } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+    await screen.findByRole('button', { name: 'Saving TOML…' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close editor' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    await open(screen)
+    const newer = '# edited after discovering the created file\n' + original
+    fireEvent.input(source(screen), { target: { value: newer } })
+    finishCreate?.({ ...receipt(original, 'raw-create-receipt'), write: { state: 'created', durability: 'durable', detail: null } })
+    await waitFor(() => expect(lane.fetchLaneAddons).toHaveBeenCalledTimes(3))
+    expect(source(screen).value).toBe(newer)
+    expect((screen.getByRole('button', { name: 'Save TOML' }) as HTMLButtonElement).disabled).toBe(false)
+    files.saveLaneDeclaration.mockResolvedValueOnce(receipt(newer, 'raw-saved-after-reopen'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
+    await waitFor(() => expect(files.saveLaneDeclaration).toHaveBeenLastCalledWith({
+      mode: 'save', file_name: 'custom.toml', source_text: newer, expected_source_revision: 'raw-read-after-create',
+    }))
+  })
   it('recovers a lost create response through the file list while retaining the new-file draft', async () => {
     files.saveLaneDeclaration.mockRejectedValue(new Error('Create response lost'))
     const screen = render(html`<${LaneAddonsPanel} />`)
@@ -121,6 +150,24 @@ describe('Lane declaration editing through the status surface', () => {
     expect(source(screen).value).toBe(correction)
     expect(files.saveLaneDeclaration).toHaveBeenCalledWith({ mode: 'save', file_name: 'custom.toml', source_text: correction, expected_source_revision: 'raw-revision-1' })
     expect(screen.queryByText(/File saved/)).toBeNull()
+  })
+  it('offers issue editing only for exact declaration files in the configured directory', async () => {
+    const directory = snapshot.configuration.directory
+    const paths = [directory, `${directory}/nested/broken.toml`, `${directory}-other/broken.toml`,
+      `${directory}/readme.txt`, `${directory}/.toml`, path]
+    lane.fetchLaneAddons.mockResolvedValue({ ...snapshot, configuration: { ...snapshot.configuration,
+      complete: false, declarations: [], issues: paths.map(source_path => ({
+        source_path, id: null, message: 'Configuration read failed',
+      })) } })
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('Configuration read: incomplete')
+    for (const sourcePath of paths.slice(0, -1)) {
+      expect(screen.queryByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeNull()
+    }
+    fireEvent.click(screen.getByRole('button', { name: `Edit TOML ${path}`, exact: true }))
+    await waitFor(() => expect(source(screen).value).toBe(original))
+    expect(files.fetchLaneDeclaration).toHaveBeenCalledTimes(1)
+    expect(files.fetchLaneDeclaration).toHaveBeenCalledWith(path, expect.any(AbortSignal))
   })
   it('keeps the draft on conflict and only adopts a new raw revision after an explicit choice', async () => {
     const current = { ...document, source_text: '# another writer\n' + original, source_revision: 'raw-external', desired_revision: document.desired_revision }

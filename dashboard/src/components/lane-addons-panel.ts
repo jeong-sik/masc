@@ -16,6 +16,13 @@ const inputClass = 'border border-[var(--border)] rounded px-2 py-1 bg-transpare
 const buttonClass = `${inputClass} cursor-pointer disabled:opacity-50`
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
+function isDeclarationFile(directory: string, sourcePath: string): boolean {
+  const fileName = sourcePath.slice(sourcePath.lastIndexOf('/') + 1)
+  const expectedPath = `${directory}${directory.endsWith('/') ? '' : '/'}${fileName}`
+  return sourcePath === expectedPath && fileName.length > '.toml'.length
+    && fileName.endsWith('.toml') && !fileName.includes('\\') && !fileName.includes('\0')
+}
+
 type TrackedAction = {
   request: LaneAddonActionRequest
   receipt: LaneAddonActionReceipt | null
@@ -203,6 +210,7 @@ export function LaneAddonsPanel() {
       if (!controller.signal.aborted && mounted.current) setReading(false)
     }
   }
+  const configuration = snapshot?.configuration ?? null
   const rows = slice?.rows ?? snapshot?.rows ?? []
   const coverage = slice?.coverage ?? snapshot?.coverage ?? []
   return html`<section class="space-y-4 p-4" aria-label="Lane Add-ons">
@@ -216,17 +224,18 @@ export function LaneAddonsPanel() {
     ${error && html`<p role="alert" class="text-red-400">${error}</p>`}
     ${snapshot && html`<section class="space-y-2" aria-label="TOML configuration">
       <h3 class="font-semibold">TOML configuration</h3>
-      ${snapshot.configuration === null
+      ${configuration === null
         ? html`<p>Configuration service has not started.</p>`
-        : html`<p class="break-all">Directory: <code>${snapshot.configuration.directory}</code></p>
-          <p>Configuration read: ${snapshot.configuration.complete ? 'complete' : 'incomplete'}</p>
-          ${snapshot.configuration.issues.map((issue, index) => html`<p key=${index} role="alert" class="text-red-400 break-all">
+        : html`<p class="break-all">Directory: <code>${configuration.directory}</code></p>
+          <p>Configuration read: ${configuration.complete ? 'complete' : 'incomplete'}</p>
+          ${configuration.issues.map((issue, index) => html`<p key=${index} role="alert" class="text-red-400 break-all">
             <strong>${issue.source_path}</strong>${issue.id !== null && html` · ${issue.id}`} — ${issue.message}
-            <button type="button" class=${buttonClass} onClick=${() => editToml(issue.source_path)} aria-label=${`Edit TOML ${issue.source_path}`}>Edit TOML</button>
+            ${isDeclarationFile(configuration.directory, issue.source_path) && html`<button type="button" class=${buttonClass}
+              onClick=${() => editToml(issue.source_path)} aria-label=${`Edit TOML ${issue.source_path}`}>Edit TOML</button>`}
           </p>`)}
           <div class="overflow-x-auto"><table class="w-full text-left" aria-label="TOML declarations"><thead><tr>
             <th>Declaration / file</th><th>Desired revision</th><th>Applied revision / instance</th><th>Configuration status</th>
-          </tr></thead><tbody>${snapshot.configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
+          </tr></thead><tbody>${configuration.declarations.map(declaration => html`<tr key=${declaration.id}>
             <td>${declaration.id}<div class="break-all">${declaration.source_path}</div>
               <button type="button" class=${buttonClass} onClick=${() => editToml(declaration.source_path)} aria-label=${`Edit TOML ${declaration.source_path}`}>Edit TOML</button></td>
             <td class="break-all">${declaration.desired_revision}</td>
@@ -234,7 +243,7 @@ export function LaneAddonsPanel() {
             <td>${declaration.applied_revision === null ? 'Not yet applied'
               : declaration.applied_revision === declaration.desired_revision ? 'Desired revision applied' : 'Revision change pending'}</td>
           </tr>`)}</tbody></table></div>
-          ${snapshot.configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
+          ${configuration.declarations.length === 0 && html`<p>No readable TOML declarations.</p>`}
           <p>Configuration status tracks installed revisions. Observation status is shown per instance below.</p>`}
     </section>`}
     <${LaneDeclarationEditor} target=${editor} onClose=${() => setEditor(null)} onSaved=${(key: string, document: LaneDeclarationDocument) => {

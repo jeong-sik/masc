@@ -133,7 +133,7 @@ let test_an_endpoint_is_added_and_the_notes_survive () =
         ()
     in
     (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Tts, added) ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     let written = read path in
     Alcotest.(check (list string))
@@ -161,7 +161,7 @@ let test_an_endpoint_is_added_and_the_notes_survive () =
 let test_an_edit_the_loader_refuses_is_not_written () =
   with_config fixture (fun path ->
     match apply path [ Voice_setup.Set_default_model (Voice_setup.Tts, "") ] with
-    | Ok () -> Alcotest.fail "a blank default_model must not be accepted"
+    | Ok _revision -> Alcotest.fail "a blank default_model must not be accepted"
     | Error (Voice_setup.Voice_section_invalid message) ->
       Alcotest.(check bool)
         "the refusal names the key"
@@ -190,7 +190,7 @@ let test_a_stale_revision_writes_nothing () =
     with
     | Error Voice_setup.Configuration_changed ->
       Alcotest.(check string) "the concurrent write is preserved" concurrent (read path)
-    | Ok () -> Alcotest.fail "a stale revision must be refused"
+    | Ok _revision -> Alcotest.fail "a stale revision must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
 (* A first endpoint and the default_model its section requires have to land
@@ -206,7 +206,7 @@ let test_changes_that_depend_on_each_other_land_together () =
     in
     (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Stt, added) ] with
      | Error (Voice_setup.Voice_section_invalid _) -> ()
-     | Ok () -> Alcotest.fail "an stt section with no default_model must be refused"
+     | Ok _revision -> Alcotest.fail "an stt section with no default_model must be refused"
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     Alcotest.(check string) "nothing was written by the refused half" runtime_base (read path);
     match
@@ -217,7 +217,7 @@ let test_changes_that_depend_on_each_other_land_together () =
         ]
     with
     | Error error -> Alcotest.fail (Voice_setup.error_message error)
-    | Ok () ->
+    | Ok _revision ->
       (match Voice_config.parse_runtime_toml_text (read path) with
        | Ok (Some config) ->
          (match config.Voice_config.stt with
@@ -230,7 +230,7 @@ let test_changes_that_depend_on_each_other_land_together () =
 let test_an_agent_voice_is_set_and_cleared () =
   with_config fixture (fun path ->
     (match apply path [ Voice_setup.Set_agent_voice ("codex", Some "JBFqnCBsd6RMkjVDRZzb") ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     let voices contents =
       match Voice_config.parse_runtime_toml_text contents with
@@ -245,7 +245,7 @@ let test_an_agent_voice_is_set_and_cleared () =
       (Some "JBFqnCBsd6RMkjVDRZzb")
       (List.assoc_opt "codex" (voices (read path)));
     (match apply path [ Voice_setup.Set_agent_voice ("codex", None) ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     Alcotest.(check (option string))
       "and cleared again"
@@ -269,7 +269,7 @@ let test_a_field_left_none_is_dropped_from_the_endpoint () =
         ()
     in
     (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Tts, local) ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     match Voice_config.parse_runtime_toml_text (read path) with
     | Ok (Some config) ->
@@ -315,10 +315,10 @@ let test_an_endpoint_is_removed () =
         ()
     in
     (match apply path [ Voice_setup.Put_endpoint (Voice_setup.Tts, local) ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     (match apply path [ Voice_setup.Remove_endpoint (Voice_setup.Tts, "elevenlabs-direct") ] with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     match Voice_config.parse_runtime_toml_text (read path) with
     | Ok (Some config) ->
@@ -344,7 +344,7 @@ let test_removing_the_last_endpoint_is_refused () =
     match apply path [ Voice_setup.Remove_endpoint (Voice_setup.Stt, "whisper-local") ] with
     | Error (Voice_setup.Voice_section_invalid _) ->
       Alcotest.(check string) "the file is untouched" fixture (read path)
-    | Ok () -> Alcotest.fail "an stt section with no endpoints must be refused"
+    | Ok _revision -> Alcotest.fail "an stt section with no endpoints must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
 let () =

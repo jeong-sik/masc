@@ -481,10 +481,7 @@ let apply ~base_path json =
   let path = runtime_config_path ~base_path in
   match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
   | Error error -> Error (Setup_failed error)
-  | Ok () ->
-    (* The revision after the write, so a caller can keep editing without
-       reading again. *)
-    (match Voice_setup.observe ~runtime_config_path:path with
-     | Error error -> Error (Setup_failed error)
-     | Ok (revision, _) ->
-       Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ]))
+  (* The revision this write produced, so a caller can keep editing without
+     reading again -- and out of the commit rather than a read after it, which
+     could answer a different writer's revision. *)
+  | Ok revision -> Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ])

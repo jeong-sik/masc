@@ -7347,28 +7347,23 @@ let image_url_to_mosaic ~cols url : Masc_tui_link_preview.mosaic_entry =
 let () =
   compute_and_store_mosaic :=
     fun img ->
-      match Masc_tui_link_preview.mosaic_lookup img with
-      | Some (Masc_tui_link_preview.Mosaic _ | Masc_tui_link_preview.Refused _) ->
-          (* Render/background ticks never retry. The modal's [r] action
-             explicitly refreshes a refused preview. *)
-          ()
-      | None ->
-          Masc_tui_link_preview.mosaic_store img
-            (Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
-                 image_url_to_mosaic ~cols:mosaic_cols img))
+      (* Claim and decode in the same worker: canceling its waiting fiber must
+         not release the URL while the converter still writes its files. *)
+      Eio_guard.run_in_systhread ~label:"tui-image-mosaic" (fun () ->
+        Masc_tui_link_preview.load_mosaic img ~compute:(fun () ->
+          image_url_to_mosaic ~cols:mosaic_cols img))
 
 let retry_image_mosaic img =
   match Eio_context.get_switch_opt () with
   | None -> ()
   | Some sw ->
-    ignore (Masc_tui_link_preview.retry_mosaic img ~retry:(fun () ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        Masc_tui_link_preview.mosaic_store img
-          (Eio_guard.run_in_systhread ~label:"tui-image-mosaic-retry" (fun () ->
-            Masc_tui_image_cache.invalidate_download
-              ~cache_dir:(ensure_img_cache_dir ()) img;
-            image_url_to_mosaic ~cols:mosaic_cols img));
-        `Stop_daemon)))
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio_guard.run_in_systhread ~label:"tui-image-mosaic-retry" (fun () ->
+        Masc_tui_link_preview.retry_mosaic img ~retry:(fun () ->
+          Masc_tui_image_cache.invalidate_download
+            ~cache_dir:(ensure_img_cache_dir ()) img;
+          image_url_to_mosaic ~cols:mosaic_cols img));
+      `Stop_daemon)
 
 let open_image state ~notice path =
   let refuse reason =

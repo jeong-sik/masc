@@ -45,8 +45,11 @@ let row_error_to_string = function
       in
       Printf.sprintf "malformed JSON at %s: %s" location detail
   | Invalid_metrics_row { physical_index; detail } ->
-      Printf.sprintf "physical row %d is not current Keeper metrics: %s"
-        physical_index detail
+      (* The row number and the reason, and nothing between them. The notice
+         above already said these rows are unreadable metrics, and the reason is
+         the part that differs per row -- it is also the part the cut row drops
+         first, because it is last. *)
+      Printf.sprintf "row %d: %s" physical_index detail
   | Misfiled_row { physical_index; names_keeper } ->
       Printf.sprintf "physical row %d is in this Keeper's store but names %S"
         physical_index names_keeper

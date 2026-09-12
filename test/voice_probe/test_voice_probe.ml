@@ -114,6 +114,33 @@ let test_a_body_without_a_transcript_is_not_silence () =
   Alcotest.(check bool) "nor a body that is not an object at all" true
     (refused (`List []))
 
+
+(* The runtime path has to route the same way the probe does. It did not: the
+   command transport was wired into probe_stt only, so a configured
+   whisper_cli endpoint -- the one kind that transcribes without a server --
+   was sent an HTTP request it has no address for, and [/transcribe] reported
+   every endpoint as failed while [voice-verify --audio] on the same
+   configuration worked (#35569, and the Codex review of #35526).
+
+   Counted rather than exercised: [transcribe_audio] loads the workspace's
+   voice configuration and reaches real endpoints, so what a test can hold
+   here is that the routing is read at all. What it routes to is
+   {!transcriber_of_kind}, which the cases above pin. *)
+let voice_bridge_path = "lib/voice/voice_bridge.ml"
+
+let test_the_runtime_loop_routes_by_kind () =
+  Alcotest.(check int) "transcribe_audio is where the loop lives" 1
+    (Ast_grep.count_value_bindings ~module_path:voice_bridge_path
+       ~name:"transcribe_audio");
+  Alcotest.(check int) "and it asks which transport this endpoint is" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:voice_bridge_path
+       ~binding_name:"transcribe_audio" ~callee:"transcriber_of_kind")
+
+let test_the_runtime_loop_can_reach_the_command_transport () =
+  Alcotest.(check int) "a command kind is run, not addressed" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:voice_bridge_path
+       ~binding_name:"transcribe_audio" ~callee:"transcribe_via_command")
+
 let () =
   Alcotest.run
     "voice_probe"
@@ -134,5 +161,9 @@ let () =
             test_an_empty_transcript_is_still_a_transcript
         ; Alcotest.test_case "a body without a transcript is not silence" `Quick
             test_a_body_without_a_transcript_is_not_silence
+        ; Alcotest.test_case "the runtime loop routes by kind" `Quick
+            test_the_runtime_loop_routes_by_kind
+        ; Alcotest.test_case "the runtime loop can reach the command transport" `Quick
+            test_the_runtime_loop_can_reach_the_command_transport
         ] )
     ]

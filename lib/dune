@@ -67,6 +67,7 @@
   masc.browser_lane
   masc.slack_lane
   masc.msx_lane
+  masc.dos_lane
   masc.tool_metrics_store
   masc.crypto_rng
   masc.time_codec

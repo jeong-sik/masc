@@ -113,6 +113,9 @@
   masc.keeper_failure_taxonomy
   masc.keeper_toml
   masc.config_journal
+  masc.voice_setup
+  masc.voice_config
+  masc.voice_runtime_overlay
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics
@@ -121,6 +124,7 @@
   masc.types_boundary
   masc.trajectory
   masc.keeper_tooling
+  masc.keeper_tool_call_index
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed

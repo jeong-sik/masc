@@ -1,0 +1,33 @@
+{
+  "source_commit": "cc757326f8ebb1d4d3d4ac08486bb507352be35f",
+  "server_sha256": "1eabba751f89669b9e3e4162a1cc5bedd525454a398a4ca4ab38f12b5a24daa6",
+  "packages": {
+    "browser-lanes": {
+      "SKILL.md": "6e3ea26f00a79eee164488476ecd4bcdb3e348fcd903a3bfe191e747e66576df",
+      "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972",
+      "references/composition.md": "f117eec3f25845a7276280c92676a17795268866640acbb00fedb59b16d3c292",
+      "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+      "references/extraction.md": "a2ad35c4a5b0079e8639b9962ef6f675f8a747ef382bacb9e8d871887c7fbf3f",
+      "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77"
+    },
+    "browser-navigate-content": {
+      "SKILL.md": "a1c3189c8cf1178ad2daaa9b81aefd45d70048cf3f11e5f564964a960d462514"
+    }
+  },
+  "exports": [
+    {
+      "package": "browser-lanes",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-delivery-native-cc757/bundle/browser-lanes\nbundled revision: a837a88245f0aa23b9b575869a46f76040b802b80ed202bf21eabec9425dbc79\n",
+      "stderr": "[2026-09-13 02:55:09] [INFO] [MCP] Tag registry initialized: 165 tools registered\n"
+    },
+    {
+      "package": "browser-navigate-content",
+      "exit_code": 0,
+      "stdout": "Bundled package exported to /private/tmp/browser-delivery-native-cc757/bundle/browser-navigate-content\nbundled revision: ce31aaf995429dda18125410cb14bf9ed21646a6f8ea34c568afce8b2cf4bafe\n",
+      "stderr": "[2026-09-13 02:55:09] [INFO] [MCP] Tag registry initialized: 165 tools registered\n"
+    }
+  ],
+  "origin": "candidate binary skills-refresh --export-to",
+  "result": "exported"
+}

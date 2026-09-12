@@ -469,6 +469,9 @@ let apply ~base_path json =
    use the endpoint kind's default transport destination. *)
 let catalogue_endpoint_of_json json =
   let* fields = fields json in
+  let* () =
+    no_unknown_fields ~what:"a listing" ~allowed:[ "kind"; "api_key_env" ] fields
+  in
   let* kind_text = string_field ~what:"a listing" fields "kind" in
   let* kind = kind_of_string kind_text in
   let* api_key_env = optional_string ~what:"a listing" fields "api_key_env" in

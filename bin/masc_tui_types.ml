@@ -3246,6 +3246,20 @@ module Browser_lane_view = struct
   let scene_context t =
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
+        let target_kind = match node.kind with
+          | Region _ -> "region" | Control _ -> "control" | Text -> "text" | Raster -> "raster" in
+        let pinned = ["lane",`String (source_name scene.source);"tabId",`Int scene.tab_id;
+          "expectedUrl",`String scene.content.url] @
+          (match scene.client_id with None -> [] | Some id -> ["clientId",`String id]) in
+        let target = ["documentId",`String scene.content.document_id;"nodeId",`String node.node_id] in
+        (* The same typed action decides Enter in the TUI. A selected region
+           is a scoped read, even when it contains navigational links. *)
+        let default_action = match scene_target_action node with
+          | None -> `Null
+          | Some Read_region -> `Assoc ["kind",`String "read_region";"tool",`String "BrowserRead";
+              "input",`Assoc (pinned @ ["mode",`String "scene";"scope",`Assoc target])]
+          | Some Click_control -> `Assoc ["kind",`String "click_control";"tool",`String "BrowserInteract";
+              "input",`Assoc (pinned @ ["action",`String "click"] @ target)] in
         let source = match node.source_context with
           | Masc.Browser_source_context.Unmapped -> `Null
           | Invalid detail -> `Assoc ["error", `String detail]
@@ -3253,7 +3267,11 @@ module Browser_lane_view = struct
               "column",`Int source.column;"precision",`String (match source.kind with Template -> "template" | Element -> "element");
               "sha256",`String source.digest] in
         Some (Yojson.Safe.pretty_to_string (`Assoc [
-          "context",`String "Browser element observation; page-provided source hint. Verify the chosen checkout and file SHA-256 before editing.";
+          "context",`String ("Browser observation of the selected " ^ target_kind
+            ^ ". defaultAction describes its Enter action in the TUI."
+            ^ (match node.source_context with Masc.Browser_source_context.Unmapped -> ""
+               | Invalid _ | Located _ -> " The source hint is page-provided; verify the chosen checkout and file SHA-256 before editing."));
+          "targetKind",`String target_kind;"defaultAction",default_action;
           "lane",`String (source_name scene.source);
           "clientId",(match scene.client_id with Some id -> `String id | None -> `Null);
           "tabId",`Int scene.tab_id;"url",`String scene.content.url;

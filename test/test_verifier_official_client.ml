@@ -185,16 +185,20 @@ let test_unsafe_slots_refused_before_spawn () =
     [ "Codex", replace "claude-code" "codex-app-server" (runtime_config command), "official.verifier"
     ; "Antigravity", replace "claude-code" "antigravity-cli" (runtime_config command), "official.verifier"
     ; "disabled tools", replace "tools-support = true" "tools-support = false" (runtime_config command), "official.verifier"
+    ; "unsupported media", replace "supports-image-input = true" "supports-image-input = false" (runtime_config command), "official.verifier"
+    ; "missing runtime", runtime_config command, "missing.runtime"
     ; "lane", runtime_config command ^ "\n[runtime.lanes.verifier_lane]\ncandidates = [\"official.verifier\"]\n", "verifier_lane"
     ] in
   List.iter (fun (label,text,slot) ->
     write config_path text;
     (match Runtime.init_default ~config_path with Ok () -> () | Error e -> fail e);
-    check bool (label ^ " CLI admission refused") true
+    check bool (label ^ " CLI admission") (label <> "unsupported media")
       (Result.is_error (Runtime.verifier_cli_slot_admission ~runtime_id:slot));
     let result = AR.run ~evaluator_runtime:slot ~sw:(Some sw)
       ~log_info:(fun _ -> ()) ~log_warn:(fun _ -> ())
       ~render_prompt:(fun () -> Ok "A prose approval must never authorize this review.")
+      ~goal_blocks:[Agent_core.Types.Image
+        { media_type="image/png"; data=png; source_type=Base64 }]
       ~lookup:AR.No_lookup_surface ~base_path:root () in
     check bool (label ^ " explicit override cannot bypass admission") true
       (result.verdict = None && result.gate = AR.Evaluator_unavailable);

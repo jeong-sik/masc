@@ -38,10 +38,15 @@ key="$(eval printf '%s' "\${${key_env}:-}")"
 [[ -n "${key}" ]] || { echo "${key_env} is not set" >&2; exit 2; }
 [[ -x "${BENCH_DIR}/dist/masc" ]] || { echo "run image/fetch_masc.sh first" >&2; exit 2; }
 
-cfg="$(mktemp -d)"
+# Render under the bench directory, not mktemp: Docker Desktop shares the
+# checkout but not /var/folders, and an unshared bind mount arrives as an
+# empty directory rather than an error. That silently cost a run — masc seeded
+# a default config over the empty mount and answered "Model setup required".
+cfg="${BENCH_DIR}/configs/out-probe"
+rm -rf "${cfg}"
 cleanup() {
   [[ "${PROBE_KEEP:-0}" = "1" ]] || docker rm -f "${NAME}" >/dev/null 2>&1
-  rm -rf "${cfg}"
+  [[ "${PROBE_KEEP:-0}" = "1" ]] || rm -rf "${cfg}"
 }
 trap cleanup EXIT
 
@@ -63,6 +68,14 @@ docker run -d --name "${NAME}" --platform "${PLATFORM}" \
   -e "BENCH_KEEPER_POOL=${POOL}" \
   ${GH_TOKEN:+-e "GH_TOKEN=${GH_TOKEN}"} \
   "${IMAGE}" sleep infinity >/dev/null || { echo "STAGE_FAIL docker-run" >&2; exit 1; }
+
+# An unshared bind mount is empty, not an error, so check before spending a
+# bootstrap on it.
+mounted="$(docker exec "${NAME}" sh -c 'ls /opt/masc-bench/config | wc -l')"
+if [[ "${mounted//[[:space:]]/}" = "0" ]]; then
+  echo "STAGE_FAIL config-mount-empty (is ${cfg} shared with Docker?)" >&2
+  exit 1
+fi
 
 echo "== bootstrap"
 if ! docker exec \

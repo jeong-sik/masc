@@ -2799,10 +2799,8 @@ let voice_wizard_with_value (draft : Voice_wizard.draft) (step : Voice_wizard.st
   | Voice_wizard.Voice -> { draft with Voice_wizard.voice = value }
   | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> draft
 
-(* Opened on whichever provider the section offers first, rather than on one
-   named here. The order is Voice_wizard's, and it puts the entry that needs
-   nothing installed in front -- a reader on a fresh machine starts on the one
-   they can finish. *)
+(* Opened on whichever provider the section offers first. Provider ordering
+   belongs to Voice_wizard, including its platform-neutral default. *)
 let voice_wizard_open ~section ~revision =
   let provider =
     match Voice_wizard.providers_for section with

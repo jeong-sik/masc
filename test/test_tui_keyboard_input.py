@@ -14497,10 +14497,7 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
                 raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
 
         opened = press_and_settle(process, master_fd, output, b"e")
-        # The wizard opens on whatever speech out offers first, which is say --
-        # five questions. This walk is about ElevenLabs, so it moves there at
-        # the provider step and the count becomes seven.
-        expect(opened, b"step 1/5", "the wizard did not open on the first question")
+        expect(opened, b"step 1/7", "the wizard did not open on the first question")
         expect(opened, b"setup", "the wizard title did not draw")
         expect(opened, b"speech out", "the first question did not show its answer")
 
@@ -14519,14 +14516,8 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
 
         # Enter walks forward. Provider is the second closed set.
         provider = press_and_settle(process, master_fd, output, b"\r")
-        expect(provider, b"step 2/5", "enter did not reach the provider step")
-        expect(provider, b"macos_say", "say does not lead the speech out providers")
-
-        # Walking to ElevenLabs changes which questions exist, so the counter
-        # moves with it: five becomes seven as an address and a key appear.
-        chosen = press_and_settle(process, master_fd, output, b"\x1b[C")
-        expect(chosen, b"elevenlabs", "the right arrow did not reach elevenlabs")
-        expect(chosen, b"step 2/7", "the question count did not follow the provider")
+        expect(provider, b"step 2/7", "enter did not reach the provider step")
+        expect(provider, b"elevenlabs", "the default requires a macOS server")
 
         # Typing reaches the field, and leaving the step reaches the draft.
         expect(
@@ -14636,7 +14627,7 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
 def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
     """The path a new mac takes: say, which needs nothing installed.
 
-    say leads the speech-out provider list, so the wizard opens on it. What
+    The operator explicitly selects say. What
     this holds that the ElevenLabs walk cannot: that the questions say is not
     asked -- address, credential, model -- are absent from the terminal too,
     and that the save carries no model change. A blank model written here
@@ -14656,12 +14647,13 @@ def voice_wizard_say_interaction(requests: HttpRequests) -> Interaction:
 
         open_the_voice_pane(process, master_fd, output)
         opened = press_and_settle(process, master_fd, output, b"e")
-        # Five questions, not seven: no address, no credential, no model.
-        expect(opened, b"step 1/5", "the say path asked more than five questions")
+        expect(opened, b"step 1/7", "the wizard did not open on the first question")
 
         provider = press_and_settle(process, master_fd, output, b"\r")
+        expect(provider, b"elevenlabs", "the default requires a macOS server")
+        provider = press_and_settle(process, master_fd, output, b"\x1b[C")
         expect(provider, b"step 2/5", "enter did not reach the provider step")
-        expect(provider, b"macos_say", "say does not lead the speech out providers")
+        expect(provider, b"macos_say", "the right arrow did not select say")
 
         expect(
             press_and_settle(process, master_fd, output, b"\r"),

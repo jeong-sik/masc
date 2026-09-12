@@ -201,7 +201,10 @@ let with_catalogue_processes f =
     Out_channel.with_open_bin (path name) (fun channel -> output_string channel body);
     Unix.chmod (path name) 0o700
   in
-  let env_names = [ "PATH"; "MASC_TEST_CATALOGUE_DIR"; "MASC_TEST_CATALOGUE_KEY" ] in
+  let env_names =
+    [ "PATH"; "MASC_TEST_CATALOGUE_DIR"; "MASC_TEST_CATALOGUE_KEY"
+    ; "MASC_CONFIG_DIR"; "MASC_BASE_PATH"; "MASC_BASE_PATH_INPUT" ]
+  in
   let previous = List.map (fun name -> name, Sys.getenv_opt name) env_names in
   let read name = In_channel.with_open_bin (path name) In_channel.input_all in
   Fun.protect
@@ -209,8 +212,14 @@ let with_catalogue_processes f =
       List.iter
         (fun (name, value) -> Unix.putenv name (Option.value value ~default:""))
         previous;
-      Array.iter (fun name -> Sys.remove (path name)) (Sys.readdir root);
-      Unix.rmdir root)
+      let rec remove path =
+        match (Unix.lstat path).Unix.st_kind with
+        | Unix.S_DIR ->
+          Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+          Unix.rmdir path
+        | _ -> Sys.remove path
+      in
+      remove root)
     (fun () ->
       write "curl"
         {|#!/bin/sh
@@ -226,7 +235,7 @@ printf '%s\n' 'Command Voice  ko_KR  # hello'
       Unix.putenv "PATH" root;
       Unix.putenv "MASC_TEST_CATALOGUE_DIR" root;
       Unix.putenv "MASC_TEST_CATALOGUE_KEY" "fixture-catalogue-secret";
-      Eio_main.run (fun _ -> f ~read))
+      Eio_main.run (fun _ -> f ~read ~root))
 
 let listed_id endpoint =
   match Voice.list_voices endpoint with
@@ -235,7 +244,7 @@ let listed_id endpoint =
   | Error message -> Alcotest.fail message
 
 let test_resolved_alias_selects_the_same_transport_as_the_request () =
-  with_catalogue_processes (fun ~read:_ ->
+  with_catalogue_processes (fun ~read:_ ~root:_ ->
     let endpoint =
       { (endpoint ~kind:Voice_config.Macos_say ~base_url:None) with
         Voice_config.id = "elevenlabs"
@@ -251,7 +260,7 @@ let test_resolved_alias_selects_the_same_transport_as_the_request () =
       "Command Voice" (listed_id endpoint))
 
 let test_catalogue_credentials_reach_stdin_and_never_argv () =
-  with_catalogue_processes (fun ~read ->
+  with_catalogue_processes (fun ~read ~root:_ ->
     let endpoint =
       { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
         Voice_config.api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
@@ -268,7 +277,7 @@ let test_catalogue_credentials_reach_stdin_and_never_argv () =
       "xi-api-key: fixture-catalogue-secret\n" (read "stdin"))
 
 let test_catalogue_requests_dispatch_every_endpoint_kind () =
-  with_catalogue_processes (fun ~read:_ ->
+  with_catalogue_processes (fun ~read:_ ~root:_ ->
     List.iter
       (fun (kind, expected) ->
         let request =
@@ -296,6 +305,30 @@ let test_catalogue_requests_dispatch_every_endpoint_kind () =
       ; "whisper_cli", None
       ])
 
+let test_say_probe_refuses_an_uninstalled_voice_before_synthesis () =
+  with_catalogue_processes (fun ~read ~root ->
+    let config = Filename.concat root "runtime.toml" in
+    Out_channel.with_open_bin config (fun out ->
+      output_string out
+        {|[voice.tts]
+default_voice = "Uninstalled Voice"
+[[voice.tts.endpoints]]
+id = "speaker"
+kind = "macos_say"
+|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    (match Voice.probe_tts ~message:"hello" () with
+     | Ok [ { Voice.outcome = Voice.Refused message; _ } ] ->
+       Alcotest.(check string) "the missing voice is named"
+         "voice config endpoint speaker has no installed voice named \"Uninstalled Voice\""
+         message
+     | Ok _ -> Alcotest.fail "the probe must refuse the unavailable voice"
+     | Error message -> Alcotest.fail message);
+    Alcotest.(check string) "say was only asked to list voices, never synthesize"
+      "-v\n?\n" (read "say-argv"))
+
 let () =
   Alcotest.run
     "voice_catalog"
@@ -306,6 +339,8 @@ let () =
             test_catalogue_credentials_reach_stdin_and_never_argv
         ; Alcotest.test_case "catalogue requests dispatch every endpoint kind" `Quick
             test_catalogue_requests_dispatch_every_endpoint_kind
+        ; Alcotest.test_case "say probe refuses an uninstalled voice" `Quick
+            test_say_probe_refuses_an_uninstalled_voice_before_synthesis
         ] )
     ; ( "what the endpoint answered"
       , [ Alcotest.test_case "the answer becomes pickable rows" `Quick

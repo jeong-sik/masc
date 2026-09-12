@@ -9,9 +9,8 @@ module T = Masc_tui_types
 let session () =
   T.voice_wizard_open ~section:Voice_setup.Tts ~revision:"rev-1"
 
-(* The session opens on whatever the section offers first, which for speech out
-   is say -- the entry that needs nothing installed. Cases about a provider
-   with an address or a key walk to it the way an operator does. *)
+(* Cases choose their provider explicitly so the platform-neutral default is
+   independent of the behavior each case exercises. *)
 let rec walk_to session provider guard =
   if guard = 0
   then Alcotest.failf "never reached the provider under test"

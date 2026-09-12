@@ -29,11 +29,10 @@ let provider_of_label = function
    reports as not asked. Speech out is not offered whisper-cli for the mirror
    reason.
 
-   say comes first for speech out because it is the only entry here that needs
-   nothing installed -- it is in the base system of the machine this is being
-   read on. *)
+   The initial choice is available across platforms. macOS speech remains an
+   explicit option; the client cannot assume the server runs on a Mac. *)
 let providers_for = function
-  | Voice_setup.Tts -> [ Macos_say; Elevenlabs; Openai_compatible; Mcp_tool ]
+  | Voice_setup.Tts -> [ Elevenlabs; Macos_say; Openai_compatible; Mcp_tool ]
   | Voice_setup.Stt -> [ Whisper_cli; Elevenlabs; Openai_compatible ]
 ;;
 

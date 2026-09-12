@@ -373,6 +373,15 @@ let list_voices (endpoint : Voice_config.endpoint) =
          endpoint.Voice_config.id)
 ;;
 
+let validate_macos_voice endpoint ~voice =
+  let* voices = list_voices endpoint in
+  if List.exists (fun entry -> String.equal entry.voice_id voice) voices
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf "voice config endpoint %s has no installed voice named %S"
+         endpoint.Voice_config.id voice)
+
 let probe_tts ?(agent_id = "probe") ~message () =
   match Voice_config.load_detailed () with
   | Error error -> Error (Voice_config.load_error_to_string error)
@@ -408,6 +417,7 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   let result =
                     match adapter.transport with
                     | Voice_runtime_overlay.Macos_say ->
+                      let* () = validate_macos_voice endpoint ~voice in
                       Voice_bridge_transport.speak_via_command_to_file
                         endpoint ~message ~voice ~output_file
                     | Voice_runtime_overlay.Openai_compat
@@ -745,6 +755,7 @@ let attempt_tts_endpoint
     (match
        (match adapter.transport with
         | Voice_runtime_overlay.Macos_say ->
+          let* () = validate_macos_voice endpoint ~voice in
           Voice_bridge_transport.speak_via_command_to_file
             endpoint
             ~message

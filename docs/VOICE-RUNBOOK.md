@@ -47,9 +47,8 @@ apt package would install something else or nothing.
 
 ### Doing it from the TUI instead
 
-`p` to the voice pane, then `e`. The wizard opens on whatever the section
-offers first, which for speech out is say — the entry that needs nothing
-installed — so a fresh machine lands on the one it can finish.
+`p` to the voice pane, then `e`. Speech out starts on ElevenLabs, which does
+not assume a macOS server. On a Mac, select `macos_say` at the provider step.
 
 Five questions, walked in a terminal and counted there:
 
@@ -65,12 +64,10 @@ No address, no credential, no model. say is found under the name its kind
 knows, nothing leaves the machine, and it is asked for a voice rather than a
 model.
 
-Moving off say changes the questions, and the counter moves with them: `→` at
-step 2 reaches ElevenLabs and the walk becomes 2/7, because an address and a
-key have appeared.
+Changing providers changes the questions and the counter. ElevenLabs has seven
+steps; say has five because it needs neither a credential nor a model.
 
-What the save puts on the wire for the say path, read off it rather than
-assumed: a `put_endpoint` of kind `macos_say`, a `set_tts_default_voice`, and
+The say save carries a `put_endpoint` of kind `macos_say` with its own `default_voice`, and
 **no `set_default_model`** — a blank model written there would land on a
 section a sibling endpoint shares. Neither `base_url` nor `api_key_env`
 appears at all.

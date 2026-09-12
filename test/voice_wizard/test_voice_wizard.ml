@@ -60,15 +60,14 @@ let gap_names draft =
    offering either for speech in would produce an endpoint every probe reports
    as not asked. whisper-cli is the mirror.
 
-   say leads speech out because it is the only entry that needs nothing
-   installed. *)
+   The initial choice must not require a macOS server. *)
 let provider_labels section =
   List.map Voice_wizard.provider_label (Voice_wizard.providers_for section)
 
 let test_each_side_is_offered_what_can_do_its_half () =
   Alcotest.(check (list string))
-    "speech out, the one that needs no download first"
-    [ "macos_say"; "elevenlabs"; "openai_compatible"; "mcp_tool" ]
+    "speech out starts with a provider available across platforms"
+    [ "elevenlabs"; "macos_say"; "openai_compatible"; "mcp_tool" ]
     (provider_labels Voice_setup.Tts);
   Alcotest.(check (list string))
     "speech in, and nothing in it only speaks"

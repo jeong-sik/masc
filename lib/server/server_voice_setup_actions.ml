@@ -184,7 +184,10 @@ let observe ~base_path =
            section_json
              ~endpoints:(List.map endpoint_json tts.Voice_config.endpoints)
              ~extra:
-               [ "default_model", `String tts.Voice_config.default_model
+               [ ( "default_model"
+                 , match tts.Voice_config.default_model with
+                   | Some model -> `String model
+                   | None -> `Null )
                ; "default_voice", `String tts.Voice_config.default_voice
                ; ( "agent_voices"
                  , `Assoc

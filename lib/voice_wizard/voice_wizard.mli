@@ -16,6 +16,8 @@ type provider =
   | Elevenlabs
   | Openai_compatible
   | Mcp_tool
+  | Macos_say
+  | Whisper_cli
 
 val provider_label : provider -> string
 val provider_of_label : string -> provider option

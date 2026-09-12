@@ -66,7 +66,7 @@ type voice_tuning = {
 (** {1 TTS / STT / session config} *)
 
 type tts_config = {
-  default_model : string;
+  default_model : string option;
       (** Required once the [tts] section exists, and never blank: every
           endpoint in the section is asked for this model by name. *)
   default_voice : string;

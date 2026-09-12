@@ -237,6 +237,53 @@ let test_a_line_naming_no_voice_is_dropped () =
   Alcotest.(check int) "nothing to choose, nothing offered" 0
     (List.length (Bridge.say_catalogue_of_output "# just a comment\n\n"))
 
+(* A speaking section whose endpoints all run a command that takes no model is
+   not made to invent one. The rule the loader used to apply -- every section
+   names a model -- was justified by "every endpoint in it is asked for this
+   model by name", and say is never asked. *)
+let test_a_say_only_section_needs_no_model () =
+  let text =
+    {|{"tts": {"default_voice": "Yuna",
+       "endpoints": [{"id": "macos-say", "kind": "macos_say"}]}}|}
+  in
+  match Voice_config.parse_json (Yojson.Safe.from_string text) with
+  | Error message -> Alcotest.fail message
+  | Ok config ->
+    (match config.Voice_config.tts with
+     | None -> Alcotest.fail "the section should have loaded"
+     | Some tts ->
+       (* Absent, not blank. A blank would be a model named "" and would reach
+          an endpoint that way. *)
+       Alcotest.(check (option string)) "and carries no model at all" None
+         tts.Voice_config.default_model)
+
+(* One endpoint that is asked for a model brings the requirement back. The
+   section is shared, so a blank would reach that endpoint as model_id "". *)
+let test_a_section_with_an_asked_endpoint_still_needs_one () =
+  let text =
+    {|{"tts": {"default_voice": "Yuna",
+       "endpoints": [{"id": "macos-say", "kind": "macos_say"},
+                     {"id": "eleven", "kind": "elevenlabs_direct"}]}}|}
+  in
+  match Voice_config.parse_json (Yojson.Safe.from_string text) with
+  | Ok _ -> Alcotest.fail "an endpoint that is asked for a model should require one"
+  | Error message ->
+    Alcotest.(check bool) "and the refusal names the field" true
+      (Astring.String.is_infix ~affix:"default_model" message)
+
+(* Every transcriber is asked for one, so speech in keeps the requirement
+   outright: the three that reach an address are asked by name, and whisper-cli
+   is asked for the file it loads. *)
+let test_speech_in_always_needs_a_model () =
+  let text =
+    {|{"stt": {"endpoints": [{"id": "whisper-local", "kind": "whisper_cli"}]}}|}
+  in
+  match Voice_config.parse_json (Yojson.Safe.from_string text) with
+  | Ok _ -> Alcotest.fail "a transcriber without its model should be refused"
+  | Error message ->
+    Alcotest.(check bool) "and the refusal names the field" true
+      (Astring.String.is_infix ~affix:"stt.default_model" message)
+
 let () =
   Alcotest.run
     "voice_local_command"
@@ -267,6 +314,14 @@ let () =
             test_a_parenthesised_name_keeps_its_parenthesis
         ; Alcotest.test_case "a line naming no voice is dropped" `Quick
             test_a_line_naming_no_voice_is_dropped
+        ] )
+    ; ( "what the section has to name"
+      , [ Alcotest.test_case "a say-only section needs no model" `Quick
+            test_a_say_only_section_needs_no_model
+        ; Alcotest.test_case "a section with an asked endpoint still needs one" `Quick
+            test_a_section_with_an_asked_endpoint_still_needs_one
+        ; Alcotest.test_case "speech in always needs a model" `Quick
+            test_speech_in_always_needs_a_model
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

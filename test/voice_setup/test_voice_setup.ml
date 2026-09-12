@@ -110,9 +110,9 @@ let test_observe_reads_the_section () =
       (match config.Voice_config.tts with
        | None -> Alcotest.fail "the fixture configures tts"
        | Some tts ->
-         Alcotest.(check string)
+         Alcotest.(check (option string))
            "the model the file names"
-           "eleven_multilingual_v2"
+           (Some "eleven_multilingual_v2")
            tts.Voice_config.default_model))
 
 let test_a_file_without_a_voice_section_observes_as_none () =

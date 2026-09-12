@@ -6663,7 +6663,12 @@ value = {surface="dashboard", content="must not run"}
           check int "navigation is never replayed" 1 !navigations;
           check int "only the failed read is retried" 2 !reads)
         else match bundle.terminal_effect_state () with
-          | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ -> ()
+          | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+            if break_evidence then (
+              check bool "broken evidence fixture reaches the storage fence" true
+                (String_util.contains_substring failure.diagnostic "skill-composition-evidence-v1");
+              check bool "canonical failed result is not a schema refusal" false
+                (String_util.contains_substring failure.diagnostic "does not match Tool_result.to_json"))
           | _ -> fail "unsafe or unobserved composition escaped its terminal fence"))
 ;;
 

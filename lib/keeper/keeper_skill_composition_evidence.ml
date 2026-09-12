@@ -97,12 +97,17 @@ let valid_result = function
      | [ "data", _
        ; "disposition", `String "failed"
        ; "duration_ms", `Float duration_ms
+       ; "effect_disposition", `String effect_disposition
        ; "failure_class", `String failure_class
        ; "message", `String _
        ; "tool_name", `String tool_name
        ] ->
        String.trim tool_name <> ""
        && valid_duration duration_ms
+       && (match Tool_result.failure_effect_disposition_of_string effect_disposition with
+           | Some value -> String.equal effect_disposition
+               (Tool_result.failure_effect_disposition_to_string value)
+           | None -> false)
        &&
        (match Tool_result.tool_failure_class_of_string failure_class with
         | Some value ->

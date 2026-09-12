@@ -1,0 +1,12 @@
+id = "output-statistics"
+revision = "0.1.0"
+title = "Latest completed output statistics"
+contributions = ["derive"]
+image = "masc-lane-output-statistics:0.1.0"
+command = ["python3", "server.py"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304

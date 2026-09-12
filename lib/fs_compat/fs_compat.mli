@@ -252,6 +252,12 @@ val load_owned_regular_file_with_snapshot
     and after I/O. Consumers may cache a content digest against [snapshot] and
     reuse it only while a later owned read reports an equal snapshot. *)
 
+val sha256_owned_regular_file
+  : ownership_root:string -> string -> (string option, owned_regular_file_read_error) result
+(** Stream SHA-256 using a fixed-size buffer through one validated owned regular
+    descriptor. The same parent-chain, identity and before/after snapshot checks
+    as {!load_owned_regular_file_with_snapshot} apply; no file-size allocation. *)
+
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
@@ -842,6 +848,16 @@ val file_mtime : string -> float option
 
 (** Rename file. *)
 val rename : string -> string -> unit
+
+val exchange_paths : string -> string -> unit
+(** Atomically exchange two existing paths on the same filesystem. Uses
+    RENAME_EXCHANGE on Linux and RENAME_SWAP on macOS. Raises [Unix_error]
+    without changing either path if unsupported; never falls back to two
+    renames. The caller owns path validation and post-publication sync. *)
+
+val rename_noreplace : string -> string -> unit
+(** Publish [src] at [dst] only if [dst] does not exist, including an empty
+    directory or dangling symlink. Unsupported filesystems raise Unix_error. *)
 
 (** [rename_if_exists ~src ~dst] renames [src] to [dst], returning [true]
     on success and [false] if [src] did not exist. Other I/O errors

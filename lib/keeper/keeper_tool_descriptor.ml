@@ -653,9 +653,23 @@ let execute_output_schema =
 ;;
 
 (* Browser reads have mode-specific payloads. Compositions can retain the whole
-   object; only the invariant interaction receipt exposes typed data edges. *)
+   object; navigation and interaction receipts expose typed data edges. *)
 let browser_read_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc [];"required",`List [];"additionalProperties",`Bool true]
+
+(* Browser_webdriver.page_summary observes the landing document after Page_goto.
+   Its URL can differ from the requested URL after a redirect. *)
+let browser_goto_output_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc
+        [ "url", `Assoc [ "type", `String "string" ]
+        ; "title", `Assoc [ "type", `String "string" ]
+        ]
+    ; "required", `List [ `String "url"; `String "title" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
 
 let browser_interact_output_schema = `Assoc ["type",`String "object";
   "properties",`Assoc ["tabId",`Assoc ["type",`String "integer"];
@@ -1080,6 +1094,7 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.browser_goto_schema.name
       ~description:Tool_schemas_misc.browser_goto_schema.description
       ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
+      ~composable_output:(Json_output { schema = browser_goto_output_schema })
       (* A navigation reaches the web from the automation profile; the live
          lane refuses navigation verbs at the state layer. Serial: the
          automation lane is one browser, and Concurrent here demands a
@@ -2855,6 +2870,8 @@ let internal_descriptors : t list =
        ~readonly:true
   (* Optional layers contribute observations; their replies do not gate
      existing Keeper work or replace the machine/browser owners. *)
+  ; masc_misc_descriptor "lane_act" "masc_lane_act" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_action_status" "masc_lane_action_status" ~readonly:true
   ; masc_misc_descriptor "lane_attach" "masc_lane_attach" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_inspect" "masc_lane_inspect" ~readonly:true
   ; masc_misc_descriptor "lane_observe" "masc_lane_observe" ~readonly:false

@@ -17,6 +17,18 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+(* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
+   The terminal used to take this byte for flow control -- raw mode clears
+   IXON now, which is what makes it bindable at all. A letter would not do:
+   in the composer every letter is text.
+
+   The byte and the printed name sit together because the chat pane prints
+   the name on the folded line while masc_tui.ml matches the byte. Apart,
+   one of them drifts and the line names a key that does nothing. *)
+let expand_turn_key = "\019"
+let expand_turn_label = "^S"
+
+
 let keepers_jump =
   b Meta "2" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 2"
@@ -162,6 +174,10 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
+      ; b Act expand_turn_label "turn detail"
+          ~help:
+            "unfold the running turn's status rows, or fold them back to the \
+             progress line"
       ; b Act "Ctrl-N" "journal detail"
           (* The three words are the states' own, the way Ctrl-R above spells
              its own. Pressing this answers "Librarian/Memory timeline: full",

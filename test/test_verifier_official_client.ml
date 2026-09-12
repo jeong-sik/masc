@@ -210,7 +210,7 @@ let test_unsafe_slots_refused_before_spawn () =
     in scan 0 in
   let cases =
     [ "Codex", replace "claude-code" "codex-app-server" (runtime_config command), "official.verifier"
-    ; "Antigravity", replace "claude-code" "antigravity-cli" (runtime_config command), "official.verifier"
+    ; "Antigravity", replace "command =" "timeout-s = 30.0\ncommand =" (replace "claude-code" "antigravity-cli" (runtime_config command)), "official.verifier"
     ; "disabled tools", replace "tools-support = true" "tools-support = false" (runtime_config command), "official.verifier"
     ; "unsupported media", replace "supports-image-input = true" "supports-image-input = false" (runtime_config command), "official.verifier"
     ; "missing runtime", runtime_config command, "missing.runtime"

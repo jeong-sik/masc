@@ -684,11 +684,18 @@ let pending_board_event_of_fusion_completion
           []
           ~fallback:"" )
   in
+  let lookup =
+    event_row_text Prompt_names.keeper_world_event_rows_fusion_result_lookup
+      [ "run_id", fc.run_id ]
+      ~fallback:(Yojson.Safe.to_string
+        (`Assoc [ "tool", `String "masc_fusion_status"
+                ; "arguments", `Assoc [ "run_id", `String fc.run_id ] ]))
+  in
   { event_kind = Fusion_completed
   ; post_id
   ; author = meta.name
   ; title
-  ; preview = short_preview ~max_len:fusion_result_preview_max_len message
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len message ^ "\n" ^ lookup
   ; hearth = None
   ; post_kind = Board.System_post
   ; updated_at = arrived_at

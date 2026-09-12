@@ -416,8 +416,10 @@ val fusion_status_json
 
 (** RFC-0266 §7 Phase 3 — in-process handler for the [masc_fusion_status]
     read-only tool. Parses the optional [run_id] argument and projects the
-    process-wide [Fusion_run_registry.global] via {!fusion_status_json}, scoped
-    to [meta.name]. *)
+    process-wide [Fusion_run_registry.global], scoped
+    to [meta.name]. Explicit run lookup also returns original durable Board
+    evidence and separate Keeper decisions, even when the registry entry is
+    not retained. *)
 val handle_masc_fusion_status
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

@@ -383,6 +383,60 @@ as a success.
 The audio goes in the **raw body**, not as multipart — the same as
 `/voice/transcribe`, and the same trap that costs time to rediscover.
 
+## Setting voice up from the TUI
+
+`p` until the pane strip reaches voice, then `e`.
+
+The pane itself reads two routes. `/api/v1/voice/config` is public and answers
+whether things load; `/api/v1/voice/setup` is admin-gated and names each
+endpoint, so the pane lists them by id, kind and address. A chain that has
+quietly gone dead looks healthy in the first and is visible in the second.
+
+### The questions
+
+| Step | Asked when |
+|---|---|
+| side | always — speech out or speech in |
+| provider | always |
+| name | always — how the entry is addressed later |
+| address | not for ElevenLabs, which carries its own |
+| credential variable | not for an MCP tool |
+| model | always |
+| voice | speech out only |
+| review | always |
+
+`enter` moves forward, `up` moves back, `esc` leaves without writing. The side
+and the provider walk on `←` / `→` / space, because both are closed sets;
+everything else is typed. `ctrl-u` clears a field.
+
+Two blanks are real answers rather than unfinished ones:
+
+- **a blank credential variable** sends no Authorization header, which is what a
+  local server that never asked for one answers 200 to;
+- **a blank address** offers the addresses a local server usually listens on, as
+  starting points. The wizard cannot tell what is running on a port — the probe
+  decides that.
+
+### What saving does
+
+The save carries the revision the pane read. A wizard left open while something
+else wrote is told its read went stale rather than overwriting that writer.
+
+On success the pane reloads, and for speech out every configured endpoint is
+asked to say one sentence. Each answer is shown, **including the refusals** —
+that is the part a fallback chain hides by stopping at the first endpoint that
+answers.
+
+Speech in is not probed there: transcription needs audio the pane does not have.
+Use `masc voice-verify --audio FILE`, and see above for making a file.
+
+### What it will not do
+
+The wizard does not install or start anything. It registers an address and
+checks whether something answers on it. Starting a local server is still
+`scripts/whisper-server.sh start` in the `me` repo, or whatever that server's own
+command is.
+
 ## Incident: voice was down for six days and said nothing
 
 `runtime.toml [voice]` carried `max_retries` on both endpoint lists.

@@ -362,8 +362,17 @@ let render_memory_body ~cols ~budget (state : state)
       (Theme.recede ()) Ansi.reset
       (Theme.recede ()) Ansi.reset
   in
+  (* What to say where the numbers would go. They are missing for two reasons
+     and the line has to name the one that holds: nothing has arrived yet, or
+     the load failed. The table below already draws the server's own reason in
+     red, so a header that says "waiting" after a failure puts two answers to
+     the same question on one screen -- and this one is on top, so it is the
+     one that gets read. *)
+  let missing_reading waiting =
+    if Option.is_some state.memory_health_error then "load failed" else waiting
+  in
   (match state.memory_health with
-   | None -> push "  Total: waiting for memory snapshots"
+   | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
    | Some snapshot ->
        push (Printf.sprintf "  Total %d facts · %d ordinary + %d source · %s · %d keepers"
          (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
@@ -372,7 +381,7 @@ let render_memory_body ~cols ~budget (state : state)
             (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
          (List.length snapshot.mhs_keepers)));
   (match state.memory_health with
-   | None -> push "  Librarian: waiting for health data"
+   | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
        push (Printf.sprintf "  Ordinary: %d observed / %d derived · %d support invalidations · Librarian: %d failures since server start"
          snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts

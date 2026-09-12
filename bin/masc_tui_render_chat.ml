@@ -567,7 +567,11 @@ let keeper_message_identity ~max_cells state keeper_name =
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
-           let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+           let runtime_id =
+             Keeper_chat_transcript.runtime_identity_text ~keeper_name
+               ~configured_runtime:row.kr_runtime_id
+               (Option.map (fun live -> live.tl_transcript) state.msg_live)
+           in
            let prefix =
              Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
                (Tui_decode.keeper_phase_to_string row.kr_phase)
@@ -1315,6 +1319,131 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name
   in
   layout_entries
 
+
+(* What a queued line is waiting on. "Pending" reads the same behind this
+   Keeper's turn that is still out and behind another queued line, and the
+   difference is whether the wait is ordinary. Computed here rather than in
+   the queue module: the answer needs the in-flight list, and the queue
+   cannot see it without a dependency cycle through [masc_tui_types]. *)
+let chat_pending_behind (state : state)
+  (item : Masc_tui_keeper_chat_queue.item) =
+  let keeper_name =
+  item.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
+  in
+  let held =
+  List.length
+    (List.filter
+       (fun (entry : Masc_tui_types.inflight) ->
+          String.equal entry.Masc_tui_types.sent_request.keeper_name
+            keeper_name)
+       state.msg_inflight)
+  in
+  let ahead =
+  List.filter
+    (fun (waiting : Masc_tui_keeper_chat_queue.item) ->
+       String.equal
+         waiting.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
+         keeper_name
+       && waiting.submission_seq > item.submission_seq
+       &&
+       (* A steer precedes ordinary input whatever its seq; a NEXT line
+          ahead of a steer is not ahead at all. *)
+       (match (waiting.intent, item.intent) with
+        | Steer_after_interrupt, Next -> true
+        | Next, Steer_after_interrupt -> false
+        | _ -> waiting.submission_seq > item.submission_seq))
+    (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
+  in
+  match (item.intent, held, ahead) with
+  | Masc_tui_keeper_chat_queue.Steer_after_interrupt, 0, [] ->
+    Some "after the interrupted turn settles"
+  | Masc_tui_keeper_chat_queue.Steer_after_interrupt, _, _ ->
+    Some "behind this Keeper's turn still out"
+  | Masc_tui_keeper_chat_queue.Next, 0, [] -> None
+  | Masc_tui_keeper_chat_queue.Next, 0, waiting_ahead :: _ -> (
+    match waiting_ahead.intent with
+    | Steer_after_interrupt -> Some "behind a queued steer"
+    | Next -> Some "behind an earlier queued message")
+  | Masc_tui_keeper_chat_queue.Next, 1, _ ->
+    Some "behind this Keeper's running turn"
+  | Masc_tui_keeper_chat_queue.Next, held, _ ->
+    Some
+      (Printf.sprintf "behind this Keeper's %d running turns" held)
+
+(* The operator's own lines that have left the composer and not settled yet:
+   the one a running turn is answering, and the ones waiting behind it.
+
+   They were drawn in fixed slots between the history and the composer, which
+   put them outside the conversation's own time axis. A line typed at 14:06
+   sat below a status row stamped 14:05:54 and above the composer, so the
+   screen said the newest thing had happened first. As entries they join the
+   tail of the stream every other line is in, and what state a line is in is
+   said on the row rather than by where the row sits.
+
+   [Markdown_streaming] because a queued line is still editable -- Ctrl-P
+   takes the last one back into the composer -- so no render cache may hold
+   it. [Rail_none] because the rail draws a turn's bracket and these belong
+   to a turn that has not opened one yet; RFC chat-turn-rail-and-side-lanes
+   decides later what a turn's own opening looks like. *)
+let chat_tail_entries (state : state) ~keeper_name ~role_label_column =
+  (* The state goes in the body, not in [request_label]. That field rides the
+     metadata row, which every origin mode but [Origin_row] folds away -- so a
+     line saying where it stands would have said it only to a reader who had
+     already pressed Ctrl-F. The body is drawn whatever the mode. *)
+  let entry ~at ~label ~note ~body =
+    let style = Message_layout.User in
+    ({ style
+     ; timestamp = keeper_message_clock at
+     ; timeline_bucket = Some (keeper_message_timeline_bucket at)
+     ; role_label =
+         Message_layout.align_role_label ~column:role_label_column ~style label
+     ; role_label_mark_cells =
+         Message_layout.role_label_mark_cells ~column:role_label_column ~style ()
+     ; request_label = ""
+     ; body = note ^ "\n" ^ Terminal_text.single_line body
+     ; markdown_source = Message_layout.Markdown_streaming
+     ; turn_rail = Message_layout.Rail_none
+     ; action = Message_layout.Action_none
+     }
+      : Message_layout.entry)
+  in
+  let promoted =
+    match promoted_inflight_for_keeper state keeper_name with
+    | None -> []
+    | Some inflight ->
+        (* The status says what the operator can act on: the line left and the
+           running turn is answering it. The compact request id that stood
+           here named a queue internal no reader could resolve. *)
+        [ entry ~at:inflight.submitted_at ~label:"YOU"
+            ~note:"sent · the running turn answers it"
+            ~body:inflight.sent_request.message ]
+  in
+  let pending =
+    Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued ~keeper_name
+    |> keeper_message_pending_preview
+    |> List.map (function
+         | Pending_preview_item (position, item) ->
+             let intent =
+               match item.Masc_tui_keeper_chat_queue.intent with
+               | Masc_tui_keeper_chat_queue.Next -> "NEXT"
+               | Masc_tui_keeper_chat_queue.Steer_after_interrupt -> "STEER"
+             in
+             let note =
+               match chat_pending_behind state item with
+               | Some reason -> Printf.sprintf "%s %d · %s" intent position reason
+               | None -> Printf.sprintf "%s %d" intent position
+             in
+             entry ~at:item.submitted_at ~label:"YOU" ~note
+               ~body:item.Masc_tui_keeper_chat_queue.request.Keeper_chat.message
+         | Pending_preview_omitted omitted ->
+             entry ~at:(Unix.gettimeofday ()) ~label:""
+               ~note:
+                 (Printf.sprintf
+                    "… %d pending row(s) hidden · Ctrl-K:cancel last · \
+                     Ctrl-P:edit last" omitted)
+               ~body:"")
+  in
+  promoted @ pending
 
 (* One conversation's layout entries, reused per message across a change of
    the conversation.
@@ -2205,6 +2334,15 @@ let render_keeper_message (state : state) =
       | [] -> committed_layout_entries
       | _ :: _ -> List.map snd tagged_layout_entries
     in
+    (* The operator's unsettled lines sit at the end of the same stream, not
+       in a slot below it. Appended after [tagged_layout_entries] on purpose:
+       the scroll pin counts rows of committed messages that landed after its
+       anchor, and these are not committed messages -- adding them there would
+       move a pin the reader set. *)
+    let layout_entries =
+      layout_entries
+      @ chat_tail_entries state ~keeper_name ~role_label_column
+    in
     let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
@@ -2313,113 +2451,10 @@ let render_keeper_message (state : state) =
       done
     end;
 
-    (* Queue provenance survives promotion in [inflight.origin]. While that
-       request runs, draw its USER in the exact slot NEXT owned and withhold its
-       session copy from the settled transcript. Settlement drops the inflight
-       provenance and the durable typed turn takes over. *)
-    (match promoted with
-     | Some entry ->
-         let request = entry.sent_request in
-         (* The status in the row says what the operator can act on: the line
-           left and the running turn is answering it. The compact request id
-           that stood here named a queue internal -- a value no reader could
-           resolve -- and its truncation glyph read like damage; the id stays
-           reachable on the settled rows' metadata. The 2026-09-10 misread
-           ("is this line ever going?") came from a row that said where it
-           came from but not that it had gone. *)
-         box_line_styled chat_buf chat_cols ~style:(Theme.info ())
-           (Printf.sprintf "  [%s]  ▶  YOU  sent · the running turn answers it"
-              (keeper_message_clock entry.submitted_at));
-         box_line_styled chat_buf chat_cols ~style:(Theme.info ())
-           ("    " ^ Terminal_text.single_line request.message)
-     | None -> ());
-    (* Pending input owns the exact two-row shape of the USER entry it will
-       become: one lane header and one body row. [history_height] subtracts
-       these rows through [keeper_message_status_rows], so promotion exchanges
-       NEXT for the promoted USER without moving the divider, composer, or
-       footer. The model has not seen pending input yet. *)
-    let pending =
-      Masc_tui_keeper_chat_queue.waiting_for_keeper state.msg_queued
-        ~keeper_name
-      |> keeper_message_pending_preview
-    in
-    (* The pending rows say when a line was typed and what it says; what they
-       were missing is what each line is behind. "Pending" reads the same
-       behind this Keeper's turn that is still out and behind another queued
-       line, and the difference is whether the wait is ordinary. Computed
-       here rather than in the queue module: the answer needs the in-flight
-       list, and the queue cannot see it without a dependency cycle through
-       [masc_tui_types]. *)
-    let pending_behind (item : Masc_tui_keeper_chat_queue.item) =
-      let keeper_name =
-        item.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
-      in
-      let held =
-        List.length
-          (List.filter
-             (fun (entry : Masc_tui_types.inflight) ->
-                String.equal entry.Masc_tui_types.sent_request.keeper_name
-                  keeper_name)
-             state.msg_inflight)
-      in
-      let ahead =
-        List.filter
-          (fun (waiting : Masc_tui_keeper_chat_queue.item) ->
-             String.equal
-               waiting.Masc_tui_keeper_chat_queue.request.Keeper_chat.keeper_name
-               keeper_name
-             && waiting.submission_seq > item.submission_seq
-             &&
-             (* A steer precedes ordinary input whatever its seq; a NEXT line
-                ahead of a steer is not ahead at all. *)
-             (match (waiting.intent, item.intent) with
-              | Steer_after_interrupt, Next -> true
-              | Next, Steer_after_interrupt -> false
-              | _ -> waiting.submission_seq > item.submission_seq))
-          (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
-      in
-      match (item.intent, held, ahead) with
-      | Masc_tui_keeper_chat_queue.Steer_after_interrupt, 0, [] ->
-          Some "after the interrupted turn settles"
-      | Masc_tui_keeper_chat_queue.Steer_after_interrupt, _, _ ->
-          Some "behind this Keeper's turn still out"
-      | Masc_tui_keeper_chat_queue.Next, 0, [] -> None
-      | Masc_tui_keeper_chat_queue.Next, 0, waiting_ahead :: _ -> (
-          match waiting_ahead.intent with
-          | Steer_after_interrupt -> Some "behind a queued steer"
-          | Next -> Some "behind an earlier queued message")
-      | Masc_tui_keeper_chat_queue.Next, 1, _ ->
-          Some "behind this Keeper's running turn"
-      | Masc_tui_keeper_chat_queue.Next, held, _ ->
-          Some
-            (Printf.sprintf "behind this Keeper's %d running turns" held)
-    in
-    List.iter
-      (function
-        | Pending_preview_item (position, item) ->
-            let intent, style =
-              match item.Masc_tui_keeper_chat_queue.intent with
-              | Masc_tui_keeper_chat_queue.Next -> "NEXT", Theme.recede ()
-              | Masc_tui_keeper_chat_queue.Steer_after_interrupt ->
-                  "STEER", Theme.warn ()
-            in
-            let suffix =
-              match pending_behind item with
-              | Some reason -> " · " ^ reason
-              | None -> ""
-            in
-            let request = item.Masc_tui_keeper_chat_queue.request in
-            box_line_styled chat_buf chat_cols ~style
-              (Printf.sprintf "  %s %d · %s%s" intent position
-                 (keeper_message_clock item.submitted_at) suffix);
-            box_line_styled chat_buf chat_cols ~style
-              ("    " ^ Terminal_text.single_line request.Keeper_chat.message)
-        | Pending_preview_omitted omitted ->
-            box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-              (Printf.sprintf
-                 "  … %d pending row(s) hidden · Ctrl-K:cancel last · Ctrl-P:edit last"
-                 omitted))
-      pending;
+    (* The operator's unsettled lines used to be drawn here, between the
+       history and the composer. They are entries in the history now -- see
+       [chat_tail_entries] -- so the conversation holds one time axis and
+       these rows scroll with the lines they follow. *)
 
     (* Input area divider *)
     box_divider chat_buf chat_cols;
@@ -2628,13 +2663,32 @@ let render_keeper_message (state : state) =
                in
                Printf.sprintf " · the judge is deciding%s; your answer ends it now" age)
          in
-         (* [status_rows] puts the approval question first among its Attention
-            rows, so the note lands on that one and not on an interrupt or a
-            stream diagnostic that shares the kind. *)
-         let note_unused =
-           ref
-             (not (String.equal gate_note "")
-              && Option.is_some (Keeper_chat_transcript.awaiting_approval live))
+         (* What the fold took, said on the line that stays. A count the
+            reader can see is a thing they can ask for; rows that simply were
+            not drawn are a screen that looks complete and is not. *)
+         let now = Unix.gettimeofday () in
+         let folded_away =
+           Masc_tui_types.keeper_message_folded_status_count state live ~now
+         in
+         let gate_waiting =
+           match state.msg_target_keeper_name with
+           | Some keeper_name when state.msg_turn_folded ->
+               List.length
+                 (Masc_tui_types.keeper_effects_at_the_gate state ~keeper_name)
+           | Some _ | None -> 0
+         in
+         let fold_suffix =
+           let parts =
+             (if gate_waiting > 0 then [ Printf.sprintf "gate %d" gate_waiting ]
+              else [])
+             @ (if folded_away > 0 then [ Printf.sprintf "+%d" folded_away ]
+                else [])
+           in
+           match parts with
+           | [] -> ""
+           | parts ->
+               " · " ^ String.concat " · " parts ^ " · "
+               ^ Masc_tui_keys.expand_turn_label
          in
          List.iter
            (fun (kind, text) ->
@@ -2643,17 +2697,17 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
                     ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                     ^ " · " ^ text ^ queue_hint)
-              | Keeper_chat_transcript.Attention ->
-                  let suffix =
-                    if !note_unused then begin
-                      note_unused := false;
-                      gate_note
-                    end
-                    else ""
-                  in
+                     ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+              (* The gate and this row describe the same held call, so the
+                 note rides the row that asks -- which is this one by its
+                 kind now, rather than by being first among the Attention
+                 rows and hoping the order holds. *)
+              | Keeper_chat_transcript.Answer_needed ->
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-                    ("  " ^ text ^ suffix)
+                    ("  " ^ text ^ gate_note)
+              | Keeper_chat_transcript.Attention ->
+                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+                    ("  " ^ text)
               | Keeper_chat_transcript.Approval outcome ->
                   let style =
                     match outcome with
@@ -2664,7 +2718,7 @@ let render_keeper_message (state : state) =
                     | Keeper_chat_transcript.Approval_other _ -> Theme.warn ()
                   in
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
-           (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
+           (Masc_tui_types.keeper_message_visible_status_rows state live ~now)
      | Some _ | None -> ());
     (* Effects this Keeper is not waiting on. A deferral returns successfully
        and the Keeper carries on, so the tool row reads as a plain return and

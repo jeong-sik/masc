@@ -2081,6 +2081,16 @@ def wheel_scrolls_and_clicks_do_not(
     drain_until_quiet(process, master_fd, output)
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
 
+    # The tab the detail screen opened on says so in the text, not only in
+    # bold and underline. A capture like this one is where style-only
+    # marking goes missing -- the bytes name the tab, or nothing does. And
+    # Info's own body opens with a section called "Identity", which is
+    # another tab's name, so a reader with no mark has a wrong guess ready.
+    if b"\xe2\x96\xb8Info" not in output:
+        raise AssertionError(
+            "the keeper detail screen did not mark the tab it opened on"
+        )
+
     # Wait until the process is back inside its input read, then resize and
     # send one surface shortcut without waiting for the compact frame. The
     # SIGWINCH lands after the loop's first resize poll; input must consume
@@ -13052,6 +13062,39 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
     return interact
 
 
+def flow_control_is_off_interaction() -> Interaction:
+    """Ctrl-S has to reach the key layer, not the tty.
+
+    IXON lives in c_iflag and ICANON in c_lflag, so raw mode did not clear it:
+    the terminal answered Ctrl-S by stopping output and Ctrl-Q by resuming,
+    and neither byte ever reached the program. With IXANY also on, the next
+    key released it, so what an operator saw was a stall rather than a freeze
+    -- and what it cost was a key that could not be bound to anything.
+
+    Read off the tty rather than inferred from the drawing: the flag is the
+    fact, and a screen that repaints cannot tell the difference."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        slave_fd: int,
+        output: bytearray,
+        base_path: str,
+    ) -> None:
+        wait_for_output(
+            process, master_fd, output, b"MASC Overview", start=0, timeout=30.0
+        )
+        attributes = termios.tcgetattr(slave_fd)
+        if attributes[0] & termios.IXON:
+            raise AssertionError(
+                "the tty still answers Ctrl-S itself; c_ixon must be cleared "
+                "with the rest of raw mode or the key cannot be bound"
+            )
+        send_and_wait(process, master_fd, output, b"q", b"q: press again to quit")
+
+    return interact
+
+
 def run_keyboard_regression(executable: str) -> None:
     utf8_requests: HttpRequests = []
     missing_target_requests: HttpRequests = []
@@ -13112,6 +13155,11 @@ def run_keyboard_regression(executable: str) -> None:
     )
     schedule_fixtures = schedule_detail_http_fixtures()
     fusion_fixtures, fusion_initial_runs = fusion_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="flow control leaves Ctrl-S to the key layer",
+        interact=flow_control_is_off_interaction(),
+    )
     run_terminal_scenario(
         executable,
         description="Image view over the frame",
@@ -13956,7 +14004,7 @@ def run_browser_scene_regression(executable: str) -> None:
         visible = screen_text(frame)
         # Source-context selection includes text and raster observations,
         # not only clickable controls. Preserve their document order.
-        for text in (b"[>1 p] SCENE BEFORE CLICK", b"[2 button/link] First action",
+        for text in (b"[>1] SCENE BEFORE CLICK", b"[2 button/link] First action",
                      b"[3 button/link] Second action",
                      "[4 image · Ctrl-O] Scene illustration".encode()):
             assert text in visible, f"scene projection missing {text!r}"
@@ -14814,7 +14862,7 @@ def run_schedule_source_status_regression(executable: str) -> None:
             palette_go(process, master_fd, output, b"go schedules",
                        b"503" if initial_error else b"status:running")
             if initial_error:
-                screen = require("조회 실패:", "503")
+                screen = require("data unreliable:", "schedule load failed:", "503")
                 for absent in (b"Requests: 0", b"no scheduled automation", b"schedule-proof-701"):
                     if absent in screen:
                         raise AssertionError(f"Failed initial source invented data: {screen!r}")
@@ -14823,15 +14871,15 @@ def run_schedule_source_status_regression(executable: str) -> None:
                 require("schedule-proof-701", "status:running", "Requests: 1")
                 fail_reads.set()
                 send_and_wait(process, master_fd, output, b"r", b"503")
-                require("이전 조회 유지 · 갱신 실패:", "503", "schedule-proof-701",
+                require("이전 조회 유지 ·", "503", "schedule-proof-701",
                         "status:running", "Requests: 1")
                 evidence("retained-list-refresh-failed")
                 send_and_wait(process, master_fd, output, b"\x1b[C", b"instance-proof-701")
-                require("이전 조회 유지 · 갱신 실패:", "503", "instance-proof-701")
+                require("이전 조회 유지 ·", "503", "instance-proof-701")
                 # The warning belongs to the source, so it remains visible
                 # while the retained detail body is scrolled.
                 send_and_wait(process, master_fd, output, b"\x1b[6~", b"DELIVERY EVIDENCE")
-                require("이전 조회 유지 · 갱신 실패:", "503")
+                require("이전 조회 유지 ·", "503")
                 send_and_wait(process, master_fd, output, b"\x1b[D", b"status:running")
 
             recovered_reads.set()

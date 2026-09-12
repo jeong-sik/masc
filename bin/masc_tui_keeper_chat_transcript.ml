@@ -255,6 +255,16 @@ let revision t = t.revision
 let bump t = t.revision <- t.revision + 1
 let current_runtime_id t = t.current_runtime_id
 
+let runtime_identity_text ~keeper_name ~configured_runtime transcript =
+  let configured = "configured: " ^ safe_line configured_runtime in
+  match transcript with
+  | Some t when String.equal t.keeper_name keeper_name ->
+    (match t.current_runtime_id with
+     | Some runtime when String.trim runtime <> "" ->
+       "turn: " ^ safe_line runtime ^ " · " ^ configured
+     | Some _ | None -> configured)
+  | Some _ | None -> configured
+
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
    between closes it. Coalescing here rather than at draw time keeps the trail
    bounded by the turn's shape (rounds), not by its chunking on the wire. *)
@@ -319,19 +329,28 @@ let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
   ; duration
   }
 
-let activity_of_live_call (call : live_tool_call) =
+let activity_of_live_call (t : t) (call : live_tool_call) =
+  (* An ended attempt cannot still be waiting. Keep recorded results ahead
+     of this projection so late result evidence can complete its own call. *)
+  let attempt_ended =
+    call.attempt <> t.attempt
+    || (match t.phase with
+        | Waiting | Working -> false
+        | Stream_ended | Stream_failed _ -> true)
+  in
   make_tool_activity ?execution_id:call.execution_id
     ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
       (if call.failed then Failed
        else if call.result_ready then Returned
+       else if attempt_ended then Never_returned
        else if call.ended then Awaiting_result
        else Started)
     ~duration:call.duration ()
 
 let tool_calls t =
-  List.rev t.reversed_tool_calls |> List.map activity_of_live_call
+  List.rev t.reversed_tool_calls |> List.map (activity_of_live_call t)
 
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
@@ -438,9 +457,11 @@ let compact_outcome (activities : tool_activity list) =
   else if
     List.exists
       (fun activity ->
-        activity.outcome = Started || activity.outcome = Never_returned)
+        activity.outcome = Started)
       activities
   then Started
+  else if List.exists (fun activity -> activity.outcome = Never_returned) activities
+  then Never_returned
   else if
     List.exists
       (fun activity -> activity.outcome = Outcome_unrecorded)
@@ -673,10 +694,10 @@ let skill_activity_of_tool (activity : tool_activity) =
   | Skill_activity ->
       let state =
         match activity.outcome with
-        | Started | Awaiting_result | Never_returned -> Skill_calling
+        | Started | Awaiting_result -> Skill_calling
         | Returned -> Skill_served_pending
         | Failed -> Skill_failed
-        | Outcome_unrecorded -> Skill_evidence_missing
+        | Never_returned | Outcome_unrecorded -> Skill_evidence_missing
       in
       let skill_name =
         Option.value activity.subject
@@ -967,7 +988,7 @@ let trail t =
               let acc = flush_generic acc generic in
               split (Trail_skill skill :: acc) [] rest)
     in
-    group |> List.rev |> List.map activity_of_live_call |> split acc []
+    group |> List.rev |> List.map (activity_of_live_call t) |> split acc []
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)
@@ -1007,8 +1028,23 @@ let trail t =
 
 type status_kind =
   | Progress
+  | Answer_needed
   | Attention
   | Approval of approval_outcome
+
+(* Whether a row survives the turn dashboard being folded.
+
+   Folding is a reading aid, not a filter. The progress row is the summary
+   the folded line already is, so it stays and carries the count of what went
+   with it. A row that asks the operator for something cannot fold: the
+   question would go behind a key they have no reason to press, and the turn
+   would sit held with nothing on screen saying so. Everything else --
+   a settled approval, an interrupt already acknowledged, a stream
+   diagnostic that says the recorded outcome is unaffected -- is history the
+   operator can ask for. *)
+let status_row_survives_folding = function
+  | Progress | Answer_needed -> true
+  | Attention | Approval _ -> false
 
 let approval_outcome_of_string = function
   | "approve" | "approved" -> Approved
@@ -1071,7 +1107,7 @@ let phase_text ~now t =
             (match List.filter
                (fun (call : live_tool_call) ->
                  Option.exists (String.equal awaiting.call_id) call.call_id
-                 && (match (activity_of_live_call call).outcome with
+                 && (match (activity_of_live_call t call).outcome with
                      | Started | Awaiting_result -> true
                      | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
                current_calls with
@@ -1081,7 +1117,7 @@ let phase_text ~now t =
       let activities_now =
         current_calls
         |> List.filter (fun (call : live_tool_call) -> Some call.local_id <> awaiting_call)
-        |> List.map activity_of_live_call
+        |> List.map (activity_of_live_call t)
       in
       let describe_pending label outcome =
         match List.filter (fun activity -> activity.outcome = outcome) activities_now with
@@ -1108,7 +1144,7 @@ let phase_text ~now t =
         match List.filter
           (fun (call : live_tool_call) ->
             Some call.local_id <> awaiting_call
-            && (match (activity_of_live_call call).outcome with
+            && (match (activity_of_live_call t call).outcome with
                 | Started | Awaiting_result -> true
                 | Returned | Failed | Never_returned | Outcome_unrecorded -> false))
           current_calls
@@ -1234,7 +1270,7 @@ let awaiting_text t =
 
 let status_rows ~now t =
   [ Some (Progress, progress_text ~now t)
-  ; Option.map (fun text -> (Attention, text)) (awaiting_text t)
+  ; Option.map (fun text -> (Answer_needed, text)) (awaiting_text t)
   ; Option.map
       (fun settlement ->
         ( Approval settlement.settled_outcome
@@ -1444,10 +1480,14 @@ let apply_delta ~now t (delta : Live.delta) =
                ; nodes
                }
              :: older);
-      (match attempt_index with
-       | Some idx -> t.attempt <- idx
-       | None -> t.attempt <- t.attempt + 1);
-      if Option.is_some runtime_id then t.current_runtime_id <- runtime_id;
+      let next_attempt = Option.value attempt_index ~default:(t.attempt + 1) in
+      let new_attempt = next_attempt <> t.attempt in
+      t.attempt <- next_attempt;
+      (* Unknown identity belongs to the new attempt. Keeping the previous
+         runtime here also prevents STREAM_MODEL_STARTED from naming the new
+         one. A repeated event for this same attempt adds no missing fact. *)
+      if new_attempt || Option.is_some runtime_id then
+        t.current_runtime_id <- runtime_id;
       t.endpoint_streaming <- false;
       t.awaiting <- None;
       (match t.phase with

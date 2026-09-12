@@ -8296,6 +8296,15 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 def assert_runtime_row(
     frame: bytes, *, health: bytes, runtime: bytes, description: str
 ) -> None:
+    """Both halves of the runtime identity on one screen row.
+
+    The runtime half is the text the chat header draws around the model
+    name, not the model name alone: #35458 folded the turn gauge into one
+    line and the header now says "<state> configured: <model>", where it
+    used to say "<state> <model>". The two callers below kept the old
+    spelling and stopped matching any row, which reads as "the header lost
+    the health" rather than "the header renamed the field".
+    """
     rows = screen_rows(frame)
     row = screen_row_of(rows, runtime)
     if row < 0 or health not in rows[row]:
@@ -8389,7 +8398,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             beta_frame,
             health=b"idle",
-            runtime=b"paused anthropic.claude-sonnet-4",
+            runtime=b"paused configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
         )
         for expected in (
@@ -8434,7 +8443,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             alpha_frame,
             health=b"healthy",
-            runtime=b"running anthropic.claude-opus-5",
+            runtime=b"running configured: anthropic.claude-opus-5",
             description="restored alpha chat",
         )
         for expected in (

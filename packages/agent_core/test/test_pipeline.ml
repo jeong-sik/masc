@@ -549,6 +549,73 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
     (Agent.state agent).turn_count
 ;;
 
+let test_turn_completed_log_carries_the_hook_turn_ordinal () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let hook_turns = ref [] in
+  let hooks =
+    { Hooks.empty with
+      after_turn =
+        Some
+          (function
+            | Hooks.AfterTurn { turn; _ } ->
+              hook_turns := turn :: !hook_turns;
+              Hooks.Continue
+            | _ -> Alcotest.fail "expected AfterTurn")
+    }
+  in
+  let sink, get_records = Log.collector_sink () in
+  Log.clear_sinks ();
+  Log.set_global_level Log.Info;
+  Log.add_sink sink;
+  let logged_turns =
+    Fun.protect
+      ~finally:(fun () ->
+        Log.clear_sinks ();
+        Log.set_global_level Log.Info)
+      (fun () ->
+         let agent =
+           Agent.create
+             ~net:(Eio.Stdenv.net env)
+             ~config:
+               { (Types.default_config ~model:"test-model") with
+                 name = "turn-ordinal-log-test"
+               }
+             ~options:
+               { Agent.default_options with
+                 transport = Some (transport_returning (pipeline_response EndTurn))
+               ; provider_config = Some (Provider_mock.to_provider_config ())
+               ; hooks
+               }
+             ()
+         in
+         (match Agent.run ~sw agent "hello" with
+          | Ok _ -> ()
+          | Error error -> Alcotest.fail (Error.to_string error));
+         get_records ()
+         |> List.filter_map (fun (record : Log.record) ->
+           if
+             String.equal record.module_name "agent"
+             && String.equal record.message "turn completed"
+           then
+             List.find_map
+               (function
+                 | Log.I ("turn", turn) -> Some turn
+                 | _ -> None)
+               record.fields
+           else None))
+  in
+  (* One provider turn: the hook saw the zero-based identity, and the loop's
+     "turn completed" line must name the same turn, not the one after it. *)
+  Alcotest.(check (list int)) "AfterTurn ordinal" [ 0 ] (List.rev !hook_turns);
+  Alcotest.(check (list int))
+    "turn completed log names the hook's turn"
+    (List.rev !hook_turns)
+    logged_turns
+;;
+
 let unwrap_raw_trace = function
   | Ok value -> value
   | Error error -> Alcotest.fail (Error.to_string error)
@@ -3730,6 +3797,10 @@ let () =
             "provider turn identity spans multiturn tool loop"
             `Quick
             test_provider_turn_identity_is_shared_across_multiturn_tool_loop
+        ; Alcotest.test_case
+            "turn completed log carries the AfterTurn ordinal (audit R1)"
+            `Quick
+            test_turn_completed_log_carries_the_hook_turn_ordinal
         ; Alcotest.test_case
             "output rejects unknown terminal"
             `Quick

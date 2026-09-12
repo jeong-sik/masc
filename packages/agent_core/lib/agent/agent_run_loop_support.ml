@@ -17,6 +17,12 @@ let stop_reason_label : Types.stop_reason -> string = function
   | Unknown s -> "unknown:" ^ s
 ;;
 
+(* [turn_index] is the zero-based provider turn identity from
+   [Agent_turn.provider_turn_ordinal]: the same value the AfterTurn hook,
+   the event bus and the tracing span carry for this turn. The line used to
+   log [turn_count + 1], so it named the turn one past every other producer
+   and a keeper "turn=N" could only ever be joined to "turn completed
+   turn=N+1". *)
 let log_turn ~run_start ~turn_start ~turn_index ~model ~stop =
   let now = Unix.gettimeofday () in
   let model_field = if String.length model = 0 then "-" else model in

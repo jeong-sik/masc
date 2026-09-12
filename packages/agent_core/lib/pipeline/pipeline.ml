@@ -669,7 +669,7 @@ let run_new_turn
   (* One immutable zero-based identity owns the complete provider turn.  The
      collect stage advances mutable agent state before output/tool dispatch,
      so reading [state.turn_count] again downstream would name the next turn. *)
-  let turn = agent.state.turn_count in
+  let turn = Agent_turn.provider_turn_ordinal agent.state in
   (* Stage 1: Input *)
   let* () =
     Tracing.with_span

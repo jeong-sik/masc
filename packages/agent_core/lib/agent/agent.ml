@@ -86,7 +86,7 @@ let run_turn_core_detailed
     { kind = Agent_run
     ; name = "agent_turn"
     ; agent_name = agent.state.config.name
-    ; turn = agent.state.turn_count
+    ; turn = Agent_turn.provider_turn_ordinal agent.state
     ; extra = []
     ; links =
         (match agent.options.trace_link with
@@ -165,7 +165,7 @@ let run_loop_turns_detailed
   let rec loop lease =
     let lease = acquire_provider_lease ~yield_enabled ~on_resume lease in
     let release = plan_provider_lease_release ~yield_enabled ~on_yield lease in
-    let turn_index = agent.state.turn_count + 1 in
+    let turn_index = Agent_turn.provider_turn_ordinal agent.state in
     let turn_start = Unix.gettimeofday () in
     let result =
       run_turn_core_detailed
@@ -791,7 +791,7 @@ module Advanced = struct
     let rec loop lease =
       let lease = acquire_provider_lease ~yield_enabled ~on_resume lease in
       let release = plan_provider_lease_release ~yield_enabled ~on_yield lease in
-      let turn_index = agent.state.turn_count + 1 in
+      let turn_index = Agent_turn.provider_turn_ordinal agent.state in
       let turn_start = Unix.gettimeofday () in
       match
         run_turn_core_detailed

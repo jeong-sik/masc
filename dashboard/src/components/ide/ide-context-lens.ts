@@ -7,6 +7,7 @@ import { KeeperBadge } from '../keeper-badge'
 import type { AnchoredThread } from './anchored-thread-rail-store'
 import type { RunActivityEvent } from './run-activity-store'
 import { focusIdeContextAnchor, normalizeIdeContextFilePath, normalizeIdeContextLine } from './ide-state'
+import { activityFileContext } from './ide-activity-file-context'
 import { truncate } from '../../lib/truncate'
 import { isPositiveSafeInteger } from '../common/normalize'
 
@@ -96,6 +97,7 @@ export interface IdeContextLensModel {
 }
 
 export interface IdeContextLensInput {
+  readonly codebase?: string | null
   readonly filePath: string
   readonly diffRows: ReadonlyArray<UnifiedDiffRow>
   readonly events: ReadonlyArray<RunActivityEvent>
@@ -187,10 +189,8 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     matchesFilePath(thread.anchor.file_path),
   )
   const fileEvents = input.events.filter(event => {
-    const eventFile = event.context?.file_path
-    const eventLine = event.context?.line
-    if (eventLine !== undefined && eventFile === undefined) return false
-    return eventFile === undefined || matchesFilePath(eventFile)
+    const context = activityFileContext(event, input.codebase)
+    return context !== null && matchesFilePath(context.filePath)
   })
   const changedRows = input.diffRows.filter(row => row.kind === 'add' || row.kind === 'delete')
   const changedLineCount = changedRows.length
@@ -340,6 +340,7 @@ function contextSurfaceAction(
 }
 
 export function IdeContextLens({
+  codebase,
   filePath,
   diffRows,
   events,
@@ -348,7 +349,7 @@ export function IdeContextLens({
   onAnchorActivate,
   onRouteLinkActivate,
 }: IdeContextLensProps) {
-  const model = deriveIdeContextLens({ filePath, diffRows, events, threads, diagnostics })
+  const model = deriveIdeContextLens({ filePath, codebase, diffRows, events, threads, diagnostics })
   const fileLabel = filePath.split('/').pop() || filePath || '(no file)'
   const activateAnchor = onAnchorActivate ?? activateIdeContextAnchor
   const activateRouteLink = onRouteLinkActivate ?? openIdeContextRouteLink
@@ -676,20 +677,22 @@ function buildAnchors(
   }
 
   for (const event of events.slice(0, 3)) {
+    const eventFile = event.context?.file_path
+    if (eventFile === undefined) continue
     const refs = eventRouteRefs(event)
     const contextMeta = eventContextMeta(event, refs)
     const eventLine = eventLineForFile(event, filePath) ?? refs.line
     const eventSurface = surfaceFromEvent(event)
     anchors.push({
       id: `event-${event.id}`,
-      file_path: event.context?.file_path ?? filePath,
+      file_path: eventFile,
       surface: eventSurface,
       label: truncate(`${event.verb} ${event.target}`, 48),
       meta: truncate(contextMeta || event.detail || `keeper ${event.keeper_id}`, 60),
       line: eventLine,
       keeper_id: event.keeper_id,
       route_links: routeLinksForContext({
-        filePath: event.context?.file_path ?? filePath,
+        filePath: eventFile,
         line: eventLine,
         surface: eventSurface,
         label: truncate(event.detail || `${event.verb} ${event.target}`, 48),

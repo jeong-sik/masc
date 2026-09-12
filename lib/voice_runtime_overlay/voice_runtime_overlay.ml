@@ -436,31 +436,32 @@ let elevenlabs_catalogue_url base_url =
 
 let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
   let adapter = adapter_for_endpoint endpoint in
-  match endpoint_base_url endpoint, adapter.transport with
-  | _, (Macos_say | Whisper_cli) ->
+  match adapter.transport with
+  | Macos_say | Whisper_cli ->
     Error
       (Printf.sprintf
          "voice config endpoint %s runs a command and has no HTTP voice catalogue"
          endpoint.id)
-  | None, _ ->
-    Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
-  | Some _, Openai_compat ->
+  | Openai_compat ->
     Error
       (Printf.sprintf
          "voice config endpoint %s speaks the OpenAI shape, which has no voice list \
           to ask for: type the voice name the server expects"
          endpoint.id)
-  | Some _, Voice_mcp ->
+  | Voice_mcp ->
     Error
       (Printf.sprintf
          "voice config endpoint %s is reached through a tool, which is asked to \
           speak rather than asked what it can speak with"
          endpoint.id)
-  | Some base_url, Elevenlabs_direct ->
-    Ok
-      { listing_url = elevenlabs_catalogue_url base_url
-      ; listing_headers = [ "xi-api-key", api_key ]
-      }
+  | Elevenlabs_direct ->
+    (match endpoint_base_url endpoint with
+     | None -> Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+     | Some base_url ->
+       Ok
+         { listing_url = elevenlabs_catalogue_url base_url
+         ; listing_headers = [ "xi-api-key", api_key ]
+         })
 ;;
 
 (* The two kinds that are a command rather than an address.
@@ -483,6 +484,13 @@ let endpoint_command (endpoint : Voice_config.endpoint) ~default =
   | Some _ | None -> default
 ;;
 
+(* WAVE because it is what say can actually encode and what every player
+   masc hands a clip to reads. LEI16@22050 is say's own default sample
+   format for this container; naming it keeps the bytes the same across
+   macOS releases rather than following whatever the default becomes. *)
+let macos_say_file_format = "WAVE"
+let macos_say_data_format = "LEI16@22050"
+
 let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message ~output_file =
   let adapter = adapter_for_endpoint endpoint in
   match adapter.transport with
@@ -501,10 +509,21 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
     (* A blank voice is not an error: say then uses the system voice, which is
        what a reader who never picked one has been listening to all along. *)
     let voice_args = if String.trim voice = "" then [] else [ "-v"; String.trim voice ] in
+    (* The container and the samples are stated, never left to the file
+       name. say reads the extension only to pick an encoder, and it has no
+       MP3 one: measured 2026-09-13 on macOS 26, [say -o clip.mp3] exits 0
+       having written a 16-byte empty MP3 tag frame -- silence that reaches
+       the listener with no error anywhere. Named here, the same sentence
+       came back as 111KB of 16-bit mono WAVE. *)
     Ok
       { argv =
           (command :: voice_args)
-          @ [ "--file-format=WAVE"; "--data-format=LEI16"; "-o"; output_file; message ]
+          @ [ "--file-format=" ^ macos_say_file_format
+            ; "--data-format=" ^ macos_say_data_format
+            ; "-o"
+            ; output_file
+            ; message
+            ]
       }
 ;;
 

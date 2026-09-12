@@ -226,7 +226,6 @@ let endpoint_kind_of_string = function
 let kind_needs_default_model = function
   | Openai_compat | Elevenlabs_direct | Whisper_cli -> true
   | Macos_say | Voice_mcp -> false
-
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
   | Elevenlabs_direct -> "elevenlabs_direct"

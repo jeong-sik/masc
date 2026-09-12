@@ -1,7 +1,17 @@
 (** Transport helpers for {!Voice_bridge}. *)
 
 val safe_agent_id : string -> string
-val make_audio_file : ?format:Voice_bridge_core.audio_format -> unit -> string
+
+val command_failure_reason : string -> string
+(** A failed command's output, trimmed to the end. The reason a command
+    failed is its last line, not its first: whisper-cli prints nine lines of
+    backend loading before it says which model file it could not open, so a
+    head-first trim reported which Metal library loaded and never the
+    missing file. *)
+val make_audio_file : format:Voice_bridge_core.clip_format -> string
+(** A fresh clip path under {!Voice_bridge_core.audio_dir}, named
+    [<token><extension>] for the format the caller is about to write. The
+    128-bit token is also the HTTP capability the dashboard fetches it by. *)
 
 val run_voice_status
   :  ?timeout_sec:float
@@ -24,10 +34,22 @@ val transcribe_via_http_stt
   -> model:string
   -> (Yojson.Safe.t, string) result
 
-(** Ask one endpoint which voices it has, as it answers. Parsing that answer
+(** Scan the paginated catalogue under one caller-owned deadline.
+    [remaining_seconds] observes that deadline; [fetch_page] receives its
+    remaining time, never a fresh per-page allowance. Exposed for deterministic
+    transport tests without sleeping or contacting a provider. *)
+val collect_voice_catalogue
+  :  remaining_seconds:(unit -> float)
+  -> fetch_page:(timeout_sec:float -> Voice_runtime_overlay.voice_listing_request
+                -> (Yojson.Safe.t, string) result)
+  -> Voice_runtime_overlay.voice_listing_request
+  -> (Yojson.Safe.t, string) result
+
+(** Ask one endpoint for its complete catalogue. Parsing the collected voices
     into names belongs to the caller: this is the transport. [Error] when the
     endpoint kind has no catalogue to ask for, when the credential is missing,
-    or when the request failed -- each said in words a reader can act on. *)
+    or when any page failed or its continuation was malformed. All pages share
+    the existing configured HTTP deadline; partial catalogues are not returned. *)
 val list_voices_via_http : Voice_config.endpoint -> (Yojson.Safe.t, string) result
 
 (** Speak one message by running a command, writing audio to [output_file] and

@@ -337,7 +337,10 @@ let observe ~base_path =
            section_json
              ~endpoints:(List.map endpoint_json tts.Voice_config.endpoints)
              ~extra:
-               [ ( "default_model"
+               [ (* Null rather than "" when the section names none: a
+                    speaking section whose endpoints all take no model has
+                    none, and a blank here reads as a model named "". *)
+                 ( "default_model"
                  , match tts.Voice_config.default_model with
                    | Some model -> `String model
                    | None -> `Null )
@@ -468,11 +471,8 @@ let catalogue_endpoint_of_json json =
   let* fields = fields json in
   let* kind_text = string_field ~what:"a listing" fields "kind" in
   let* kind = kind_of_string kind_text in
-  let api_key_env =
-    match List.assoc_opt "api_key_env" fields with
-    | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-    | Some _ | None -> None
-  in
+  let* api_key_env = optional_string ~what:"a listing" fields "api_key_env" in
+  let api_key_env = Option.map String.trim api_key_env in
   Ok
     { Voice_config.id = "voice-catalogue-read"
     ; kind

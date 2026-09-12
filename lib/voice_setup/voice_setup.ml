@@ -116,7 +116,7 @@ let apply_change contents = function
     Toml_line_editor.edit_table_scalar
       contents
       ~path:"voice.tts.agent_voices"
-      ~key:("\"" ^ Toml_line_editor.escape_string agent ^ "\"")
+      ~key:agent
       ~value:voice
 ;;
 

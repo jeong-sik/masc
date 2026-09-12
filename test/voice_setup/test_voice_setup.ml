@@ -389,6 +389,8 @@ let test_a_dotted_keeper_voice_can_be_written_replaced_and_removed () =
       | Error message -> Alcotest.fail message
     in
     set (Some "one");
+    Alcotest.(check (option string)) "the raw dotted keeper name was written"
+      (Some "one") (List.assoc_opt "team.alpha" (voices ()));
     set (Some "two");
     Alcotest.(check (option string)) "the literal keeper key was replaced"
       (Some "two") (List.assoc_opt "team.alpha" (voices ()));

@@ -103,6 +103,20 @@ let list_voices_via_command_endpoint endpoint =
   | Ok output -> Ok (say_catalogue_of_output output)
 ;;
 
+(* The container each kind writes. say encodes WAVE and cannot encode MP3
+   at all; everything reached over a wire answers MP3, which is what the
+   OpenAI-compatible /audio/speech and ElevenLabs both default to and what
+   the MCP bridge relays. Whisper_cli never speaks -- the branch that names
+   it refuses before a file is opened -- so its answer is never written. *)
+let clip_format_for_kind (kind : Voice_config.endpoint_kind) =
+  match kind with
+  | Voice_config.Macos_say -> Voice_bridge_core.Wav
+  | Voice_config.Openai_compat
+  | Voice_config.Elevenlabs_direct
+  | Voice_config.Voice_mcp
+  | Voice_config.Whisper_cli -> Voice_bridge_core.Mp3
+;;
+
 let audio_url_of_file audio_file =
   match Voice_bridge_core.audio_token_of_file audio_file with
   | Some token ->
@@ -200,6 +214,10 @@ let transcribe_audio ~audio_file ?language_code () =
              match language_code with
              | Some lc -> lc
              | None ->
+               (* The endpoint says which language it heard, or does not. A
+                  command answers with its transcript and no such field, so
+                  "unknown" here is the endpoint having been silent about it
+                  -- the same word this loop has always used. *)
                (match Json_util.get_string json "language_code" with
                 | Some lc -> lc
                 | None -> "unknown")
@@ -239,6 +257,9 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
    that names no model has none of those to try, so there is nothing to attempt
    rather than something to attempt with a blank name. *)
 let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
+  (* The dashboard's own attempt, which only knows the HTTP endpoints. A
+     section that names no model has none of those to try, so there is nothing
+     to attempt rather than something to attempt with a blank name. *)
   match model with
   | None -> None
   | Some model ->
@@ -249,7 +270,9 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
       if Voice_runtime_overlay.transport_supports_http_tts adapter
       then (
-        let audio_file = make_audio_file () in
+        let audio_file =
+          make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+        in
         match
           speak_via_http_tts_to_file
             endpoint
@@ -436,7 +459,7 @@ let probe_tts ?(agent_id = "probe") ~message () =
                     | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Whisper_cli ->
                       Voice_bridge_core.Mp3
                   in
-                  let output_file = make_audio_file ~format () in
+                  let output_file = make_audio_file ~format in
                   (* The voice is resolved per endpoint: an id is provider
                      vocabulary, so the one that suits this endpoint is the one
                      to ask it for (#24068). *)
@@ -786,7 +809,7 @@ let attempt_tts_endpoint
       | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Whisper_cli ->
         Voice_bridge_core.Mp3
     in
-    let audio_file = make_audio_file ~format () in
+    let audio_file = make_audio_file ~format in
     (match
        (match adapter.transport with
         | Voice_runtime_overlay.Macos_say ->
@@ -979,7 +1002,9 @@ let try_http_tts_for_browser_audio
   let rec try_endpoints = function
     | [] -> None
     | endpoint :: rest ->
-      let audio_file = make_audio_file () in
+      let audio_file =
+        make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+      in
       (match
          speak_via_http_tts_to_file
            endpoint

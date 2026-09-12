@@ -15,12 +15,12 @@
 
 (** {1 Request timeout} *)
 
-type audio_format = Mp3 | Wav
-val audio_extension : audio_format -> string
-val audio_content_type : audio_format -> string
-val audio_format_of_path : string -> audio_format option
+type clip_format = Mp3 | Wav
+val audio_extension : clip_format -> string
+val audio_content_type : clip_format -> string
+val audio_format_of_path : string -> clip_format option
 val audio_token_of_file : string -> string option
-val audio_file_of_token : string -> (string * audio_format) option
+val audio_file_of_token : string -> (string * clip_format) option
 (** Voice clip capability names: 32 hexadecimal characters for MP3, or the
     same token followed by [.wav] for PCM wave audio. *)
 
@@ -133,6 +133,35 @@ val masc_base_dir : unit -> string
 
 val ensure_audio_dir : unit -> unit
 (** [mkdir -p <masc_base_dir>/audio]. *)
+
+(** The container a synthesized clip is written in.
+
+    The filename is [<token><extension>] and that extension is what the
+    writer hands to its encoder, so it has to be true. Measured 2026-09-13
+    on macOS 26: [say -o clip.mp3] exits 0 and writes a 16-byte empty MP3
+    tag frame -- silence with no error and no log -- while [say -o clip.wav]
+    with no format flag fails loudly instead. Say writes WAVE; the HTTP
+    providers answer MP3. *)
+
+val clip_formats : clip_format list
+(** The supported clip containers. Capability lookup still selects exactly
+    the format encoded by its token. *)
+
+val clip_extension : clip_format -> string
+val clip_content_type : clip_format -> string
+
+val audio_dir : unit -> string
+(** [<masc_base_dir>/audio] -- where clips are written and served from. *)
+
+val find_clip : dir:string -> token:string -> (string * clip_format) option
+(** The clip [token] names under [dir], and the format it is stored in.
+    A WAVE capability ends in [.wav]; a bare capability names MP3.
+    [None] for an invalid capability or a missing file in that exact format. *)
+
+val clip_token_of_path : string -> string option
+(** The token a clip path carries, for building the URL the dashboard
+    fetches it by. WAVE keeps [.wav] in the token. [None] when the filename
+    does not carry a valid 128-bit capability and supported format. *)
 
 (** {1 Structured logging helpers} *)
 

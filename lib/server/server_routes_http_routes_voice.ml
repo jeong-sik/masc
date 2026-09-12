@@ -197,24 +197,74 @@ let handle_voice_setup ~base_path ~act request reqd body =
      | Ok result -> respond_json_value_with_cors ~status:`OK request reqd result
      | Error error -> respond_voice_setup_error request reqd error)
 
+(* Probing every endpoint, rather than serving from the first that answers.
+
+   The fallback chain behind agent_speak stops at the first endpoint that
+   works, which is right for a turn and wrong for "is this configuration
+   working": a chain that succeeds says nothing about the endpoints behind
+   the one that answered, so a dead fallback looks exactly like a healthy one
+   until the endpoint in front of it goes away. [Voice_bridge.probe_tts] and
+   [probe_stt] ask all of them and report each separately; these routes are
+   how a dashboard or a wizard asks for that report. *)
+let probe_report_json attempts =
+  `Assoc [ "endpoints", `List (List.map Voice_bridge.probe_attempt_json attempts) ]
+
+let probe_failed request reqd reason =
+  respond_json ~status:`Bad_request ~request reqd (`Assoc [ "error", `String reason ])
+
+let handle_probe_tts request reqd body =
+  match Yojson.Safe.from_string body with
+  (* Narrowed to what the parser throws: a wildcard here would swallow
+     Eio.Cancel.Cancelled and leave a cancelled fiber reporting a parse
+     failure. *)
+  | exception Yojson.Json_error _ ->
+    probe_failed request reqd "the request body is not JSON"
+  | json ->
+    let message =
+      match json with
+      | `Assoc fields ->
+        (match List.assoc_opt "message" fields with
+         | Some (`String text) when String.trim text <> "" -> Some text
+         | Some _ | None -> None)
+      | _ -> None
+    in
+    (match message with
+     | None ->
+       probe_failed request reqd
+         "a probe needs a non-empty \"message\" for the endpoints to synthesize"
+     | Some message ->
+       (match Voice_bridge.probe_tts ~message () with
+        | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
+        | Error reason -> probe_failed request reqd reason))
+
+(* The audio arrives in the raw body, the way /voice/transcribe takes it. *)
+let handle_probe_stt request reqd body =
+  if String.length body = 0
+  then probe_failed request reqd "empty audio body"
+  else
+    Eio.Switch.run (fun sw ->
+      let tmp = Filename.temp_file "masc_voice_probe_" (audio_temp_suffix request) in
+      Eio.Switch.on_release sw (fun () ->
+        try Sys.remove tmp with
+        | Sys_error _ -> ());
+      Fs_compat.save_file tmp body;
+      match Voice_bridge.probe_stt ~audio_file:tmp () with
+      | Ok attempts -> respond_json ~request reqd (probe_report_json attempts)
+      | Error reason -> probe_failed request reqd reason)
+
 (* Which voices an endpoint has, asked before the endpoint is written.
 
-   The request names a kind and the environment variable holding that
-   provider's key -- never a key, and never an address. No address because the
-   wizard does not ask for one on the only kind that has a catalogue: an
-   ElevenLabs endpoint carries its own, so the server uses it rather than
-   fetching whatever URL a caller names. That keeps this route from being a way
-   to make the server read an arbitrary address.
-
-   The variable is resolved in the server's own environment, which is where the
-   key lives; a caller that could send one would be sending it through a log. *)
+   A voice id is provider vocabulary and the two kinds that publish a
+   catalogue publish it differently -- ElevenLabs answers a URL, say answers a
+   command -- so the kind decides which is asked rather than one being tried
+   and the other used when it fails. Asked before the endpoint is saved so a
+   wizard does not have to write a guess first and correct it after. *)
 let catalogue_failed request reqd reason =
-  respond_json ~status:`Bad_request ~request reqd (`Assoc [ ("error", `String reason) ])
+  respond_json ~status:`Bad_request ~request reqd (`Assoc [ "error", `String reason ])
 
 let handle_voice_catalogue request reqd body =
   match Yojson.Safe.from_string body with
-  (* Narrowed to what the parser throws, so a cancelled fiber is not reported
-     as a malformed body. *)
+  (* Narrowed to what the parser throws, for the reason the probes are. *)
   | exception Yojson.Json_error _ ->
     catalogue_failed request reqd "the request body is not JSON"
   | json ->
@@ -228,6 +278,7 @@ let handle_voice_catalogue request reqd body =
           respond_json ~request reqd
             (`Assoc
               [ "voices", `List (List.map Voice_bridge.catalogue_voice_json voices) ])))
+
 let add_routes router =
   router
   |> Http.Router.prefix_get Masc_network_defaults.voice_audio_path_prefix
@@ -278,6 +329,29 @@ let add_routes router =
            Http.Request.read_body_async reqd (fun body ->
              handle_transcribe state request reqd body))
          request reqd)
+  (* Probing a TTS endpoint spends a credit on a metered provider, the same
+     reason /voice/transcribe is admin-gated rather than carrying a public
+     capability. *)
+  |> Http.Router.post "/api/v1/voice/probe/tts" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_probe_tts request reqd body))
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/probe/stt" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_probe_stt request reqd body))
+         request reqd)
+  (* Asking a provider for its catalogue spends nothing but reaches out with
+     the operator's credential, so it is gated like the rest of setup. *)
+  |> Http.Router.post "/api/v1/voice/voices" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_voice_catalogue request reqd body))
+         request reqd)
   (* Voice setup: read what is configured, see what a change would do, commit
      it. All three are CanAdmin -- they read and rewrite the workspace's
      runtime.toml, which GET /api/v1/voice/config deliberately does not expose
@@ -306,13 +380,4 @@ let add_routes router =
            Http.Request.read_body_async reqd (fun body ->
              handle_voice_setup ~base_path ~act:Server_voice_setup_actions.apply request
                reqd body))
-         request reqd)
-  (* Asking a provider for its catalogue spends nothing but reaches out with
-     the workspace's key, so it sits with the probes rather than with the
-     public read. *)
-  |> Http.Router.post "/api/v1/voice/voices" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name _req reqd ->
-           Http.Request.read_body_async reqd (fun body ->
-             handle_voice_catalogue request reqd body))
          request reqd)

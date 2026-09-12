@@ -1,6 +1,6 @@
 (** Voice_bridge core — config, helpers, audio path utils, local playback. *)
 
-type audio_format = Mp3 | Wav
+type clip_format = Mp3 | Wav
 
 let audio_extension = function Mp3 -> ".mp3" | Wav -> ".wav"
 let audio_content_type = function Mp3 -> "audio/mpeg" | Wav -> "audio/wav"
@@ -498,6 +498,48 @@ let ensure_audio_dir () =
     Sys.mkdir dir 0o755
   else if not (Sys.is_directory dir) then
     log_error "voice audio path exists but is not a directory"
+
+(* The container a synthesized clip is written in.
+
+   A clip's filename is <token><extension>, and that extension is a claim
+   about the bytes rather than a decoration: the writer picks a format from
+   it. Measured 2026-09-13 on macOS 26 -- [say -o clip.mp3] exits 0 and
+   writes a 16-byte empty MP3 tag frame. No audio, no error, no log line,
+   and the browser plays silence. [say -o clip.wav] without a format flag
+   fails loudly instead ("Opening output file failed: fmt?", exit 1), so
+   the two failures do not even agree on how to fail.
+
+   Naming the format is what keeps that silence out of reach: every writer
+   says which container it produces, and the capability keeps that choice
+   when a reader resolves the file. *)
+(* The supported containers, shared with format-aware callers. *)
+let clip_formats = [ Mp3; Wav ]
+
+let clip_extension = audio_extension
+
+let clip_content_type = audio_content_type
+
+let audio_dir () = Filename.concat (masc_base_dir ()) "audio"
+
+(* Resolve only the format named by the capability. A missing MP3 must not
+   silently select a WAVE file with the same random identifier, or vice versa. *)
+let find_clip ~dir ~token =
+  let exists path =
+    try Sys.file_exists path with
+    (* An unreadable audio dir reads as "no clip", the same as a reaped one:
+       callers answer 404 either way, and raising here would take down a
+       history render over one directory. *)
+    | Sys_error _ | Unix.Unix_error _ -> false
+  in
+  match audio_file_of_token token with
+  | None -> None
+  | Some (filename, format) ->
+    let path = Filename.concat dir filename in
+    if exists path then Some (path, format) else None
+
+(* The token a clip filename carries, for the reverse direction: the speak
+   path has a path and needs the URL the dashboard fetches it by. *)
+let clip_token_of_path = audio_token_of_file
 
 let provider_metadata_keys =
   [ "provider_name"; "provider_kind"; "provider_family"; "provider_auth"; "endpoint_id"; "endpoint_url" ]

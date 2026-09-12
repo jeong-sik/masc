@@ -7,7 +7,7 @@ module Tool_registry = Tool_registry
 
 let make_completed ~name ~duration_ms =
   Tool_result.Completed
-    { content_blocks = None; Tool_result.tool_name = name
+    { retained_artifacts = []; content_blocks = None; Tool_result.tool_name = name
     ; data = `Null
     ; metadata = None
     ; duration_ms

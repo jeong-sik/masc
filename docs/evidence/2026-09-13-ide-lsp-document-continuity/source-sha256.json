@@ -1,0 +1,10 @@
+{
+  "dashboard/src/components/ide/ide-lsp-client.ts": "5d9f1aea74dba9c0437ed548df0b87df31fb97c3699e3ae50e159630f3985554",
+  "dashboard/src/components/ide/ide-lsp-document-status.ts": "437615ef1d65212fd01162d71a59bce58a416f474e81ef199219186f620a6784",
+  "dashboard/src/components/ide/ide-shell.ts": "8be4f22c9d5ff04196d82ab9ab6ba1b1ea22709baf65b642738410dd94b6f488",
+  "dashboard/src/components/ide/ide-editor.ts": "e9bfdb8ac533d7ffc2b9dc5c8a930fd87282bac59412eecadbd51f8f66bdf6ac",
+  "dashboard/src/components/ide/code-document-store.ts": "1df28c0370c693c717651ddb4cf35871fece7a488d1a75a6dcb89992898623c7",
+  "dashboard/src/components/ide/ide-data-workspace-store.ts": "a677e5b6b49161cad6847a8dc982304cf0ac14675c5342a640c2004e2d9980b4",
+  "dashboard/scripts/lsp-document-browser-fixture.ts": "c9387b16100629d7bc8be1d87c3b450e787b2782ded3208b9d1c60c668039eb1",
+  "scripts/lsp-editor-browser-probe.mjs": "2d92fadfd380c665eecf023d6ef18d3c5c7cb0d274660efb706bdd8299e3d363"
+}

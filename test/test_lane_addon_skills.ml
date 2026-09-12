@@ -49,7 +49,9 @@ let bundled_files = [
   "skills/msx-observe/scripts/summarize.py";
 ]
 let fixture_package_source =
-  Filename.concat (Filename.dirname Sys.executable_name) "../addons/msx-observer"
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root "addons/msx-observer"
+  | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons/msx-observer"
 
 type fixture = {
   config : Workspace.config;
@@ -129,6 +131,10 @@ let detach clock fixture =
   let id = installed fixture |> json_string "instance_id" in
   ignore (dispatch fixture Lane.Detach ["instance_id", `String id]);
   await clock (fun () -> !(fixture.stops) = 1);
+  await clock (fun () -> installed fixture |> member "phase" |> json_string "kind" = "detached");
+  (* Exercise the maintenance publication after cleanup completes. This
+     fixture drives reconciliation explicitly rather than starting Pulse. *)
+  ignore (reconcile fixture);
   await clock (fun () -> absent (snapshot fixture) "msx-observe")
 
 let with_fixture ?(runtime_text=base_config) f =
@@ -184,7 +190,9 @@ let test_declaration_catalog_and_resources () = with_fixture (fun clock fixture 
   let source = Snapshot.sources published |> List.find (fun (scan : Snapshot.source_scan) -> scan.source.source.id = entry.identity.source_id) in
   check bool "package source is read-only" true (source.source.source.access = Skill_source_config.Read_only);
   let raw_document = read (Filename.concat fixture.package "skills/msx-observe/SKILL.md") in
-  check string "content revision identifies exact SKILL.md bytes" (digest raw_document)
+  check string "content revision identifies exact SKILL.md bytes"
+    (Skill_reference.content_revision_of_source_text raw_document
+     |> Skill_reference.content_revision_to_string)
     (Snapshot.content_revision_to_string entry.content_revision);
   let reader = tool fixture in
   checked_read reader "read-skill" (Skill_reference.to_yojson reference) entry.document.body;

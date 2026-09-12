@@ -2,12 +2,23 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchEditSnapshots, type EditSnapshots } from '../../api/edit-snapshots'
 import { editSnapshotDiff } from './edit-snapshot-diff'
+import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../../api/admin-required'
+import { currentStoredTokenRevision } from '../../api/core'
+import { storedTokenRevision } from '../../api/token-revision'
 
 type State = { kind: 'idle' } | { kind: 'loading' }
   | { kind: 'loaded'; before: string; after: string; diff: string }
   | { kind: 'error'; message: string }
+  | { kind: 'admin-required' }
 
 export function EditSnapshotView({ refs }: { refs: EditSnapshots }) {
+  // Remount the comparison when credentials change, discarding plaintext
+  // originals and terminating its worker before another session can reuse it.
+  const authRevision = storedTokenRevision.value
+  return html`<${ScopedEditSnapshotView} key=${authRevision} refs=${refs} authRevision=${authRevision} />`
+}
+
+function ScopedEditSnapshotView({ refs, authRevision }: { refs: EditSnapshots; authRevision: number }) {
   const [requested, setRequested] = useState(false)
   const [state, setState] = useState<State>({ kind: 'idle' })
   useEffect(() => {
@@ -17,11 +28,14 @@ export function EditSnapshotView({ refs }: { refs: EditSnapshots }) {
     void fetchEditSnapshots(refs, controller.signal).then(async result => ({
       ...result, diff: await editSnapshotDiff(result.before, result.after, controller.signal),
     })).then(
-      result => { if (!controller.signal.aborted) setState({ kind: 'loaded', ...result }) },
-      error => { if (!controller.signal.aborted) setState({ kind: 'error', message: error instanceof Error ? error.message : String(error) }) },
+      result => { if (!controller.signal.aborted && authRevision === currentStoredTokenRevision()) setState({ kind: 'loaded', ...result }) },
+      error => { if (!controller.signal.aborted && authRevision === currentStoredTokenRevision()) setState(isAdminRequired(error)
+        ? { kind: 'admin-required' }
+        : { kind: 'error', message: error instanceof Error ? error.message : String(error) }) },
     )
     return () => controller.abort()
-  }, [requested, refs.before.sha256, refs.before.bytes, refs.after.sha256, refs.after.bytes])
+  }, [requested, refs.before.sha256, refs.before.bytes, refs.after.sha256, refs.after.bytes, authRevision])
+  if (state.kind === 'admin-required') return html`<p role="alert" data-access-state="admin-required" class="my-2 text-xs">${ADMIN_REQUIRED_MESSAGE}</p>`
   return html`<div class="my-2" data-edit-snapshot-view>
     <button type="button" class="rounded border border-border px-2 py-1 text-xs"
       aria-expanded=${requested} onClick=${() => setRequested(value => !value)}>

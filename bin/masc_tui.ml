@@ -5522,11 +5522,10 @@ let move_list_to_edge (state : state) ~(to_bottom : bool) =
 
 let move_list_by_rows (state : state) ~delta =
   match row_list state with
-  | None -> false
-  | Some { rl_count = 0; _ } -> false
+  | None | Some { rl_count = 0; _ } -> ()
   | Some r ->
-      r.rl_place (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor);
-      true
+      r.rl_place
+        (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor)
 
 
 (* Standalone rows never scroll, so an action notice only has to be retained
@@ -18226,7 +18225,7 @@ and is loaded on demand through keeper_skill.
                      state.repository_changes_cursor <- cursor;
                      state.repository_changes_scroll <- scroll)
             | Code ->
-                ignore (move_list_by_rows state ~delta:(direction * page) : bool)
+                move_list_by_rows state ~delta:(direction * page)
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -18366,20 +18365,19 @@ and is loaded on demand through keeper_skill.
                               ~cursor:state.lane_runs_cursor ~height
                               state.lane_runs_scroll)
                  | Lanes_overview ->
-                     ignore
-                       (move_list_by_rows state ~delta:(direction * page)
-                         : bool))
+                     move_list_by_rows state ~delta:(direction * page))
              | Metrics ->
                  state.metrics_scroll <-
                    max 0 (state.metrics_scroll + (direction * page))
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
-                edge. [move_list_by_rows] says whether it found a list, and
-                on these it does; the ones below are where it does not. *)
+                edge. [move_list_by_rows] finds the list itself and answers
+                to nothing when there is none; the arm below is where there
+                is none. *)
              | Keepers _ | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
-                 ignore (move_list_by_rows state ~delta:(direction * page) : bool)
+                 move_list_by_rows state ~delta:(direction * page)
              (* No row list to page. Overview's two panes, Activity's ring and
                 the Tools and Resources listings are built by the frame out of
                 text the frame formats, so the count a page needs does not

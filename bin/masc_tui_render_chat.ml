@@ -2632,13 +2632,32 @@ let render_keeper_message (state : state) =
                in
                Printf.sprintf " · the judge is deciding%s; your answer ends it now" age)
          in
-         (* [status_rows] puts the approval question first among its Attention
-            rows, so the note lands on that one and not on an interrupt or a
-            stream diagnostic that shares the kind. *)
-         let note_unused =
-           ref
-             (not (String.equal gate_note "")
-              && Option.is_some (Keeper_chat_transcript.awaiting_approval live))
+         (* What the fold took, said on the line that stays. A count the
+            reader can see is a thing they can ask for; rows that simply were
+            not drawn are a screen that looks complete and is not. *)
+         let now = Unix.gettimeofday () in
+         let folded_away =
+           Masc_tui_types.keeper_message_folded_status_count state live ~now
+         in
+         let gate_waiting =
+           match state.msg_target_keeper_name with
+           | Some keeper_name when state.msg_turn_folded ->
+               List.length
+                 (Masc_tui_types.keeper_effects_at_the_gate state ~keeper_name)
+           | Some _ | None -> 0
+         in
+         let fold_suffix =
+           let parts =
+             (if gate_waiting > 0 then [ Printf.sprintf "gate %d" gate_waiting ]
+              else [])
+             @ (if folded_away > 0 then [ Printf.sprintf "+%d" folded_away ]
+                else [])
+           in
+           match parts with
+           | [] -> ""
+           | parts ->
+               " · " ^ String.concat " · " parts ^ " · "
+               ^ Masc_tui_keys.expand_turn_label
          in
          List.iter
            (fun (kind, text) ->
@@ -2647,17 +2666,17 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
                     ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
                      ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                     ^ " · " ^ text ^ queue_hint)
-              | Keeper_chat_transcript.Attention ->
-                  let suffix =
-                    if !note_unused then begin
-                      note_unused := false;
-                      gate_note
-                    end
-                    else ""
-                  in
+                     ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+              (* The gate and this row describe the same held call, so the
+                 note rides the row that asks -- which is this one by its
+                 kind now, rather than by being first among the Attention
+                 rows and hoping the order holds. *)
+              | Keeper_chat_transcript.Answer_needed ->
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-                    ("  " ^ text ^ suffix)
+                    ("  " ^ text ^ gate_note)
+              | Keeper_chat_transcript.Attention ->
+                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+                    ("  " ^ text)
               | Keeper_chat_transcript.Approval outcome ->
                   let style =
                     match outcome with
@@ -2668,7 +2687,7 @@ let render_keeper_message (state : state) =
                     | Keeper_chat_transcript.Approval_other _ -> Theme.warn ()
                   in
                   box_line_styled chat_buf chat_cols ~style ("  " ^ text)))
-           (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
+           (Masc_tui_types.keeper_message_visible_status_rows state live ~now)
      | Some _ | None -> ());
     (* Effects this Keeper is not waiting on. A deferral returns successfully
        and the Keeper carries on, so the tool row reads as a plain return and

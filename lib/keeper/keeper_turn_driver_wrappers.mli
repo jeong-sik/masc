@@ -19,6 +19,7 @@ val run_named_with_masc_tools :
   base_path:string ->
   system_prompt:string ->
   ?native_tools:Agent_core.Tool.t list ->
+  ?tool_requirement:Keeper_required_tools.t ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->

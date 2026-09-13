@@ -90,7 +90,7 @@ let test_whisper_offers_a_package_and_a_model () =
     P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac S.Arm64 26)
       ~distribution:P.Other P.Whisper_cli
   in
-  check int "a package and a model, nothing else" 2 (List.length actions);
+  check int "a transcriber, a model, and a recorder" 3 (List.length actions);
   (match (find "whisper_cli_brew_install" actions).action_effect with
    | P.Run_commands steps ->
      check (list (list string)) "the formula, installed and not started"
@@ -141,19 +141,51 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
   List.iter
     (fun distribution ->
       let actions = whisper (S.Linux S.X64) distribution in
-      (* Two now: the binary and the model. The branch named the binary and
-         stopped, so an operator who followed this plan to its end still had
-         nothing for -m. Both are links here because no cache directory was
-         given. *)
-      check int "two actions, and both are links" 2 (List.length actions);
+      (* Three now: the binary, the model, and the recorder. The branch named
+         the binary and stopped, so an operator who followed this plan to its
+         end still had nothing for -m. The first two are links here because no
+         cache directory was given and because whisper.cpp is not packaged. *)
+      check int "three actions" 3 (List.length actions);
       List.iter
-        (fun (action : P.action) ->
-          match action.action_effect with
+        (fun id ->
+          match (find id actions).action_effect with
           | P.Open_official_installer _ -> ()
           | P.Run_commands _ | P.Install_official_cli _ ->
-            fail "no package name is guessed for Linux")
-        actions)
+            fail "no package name is guessed for whisper.cpp on Linux")
+        [ "whisper_cli_build_instructions"; "whisper_model_page" ])
     [ P.Debian; P.Ubuntu; P.Other ]
+
+(* The rule above is about whisper.cpp, which is built rather than packaged.
+   sox is packaged, so naming it is not a guess -- but only where the package
+   manager is known. Elsewhere it is a link for the same reason whisper is. *)
+let test_the_recorder_is_named_where_the_package_manager_is_known () =
+  List.iter
+    (fun distribution ->
+      let actions = whisper (S.Linux S.X64) distribution in
+      match (find "sox_apt_install" actions).action_effect with
+      | P.Run_commands steps ->
+        check (list (list string)) "the package, installed"
+          [ [ "apt-get"; "install"; "-y"; "sox" ] ] steps
+      | P.Open_official_installer _ | P.Install_official_cli _ ->
+        fail "a known package manager can name the package")
+    [ P.Debian; P.Ubuntu ];
+  match (find "sox_project_page" (whisper (S.Linux S.X64) P.Other)).action_effect with
+  | P.Open_official_installer _ -> ()
+  | P.Run_commands _ | P.Install_official_cli _ ->
+    fail "an unknown distribution gets a link, not a guessed package"
+
+(* Transcribing a file and making one are different halves, and only the first
+   was named. masc records with sox's rec and marks the start and end of a
+   recording with sox's play; without them a capture fails on its own process
+   error and the tones are swallowed at debug level, so nothing on the way in
+   says a package is missing. *)
+let test_hearing_names_the_recorder_not_only_the_transcriber () =
+  match (find "sox_brew_install" (whisper (mac S.Arm64 26) P.Other)).action_effect with
+  | P.Run_commands steps ->
+    check (list (list string)) "the formula that carries rec and play"
+      [ [ "brew"; "install"; "sox" ] ] steps
+  | P.Open_official_installer _ | P.Install_official_cli _ ->
+    fail "Homebrew can name this one"
 
 
 (* The model step is written once and used by both hosts. Left per-host, the
@@ -198,4 +230,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "linux gets instructions rather than a guessed package" `Quick
     test_linux_gets_instructions_rather_than_a_guessed_package;
   test_case "linux with a cache gets the same download" `Quick
-    test_linux_with_a_cache_gets_the_same_download]]
+    test_linux_with_a_cache_gets_the_same_download;
+  test_case "hearing names the recorder, not only the transcriber" `Quick
+    test_hearing_names_the_recorder_not_only_the_transcriber;
+  test_case "the recorder is named where the package manager is known" `Quick
+    test_the_recorder_is_named_where_the_package_manager_is_known]]

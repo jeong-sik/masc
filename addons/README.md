@@ -13,6 +13,7 @@ step in other Keeper activity.
 | [msx-observer](msx-observer/) | Projects captures with the existing MSX frame clock and machine incarnation. | Borrows the native machine through host snapshots; does not send input or own the machine. |
 | [output-statistics](output-statistics/README.md) | Counts rows and row kinds in each supplied completed output. | Owns its worker; no cumulative event count or machine state. |
 | [frame-progress](frame-progress/README.md) | Measures frame differences between supplied MSX captures. | Keeps a baseline in worker memory; restart or missing input requires a fresh baseline. |
+| [value-difference](value-difference/README.md) | Measures signed changes and directions between supplied numeric values, including DOS counters. | Keeps independent source baselines in worker memory; owns no upstream machine. |
 | [dos-world](dos-world/README.md) | Runs a homebrew DOS counter, accepts an optional action and emits guest-state and screen artifacts. | Owns its DOS/WASM machine inside its worker; replacement starts a new machine. |
 
 Removing an observer or metric package leaves the source owner intact. Removing
@@ -36,12 +37,17 @@ See [TOML installation](../docs/guides/lane-addon-toml.md), the
 [MSX declaration](../docs/examples/lane-addons/msx-frames.toml) and
 [DOS declaration](dos-world/install.toml).
 
+The [TUI package guide](../docs/guides/tui-lane-addons.md) covers `/addons`,
+TOML editing, named connections, Skills, actions, Slice and retained evidence.
+New packages use this common surface without adding domain-specific menus.
+
 [Output composition](../docs/guides/lane-output-composition.md) connects a
 consumer's `binding.sources` to another installation in the same run using
 `kind = "lane_output"` and `selection = "latest_completed"`.
 [Named outputs](../docs/guides/lane-output-ports.md) let that source select an
 `output_id` declared by the producer: MSX publishes `frames`, DOS publishes
-`guest`, and statistics publishes `statistics`. Unknown names are unavailable;
+`guest`, value-difference publishes `difference`, and statistics publishes
+`statistics`. Unknown names are unavailable;
 a known port with no matching rows is an empty supplied output. Original row
 identities and whole-producer coverage remain attached to the selected evidence.
 
@@ -52,11 +58,12 @@ image build commands for CI, using the repository root and `addons` build contex
 
 ```sh
 docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 addons
-docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.1.0 addons
+docker build -f addons/msx-observer/Dockerfile -t masc-lane-msx-observer:0.2.0 addons
 ```
 
-Each manifest specifies its worker's resource envelope. The Web, MSX, statistics
-and frame-progress examples use half a CPU, 128 MiB memory, 16 processes and a
+Each manifest specifies its worker's resource envelope. The Web, MSX, statistics,
+frame-progress and value-difference examples use half a CPU, 128 MiB memory,
+16 processes and a
 4 MiB maximum reply; DOS uses one CPU, 512 MiB, 64 processes and the same reply
 bound. These apply to package environments, not Keeper activity. Qualification
 records the applied envelope and measured impact; declarations alone do not
@@ -208,7 +215,15 @@ across explicitly recorded histories. Optional `incarnation: "load-2"` pins one
 history; absent or null means any observed incarnation, not an invented ID.
 Each `capture`
 observation adds `machine_id`, `incarnation`, nonnegative integer `frame`,
-`screen: {uri, sha256}`, and nullable `input_cursor`. Incarnation must change when
+`screen: {uri, sha256}`, nullable `input_cursor`, and `input_ledger`. The ledger
+is either explicit null (input history was not observed) or
+`{format: "msx-input-jsonl", entry_count, evidence: {uri, sha256}}`. Its count
+matches the input cursor. The native source captures the same frame, incarnation
+and immutable input records atomically, then stores oldest-first snapshot JSONL
+outside the machine lock. Each record preserves native `frame`, `who`, `key`
+and `edge`; the observer retains that evidence with the frame. A zero count and
+an empty ledger blob mean an observed empty history. Null does not mean zero.
+Incarnation must change when
 loading/restoring a machine history so a reset frame is not mistaken for an
 earlier point in the same clock. The package preserves every supplied capture
 and indicates whether it matches the binding. It never derives game-state facts

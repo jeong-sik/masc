@@ -1,0 +1,110 @@
+{
+  "scope": "Actual native TUI screenshot input through recording HTTP forwarder to compiled automation Browser Lane and real Firefox; no Keeper/model in this gesture run",
+  "steps": [
+    {
+      "label": "open",
+      "status": 200,
+      "elapsed_ms": 2083.8,
+      "request": {
+        "action": "open",
+        "headless": true
+      }
+    },
+    {
+      "label": "goto",
+      "status": 200,
+      "elapsed_ms": 128.43,
+      "request": {
+        "url": "http://127.0.0.1:55623/index.html"
+      }
+    },
+    {
+      "label": "initial-page",
+      "status": 200,
+      "elapsed_ms": 22.31,
+      "request": {
+        "lane": "automation"
+      }
+    },
+    {
+      "label": "click-observed-1",
+      "status": 200,
+      "elapsed_ms": 7.34,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content"
+      }
+    },
+    {
+      "label": "drag-observed-2",
+      "status": 200,
+      "elapsed_ms": 5.81,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content"
+      }
+    },
+    {
+      "label": "scroll-observed-3",
+      "status": 200,
+      "elapsed_ms": 6.39,
+      "request": {
+        "lane": "automation",
+        "tabId": 1,
+        "view": "content"
+      }
+    },
+    {
+      "label": "close",
+      "status": 200,
+      "elapsed_ms": 765.48,
+      "request": {
+        "action": "close"
+      }
+    }
+  ],
+  "cleanup": [
+    "owned automation Firefox session closed",
+    {
+      "name": "server",
+      "pid": 27068,
+      "exit": 0
+    },
+    {
+      "name": "driver",
+      "pid": 27066,
+      "exit": 0
+    }
+  ],
+  "composition_source_commit": "0e06ee97194d721b87d8ef7c7dfb7ac5e1765b8c",
+  "composition_distribution": "full package exported by this server binary",
+  "composition_file_sha256": "f70dcede49da1e3ac8a496c729a18253a7604e55b27bf54c954ed9772c0ea107",
+  "build": {
+    "release_version": "0.35.15",
+    "binary_version": "0.35.15",
+    "commit": "0e06ee97194d721b87d8ef7c7dfb7ac5e1765b8c",
+    "commit_source": "embedded",
+    "binary_commit": "0e06ee97194d721b87d8ef7c7dfb7ac5e1765b8c",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "9966bf0574e4f974c5396b76672db288653484e7d4523b95dca7eb7b4c64f396",
+    "binary_commit_unix_ts": 1789243285.0,
+    "binary_commit_age_seconds": 1359,
+    "executable_path": "/private/tmp/browser-progressive-native-0e06/runtime/masc-macos-arm64",
+    "executable_dir": "/private/tmp/browser-progressive-native-0e06/runtime",
+    "runtime_instance_id": "01a0974a-9a1f-7000-8ea4-049d4055af7d",
+    "started_at": "2026-09-12T20:24:03Z",
+    "uptime_seconds": 0
+  },
+  "binary_sha256": "9966bf0574e4f974c5396b76672db288653484e7d4523b95dca7eb7b4c64f396",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "api_port": 55610,
+  "driver_port": 55609,
+  "tab_id": 1,
+  "gesture_capture_sha256": "015f3012394ddb6640caee0153b66d6dc043bdb383c8a5b2b9fee640bd2951d6",
+  "result": "failed",
+  "error": "RuntimeError('Gesture cleanup incomplete: [{\\'stage\\': \\'wait-terminated-tui\\', \\'error\\': \"TimeoutExpired([\\'/private/tmp/browser-progressive-native-0e06/runtime/masc-tui-macos-arm64\\', \\'--base-path\\', \\'/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h\\', \\'--workspace\\', \\'masc-browser-handoff-yq3d680h\\', \\'--port\\', \\'55648\\'], 10)\"}, {\\'stage\\': \\'kill-tui\\', \\'error\\': \"PermissionError(1, \\'Operation not permitted\\')\"}, {\\'stage\\': \\'wait-killed-tui\\', \\'error\\': \"TimeoutExpired([\\'/private/tmp/browser-progressive-native-0e06/runtime/masc-tui-macos-arm64\\', \\'--base-path\\', \\'/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h\\', \\'--workspace\\', \\'masc-browser-handoff-yq3d680h\\', \\'--port\\', \\'55648\\'], 5)\"}, {\\'stage\\': \\'tui-exit\\', \\'error\\': \\'None\\'}]')",
+  "cleanup_ok": true
+}

@@ -1,6 +1,10 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
 type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
+type error = Request_rejected of string | Runtime_failed of string
+let error_to_string = function Request_rejected detail | Runtime_failed detail -> detail
+let request_result result = Result.map_error (fun detail -> Request_rejected detail) result
+let runtime_result result = Result.map_error (fun detail -> Runtime_failed detail) result
 exception Worker_detached
 exception Action_persistence_failed of string
 type connection = {
@@ -386,13 +390,13 @@ let historical m =
         | Some (`String id) -> not (Hashtbl.mem m.entries id) | _ -> true)
     | _ -> true) bindings)
 let persisted_binding m id =
-  let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
+  let* bindings = runtime_result (offload (fun () -> Lane_addon_store.bindings m.store)) in
   match List.find_opt (function
     | `Assoc fields -> (match text fields "instance_id" with
         | Ok found -> String.equal found id | Error _ -> false)
     | _ -> false) bindings with
   | Some (`Assoc fields) -> Ok fields
-  | _ -> Error "unknown retained instance"
+  | _ -> Error (Request_rejected "unknown retained instance")
 let replace_phase fields phase =
   `Assoc (("phase", phase_to_json phase) :: List.remove_assoc "phase" fields)
 let historical_detach ~sw m fields =
@@ -480,10 +484,10 @@ let slice m args =
     | None -> Ok None | Some (`Int n) -> Ok (Some (float_of_int n))
     | Some (`Float t) when Float.is_finite t -> Ok (Some t)
     | _ -> Error (key ^ " requires a finite epoch timestamp") in
-  let* run_id = optional_text "run_id" in let* lane_id = optional_text "lane_id" in
-  let* since = optional_time "since" in let* until = optional_time "until" in
-  let* () = match since, until with Some a, Some b when a > b -> Error "since exceeds until" | _ -> Ok () in
-  let* bindings = offload (fun () -> Lane_addon_store.bindings m.store) in
+  let* run_id = request_result (optional_text "run_id") in let* lane_id = request_result (optional_text "lane_id") in
+  let* since = request_result (optional_time "since") in let* until = request_result (optional_time "until") in
+  let* () = match since, until with Some a, Some b when a > b -> Error (Request_rejected "since exceeds until") | _ -> Ok () in
+  let* bindings = runtime_result (offload (fun () -> Lane_addon_store.bindings m.store)) in
   let rec read acc statuses = function
     | [] -> Ok (List.rev acc, List.rev statuses)
     | `Assoc fields :: rest ->
@@ -509,7 +513,7 @@ let slice m args =
                     else "previous process; current observation and cleanup state are unknown") } in
           read (output :: acc) (status :: statuses) rest
     | _ -> Error "invalid persisted binding" in
-  let* outputs, statuses = read [] [] bindings in
+  let* outputs, statuses = runtime_result (read [] [] bindings) in
   (* Each instance response is bounded by its own declared resource envelope.
      File parsing and filtering happened outside the owner domain. *)
   let rows = List.concat_map (fun output -> output.rows) outputs in
@@ -560,6 +564,32 @@ let detach_entry ~sw m e =
 let configuration_directory config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
   Filename.concat resolution.config_root.path "lane-addons"
+
+let edit_directory config =
+  let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
+  match resolution.status with
+  | Config_dir_resolver.Invalid_env_status -> Error {Lane_addon_declaration.code=Io_error;
+      message=String.concat "; " resolution.warnings; current=None}
+  | Ready | Warn | Missing_status -> Ok (Filename.concat resolution.config_root.path "lane-addons")
+
+let read_declaration ~config json = Eio_context.run_on_owner_domain (fun () ->
+  let* source_path = Lane_addon_declaration.read_request json in
+  let* directory = edit_directory config in
+  let m = manager config in
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    offload (fun () -> Lane_addon_declaration.read ~directory ~source_path)
+    |> Result.map Lane_addon_declaration.document_to_json))
+
+let save_declaration ~config json = Eio_context.run_on_owner_domain (fun () ->
+  let* request = Lane_addon_declaration.write_request json in
+  let* directory = edit_directory config in
+  let m = manager config in
+  (* Like reconcile and Detach, this recoverable serializer uses use_ro so an
+     exception releases it without poisoning later configuration repairs. *)
+  Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+    let* receipt = offload (fun () -> Lane_addon_declaration.write ~directory request) in
+    m.configuration_nudge ();
+    Ok (Lane_addon_declaration.receipt_to_json receipt)))
 
 (* Explicit removal edits the desired configuration. Otherwise the next
    reconciliation would legitimately create the just-detached observer again. *)
@@ -643,55 +673,56 @@ let retained_action_unlocked m ~instance_id ~request_id =
       (match recovered with None -> Ok (Some receipt)
        | Some receipt -> let* () = save_action_unlocked m receipt in Ok (Some receipt))
 let action_status m args =
-  let* instance_id = text args "instance_id" in let* request_id = text args "request_id" in
+  let* instance_id = request_result (text args "instance_id") in let* request_id = request_result (text args "request_id") in
   Eio.Mutex.use_ro m.action_mutex (fun () ->
-    let* receipt = retained_action_unlocked m ~instance_id ~request_id in
-    match receipt with None -> Error "unknown action request"
+    let* receipt = runtime_result (retained_action_unlocked m ~instance_id ~request_id) in
+    match receipt with None -> Error (Request_rejected "unknown action request")
     | Some receipt -> Ok (Lane_addon_action.to_json receipt))
 let enqueue_action ?caller m args =
-  let* instance_id = text args "instance_id" in
-  let* incarnation = text args "expected_incarnation" in let* request_id = text args "request_id" in
+  let* instance_id = request_result (text args "instance_id") in
+  let* incarnation = request_result (text args "expected_incarnation") in let* request_id = request_result (text args "request_id") in
   let* requester = match caller with Some value when String.trim value <> "" -> Ok value
-    | _ -> Error "Lane action requires an authenticated caller" in
-  let* () = if incarnation = instance_id then Ok () else Error "stale action incarnation" in
+    | _ -> Error (Request_rejected "Lane action requires an authenticated caller") in
+  let* () = if incarnation = instance_id then Ok () else Error (Request_rejected "stale action incarnation") in
   let* action = match List.assoc_opt "action" args with Some (`Assoc _ as action) -> Ok action
-    | _ -> Error "action requires an object" in
-  let* action = Lane_addon_action.canonical action in
-  let* arguments = Lane_addon_action.canonical (Lane_addon_action.arguments ~instance_id ~request_id ~action) in
+    | _ -> Error (Request_rejected "action requires an object") in
+  let* action = request_result (Lane_addon_action.canonical action) in
+  let* arguments = request_result (Lane_addon_action.canonical (Lane_addon_action.arguments ~instance_id ~request_id ~action)) in
   let input_sha256 = Lane_addon_action.input_digest arguments in
   Eio.Mutex.use_ro m.action_mutex (fun () ->
-    let* previous = retained_action_unlocked m ~instance_id ~request_id in
+    let* previous = runtime_result (retained_action_unlocked m ~instance_id ~request_id) in
     match previous with
     | Some receipt ->
-        if receipt.requester <> requester then Error "request identity belongs to a different authenticated caller"
-        else if receipt.input_sha256 <> input_sha256 then Error "request_id already names different action input"
+        if receipt.requester <> requester then Error (Request_rejected "request identity belongs to a different authenticated caller")
+        else if receipt.input_sha256 <> input_sha256 then Error (Request_rejected "request_id already names different action input")
         else Ok (Lane_addon_action.to_json receipt)
     | None ->
-        let* e = find m args in
-        let* () = if not e.running || e.stopping then Error "action worker is stopped or detaching" else Ok () in
-        let* c = match e.connection with Some c -> Ok c | None -> Error "action worker initialization pending" in
+        let* e = request_result (find m args) in
+        let* () = if not e.running || e.stopping then Error (Request_rejected "action worker is stopped or detaching") else Ok () in
+        let* c = match e.connection with Some c -> Ok c | None -> Error (Request_rejected "action worker initialization pending") in
         let* name, schema = match e.package.action_tool, c.action_schema () with
           | Some name, Some schema -> Ok (name, schema)
-          | _ -> Error "worker has no available advertised action port" in
+          | _ -> Error (Request_rejected "worker has no available advertised action port") in
         let* () = if String.length (Yojson.Safe.to_string arguments) <= e.package.resources.max_reply_bytes then Ok ()
-          else Error "action input exceeds the package message envelope" in
-        let* _ = Lane_addon_action.validate ~schema ~name arguments in
+          else Error (Request_rejected "action input exceeds the package message envelope") in
+        let* () = runtime_result (Lane_addon_action.validate_schema schema) in
+        let* _ = request_result (Lane_addon_action.validate ~schema ~name arguments) in
         let receipt : Lane_addon_action.receipt = {instance_id; incarnation; request_id; requester;
           executor = None; input_sha256; action; state = Queued; result = None; detail = None} in
-        let* () = save_action_unlocked m receipt in
+        let* () = runtime_result (save_action_unlocked m receipt) in
         (* Persistence yields. Detach and host shutdown may have completed while
            the file was written; do not queue against a retired owner. *)
         if not e.running || e.stopping then (
           let receipt = {receipt with state = Failed_before_effect;
             detail = Some "worker retired before the queued request entered its dispatch loop"} in
-          let* () = save_action_unlocked m receipt in Ok (Lane_addon_action.to_json receipt))
+          let* () = runtime_result (save_action_unlocked m receipt) in Ok (Lane_addon_action.to_json receipt))
         else (
           Queue.add receipt e.action_queue;
           wake e;
           Ok (Lane_addon_action.to_json receipt)))
 
 let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (fun () ->
-  let* args = object_ json in
+  let* args = request_result (object_ json) in
   let allowed = match operation with
     | Attach -> ["manifest_path"; "run_id"; "binding"]
     | Inspect -> ["instance_id"]
@@ -703,27 +734,27 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
   let names = List.map fst args in
   let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
     || List.exists (fun name -> not (List.mem name allowed)) names
-    then Error "duplicate or unknown Lane request field" else Ok () in
+    then Error (Request_rejected "duplicate or unknown Lane request field") else Ok () in
   let m = manager config in
   match operation with
   | Act -> enqueue_action ?caller m args
   | Action_status -> action_status m args
   | Inspect ->
       let* instance_id = match List.assoc_opt "instance_id" args with
-        | None -> Ok None | Some _ -> Result.map Option.some (text args "instance_id") in
-      snapshot m ?instance_id ()
+        | None -> Ok None | Some _ -> Result.map Option.some (request_result (text args "instance_id")) in
+      runtime_result (snapshot m ?instance_id ())
   | Slice -> slice m args
   | Evidence ->
-      let* id = text args "instance_id" in
+      let* id = request_result (text args "instance_id") in
       let* binding = match Hashtbl.find_opt m.entries id with
         | Some e -> Ok (entry_json e)
         | None -> Result.map (fun fields -> `Assoc fields) (persisted_binding m id) in
       let* ids = match List.assoc_opt "row_ids" args with
         | Some (`List values) ->
             List.fold_left (fun acc -> function `String id -> let* ids = acc in Ok (id :: ids)
-              | _ -> Error "row_ids must contain strings") (Ok []) values
-        | _ -> Error "row_ids requires an array" in
-      let* frozen = offload (fun () -> Lane_addon_store.freeze m.store ~instance_id:id ~binding ~row_ids:ids) in
+              | _ -> Error (Request_rejected "row_ids must contain strings")) (Ok []) values
+        | _ -> Error (Request_rejected "row_ids requires an array") in
+      let* frozen = runtime_result (offload (fun () -> Lane_addon_store.freeze m.store ~instance_id:id ~binding ~row_ids:ids)) in
       (match List.assoc_opt "keeper_name" args with
        | None -> Ok frozen
        | Some _ ->
@@ -747,25 +778,28 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
            let delivery = match receipt with
              | Ok receipt -> `Assoc ["status", `String "accepted"; "receipt", receipt]
              | Error message -> `Assoc ["status", `String "failed"; "error", `String message] in
-           let* fields = object_ published in Ok (`Assoc (("delivery", delivery) :: fields)))
+           let* fields = runtime_result (object_ published) in Ok (`Assoc (("delivery", delivery) :: fields)))
   | Attach ->
-      let* path = text args "manifest_path" in let* run_id = text args "run_id" in
+      let* path = request_result (text args "manifest_path") in let* run_id = request_result (text args "run_id") in
       let* binding = match List.assoc_opt "binding" args with Some (`Assoc _ as value) -> Ok value
-        | _ -> Error "binding requires an object" in
-      let* package = offload (fun () -> Lane_addon_manifest.load ~path) in
-      let* () = Lane_addon_sources.validate binding in
+        | _ -> Error (Request_rejected "binding requires an object") in
+      let* package = offload (fun () -> Lane_addon_manifest.load ~path)
+        |> Result.map_error (function
+          | Lane_addon_manifest.Invalid_manifest detail -> Request_rejected detail
+          | Io_failure detail -> Runtime_failed detail) in
+      let* () = request_result (Lane_addon_sources.validate binding) in
       let* sw = match Eio_context.get_root_switch_opt () with
-        | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
-      attach_entry ~sw m ~run_id ~package ~binding ~configuration:None
+        | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
+      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None)
   | Observe ->
-      let* e = find m args in
-      if e.stopping then Error "instance is stopping or detached"
-      else if not e.running then Error "worker stopped; detach and attach again to restart"
+      let* e = request_result (find m args) in
+      if e.stopping then Error (Request_rejected "instance is stopping or detached")
+      else if not e.running then Error (Request_rejected "worker stopped; detach and attach again to restart")
       else (wake e; Ok (entry_json e))
   | Detach ->
-      let* id = text args "instance_id" in
+      let* id = request_result (text args "instance_id") in
       let* sw = match Eio_context.get_root_switch_opt () with
-        | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
+        | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
       (* Each owned transition is recoverable from its binding record.
          Cancellation releases the serializer so a later pass can reconcile. *)
       Eio.Mutex.use_ro m.configuration_mutex (fun () ->
@@ -773,20 +807,20 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
         | None ->
             let* fields = persisted_binding m id in
             let* phase = match List.assoc_opt "phase" fields with
-              | Some json -> phase_of_json json | None -> Error "missing retained phase" in
-            let* owner = configuration_of_fields fields in
+              | Some json -> runtime_result (phase_of_json json) | None -> Error (Runtime_failed "missing retained phase") in
+            let* owner = runtime_result (configuration_of_fields fields) in
             let* () = match phase, owner with
               | Detached, _ | _, None -> Ok ()
               | _, Some owner ->
                   let another_owner = List.exists (fun e -> match e.configuration with
                     | Some current -> current.id = owner.id | None -> false) (entries m) in
                   if another_owner then Ok () else
-                    offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner) in
-            historical_detach ~sw m fields
+                    runtime_result (offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner)) in
+            runtime_result (historical_detach ~sw m fields)
         | Some e ->
             let* () = match e.configuration with None -> Ok () | Some owner ->
-              offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner) in
-            detach_entry ~sw m e))
+              runtime_result (offload (fun () -> remove_configuration_file ~directory:(configuration_directory config) owner)) in
+            runtime_result (detach_entry ~sw m e)))
 
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
@@ -922,7 +956,7 @@ let start_configuration_service ~config ~sw ~clock =
     let stop () = active := false; Pulse.shutdown pulse in
     Hashtbl.add configuration_services key stop;
     let m = manager config in
-    m.configuration_nudge <- (fun () -> Pulse.nudge pulse ~reason:"owned worker released");
+    m.configuration_nudge <- (fun () -> Pulse.nudge pulse ~reason:"configuration reconciliation requested");
     Eio.Switch.on_release sw (fun () ->
       stop (); Hashtbl.remove configuration_services key;
       m.configuration_nudge <- (fun () -> ()));

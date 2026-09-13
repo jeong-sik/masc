@@ -1,0 +1,9 @@
+RDIR   = os.path.join(ROOT, 'renders')
+EV     = os.path.join(ROOT, 'evidence.json')
+
+# fee wording assembled from codepoints (transport-safe)
+FEE = chr(0xBB34) + chr(0xB8CC)
+BO = chr(0xBCF4)
+MYEON = chr(0xBA74)
+BOMYON = BO + MYEON
+

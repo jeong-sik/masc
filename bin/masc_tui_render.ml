@@ -5384,6 +5384,12 @@ let render_clients (state : state) =
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d attached, scroll %d]" shown scroll);
   box_bottom buf cols;
+  (* [listing_chrome] already counts this row. Without it the keys the table
+     declares for Clients went unshown, and so did an armed search's query,
+     which rides the same row. *)
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints Masc_tui_types.Clients));
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;
 

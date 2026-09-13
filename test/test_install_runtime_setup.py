@@ -1181,6 +1181,19 @@ base_url = "https://voice.fixture.invalid/v1"
             # section owns this default so those mappings remain effective.
             self.assertNotIn('default_voice', endpoint)
 
+    def test_a_directory_that_was_never_initialized_is_told_to_run_init(self):
+        # Voice is a section of the configuration masc init writes. Measured
+        # before this: exit 1 and the raw Sys_error text for the missing file,
+        # which names neither the workspace nor what to run.
+        with tempfile.TemporaryDirectory(prefix='voice-no-init-') as directory:
+            base = Path(directory)
+            result = self.configure(base, '--voice', 'Yuna')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('No masc workspace at', result.stderr)
+            self.assertIn('masc init --base-path', result.stderr)
+            self.assertNotIn('Sys_error', result.stderr)
+            self.assertEqual(list(base.iterdir()), [])
+
     def test_a_local_model_cannot_replace_a_remote_stt_model(self):
         with self.workspace(self.REMOTE_STT) as (base, runtime):
             before = runtime.read_bytes()

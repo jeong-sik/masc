@@ -7,7 +7,12 @@ type action_effect = Open_official_installer of { url : string; argv : string li
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
 type action = private { id : string; label : string; detail : string;
-  source_url : string; requires_admin : bool; action_effect : action_effect }
+  source_url : string; requires_admin : bool; action_effect : action_effect;
+  writes : string option
+  (** The file this action leaves behind once it completes, where one does --
+      for a download, the final path rather than any temporary one it fetches
+      to. Published as [writes] ([null] when there is none) so a reader that
+      needs the path does not recover it from argv. *) }
 type outcome = External_step_pending | Commands_completed_recheck_required
   | Failed of { step : int; reason : string }
 val distribution_of_os_release : string -> distribution

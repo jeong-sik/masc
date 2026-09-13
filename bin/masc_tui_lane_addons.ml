@@ -310,9 +310,11 @@ let visual_lines ~height ~width view =
   let tabs = line ~tone:Accent (String.concat " " (List.map (fun (focus,label) ->
     if view.focus=focus then "[" ^ label ^ "]" else label)
     [Timeline,"1:Time";Connections,"2:Links";Configurations,"3:TOML";Instances,"4:Workers";Rows,"5:Rows"])) in
-  let status = match view.error with
-    | Some error -> wrap ~tone:Attention ("Error: " ^ error)
-    | None -> [line ~tone:Dim (if view.loading then "Refreshing · retained observations" else "Recorded observations · r:refresh")] in
+  let status = match view.loading, view.snapshot, view.error with
+    | true, _, _ -> [line ~tone:Dim "Refreshing · previous reading remains visible"]
+    | false, None, Some error -> wrap ~tone:Attention ("Load failed: " ^ error)
+    | false, None, None -> [line ~tone:Dim "No reading yet · r:refresh"]
+    | false, Some _, _ -> [line ~tone:Dim "Recorded observations · r:refresh"] in
   let notifications =
     (match view.draft with None -> [] | Some draft -> wrap ((if view.naming then "New TOML filename: " else ":") ^ draft))
     @ (match selected_document view with None -> [] | Some document -> List.concat_map wrap (Document.summary document)) in
@@ -320,7 +322,11 @@ let visual_lines ~height ~width view =
   | Configurations | Instances | Rows -> None
   | Timeline | Connections ->
       let content = match view.snapshot with
-      | None -> [line ~tone:Dim "No response yet · r:inspect"]
+      | None ->
+          [line ~tone:(if Option.is_some view.error then Attention else Dim)
+             (if Option.is_some view.error then
+                "(load failed; nothing here is a reading)"
+              else "No reading yet · r:refresh")]
       | Some snapshot ->
         match view.focus with
         | Timeline ->
@@ -478,15 +484,10 @@ let lines ?(height=24) ~width view =
   | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
   | None ->
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
-  let header = [String.concat "  " [tab Configurations "3 Installs"; tab Instances "4 Workers"; tab Rows "5 Rows"];
-    (match view.focus with
-     | Timeline | Connections -> "1:timeline  2:links"
-     | Configurations -> "n:new TOML  E:edit selected TOML  Tab:next area"
-     | Instances -> "o:observe  d:detach  E:edit TOML  :act {…}:action  t:status"
-     | Rows -> "Space:select evidence  e:export  Tab:next area");
-    (if view.loading then "Request pending · retained observations below · Esc:back"
-     else "Retained server observations · J/K:scroll · :command")] in
-  let error = match view.error with None -> [] | Some detail -> ["Error: " ^ detail] in
+  let header = [String.concat "  " [tab Timeline "1 Time"; tab Connections "2 Links";
+      tab Configurations "3 TOML"; tab Instances "4 Workers"; tab Rows "5 Rows"]] in
+  let error = match view.error with None -> [] | Some detail ->
+    List.map (fun line -> "Load failed: " ^ line) (String.split_on_char '\n' detail) in
   (* Keep the selected item inside a bounded list. Details belong only to that
      selection, so a large inventory cannot bury the current lane's output. *)
   let window cursor render items =
@@ -500,7 +501,9 @@ let lines ?(height=24) ~width view =
          else Some (Masc_tui_message_layout.fit_width
            (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
-    | None -> [if view.loading then "Loading Lane Add-ons…" else "No response yet. Press r to inspect Lane Add-ons."]
+    | None -> [if view.loading then "Refreshing…" else
+        if Option.is_some view.error then "(load failed; nothing here is a reading)"
+        else "No reading yet · r:refresh"]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"
           (List.length snapshot.instances)
@@ -559,7 +562,7 @@ let lines ?(height=24) ~width view =
   let action = action_lines view in
   let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
     (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
-  compact header @ compact error @ draft @ documents @ content @ action @ error @ receipt
+  compact header @ compact error @ draft @ documents @ content @ action @ receipt
   |> List.concat_map (fun line ->
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
       (Masc.Tui_decode.sanitize_terminal_text line))

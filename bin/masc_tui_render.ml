@@ -13751,7 +13751,7 @@ let render_terminal_too_small state ~rows ~cols =
     growing the terminal restores the unchanged selected surface. *)
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
-  surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"lane-addons"
     ~title:(screen_title " MASC Lane Add-ons")
     ~hints:"1:timeline  2:links  3:installations  4:workers  5:rows  Tab:area  j/k:select  J/K:scroll  r:refresh  Esc:back"
     ~body:(fun ~budget c ->

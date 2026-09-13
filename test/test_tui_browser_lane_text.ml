@@ -284,6 +284,40 @@ let () =
   assert (Masc.Browser_scene.region_role_of_string "section" = Masc.Browser_scene.Section);
   assert (Masc.Browser_scene.region_role_of_string "region" = Masc.Browser_scene.Named_region);
   assert (Masc.Browser_scene.region_role_of_string " CustomRole " = Masc.Browser_scene.Unknown "CustomRole");
+  let article_node = List.nth (Lane.scene_targets view) 2 in
+  let article_context = Lane.scene_scope_context_for_node view article_node in
+  (match article_context with
+   | Some context ->
+       assert (context.role = Masc.Browser_scene.Article);
+       assert (context.label = "One post");
+       assert (context.target = {Browser_lane.document_id = content.document_id; node_id = "article"})
+   | None -> failwith "article scope context was not retained from the observed region");
+  let focused_target = {Browser_lane.document_id = content.document_id; node_id = "article"} in
+  let focused_content = {content with view = Content; scope = Some focused_target;
+    nodes = [region "title" "article" "One post body"]} in
+  let focused_scene = {scene with content = focused_content} in
+  let focused_view = Lane.publish_scene focused_scene
+    {view with scene_scope = article_context} in
+  assert (focused_view.scene_scope = article_context);
+  (match Lane.scene_context focused_view with
+   | None -> failwith "scoped article context missing"
+   | Some text ->
+       let open Yojson.Safe.Util in
+       let json = Yojson.Safe.from_string text in
+       assert (json |> member "scopeContext" |> member "role" = `String "article");
+       assert (json |> member "scopeContext" |> member "label" = `String "One post"));
+  let scrolling = {focused_view with load = Loading (42, Scene_scroll {
+      tab_id = 3; document_id = content.document_id; expected_url = content.url;
+      scene_view = Content; scope = Some focused_target; delta_y = 600})} in
+  let scrolled_content = {focused_content with scroll_y = 600.} in
+  let scrolled = Lane.accept_scene ~generation:42
+    (Ok {focused_scene with content = scrolled_content}) scrolling in
+  assert (scrolled.scene_scope = article_context);
+  let clicking = {focused_view with load = Loading (43, Scene_click {
+      tab_id = 3; document_id = content.document_id; node_id = "title";
+      expected_url = content.url; scope = Some focused_target})} in
+  let clicked = Lane.accept_scene ~generation:43 (Ok focused_scene) clicking in
+  assert (clicked.scene_scope = article_context);
   let guard : Lane.navigation_guard = {
     expected_url = "https://example.org/feed#post";
     navigation_source = {url = content.url; document_id = content.document_id} } in

@@ -444,9 +444,9 @@ let visual_lines ?(failed_note = "") ~height ~width view =
                   | Masc.Lane_addon_sources.Snapshot_file {id;_}
                   | Masc.Lane_addon_sources.Msx_capture {id}
                   | Masc.Lane_addon_sources.Browser_document {id;_} -> id) sources) in
-            let columns ~active a b c =
+            let columns ~active:_ a b c =
               let column = max 1 ((width-6)/3) in
-              {active;cells=[Dim,fit column a;Accent," → ";Normal,fit column b;Accent," → ";Dim,fit (width-6-2*column) c]} in
+              {cells=[Dim,fit column a;Accent," → ";Normal,fit column b;Accent," → ";Dim,fit (width-6-2*column) c]} in
             [line ~tone:Dim "Declared inputs → worker → named outputs"]
             @ (if width>=80 then [columns ~active:false "INPUT" "WORKER / PHASE" "OUTPUT"] else [])
             @ (if instances=[] then [line "No workers attached · 3:installations"] else [])

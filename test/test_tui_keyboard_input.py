@@ -9334,6 +9334,13 @@ def standalone_lane_fixture(
             "Selects the next Memory OS snapshot from immutable Keeper history.",
             False,
         ),
+        # Copied from server_standalone_lane_projection.ml, which is where the
+        # other four purposes come from too.
+        "workspace_curator_exact": (
+            "Synthesizes attributed proposals after committed workspace memory "
+            "changes; semantic verification is not performed.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -9388,6 +9395,11 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
+                # The decoder takes the lane set from Exact_lane_run_registry
+                # plus the verifier and refuses a response that is not exactly
+                # that set. #35688 added the Workspace Curator to the registry,
+                # so a fixture of four became "load failed" on the Lanes screen.
+                standalone_lane_fixture("workspace_curator_exact", "Workspace Curator"),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },
@@ -9459,6 +9471,9 @@ def standalone_lane_runtime_config_response() -> HttpResponse:
                     'slots = ["glm-coding.glm-5-turbo"]',
                     "",
                     "[runtime.exact_output_lanes.librarian_exact]",
+                    'slots = ["glm-coding.glm-5-turbo"]',
+                    "",
+                    "[runtime.exact_output_lanes.workspace_curator_exact]",
                     'slots = ["glm-coding.glm-5-turbo"]',
                     "",
                     "[runtime.exact_output_lanes.verifier_exact]",
@@ -10385,10 +10400,15 @@ def keeper_lanes_ia_interaction(
 
         banded_hitl = re.compile(rb"\x1b\[7m[^\x1b\n]*HITL Auto Judge")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
+        # One `j` per row is what this walk asserts, so a lane added to the
+        # registry is one more step, in the projection's order: the Workspace
+        # Curator (#35688) sits between the Librarian and the Verifier.
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        send_and_wait(process, master_fd, output, b"j", banded_curator)
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
             process, master_fd, output, b"\r", b"task task-9"
@@ -10442,6 +10462,7 @@ def keeper_lanes_ia_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k", banded_curator)
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
         send_and_wait(process, master_fd, output, b"\r", b"succeeded")

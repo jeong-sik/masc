@@ -145,10 +145,12 @@ let render_proof_prompt ~lookup (goal : Goal_store.goal) =
    workspace location, and every producer's tree sits under it. An unreadable
    root is not turned into "the tree is empty" — the review defers with the
    reason and the pending row stays durable. *)
-let goal_proof_lookup config =
+let goal_proof_lookup config ~submitted_evidence =
   let open Result.Syntax in
-  let* tools = Verification_authority_tools.create_goal_proof ~config in
+  let* tools = Verification_authority_tools.create_goal_proof ~config ~submitted_evidence in
   let* root_layout = Verification_authority_tools.goal_proof_root_layout tools in
+  let root_layout = root_layout @ ["Submitted source identities (read exact bodies with the Board/Fusion tools): " ^
+    Yojson.Safe.to_string (`List (List.map Workspace_verification_store.submitted_evidence_item_metadata_to_yojson submitted_evidence))] in
   Ok
     (Task.Anti_rationalization.Lookup_tools
        { schemas = Verification_authority_tools.schemas tools
@@ -200,15 +202,15 @@ let bind_review config ~goal_id =
     | Goal_phase.Verifying ->
       Result.bind (Goal_verification.get_record_authoritative config ~goal_id)
         (function
-          | Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }
+          | Some { Goal_verification.completion = Goal_verification.Proof_pending pending; submitted_evidence; _ }
             when Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
-            Ok (goal, (pending.request_id, pending.criterion))
+            Ok (goal, (pending.request_id, pending.criterion, submitted_evidence))
           | Some _ | None -> Error "goal has no pending proof for its current criterion"))
 ;;
 
 let newer_request_pending config ~goal_id ~request_id =
   match bind_review config ~goal_id with
-  | Ok (_, (current_request_id, _)) -> not (String.equal request_id current_request_id)
+  | Ok (_, (current_request_id, _, _)) -> not (String.equal request_id current_request_id)
   | Error _ -> false
 ;;
 
@@ -223,9 +225,9 @@ let process_pending_work_inner
       (work : pending_work)
   : process_outcome
   =
-  let goal, (request_id, criterion) = bound_review in
+  let goal, (request_id, criterion, submitted_evidence) = bound_review in
     let outcome =
-       (match goal_proof_lookup config with
+       (match goal_proof_lookup config ~submitted_evidence with
         | Error detail ->
           defer
             ~goal_id:work.goal_id
@@ -323,7 +325,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
   =
   match bind_review config ~goal_id:work.goal_id with
   | Error detail -> defer ~goal_id:work.goal_id ~reason:detail
-  | Ok ((_goal, (request_id, criterion)) as bound_review) ->
+  | Ok ((_goal, (request_id, criterion, _)) as bound_review) ->
   let registry = Goal_verification_run_registry.global () in
   let run_id = Random_id.uuid_v7 () in
   let started_at = Time_compat.now () in

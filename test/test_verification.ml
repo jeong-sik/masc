@@ -3094,7 +3094,8 @@ let test_transport_projection_bounds_the_evidence_total () =
           | VS.Evidence_artifact { truncated; _ } ->
             Alcotest.(check bool) "no item is truncated on its own" false truncated
           | VS.Evidence_note _ | VS.Evidence_invalid_reference
-          | VS.Evidence_artifact_unreadable _ | VS.Evidence_artifact_binary _ -> ())
+          | VS.Evidence_artifact_unreadable _ | VS.Evidence_artifact_binary _
+          | VS.Evidence_collaboration _ -> ())
         items;
       Alcotest.(check bool)
         "the stored snapshot carries every byte"

@@ -7022,6 +7022,10 @@ let verification_evidence_lines (state : state) ~width task_id =
             List.concat_map
               (fun (item : Masc.Tui_decode.verification_evidence_item) ->
                 match item with
+                | Masc.Tui_decode.Ev_collaboration {ev_reference; ev_content; ev_sha256} ->
+                    ((Ansi.reset, Printf.sprintf "    - submitted source %s (sha256 %s)"
+                        (Terminal_text.single_line ev_reference) ev_sha256)
+                     :: wrap ~prefix:"      " ev_content)
                 | Masc.Tui_decode.Ev_note note -> wrap ~prefix:"    - note: " note
                 | Masc.Tui_decode.Ev_artifact
                     { ev_reference; ev_content; ev_bytes; ev_truncated } ->

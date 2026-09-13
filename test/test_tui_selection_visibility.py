@@ -34,7 +34,14 @@ def run_models(executable: str) -> None:
         # merely a model name present somewhere in the output history.
         for rows in (20, 16, 30):
             h.resize_and_wait(
-                process, fd, output, rows=rows, columns=100, needle=b"MASC Models"
+                process,
+                fd,
+                output,
+                rows=rows,
+                columns=100,
+                needle=b"MASC Models",
+                controls=(h.FULL_REDRAW,),
+                final_cursor=b"\x1b[?25l",
             )
             screen = h.screen_text(bytes(output))
             if not any(

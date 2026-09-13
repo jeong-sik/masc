@@ -502,6 +502,22 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 
+(* The slash word being typed, painted: the run already pressed in the accent,
+   a word that is no command in the bad tone. [restore] is the colour the row
+   around it is drawn in, so a painted span hands that back rather than
+   resetting it. *)
+let slash_hint_text ~restore draft =
+  let paint (span : Masc_tui_command.hint_span) =
+    match span with
+    | Masc_tui_command.Typed text ->
+        Masc_tui_theme.tone Masc_tui_theme.Accent ^ text ^ restore
+    | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
+    | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
+  in
+  match Masc_tui_command.hint_spans (Masc_tui_command.hint draft) with
+  | [] -> None
+  | spans -> Some (String.concat "" (List.map paint spans))
+
 let composer_line state ~cols =
   match browser_lane_on_screen state with
   | Some view ->
@@ -533,8 +549,21 @@ let composer_line state ~cols =
         Printf.sprintf "  (%s to write)" Composer.focus_key
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) -> ""
   in
+  (* A slash command sent from this row runs as it does from the chat pane,
+     but only the chat pane's footer said what the word being typed was:
+     "/tsk" read here as a message until Enter, and the candidates for "/t"
+     showed nowhere. The hint follows the draft, so the cursor, which is
+     placed after the draft, does not move. *)
+  let slash_hint =
+    match composer.Composer.focus with
+    | Composer.Focused -> slash_hint_text ~restore:tone draft
+    | Composer.Unfocused -> None
+  in
   let body =
-    if String.equal draft "" then prompt ^ hint else prompt ^ draft
+    match String.equal draft "", slash_hint with
+    | true, _ -> prompt ^ hint
+    | false, None -> prompt ^ draft
+    | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied

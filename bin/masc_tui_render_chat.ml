@@ -2948,18 +2948,7 @@ let render_keeper_message (state : state) =
        actually pressed, which is what tells them how far along the word they
        are. *)
     let slash_hint =
-      let paint (span : Masc_tui_command.hint_span) =
-        match span with
-        | Masc_tui_command.Typed text -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Wrong text -> (Theme.bad ()) ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
-      in
-      match
-        Masc_tui_command.hint_spans
-          (Masc_tui_command.hint (Buffer.contents state.msg_input))
-      with
-      | [] -> None
-      | spans -> Some (String.concat "" (List.map paint spans))
+      slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
     in
     let footer_hints =
       match slash_hint with

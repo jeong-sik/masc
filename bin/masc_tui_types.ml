@@ -4491,7 +4491,8 @@ type state = {
   mutable standalone_lanes_error: string option;
   mutable standalone_lanes_inflight: bool;
   mutable standalone_lanes_generation: int;
-  (* The clients roster, off the ring under Runtime the way Lanes is. A
+  (* The clients roster, off the ring under Runtime. Lanes is a top-level
+     workspace. A
      cursor, not just a scroll: "/" search lands on a row by name, and the
      cursor is where it lands. *)
   mutable clients_surface: Tui_decode.clients_snapshot option;

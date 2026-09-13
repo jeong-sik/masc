@@ -12303,8 +12303,10 @@ def fusion_list_detail_interaction(
                 f"Fusion refresh moved selection off its run id: {refreshed!r}"
             )
 
+        # The detail no longer repeats the list's Flow row: its pipeline row
+        # names the same four stops with the run's state on them.
         detail = send_and_wait(
-            process, master_fd, output, b"\r", b"Flow: Question"
+            process, master_fd, output, b"\r", b"Pipeline:"
         )
         detail_plain = CSI_RE.sub(b"", detail)
         question_index = detail_plain.find(b"1  QUESTION")
@@ -12338,13 +12340,18 @@ def fusion_list_detail_interaction(
         # hold the rest. Wait for the frames to stop and read the screen.
         drain_until_quiet(process, master_fd, output)
         panel_plain = screen_text(bytes(output))
+        # Which page a row lands on follows the RUN block's height above it,
+        # and that block is not this scenario's subject: the panel summary
+        # sits at the foot of the first page when the block is short and at
+        # the head of the second when it is tall. Read both.
+        two_pages = detail_plain + panel_plain
         for needle in (
             b"panel-answer-first-501",
             b"panel-failure-second-501",
             b"1 answered / 1 failed",
             b"10 input / 20 output tokens",
         ):
-            if needle not in panel_plain:
+            if needle not in two_pages:
                 raise AssertionError(
                     f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
                 )

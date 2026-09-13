@@ -822,6 +822,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
       path content
   in
   let commit_revision = current_revision_exn ctx.config name in
+  let actor_published = ref false in
   let uncertain_commit =
     Keeper_turn_up_config_persistence.persist_with_publication
       ~expected_revision:commit_revision
@@ -837,39 +838,41 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
         with
         | Error detail -> fail detail
         | Ok runtime_write ->
-          Keeper_turn_up_config_persistence.Commit_with_warnings
-            ( (),
-              Keeper_turn_up_config_persistence
-              .warnings_of_runtime_assignment_write runtime_write ))
+          Keeper_turn_up_config_persistence.Commit_then_publish
+            (Keeper_turn_up_config_persistence.warnings_of_runtime_assignment_write runtime_write,
+             fun () -> actor_published := true))
       ()
   in
   (match uncertain_commit with
-   | Error error ->
-     fail
-       ("uncertain runtime commit was not preserved: "
-        ^ Keeper_turn_up_config_persistence.error_to_string error)
-   | Ok { warnings; _ } ->
-     check bool "runtime commit durability warning is visible" true
-       (List.exists
-          (function
-            | Keeper_turn_up_config_persistence
-              .Runtime_config_parent_sync_unconfirmed _ -> true
-            | _ -> false)
-          warnings));
+   | Error (Keeper_turn_up_config_persistence.Io_error _) -> ()
+   | Error error -> fail (Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "unconfirmed runtime durability was reported committed");
+  check bool "unconfirmed configuration never publishes actor state" false !actor_published;
+  check string "unconfirmed commit restores manifest before-image"
+    manifest_before (Fs_compat.load_file manifest_path);
+  check string "unconfirmed commit restores runtime before-image"
+    runtime_before (Fs_compat.load_file runtime_path);
+  check bool "confirmed compensation retires journal" false
+    (Sys.file_exists (Keeper_config_journal.journal_path_for_base_path
+       ~base_path:ctx.config.base_path));
   let manifest_before_uncertain_restore = Fs_compat.load_file manifest_path in
   let runtime_before_uncertain_restore = Fs_compat.load_file runtime_path in
   let restore_revision = current_revision_exn ctx.config name in
+  let restore_attempted = ref false in
   (match
      Keeper_turn_up_config_persistence.For_testing
      .persist_with_runtime_restore_replace_file
-       ~replace_file:replace_file_with_parent_sync_failure
+       ~replace_file:(fun path content ->
+         restore_attempted := true;
+         replace_file_with_parent_sync_failure path content)
        ~expected_revision:restore_revision
        ~config:ctx.config
        ~parsed:(parse "uncertain runtime restore")
        ~meta:{ meta with instructions = "uncertain runtime restore" }
        ~publish:(fun runtime_transaction _ ->
          match
-           Runtime.commit_keeper_assignment runtime_transaction ~runtime_id:None
+           Runtime.commit_keeper_assignment runtime_transaction
+             ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
          with
          | Error detail -> fail detail
          | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
@@ -885,6 +888,7 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
        ("unexpected uncertain restore result: "
         ^ Keeper_turn_up_config_persistence.error_to_string error)
    | Ok _ -> fail "uncertain runtime restore was reported as exact");
+  check bool "uncertain restore exercised the replacement writer" true !restore_attempted;
   check string "uncertain restore still restores visible manifest bytes"
     manifest_before_uncertain_restore (Fs_compat.load_file manifest_path);
   check string "uncertain restore still restores visible runtime bytes"
@@ -1237,6 +1241,75 @@ let test_rollback_after_rename_failure_requires_reconciliation () =
     (current_revision_exn ctx.config name = initial)
 ;;
 
+(* Regression for the review finding on #35366: a successful
+   compensating rollback used to leave the crash journal in place, so
+   the next boot's recovery could re-apply this request's stale
+   before-images over LATER successful writes. Pins the Ok branch of
+   rollback clearing the journal, and the production startup recovery
+   entry point answering No_journal afterwards. *)
+let test_compensated_rollback_clears_crash_journal () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let journal_path =
+    Keeper_config_journal.journal_path_for_base_path ~base_path
+  in
+  let name = "manifest-rollback-journal-clear-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _runtime_transaction _ -> Rollback ())
+       ()
+   with
+   | Ok _ ->
+     check bool "successful compensation cleared the crash journal" false
+       (Sys.file_exists journal_path);
+     let report =
+       Server_bootstrap_maintenance
+       .recover_keeper_config_journal_on_startup ~base_path
+     in
+     (match report.Keeper_config_journal.outcome with
+      | Keeper_config_journal.No_journal -> ()
+      | _ -> fail "startup recovery found a journal after compensated rollback")
+   | Error error ->
+     fail
+       ("unexpected rollback error: "
+       ^ Keeper_turn_up_config_persistence.error_to_string error));
+  check bool "compensated rollback kept the pre-request state" true
+    (current_revision_exn ctx.config name = initial)
+;;
+
 let test_publication_exception_restores_missing_manifest () =
   with_persisting_context @@ fun ctx ->
   let name = "manifest-publication-exception-fixture" in
@@ -1314,6 +1387,606 @@ let test_post_write_revision_failure_restores_missing_manifest () =
   check bool "post-write revision failure leaves no orphan manifest" true
     (current_revision_exn ctx.config name
      = missing_config_revision)
+;;
+
+let test_config_journal_recovery_recovers_composite_write () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "journal-recovery-composite-fixture" in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir (name ^ ".toml") in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let manifest_before = "[keeper]\nname = \"journal-recovery-composite-fixture\"\n" in
+  let runtime_before =
+    "[exec.test]\nruntime = \"before\"\n"
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path manifest_before;
+  Fs_compat.save_file runtime_path runtime_before;
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
+  in
+  let journal_record : Keeper_config_journal.record =
+    { tx_id = "journal-recovery-composite"
+    ; keeper_name = name
+    ; manifest_before = Keeper_config_journal.Manifest_bytes manifest_before
+    ; runtime_before = Some (Keeper_config_journal.Runtime_bytes runtime_before)
+    ; manifest_path
+    ; runtime_path = Some runtime_path
+    ; started_at_unix = Time_compat.now ()
+    ; phase = Keeper_config_journal.Prepared
+    }
+  in
+  (match Keeper_config_journal.stage ~base_path journal_record with
+   | Ok () -> ()
+   | Error error ->
+     fail ("journal stage failed: " ^ error));
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  check int "secret before-images are private" 0o600
+    ((Unix.stat journal_path).Unix.st_perm land 0o777);
+  let staged_bytes = Fs_compat.load_file journal_path in
+  (match Keeper_config_journal.stage ~base_path { journal_record with tx_id = "replacement" } with
+   | Error _ -> ()
+   | Ok () -> fail "unresolved before-images were overwritten");
+  check string "a rejected stage preserves the exact journal" staged_bytes
+    (Fs_compat.load_file journal_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"changed\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"changed\"\n";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  let manifest_restored, runtime_restored =
+    match report.outcome with
+    | Keeper_config_journal.Recovered_rolled_back
+        { manifest_restored; runtime_restored } ->
+      manifest_restored, runtime_restored
+    | _ ->
+      fail
+        ("expected composite recovery to succeed, got: "
+         ^ "unexpected recovery outcome")
+  in
+  check bool "manifest restored by recovery" true manifest_restored;
+  check bool "runtime restored by recovery" true runtime_restored;
+  check string "manifest bytes restored" manifest_before (Fs_compat.load_file manifest_path);
+  check string "runtime bytes restored" runtime_before (Fs_compat.load_file runtime_path);
+  check bool "journal was cleared" false (Sys.file_exists report.journal_path)
+;;
+
+(* Operator re-review 2026-09-12 (#35366, #2-a): a request-scoped write
+   used to stage a fresh journal over an unresolved one, silently
+   destroying the earlier write's before-images. Pins that persist
+   refuses to run while an unresolved journal exists. *)
+let test_publish_rejected_while_unresolved_journal_exists () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let name = "unresolved-journal-guard-fixture" in
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (name ^ ".toml")
+  in
+  let journal_record : Keeper_config_journal.record =
+    { tx_id = "unresolved-guard-tx"
+    ; keeper_name = name
+    ; manifest_before = Keeper_config_journal.Manifest_absent
+    ; runtime_before = None
+    ; manifest_path
+    ; runtime_path = None
+    ; started_at_unix = Time_compat.now ()
+    ; phase = Keeper_config_journal.Prepared
+    }
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:missing_config_revision
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok _ -> current_revision_exn ctx.config name
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let manifest_path =
+    Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+      (name ^ ".toml")
+  in
+  (match Keeper_config_journal.stage ~base_path journal_record with
+   | Ok () -> ()
+   | Error error -> fail ("journal stage failed: " ^ error));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String "next" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      parse_stating_a_profile ctx
+        (`Assoc [ "name", `String name; "instructions", `String "next" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ()
+   with
+   | Ok _ -> fail "expected persist to be rejected while an unresolved journal exists"
+   | Error (Keeper_turn_up_config_persistence.Io_error detail) as outcome ->
+     if
+       try
+         ignore (Str.search_forward (Str.regexp "configuration recovery required") detail 0);
+         true
+       with Not_found -> false
+     then ignore outcome
+     else
+       fail ("expected stale-journal rejection, got: " ^ detail)
+   | Error other ->
+     fail
+       ("expected Io_error, got: "
+       ^ Keeper_turn_up_config_persistence.error_to_string other));
+  check bool "manifest untouched by the rejected write" true
+    (let bytes = Fs_compat.load_file manifest_path in
+     try
+       ignore
+         (Str.search_forward
+            (Str.regexp "instructions = \"initial\"")
+            bytes
+            0);
+       true
+     with Not_found -> false)
+;;
+
+let test_config_journal_recovery_ignores_missing_journal () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir "no-journal.toml" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"no-journal\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"before\"\n";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | _ ->
+     fail
+       ("expected no_journal when no marker exists, got: "
+        ^ "unexpected recovery outcome"));
+  check bool "journal file absent" false (Sys.file_exists report.journal_path);
+  check string "manifest untouched without recovery" "[keeper]\nname = \"no-journal\"\n"
+    (Fs_compat.load_file manifest_path);
+  check string "runtime untouched without recovery" "[exec.test]\nruntime = \"before\"\n"
+    (Fs_compat.load_file runtime_path)
+;;
+
+let test_config_write_failures_compensate_once () =
+  with_persisting_context @@ fun ctx ->
+  let module P = Keeper_turn_up_config_persistence in
+  let name = "journal-write-failure-fixture" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "instructions", `String "initial"]) with
+    | Ok meta -> meta | Error error -> fail error in
+  let parsed = match parse_stating_a_profile ctx
+      (`Assoc ["name", `String name; "instructions", `String "initial"]) with
+    | Ok parsed -> parsed
+    | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path:ctx.config.base_path)
+      (name ^ ".toml") in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path
+      ~base_path:ctx.config.base_path in
+  let run ?write_manifest ~raises () =
+    let restores = ref 0 and publications = ref 0 in
+    let result = P.For_testing.persist_with_faults ?write_manifest
+        ~on_restore:(fun () -> incr restores)
+        ~expected_revision:missing_config_revision ~config:ctx.config ~parsed ~meta
+        ~publish:(fun _ _ ->
+          incr publications;
+          if raises then raise (Failure "injected publish failure");
+          P.Commit ()) () in
+    (match result with
+     | Error (P.Publication_exception _) when raises -> ()
+     | Error (P.Io_error _) when not raises -> ()
+     | Error error -> fail (P.error_to_string error)
+     | Ok _ -> fail "failed write was reported as committed");
+    check int "compensation runs once" 1 !restores;
+    check int "write failure does not publish" (if raises then 1 else 0) !publications;
+    check bool "no orphan manifest remains" false (Sys.file_exists path);
+    check bool "completed compensation clears recovery authority" false
+      (Sys.file_exists journal_path)
+  in
+  List.iter (fun after_rename ->
+    let sync_file _ = if not after_rename then raise (Failure "payload sync failed") in
+    let sync_parent _ = if after_rename then raise (Failure "parent sync failed") in
+    let write_manifest path =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file ~sync_parent path "new manifest bytes" in
+    run ~write_manifest ~raises:false ()) [false; true];
+  run ~raises:true ()
+;;
+
+let test_journal_rejects_foreign_paths_and_unreadable_files () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  Fs_compat.mkdir_p (Filename.dirname journal_path);
+  let record : Keeper_config_journal.record =
+    { tx_id = "foreign"; keeper_name = "journal-boundary-fixture"
+    ; manifest_before = Manifest_absent; runtime_before = None
+    ; manifest_path = Filename.concat base_path "unrelated.toml"
+    ; runtime_path = None; started_at_unix = 0.; phase = Prepared } in
+  let json = Keeper_config_journal.record_to_yojson record in
+  Fs_compat.save_file journal_path (Yojson.Safe.to_string json);
+  let restores = ref 0 in
+  let report = Keeper_config_journal.recover_interrupted ~base_path
+      ~manifest_restore:(fun _ _ -> incr restores; Ok ())
+      ~runtime_restore:(fun _ _ -> incr restores; Ok ()) in
+  (match report.outcome with
+   | Journal_corrupt _ -> () | _ -> fail "foreign recovery target was accepted");
+  check int "validation precedes every restore" 0 !restores;
+  check bool "invalid evidence remains available" true (Sys.file_exists journal_path);
+  (match Keeper_config_journal.load ~journal_path:(Filename.concat journal_path "child") with
+   | Error _ -> () | Ok _ -> fail "ENOTDIR was misreported as a missing journal");
+  let sentinel = { record with runtime_before = Some (Runtime_bytes "absent") } in
+  match Keeper_config_journal.record_of_yojson
+          (Keeper_config_journal.record_to_yojson sentinel) with
+  | Ok decoded -> check bool "literal bytes do not decode as file absence" true
+      (decoded.runtime_before = Some (Runtime_bytes "absent"))
+  | Error detail -> fail detail
+;;
+
+let test_retained_journal_protects_all_config_writers () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let manifest_path = Filename.concat
+    (Config_dir_resolver.keepers_dir_for_base_path ~base_path) "guarded.toml" in
+  Fs_compat.mkdir_p (Filename.dirname manifest_path);
+  let source = Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml") in
+  Fs_compat.save_file runtime_config_path source;
+  Fs_compat.save_file manifest_path "before";
+  let journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  let record : Keeper_config_journal.record =
+    { tx_id = "retained"; keeper_name = "guarded";
+      manifest_before = Manifest_bytes "before"; runtime_before = Some (Runtime_bytes source);
+      manifest_path; runtime_path = Some runtime_config_path;
+      started_at_unix = 0.; phase = Prepared } in
+  let calls = ref 0 in
+  let writers =
+    [ "save", (fun () -> Runtime.save_config_text ~runtime_config_path source |> Result.map ignore)
+    ; "edit", (fun () -> Runtime.edit_config_text ~runtime_config_path
+        (fun text -> incr calls; text) |> Result.map ignore)
+    ; "assignment removal", (fun () -> Runtime.with_keeper_assignment_transaction
+        ~runtime_config_path ~keeper_name:"guarded"
+        (fun transaction -> incr calls; Runtime.commit_keeper_removal transaction)
+        |> function Error detail -> Error detail
+           | Ok receipt -> Result.map ignore receipt.Runtime.value)
+    ; "setup activation", (fun () -> Runtime.with_config_lock ~runtime_config_path
+        (fun () -> incr calls; Ok ()))
+    ; "manifest", (fun () -> Runtime.with_manifest_config_lock ~runtime_config_path ~manifest_path
+        (fun () -> incr calls; Fs_compat.save_file manifest_path "after"; Ok ())) ] in
+  let check_blocked label =
+    let journal_before = Fs_compat.load_file journal_path in
+    List.iter (fun (name, write) ->
+      match write () with
+      | Error detail -> check bool (label ^ " " ^ name ^ " reports recovery authority") true
+          (String.starts_with ~prefix:"configuration recovery required" detail)
+      | Ok () -> fail (label ^ " admitted " ^ name)) writers;
+    check int (label ^ " never entered edit bodies") 0 !calls;
+    check string (label ^ " preserves runtime") source (Fs_compat.load_file runtime_config_path);
+    check string (label ^ " preserves manifest") "before" (Fs_compat.load_file manifest_path);
+    check string (label ^ " preserves journal") journal_before (Fs_compat.load_file journal_path)
+  in
+  (match Keeper_config_journal.stage ~base_path record with Ok () -> () | Error detail -> fail detail);
+  check_blocked "retained";
+  Fs_compat.save_file journal_path "{corrupt";
+  check_blocked "corrupt";
+  (match Keeper_config_journal.clear ~journal_path with Ok () -> () | Error detail -> fail detail);
+  let synced = ref false in
+  (match Runtime.For_testing.with_config_lock_with_journal_sync_parent
+      ~runtime_config_path
+      ~sync_parent:(fun directory ->
+        synced := true;
+        raise (Unix.Unix_error (Unix.EIO, "fsync", directory)))
+      (fun () -> incr calls) with
+   | Error detail -> check bool "failed retirement sync is explicit" true
+       (String.starts_with ~prefix:"configuration journal retirement unconfirmed" detail)
+   | Ok () -> fail "unconfirmed journal retirement admitted a writer");
+  check bool "absence still confirms durable retirement" true !synced;
+  check int "failed retirement sync does not enter writer" 0 !calls;
+  List.iter (fun (name, write) -> match write () with
+    | Ok () -> () | Error detail -> fail (name ^ ": " ^ detail)) writers;
+  check int "absent journal admits all callback bodies" 4 !calls;
+  check string "manifest writer applied after retirement" "after" (Fs_compat.load_file manifest_path)
+;;
+
+let test_actor_publication_starts_after_config_commit () =
+  let exception Interrupted_publication in
+  with_persisting_context @@ fun ctx ->
+  let module P = Keeper_turn_up_config_persistence in
+  let name = "journal-post-commit-fixture" in
+  let meta = match Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String name; "instructions", `String "committed"]) with
+    | Ok meta -> meta | Error error -> fail error in
+  let parsed = match parse_stating_a_profile ctx
+      (`Assoc ["name", `String name; "instructions", `String "committed"]) with
+    | Ok parsed -> parsed
+    | Error error -> fail (Keeper_types_profile.tool_result_body error) in
+  let journal_path = Keeper_config_journal.journal_path_for_base_path
+      ~base_path:ctx.config.base_path in
+  let published = ref false in
+  (match P.commit_configuration ~expected_revision:missing_config_revision
+      ~config:ctx.config ~parsed ~meta
+      ~publish:(fun outcome _revision ->
+        check bool "declaration is visible before actor publication" true
+          (Sys.file_exists outcome.path);
+        check bool "journal retired before actor publication" false
+          (Sys.file_exists journal_path);
+        published := true;
+        raise Interrupted_publication) () with
+   | exception Interrupted_publication -> ()
+   | exception exn -> fail (Printexc.to_string exn)
+   | Error error -> fail (P.error_to_string error)
+   | Ok _ -> fail "injected interruption did not propagate");
+  check bool "actor publication was reached" true !published;
+  let committed_revision = current_revision_exn ctx.config name in
+  check bool "interrupted publication preserves committed configuration" false
+    (committed_revision = missing_config_revision);
+  (match Keeper_config_journal.load ~journal_path with
+   | Ok None -> () | _ -> fail "restart would roll back committed actor configuration");
+  match P.commit_configuration ~expected_revision:committed_revision
+      ~config:ctx.config ~parsed ~meta ~publish:(fun _ revision -> revision) () with
+  | Ok {value; _} -> check bool "retry observes committed revision" true
+      (value = committed_revision)
+  | Error error -> fail (P.error_to_string error)
+;;
+
+let test_initial_configuration_rechecks_journal_after_early_recovery () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let manifest_path = Filename.concat
+      (Config_dir_resolver.keepers_dir_for_base_path ~base_path) "boot-race.toml" in
+  Fs_compat.mkdir_p (Filename.dirname manifest_path);
+  Fs_compat.save_file runtime_path "before-runtime";
+  Fs_compat.save_file manifest_path "before-manifest";
+  let early = Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path in
+  (match early.outcome with No_journal -> () | _ -> fail "expected initial no-journal observation");
+  let record : Keeper_config_journal.record =
+    {tx_id="boot-race"; keeper_name="boot-race";
+     manifest_before=Manifest_bytes "before-manifest";
+     runtime_before=Some (Runtime_bytes "before-runtime");
+     manifest_path; runtime_path=Some runtime_path; started_at_unix=0.; phase=Prepared} in
+  (* A writer acquires the same lock after the early check, then crashes
+     after the first file replacement, before startup's actual read. *)
+  (match Runtime.with_config_lock ~runtime_config_path:runtime_path (fun () ->
+     match Keeper_config_journal.stage ~base_path record with
+     | Error detail -> Error detail
+     | Ok () -> Fs_compat.save_file manifest_path "interrupted-manifest"; Ok ()) with
+   | Ok () -> () | Error detail -> fail detail);
+  let constructed = ref false in
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+     (fun ~runtime_config_path ->
+       constructed := true;
+       Runtime.load_config_observation ~runtime_config_path ()) with
+   | Error detail -> check bool "late journal requires recovery" true
+       (String.starts_with ~prefix:"configuration recovery required" detail)
+   | Ok _ -> fail "initial configuration accepted an interrupted dual write");
+  check bool "constructor and publication were never entered" false !constructed;
+  check string "retained manifest remains evidence" "interrupted-manifest"
+    (Fs_compat.load_file manifest_path);
+  check bool "diagnostic configuration reads remain available" true
+    (Result.is_ok (Runtime.load_config_observation ~runtime_config_path:runtime_path ()))
+;;
+
+let test_initial_configuration_excludes_concurrent_writers () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let attempted, publish_attempt = Eio.Promise.create () in
+  let finished, publish_finished = Eio.Promise.create () in
+  let writer_entered = ref false in
+  let initialized = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    (fun ~runtime_config_path ->
+      Fs_compat.save_file runtime_config_path "before";
+      Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        Eio.Promise.resolve publish_attempt ();
+        let result = Runtime.with_config_lock ~runtime_config_path (fun () ->
+          writer_entered := true;
+          Fs_compat.save_file runtime_config_path "after";
+          Ok ()) in
+        Eio.Promise.resolve publish_finished result);
+      Eio.Promise.await attempted;
+      check int "initial owner and blocked writer both hold lock entries" 2
+        (File_lock_eio.For_testing.holders_and_waiters ~lock_path:(runtime_config_path ^ ".lock"));
+      check bool "writer cannot enter during initial publication" false !writer_entered;
+      check string "initial readers see original bytes" "before"
+        (Fs_compat.load_file runtime_config_path);
+      runtime_config_path) in
+  let runtime_path = match initialized with Ok path -> path | Error detail -> fail detail in
+  (match Eio.Promise.await finished with Ok () -> () | Error detail -> fail detail);
+  check bool "writer proceeds after initial publication" true !writer_entered;
+  check string "subsequent reader sees completed writer" "after" (Fs_compat.load_file runtime_path)
+;;
+
+let test_initial_configuration_preserves_setup_observations () =
+  with_env "MASC_CONFIG_BOOTSTRAP" "skip" @@ fun () ->
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let observe () = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    (fun ~runtime_config_path -> Runtime.load_config_observation ~runtime_config_path ()) in
+  (match observe () with
+   | Ok (Error _) -> ()
+   | Error detail -> fail ("missing model configuration became lock failure: " ^ detail)
+   | Ok (Ok _) -> fail "missing runtime configuration was invented");
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  Fs_compat.save_file runtime_path "[invalid TOML";
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+     (fun ~runtime_config_path ->
+       match Runtime.load_config_observation ~runtime_config_path () with
+       | Error _ -> fail "invalid model bytes should remain observable"
+       | Ok observation -> Runtime.init_default_degraded_observation observation) with
+   | Ok (Error _) -> ()
+   | Error detail -> fail ("invalid model configuration became lock failure: " ^ detail)
+   | Ok (Ok _) -> fail "invalid model configuration initialized")
+;;
+
+let test_no_journal_startup_preserves_read_only_config () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let config_root = Filename.dirname runtime_path in
+  Fs_compat.mkdir_p config_root;
+  let permissions = (Unix.stat config_root).Unix.st_perm in
+  Eio.Switch.on_release ctx.sw (fun () -> Unix.chmod config_root permissions);
+  Unix.chmod config_root 0o500;
+  let report = Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path in
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | _ -> fail "read-only configuration without a journal requires no recovery write");
+  check bool "no transaction lock is created for a read-only no-op" false
+    (Sys.file_exists (runtime_path ^ ".lock"))
+;;
+
+let test_config_journal_recovery_corrupt_journal_flags_error () =
+  with_persisting_context @@ fun ctx ->
+  let base_path = ctx.config.Workspace.base_path in
+  let manifest_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path
+  in
+  let manifest_path = Filename.concat manifest_dir "corrupt-journal.toml" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
+  in
+  let restore_manifest path snapshot =
+    match snapshot with
+    | Keeper_config_journal.Manifest_absent ->
+      (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      Ok ()
+    | Keeper_config_journal.Manifest_bytes source ->
+      (try Ok (Fs_compat.save_file path source)
+       with exn -> Error (Printexc.to_string exn))
+  in
+  let restore_runtime path (image : Keeper_config_journal.runtime_before_image) =
+    match image with
+    | Keeper_config_journal.Runtime_bytes source_text ->
+      (try Ok (Fs_compat.save_file path source_text)
+       with exn -> Error (Printexc.to_string exn))
+    | Keeper_config_journal.Runtime_absent ->
+      let () =
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      in
+      Ok ()
+  in
+  Fs_compat.mkdir_p manifest_dir;
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  Fs_compat.save_file manifest_path "[keeper]\nname = \"corrupt\"\n";
+  Fs_compat.save_file runtime_path "[exec.test]\nruntime = \"before\"\n";
+  Fs_compat.save_file
+    (Keeper_config_journal.journal_path_for_base_path ~base_path)
+    "{ this is not json }";
+  let report =
+    Keeper_config_journal.recover_interrupted
+      ~base_path
+      ~manifest_restore:restore_manifest
+      ~runtime_restore:restore_runtime
+  in
+  let _ =
+    match report.outcome with
+    | Keeper_config_journal.Journal_corrupt detail ->
+      check bool "corrupt detail is visible" true (String.length detail > 0)
+    | _ ->
+      fail
+        ("expected journal_corrupt on bad json, got: "
+         ^ "unexpected recovery outcome")
+  in
+  check bool "corrupt journal is not auto-deleted" true
+    (Sys.file_exists report.journal_path);
+  check string "manifest unchanged while journal corrupt" "[keeper]\nname = \"corrupt\"\n"
+    (Fs_compat.load_file manifest_path);
+  check string "runtime unchanged while journal corrupt" "[exec.test]\nruntime = \"before\"\n"
+    (Fs_compat.load_file runtime_path)
 ;;
 
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
@@ -2084,6 +2757,42 @@ let () =
             "post-write revision failure restores missing manifest"
             `Quick
             test_post_write_revision_failure_restores_missing_manifest
+        ; test_case
+            "publish rejected while unresolved journal exists"
+            `Quick
+            test_publish_rejected_while_unresolved_journal_exists
+        ; test_case
+            "compensated rollback clears the crash journal"
+            `Quick
+            test_compensated_rollback_clears_crash_journal
+        ; test_case "failed writes and publication compensate once" `Quick
+            test_config_write_failures_compensate_once
+        ; test_case "journal rejects foreign paths and preserves read errors" `Quick
+            test_journal_rejects_foreign_paths_and_unreadable_files
+        ; test_case "retained journal protects runtime and manifest writers" `Quick
+            test_retained_journal_protects_all_config_writers
+        ; test_case "actor publication follows durable configuration commit" `Quick
+            test_actor_publication_starts_after_config_commit
+        ; test_case "no-journal startup preserves read-only configuration" `Quick
+            test_no_journal_startup_preserves_read_only_config
+        ; test_case
+            "journal recovery recovers interrupted dual-write"
+            `Quick
+            test_config_journal_recovery_recovers_composite_write
+        ; test_case "initial configuration rechecks a journal staged after early recovery" `Quick
+            test_initial_configuration_rechecks_journal_after_early_recovery
+        ; test_case "initial configuration excludes a concurrent writer until publication" `Quick
+            test_initial_configuration_excludes_concurrent_writers
+        ; test_case "initial configuration preserves missing and invalid setup observations" `Quick
+            test_initial_configuration_preserves_setup_observations
+        ; test_case
+            "journal recovery no-op when journal missing"
+            `Quick
+            test_config_journal_recovery_ignores_missing_journal
+        ; test_case
+            "journal recovery reports corrupt manifest"
+            `Quick
+            test_config_journal_recovery_corrupt_journal_flags_error
         ] )
     ]
 ;;

@@ -61,18 +61,21 @@ afterEach(() => {
 })
 
 describe('IdeConversationRail', () => {
-  it('renders the conversation rail with empty state when no API data', () => {
+  it('renders loading before confirming the empty conversation window', async () => {
     const container = document.createElement('div')
     render(h(IdeConversationRail, {}), container)
 
     const region = container.querySelector('[role="region"]')
     expect(region?.getAttribute('aria-label')).toBe('REACTION THREAD')
     expect(region?.classList.contains('ide-conversation-panel')).toBe(true)
-    expect(container.querySelector('.ide-rail-scope')?.getAttribute('aria-label')).toBe('Keeper workspace scope')
+    expect(container.querySelector('[aria-label="Keeper workspace scope"]')?.getAttribute('aria-label')).toBe('Keeper workspace scope')
     expect(container.querySelector('.ide-rail-list')).not.toBeNull()
     expect(container.textContent).toContain('REACTION THREAD')
     expect(container.textContent).toContain('0')
-    expect(container.textContent).toContain('no conversation activity')
+    expect(container.textContent).toContain('Conversation sources are incomplete')
+    expect(container.textContent).not.toContain('no conversation activity')
+    await waitFor(() => expect(container.textContent).toContain('no conversation activity in the loaded window'))
+    render(null, container)
   })
 
   it('normalizes explicit board post file references into anchored threads', () => {
@@ -511,5 +514,93 @@ describe('boardKindFromPost', () => {
     expect(boardKindFromPost(stubPost(null))).toBe('note')
     expect(boardKindFromPost(stubPost(''))).toBe('note')
     expect(boardKindFromPost(stubPost('unknown'))).toBe('note')
+  })
+})
+
+describe('Reaction Thread source lifecycle', () => {
+  const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+    status, headers: { 'Content-Type': 'application/json' },
+  })
+  const board = (body: string) => ({ posts: [{ id: 'post-refresh', author: 'editor', title: 'Review', body,
+    created_at: '2026-09-13T00:00:00Z', updated_at: '2026-09-13T00:00:00Z', comment_count: 0, votes: 0 }] })
+  it('preserves independent successful data through failure and retries only the selected source', async () => {
+    let failBoard = true, failDecisions = true
+    const calls = { board: 0, decisions: 0 }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/v1/board')) {
+        calls.board++
+        return failBoard ? response({}, 503) : response(board('Retained original Board note'))
+      }
+      calls.decisions++
+      return failDecisions ? response({}, 503) : response({ events: [], limit: 200, generated_at: null })
+    }))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(container.querySelectorAll('[data-load-state="error"]')).toHaveLength(2))
+      expect(container.textContent).not.toContain('no conversation activity')
+      failBoard = false
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Retry Board"]')!)
+      await waitFor(() => expect(container.textContent).toContain('Retained original Board note'))
+      expect(calls).toEqual({ board: 2, decisions: 1 })
+      failBoard = true
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Refresh Board"]')!)
+      await waitFor(() => expect(container.textContent).toContain('Refresh failed; showing last successful data'))
+      expect(container.textContent).toContain('Retained original Board note')
+      expect(container.querySelector('[data-conversation-source="Board"] time')).not.toBeNull()
+      failDecisions = false
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Retry Decisions"]')!)
+      await waitFor(() => expect(container.querySelector('[data-conversation-source="Decisions"]')?.getAttribute('data-load-state')).toBe('ready'))
+      expect(calls).toEqual({ board: 3, decisions: 2 })
+    } finally { render(null, container) }
+  })
+  it('aborts superseded and unmounted reads and ignores their late replies', async () => {
+    const pending: Array<{ signal: AbortSignal; finish: (value: Response) => void }> = []
+    vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
+      if (!url.startsWith('/api/v1/board')) return Promise.resolve(response({ events: [], limit: 200, generated_at: null }))
+      return new Promise<Response>(finish => pending.push({ signal: options.signal as AbortSignal, finish }))
+    }))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(pending).toHaveLength(1))
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Refresh Board"]')!)
+      await waitFor(() => expect(pending).toHaveLength(2))
+      expect(pending[0]!.signal.aborted).toBe(true)
+      pending[1]!.finish(response(board('New observation')))
+      await waitFor(() => expect(container.textContent).toContain('New observation'))
+      pending[0]!.finish(response(board('Superseded observation')))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(container.textContent).not.toContain('Superseded observation')
+      fireEvent.click(container.querySelector<HTMLButtonElement>('[aria-label="Refresh Board"]')!)
+      await waitFor(() => expect(pending).toHaveLength(3))
+      render(null, container)
+      expect(pending[2]!.signal.aborted).toBe(true)
+      pending[2]!.finish(response(board('After unmount')))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(container.textContent).toBe('')
+    } finally { render(null, container) }
+  })
+  it('reports a malformed Decisions envelope while retaining independently loaded Board notes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => response(url.startsWith('/api/v1/board')
+      ? board('Independent Board note') : { unavailable: true })))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(container.querySelector('[data-conversation-source="Decisions"]')?.getAttribute('data-load-state')).toBe('error'))
+      expect(container.textContent).toContain('Independent Board note')
+      expect(container.textContent).not.toContain('no conversation activity')
+    } finally { render(null, container) }
+  })
+  it('reports a malformed Board envelope as failure rather than empty success', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => response(url.startsWith('/api/v1/board')
+      ? { unavailable: true } : { events: [], limit: 200, generated_at: null })))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(container.textContent).toContain('Invalid Board posts response'))
+      expect(container.querySelector('[data-conversation-source="Board"]')?.getAttribute('data-load-state')).toBe('error')
+      expect(container.textContent).not.toContain('no conversation activity')
+    } finally { render(null, container) }
   })
 })

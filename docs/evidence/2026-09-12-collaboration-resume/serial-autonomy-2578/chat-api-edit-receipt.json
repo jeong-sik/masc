@@ -1,0 +1,218 @@
+{
+  "source_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+  "endpoint": "/api/v1/keepers/exhibit-editor/tool-calls?limit=1000",
+  "entry": {
+    "ts": 1789213537.223654,
+    "record_kind": "tool_call",
+    "keeper": "exhibit-editor",
+    "tool": "Edit",
+    "input": {
+      "file_path": "serial/story.md",
+      "new_string": "폐막 삼십 분 전. 은빛정류장 전시실의 불이 하나둘 어두워지기 시작했다.",
+      "old_string": "폐막三十 분 전. 은빛정류장 전시실의 불이 하나둘 어두워지기 시작했다."
+    },
+    "output": {
+      "_blob": {
+        "sha256": "8fd7e15a5ca3239a37ddece6a66dcec75e5c7ffd9fadc1392d97a5b44cf109ff",
+        "bytes": 1335,
+        "mime": "application/vnd.masc.tool-result-manifest+json",
+        "preview": ""
+      }
+    },
+    "success": true,
+    "duration_ms": 26.957988739013672,
+    "runtime_contract": {
+      "keeper_name": "exhibit-editor",
+      "trace_id": "trace-1789042595401-00001",
+      "session_id": "trace-1789042595401-00001",
+      "generation": null,
+      "keeper_turn_id": 392,
+      "task_id": "task-003",
+      "goal_ids": [],
+      "sandbox_profile": "docker",
+      "sandbox_root": "/home/keeper/playground/exhibit-editor",
+      "sandbox_roots": [
+        ".masc/playground/docker/exhibit-editor/"
+      ],
+      "path_resolution": {
+        "read_implicit_cwd": false,
+        "read_explicit_cwd_supported": true,
+        "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+        "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+        "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+        "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+      },
+      "network_mode": "none",
+      "runtime_profile": "glm-coding.glm-5.3"
+    },
+    "action_radius": {
+      "tool_name": "Edit",
+      "action_key": "Edit",
+      "target_kind": "path",
+      "target_path": "serial/story.md",
+      "sandbox_target": "docker",
+      "observed_paths": [
+        "serial/story.md"
+      ],
+      "success": true,
+      "duration_ms": 26.957988739013672,
+      "error": null
+    },
+    "route_evidence": {
+      "descriptor_id": "agent.edit_file",
+      "capability_id": "tool_edit_file",
+      "keeper_model_projection": "preferred_public_name",
+      "public_name": "Edit",
+      "canonical_name": "tool_edit_file",
+      "description": "Patch an existing file by replacing an exact string. Prefer Edit over sed -i/awk/perl via Execute for file changes: the exact-match check and the 'not found' error keep a failed edit from writing anything. Each call replaces one exact string (every occurrence with replace_all=true); apply several disjoint changes as successive Edit calls. Read the file first and copy old_string verbatim from its current bytes, including leading whitespace, indentation, and newlines; the match is exact and byte-sensitive. On 'old_string not found', re-Read the file to get the current text instead of retrying the same string.",
+      "executor": "filesystem",
+      "backend": "sandbox_process",
+      "sandbox": "backend_selected",
+      "runtime_handler": "tool_edit_file",
+      "execution": "serial",
+      "tool_kind": "atomic",
+      "composable_output": {
+        "kind": "json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string"
+            },
+            "bytes_written": {
+              "type": "integer"
+            },
+            "via": {
+              "type": "string"
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "occurrences": {
+              "type": "integer"
+            },
+            "replace_all": {
+              "type": "boolean"
+            },
+            "edit_snapshots": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "before": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": true
+                },
+                "after": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": true
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "ok",
+            "path",
+            "mode",
+            "bytes_written"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "receipt_labels": {
+        "descriptor_id": "agent.edit_file",
+        "capability_id": "tool_edit_file",
+        "keeper_model_projection": "preferred_public_name",
+        "public_name": "Edit",
+        "canonical_name": "tool_edit_file",
+        "executor": "filesystem",
+        "backend": "sandbox_process",
+        "sandbox": "backend_selected",
+        "runtime_handler": "tool_edit_file",
+        "execution": "serial",
+        "composable_output": "opaque",
+        "input_schema_source": "canonical_registry"
+      },
+      "eval_tags": [],
+      "readonly": false,
+      "cwd_scope": "keeper_sandbox",
+      "polling_read": false,
+      "tool_name": "Edit"
+    },
+    "agent_name": "exhibit-editor",
+    "model": "runtime",
+    "runtime_profile": "glm-coding.glm-5.3",
+    "turn_kind": "autonomous",
+    "lane": "tool_optional",
+    "prompt_fingerprint": "c5a5f086d9990cab30459ce526e8714c86d36d747e7b4a79539b79fbb0129b4d",
+    "execution_id": "exec-1789213537223-0038",
+    "tool_use_id": "call_80c8b4da5a914449b2abf519",
+    "planned_index": 0,
+    "batch_index": 0,
+    "batch_size": 1,
+    "execution_mode": "serial",
+    "disposition": "completed",
+    "artifact_refs": [
+      {
+        "_blob": {
+          "sha256": "3a5e59215198927424829f40d9d30486fee5ed1128e9a486d24a68c59b2df91c",
+          "bytes": 10335,
+          "mime": "application/octet-stream",
+          "preview": ""
+        }
+      },
+      {
+        "_blob": {
+          "sha256": "64b4e4fbd644605c3f5a07d46c814f58b6fcd40a246dfff69d9ee53aad025c60",
+          "bytes": 10336,
+          "mime": "application/octet-stream",
+          "preview": ""
+        }
+      }
+    ],
+    "file_change_evidence": {
+      "kind": "edit",
+      "occurrence_count": 1,
+      "occurrences": [
+        {
+          "old_range": {
+            "start_line": 77,
+            "end_line": 77
+          },
+          "new_range": {
+            "start_line": 77,
+            "end_line": 77
+          }
+        }
+      ]
+    },
+    "trace_id": "trace-1789042595401-00001",
+    "session_id": "trace-1789042595401-00001",
+    "turn": 688,
+    "keeper_turn_id": 392,
+    "task_id": "task-003",
+    "sandbox_profile": "docker",
+    "network_mode": "none",
+    "result_bytes": 593,
+    "definition_source": "tools/Edit.toml"
+  },
+  "scope": "Actual authenticated HTTP receipt; not a rendered Chat diff proof."
+}

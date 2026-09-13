@@ -36,6 +36,20 @@ let test_dead_server_fd_flat () =
   in
   let pool = Masc_http_client.Pool.create ~sw ~env ~config () in
   let url = Printf.sprintf "http://127.0.0.1:%d/" (closed_port ()) in
+  (* One request before the baseline. What this case holds is that a refused
+     request keeps no descriptor -- growth per request -- and the first
+     request through a fresh pool also opens the things a first request opens
+     once: the count came out 1 whether the loop ran 5 times or 200, so what
+     was being measured was first use, not a leak. Measured on macOS 26,
+     2026-09-13.
+
+     The warm-up is asserted like the rest: if the first request stopped
+     failing at TCP, the loop below would be measuring a different thing. *)
+  let warm_up =
+    error_message (Masc_http_client.Pool.request pool ~method_:`GET ~url ())
+  in
+  Alcotest.(check bool) "the warm-up request is refused like the rest" true
+    (Astring.String.is_prefix ~affix:"TCP connect failed:" warm_up);
   let fd_before = (Fd_accountant.fd_snapshot ()).fd_open in
   for _ = 1 to 50 do
     let msg = error_message

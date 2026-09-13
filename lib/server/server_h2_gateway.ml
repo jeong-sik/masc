@@ -1525,6 +1525,48 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       (* ═══════════════════════════════════════════════════════════════════════
          Delegated route groups
          ═══════════════════════════════════════════════════════════════════════ *)
+      (* Probing an endpoint spends a credit on a metered provider, the same
+         reason /voice/transcribe is admin-gated rather than carrying a public
+         capability. The HTTP/1 router registers the same two paths in
+         server_routes_http_routes_voice.ml; both tables read the request and
+         shape the report through Server_voice_probe, so a client that selects
+         h2c is answered by the same code as one that does not. *)
+      | `POST, "/api/v1/voice/probe/tts" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun _state _actor ->
+               h2_read_body h2_reqd (fun body ->
+                 match Server_voice_probe.tts_report ~body with
+                 | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+                 | Error reason ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String reason ])
+                     ~status:`Bad_request
+                     ~extra_headers:cors))
+
+      (* The audio arrives in the raw body, not as a multipart part. *)
+      | `POST, "/api/v1/voice/probe/stt" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun _state _actor ->
+               h2_read_body h2_reqd (fun body ->
+                 match
+                   Server_voice_probe.stt_report
+                     ~content_type:
+                       (Httpun.Headers.get httpun_request.headers "content-type")
+                     ~body
+                 with
+                 | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
+                 | Error reason ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String reason ])
+                     ~status:`Bad_request
+                     ~extra_headers:cors))
+
       | _
         when Server_h2_gateway_routes_extra.dispatch ~h2_reqd ~httpun_request
                ~cors ~path

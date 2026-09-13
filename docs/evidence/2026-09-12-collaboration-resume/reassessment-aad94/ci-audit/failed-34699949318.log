@@ -1,0 +1,850 @@
+lint suite	Blocking lints	﻿2026-09-12T14:41:34.1208892Z ##[group]Run bash scripts/ci/run-lint-suite.sh blocking-pr \
+lint suite	Blocking lints	2026-09-12T14:41:34.1209546Z [36;1mbash scripts/ci/run-lint-suite.sh blocking-pr \[0m
+lint suite	Blocking lints	2026-09-12T14:41:34.1210003Z [36;1m  "132f808e9325fe0d60959a33c4a5c9b927d99217"[0m
+lint suite	Blocking lints	2026-09-12T14:41:34.1233833Z shell: /usr/bin/bash -e {0}
+lint suite	Blocking lints	2026-09-12T14:41:34.1234234Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:34.1301579Z ##[group]Installer terminal wizard
+lint suite	Blocking lints	2026-09-12T14:41:35.0274362Z ..............
+lint suite	Blocking lints	2026-09-12T14:41:35.0275855Z ----------------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:41:35.0276847Z Ran 14 tests in 0.832s
+lint suite	Blocking lints	2026-09-12T14:41:35.0277209Z 
+lint suite	Blocking lints	2026-09-12T14:41:35.0277632Z OK
+lint suite	Blocking lints	2026-09-12T14:41:35.0404300Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:35.0405593Z ##[group]Installer upgrade configuration
+lint suite	Blocking lints	2026-09-12T14:41:35.2264905Z ...
+lint suite	Blocking lints	2026-09-12T14:41:35.2265891Z ----------------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:41:35.2266458Z Ran 3 tests in 0.139s
+lint suite	Blocking lints	2026-09-12T14:41:35.2266705Z 
+lint suite	Blocking lints	2026-09-12T14:41:35.2267447Z OK
+lint suite	Blocking lints	2026-09-12T14:41:35.2359055Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:35.2360079Z ##[group]Issue taxonomy truth
+lint suite	Blocking lints	2026-09-12T14:41:35.3119642Z issue taxonomy truth: 32 values named in 2 docs
+lint suite	Blocking lints	2026-09-12T14:41:35.3120869Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:35.3121548Z ##[group]Logging consistency
+lint suite	Blocking lints	2026-09-12T14:41:39.5233271Z ─── logging-consistency ───────────────────
+lint suite	Blocking lints	2026-09-12T14:41:39.5234999Z   current:  0
+lint suite	Blocking lints	2026-09-12T14:41:39.5235723Z   baseline: 0
+lint suite	Blocking lints	2026-09-12T14:41:39.5236417Z   status: OK
+lint suite	Blocking lints	2026-09-12T14:41:39.5237783Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:39.5238652Z ##[group]Issue taxonomy parser and reconciliation
+lint suite	Blocking lints	2026-09-12T14:41:39.5508250Z issue-taxonomy-core: parser and reconciliation contracts passed
+lint suite	Blocking lints	2026-09-12T14:41:39.5545046Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:39.5605784Z ##[notice]Skipping OCaml test suite reporter self-test; scripts/ci-run-test-suite.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:39.5613430Z ##[group]Edited-tests selector self-test
+lint suite	Blocking lints	2026-09-12T14:41:39.6330719Z ok   a source edit selects the suites named after it
+lint suite	Blocking lints	2026-09-12T14:41:39.6947047Z ok   an umbrella module selects only the guards that name it
+lint suite	Blocking lints	2026-09-12T14:41:39.7575094Z ok   a watched source reaches the guard that declares it
+lint suite	Blocking lints	2026-09-12T14:41:39.8121559Z ok   a guard that opens its input is selected too
+lint suite	Blocking lints	2026-09-12T14:41:39.8697247Z ok   a package source selects its suites in both test roots
+lint suite	Blocking lints	2026-09-12T14:41:39.9131239Z ok   a doc no suite names selects nothing
+lint suite	Blocking lints	2026-09-12T14:41:39.9699971Z ok   a document a suite reads selects that suite
+lint suite	Blocking lints	2026-09-12T14:41:40.2868766Z ok   past the cap with no asset there is nothing left
+lint suite	Blocking lints	2026-09-12T14:41:40.6362073Z ok   past the cap a tool definition still reaches its guards
+lint suite	Blocking lints	2026-09-12T14:41:40.6943578Z ok   a tool definition reaches every guard over it
+lint suite	Blocking lints	2026-09-12T14:41:40.7518637Z ok   a prompt asset reaches the asset guard and the prompt golden
+lint suite	Blocking lints	2026-09-12T14:41:40.8053401Z ok   an edited test is still selected on its own
+lint suite	Blocking lints	2026-09-12T14:41:40.8891875Z ok   a source and its own suite are one entry
+lint suite	Blocking lints	2026-09-12T14:41:40.8892822Z run-edited-tests self-test: all cases pass
+lint suite	Blocking lints	2026-09-12T14:41:40.8894620Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:40.8931880Z ##[notice]Skipping Prompt source words self-test; scripts/lint/prompt-source-words-agree.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:40.8933989Z ##[group]Prompt source words agree
+lint suite	Blocking lints	2026-09-12T14:41:40.9062568Z prompt source words: the producer, the dashboard, and the TUI name the same three
+lint suite	Blocking lints	2026-09-12T14:41:40.9064315Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:40.9065375Z ##[group]Keeper host_cwd leak gate
+lint suite	Blocking lints	2026-09-12T14:41:41.6474895Z OK: no host_cwd leak in lib/keeper
+lint suite	Blocking lints	2026-09-12T14:41:41.6476353Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:41.6513554Z ##[notice]Skipping Turn-path provider-agnostic self-test; scripts/turn-path-provider-agnostic-gate.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:41.6515964Z ##[group]Turn-path provider-agnostic gate
+lint suite	Blocking lints	2026-09-12T14:41:41.6936733Z turn-path provider-agnostic gate: clean (59 files scanned)
+lint suite	Blocking lints	2026-09-12T14:41:41.6938199Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:41.6973598Z ##[notice]Skipping Dashboard tests type-checked self-test; scripts/lint/dashboard-tests-are-type-checked.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:41.6976465Z ##[group]Dashboard tests type-checked
+lint suite	Blocking lints	2026-09-12T14:41:42.9091452Z dashboard tests type-checked: 0 file(s) with @ts-nocheck across 695 test file(s)
+lint suite	Blocking lints	2026-09-12T14:41:42.9093209Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:42.9131496Z ##[notice]Skipping Test suites declared as tests self-test; scripts/lint/test-suites-are-declared-as-tests.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:42.9133514Z ##[group]Test suites declared as tests
+lint suite	Blocking lints	2026-09-12T14:41:42.9502883Z test suite stanzas: 0 test_-named (executable) across 891 stanza name(s)
+lint suite	Blocking lints	2026-09-12T14:41:42.9504631Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:41:42.9542027Z ##[notice]Skipping Dune suite scope self-test (RFC-0428); scripts/ci/dune_suite_scope.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:42.9578390Z ##[notice]Skipping Test stanza env reader self-test; scripts/ci/stanza_env.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:41:42.9580162Z ##[group]Test stanza env is readable
+lint suite	Blocking lints	2026-09-12T14:42:07.1179990Z stanza env: read all 392 stanza files and 926 suites declared in test/dune and its includes; 22 declare an environment, and the directory block adds 4 variable(s) to every one
+lint suite	Blocking lints	2026-09-12T14:42:07.1238153Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.1239386Z ##[group]Hardcoded model prefix
+lint suite	Blocking lints	2026-09-12T14:42:07.1516392Z no-roadmap-stale-hardcoding: clean (2 roots scanned)
+lint suite	Blocking lints	2026-09-12T14:42:07.1530577Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.1531498Z ##[group]Raw font-size px
+lint suite	Blocking lints	2026-09-12T14:42:07.1647477Z no-raw-font-size-px: clean
+lint suite	Blocking lints	2026-09-12T14:42:07.1649370Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.1650452Z ##[group]Harness connector env ratchet (#28807)
+lint suite	Blocking lints	2026-09-12T14:42:07.2531920Z harness-connector-env-ratchet self-test: pass
+lint suite	Blocking lints	2026-09-12T14:42:07.2544767Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.2545678Z ##[group]OCaml comment terminator trap
+lint suite	Blocking lints	2026-09-12T14:42:07.2882959Z no-ocaml-comment-terminator-trap: clean
+lint suite	Blocking lints	2026-09-12T14:42:07.2885106Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.2886491Z ##[group]Wire-field removal schema gate (#29516/#29601/#29666)
+lint suite	Blocking lints	2026-09-12T14:42:07.4477295Z wire-field-removal-schema-gate self-test: pass
+lint suite	Blocking lints	2026-09-12T14:42:07.4506818Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.4508911Z ##[group]Timeout env knob ceiling (RFC-0138)
+lint suite	Blocking lints	2026-09-12T14:42:07.4770860Z [timeout-env-ceiling] distinct MASC_*_TIMEOUT names in lib/: current=24 baseline=24
+lint suite	Blocking lints	2026-09-12T14:42:07.4771664Z PASS
+lint suite	Blocking lints	2026-09-12T14:42:07.4773261Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.4811081Z ##[notice]Skipping .mli env knob exists self-test; scripts/lint/mli-env-knob-exists.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:07.4813207Z ##[group].mli env knob exists
+lint suite	Blocking lints	2026-09-12T14:42:07.5268849Z [mli-env-knob-exists] OK: 113 knobs named in .mli, every one exercised
+lint suite	Blocking lints	2026-09-12T14:42:07.5270260Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.5307725Z ##[notice]Skipping Guard scan targets exist self-test; scripts/lint/guard-scan-targets-exist.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:07.5310206Z ##[group]Guard scan targets exist
+lint suite	Blocking lints	2026-09-12T14:42:07.5884778Z [guard-scan-targets-exist] OK: 156 declared scan targets, every one present
+lint suite	Blocking lints	2026-09-12T14:42:07.5886734Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.5926421Z ##[notice]Skipping Shim stub set agrees self-test; scripts/lint/shim-stub-set-agrees.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:07.5928739Z ##[group]Shim stub set agrees
+lint suite	Blocking lints	2026-09-12T14:42:07.6126464Z [shim-stub-set] 3 stub(s) agree across all three lists
+lint suite	Blocking lints	2026-09-12T14:42:07.6128121Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.6128884Z ##[group]Opam cache freshness ratchet
+lint suite	Blocking lints	2026-09-12T14:42:07.6327023Z [opam-cache-freshness] wiring OK
+lint suite	Blocking lints	2026-09-12T14:42:07.6328704Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.6369422Z ##[notice]Skipping Opam cache freshness self-test; scripts/ci/opam-cache-freshness.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:07.6371308Z ##[group]No actionable-signal bool context
+lint suite	Blocking lints	2026-09-12T14:42:07.7610672Z no-actionable-signal-bool-context: PASS
+lint suite	Blocking lints	2026-09-12T14:42:07.7612209Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.7612959Z ##[group]Provider name hardcoding ratchet
+lint suite	Blocking lints	2026-09-12T14:42:07.7897895Z metric                                  count
+lint suite	Blocking lints	2026-09-12T14:42:07.7898544Z ------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:07.7899426Z provider_name_literals_current              2
+lint suite	Blocking lints	2026-09-12T14:42:07.7899897Z provider_name_allowlist_entries             2
+lint suite	Blocking lints	2026-09-12T14:42:07.7900389Z provider_name_new_literals                  0
+lint suite	Blocking lints	2026-09-12T14:42:07.7900814Z provider_name_stale_allowlist               0
+lint suite	Blocking lints	2026-09-12T14:42:07.7901129Z 
+lint suite	Blocking lints	2026-09-12T14:42:07.7901300Z [no-provider-name-hardcoding] OK
+lint suite	Blocking lints	2026-09-12T14:42:07.7909464Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.7910191Z ##[group]Keeper behavior hardcoding
+lint suite	Blocking lints	2026-09-12T14:42:07.8354814Z [no-keeper-behavior-hardcoding] OK
+lint suite	Blocking lints	2026-09-12T14:42:07.8367377Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.8368506Z ##[group]Eval tool-selector runtime import
+lint suite	Blocking lints	2026-09-12T14:42:07.8510731Z [no-eval-tool-selector-runtime-import] OK
+lint suite	Blocking lints	2026-09-12T14:42:07.8523384Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.8524391Z ##[group]One process manager in lib
+lint suite	Blocking lints	2026-09-12T14:42:07.8736812Z [one-process-manager] OK
+lint suite	Blocking lints	2026-09-12T14:42:07.8749548Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:07.8750465Z ##[group]Legacy tool surface name
+lint suite	Blocking lints	2026-09-12T14:42:08.0522765Z metric                                      count
+lint suite	Blocking lints	2026-09-12T14:42:08.0523411Z ------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:08.0524460Z legacy_tool_name_literals_current               0
+lint suite	Blocking lints	2026-09-12T14:42:08.0524927Z legacy_tool_name_allowlist_entries              0
+lint suite	Blocking lints	2026-09-12T14:42:08.0525329Z legacy_tool_name_new_literals                   0
+lint suite	Blocking lints	2026-09-12T14:42:08.0525714Z legacy_tool_name_stale_allowlist                0
+lint suite	Blocking lints	2026-09-12T14:42:08.0535895Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:08.0537271Z ##[group]Retired tool husk ratchet
+lint suite	Blocking lints	2026-09-12T14:42:08.1414030Z metric                                  count
+lint suite	Blocking lints	2026-09-12T14:42:08.1414739Z ------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:08.1415449Z retired_tool_husk_hits                      0
+lint suite	Blocking lints	2026-09-12T14:42:08.1415856Z 
+lint suite	Blocking lints	2026-09-12T14:42:08.1416024Z [no-retired-tool-husks] OK
+lint suite	Blocking lints	2026-09-12T14:42:08.1426919Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:08.1428278Z ##[group]Synthetic tool-call residue ratchet
+lint suite	Blocking lints	2026-09-12T14:42:08.2236852Z metric                                          count
+lint suite	Blocking lints	2026-09-12T14:42:08.2237685Z ------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:08.2238844Z synthetic_tool_call_residue_hits                    0
+lint suite	Blocking lints	2026-09-12T14:42:08.2239347Z 
+lint suite	Blocking lints	2026-09-12T14:42:08.2239634Z [no-synthetic-tool-call-residue] OK
+lint suite	Blocking lints	2026-09-12T14:42:08.2250766Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:08.2251634Z ##[group]Tool substrate adapter surface
+lint suite	Blocking lints	2026-09-12T14:42:08.4339930Z metric                                          count
+lint suite	Blocking lints	2026-09-12T14:42:08.4340744Z ----------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:08.4341663Z tool_substrate_forbidden_current                    0
+lint suite	Blocking lints	2026-09-12T14:42:08.4342126Z tool_substrate_allowlist_entries                    0
+lint suite	Blocking lints	2026-09-12T14:42:08.4342555Z tool_substrate_new_hits                             0
+lint suite	Blocking lints	2026-09-12T14:42:08.4343011Z tool_substrate_stale_allowlist                      0
+lint suite	Blocking lints	2026-09-12T14:42:08.4352591Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:08.4353436Z ##[group]Tool -> Keeper dependency-direction ratchet (RFC-0194)
+lint suite	Blocking lints	2026-09-12T14:42:11.6292229Z [tool-keeper-boundary-ratchet] OK (0 baselined, 0 new).
+lint suite	Blocking lints	2026-09-12T14:42:11.6293335Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:11.6294296Z ##[group]MASC domain ownership ratchet
+lint suite	Blocking lints	2026-09-12T14:42:12.7123592Z [masc-domain-boundary-ratchet] OK (0 baselined, 0 new).
+lint suite	Blocking lints	2026-09-12T14:42:12.7125118Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.7162817Z ##[notice]Skipping Keeper turn content boundary self-test; scripts/check-keeper-turn-content-boundary.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:12.7167146Z ##[group]No Tool_result.error + Printexc (RFC-0148)
+lint suite	Blocking lints	2026-09-12T14:42:12.7288263Z OK: no RFC-0148 backsliding sites in lib/tool_*.ml
+lint suite	Blocking lints	2026-09-12T14:42:12.7289449Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.7327275Z ##[notice]Skipping Board attention exact-flow boundary self-test; scripts/check-board-attention-exact-flow-boundary.sh is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:12.7330680Z ##[group]Boundary redaction SSOT (RFC-0132 PR-3)
+lint suite	Blocking lints	2026-09-12T14:42:12.7728208Z metric                                          count
+lint suite	Blocking lints	2026-09-12T14:42:12.7730146Z --------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:12.7730948Z rfc0132_pr3_scan_files                             13
+lint suite	Blocking lints	2026-09-12T14:42:12.7731774Z rfc0132_pr3_preapproved_entries                     0
+lint suite	Blocking lints	2026-09-12T14:42:12.7732590Z rfc0132_pr3_violations                              0
+lint suite	Blocking lints	2026-09-12T14:42:12.7733379Z rfc0132_pr3_stale_preapproved                       0
+lint suite	Blocking lints	2026-09-12T14:42:12.7734150Z 
+lint suite	Blocking lints	2026-09-12T14:42:12.7734651Z [no-runtime-literal-outside-boundary-redaction] OK
+lint suite	Blocking lints	2026-09-12T14:42:12.7747107Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.7748258Z ##[group]No fabricated telemetry
+lint suite	Blocking lints	2026-09-12T14:42:12.7931499Z no-fabricated-telemetry: clean
+lint suite	Blocking lints	2026-09-12T14:42:12.7944893Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.7946141Z ##[group]No inline ok-envelope literals
+lint suite	Blocking lints	2026-09-12T14:42:12.8242922Z OK: no inline ok-envelope literals found outside allowlist
+lint suite	Blocking lints	2026-09-12T14:42:12.8257239Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.8258224Z ##[group]Tool-subject key lists mirror each other
+lint suite	Blocking lints	2026-09-12T14:42:12.8444282Z subject-keys-mirror: OK — the three lists match in membership and order
+lint suite	Blocking lints	2026-09-12T14:42:12.8445714Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.8446842Z ##[group]No inline error-envelope literals
+lint suite	Blocking lints	2026-09-12T14:42:12.8741009Z OK: no inline error-envelope literals found outside allowlist
+lint suite	Blocking lints	2026-09-12T14:42:12.8755583Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.8756631Z ##[group]No inline json_kind_name
+lint suite	Blocking lints	2026-09-12T14:42:12.9019451Z OK: no inline Yojson kind classifiers outside allowlist
+lint suite	Blocking lints	2026-09-12T14:42:12.9034328Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.9035160Z ##[group]No yojson 3.0 dead arms
+lint suite	Blocking lints	2026-09-12T14:42:12.9436033Z OK: no yojson 3.0 dead arms found
+lint suite	Blocking lints	2026-09-12T14:42:12.9449497Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:12.9450267Z ##[group]Workflow YAML syntax
+lint suite	Blocking lints	2026-09-12T14:42:13.0578267Z yaml-syntax: 16 workflow file(s) parsed OK
+lint suite	Blocking lints	2026-09-12T14:42:13.0632119Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:13.0633098Z ##[group]Board SLO extractor fixture
+lint suite	Blocking lints	2026-09-12T14:42:13.2252584Z board-slo-extractor fixture test passed
+lint suite	Blocking lints	2026-09-12T14:42:13.2270753Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:13.2271520Z ##[group]Feedback-loop metrics fixture
+lint suite	Blocking lints	2026-09-12T14:42:13.3845574Z feedback-loop metrics fixture: OK
+lint suite	Blocking lints	2026-09-12T14:42:13.3862091Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:13.3863193Z ##[group]Agent-core package shape
+lint suite	Blocking lints	2026-09-12T14:42:14.4331650Z agent-core package shape: ok
+lint suite	Blocking lints	2026-09-12T14:42:14.4333516Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:14.4334416Z ##[group]Execute async surface
+lint suite	Blocking lints	2026-09-12T14:42:14.4637388Z execute-async-surface: PASS
+lint suite	Blocking lints	2026-09-12T14:42:14.4638504Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:14.4639264Z ##[group]HITL exact-flow boundary
+lint suite	Blocking lints	2026-09-12T14:42:14.5911245Z HITL exact-flow boundary: OK
+lint suite	Blocking lints	2026-09-12T14:42:14.5913680Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:14.5914662Z ##[group]Turn-records envelope parity
+lint suite	Blocking lints	2026-09-12T14:42:14.6130070Z [turn-records-envelope] OK - 18 keys, server and dashboard agree
+lint suite	Blocking lints	2026-09-12T14:42:14.6169589Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:14.6170213Z ##[group]Feature flag consistency
+lint suite	Blocking lints	2026-09-12T14:42:14.6202478Z === Feature Flag Consistency Check ===
+lint suite	Blocking lints	2026-09-12T14:42:14.6489114Z 
+lint suite	Blocking lints	2026-09-12T14:42:14.6490112Z --- Checking consumer coverage ---
+lint suite	Blocking lints	2026-09-12T14:42:14.6680062Z OK: All literal registry consumers are registered.
+lint suite	Blocking lints	2026-09-12T14:42:14.6680746Z 
+lint suite	Blocking lints	2026-09-12T14:42:14.6680979Z --- Checking for stale literal registry entries ---
+lint suite	Blocking lints	2026-09-12T14:42:14.6866224Z OK: Every literal registry entry has a runtime consumer.
+lint suite	Blocking lints	2026-09-12T14:42:14.6866789Z 
+lint suite	Blocking lints	2026-09-12T14:42:14.6907949Z Summary: 14 literal consumers, 14 registry entries, 0 error(s)
+lint suite	Blocking lints	2026-09-12T14:42:14.6908974Z PASS: Feature flag consistency check passed.
+lint suite	Blocking lints	2026-09-12T14:42:14.6909969Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:14.6910853Z ##[group]Drain loops yield
+lint suite	Blocking lints	2026-09-12T14:42:14.7629208Z check-drain-loop-yields: ok (15/15 drain-caller file(s) verified)
+lint suite	Blocking lints	2026-09-12T14:42:14.7630412Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:14.7631165Z ##[group]Log severity anti-patterns
+lint suite	Blocking lints	2026-09-12T14:42:14.8343163Z OK    L1a (silent + warn): 3
+lint suite	Blocking lints	2026-09-12T14:42:14.8975409Z OK    L1b (logging-only mode + warn): 0
+lint suite	Blocking lints	2026-09-12T14:42:14.9592207Z OK    L2 (operator_broadcast + info): 0
+lint suite	Blocking lints	2026-09-12T14:42:15.0686642Z OK    L4 (watchdog/keepalive/heartbeat + info): 0
+lint suite	Blocking lints	2026-09-12T14:42:15.1292929Z OK    L5 (validation success (coerced) + info): 0
+lint suite	Blocking lints	2026-09-12T14:42:15.1921732Z OK    L6 (outcome-carrying line + static info): 0
+lint suite	Blocking lints	2026-09-12T14:42:15.1922167Z 
+lint suite	Blocking lints	2026-09-12T14:42:15.1922696Z ─── Summary ───────────────────────────────
+lint suite	Blocking lints	2026-09-12T14:42:15.1923199Z   current total:  3
+lint suite	Blocking lints	2026-09-12T14:42:15.1923892Z   baseline total: 3
+lint suite	Blocking lints	2026-09-12T14:42:15.1924348Z   delta:          0
+lint suite	Blocking lints	2026-09-12T14:42:15.1924739Z   status: OK
+lint suite	Blocking lints	2026-09-12T14:42:15.1925627Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:15.1926748Z ##[group]Determinism contract
+lint suite	Blocking lints	2026-09-12T14:42:15.4027954Z === Scan: new deterministic-boundary ratchet ===
+lint suite	Blocking lints	2026-09-12T14:42:16.9920060Z FAIL: new deterministic-boundary debt added:
+lint suite	Blocking lints	2026-09-12T14:42:16.9943161Z origin/main...HEAD: lib/verification_collaboration_evidence.ml:62:   let offset = Option.value (Json_util.get_int args "comment_offset") ~default:0 in
+lint suite	Blocking lints	2026-09-12T14:42:16.9946625Z 
+lint suite	Blocking lints	2026-09-12T14:42:16.9948074Z Wrap non-determinism at the boundary, keep parsing sound-partial, or add a nearby DET-OK/NDT-OK comment with rationale.
+lint suite	Blocking lints	2026-09-12T14:42:16.9949139Z === Scan: deterministic branch on non-deterministic source ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0114513Z === Scan: permissive default on unknown input ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0226264Z WARN: Option.value with default on potentially unknown input (sound partial?):
+lint suite	Blocking lints	2026-09-12T14:42:17.0247849Z lib/mcp_server_eio_call_tool.ml-317-    ~(execution_id : Ids.Execution_id.t) : unit =
+lint suite	Blocking lints	2026-09-12T14:42:17.0249001Z lib/mcp_server_eio_call_tool.ml:318:  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
+lint suite	Blocking lints	2026-09-12T14:42:17.0249612Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0250014Z lib/mcp_server_eio_call_tool.ml-323-  in
+lint suite	Blocking lints	2026-09-12T14:42:17.0250573Z lib/mcp_server_eio_call_tool.ml:324:  let turn = Option.value ~default:0 ctx.turn in
+lint suite	Blocking lints	2026-09-12T14:42:17.0251065Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0251428Z lib/mcp_server_eio_protocol.ml-463-       let arguments =
+lint suite	Blocking lints	2026-09-12T14:42:17.0252342Z lib/mcp_server_eio_protocol.ml:464:         match Option.value ~default:`Null (Json_util.assoc_member_opt "arguments" payload) with
+lint suite	Blocking lints	2026-09-12T14:42:17.0252950Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0253303Z lib/mcp_server_eio_protocol.ml-1216-        else None)
+lint suite	Blocking lints	2026-09-12T14:42:17.0253904Z lib/mcp_server_eio_protocol.ml:1217:      |> Option.value ~default:0
+lint suite	Blocking lints	2026-09-12T14:42:17.0254394Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0254816Z lib/keeper/keeper_effective_tool_surface.ml-502-         else None)
+lint suite	Blocking lints	2026-09-12T14:42:17.0255489Z lib/keeper/keeper_effective_tool_surface.ml:503:    |> Option.value ~default:[]
+lint suite	Blocking lints	2026-09-12T14:42:17.0256677Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0257245Z lib/keeper/keeper_world_observation_message_scope.ml-324-    in
+lint suite	Blocking lints	2026-09-12T14:42:17.0257870Z lib/keeper/keeper_world_observation_message_scope.ml:325:    Option.value ~default:messages (drop messages)
+lint suite	Blocking lints	2026-09-12T14:42:17.0258470Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0258842Z lib/keeper/keeper_memory_os_current.ml-253-         (fun premise_id ->
+lint suite	Blocking lints	2026-09-12T14:42:17.0259877Z lib/keeper/keeper_memory_os_current.ml:254:            let current = Hashtbl.find_opt dependents premise_id |> Option.value ~default:[] in
+lint suite	Blocking lints	2026-09-12T14:42:17.0260534Z === Scan: catch-all permissive default ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0442052Z WARN: catch-all branch returning Some (possible unsound default):
+lint suite	Blocking lints	2026-09-12T14:42:17.0459451Z lib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate
+lint suite	Blocking lints	2026-09-12T14:42:17.0460146Z lib/telemetry_unified/telemetry_unified.ml-114-
+lint suite	Blocking lints	2026-09-12T14:42:17.0460675Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0461186Z lib/dashboard/dashboard_execution_helpers.ml:43:            | _ -> Some (candidate, candidate_ts)))
+lint suite	Blocking lints	2026-09-12T14:42:17.0461883Z lib/dashboard/dashboard_execution_helpers.ml-44-  in
+lint suite	Blocking lints	2026-09-12T14:42:17.0462446Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0462855Z lib/fusion_core/fusion_harness_core.ml:55:          | _ -> Some (rep, n))
+lint suite	Blocking lints	2026-09-12T14:42:17.0463867Z lib/fusion_core/fusion_harness_core.ml-56-        None ordered_keys
+lint suite	Blocking lints	2026-09-12T14:42:17.0464373Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0464868Z lib/server/server_routes_http_routes_workspace.ml:585:     | _ -> Some (String.concat " " parts))
+lint suite	Blocking lints	2026-09-12T14:42:17.0466144Z lib/server/server_routes_http_routes_workspace.ml-586-  | _ when String.equal added "-" && String.equal deleted "-" -> Some "bin"
+lint suite	Blocking lints	2026-09-12T14:42:17.0466755Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0467262Z lib/server/server_dashboard_http_composite_claims.ml:451:          | _ -> Some "runtime_blocked"))
+lint suite	Blocking lints	2026-09-12T14:42:17.0468112Z lib/server/server_dashboard_http_composite_claims.ml-452-  in
+lint suite	Blocking lints	2026-09-12T14:42:17.0468747Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0469191Z lib/server/server_dashboard_http_keeper_api.ml:1079:                  | _ -> Some entry.ts)
+lint suite	Blocking lints	2026-09-12T14:42:17.0469835Z lib/server/server_dashboard_http_keeper_api.ml-1080-                None entries
+lint suite	Blocking lints	2026-09-12T14:42:17.0470284Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.0470655Z lib/server/server_dashboard_http_keeper_api.ml:1758:            | _ -> Some r.ts)
+lint suite	Blocking lints	2026-09-12T14:42:17.0473248Z lib/server/server_dashboard_http_keeper_api.ml-1759-          None records
+lint suite	Blocking lints	2026-09-12T14:42:17.0474054Z === Scan: unordered iteration in deterministic context ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0627520Z === DET/NDT gate: FAIL ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0641584Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.0646227Z ##[error]Determinism contract (exit 1)
+lint suite	Blocking lints	2026-09-12T14:42:17.0648165Z ##[group]TLA variant sync
+lint suite	Blocking lints	2026-09-12T14:42:17.0674389Z === VAR gate: cross-language variant sync (scripts/check-variants.sh) ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0709358Z === Check 1: KeeperStateMachine.phase (OCaml) vs KeeperPhase (TypeScript) ===
+lint suite	Blocking lints	2026-09-12T14:42:17.0908210Z OK: OCaml(all_phases) <-> TypeScript(KeeperPhase) in sync (8 variants)
+lint suite	Blocking lints	2026-09-12T14:42:17.0908964Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.0909345Z === Check 2: turn_phase (OCaml) vs KeeperTurnCycle.tla domain ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1090853Z OK: OCaml(turn_phase) <-> TLA+(TurnPhaseSet) in sync (6 variants)
+lint suite	Blocking lints	2026-09-12T14:42:17.1091496Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1091978Z === Check 4: PHASE_STYLES record coverage vs KeeperPhase type ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1215942Z OK: TypeScript(KeeperPhase) <-> TypeScript(PHASE_STYLES keys) in sync (8 variants)
+lint suite	Blocking lints	2026-09-12T14:42:17.1216543Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1216746Z === check-variants: PASS ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1217353Z Cross-language check: PASS
+lint suite	Blocking lints	2026-09-12T14:42:17.1217538Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1217712Z === Scan: OCaml lifecycle variants ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1289610Z   Found 90 constructors
+lint suite	Blocking lints	2026-09-12T14:42:17.1290139Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1290371Z === Scan: TLA+ lifecycle domain literals ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1385867Z   Found 69 PascalCase literals
+lint suite	Blocking lints	2026-09-12T14:42:17.1386607Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1386846Z === Scan: Event type strings ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1452542Z INFO: lib/keeper_types/keeper_types.ml has no matching keeper_types.tla under specs/ (not required, but note for 3-way sync)
+lint suite	Blocking lints	2026-09-12T14:42:17.1482546Z INFO: lib/keeper/keeper_types_profile.ml has no matching keeper_types_profile.tla under specs/ (not required, but note for 3-way sync)
+lint suite	Blocking lints	2026-09-12T14:42:17.1483489Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1483919Z === Scan: unexplained wildcard _ in match expressions ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1614015Z WARN: unexplained wildcard match arms in keeper lib (add justification comment):
+lint suite	Blocking lints	2026-09-12T14:42:17.1637754Z scripts/ci/check-tla-variant-sync.sh: line 115: echo: write error: Broken pipe
+lint suite	Blocking lints	2026-09-12T14:42:17.1638542Z   lib/keeper/keeper_supervisor_launch.ml:345:               | _ -> Keeper_registry.Exception (Printexc.to_string exn)
+lint suite	Blocking lints	2026-09-12T14:42:17.1639856Z   lib/keeper/keeper_skill_activation_ledger.ml:971:  | _ -> Error (Expected_object { field })
+lint suite	Blocking lints	2026-09-12T14:42:17.1640781Z   lib/keeper/keeper_skill_activation_ledger.ml:1044:           | _ -> Error (Expected_object { field = "task_ids" }))
+lint suite	Blocking lints	2026-09-12T14:42:17.1641780Z   lib/keeper/keeper_skill_activation_ledger.ml:1196:  | _ -> Error Invalid_action_identity_field
+lint suite	Blocking lints	2026-09-12T14:42:17.1643138Z   lib/keeper/keeper_skill_activation_ledger.ml:1364:      | _ -> []
+lint suite	Blocking lints	2026-09-12T14:42:17.1644192Z   lib/keeper/keeper_board_attention_partition.ml:260:  | _ -> Error (context ^ " must be a string")
+lint suite	Blocking lints	2026-09-12T14:42:17.1645185Z   lib/keeper/keeper_board_attention_partition.ml:267:  | _ -> Error (context ^ " must be a number")
+lint suite	Blocking lints	2026-09-12T14:42:17.1646552Z   lib/keeper/keeper_board_attention_partition.ml:273:  | _ -> Error (context ^ " must be an integer")
+lint suite	Blocking lints	2026-09-12T14:42:17.1647471Z   lib/keeper/keeper_board_attention_partition.ml:391:     | _ -> Ok (Advancing { execution_anchor; last_from; next }))
+lint suite	Blocking lints	2026-09-12T14:42:17.1648547Z   lib/keeper/keeper_board_attention_partition.ml:527:    | _ -> Error (context ^ ".schema_version must be an integer")
+lint suite	Blocking lints	2026-09-12T14:42:17.1649478Z   lib/keeper/keeper_board_attention_partition.ml:1132:      | _ -> Ok ()
+lint suite	Blocking lints	2026-09-12T14:42:17.1650257Z   lib/keeper/keeper_world_observation_message_scope.ml:97:  | _ ->
+lint suite	Blocking lints	2026-09-12T14:42:17.1650993Z   lib/keeper/keeper_world_observation_message_scope.ml:101:     | _ -> "someone")
+lint suite	Blocking lints	2026-09-12T14:42:17.1651741Z   lib/keeper/keeper_world_observation_message_scope.ml:192:  | _ ->
+lint suite	Blocking lints	2026-09-12T14:42:17.1652506Z   lib/keeper/keeper_world_observation_message_scope.ml:223:      | _ -> []
+lint suite	Blocking lints	2026-09-12T14:42:17.1653367Z   lib/keeper/keeper_shutdown_store.ml:451:  | _ -> Error (decode_error field "inside an object")
+lint suite	Blocking lints	2026-09-12T14:42:17.1654285Z   lib/keeper/keeper_shutdown_store.ml:527:  | _ -> Ok ()
+lint suite	Blocking lints	2026-09-12T14:42:17.1655143Z   lib/keeper/keeper_shutdown_store.ml:579:         | _ -> Error (decode_error (field ^ "[]") "a string"))
+lint suite	Blocking lints	2026-09-12T14:42:17.1655896Z   lib/keeper/keeper_shutdown_store.ml:982:    | _ -> Ok () in
+lint suite	Blocking lints	2026-09-12T14:42:17.1656582Z   lib/keeper/keeper_shutdown_store.ml:1385:      | _ ->
+lint suite	Blocking lints	2026-09-12T14:42:17.1657402Z   (Consider replacing with exhaustive match; if _ is intentional, add (* justification: ... *))
+lint suite	Blocking lints	2026-09-12T14:42:17.1657922Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.1658372Z === VAR gate: PASS (no critical drift detected) ===
+lint suite	Blocking lints	2026-09-12T14:42:17.1659317Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.1660044Z ##[group]SSOT spawn drift
+lint suite	Blocking lints	2026-09-12T14:42:17.1885064Z PASS: legacy CLI Spawn mapping is removed.
+lint suite	Blocking lints	2026-09-12T14:42:17.1886290Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.1887010Z ##[group]Silent failure patterns
+lint suite	Blocking lints	2026-09-12T14:42:17.1918665Z === Scan: try/ignore anti-pattern ===
+lint suite	Blocking lints	2026-09-12T14:42:17.2081610Z PASS
+lint suite	Blocking lints	2026-09-12T14:42:17.2082394Z === Scan: wildcard -> () swallow ===
+lint suite	Blocking lints	2026-09-12T14:42:17.2287081Z WARN: wildcard -> () branches without visible logging:
+lint suite	Blocking lints	2026-09-12T14:42:17.2308211Z lib/voice/voice_bridge.ml-1118-             (db_of_amplitude floor +. capture.Voice_config.trigger_margin_db)
+lint suite	Blocking lints	2026-09-12T14:42:17.2309410Z lib/voice/voice_bridge.ml:1119:         | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:42:17.2310185Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.2311155Z lib/notify.ml-60-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> Buffer.add_char buf c
+lint suite	Blocking lints	2026-09-12T14:42:17.2312207Z lib/notify.ml:61:    | _ -> ()
+lint suite	Blocking lints	2026-09-12T14:42:17.2313036Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.2314272Z lib/shutdown_hooks.ml-137-                       (Unix.error_message e))
+lint suite	Blocking lints	2026-09-12T14:42:17.2315295Z lib/shutdown_hooks.ml:138:                | _ -> () (* skip dirs / symlinks / fifos *))
+lint suite	Blocking lints	2026-09-12T14:42:17.2316054Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.2317214Z lib/browser_webdriver.ml-213-        session.handles <- List.filter (fun (_,known) -> known <> id) session.handles;
+lint suite	Blocking lints	2026-09-12T14:42:17.2318061Z lib/browser_webdriver.ml:214:        (match result with `List [] -> t.session <- None; release_resources session | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:42:17.2318697Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.2319222Z lib/fusion/fusion_official_client.ml-190-        | None -> Runtime_quota_window.note_observed_exhausted ~scope:quota_scope)
+lint suite	Blocking lints	2026-09-12T14:42:17.2319881Z lib/fusion/fusion_official_client.ml:191:     | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:42:17.2320289Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.2320841Z lib/model_inference_metrics/model_inference_metrics_entry.ml-361-       | Some n when n < 0 -> add "negative_input_tokens"
+lint suite	Blocking lints	2026-09-12T14:42:17.2321621Z lib/model_inference_metrics/model_inference_metrics_entry.ml:362:       | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:42:17.2322098Z --
+lint suite	Blocking lints	2026-09-12T14:42:17.2322628Z lib/model_inference_metrics/model_inference_metrics_entry.ml-364-       | Some n when n < 0 -> add "negative_output_tokens"
+lint suite	Blocking lints	2026-09-12T14:42:17.2323494Z lib/model_inference_metrics/model_inference_metrics_entry.ml:365:       | _ -> ());
+lint suite	Blocking lints	2026-09-12T14:42:17.2324196Z === Scan: Hashtbl.find without find_opt fallback ===
+lint suite	Blocking lints	2026-09-12T14:42:17.2587918Z === Scan: naked Option.get ===
+lint suite	Blocking lints	2026-09-12T14:42:17.2744116Z === SIL gate: PASS (no critical silent failures detected) ===
+lint suite	Blocking lints	2026-09-12T14:42:17.2746130Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.2746965Z ##[group]Spec Mirrors: references resolve
+lint suite	Blocking lints	2026-09-12T14:42:17.2784077Z === check-spec-truth: scanning TLA+ spec Mirrors: annotations ===
+lint suite	Blocking lints	2026-09-12T14:42:17.2784617Z     Repo root: /home/runner/work/masc/masc
+lint suite	Blocking lints	2026-09-12T14:42:17.2784841Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.4479428Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.4480275Z === check-spec-truth summary ===
+lint suite	Blocking lints	2026-09-12T14:42:17.4481058Z   Refs checked        : 1
+lint suite	Blocking lints	2026-09-12T14:42:17.4481493Z   Skipped (bare block): 0
+lint suite	Blocking lints	2026-09-12T14:42:17.4481838Z   Orphan refs found   : 0
+lint suite	Blocking lints	2026-09-12T14:42:17.4481996Z 
+lint suite	Blocking lints	2026-09-12T14:42:17.4482301Z PASS: all live Mirrors: references resolve to existing OCaml sources.
+lint suite	Blocking lints	2026-09-12T14:42:17.4483357Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.4484787Z ##[group]docs/spec names files that exist
+lint suite	Blocking lints	2026-09-12T14:42:17.4732900Z === spec file references: 83 checked ===
+lint suite	Blocking lints	2026-09-12T14:42:17.4733492Z PASS: every referenced source file exists
+lint suite	Blocking lints	2026-09-12T14:42:17.4774644Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.4775355Z ##[group]Env-read config floor self-test
+lint suite	Blocking lints	2026-09-12T14:42:17.5278845Z PASS: env-read config-floor self-test
+lint suite	Blocking lints	2026-09-12T14:42:17.5359279Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:17.5360122Z ##[group]Exact-field decoders have a preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3400575Z === exact-field decoder preflight coverage ===
+lint suite	Blocking lints	2026-09-12T14:42:18.3401520Z   keeper_event_queue_persistence                   preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3402546Z   keeper_memory_os_current                         preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3403217Z   keeper_memory_source_current                     preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3404817Z   keeper_multimodal_input                          no store — decodes chat/vision request bodies
+lint suite	Blocking lints	2026-09-12T14:42:18.3405962Z   keeper_official_client_session_store             preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3406690Z   keeper_paused_work_disposition_receipt           preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3407694Z   keeper_paused_work_operator_request              no store — decodes an operator request payload
+lint suite	Blocking lints	2026-09-12T14:42:18.3408524Z   keeper_provider_input_snapshot                   preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3409306Z   keeper_usage_resolution                          via Keeper_meta_store through keeper_meta_json_parse
+lint suite	Blocking lints	2026-09-12T14:42:18.3410228Z   turn_record                                      preflight
+lint suite	Blocking lints	2026-09-12T14:42:18.3410642Z 
+lint suite	Blocking lints	2026-09-12T14:42:18.3411034Z PASS: 10 exact-field decoder(s); 8 read by the preflight, 2 declared file-free.
+lint suite	Blocking lints	2026-09-12T14:42:18.3452364Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:18.3453446Z ##[group]Root dune warning mask
+lint suite	Blocking lints	2026-09-12T14:42:18.3560905Z OCaml compile authority: PASS (root dune sets -w +32, +69 and -warn-error +a in dev and release)
+lint suite	Blocking lints	2026-09-12T14:42:18.3563212Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:18.3564383Z ##[group]Path layout SSOT
+lint suite	Blocking lints	2026-09-12T14:42:18.4409635Z audit-path-ssot: OK (0 violations, 0 stale allowlist entries)
+lint suite	Blocking lints	2026-09-12T14:42:18.4557241Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:18.4557833Z ##[group]odoc references resolve
+lint suite	Blocking lints	2026-09-12T14:42:21.5648382Z [odoc-refs] OK - every {!...} and every private-note [name] in lib/**/*.mli resolves (4519 files scanned)
+lint suite	Blocking lints	2026-09-12T14:42:21.5713379Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:21.5714365Z ##[group]TLA bug models keep their pair
+lint suite	Blocking lints	2026-09-12T14:42:21.5758708Z metric                                     current   baseline   dir
+lint suite	Blocking lints	2026-09-12T14:42:21.5759246Z ----------------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:21.5759932Z [strict — ratchet enforced]
+lint suite	Blocking lints	2026-09-12T14:42:21.8674580Z bug_model_coverage_specs                        46         46   INC
+lint suite	Blocking lints	2026-09-12T14:42:21.9515895Z domains_without_bug_model                        0          0   DEC
+lint suite	Blocking lints	2026-09-12T14:42:22.3434869Z 
+lint suite	Blocking lints	2026-09-12T14:42:22.3435585Z [tla-bug-model-ratchet] OK
+lint suite	Blocking lints	2026-09-12T14:42:22.3437628Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:22.3438159Z ##[group]TLA ppx coverage floor
+lint suite	Blocking lints	2026-09-12T14:42:22.3478059Z metric                                     current   baseline
+lint suite	Blocking lints	2026-09-12T14:42:22.3478515Z ----------------------------------------------------------------
+lint suite	Blocking lints	2026-09-12T14:42:22.3846103Z [strict — ratchet enforced (monotonic increase)]
+lint suite	Blocking lints	2026-09-12T14:42:22.3846671Z ppx_deriving_tla_modules                        11         11
+lint suite	Blocking lints	2026-09-12T14:42:22.4219686Z ppx_fsm_guard_files                              6          6
+lint suite	Blocking lints	2026-09-12T14:42:22.4589861Z ppx_deriving_tla_attributes                     16         16
+lint suite	Blocking lints	2026-09-12T14:42:22.4954396Z ppx_fsm_guard_attributes                        20         20
+lint suite	Blocking lints	2026-09-12T14:42:22.4954857Z 
+lint suite	Blocking lints	2026-09-12T14:42:22.4955271Z [descriptive — recorded only]
+lint suite	Blocking lints	2026-09-12T14:42:22.5352268Z lib_subdirs_with_ppx                             9          9
+lint suite	Blocking lints	2026-09-12T14:42:22.6865582Z 
+lint suite	Blocking lints	2026-09-12T14:42:22.6866233Z [tla-ppx-ratchet] OK
+lint suite	Blocking lints	2026-09-12T14:42:22.6870523Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:22.6871016Z ##[group]TLA cfg has a parent spec
+lint suite	Blocking lints	2026-09-12T14:42:23.3989486Z ---
+lint suite	Blocking lints	2026-09-12T14:42:23.3990266Z audit-tla-cfg-orphan summary: 87 cfgs with parent scanned / 0 orphans (incl. no-parent)
+lint suite	Blocking lints	2026-09-12T14:42:23.3991279Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:23.3991921Z ##[group]TLA annotation drift
+lint suite	Blocking lints	2026-09-12T14:42:23.5926511Z 
+lint suite	Blocking lints	2026-09-12T14:42:23.5927782Z tla-annotation-drift summary: 9 constructors checked across 2 type/set pairs, 0 new drift(s), 0 baseline-known drift(s); 3 cross-spec set(s) checked, 0 cross-spec drift(s)
+lint suite	Blocking lints	2026-09-12T14:42:23.5929159Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:23.5929677Z ##[group]Model prefix inheritance
+lint suite	Blocking lints	2026-09-12T14:42:23.6475249Z === runtime exact catalog identities ===
+lint suite	Blocking lints	2026-09-12T14:42:23.6475678Z 
+lint suite	Blocking lints	2026-09-12T14:42:23.6476106Z PASS: 41 runtime provider/model identities; 41 exact catalog rows; 0 recorded provider-base fallback.
+lint suite	Blocking lints	2026-09-12T14:42:23.6530342Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:23.6530893Z ##[group]Every check script is reached
+lint suite	Blocking lints	2026-09-12T14:42:23.9697149Z guards: 119, reached: 99, not wired: 20
+lint suite	Blocking lints	2026-09-12T14:42:23.9697766Z every check script is reached, or listed as one that is not.
+lint suite	Blocking lints	2026-09-12T14:42:23.9741454Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:23.9742331Z ##[group]Fun.protect finalizer guard
+lint suite	Blocking lints	2026-09-12T14:42:24.0185498Z Fun.protect finalizer guard passed (0 new Fun.protect line(s)).
+lint suite	Blocking lints	2026-09-12T14:42:24.0256998Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.0257588Z ##[group]ignore justification self-test
+lint suite	Blocking lints	2026-09-12T14:42:24.0595696Z ok: 8 sites reported, 32 lines left alone
+lint suite	Blocking lints	2026-09-12T14:42:24.0651957Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.0652571Z ##[group]Dashboard backend-coupled test detector self-test
+lint suite	Blocking lints	2026-09-12T14:42:24.0970734Z self-test: a coupled test is listed, a fixture-only mention is not (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:24.1021741Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.1022265Z ##[group]Node alias target reader self-test
+lint suite	Blocking lints	2026-09-12T14:42:24.1334844Z self-test: a node rule is a target, a python one is not, and an included rule is owned by the including directory (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:24.1386970Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.1387495Z ##[group]ignore justification (new sites)
+lint suite	Blocking lints	2026-09-12T14:42:24.1971789Z New ignore sites are justified.
+lint suite	Blocking lints	2026-09-12T14:42:24.1982436Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.1983964Z ##[group]Stale-base revert guard self-test (RFC-0235)
+lint suite	Blocking lints	2026-09-12T14:42:24.5587265Z [PASS] fire: stale-base PR reverts main (exit=1, want=1)
+lint suite	Blocking lints	2026-09-12T14:42:24.5587940Z [PASS] pass: PR has main's additions (exit=0, want=0)
+lint suite	Blocking lints	2026-09-12T14:42:24.5588340Z [PASS] pass: PR edits a disjoint file (exit=0, want=0)
+lint suite	Blocking lints	2026-09-12T14:42:24.5588733Z [PASS] pass: intentional revert acked (exit=0, want=0)
+lint suite	Blocking lints	2026-09-12T14:42:24.5588971Z 
+lint suite	Blocking lints	2026-09-12T14:42:24.5589113Z All stale-base guard self-tests passed.
+lint suite	Blocking lints	2026-09-12T14:42:24.5644917Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.5645417Z ##[group]Stale-base revert guard (RFC-0235)
+lint suite	Blocking lints	2026-09-12T14:42:24.6074432Z stale-base guard: no stale-base reversal detected.
+lint suite	Blocking lints	2026-09-12T14:42:24.6140163Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.6140829Z ##[group]Release train guard
+lint suite	Blocking lints	2026-09-12T14:42:24.6299665Z Release train guard OK: base=0.35.14 head=0.35.14 latest_tag_ref=v0.35.14 latest_tag_version=0.35.14
+lint suite	Blocking lints	2026-09-12T14:42:24.6300822Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:24.6301470Z ##[group]PR hygiene
+lint suite	Blocking lints	2026-09-12T14:42:25.3496596Z PR hygiene check passed.
+lint suite	Blocking lints	2026-09-12T14:42:25.3508903Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:25.3510164Z ##[group]Boundary-guard .mli pairing
+lint suite	Blocking lints	2026-09-12T14:42:25.3607761Z PAIR-GATE: checked 0 newly-added .mli vs allow-list — OK
+lint suite	Blocking lints	2026-09-12T14:42:25.3608983Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:25.3609858Z ##[group]Wire-field removal schema gate
+lint suite	Blocking lints	2026-09-12T14:42:25.3749169Z WIRE-GATE: no protected persistence module changed vs 132f808e9325fe0d60959a33c4a5c9b927d99217
+lint suite	Blocking lints	2026-09-12T14:42:25.3750661Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:25.3751401Z ##[group]Cancel guard on wildcard catches
+lint suite	Blocking lints	2026-09-12T14:42:30.7188051Z cancel-guard exemptions: 18 (budget 18)
+lint suite	Blocking lints	2026-09-12T14:42:30.7188709Z No wildcard catch violations found.
+lint suite	Blocking lints	2026-09-12T14:42:30.7189846Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:30.7227307Z ##[notice]Skipping Wildcard-only match self-test; scripts/ci/check-wildcard-only-match.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:30.7229333Z ##[group]Wildcard-only match
+lint suite	Blocking lints	2026-09-12T14:42:31.9260439Z No wildcard-only match expressions found.
+lint suite	Blocking lints	2026-09-12T14:42:31.9313048Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:31.9313527Z ##[group]TUI renderer writes no state
+lint suite	Blocking lints	2026-09-12T14:42:31.9360350Z [tui-render-purity] state writes in bin/masc_tui_render.ml: 0 (budget 0)
+lint suite	Blocking lints	2026-09-12T14:42:31.9361062Z [tui-render-purity] OK
+lint suite	Blocking lints	2026-09-12T14:42:31.9361892Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:31.9397759Z ##[notice]Skipping Committed-credential self-test; scripts/ci/check-committed-secrets.py is unchanged
+lint suite	Blocking lints	2026-09-12T14:42:31.9399218Z ##[group]No committed credentials
+lint suite	Blocking lints	2026-09-12T14:42:56.0137078Z check-committed-secrets: no unpinned credential shapes
+lint suite	Blocking lints	2026-09-12T14:42:56.0204851Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.0205462Z ##[group]Eio conventions
+lint suite	Blocking lints	2026-09-12T14:42:56.0650635Z Eio convention snapshot:
+lint suite	Blocking lints	2026-09-12T14:42:56.0651176Z   search tool: rg
+lint suite	Blocking lints	2026-09-12T14:42:56.0834189Z   lib/Eio_unix.sleep: 0
+lint suite	Blocking lints	2026-09-12T14:42:56.1024460Z   lib/Unix.sleep*: 2
+lint suite	Blocking lints	2026-09-12T14:42:56.1209364Z   lib/Eio.Mutex.create (): 85
+lint suite	Blocking lints	2026-09-12T14:42:56.1404027Z   lib/Eio.Fiber.fork: 97
+lint suite	Blocking lints	2026-09-12T14:42:56.1656253Z   lib+test/fork_promise: 42
+lint suite	Blocking lints	2026-09-12T14:42:56.1657900Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.1658591Z ##[group]OCaml phase-count drift
+lint suite	Blocking lints	2026-09-12T14:42:56.1982167Z OCaml phase-count audit clean: SSOT=8, no unqualified mismatches.
+lint suite	Blocking lints	2026-09-12T14:42:56.1996649Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.1997139Z ##[group]TLA phase-count drift
+lint suite	Blocking lints	2026-09-12T14:42:56.2266246Z phase-count audit clean: SSOT=8, no unqualified mismatches.
+lint suite	Blocking lints	2026-09-12T14:42:56.2279672Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.2280262Z ##[group]Route tool catalog
+lint suite	Blocking lints	2026-09-12T14:42:56.3154610Z [route-tool-catalog] OK - 30 route tool names, all registered in the catalog
+lint suite	Blocking lints	2026-09-12T14:42:56.3166747Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.3167348Z ##[group]Shell IR structural boundary
+lint suite	Blocking lints	2026-09-12T14:42:56.5698851Z OK (Shell IR remains structural; authorization taxonomy absent)
+lint suite	Blocking lints	2026-09-12T14:42:56.5700755Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.5701356Z ##[group]Base policy
+lint suite	Blocking lints	2026-09-12T14:42:56.6836083Z === Base Policy Audit ===
+lint suite	Blocking lints	2026-09-12T14:42:56.6836533Z 
+lint suite	Blocking lints	2026-09-12T14:42:56.6836698Z   mli_open_base          : 0  (baseline: 0)
+lint suite	Blocking lints	2026-09-12T14:42:56.6837196Z   ml_base_stdlib_shadow  : 0  (baseline: 0)
+lint suite	Blocking lints	2026-09-12T14:42:56.6837687Z   bin_ml_base_stdlib_shadow: 0  (baseline: 0)
+lint suite	Blocking lints	2026-09-12T14:42:56.6838016Z 
+lint suite	Blocking lints	2026-09-12T14:42:56.6838164Z   Status: PASS
+lint suite	Blocking lints	2026-09-12T14:42:56.6840181Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.6840731Z ##[group]Sublib leaf boundary self-test
+lint suite	Blocking lints	2026-09-12T14:42:56.7337172Z self-test: Dune 0.1 describe schema decodes strictly (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7338220Z self-test: clean graph -> no violation (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7339187Z self-test: buggy graph (direct) -> violation ('masc.masc_goal', 'masc') (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7340188Z self-test: buggy graph (transitive) -> violation ('masc.masc_goal', 'masc.mid', 'masc') (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7341515Z self-test: closed source root with external deps -> clean (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7342153Z self-test: closed source root rejects local coordinator dep (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7342772Z self-test: missing required local library fails closed (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7343266Z self-test: dangling UID fails closed (PASS)
+lint suite	Blocking lints	2026-09-12T14:42:56.7343692Z SELF-TEST: ALL PASS
+lint suite	Blocking lints	2026-09-12T14:42:56.7418184Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:56.7418683Z ##[group]SSOT rules
+lint suite	Blocking lints	2026-09-12T14:42:56.7527546Z OK[count-rule-self-test]: single-file include/exclude counts covered.
+lint suite	Blocking lints	2026-09-12T14:42:56.7734905Z OK[R1-masc-path]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.7926160Z OK[R2-loopback-literal]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.8108734Z OK[R4-config-filename]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.8304909Z OK[R5-health-path]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.8540777Z OK[R6-home-masc-root]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.8782434Z OK[R6-home-masc-root-docs]: 58 occurrences (baseline 58).
+lint suite	Blocking lints	2026-09-12T14:42:56.9327724Z OK[R7-metric-label-keeper-name]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.9388384Z OK[R9-tui-chat-theme-owner]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.9569156Z OK[R10-pattern-self-test]: owned prefixes and numeric boundary covered.
+lint suite	Blocking lints	2026-09-12T14:42:56.9770767Z OK[R10-tui-projected-background]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:56.9890096Z OK[R11-pattern-self-test]: direct and alias bypasses covered.
+lint suite	Blocking lints	2026-09-12T14:42:57.0095745Z OK[R11-tui-palette-for-testing]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:57.0630711Z OK[R12-pattern-self-test]: direct, member, alias-declaration, and scope boundaries covered.
+lint suite	Blocking lints	2026-09-12T14:42:57.0877521Z OK[R12-tui-theme-for-testing]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:57.1174012Z OK[R13-pattern-self-test]: direct, lower-case, and split footer fact literals covered.
+lint suite	Blocking lints	2026-09-12T14:42:57.1294563Z OK[R13-tui-footer-fact-literal]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:57.1425240Z OK[R14-pattern-self-test]: a windowed read matches, a cursor lookup does not.
+lint suite	Blocking lints	2026-09-12T14:42:57.1567501Z OK[R14-tui-row-walk]: 0 occurrences (baseline 0).
+lint suite	Blocking lints	2026-09-12T14:42:57.1567942Z 
+lint suite	Blocking lints	2026-09-12T14:42:57.1568215Z SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):
+lint suite	Blocking lints	2026-09-12T14:42:57.1568608Z   Script: scripts/check-ssot.sh
+lint suite	Blocking lints	2026-09-12T14:42:57.1569107Z   Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30194 #30196 #30411 #30507 #30520
+lint suite	Blocking lints	2026-09-12T14:42:57.1569892Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:57.1570284Z ##[group]TOML syntax
+lint suite	Blocking lints	2026-09-12T14:42:57.1585939Z Checking TOML syntax...
+lint suite	Blocking lints	2026-09-12T14:42:57.2744630Z All 428 TOML files parsed successfully.
+lint suite	Blocking lints	2026-09-12T14:42:57.2800273Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:57.2800724Z ##[group]YAML syntax
+lint suite	Blocking lints	2026-09-12T14:42:59.0252321Z 33 YAML files validated successfully.
+lint suite	Blocking lints	2026-09-12T14:42:59.0298126Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.0298663Z ##[group]Sandbox dune version
+lint suite	Blocking lints	2026-09-12T14:42:59.0411672Z dune-project requires  : 3.22
+lint suite	Blocking lints	2026-09-12T14:42:59.0412463Z sandbox image installs : 3.24.1  (from masc.opam.locked (via --deps-only))
+lint suite	Blocking lints	2026-09-12T14:42:59.0429319Z OK: sandbox dune 3.24.1 >= dune-project required 3.22
+lint suite	Blocking lints	2026-09-12T14:42:59.0431007Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.0431690Z ##[group]Sandbox OCaml version
+lint suite	Blocking lints	2026-09-12T14:42:59.0506850Z masc.opam requires     : ocaml 5.5.1
+lint suite	Blocking lints	2026-09-12T14:42:59.0507403Z sandbox image installs : ocaml-base-compiler 5.5.1
+lint suite	Blocking lints	2026-09-12T14:42:59.0507840Z OK: sandbox compiler 5.5.1 matches the masc.opam pin
+lint suite	Blocking lints	2026-09-12T14:42:59.0509177Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.0509809Z ##[group]Checkpoint legacy purge
+lint suite	Blocking lints	2026-09-12T14:42:59.1639687Z [checkpoint-installation-legacy-purge] OK
+lint suite	Blocking lints	2026-09-12T14:42:59.1641027Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.1641764Z ##[group]Dashboard nav-event parity
+lint suite	Blocking lints	2026-09-12T14:42:59.1948809Z dashboard nav-event allowlist parity: OK
+lint suite	Blocking lints	2026-09-12T14:42:59.1993119Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.1993664Z ##[group]TLA harness coverage
+lint suite	Blocking lints	2026-09-12T14:42:59.2411207Z === TLA harness coverage: PASS ===
+lint suite	Blocking lints	2026-09-12T14:42:59.2412051Z Known unchecked cfg-backed specs (1):
+lint suite	Blocking lints	2026-09-12T14:42:59.2412372Z   specs/boundary/ContinuationCorrelation.tla
+lint suite	Blocking lints	2026-09-12T14:42:59.2414630Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.2415714Z ##[group]Opam lock covers declared deps
+lint suite	Blocking lints	2026-09-12T14:42:59.2638779Z [opam-lock] OK - 73 declared deps all pinned; 3 shared first-party repo pin(s) agree
+lint suite	Blocking lints	2026-09-12T14:42:59.2680344Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.2681184Z ##[group]Keeper runtime setting registry
+lint suite	Blocking lints	2026-09-12T14:42:59.3373352Z PASS: Keeper runtime settings are registry-backed (38 Keeper env declarations inventoried).
+lint suite	Blocking lints	2026-09-12T14:42:59.3375532Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.3376428Z ##[group]Env snapshot default drift
+lint suite	Blocking lints	2026-09-12T14:42:59.5869979Z === env snapshot default drift: 66 of 120 snapshot entries compared ===
+lint suite	Blocking lints	2026-09-12T14:42:59.5870738Z   54 not compared:
+lint suite	Blocking lints	2026-09-12T14:42:59.5871089Z     9 state a default that is not a quoted literal
+lint suite	Blocking lints	2026-09-12T14:42:59.5871543Z     1 restate a var another entry already declared
+lint suite	Blocking lints	2026-09-12T14:42:59.5872037Z     42 have no reader that states a ~default:
+lint suite	Blocking lints	2026-09-12T14:42:59.5872500Z     2 state a default the reader's form cannot be compared to
+lint suite	Blocking lints	2026-09-12T14:42:59.5873003Z PASS: every stated default matches the reader that applies it
+lint suite	Blocking lints	2026-09-12T14:42:59.5933582Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:42:59.5934299Z ##[group]Hardcoding and truth audit
+lint suite	Blocking lints	2026-09-12T14:42:59.5972943Z === Hardcoding / Truth Audit ===
+lint suite	Blocking lints	2026-09-12T14:42:59.5976836Z Repo: /home/runner/work/masc/masc
+lint suite	Blocking lints	2026-09-12T14:42:59.5997561Z Head: fbf30719ab
+lint suite	Blocking lints	2026-09-12T14:42:59.5997965Z 
+lint suite	Blocking lints	2026-09-12T14:42:59.5998118Z === Typed Boundary Metadata ===
+lint suite	Blocking lints	2026-09-12T14:42:59.6041456Z PASS: legacy checkout follow-up helper surface is absent.
+lint suite	Blocking lints	2026-09-12T14:42:59.6078882Z PASS: generic Tool_catalog effect-domain metadata is absent.
+lint suite	Blocking lints	2026-09-12T14:42:59.6079308Z 
+lint suite	Blocking lints	2026-09-12T14:42:59.6079498Z === Confirmed String/Heuristic Semantics ===
+lint suite	Blocking lints	2026-09-12T14:42:59.6134474Z PASS: legacy Provider_adapter implementation files are absent.
+lint suite	Blocking lints	2026-09-12T14:42:59.6135094Z 
+lint suite	Blocking lints	2026-09-12T14:42:59.6135287Z === Anti-Fake Detector ===
+lint suite	Blocking lints	2026-09-12T14:43:43.4679662Z === Summary ===
+lint suite	Blocking lints	2026-09-12T14:43:43.4680029Z   Good:    1313
+lint suite	Blocking lints	2026-09-12T14:43:43.4680259Z   Suspect: 0
+lint suite	Blocking lints	2026-09-12T14:43:43.4680460Z   Fake:    0
+lint suite	Blocking lints	2026-09-12T14:43:43.4680656Z   Harness: 37
+lint suite	Blocking lints	2026-09-12T14:43:43.4680859Z   Total:   1350
+lint suite	Blocking lints	2026-09-12T14:43:43.4681424Z PASS: anti-fake detector completed without fake-test findings.
+lint suite	Blocking lints	2026-09-12T14:43:43.4681881Z 
+lint suite	Blocking lints	2026-09-12T14:43:43.4682149Z === Broad Active-Source Smell Sample ===
+lint suite	Blocking lints	2026-09-12T14:43:43.4707922Z 
+lint suite	Blocking lints	2026-09-12T14:43:43.4708526Z === Result ===
+lint suite	Blocking lints	2026-09-12T14:43:43.4708964Z Confirmed active issue groups: 0
+lint suite	Blocking lints	2026-09-12T14:43:43.4709388Z Status: pass
+lint suite	Blocking lints	2026-09-12T14:43:43.4711168Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:43.4715138Z ##[group]Boundary guard
+lint suite	Blocking lints	2026-09-12T14:43:43.7253366Z BOUNDARY INFO: V4b-retired-state-protocol-zero-pin — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:43.8013504Z BOUNDARY INFO: V7-retired-command-semantics-gates — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:44.0836578Z BOUNDARY INFO: V7b-retired-authorization-hierarchy — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:44.2339751Z BOUNDARY INFO: V7c-task-completion-semantic-heuristics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:44.5171252Z BOUNDARY INFO: V7d-retired-derived-autonomy-and-effect-classes — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:44.7797404Z BOUNDARY INFO: V7e-retired-pre-tool-alias-blocker — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:44.9790797Z BOUNDARY INFO: V7f-retired-subprocess-text-retry — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.0170592Z BOUNDARY INFO: V7g-retired-subprocess-message-locale-pin — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.1518051Z BOUNDARY INFO: V7h-retired-keeper-failure-circuit-breaker — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.1846512Z BOUNDARY INFO: V7i-retired-dispatch-tool-search-heuristics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.4329096Z BOUNDARY INFO: V7j-retired-consecutive-tool-failure-guard — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7009014Z BOUNDARY INFO: V7k-retired-dispatch-effect-inference — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7160855Z BOUNDARY INFO: V7l-generic-gate-product-knowledge — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7238001Z BOUNDARY INFO: V7m-mcp-message-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7395730Z BOUNDARY INFO: V7n-generic-ide-product-routes — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7436929Z BOUNDARY INFO: V7o-retired-keeper-payload-outcome-classifier — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7479665Z BOUNDARY INFO: V7p-tool-bridge-message-and-product-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7664521Z BOUNDARY INFO: V7q-timeout-message-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.7729569Z BOUNDARY INFO: V7r-terminal-config-auth-substring-semantics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:45.9298215Z BOUNDARY INFO: V7s-retired-runtime-tool-family-authorization — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.0197191Z BOUNDARY INFO: V7t-retired-completion-trust-cli — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.0744420Z BOUNDARY INFO: V7u-retired-decision-pipeline-diagram — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.1655627Z BOUNDARY INFO: V7v-retired-tool-result-message-inference — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.1698922Z BOUNDARY INFO: V7w-retired-dashboard-embedded-json-coercion — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.2648876Z BOUNDARY INFO: V7x-retired-task-and-recording-message-heuristics — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.4166381Z BOUNDARY INFO: V7y-retired-keeper-raw-output-reinterpretation — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.5427498Z BOUNDARY INFO: V7z-retired-connector-wake-suppression — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.6602281Z BOUNDARY INFO: V7aa-retired-multimodal-rollout-gates — no forbidden active-source matches
+lint suite	Blocking lints	2026-09-12T14:43:46.7451628Z BOUNDARY INFO: V10-provider-filter-ownership — no forbidden matches
+lint suite	Blocking lints	2026-09-12T14:43:46.7452216Z BOUNDARY: all checks within baseline
+lint suite	Blocking lints	2026-09-12T14:43:46.7453646Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:46.7454477Z ##[group]Dashboard env knob count
+lint suite	Blocking lints	2026-09-12T14:43:46.7509954Z Dashboard env var count: 15 (baseline: 15)
+lint suite	Blocking lints	2026-09-12T14:43:46.7511699Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:46.7513155Z ##[group]Silent failure
+lint suite	Blocking lints	2026-09-12T14:43:46.8185646Z check_silent_failure: 0 silent-failure anti-pattern site(s) found.
+lint suite	Blocking lints	2026-09-12T14:43:46.8188066Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:46.8188680Z ##[group]Dashboard styling drift
+lint suite	Blocking lints	2026-09-12T14:43:47.2410560Z Dashboard drift gate: OK
+lint suite	Blocking lints	2026-09-12T14:43:47.2411736Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:47.2412333Z ##[group]Dashboard prompt keys
+lint suite	Blocking lints	2026-09-12T14:43:47.3052729Z [dashboard-prompt-keys] OK - 0 prompt keys named in dashboard code, all present
+lint suite	Blocking lints	2026-09-12T14:43:47.3064475Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:47.3065124Z ##[group]TLA spec line-refs
+lint suite	Blocking lints	2026-09-12T14:43:47.3938068Z line-ref audit clean: 0 prose-form citation(s) verified + 0 colon-form line-ref(s) across 8 spec(s).
+lint suite	Blocking lints	2026-09-12T14:43:47.3939513Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:47.3940007Z ##[group]OCaml spec-nav line-refs
+lint suite	Blocking lints	2026-09-12T14:43:52.1879161Z ocaml-spec-nav line-ref audit clean: 0 citation(s) verified across 961 file(s) (0 baselined).
+lint suite	Blocking lints	2026-09-12T14:43:52.1880391Z ##[endgroup]
+lint suite	Blocking lints	2026-09-12T14:43:52.1880986Z 
+lint suite	Blocking lints	2026-09-12T14:43:52.1881496Z FAILED 1/109 lints:
+lint suite	Blocking lints	2026-09-12T14:43:52.1882089Z  - Determinism contract
+lint suite	Blocking lints	2026-09-12T14:43:52.1893374Z ##[error]Process completed with exit code 1.
+dune build --profile release @check	Build	﻿2026-09-12T14:42:00.0549387Z ##[group]Run set -euo pipefail
+dune build --profile release @check	Build	2026-09-12T14:42:00.0549743Z [36;1mset -euo pipefail[0m
+dune build --profile release @check	Build	2026-09-12T14:42:00.0550027Z [36;1mdune build --profile release @check[0m
+dune build --profile release @check	Build	2026-09-12T14:42:00.0584406Z shell: /usr/bin/bash -e {0}
+dune build --profile release @check	Build	2026-09-12T14:42:00.0584667Z env:
+dune build --profile release @check	Build	2026-09-12T14:42:00.0584862Z   OPAMCOLOR: always
+dune build --profile release @check	Build	2026-09-12T14:42:00.0585101Z   OPAMCONFIRMLEVEL: unsafe-yes
+dune build --profile release @check	Build	2026-09-12T14:42:00.0585369Z   OPAMERRLOGLEN: 0
+dune build --profile release @check	Build	2026-09-12T14:42:00.0585607Z   OPAMEXTERNALSOLVER: builtin-0install
+dune build --profile release @check	Build	2026-09-12T14:42:00.0585888Z   OPAMRETRIES: 10
+dune build --profile release @check	Build	2026-09-12T14:42:00.0586104Z   OPAMSOLVERTIMEOUT: 600
+dune build --profile release @check	Build	2026-09-12T14:42:00.0586341Z   OPAMYES: 1
+dune build --profile release @check	Build	2026-09-12T14:42:00.0586542Z   OPAMSWITCH: ci-5-5-1
+dune build --profile release @check	Build	2026-09-12T14:42:00.0586757Z   DUNE_JOBS: 4
+dune build --profile release @check	Build	2026-09-12T14:42:00.0587110Z ##[endgroup]
+dune build --profile release @check	Build	2026-09-12T14:42:01.5654933Z (cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+dune build --profile release @check	Build	2026-09-12T14:42:01.5657571Z Warning: option "-j-std" is deprecated.
+dune build --profile release @check	Build	2026-09-12T14:44:39.9875105Z (cd _build/default && /home/runner/.opam/ci-5-5-1/bin/ocamlc.opt -w +32+69 -warn-error +a -g -bin-annot -bin-annot-occurrences -I test/.test_verification_collaboration_evidence.eobjs/byte -I /home/runner/.opam/ci-5-5-1/lib/alcotest -I /home/runner/.opam/ci-5-5-1/lib/astring -I /home/runner/.opam/ci-5-5-1/lib/base64 -I /home/runner/.opam/ci-5-5-1/lib/cohttp -I /home/runner/.opam/ci-5-5-1/lib/cohttp-eio -I /home/runner/.opam/ci-5-5-1/lib/cstruct -I /home/runner/.opam/ci-5-5-1/lib/digestif -I /home/runner/.opam/ci-5-5-1/lib/eio -I /home/runner/.opam/ci-5-5-1/lib/eio/mock -I /home/runner/.opam/ci-5-5-1/lib/eio/unix -I /home/runner/.opam/ci-5-5-1/lib/eio_main -I /home/runner/.opam/ci-5-5-1/lib/fmt -I /home/runner/.opam/ci-5-5-1/lib/grpc-direct -I /home/runner/.opam/ci-5-5-1/lib/http -I /home/runner/.opam/ci-5-5-1/lib/httpun -I /home/runner/.opam/ci-5-5-1/lib/mirage-crypto -I /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-rng -I /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-rng/unix -I /home/runner/.opam/ci-5-5-1/lib/ocaml-protoc-plugin -I /home/runner/.opam/ci-5-5-1/lib/ocaml/runtime_events -I /home/runner/.opam/ci-5-5-1/lib/ocaml/str -I /home/runner/.opam/ci-5-5-1/lib/ocaml/threads -I /home/runner/.opam/ci-5-5-1/lib/ocaml/unix -I /home/runner/.opam/ci-5-5-1/lib/opentelemetry -I /home/runner/.opam/ci-5-5-1/lib/otoml -I /home/runner/.opam/ci-5-5-1/lib/piaf -I /home/runner/.opam/ci-5-5-1/lib/piaf/stream -I /home/runner/.opam/ci-5-5-1/lib/qcheck-alcotest -I /home/runner/.opam/ci-5-5-1/lib/qcheck-core -I /home/runner/.opam/ci-5-5-1/lib/re -I /home/runner/.opam/ci-5-5-1/lib/sqlite3 -I /home/runner/.opam/ci-5-5-1/lib/uri -I /home/runner/.opam/ci-5-5-1/lib/uuidm -I /home/runner/.opam/ci-5-5-1/lib/yojson -I /home/runner/.opam/ci-5-5-1/lib/zstd -I bin/.masc_tui_msx_tick.objs/byte -I bin/.masc_tui_types.objs/byte -H lib/.masc.objs/byte -I lib/.masc.objs/public_cmi -I lib/activity_graph/.masc_activity_graph.objs/byte -I lib/ag_ui/.masc_ag_ui.objs/byte -I lib/agent_observation/.masc_agent_observation.objs/byte -I lib/attribution/.masc_attribution.objs/byte -H lib/auth/.masc_auth.objs/byte -I lib/auth/.masc_auth.objs/public_cmi -I lib/backend/.masc_backend.objs/byte -I lib/board/.masc_board_handlers.objs/byte -H lib/board_tool_adapter/.board_tool_adapter.objs/byte -I lib/board_tool_adapter/.board_tool_adapter.objs/public_cmi -I lib/board_types/.masc_board.objs/byte -I lib/briefing_compactors/.masc_briefing_compactors.objs/byte -I lib/compression/.masc_compression.objs/byte -I lib/config/.masc_config.objs/byte -I lib/config_dir_resolver/.masc_config_dir_resolver.objs/byte -I lib/core/.masc_core.objs/byte -I lib/cost_ledger/.masc_cost_ledger.objs/byte -I lib/dashboard/.masc_dashboard.objs/byte -I lib/dashboard_eval_feed/.masc_dashboard_eval_feed.objs/byte -I lib/dashboard_tla_specs/.masc_dashboard_tla_specs.objs/byte -I lib/dated_jsonl/.dated_jsonl.objs/byte -I lib/discovery_cache/.discovery_cache.objs/byte -I lib/eio_context/.masc_eio_context.objs/byte -I lib/embedded_config/.embedded_config.objs/byte -I lib/event_bus_slots/.masc_event_bus_slots.objs/byte -I lib/exec/.masc_exec.objs/byte -I lib/exec/command_gate/.masc_exec_command_gate.objs/byte -I lib/exec/parser/.masc_exec_bash_parser.objs/byte -I lib/exec_policy/.masc_exec_policy.objs/byte -I lib/fd_accountant/.fd_accountant.objs/byte -I lib/fs_compat/.fs_compat.objs/byte -I lib/gate/.masc_gate.objs/byte -I lib/goal/.masc_goal.objs/byte -I lib/host_config/.masc_host_config.objs/byte -I lib/ide/.masc_ide.objs/byte -I lib/ide_memo/.masc_ide_memo.objs/byte -I lib/json_field/.json_field.objs/byte -I lib/keeper_chat_delivery_identity/.masc_keeper_chat_delivery_identity.objs/byte -I lib/keeper_chat_operations/.masc_keeper_chat_operations.objs/byte -I lib/keeper_contract/.masc_keeper_contract.objs/byte -I lib/keeper_execution_scope/.masc_keeper_execution_scope.objs/byte -I lib/keeper_failure_taxonomy/.masc_keeper_failure_taxonomy.objs/byte -I lib/keeper_hooks_agent_core_types/.masc_keeper_hooks_agent_core_types.objs/byte -I lib/keeper_metrics/.keeper_metrics.objs/byte -I lib/keeper_operation_identity/.masc_keeper_operation_identity.objs/byte -I lib/keeper_paste_naming/.masc_keeper_paste_naming.objs/byte -I lib/keeper_registry/.masc_keeper_registry.objs/byte -H lib/keeper_runtime/.masc_keeper_runtime.objs/byte -I lib/keeper_runtime/.masc_keeper_runtime.objs/public_cmi -I lib/keeper_sandbox_image/.keeper_sandbox_image.objs/byte -I lib/keeper_toml/.masc_keeper_toml.objs/byte -I lib/keeper_tool_call_index/.keeper_tool_call_index.objs/byte -I lib/keeper_tooling/.keeper_tooling.objs/byte -I lib/keeper_types/.masc_keeper_types.objs/byte -I lib/keeper_types_profile_sandbox/.masc_keeper_types_profile_sandbox.objs/byte -I lib/keeper_usage_trust/.masc_keeper_usage_trust.objs/byte -I lib/local_runtime_pool/.local_runtime_pool.objs/byte -I lib/lockfree_atomic/.lockfree_atomic.objs/byte -I lib/lsp_client/.masc_lsp_client.objs/byte -I lib/masc_http_client/.masc_http_client.objs/byte -I lib/masc_log/.masc_log.objs/byte -I lib/mcp_session/.masc_session.objs/byte -I lib/mcp_transport_protocol/.masc_transport_protocol.objs/byte -I lib/model_inference_metrics/.masc_model_inference_metrics.objs/byte -I lib/multimodal/.multimodal.objs/byte -I lib/operator/.masc_operator.objs/byte -I lib/otel_dispatch_hook/.otel_dispatch_hook.objs/byte -I lib/otel_genai/.otel_genai.objs/byte -I lib/otel_metric_store/.otel_metric_store.objs/byte -I lib/otel_metrics/.masc_otel_metrics.objs/byte -I lib/otel_spans/.masc_otel_spans.objs/byte -I lib/pool_metrics/.pool_metrics.objs/byte -I lib/process/.masc_process.objs/byte -I lib/prompt_registry/.masc_prompt_registry.objs/byte -I lib/provider_tool_support/.provider_tool_support.objs/byte -I lib/pulse/.masc_pulse.objs/byte -I lib/repo_manager/.repo_manager.objs/byte -I lib/run_registry_core/.run_registry_core.objs/byte -H lib/runtime/.masc_runtime.objs/byte -I lib/runtime/.masc_runtime.objs/public_cmi -I lib/runtime_model/.masc_runtime_model.objs/byte -H lib/server/.masc_server.objs/byte -I lib/server/.masc_server.objs/public_cmi -I lib/shared_audit/.shared_audit.objs/byte -I lib/skill_snapshot/.masc_skill_snapshot.objs/byte -I lib/string_util/.masc_string_util.objs/byte -I lib/telemetry_coverage_gap/.telemetry_coverage_gap.objs/byte -I lib/telemetry_unified/.telemetry_unified.objs/byte -I lib/telemetry_unified_source/.telemetry_unified_source.objs/byte -I lib/time_compat/.time_compat.objs/byte -I lib/tool/.masc_tool_dispatch.objs/byte -I lib/tool_blob_store/.masc_tool_blob_store.objs/byte -I lib/tool_call_quality_benchmark/.masc_tool_call_quality_benchmark.objs/byte -I lib/tool_catalog_surfaces/.masc_tool_catalog_surfaces.objs/byte -I lib/tool_invocation_ref/.masc_tool_invocation_ref.objs/byte -I lib/tool_schemas/.masc_tool_schemas.objs/byte -I lib/tool_schemas_specs/.tool_schemas_specs.objs/byte -H lib/tool_surface/.masc_tool_surface.objs/byte -I lib/tool_surface/.masc_tool_surface.objs/public_cmi -I lib/tool_types/.masc_tool_types.objs/byte -I lib/trajectory/.masc_trajectory.objs/byte -I lib/turn_fsm/.masc_turn.objs/byte -I lib/types/.masc_types.objs/byte -I lib/types_boundary/.masc_types_boundary.objs/byte -I lib/voice_bridge_core/.voice_bridge_core.objs/byte -I lib/voice_config/.voice_config.objs/byte -I lib/voice_runtime_overlay/.voice_runtime_overlay.objs/byte -I lib/workspace/.masc_workspace.objs/byte -H packages/agent_core/lib/.agent_core.objs/byte -I packages/agent_core/lib/.agent_core.objs/public_cmi -I packages/agent_core/lib/base/.agent_core_base.objs/byte -H packages/agent_core/lib/llm_provider/.llm_provider.objs/byte -I packages/agent_core/lib/llm_provider/.llm_provider.objs/public_cmi -I packages/agent_core/lib/protocol/.agent_core_protocol.objs/byte -I test/deps/.masc_test_deps.objs/byte -H /home/runner/.opam/ci-5-5-1/lib/alcotest/engine -H /home/runner/.opam/ci-5-5-1/lib/alcotest/stdlib_ext -H /home/runner/.opam/ci-5-5-1/lib/ambient-context -H /home/runner/.opam/ci-5-5-1/lib/ambient-context-eio -H /home/runner/.opam/ci-5-5-1/lib/ambient-context/atomic -H /home/runner/.opam/ci-5-5-1/lib/ambient-context/core -H /home/runner/.opam/ci-5-5-1/lib/ambient-context/tls -H /home/runner/.opam/ci-5-5-1/lib/angstrom -H /home/runner/.opam/ci-5-5-1/lib/asn1-combinators -H /home/runner/.opam/ci-5-5-1/lib/atdgen-runtime -H /home/runner/.opam/ci-5-5-1/lib/base -H /home/runner/.opam/ci-5-5-1/lib/base/base_internalhash_types -H /home/runner/.opam/ci-5-5-1/lib/base/shadow_stdlib -H /home/runner/.opam/ci-5-5-1/lib/base64/rfc2045 -H /home/runner/.opam/ci-5-5-1/lib/bigstringaf -H /home/runner/.opam/ci-5-5-1/lib/biniou -H /home/runner/.opam/ci-5-5-1/lib/bos -H /home/runner/.opam/ci-5-5-1/lib/bstr -H /home/runner/.opam/ci-5-5-1/lib/ca-certs -H /home/runner/.opam/ci-5-5-1/lib/camlp-streams -H /home/runner/.opam/ci-5-5-1/lib/checkseum/c -H /home/runner/.opam/ci-5-5-1/lib/cmdliner -H /home/runner/.opam/ci-5-5-1/lib/ctypes -H /home/runner/.opam/ci-5-5-1/lib/ctypes/stubs -H /home/runner/.opam/ci-5-5-1/lib/decompress/de -H /home/runner/.opam/ci-5-5-1/lib/decompress/gz -H /home/runner/.opam/ci-5-5-1/lib/decompress/zl -H /home/runner/.opam/ci-5-5-1/lib/digestif/c -H /home/runner/.opam/ci-5-5-1/lib/domain-local-await -H /home/runner/.opam/ci-5-5-1/lib/domain-name -H /home/runner/.opam/ci-5-5-1/lib/dune-build-info -H /home/runner/.opam/ci-5-5-1/lib/duration -H /home/runner/.opam/ci-5-5-1/lib/easy-format -H /home/runner/.opam/ci-5-5-1/lib/eio-ssl -H /home/runner/.opam/ci-5-5-1/lib/eio/core -H /home/runner/.opam/ci-5-5-1/lib/eio/runtime_events -H /home/runner/.opam/ci-5-5-1/lib/eio/utils -H /home/runner/.opam/ci-5-5-1/lib/eio_linux -H /home/runner/.opam/ci-5-5-1/lib/eio_posix -H /home/runner/.opam/ci-5-5-1/lib/eqaf -H /home/runner/.opam/ci-5-5-1/lib/faraday -H /home/runner/.opam/ci-5-5-1/lib/fmt/cli -H /home/runner/.opam/ci-5-5-1/lib/fmt/tty -H /home/runner/.opam/ci-5-5-1/lib/fpath -H /home/runner/.opam/ci-5-5-1/lib/gluten -H /home/runner/.opam/ci-5-5-1/lib/gluten-eio -H /home/runner/.opam/ci-5-5-1/lib/gmap -H /home/runner/.opam/ci-5-5-1/lib/graphql -H /home/runner/.opam/ci-5-5-1/lib/graphql_parser -H /home/runner/.opam/ci-5-5-1/lib/grpc-direct-core -H /home/runner/.opam/ci-5-5-1/lib/grpc-direct/h2_lite -H /home/runner/.opam/ci-5-5-1/lib/h2 -H /home/runner/.opam/ci-5-5-1/lib/h2-eio -H /home/runner/.opam/ci-5-5-1/lib/hmap -H /home/runner/.opam/ci-5-5-1/lib/hpack -H /home/runner/.opam/ci-5-5-1/lib/httpun-eio -H /home/runner/.opam/ci-5-5-1/lib/httpun-types -H /home/runner/.opam/ci-5-5-1/lib/httpun-ws -H /home/runner/.opam/ci-5-5-1/lib/integers -H /home/runner/.opam/ci-5-5-1/lib/iomux -H /home/runner/.opam/ci-5-5-1/lib/ipaddr -H /home/runner/.opam/ci-5-5-1/lib/jane-street-headers -H /home/runner/.opam/ci-5-5-1/lib/kdf/hkdf -H /home/runner/.opam/ci-5-5-1/lib/kdf/pbkdf -H /home/runner/.opam/ci-5-5-1/lib/ke -H /home/runner/.opam/ci-5-5-1/lib/logs -H /home/runner/.opam/ci-5-5-1/lib/lwt-dllist -H /home/runner/.opam/ci-5-5-1/lib/macaddr -H /home/runner/.opam/ci-5-5-1/lib/magic-mime -H /home/runner/.opam/ci-5-5-1/lib/markup -H /home/runner/.opam/ci-5-5-1/lib/mcp_protocol -H /home/runner/.opam/ci-5-5-1/lib/mcp_protocol/eio -H /home/runner/.opam/ci-5-5-1/lib/mcp_protocol/http -H /home/runner/.opam/ci-5-5-1/lib/menhirLib -H /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-ec -H /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-pk -H /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-rng-eio -H /home/runner/.opam/ci-5-5-1/lib/mtime -H /home/runner/.opam/ci-5-5-1/lib/mtime/clock -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/msx -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/state_codec -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/vdpcore -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/z80core -H /home/runner/.opam/ci-5-5-1/lib/ocaml/threads -H /home/runner/.opam/ci-5-5-1/lib/ocaml_intrinsics_kernel -H /home/runner/.opam/ci-5-5-1/lib/ohex -H /home/runner/.opam/ci-5-5-1/lib/opentelemetry/atomic -H /home/runner/.opam/ci-5-5-1/lib/opentelemetry/client -H /home/runner/.opam/ci-5-5-1/lib/opentelemetry/proto -H /home/runner/.opam/ci-5-5-1/lib/optint -H /home/runner/.opam/ci-5-5-1/lib/pbrt -H /home/runner/.opam/ci-5-5-1/lib/pecu -H /home/runner/.opam/ci-5-5-1/lib/piaf/multipart -H /home/runner/.opam/ci-5-5-1/lib/piaf/multipart_form -H /home/runner/.opam/ci-5-5-1/lib/piaf/sendfile -H /home/runner/.opam/ci-5-5-1/lib/ppx_compare/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_deriving/runtime -H /home/runner/.opam/ci-5-5-1/lib/ppx_deriving_yojson/runtime -H /home/runner/.opam/ci-5-5-1/lib/ppx_enumerate/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/config -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/config_types -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/make_corrected_file -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/runtime -H /home/runner/.opam/ci-5-5-1/lib/ppx_hash/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_here/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_inline_test/config -H /home/runner/.opam/ci-5-5-1/lib/ppx_inline_test/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_sexp_conv/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppxlib/print_diff -H /home/runner/.opam/ci-5-5-1/lib/prettym -H /home/runner/.opam/ci-5-5-1/lib/psq -H /home/runner/.opam/ci-5-5-1/lib/ptime -H /home/runner/.opam/ci-5-5-1/lib/ptime/clock -H /home/runner/.opam/ci-5-5-1/lib/qcheck-core/runner -H /home/runner/.opam/ci-5-5-1/lib/re/pcre -H /home/runner/.opam/ci-5-5-1/lib/re/str -H /home/runner/.opam/ci-5-5-1/lib/rresult -H /home/runner/.opam/ci-5-5-1/lib/seq -H /home/runner/.opam/ci-5-5-1/lib/sexplib0 -H /home/runner/.opam/ci-5-5-1/lib/ssl -H /home/runner/.opam/ci-5-5-1/lib/stdio -H /home/runner/.opam/ci-5-5-1/lib/stdlib-shims -H /home/runner/.opam/ci-5-5-1/lib/stringext -H /home/runner/.opam/ci-5-5-1/lib/thread-local-storage -H /home/runner/.opam/ci-5-5-1/lib/thread-table -H /home/runner/.opam/ci-5-5-1/lib/time_now -H /home/runner/.opam/ci-5-5-1/lib/tls -H /home/runner/.opam/ci-5-5-1/lib/tls-eio -H /home/runner/.opam/ci-5-5-1/lib/unstrctrd -H /home/runner/.opam/ci-5-5-1/lib/unstrctrd/parser -H /home/runner/.opam/ci-5-5-1/lib/uri-sexp -H /home/runner/.opam/ci-5-5-1/lib/uri/services -H /home/runner/.opam/ci-5-5-1/lib/uring -H /home/runner/.opam/ci-5-5-1/lib/uucp -H /home/runner/.opam/ci-5-5-1/lib/uunf -H /home/runner/.opam/ci-5-5-1/lib/uuseg -H /home/runner/.opam/ci-5-5-1/lib/uutf -H /home/runner/.opam/ci-5-5-1/lib/ws-direct-core -H /home/runner/.opam/ci-5-5-1/lib/ws-direct-eio -H /home/runner/.opam/ci-5-5-1/lib/ws-direct-gluten -H /home/runner/.opam/ci-5-5-1/lib/x509 -H /home/runner/.opam/ci-5-5-1/lib/yaml -H /home/runner/.opam/ci-5-5-1/lib/yaml/bindings -H /home/runner/.opam/ci-5-5-1/lib/yaml/bindings/types -H /home/runner/.opam/ci-5-5-1/lib/yaml/c -H /home/runner/.opam/ci-5-5-1/lib/yaml/ffi -H /home/runner/.opam/ci-5-5-1/lib/yaml/types -H /home/runner/.opam/ci-5-5-1/lib/zarith -H /home/runner/.opam/ci-5-5-1/lib/zstd/stubs -H bin/.masc_tui_acting.objs/byte -H bin/.masc_tui_acting_pane.objs/byte -H bin/.masc_tui_agenda.objs/byte -H bin/.masc_tui_ask_layout.objs/byte -H bin/.masc_tui_ask_projection.objs/byte -H bin/.masc_tui_attachment.objs/byte -H bin/.masc_tui_audio_device.objs/byte -H bin/.masc_tui_board_detail.objs/byte -H bin/.masc_tui_code_lexer.objs/byte -H bin/.masc_tui_color.objs/byte -H bin/.masc_tui_composer.objs/byte -H bin/.masc_tui_context_inspector.objs/byte -H bin/.masc_tui_context_state.objs/byte -H bin/.masc_tui_credential.objs/byte -H bin/.masc_tui_diff.objs/byte -H bin/.masc_tui_fetched.objs/byte -H bin/.masc_tui_frame.objs/byte -H bin/.masc_tui_gate_text.objs/byte -H bin/.masc_tui_image_preview.objs/byte -H bin/.masc_tui_image_ref.objs/byte -H bin/.masc_tui_keeper_chat_diff.objs/byte -H bin/.masc_tui_keeper_chat_live.objs/byte -H bin/.masc_tui_keeper_chat_log.objs/byte -H bin/.masc_tui_keeper_chat_projection.objs/byte -H bin/.masc_tui_keeper_chat_queue.objs/byte -H bin/.masc_tui_keeper_chat_transcript.objs/byte -H bin/.masc_tui_keeper_control.objs/byte -H bin/.masc_tui_keeper_sandbox.objs/byte -H bin/.masc_tui_keeper_selection.objs/byte -H bin/.masc_tui_lane_addons.objs/byte -H bin/.masc_tui_markdown.objs/byte -H bin/.masc_tui_mcp.objs/byte -H bin/.masc_tui_memo.objs/byte -H bin/.masc_tui_mermaid.objs/byte -H bin/.masc_tui_message_layout.objs/byte -H bin/.masc_tui_metrics_tail.objs/byte -H bin/.masc_tui_model_runtime_table.objs/byte -H bin/.masc_tui_observer.objs/byte -H bin/.masc_tui_operator_projection.objs/byte -H bin/.masc_tui_paste.objs/byte -H bin/.masc_tui_paste_spill.objs/byte -H bin/.masc_tui_render_schedule.objs/byte -H bin/.masc_tui_roster_pane.objs/byte -H bin/.masc_tui_rows.objs/byte -H bin/.masc_tui_runtime_config_view.objs/byte -H bin/.masc_tui_scroll.objs/byte -H bin/.masc_tui_send_disposition.objs/byte -H bin/.masc_tui_table.objs/byte -H bin/.masc_tui_task_flow.objs/byte -H bin/.masc_tui_terminal_palette.objs/byte -H bin/.masc_tui_theme.objs/byte -H bin/.masc_tui_utf8_input.objs/byte -H lib/apple_keychain/.apple_keychain.objs/byte -H lib/autonomous/.autonomous.objs/byte -H lib/board_addressing/.masc_board_addressing.objs/byte -H lib/bounded_event_dedupe/.masc_bounded_event_dedupe.objs/byte -H lib/browser_lane/.browser_lane.objs/byte -H lib/build_commit/.masc_build_commit.objs/byte -H lib/build_version/.masc_build_version.objs/byte -H lib/cancel_safe/.masc_cancel_safe.objs/byte -H lib/crypto_rng/.masc_crypto_rng.objs/byte -H lib/dashboard_utils/.masc_dashboard_utils.objs/byte -H lib/egress_host/.masc_egress_host.objs/byte -H lib/egress_proxy/.masc_egress_proxy_decision.objs/byte -H lib/egress_proxy_net/.masc_egress_proxy_net.objs/byte -H lib/exec_ssh_protocol/.exec_ssh_protocol.objs/byte -H lib/fs_compat/.fs_compat_internal.objs/byte -H lib/fusion_core/.masc_fusion_core.objs/byte -H lib/jsonl_writer/.jsonl_writer.objs/byte -H lib/keeper_approval/.keeper_approval.objs/byte -H lib/keeper_checkpoint_ref/.masc_keeper_checkpoint_ref.objs/byte -H lib/keeper_identity/.masc_keeper_identity.objs/byte -H lib/keeper_tool_name/.keeper_tool_name.objs/byte -H lib/markup_document/.masc_markup_document.objs/byte -H lib/mcp_client/.masc_mcp_client.objs/byte -H lib/monotonic_deadline/.monotonic_deadline.objs/byte -H lib/msx_lane/.msx_lane.objs/byte -H lib/otel_trace_context/.otel_trace_context.objs/byte -H lib/owner_process_identity/.owner_process_identity.objs/byte -H lib/parse_outcome/.parse_outcome.objs/byte -H lib/random_id/.masc_random_id.objs/byte -H lib/schedule/.masc_schedule.objs/byte -H lib/secret_patterns/.masc_secret_patterns.objs/byte -H lib/shared_types/.shared_types.objs/byte -H lib/skill_config/.masc_skill_config.objs/byte -H lib/skill_reference/.masc_skill_reference.objs/byte -H lib/skill_snapshot_service/.masc_skill_snapshot_service.objs/byte -H lib/slack_lane/.slack_lane.objs/byte -H lib/sse_event/.sse_event.objs/byte -H lib/sse_wire/.masc_sse_wire.objs/byte -H lib/task/.masc_task_handlers.objs/byte -H lib/time_codec/.masc_time_codec.objs/byte -H lib/toml_line_editor/.toml_line_editor.objs/byte -H lib/tool_metrics_store/.tool_metrics_store.objs/byte -H lib/tool_spawn/.masc_tool_spawn.objs/byte -H lib/webmcp/.masc_webmcp.objs/byte -H lib/workspace_connection/.workspace_connection.objs/byte -H packages/agent_core/lib/mcp_protocol_bundle/.mcp_protocol_bundle.objs/byte -H packages/agent_core/lib/strings/.agent_core_strings.objs/byte -H proto/.masc_proto.objs/byte -no-alias-deps -o test/.test_verification_collaboration_evidence.eobjs/byte/dune__exe__Test_verification_collaboration_evidence.cmo -c -impl test/test_verification_collaboration_evidence.ml)
+dune build --profile release @check	Build	2026-09-12T14:44:40.0152286Z File "test/test_verification_collaboration_evidence.ml", line 46, characters 73-86:
+dune build --profile release @check	Build	2026-09-12T14:44:40.0153911Z 46 | let post_args post = `Assoc ["post_id", `String (Board.Post_id.to_string post.Board.id)]
+dune build --profile release @check	Build	2026-09-12T14:44:40.0154984Z                                                                               ^^^^^^^^^^^^^
+dune build --profile release @check	Build	2026-09-12T14:44:40.0155769Z Error: The field access post.Board.id has type
+dune build --profile release @check	Build	2026-09-12T14:44:40.0156636Z          Masc.Board.Sub_board_id.t = Board_types.Sub_board_id.t
+dune build --profile release @check	Build	2026-09-12T14:44:40.0157427Z        but an expression was expected of type
+dune build --profile release @check	Build	2026-09-12T14:44:40.0158181Z          Masc.Board.Post_id.t = Board_types.Post_id.t
+dune build --profile release @check	Build	2026-09-12T14:45:16.1920901Z ##[error]Process completed with exit code 1.
+dune build @check	Build	﻿2026-09-12T14:43:20.9781324Z ##[group]Run set -euo pipefail
+dune build @check	Build	2026-09-12T14:43:20.9781644Z [36;1mset -euo pipefail[0m
+dune build @check	Build	2026-09-12T14:43:20.9782006Z [36;1mnode_targets=$(python3 scripts/ci/list-node-alias-targets.py)[0m
+dune build @check	Build	2026-09-12T14:43:20.9782472Z [36;1mprintf 'browser parity suites:\n%s\n' "${node_targets}"[0m
+dune build @check	Build	2026-09-12T14:43:20.9782897Z [36;1mdune build @check @test/stanzas/runtest ${node_targets}[0m
+dune build @check	Build	2026-09-12T14:43:20.9816854Z shell: /usr/bin/bash -e {0}
+dune build @check	Build	2026-09-12T14:43:20.9817118Z env:
+dune build @check	Build	2026-09-12T14:43:20.9817320Z   OPAMCOLOR: always
+dune build @check	Build	2026-09-12T14:43:20.9817556Z   OPAMCONFIRMLEVEL: unsafe-yes
+dune build @check	Build	2026-09-12T14:43:20.9817814Z   OPAMERRLOGLEN: 0
+dune build @check	Build	2026-09-12T14:43:20.9818054Z   OPAMEXTERNALSOLVER: builtin-0install
+dune build @check	Build	2026-09-12T14:43:20.9818587Z   OPAMRETRIES: 10
+dune build @check	Build	2026-09-12T14:43:20.9818823Z   OPAMSOLVERTIMEOUT: 600
+dune build @check	Build	2026-09-12T14:43:20.9819057Z   OPAMYES: 1
+dune build @check	Build	2026-09-12T14:43:20.9819256Z   OPAMSWITCH: ci-5-5-1
+dune build @check	Build	2026-09-12T14:43:20.9819550Z   DUNE_JOBS: 4
+dune build @check	Build	2026-09-12T14:43:20.9819883Z ##[endgroup]
+dune build @check	Build	2026-09-12T14:43:21.0622880Z browser parity suites:
+dune build @check	Build	2026-09-12T14:43:21.0623630Z @test/runtest-test_browser_connection_extension
+dune build @check	Build	2026-09-12T14:43:21.0624397Z @test/runtest-test_browser_elements
+dune build @check	Build	2026-09-12T14:43:21.0624855Z @test/runtest-test_browser_interact_extension
+dune build @check	Build	2026-09-12T14:43:21.0625323Z @test/runtest-test_browser_scene_resource
+dune build @check	Build	2026-09-12T14:43:21.0625763Z @test/runtest-test_browser_screenshot
+dune build @check	Build	2026-09-12T14:43:22.5432647Z (cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+dune build @check	Build	2026-09-12T14:43:22.5433790Z Warning: option "-j-std" is deprecated.
+dune build @check	Build	2026-09-12T14:43:43.8909680Z (cd _build/default/test && /usr/local/bin/node ./test_browser_connection_extension.mjs)
+dune build @check	Build	2026-09-12T14:43:43.8929290Z PASS: native connection identity, late response, stale disconnect, reconnect
+dune build @check	Build	2026-09-12T14:43:43.9625612Z (cd _build/default/test && /usr/local/bin/node ./test_browser_interact_extension.mjs)
+dune build @check	Build	2026-09-12T14:43:43.9650382Z PASS: shared script, explicit tab, unique selector, URL precondition, literal fill, no Enter/submit, rejected number, readonly, scroll, closed tab
+dune build @check	Build	2026-09-12T14:43:43.9678713Z PASS: extension dispatches screenshot point click, rejects stale viewport and unsupported drag, scrolls reverse-flow pane
+dune build @check	Build	2026-09-12T14:43:43.9679883Z PASS: nested open shadow roots target the internal scroll pane
+dune build @check	Build	2026-09-12T14:43:43.9680562Z PASS: a link withdrawn by an ancestor is not followed
+dune build @check	Build	2026-09-12T14:43:43.9681443Z PASS: native host message dispatch follows an observed same-tab anchor and exposes destinationUrl
+dune build @check	Build	2026-09-12T14:43:43.9682493Z PASS: native dispatch preserves pre-effect rejection and unknown post-effect failure
+dune build @check	Build	2026-09-12T14:43:43.9683518Z PASS: preflight rejection is pre-effect; applied script with lost API result remains unknown
+dune build @check	Build	2026-09-12T14:43:43.9684683Z PASS: top-document parent/top targets accepted and link-specific referrer policies reject pre-effect
+dune build @check	Build	2026-09-12T14:43:43.9685779Z PASS: activation checks explicit tab URL then updates only active and verifies receipt
+dune build @check	Build	2026-09-12T14:43:43.9686849Z PASS: native dispatch distinguishes activation pre-effect failures from unknown effect outcomes
+dune build @check	Build	2026-09-12T14:43:43.9879410Z (cd _build/default/test && /usr/local/bin/node --test ./test_browser_elements.cjs)
+dune build @check	Build	2026-09-12T14:43:43.9911031Z TAP version 13
+dune build @check	Build	2026-09-12T14:43:43.9970511Z # Subtest: native elements expose actionable current states without sensitive values
+dune build @check	Build	2026-09-12T14:43:43.9971814Z ok 1 - native elements expose actionable current states without sensitive values
+dune build @check	Build	2026-09-12T14:43:43.9972683Z   ---
+dune build @check	Build	2026-09-12T14:43:43.9973169Z   duration_ms: 5.197459
+dune build @check	Build	2026-09-12T14:43:43.9973693Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:43.9974163Z   ...
+dune build @check	Build	2026-09-12T14:43:43.9974870Z # Subtest: live elements retain tab identity and match native control observations
+dune build @check	Build	2026-09-12T14:43:43.9975944Z ok 2 - live elements retain tab identity and match native control observations
+dune build @check	Build	2026-09-12T14:43:43.9976757Z   ---
+dune build @check	Build	2026-09-12T14:43:43.9977234Z   duration_ms: 3.571344
+dune build @check	Build	2026-09-12T14:43:43.9977746Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:43.9978211Z   ...
+dune build @check	Build	2026-09-12T14:43:43.9979400Z 1..2
+dune build @check	Build	2026-09-12T14:43:43.9979955Z # tests 2
+dune build @check	Build	2026-09-12T14:43:43.9980408Z # suites 0
+dune build @check	Build	2026-09-12T14:43:43.9980863Z # pass 2
+dune build @check	Build	2026-09-12T14:43:43.9981308Z # fail 0
+dune build @check	Build	2026-09-12T14:43:43.9981760Z # cancelled 0
+dune build @check	Build	2026-09-12T14:43:43.9982231Z # skipped 0
+dune build @check	Build	2026-09-12T14:43:43.9982739Z # todo 0
+dune build @check	Build	2026-09-12T14:43:43.9983253Z # duration_ms 90.811679
+dune build @check	Build	2026-09-12T14:43:44.1589532Z (cd _build/default/test && /usr/local/bin/node --test ./test_browser_screenshot.cjs)
+dune build @check	Build	2026-09-12T14:43:44.1609445Z TAP version 13
+dune build @check	Build	2026-09-12T14:43:44.1610321Z # Subtest: capture names the requested tab without selecting or querying the active tab
+dune build @check	Build	2026-09-12T14:43:44.1611532Z ok 1 - capture names the requested tab without selecting or querying the active tab
+dune build @check	Build	2026-09-12T14:43:44.1612440Z   ---
+dune build @check	Build	2026-09-12T14:43:44.1612942Z   duration_ms: 5.463333
+dune build @check	Build	2026-09-12T14:43:44.1613484Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:44.1613981Z   ...
+dune build @check	Build	2026-09-12T14:43:44.1614662Z # Subtest: the capture carries the viewport it observed around the pixels
+dune build @check	Build	2026-09-12T14:43:44.1615686Z ok 2 - the capture carries the viewport it observed around the pixels
+dune build @check	Build	2026-09-12T14:43:44.1616453Z   ---
+dune build @check	Build	2026-09-12T14:43:44.1616938Z   duration_ms: 2.554663
+dune build @check	Build	2026-09-12T14:43:44.1617472Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:44.1617952Z   ...
+dune build @check	Build	2026-09-12T14:43:44.1619051Z # Subtest: navigation during capture discards ambiguous pixels
+dune build @check	Build	2026-09-12T14:43:44.1619994Z ok 3 - navigation during capture discards ambiguous pixels
+dune build @check	Build	2026-09-12T14:43:44.1620683Z   ---
+dune build @check	Build	2026-09-12T14:43:44.1621138Z   duration_ms: 1.173393
+dune build @check	Build	2026-09-12T14:43:44.1621649Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:44.1622100Z   ...
+dune build @check	Build	2026-09-12T14:43:44.1622709Z # Subtest: a viewport that moves during capture discards ambiguous pixels
+dune build @check	Build	2026-09-12T14:43:44.1623637Z ok 4 - a viewport that moves during capture discards ambiguous pixels
+dune build @check	Build	2026-09-12T14:43:44.1624341Z   ---
+dune build @check	Build	2026-09-12T14:43:44.1624809Z   duration_ms: 1.559671
+dune build @check	Build	2026-09-12T14:43:44.1625302Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:44.1625757Z   ...
+dune build @check	Build	2026-09-12T14:43:44.1626375Z # Subtest: oversized reply becomes a bounded error before native messaging
+dune build @check	Build	2026-09-12T14:43:44.1627406Z ok 5 - oversized reply becomes a bounded error before native messaging
+dune build @check	Build	2026-09-12T14:43:44.1628191Z   ---
+dune build @check	Build	2026-09-12T14:43:44.1628902Z   duration_ms: 42.144222
+dune build @check	Build	2026-09-12T14:43:44.1629543Z   type: 'test'
+dune build @check	Build	2026-09-12T14:43:44.1630021Z   ...
+dune build @check	Build	2026-09-12T14:43:44.1630472Z 1..5
+dune build @check	Build	2026-09-12T14:43:44.1630922Z # tests 5
+dune build @check	Build	2026-09-12T14:43:44.1631386Z # suites 0
+dune build @check	Build	2026-09-12T14:43:44.1631846Z # pass 5
+dune build @check	Build	2026-09-12T14:43:44.1632291Z # fail 0
+dune build @check	Build	2026-09-12T14:43:44.1632748Z # cancelled 0
+dune build @check	Build	2026-09-12T14:43:44.1633266Z # skipped 0
+dune build @check	Build	2026-09-12T14:43:44.1633760Z # todo 0
+dune build @check	Build	2026-09-12T14:43:44.1634301Z # duration_ms 142.135417
+dune build @check	Build	2026-09-12T14:43:44.2058196Z (cd _build/default/test && /usr/local/bin/node ./test_browser_scene_resource.cjs)
+dune build @check	Build	2026-09-12T14:43:44.2070278Z scene resources: shared-script parity, insecure-context identity, observed href, and 6 JSON/UTF-8 overflow cases passed
+dune build @check	Build	2026-09-12T14:46:01.3109732Z (cd _build/default && /home/runner/.opam/ci-5-5-1/bin/ocamlc.opt -short-paths -keep-locs -warn-error +a -w +32+69 -warn-error +a -g -bin-annot -bin-annot-occurrences -I test/.test_verification_collaboration_evidence.eobjs/byte -I /home/runner/.opam/ci-5-5-1/lib/alcotest -I /home/runner/.opam/ci-5-5-1/lib/astring -I /home/runner/.opam/ci-5-5-1/lib/base64 -I /home/runner/.opam/ci-5-5-1/lib/cohttp -I /home/runner/.opam/ci-5-5-1/lib/cohttp-eio -I /home/runner/.opam/ci-5-5-1/lib/cstruct -I /home/runner/.opam/ci-5-5-1/lib/digestif -I /home/runner/.opam/ci-5-5-1/lib/eio -I /home/runner/.opam/ci-5-5-1/lib/eio/mock -I /home/runner/.opam/ci-5-5-1/lib/eio/unix -I /home/runner/.opam/ci-5-5-1/lib/eio_main -I /home/runner/.opam/ci-5-5-1/lib/fmt -I /home/runner/.opam/ci-5-5-1/lib/grpc-direct -I /home/runner/.opam/ci-5-5-1/lib/http -I /home/runner/.opam/ci-5-5-1/lib/httpun -I /home/runner/.opam/ci-5-5-1/lib/mirage-crypto -I /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-rng -I /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-rng/unix -I /home/runner/.opam/ci-5-5-1/lib/ocaml-protoc-plugin -I /home/runner/.opam/ci-5-5-1/lib/ocaml/runtime_events -I /home/runner/.opam/ci-5-5-1/lib/ocaml/str -I /home/runner/.opam/ci-5-5-1/lib/ocaml/threads -I /home/runner/.opam/ci-5-5-1/lib/ocaml/unix -I /home/runner/.opam/ci-5-5-1/lib/opentelemetry -I /home/runner/.opam/ci-5-5-1/lib/otoml -I /home/runner/.opam/ci-5-5-1/lib/piaf -I /home/runner/.opam/ci-5-5-1/lib/piaf/stream -I /home/runner/.opam/ci-5-5-1/lib/qcheck-alcotest -I /home/runner/.opam/ci-5-5-1/lib/qcheck-core -I /home/runner/.opam/ci-5-5-1/lib/re -I /home/runner/.opam/ci-5-5-1/lib/sqlite3 -I /home/runner/.opam/ci-5-5-1/lib/uri -I /home/runner/.opam/ci-5-5-1/lib/uuidm -I /home/runner/.opam/ci-5-5-1/lib/yojson -I /home/runner/.opam/ci-5-5-1/lib/zstd -I bin/.masc_tui_msx_tick.objs/byte -I bin/.masc_tui_types.objs/byte -H lib/.masc.objs/byte -I lib/.masc.objs/public_cmi -I lib/activity_graph/.masc_activity_graph.objs/byte -I lib/ag_ui/.masc_ag_ui.objs/byte -I lib/agent_observation/.masc_agent_observation.objs/byte -I lib/attribution/.masc_attribution.objs/byte -H lib/auth/.masc_auth.objs/byte -I lib/auth/.masc_auth.objs/public_cmi -I lib/backend/.masc_backend.objs/byte -I lib/board/.masc_board_handlers.objs/byte -H lib/board_tool_adapter/.board_tool_adapter.objs/byte -I lib/board_tool_adapter/.board_tool_adapter.objs/public_cmi -I lib/board_types/.masc_board.objs/byte -I lib/briefing_compactors/.masc_briefing_compactors.objs/byte -I lib/compression/.masc_compression.objs/byte -I lib/config/.masc_config.objs/byte -I lib/config_dir_resolver/.masc_config_dir_resolver.objs/byte -I lib/core/.masc_core.objs/byte -I lib/cost_ledger/.masc_cost_ledger.objs/byte -I lib/dashboard/.masc_dashboard.objs/byte -I lib/dashboard_eval_feed/.masc_dashboard_eval_feed.objs/byte -I lib/dashboard_tla_specs/.masc_dashboard_tla_specs.objs/byte -I lib/dated_jsonl/.dated_jsonl.objs/byte -I lib/discovery_cache/.discovery_cache.objs/byte -I lib/eio_context/.masc_eio_context.objs/byte -I lib/embedded_config/.embedded_config.objs/byte -I lib/event_bus_slots/.masc_event_bus_slots.objs/byte -I lib/exec/.masc_exec.objs/byte -I lib/exec/command_gate/.masc_exec_command_gate.objs/byte -I lib/exec/parser/.masc_exec_bash_parser.objs/byte -I lib/exec_policy/.masc_exec_policy.objs/byte -I lib/fd_accountant/.fd_accountant.objs/byte -I lib/fs_compat/.fs_compat.objs/byte -I lib/gate/.masc_gate.objs/byte -I lib/goal/.masc_goal.objs/byte -I lib/host_config/.masc_host_config.objs/byte -I lib/ide/.masc_ide.objs/byte -I lib/ide_memo/.masc_ide_memo.objs/byte -I lib/json_field/.json_field.objs/byte -I lib/keeper_chat_delivery_identity/.masc_keeper_chat_delivery_identity.objs/byte -I lib/keeper_chat_operations/.masc_keeper_chat_operations.objs/byte -I lib/keeper_contract/.masc_keeper_contract.objs/byte -I lib/keeper_execution_scope/.masc_keeper_execution_scope.objs/byte -I lib/keeper_failure_taxonomy/.masc_keeper_failure_taxonomy.objs/byte -I lib/keeper_hooks_agent_core_types/.masc_keeper_hooks_agent_core_types.objs/byte -I lib/keeper_metrics/.keeper_metrics.objs/byte -I lib/keeper_operation_identity/.masc_keeper_operation_identity.objs/byte -I lib/keeper_paste_naming/.masc_keeper_paste_naming.objs/byte -I lib/keeper_registry/.masc_keeper_registry.objs/byte -H lib/keeper_runtime/.masc_keeper_runtime.objs/byte -I lib/keeper_runtime/.masc_keeper_runtime.objs/public_cmi -I lib/keeper_sandbox_image/.keeper_sandbox_image.objs/byte -I lib/keeper_toml/.masc_keeper_toml.objs/byte -I lib/keeper_tool_call_index/.keeper_tool_call_index.objs/byte -I lib/keeper_tooling/.keeper_tooling.objs/byte -I lib/keeper_types/.masc_keeper_types.objs/byte -I lib/keeper_types_profile_sandbox/.masc_keeper_types_profile_sandbox.objs/byte -I lib/keeper_usage_trust/.masc_keeper_usage_trust.objs/byte -I lib/local_runtime_pool/.local_runtime_pool.objs/byte -I lib/lockfree_atomic/.lockfree_atomic.objs/byte -I lib/lsp_client/.masc_lsp_client.objs/byte -I lib/masc_http_client/.masc_http_client.objs/byte -I lib/masc_log/.masc_log.objs/byte -I lib/mcp_session/.masc_session.objs/byte -I lib/mcp_transport_protocol/.masc_transport_protocol.objs/byte -I lib/model_inference_metrics/.masc_model_inference_metrics.objs/byte -I lib/multimodal/.multimodal.objs/byte -I lib/operator/.masc_operator.objs/byte -I lib/otel_dispatch_hook/.otel_dispatch_hook.objs/byte -I lib/otel_genai/.otel_genai.objs/byte -I lib/otel_metric_store/.otel_metric_store.objs/byte -I lib/otel_metrics/.masc_otel_metrics.objs/byte -I lib/otel_spans/.masc_otel_spans.objs/byte -I lib/pool_metrics/.pool_metrics.objs/byte -I lib/process/.masc_process.objs/byte -I lib/prompt_registry/.masc_prompt_registry.objs/byte -I lib/provider_tool_support/.provider_tool_support.objs/byte -I lib/pulse/.masc_pulse.objs/byte -I lib/repo_manager/.repo_manager.objs/byte -I lib/run_registry_core/.run_registry_core.objs/byte -H lib/runtime/.masc_runtime.objs/byte -I lib/runtime/.masc_runtime.objs/public_cmi -I lib/runtime_model/.masc_runtime_model.objs/byte -H lib/server/.masc_server.objs/byte -I lib/server/.masc_server.objs/public_cmi -I lib/shared_audit/.shared_audit.objs/byte -I lib/skill_snapshot/.masc_skill_snapshot.objs/byte -I lib/string_util/.masc_string_util.objs/byte -I lib/telemetry_coverage_gap/.telemetry_coverage_gap.objs/byte -I lib/telemetry_unified/.telemetry_unified.objs/byte -I lib/telemetry_unified_source/.telemetry_unified_source.objs/byte -I lib/time_compat/.time_compat.objs/byte -I lib/tool/.masc_tool_dispatch.objs/byte -I lib/tool_blob_store/.masc_tool_blob_store.objs/byte -I lib/tool_call_quality_benchmark/.masc_tool_call_quality_benchmark.objs/byte -I lib/tool_catalog_surfaces/.masc_tool_catalog_surfaces.objs/byte -I lib/tool_invocation_ref/.masc_tool_invocation_ref.objs/byte -I lib/tool_schemas/.masc_tool_schemas.objs/byte -I lib/tool_schemas_specs/.tool_schemas_specs.objs/byte -H lib/tool_surface/.masc_tool_surface.objs/byte -I lib/tool_surface/.masc_tool_surface.objs/public_cmi -I lib/tool_types/.masc_tool_types.objs/byte -I lib/trajectory/.masc_trajectory.objs/byte -I lib/turn_fsm/.masc_turn.objs/byte -I lib/types/.masc_types.objs/byte -I lib/types_boundary/.masc_types_boundary.objs/byte -I lib/voice_bridge_core/.voice_bridge_core.objs/byte -I lib/voice_config/.voice_config.objs/byte -I lib/voice_runtime_overlay/.voice_runtime_overlay.objs/byte -I lib/workspace/.masc_workspace.objs/byte -H packages/agent_core/lib/.agent_core.objs/byte -I packages/agent_core/lib/.agent_core.objs/public_cmi -I packages/agent_core/lib/base/.agent_core_base.objs/byte -H packages/agent_core/lib/llm_provider/.llm_provider.objs/byte -I packages/agent_core/lib/llm_provider/.llm_provider.objs/public_cmi -I packages/agent_core/lib/protocol/.agent_core_protocol.objs/byte -I test/deps/.masc_test_deps.objs/byte -H /home/runner/.opam/ci-5-5-1/lib/alcotest/engine -H /home/runner/.opam/ci-5-5-1/lib/alcotest/stdlib_ext -H /home/runner/.opam/ci-5-5-1/lib/ambient-context -H /home/runner/.opam/ci-5-5-1/lib/ambient-context-eio -H /home/runner/.opam/ci-5-5-1/lib/ambient-context/atomic -H /home/runner/.opam/ci-5-5-1/lib/ambient-context/core -H /home/runner/.opam/ci-5-5-1/lib/ambient-context/tls -H /home/runner/.opam/ci-5-5-1/lib/angstrom -H /home/runner/.opam/ci-5-5-1/lib/asn1-combinators -H /home/runner/.opam/ci-5-5-1/lib/atdgen-runtime -H /home/runner/.opam/ci-5-5-1/lib/base -H /home/runner/.opam/ci-5-5-1/lib/base/base_internalhash_types -H /home/runner/.opam/ci-5-5-1/lib/base/shadow_stdlib -H /home/runner/.opam/ci-5-5-1/lib/base64/rfc2045 -H /home/runner/.opam/ci-5-5-1/lib/bigstringaf -H /home/runner/.opam/ci-5-5-1/lib/biniou -H /home/runner/.opam/ci-5-5-1/lib/bos -H /home/runner/.opam/ci-5-5-1/lib/bstr -H /home/runner/.opam/ci-5-5-1/lib/ca-certs -H /home/runner/.opam/ci-5-5-1/lib/camlp-streams -H /home/runner/.opam/ci-5-5-1/lib/checkseum/c -H /home/runner/.opam/ci-5-5-1/lib/cmdliner -H /home/runner/.opam/ci-5-5-1/lib/ctypes -H /home/runner/.opam/ci-5-5-1/lib/ctypes/stubs -H /home/runner/.opam/ci-5-5-1/lib/decompress/de -H /home/runner/.opam/ci-5-5-1/lib/decompress/gz -H /home/runner/.opam/ci-5-5-1/lib/decompress/zl -H /home/runner/.opam/ci-5-5-1/lib/digestif/c -H /home/runner/.opam/ci-5-5-1/lib/domain-local-await -H /home/runner/.opam/ci-5-5-1/lib/domain-name -H /home/runner/.opam/ci-5-5-1/lib/dune-build-info -H /home/runner/.opam/ci-5-5-1/lib/duration -H /home/runner/.opam/ci-5-5-1/lib/easy-format -H /home/runner/.opam/ci-5-5-1/lib/eio-ssl -H /home/runner/.opam/ci-5-5-1/lib/eio/core -H /home/runner/.opam/ci-5-5-1/lib/eio/runtime_events -H /home/runner/.opam/ci-5-5-1/lib/eio/utils -H /home/runner/.opam/ci-5-5-1/lib/eio_linux -H /home/runner/.opam/ci-5-5-1/lib/eio_posix -H /home/runner/.opam/ci-5-5-1/lib/eqaf -H /home/runner/.opam/ci-5-5-1/lib/faraday -H /home/runner/.opam/ci-5-5-1/lib/fmt/cli -H /home/runner/.opam/ci-5-5-1/lib/fmt/tty -H /home/runner/.opam/ci-5-5-1/lib/fpath -H /home/runner/.opam/ci-5-5-1/lib/gluten -H /home/runner/.opam/ci-5-5-1/lib/gluten-eio -H /home/runner/.opam/ci-5-5-1/lib/gmap -H /home/runner/.opam/ci-5-5-1/lib/graphql -H /home/runner/.opam/ci-5-5-1/lib/graphql_parser -H /home/runner/.opam/ci-5-5-1/lib/grpc-direct-core -H /home/runner/.opam/ci-5-5-1/lib/grpc-direct/h2_lite -H /home/runner/.opam/ci-5-5-1/lib/h2 -H /home/runner/.opam/ci-5-5-1/lib/h2-eio -H /home/runner/.opam/ci-5-5-1/lib/hmap -H /home/runner/.opam/ci-5-5-1/lib/hpack -H /home/runner/.opam/ci-5-5-1/lib/httpun-eio -H /home/runner/.opam/ci-5-5-1/lib/httpun-types -H /home/runner/.opam/ci-5-5-1/lib/httpun-ws -H /home/runner/.opam/ci-5-5-1/lib/integers -H /home/runner/.opam/ci-5-5-1/lib/iomux -H /home/runner/.opam/ci-5-5-1/lib/ipaddr -H /home/runner/.opam/ci-5-5-1/lib/jane-street-headers -H /home/runner/.opam/ci-5-5-1/lib/kdf/hkdf -H /home/runner/.opam/ci-5-5-1/lib/kdf/pbkdf -H /home/runner/.opam/ci-5-5-1/lib/ke -H /home/runner/.opam/ci-5-5-1/lib/logs -H /home/runner/.opam/ci-5-5-1/lib/lwt-dllist -H /home/runner/.opam/ci-5-5-1/lib/macaddr -H /home/runner/.opam/ci-5-5-1/lib/magic-mime -H /home/runner/.opam/ci-5-5-1/lib/markup -H /home/runner/.opam/ci-5-5-1/lib/mcp_protocol -H /home/runner/.opam/ci-5-5-1/lib/mcp_protocol/eio -H /home/runner/.opam/ci-5-5-1/lib/mcp_protocol/http -H /home/runner/.opam/ci-5-5-1/lib/menhirLib -H /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-ec -H /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-pk -H /home/runner/.opam/ci-5-5-1/lib/mirage-crypto-rng-eio -H /home/runner/.opam/ci-5-5-1/lib/mtime -H /home/runner/.opam/ci-5-5-1/lib/mtime/clock -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/msx -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/state_codec -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/vdpcore -H /home/runner/.opam/ci-5-5-1/lib/ocaml-msx/z80core -H /home/runner/.opam/ci-5-5-1/lib/ocaml/threads -H /home/runner/.opam/ci-5-5-1/lib/ocaml_intrinsics_kernel -H /home/runner/.opam/ci-5-5-1/lib/ohex -H /home/runner/.opam/ci-5-5-1/lib/opentelemetry/atomic -H /home/runner/.opam/ci-5-5-1/lib/opentelemetry/client -H /home/runner/.opam/ci-5-5-1/lib/opentelemetry/proto -H /home/runner/.opam/ci-5-5-1/lib/optint -H /home/runner/.opam/ci-5-5-1/lib/pbrt -H /home/runner/.opam/ci-5-5-1/lib/pecu -H /home/runner/.opam/ci-5-5-1/lib/piaf/multipart -H /home/runner/.opam/ci-5-5-1/lib/piaf/multipart_form -H /home/runner/.opam/ci-5-5-1/lib/piaf/sendfile -H /home/runner/.opam/ci-5-5-1/lib/ppx_compare/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_deriving/runtime -H /home/runner/.opam/ci-5-5-1/lib/ppx_deriving_yojson/runtime -H /home/runner/.opam/ci-5-5-1/lib/ppx_enumerate/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/config -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/config_types -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/make_corrected_file -H /home/runner/.opam/ci-5-5-1/lib/ppx_expect/runtime -H /home/runner/.opam/ci-5-5-1/lib/ppx_hash/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_here/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_inline_test/config -H /home/runner/.opam/ci-5-5-1/lib/ppx_inline_test/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppx_sexp_conv/runtime-lib -H /home/runner/.opam/ci-5-5-1/lib/ppxlib/print_diff -H /home/runner/.opam/ci-5-5-1/lib/prettym -H /home/runner/.opam/ci-5-5-1/lib/psq -H /home/runner/.opam/ci-5-5-1/lib/ptime -H /home/runner/.opam/ci-5-5-1/lib/ptime/clock -H /home/runner/.opam/ci-5-5-1/lib/qcheck-core/runner -H /home/runner/.opam/ci-5-5-1/lib/re/pcre -H /home/runner/.opam/ci-5-5-1/lib/re/str -H /home/runner/.opam/ci-5-5-1/lib/rresult -H /home/runner/.opam/ci-5-5-1/lib/seq -H /home/runner/.opam/ci-5-5-1/lib/sexplib0 -H /home/runner/.opam/ci-5-5-1/lib/ssl -H /home/runner/.opam/ci-5-5-1/lib/stdio -H /home/runner/.opam/ci-5-5-1/lib/stdlib-shims -H /home/runner/.opam/ci-5-5-1/lib/stringext -H /home/runner/.opam/ci-5-5-1/lib/thread-local-storage -H /home/runner/.opam/ci-5-5-1/lib/thread-table -H /home/runner/.opam/ci-5-5-1/lib/time_now -H /home/runner/.opam/ci-5-5-1/lib/tls -H /home/runner/.opam/ci-5-5-1/lib/tls-eio -H /home/runner/.opam/ci-5-5-1/lib/unstrctrd -H /home/runner/.opam/ci-5-5-1/lib/unstrctrd/parser -H /home/runner/.opam/ci-5-5-1/lib/uri-sexp -H /home/runner/.opam/ci-5-5-1/lib/uri/services -H /home/runner/.opam/ci-5-5-1/lib/uring -H /home/runner/.opam/ci-5-5-1/lib/uucp -H /home/runner/.opam/ci-5-5-1/lib/uunf -H /home/runner/.opam/ci-5-5-1/lib/uuseg -H /home/runner/.opam/ci-5-5-1/lib/uutf -H /home/runner/.opam/ci-5-5-1/lib/ws-direct-core -H /home/runner/.opam/ci-5-5-1/lib/ws-direct-eio -H /home/runner/.opam/ci-5-5-1/lib/ws-direct-gluten -H /home/runner/.opam/ci-5-5-1/lib/x509 -H /home/runner/.opam/ci-5-5-1/lib/yaml -H /home/runner/.opam/ci-5-5-1/lib/yaml/bindings -H /home/runner/.opam/ci-5-5-1/lib/yaml/bindings/types -H /home/runner/.opam/ci-5-5-1/lib/yaml/c -H /home/runner/.opam/ci-5-5-1/lib/yaml/ffi -H /home/runner/.opam/ci-5-5-1/lib/yaml/types -H /home/runner/.opam/ci-5-5-1/lib/zarith -H /home/runner/.opam/ci-5-5-1/lib/zstd/stubs -H bin/.masc_tui_acting.objs/byte -H bin/.masc_tui_acting_pane.objs/byte -H bin/.masc_tui_agenda.objs/byte -H bin/.masc_tui_ask_layout.objs/byte -H bin/.masc_tui_ask_projection.objs/byte -H bin/.masc_tui_attachment.objs/byte -H bin/.masc_tui_audio_device.objs/byte -H bin/.masc_tui_board_detail.objs/byte -H bin/.masc_tui_code_lexer.objs/byte -H bin/.masc_tui_color.objs/byte -H bin/.masc_tui_composer.objs/byte -H bin/.masc_tui_context_inspector.objs/byte -H bin/.masc_tui_context_state.objs/byte -H bin/.masc_tui_credential.objs/byte -H bin/.masc_tui_diff.objs/byte -H bin/.masc_tui_fetched.objs/byte -H bin/.masc_tui_frame.objs/byte -H bin/.masc_tui_gate_text.objs/byte -H bin/.masc_tui_image_preview.objs/byte -H bin/.masc_tui_image_ref.objs/byte -H bin/.masc_tui_keeper_chat_diff.objs/byte -H bin/.masc_tui_keeper_chat_live.objs/byte -H bin/.masc_tui_keeper_chat_log.objs/byte -H bin/.masc_tui_keeper_chat_projection.objs/byte -H bin/.masc_tui_keeper_chat_queue.objs/byte -H bin/.masc_tui_keeper_chat_transcript.objs/byte -H bin/.masc_tui_keeper_control.objs/byte -H bin/.masc_tui_keeper_sandbox.objs/byte -H bin/.masc_tui_keeper_selection.objs/byte -H bin/.masc_tui_lane_addons.objs/byte -H bin/.masc_tui_markdown.objs/byte -H bin/.masc_tui_mcp.objs/byte -H bin/.masc_tui_memo.objs/byte -H bin/.masc_tui_mermaid.objs/byte -H bin/.masc_tui_message_layout.objs/byte -H bin/.masc_tui_metrics_tail.objs/byte -H bin/.masc_tui_model_runtime_table.objs/byte -H bin/.masc_tui_observer.objs/byte -H bin/.masc_tui_operator_projection.objs/byte -H bin/.masc_tui_paste.objs/byte -H bin/.masc_tui_paste_spill.objs/byte -H bin/.masc_tui_render_schedule.objs/byte -H bin/.masc_tui_roster_pane.objs/byte -H bin/.masc_tui_rows.objs/byte -H bin/.masc_tui_runtime_config_view.objs/byte -H bin/.masc_tui_scroll.objs/byte -H bin/.masc_tui_send_disposition.objs/byte -H bin/.masc_tui_table.objs/byte -H bin/.masc_tui_task_flow.objs/byte -H bin/.masc_tui_terminal_palette.objs/byte -H bin/.masc_tui_theme.objs/byte -H bin/.masc_tui_utf8_input.objs/byte -H lib/apple_keychain/.apple_keychain.objs/byte -H lib/autonomous/.autonomous.objs/byte -H lib/board_addressing/.masc_board_addressing.objs/byte -H lib/bounded_event_dedupe/.masc_bounded_event_dedupe.objs/byte -H lib/browser_lane/.browser_lane.objs/byte -H lib/build_commit/.masc_build_commit.objs/byte -H lib/build_version/.masc_build_version.objs/byte -H lib/cancel_safe/.masc_cancel_safe.objs/byte -H lib/crypto_rng/.masc_crypto_rng.objs/byte -H lib/dashboard_utils/.masc_dashboard_utils.objs/byte -H lib/egress_host/.masc_egress_host.objs/byte -H lib/egress_proxy/.masc_egress_proxy_decision.objs/byte -H lib/egress_proxy_net/.masc_egress_proxy_net.objs/byte -H lib/exec_ssh_protocol/.exec_ssh_protocol.objs/byte -H lib/fs_compat/.fs_compat_internal.objs/byte -H lib/fusion_core/.masc_fusion_core.objs/byte -H lib/jsonl_writer/.jsonl_writer.objs/byte -H lib/keeper_approval/.keeper_approval.objs/byte -H lib/keeper_checkpoint_ref/.masc_keeper_checkpoint_ref.objs/byte -H lib/keeper_identity/.masc_keeper_identity.objs/byte -H lib/keeper_tool_name/.keeper_tool_name.objs/byte -H lib/markup_document/.masc_markup_document.objs/byte -H lib/mcp_client/.masc_mcp_client.objs/byte -H lib/monotonic_deadline/.monotonic_deadline.objs/byte -H lib/msx_lane/.msx_lane.objs/byte -H lib/otel_trace_context/.otel_trace_context.objs/byte -H lib/owner_process_identity/.owner_process_identity.objs/byte -H lib/parse_outcome/.parse_outcome.objs/byte -H lib/random_id/.masc_random_id.objs/byte -H lib/schedule/.masc_schedule.objs/byte -H lib/secret_patterns/.masc_secret_patterns.objs/byte -H lib/shared_types/.shared_types.objs/byte -H lib/skill_config/.masc_skill_config.objs/byte -H lib/skill_reference/.masc_skill_reference.objs/byte -H lib/skill_snapshot_service/.masc_skill_snapshot_service.objs/byte -H lib/slack_lane/.slack_lane.objs/byte -H lib/sse_event/.sse_event.objs/byte -H lib/sse_wire/.masc_sse_wire.objs/byte -H lib/task/.masc_task_handlers.objs/byte -H lib/time_codec/.masc_time_codec.objs/byte -H lib/toml_line_editor/.toml_line_editor.objs/byte -H lib/tool_metrics_store/.tool_metrics_store.objs/byte -H lib/tool_spawn/.masc_tool_spawn.objs/byte -H lib/webmcp/.masc_webmcp.objs/byte -H lib/workspace_connection/.workspace_connection.objs/byte -H packages/agent_core/lib/mcp_protocol_bundle/.mcp_protocol_bundle.objs/byte -H packages/agent_core/lib/strings/.agent_core_strings.objs/byte -H proto/.masc_proto.objs/byte -no-alias-deps -opaque -o test/.test_verification_collaboration_evidence.eobjs/byte/dune__exe__Test_verification_collaboration_evidence.cmo -c -impl test/test_verification_collaboration_evidence.ml)
+dune build @check	Build	2026-09-12T14:46:01.3315840Z File "test/test_verification_collaboration_evidence.ml", line 46, characters 73-86:
+dune build @check	Build	2026-09-12T14:46:01.3316900Z 46 | let post_args post = `Assoc ["post_id", `String (Board.Post_id.to_string post.Board.id)]
+dune build @check	Build	2026-09-12T14:46:01.3317743Z                                                                               ^^^^^^^^^^^^^
+dune build @check	Build	2026-09-12T14:46:01.3348845Z Error: The field access post.Board.id has type Board.Sub_board_id.t
+dune build @check	Build	2026-09-12T14:46:01.3349679Z        but an expression was expected of type Board.Post_id.t
+dune build @check	Build	2026-09-12T14:46:36.9230128Z ##[error]Process completed with exit code 1.

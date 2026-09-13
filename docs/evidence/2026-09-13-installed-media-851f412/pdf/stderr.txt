@@ -1,0 +1,1 @@
+[2026-09-13 03:35:24] [INFO] [MCP] Tag registry initialized: 165 tools registered

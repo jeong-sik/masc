@@ -67,6 +67,10 @@ val footer_hints_config : pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
     the union, with pane restrictions explained by each binding. *)
 
+val footer_hints_prompt_assets : string
+(** The prompts pane while it shows the read-only runtime assets: its keys
+    without the ones that edit the registry, and [o] named for the way back. *)
+
 val footer_hints_overview : task_focus:bool -> string
 (** The Overview footer. Separate from {!footer_hints} because Overview owns
     one runtime fact the static table cannot: whether j/k currently drives

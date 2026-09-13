@@ -11963,8 +11963,7 @@ let render_runtime_params (state : state) =
             "type:value  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | Some { rpe_mode = Advanced_json; _ } ->
             "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
-          | None ->
-            "j/k:select  Enter/e:edit  E:advanced JSON  x:default  p:next"));
+          | None -> Masc_tui_keys.footer_hints_config ~pane:Config_params));
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -12188,8 +12187,7 @@ let render_prompt_registry (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:
-         "j/k:선택  PgUp/PgDn:읽기  a:내부 조각  i:최근 입력  e:편집  x:재정의 삭제  o:런타임 자산");
+       ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_prompts));
   finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
 
 (* The raw text assets are distributed with the binary and deliberately have
@@ -12296,7 +12294,7 @@ let render_runtime_prompt_assets (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:선택  PgUp/PgDn:읽기  o:레지스트리  r:새로고침");
+       ~hints:Masc_tui_keys.footer_hints_prompt_assets);
   finish_surface state ~surface_key:"prompt-runtime-assets" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -12435,7 +12433,7 @@ let render_presets (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:선택  PgUp/PgDn:읽기  n:저장  u,u:되돌리기  r:새로고침");
+       ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_presets));
   finish_surface state ~surface_key:"presets" ~rows:terminal_rows ~cols buf
 
 let render_themes (state : state) =
@@ -12681,7 +12679,7 @@ let render_config_models (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:"j/k:row  e:open [models.NAME]  p:next pane  r:reload  Tab:next");
+       ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_models));
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
 let config_metadata_style = function

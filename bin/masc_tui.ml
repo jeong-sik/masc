@@ -19067,7 +19067,12 @@ and is loaded on demand through keeper_skill.
                   in
                   state.harness_cursor <- cursor;
                   state.harness_scroll <- scroll
-            | Config when state.config_pane = Config_prompts ->
+            (* Presets draw their detail from the same scroll prompts do, and
+               the key reached only prompts: a preset longer than its pane
+               showed its first screen and nothing past it. *)
+            | Config
+              when state.config_pane = Config_prompts
+                   || state.config_pane = Config_presets ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Config when state.config_pane = Config_runtime ->

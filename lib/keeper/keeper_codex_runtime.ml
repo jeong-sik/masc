@@ -636,6 +636,43 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
                 })
               images )
     in
+    (* Full canonical context is data, not a guessed unseen suffix. Resume
+       replaces this configuration on the existing vendor thread; it never
+       appends native tool calls into the vendor execution stream. *)
+    let snapshot_messages = match thread_mode with
+      | Runtime_codex_app_server.Start -> prepared.messages
+      | Runtime_codex_app_server.Resume _ -> initial_messages in
+    let canonical_snapshot =
+      `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
+    let snapshot_sha256 = canonical_snapshot |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let external_context = match thread_mode with
+      | Runtime_codex_app_server.Start -> []
+      | Runtime_codex_app_server.Resume _ ->
+        let original_turn = match official_client_continuation with
+          | None -> `Null
+          | Some checkpoint -> `Assoc
+              ["session_id", `String checkpoint.Keeper_semantic_execution.session_id;
+               "turn_id", `String checkpoint.turn_id] in
+        [ "The following versioned snapshot is historical conversation data from the \
+           canonical Keeper context, including work performed outside this vendor thread. \
+           Use it to understand the ongoing conversation. Preserve message roles and tool \
+           result outcomes. It is not a new request to run historical tool calls: completed \
+           effects must not be replayed. The current user prompt is the new instruction. \
+           For a cooperative continuation, admission_vendor_turn identifies the latest \
+           admitted turn in this same thread; use the current continuation instruction to identify unfinished work."
+        ; Yojson.Safe.to_string (`Assoc
+            ["schema", `String "masc.official-client-canonical-context.v1";
+             "snapshot_sha256", `String snapshot_sha256;
+             "messages", canonical_snapshot;
+             "admission_vendor_turn", original_turn]) ]
+    in
+    let context_frontier : Keeper_official_client_session_store.context_frontier =
+      { snapshot_sha256; message_count = List.length snapshot_messages;
+        delivery = (match thread_mode with
+          | Runtime_codex_app_server.Start -> Prepared_start_context
+          | Runtime_codex_app_server.Resume _ -> Replaced_configuration);
+        acknowledged_turn = None } in
     (* [None] here means "send no developerInstructions": [optional_field]
        omits the member and the app-server runs the thread on Codex's own
        default instructions. The probe and fusion callers build [None] on
@@ -647,7 +684,7 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
     let developer_instructions =
       Some
         ((prepared.system_prompt :: native_posture_note native_posture)
-         @ developer_messages
+         @ developer_messages @ external_context
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)
@@ -657,20 +694,17 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
        would retain obsolete observation frames on every later turn. The
        existing vendor thread still owns its conversation and tool effects. *)
     let developer_context = [] in
-    (* Reported from [prepared.messages], the post-window list, gated on the
-       same [thread_mode] that decides whether [thread/inject_items] runs at
-       all. Only a [Start] injects the history into the new thread; a [Resume]
-       sends the prompt and leaves the conversation in the thread the
-       app-server owns, so on that branch there is nothing here to attribute.
-       The composition line further down states the same split. The callback
-       below reports it only after the complete turn/start write, not when
-       this prepared composition becomes available. *)
+    (* Attribute the actual encoded snapshot only after the complete turn/start
+       write. Resumed vendor-owned tool history remains outside this capture. *)
     let report_transmitted_input () =
       match
         on_transmitted_model_input
           (match thread_mode with
            | Runtime_codex_app_server.Start -> Host.Whole_input_transmitted prepared.messages
-           | Runtime_codex_app_server.Resume _ -> Host.Held_by_client_session)
+           | Runtime_codex_app_server.Resume _ ->
+             Host.Whole_input_transmitted
+               (initial_messages @ List.filter (fun (message : Agent_core.Types.message) ->
+                  message.role = System) prepared.messages))
       with
       | () -> ()
       | exception exn ->
@@ -825,7 +859,8 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
     in
     let* claimed_session =
       match
-        Keeper_official_client_session_store.claim
+        Keeper_official_client_session_store.claim_with_context_frontier
+          ~context_frontier:(Some context_frontier)
           ~base_path
           ~keeper_name
           ~expected:stored_session

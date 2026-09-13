@@ -3399,6 +3399,15 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
     ~description:"Record an effect before configuration refresh" ~parameters:[]
     (fun _ -> incr effect_count;
       Ok { Agent_core.Types.content = "effect retained"; content_blocks = None; _meta = None }) in
+  let native_history =
+    [ Agent_core.Types.user_msg "Native correction: use the saved result."
+    ; Agent_core.Types.make_message ~role:Assistant
+        [Agent_core.Types.ToolUse {id="native-effect"; name="masc_probe"; input=`Assoc []}]
+    ; Agent_core.Types.make_message ~role:Tool
+        [Agent_core.Types.ToolResult {tool_use_id="native-effect"; content="already completed";
+         outcome=Tool_succeeded; json=Some (`Assoc ["receipt", `String "durable-native-receipt"]);
+         content_blocks=None}]
+    ; Agent_core.Types.make_message ~role:Assistant [Agent_core.Types.Text "Native work completed."] ] in
   let goal = "WIRE_GOAL_EXACT\nsecond line" in
   (* Named here rather than taken from [run_keeper_turn]'s default, because
      the expectation below is built from it. *)
@@ -3484,6 +3493,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
               run_keeper_turn
                 ~tools:[tool]
                 ~base_path
+                ~initial_messages:native_history
                 ~hooks:(hooks "UPDATED_CONTEXT")
                 ~goal
                 ~system_prompt:"UPDATED_SYSTEM_PROMPT"
@@ -3515,9 +3525,31 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        check string "start config includes current context"
          (system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" ^ envelope dynamic_context)
          start_instructions;
-       check string "resume replaces both instructions and current context"
-         ("UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note ^ "\n\n" ^ envelope "UPDATED_CONTEXT")
-         resume_instructions;
+       let current_prefix = "UPDATED_SYSTEM_PROMPT\n\n" ^ posture_note ^ "\n\n" ^ envelope "UPDATED_CONTEXT" in
+       check bool "resume replaces instructions and current context" true
+         (String.starts_with ~prefix:current_prefix resume_instructions);
+       let external_snapshot = resume_instructions |> String.split_on_char '\n'
+         |> List.find_map (fun line -> match Yojson.Safe.from_string line with
+           | `Assoc fields as json when List.assoc_opt "schema" fields =
+               Some (`String "masc.official-client-canonical-context.v1") -> Some json
+           | _ -> None | exception Yojson.Json_error _ -> None)
+         |> function Some value -> value | None -> fail "missing external canonical snapshot" in
+       let exact_messages = `List (List.map Keeper_official_client_context_codec.to_json native_history) in
+       check string "native exchange and completed effect receipt remain exact"
+         (Yojson.Safe.to_string exact_messages)
+         (Yojson.Safe.Util.member "messages" external_snapshot |> Yojson.Safe.to_string);
+       let expected_digest = exact_messages |> Yojson.Safe.to_string
+         |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+       (match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" with
+        | Ok (Some {context_frontier=Some frontier; _}) ->
+          check string "durable frontier matches transmitted snapshot" expected_digest frontier.snapshot_sha256;
+          check int "frontier records all canonical messages" 4 frontier.message_count;
+          check bool "frontier records replaceable channel" true
+            (frontier.delivery = Keeper_official_client_session_store.Replaced_configuration);
+          check bool "only settled vendor turn acknowledges context" true
+            (frontier.acknowledged_turn = Some {session_id="thread-1";turn_id="turn-2"})
+        | Ok _ -> fail "missing durable context frontier"
+        | Error detail -> fail detail);
        check string "resume retains vendor thread"
          "thread-1" (request resume_capture "thread/resume" |> request_param_string "threadId");
        List.iter (fun capture ->

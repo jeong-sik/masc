@@ -6530,7 +6530,17 @@ let decode_tool_approval_mode_overrides json =
     | [] -> Ok (List.rev acc)
     | item :: rest ->
         let* keeper = required_string_field item "keeper" in
-        let* mode = required_string_field item "mode" in
+        let* word = required_string_field item "mode" in
+        (* The server writes this through [mode_to_string]; a word its reader
+           does not know is a wire error, and it says which keeper sent it. *)
+        let* mode =
+          match Keeper_tool_approval_mode.mode_of_string word with
+          | Some mode -> Ok mode
+          | None ->
+              Error
+                (Printf.sprintf "tool approval mode for %s is not auto or yolo: %s"
+                   keeper word)
+        in
         loop ((keeper, mode) :: acc) rest
   in
   loop [] items

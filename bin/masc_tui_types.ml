@@ -373,8 +373,26 @@ let gate_mode_word_of_wire raw =
    change what can happen after that send. A Keeper-level [workspace] value is
    inheritance, so resolve it through the workspace observation rather than
    printing a setting that is not itself a mode. *)
+(* The stance's one word, the wire's own: the chat header, the Keeper Info
+   row, the footer's [g:auto] and the event line all name it, and they named it
+   four ways -- AUTO, "asked", auto, "(auto)" -- so a reader had to know that
+   the header's AUTO and the Info row's "asked" were one fact. *)
+let tool_mode_word = function
+  | Masc.Keeper_tool_approval_mode.Auto -> "auto"
+  | Masc.Keeper_tool_approval_mode.Yolo -> "yolo"
+
+(* What the stance does to a tool call, beside its word. *)
+let tool_mode_effect = function
+  | Masc.Keeper_tool_approval_mode.Auto -> "per Gate policy"
+  | Masc.Keeper_tool_approval_mode.Yolo -> "unasked"
+
 let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
-  let chat_mode = if yolo then "YOLO" else "AUTO" in
+  let chat_mode =
+    String.uppercase_ascii
+      (tool_mode_word
+         (if yolo then Masc.Keeper_tool_approval_mode.Yolo
+          else Masc.Keeper_tool_approval_mode.Auto))
+  in
   let gate_mode =
     match keeper_gate_mode with
     | Some mode when not (String.equal mode "workspace") -> Some mode

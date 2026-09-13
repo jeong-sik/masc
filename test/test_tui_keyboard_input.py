@@ -2795,7 +2795,7 @@ def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> In
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"i", b"^Y to speak")
+        send_and_wait(process, master_fd, output, b"i", b"Ctrl-Y to speak")
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
         # A sent message brings the chat pane forward, as Enter on the row does.
@@ -2818,7 +2818,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
 
     The empty draft names the key first, as the composer row does: this pane
-    bound ^Y and ^A and nothing on it said so.
+    bound Ctrl-Y and Ctrl-A and nothing on it said so.
     """
 
     def interact(
@@ -2839,7 +2839,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
         wait_for_output(
-            process, master_fd, output, b"(^Y to speak, ^A to keep listening)",
+            process, master_fd, output, b"(Ctrl-Y to speak, Ctrl-A to keep listening)",
             start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
@@ -10590,6 +10590,19 @@ def keeper_gate_mode_footer_interaction(
             raise AssertionError(
                 "the footer offers Auto and YOLO on the same row: "
                 f"{drawn_rows[footer_row]!r}"
+            )
+        # The Info row names the stance with the word the footer offers and
+        # the chat header wears: alpha is in yolo, so the row says so, with
+        # what that does beside it. It used to say "skipped" under a header
+        # saying YOLO.
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        stance_row = rows.get(screen_row_of(rows, b"Tool calls:"), b"")
+        if b"yolo \xc2\xb7 unasked" not in stance_row:
+            raise AssertionError(
+                f"the Info row does not name the stance as the footer does: {stance_row!r}"
             )
         os.write(master_fd, b"q")
 

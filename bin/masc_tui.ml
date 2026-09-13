@@ -1685,7 +1685,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          see the letter after Ctrl-V and never Ctrl-V itself. *)
       paste_image ();
       true
-    end else if c = Some 24 then begin
+    end else if c = Some (Char.code Masc_tui_keys.context_inspector_key.[0]) then begin
       (* Ctrl-X: the breakdown behind the figure in the header. The header
          names this key beside the number, so the place that shows how full
          the context is is also the place that opens what filled it. *)
@@ -2020,14 +2020,18 @@ type async_msg =
   | Keeper_gate_settings_loaded of
       (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
-      ((string * string) list, string) result * Approval.Flow.generation
+      ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
+      * Approval.Flow.generation
       (** The stance listing replaces the whole yolo set, so a fetch that
           started before an operator armed a gate would put the pre-press
           answer back. The generation says which flow the answer belongs to
           and a stale one is dropped, the same guard the held-call listing
           already rides. *)
   | Keeper_tool_mode_set of
-      string * string * (unit, string) result * Approval.Flow.generation
+      string
+      * Masc.Keeper_tool_approval_mode.mode
+      * (unit, string) result
+      * Approval.Flow.generation
       (** keeper, tool call id, allow, and whether a wait was released — the
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
@@ -13434,7 +13438,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.keeper_yolo_names <-
                List.filter_map
                  (fun (keeper, mode) ->
-                   if String.equal mode "yolo" then Some keeper else None)
+                   match mode with
+                   | Masc.Keeper_tool_approval_mode.Yolo -> Some keeper
+                   | Masc.Keeper_tool_approval_mode.Auto -> None)
                  overrides
          | Error detail ->
              state.keeper_tool_modes_error <- Some detail)
@@ -13451,16 +13457,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (fun name -> not (String.equal name keeper_name))
                   state.keeper_yolo_names
               in
-              if String.equal mode "yolo" then keeper_name :: without
-              else without);
+              match mode with
+              | Masc.Keeper_tool_approval_mode.Yolo -> keeper_name :: without
+              | Masc.Keeper_tool_approval_mode.Auto -> without);
            add_event state "system"
-             (if String.equal mode "yolo" then
-                Printf.sprintf
-                  "%s runs every tool call unasked (YOLO) until restart or g"
-                  keeper_name
-              else
-                Printf.sprintf "%s is back on the approval policy (auto)"
-                  keeper_name)
+             (match mode with
+              | Masc.Keeper_tool_approval_mode.Yolo ->
+                  Printf.sprintf
+                    "%s runs every tool call unasked (%s) until restart or g"
+                    keeper_name
+                    (Masc_tui_types.tool_mode_word Masc.Keeper_tool_approval_mode.Yolo)
+              | Masc.Keeper_tool_approval_mode.Auto ->
+                  Printf.sprintf "%s is back on the approval policy (%s)"
+                    keeper_name
+                    (Masc_tui_types.tool_mode_word Masc.Keeper_tool_approval_mode.Auto))
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
@@ -21736,8 +21746,9 @@ and is loaded on demand through keeper_skill.
               what was armed. *)
            let keeper = List.nth state.keepers state.keeper_cursor in
            let mode =
-             if List.mem keeper.k_name state.keeper_yolo_names then "auto"
-             else "yolo"
+             if List.mem keeper.k_name state.keeper_yolo_names then
+               Masc.Keeper_tool_approval_mode.Auto
+             else Masc.Keeper_tool_approval_mode.Yolo
            in
            launch_keeper_tool_mode_set state ~mailbox:async_messages
              ~keeper_name:keeper.k_name ~mode

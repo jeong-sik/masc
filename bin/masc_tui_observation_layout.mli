@@ -42,4 +42,8 @@ val plain_log_row : time:string -> Tui_decode.log_entry -> string
 (** One observed turn. The tools that ran follow the last named column,
     unbounded, so nothing after it can be pushed. *)
 val context_summary : Tui_decode.context_observation -> context_summary
-val context_header_item : max_cells:int -> Tui_decode.context_observation -> string option
+val context_header_item :
+  max_cells:int -> inspect_key:string -> Tui_decode.context_observation -> string option
+(** [inspect_key] is the name of the key that opens the breakdown, spelled by
+    the key table; this layout cannot see the table, so the caller hands it
+    over. *)

@@ -33,6 +33,17 @@ answers with both steps and asks before running either:
 |---|---|
 | `brew install whisper-cpp` | 8.9MB bottle; its `whisper-cli` transcribes a file |
 | the model | `ggml-large-v3-turbo.bin`, 1,624,555,275 bytes |
+| `brew install sox` | 2.4MB installed, 14.4.2; its `rec` makes the file to transcribe |
+
+The third one is easy to leave out and was. Transcribing a file and making one
+are different halves: masc records a capture with sox's `rec` and marks the
+start and end of a recording with sox's `play`. Neither is in the base system.
+
+Neither absence says so, either. The tones are swallowed at debug level, and
+the recorder surfaces whatever its own process failure was — not a sentence
+about a missing package. A device that posts audio to
+`POST /api/v1/voice/transcribe` needs none of this; a person speaking into the
+TUI does.
 
 Neither starts a server. `say` and `whisper-cli` each run once and exit, so
 masc runs them the way it runs `curl` for the endpoints that are addresses:

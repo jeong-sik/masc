@@ -4555,6 +4555,7 @@ let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
 
 let test_main_eio_rejects_same_base_path_on_second_server () =
   with_temp_dir "startup-base-path-owner-lock" (fun dir ->
+      let canonical_base_path = Unix.realpath dir in
       let exe = Masc_test_runtime.find_main_eio_exe () in
       let primary_port = find_free_port () in
       let secondary_port = find_free_port_from (primary_port + 1) in
@@ -4608,6 +4609,11 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
                  (read_file primary_log));
             Alcotest.skip ()
           end;
+          let lease_path =
+            Server_startup_takeover.base_path_lock_path
+              ~run_dir:(Unix.realpath (Host_config.from_env ()).base_path_lease_dir)
+              ~canonical_base_path
+          in
           let secondary_fd = open_log secondary_log in
           let pid =
             Unix.create_process_env exe
@@ -4624,16 +4630,32 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
           in
           secondary_pid := Some pid;
           Unix.close secondary_fd;
-          if not (wait_for_process_exit ~pid ~timeout_s:5.0) then
-            Alcotest.failf
-              "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
-              (read_file secondary_log);
+          let deadline = Unix.gettimeofday () +. 5.0 in
+          let rec wait_for_secondary () =
+            match Unix.waitpid [Unix.WNOHANG] pid with
+            | 0, _ ->
+                if Unix.gettimeofday () >= deadline then
+                  Alcotest.failf
+                    "secondary main_eio stayed alive despite shared base path\nlog:\n%s"
+                    (read_file secondary_log);
+                Unix.sleepf 0.1;
+                wait_for_secondary ()
+            | _, status -> secondary_pid := None; status
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_secondary ()
+          in
+          Alcotest.(check bool) "secondary refuses startup with a nonzero exit" true
+            (match wait_for_secondary () with
+             | Unix.WEXITED code -> code <> 0
+             | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false);
           let secondary_text = read_file secondary_log in
           if not (String_util.contains_substring secondary_text
-              (Printf.sprintf "Base path %s is locked." dir)) then
+              (Printf.sprintf "Base path %s is locked." canonical_base_path)) then
             Alcotest.failf
               "secondary exit did not report the base-path owner\nsecondary log:\n%s\nprimary log:\n%s"
               secondary_text (read_file primary_log);
+          Alcotest.(check bool) "secondary reports the canonical ownership lease" true
+            (String_util.contains_substring secondary_text
+              (Printf.sprintf "Lock file: %s." (Filename.quote lease_path)));
           Alcotest.(check bool) "secondary log preserves recorded-owner uncertainty" true
             (String_util.contains_substring secondary_text
               "its namespace and current holder are unverified");

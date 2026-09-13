@@ -69,11 +69,12 @@ let page_source ~args source =
        | None -> Ok None
        | Some (`Assoc fields) when List.length fields = 2 ->
          (match List.assoc_opt "source_sha256" fields, List.assoc_opt "byte_offset" fields with
-          | Some (`String expected), Some (`Int offset)
-            when offset > 0 && offset < total
-              && String_util.utf8_char_boundary bytes offset = offset ->
-            if String.equal expected digest then Ok (Some offset)
-            else Error (Source_unavailable "source changed between pages; restart the exact source read")
+          | Some (`String expected), Some (`Int offset) ->
+            if not (String.equal expected digest) then
+              Error (Source_unavailable "source changed between pages; restart the exact source read")
+            else if offset > 0 && offset < total
+              && String_util.utf8_char_boundary bytes offset = offset then Ok (Some offset)
+            else Error (Invalid_request "invalid source cursor")
           | _ -> Error (Invalid_request "invalid source cursor"))
        | Some _ -> Error (Invalid_request "invalid source cursor"))
     | _ -> Error (Invalid_request "source lookup arguments must be an object") in
@@ -109,6 +110,7 @@ let board_error = function
 
 let read_board ~config ~authority ~args = protect (fun () ->
   let* () = require_workspace config in
+  let* () = Board_dispatch.require_persisted_sources_readable () |> Result.map_error board_error in
   let* post_id = required_id args "post_id" in
   let* offset = optional_integer args "comment_offset" ~default:0 in
   let* limit = optional_integer args "comment_limit"
@@ -139,6 +141,7 @@ let fusion_error = function
 
 let read_fusion ~config ~authority ~args = protect (fun () ->
   let* () = require_workspace config in
+  let* () = Board_dispatch.require_persisted_sources_readable () |> Result.map_error board_error in
   let* run_id = required_id args "run_id" in
   let* post = Fusion_decision.source_in_workspace ~run_id |> Result.map_error fusion_error in
   let* () = require_visible authority post in

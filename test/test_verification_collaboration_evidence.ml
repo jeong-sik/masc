@@ -314,7 +314,23 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config task 
     ~author:"producer" ~content:"New source revision" ~ttl_hours:0 () |> require "changed source");
   denied task "masc_board_post_get" (cursor_args (post_args board) cursor) "verification_source_unavailable")
 
+let test_corrupt_board_store_remains_storage_failure () =
+  List.iter (fun comments -> with_fixture (fun _config task goal ->
+    let source = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion" "storage-health" in
+    let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+    let path = if comments then Board.comments_path () else Board.persist_path () in
+    Out_channel.with_open_bin path (fun channel ->
+      output_string channel (if comments then "{}\n" else "{bad-json\n"));
+    let loaded = if comments then Masc_board_handlers.Board_votes_json.load_persisted_comments store
+      else Masc_board_handlers.Board_votes_json.load_persisted_posts store in
+    (match loaded with Error _ -> () | Ok _ -> fail "corrupt fixture unexpectedly loaded");
+    List.iter (fun surface ->
+      denied surface "masc_board_post_get" (post_args source) "verification_source_storage_failed";
+      denied surface "masc_fusion_status" (run_args "storage-health") "verification_source_storage_failed")
+      [task; goal])) [false; true]
+
 let () = run "Verifier collaboration sources" ["dispatch", [
+  test_case "corrupt Board storage is never absent evidence" `Quick test_corrupt_board_store_remains_storage_failure;
   test_case "large Board and Fusion sources remain fully readable through bridge" `Quick test_large_sources_survive_actual_bridge;
   test_case "unreadable decision journal remains a storage failure" `Quick test_corrupt_decision_storage;
   test_case "shared peer post and exact paginated comments" `Quick test_shared_thread_and_pagination;

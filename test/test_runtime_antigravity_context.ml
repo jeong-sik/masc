@@ -34,7 +34,69 @@ let transport rows =
 ;;
 
 let parse rows =
-  Context.For_testing.parse_transport ~model ~cli_version:"1.2.0" (transport rows)
+  Context.For_testing.parse_transport
+    ~model
+    ~cli_version:"1.2.0"
+    (Unix.WEXITED 0, transport rows, "")
+;;
+
+let transport_status status =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "schema", `String "masc.antigravity_status_transport.v1"
+        ; "status", `String status
+        ; "records", `List []
+        ])
+;;
+
+(* Proves that a transport run that did not capture keeps its evidence: the
+   shim dying with a non-zero exit carries that status and its stderr tail,
+   and the two failure statuses the script writes on exit 0 are told apart as
+   typed outcomes. On origin/main every one of these was the bare
+   [Command_failed], and an unknown status string was a command failure
+   instead of an invalid observation. *)
+let test_transport_failure_payload () =
+  let run status body stderr =
+    Context.For_testing.parse_transport ~model ~cli_version:"1.2.0" (status, body, stderr)
+  in
+  check
+    bool
+    "shim exit carries status and stderr tail"
+    true
+    (run (Unix.WEXITED 1) "" "Traceback\nValueError: invalid context transport arguments\n"
+     = Error
+         (Context.Command_failed
+            { phase = Context.Status_transport
+            ; status = Some (Unix.WEXITED 1)
+            ; stderr_tail = "Traceback\nValueError: invalid context transport arguments"
+            }));
+  check
+    bool
+    "transport failed status is a typed outcome"
+    true
+    (run (Unix.WEXITED 0) (transport_status "failed") ""
+     = Error
+         (Context.Command_failed
+            { phase = Context.Transport_reported Context.Transport_failed
+            ; status = Some (Unix.WEXITED 0)
+            ; stderr_tail = ""
+            }));
+  check
+    bool
+    "transport interrupted status is a typed outcome"
+    true
+    (run (Unix.WEXITED 0) (transport_status "interrupted") ""
+     = Error
+         (Context.Command_failed
+            { phase = Context.Transport_reported Context.Transport_interrupted
+            ; status = Some (Unix.WEXITED 0)
+            ; stderr_tail = ""
+            }));
+  check
+    bool
+    "status the script never writes is an invalid observation"
+    true
+    (run (Unix.WEXITED 0) (transport_status "captured-later") "" = Error Context.Invalid_observation)
 ;;
 
 let test_authoritative_join () =
@@ -135,6 +197,63 @@ time.sleep(60)
          (Sys.file_exists observed_home))
 ;;
 
+(* Proves that a version probe that exits non-zero reaches the caller with
+   the phase, the exit status and the stderr text, and that the receipt
+   message renders all three. On origin/main the same fixture yielded the
+   bare [Command_failed] whose message named none of them. *)
+let test_native_version_probe_failure () =
+  let root = Filename.temp_dir "masc-context-probe-test-" "" |> Unix.realpath in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree root)
+    (fun () ->
+       let source = Filename.concat root "selected-oauth" in
+       let cli_path = Filename.concat root "fake-agy" in
+       let python_path = python () in
+       Out_channel.with_open_bin source (fun out ->
+         output_string out "fixture-oauth-token-never-log");
+       Unix.chmod source 0o600;
+       let refusal = "fixture refuses the version probe" in
+       let script =
+         Printf.sprintf
+           {|#!%s
+import sys
+assert sys.argv[1:] == ['--version']
+sys.stderr.write(%s + '\n')
+sys.exit(3)
+|}
+           python_path
+           (Yojson.Safe.to_string (`String refusal))
+       in
+       Out_channel.with_open_bin cli_path (fun out -> output_string out script);
+       Unix.chmod cli_path 0o700;
+       match
+         Context.observe ~python_path ~cli_path ~timeout_s:10. ~oauth_source:source ~model
+       with
+       | Ok _ -> fail "fixture version probe unexpectedly succeeded"
+       | Error error ->
+         check
+           bool
+           "version probe failure carries phase, exit 3 and stderr"
+           true
+           (error
+            = Context.Command_failed
+                { phase = Context.Version_probe
+                ; status = Some (Unix.WEXITED 3)
+                ; stderr_tail = refusal
+                });
+         let message = Context.error_message error in
+         let mentions needle =
+           check
+             bool
+             (Printf.sprintf "receipt message names %S" needle)
+             true
+             (String_util.contains_substring message needle)
+         in
+         mentions "the CLI version probe";
+         mentions "exited(3)";
+         mentions refusal)
+;;
+
 let () =
   run
     "Antigravity context"
@@ -144,9 +263,17 @@ let () =
             `Quick
             test_authoritative_join
         ; test_case
+            "transport failure keeps status and stderr"
+            `Quick
+            test_transport_failure_payload
+        ; test_case
             "native transport and private HOME lifecycle"
             `Quick
             test_native_observe_private_home
+        ; test_case
+            "native version probe failure names phase, exit and stderr"
+            `Quick
+            test_native_version_probe_failure
         ] )
     ]
 ;;

@@ -192,7 +192,30 @@ let test_cooling_retry_is_not_claimable_until_not_before () = with_path (fun pat
         (Operation.Operation_id.equal operation_id operation.operation_id)
     | None -> fail "cooling retry never became claimable"))
 
+let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
+  let follower = Operation.Operation_id.of_string "batch-runtime-follower" |> string_ok in
+  let arrival = Operation.Operation_id.of_string "batch-runtime-new-arrival" |> string_ok in
+  with_open path (fun store ->
+    List.iter (fun operation_id -> ignore (Store.submit store ~now:1. ~operation_id ~source ~input |> ok)) [operation_id; follower];
+    let combined = `Assoc ["message", `String "frozen batch"] in
+    let batch _ _ = Ok (Some {Store.members=[operation_id; follower]; input=combined}) in
+    let claimed = match Store.claim_next ~batch store ~now:2. |> ok with Some value -> value | None -> fail "no batch" in
+    let retry = continuation () in
+    ignore (defer store claimed retry |> ok);
+    ignore (Store.submit store ~now:13. ~operation_id:arrival ~source ~input |> ok);
+    let forbidden _ _ = fail "resumed batch asked to reselect membership" in
+    let resumed = match Store.claim_next ~batch:forbidden store ~now:14. |> ok with Some value -> value | None -> fail "no retry" in
+    check bool "same frozen aggregate" true (resumed.input = claimed.input);
+    check int "same frozen members" 2 (List.length (Store.batch_operations store ~operation_id |> ok));
+    check int "new arrival remains queued" 1 (Store.inventory store |> ok).queued_count;
+    Store.resume_direct_runtime_retry store ~now:15. ~operation_id ~observed:retry |> ok;
+    ignore (Store.succeed_running store ~now:16. ~operation_id ~outcome_ref:"shared-retry" |> ok);
+    match Store.get store follower |> ok with
+    | Some {Operation.state=Operation.Succeeded _; _} -> ()
+    | _ -> fail "follower was not settled by resumed execution"))
+
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
+  test_case "batch retry freezes members and excludes new arrivals" `Quick test_batch_runtime_retry_keeps_frozen_members;
   test_case "same operation survives and completes" `Quick test_same_operation_survives_and_completes;
   test_case "restart after claim requires exact checkpoint" `Quick test_restart_after_claim_requires_exact_checkpoint;
   test_case "interrupted resumed effects are not replayed" `Quick test_interrupted_resumed_effects_are_not_replayed;

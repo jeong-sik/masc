@@ -486,7 +486,7 @@ let test_batch_claim_freezes_inputs_and_settles_members () =
     Ok (Some { Store.members = [first; second]; input = input "combined" }) in
   let running = Option.get (store_ok (Store.claim_next ~batch store ~now:4.)) in
   check bool "frozen shared input" true (running.input = Some (input "combined"));
-  check bool "execution identity retained" true (running.batch_execution_id = Some first);
+  check bool "execution identity retained" true (Option.map (fun (member : Operation.batch_membership) -> member.execution_id) running.batch_membership = Some first);
   let member = get_exn store second in
   check string "member reports actual shared execution state" "running" (state member);
   check bool "member original input retained" true (member.input = Some (input "edited before dispatch"));
@@ -510,7 +510,7 @@ let test_batch_restart_and_commit_failure () =
   let batch _ _ = Ok (Some { Store.members = [first; second]; input = input "combined" }) in
   Store.For_testing.fail_next_commit Store.For_testing.Fail_before_commit;
   (match Store.claim_next ~batch store ~now:2. with Error _ -> () | Ok _ -> fail "precommit failure claimed batch");
-  check bool "failed commit has no membership" true ((get_exn store second).batch_execution_id = None);
+  check bool "failed commit has no membership" true ((get_exn store second).batch_membership = None);
   check int "failed commit leaves both queued" 2 (store_ok (Store.inventory store)).queued_count;
   ignore (store_ok (Store.claim_next ~batch store ~now:3.));
   store_ok (Store.close store);

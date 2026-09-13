@@ -2747,6 +2747,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
         Keeper_chat_operation.No_queued_operation
         "Owner FIFO head disappeared before claim"
     | Ok (Some operation) ->
+      (match Keeper_owner_registry.batch_operations
+        ~base_path:(Mcp_server.workspace_config state).base_path ~keeper_name operation.operation_id with
+       | Error error -> failed Keeper_chat_operation.Store_unavailable
+           (Keeper_owner_registry.command_error_to_string error)
+       | Ok batch_members ->
+      let member_ids = List.map (fun (member : Keeper_chat_operation.t) -> member.operation_id) batch_members in
       let pending_continuation () =
         Keeper_direct_gate_continuation.pending
           ~base_path:(Mcp_server.workspace_config state).base_path
@@ -2771,21 +2777,18 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             let operation_id =
               Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
             in
-            (* RFC-0412 stage 1 dual-write: every event published on this bus
-               is also appended to the per-operation canonical journal.
-               Fail-open — a journal failure never breaks the live turn. *)
-            let journal =
-              Keeper_chat_event_log.open_journal
+            (* Every request keeps its request-bound live and replay journal. One
+               bus subscriber below projects events to all admitted requests;
+               multiple subscribers would divide, rather than copy, events. *)
+            let journals = List.map (fun member_id ->
+              member_id, Keeper_chat_event_log.open_journal
                 ~base_dir:(Mcp_server.workspace_config state).base_path
-                ~keeper_name
-                ~operation_id
-                ()
-            in
-            let events =
-              Keeper_chat_events.create
-                ~on_publish:(Keeper_chat_event_log.append journal)
-                ()
-            in
+                ~keeper_name ~operation_id:(Keeper_chat_operation.Operation_id.to_string member_id) ()) member_ids in
+            let events = Keeper_chat_events.create
+              ~on_publish:(fun ~seq ~ts event ->
+                List.iter (fun (operation_id, journal) -> Keeper_chat_event_log.append journal ~seq ~ts
+                  (Keeper_chat_operation_batch.event_for_member ~operation_id event)) journals)
+              () in
             let closed = ref false in
             let delivery, resolve_delivery = Eio.Promise.create () in
             let settle_delivery result =
@@ -2820,36 +2823,23 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                  in
                  let redact_text = Keeper_secret_redaction.redact_text redaction in
                  let redact_json = Keeper_secret_redaction.redact_json redaction in
-                 let rec loop projection =
+                 let rec loop projections =
                    let { Keeper_chat_events.seq; ts; event } =
-                     Keeper_chat_events.subscribe_published events
-                   in
-                   (* The bus stamped [ts] once at publish; the journal line
-                      carries the same value, so a since_seq replay of this
-                      event reproduces this frame byte for byte. *)
-                   let projection, projected =
-                     Server_keeper_chat_agui_projection.project
-                       ~timestamp:ts
-                       ~redact_text
-                       ~redact_json
-                       projection
-                       event
-                   in
-                   Option.iter
-                     (fun event ->
-                        note_operation_wire_event ~operation_id event;
-                        Keeper_chat_broadcast.operation_event
-                          ~keeper_name
-                          ~operation_id
-                          ~seq:(Some seq)
-                          ~event;
-                        publish_operation_live_event ~operation_id ~seq:(Some seq) event)
-                     projected;
+                     Keeper_chat_events.subscribe_published events in
+                   let projections = List.map (fun (member_id, projection) ->
+                     let member_event = Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
+                     let projection, projected = Server_keeper_chat_agui_projection.project
+                       ~timestamp:ts ~redact_text ~redact_json projection member_event in
+                     Option.iter (fun event ->
+                       let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
+                       note_operation_wire_event ~operation_id event;
+                       Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~seq:(Some seq) ~event;
+                       publish_operation_live_event ~operation_id ~seq:(Some seq) event) projected;
+                     member_id, projection) projections in
                    if Server_keeper_chat_agui_projection.is_terminal event
-                   then settle_delivery (Ok ())
-                   else loop projection
+                   then settle_delivery (Ok ()) else loop projections
                  in
-                 loop Server_keeper_chat_agui_projection.initial)
+                 loop (List.map (fun id -> id, Server_keeper_chat_agui_projection.initial) member_ids))
              | Keeper_continuation_channel.Discord { channel_id; _ } ->
                (match Env_config_discord.bot_token_opt () with
                 | Some token ->
@@ -3029,7 +3019,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               |> Result.map_error Keeper_owner_registry.command_error_to_string
               |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
                 | None -> Error "claimed operation disappeared before settlement") in
-            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery))
+            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery)))
 
   in
   match
@@ -3086,7 +3076,18 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
          | Some (_, _)
          | None -> false)
   ; execute = operation_executor ~state ~clock
-  ; on_execution_settled = on_operation_execution_settled
+  ; on_execution_settled = (fun ~keeper_name ~claimed_operation_id ~execution ->
+      match claimed_operation_id with
+      | None -> ()
+      | Some operation_id ->
+        match Keeper_owner_registry.batch_operations ~base_path ~keeper_name operation_id with
+        | Error error ->
+          Log.Keeper.error "batch terminal projection failed for %s: %s"
+            keeper_name (Keeper_owner_registry.command_error_to_string error);
+          on_operation_execution_settled ~keeper_name ~claimed_operation_id ~execution
+        | Ok members -> List.iter (fun (member : Keeper_chat_operation.t) ->
+            on_operation_execution_settled ~keeper_name
+              ~claimed_operation_id:(Some member.operation_id) ~execution) members)
   }
 ;;
 

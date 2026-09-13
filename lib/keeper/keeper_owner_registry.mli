@@ -142,6 +142,10 @@ val create_meta
     already-open exact-name intake transaction is reused instead of reacquiring
     the same fence. *)
 
+val batch_operations : base_path:string -> keeper_name:string ->
+  Keeper_chat_operation.Operation_id.t ->
+  (Keeper_chat_operation.t list, command_error) result
+
 val exact_operation
   :  base_path:string
   -> keeper_name:string

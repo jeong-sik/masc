@@ -1398,13 +1398,20 @@ let decode_operation_reconciliation ~request json =
              (Printf.sprintf "%s.state is unknown: %S" surface unknown))
   in
   let* state_fields = state_fields in
+  let* batch_fields = match List.assoc_opt "batch_execution_id" fields, List.assoc_opt "batch_input_digest" fields with
+    | None, None -> Ok []
+    | Some (`String id), Some (`String _) ->
+      (match Keeper_chat_operation.Operation_id.of_string id with
+       | Ok _ -> Ok ["batch_execution_id"; "batch_input_digest"]
+       | Error detail -> Error (Malformed_event (surface ^ ".batch_execution_id: " ^ detail)))
+    | _ -> Error (Malformed_event (surface ^ ".batch execution identity and input digest must be supplied together")) in
   let* () =
     validate_exact_fields ~surface
       ~allowed:
         ([ "schema"; "operation_id"; "sequence"; "created_at"
          ; "execution_digest"; "source"; "input"; "state"
          ]
-         @ state_fields)
+         @ batch_fields @ state_fields)
       fields
   in
   let* () =
@@ -1435,9 +1442,15 @@ let decode_operation_reconciliation ~request json =
       Malformed_event (surface ^ ".expected input is not canonical: " ^ detail))
   in
   let* () =
-    validate_expected_string ~surface ~field:"execution_digest"
+    validate_expected_string ~surface
+      ~field:(if batch_fields = [] then "execution_digest" else "batch_input_digest")
       ~expected:expected_execution_digest fields
   in
+  let* stored_execution_digest = required_string ~surface "execution_digest" fields
+    |> Result.map_error (fun detail -> Malformed_event detail) in
+  let* () = if String.length stored_execution_digest = 64
+    && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) stored_execution_digest
+    then Ok () else Error (Malformed_event (surface ^ ".execution_digest must be lowercase SHA-256 hex")) in
   let* () =
     match List.assoc_opt "source" fields with
     | Some (`Assoc _) -> Ok ()
@@ -1457,13 +1470,13 @@ let decode_operation_reconciliation ~request json =
           |> Result.map_error (fun detail ->
             Malformed_event (surface ^ ".input is not canonical: " ^ detail))
         in
-        if String.equal observed_execution_digest expected_execution_digest
+        if String.equal observed_execution_digest stored_execution_digest
         then Ok ()
         else
           Error
             (Event_identity_mismatch
                { field = "input"
-               ; expected = expected_execution_digest
+               ; expected = stored_execution_digest
                ; received = observed_execution_digest
                })
     | Some other ->

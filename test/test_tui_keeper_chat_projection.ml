@@ -1034,6 +1034,51 @@ let test_operation_reconciliation_projection () =
   | Ok _ -> fail "cancelled operation projected to the wrong state"
   | Error error -> fail (Chat.stream_error_to_string error)
 
+let test_batch_member_events_pass_request_bound_stream_decode () =
+  let module Events = Masc.Keeper_chat_events in
+  let module Projection = Masc.Server_keeper_chat_agui_projection in
+  let member_id = match Keeper_chat_operation.Operation_id.of_string request.request_id with
+    | Ok id -> id | Error detail -> fail detail in
+  let events =
+    [ Events.Run_started {run_id="keeper-operation-run-batch-owner"; thread_id}
+    ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
+    ; Events.Text_delta "hello"
+    ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;
+        turn_ref=Masc.Ids.Turn_ref.make ~trace_id:"shared" ~absolute_turn:1}
+    ; Events.Text_message_end
+    ; Events.Run_finished {run_id="keeper-operation-run-batch-owner"} ] in
+  let _, projected = List.fold_left (fun (state, rows) event ->
+    let member_event = Masc.Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
+    let state, frame = Projection.project ~timestamp:1. ~redact_text:Fun.id ~redact_json:Fun.id state member_event in
+    state, match frame with None -> rows | Some frame -> Masc.Ag_ui.event_to_json frame :: rows)
+    (Projection.initial, []) events in
+  match decode (acceptance () :: List.rev projected) with
+  | Ok (Chat.Turn_completed completed) -> check string "follower receives complete shared reply" "hello" completed.reply
+  | Ok _ -> fail "shared reply did not complete the request"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+let test_batch_reconciliation_preserves_original_input_binding () =
+  let replace key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields) | _ -> fail "object" in
+  let original = operation_json "Running" ["started_at", `Float 2.] in
+  let original_digest = match original with `Assoc fields -> List.assoc "execution_digest" fields | _ -> fail "object" in
+  let combined = Masc.Keeper_chat_operation_payload.input_to_json ~message:"hello\n\nfollowup"
+    ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments:[] in
+  let combined_digest = match Keeper_chat_operation.execution_digest combined with Ok value -> value | Error detail -> fail detail in
+  let batch = original |> replace "input" combined |> replace "execution_digest" (`String combined_digest)
+    |> replace "batch_execution_id" (`String request.request_id) |> replace "batch_input_digest" original_digest in
+  (match Chat.decode_operation_reconciliation ~request batch with
+   | Ok (Chat.Operation_pending Chat.Running) -> ()
+   | Ok _ -> fail "wrong batch state"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  check bool "batch does not bypass original input identity" true
+    (Result.is_error (Chat.decode_operation_reconciliation ~request
+      (replace "batch_input_digest" (`String combined_digest) batch)));
+  check bool "batch still validates stored aggregate" true
+    (Result.is_error (Chat.decode_operation_reconciliation ~request
+      (replace "input" (`Assoc ["wrong", `String "input"]) batch)))
+;;
+
 let test_operation_reconciliation_uses_server_canonical_message () =
   let request_with_whitespace = { request with message = "  hello \n" } in
   match
@@ -1331,6 +1376,10 @@ let () =
             test_reconciliation_failure_detail
         ; test_case "operation reconciliation projection" `Quick
             test_operation_reconciliation_projection
+        ; test_case "batch member stream retains strict request identity" `Quick
+            test_batch_member_events_pass_request_bound_stream_decode
+        ; test_case "batch reconciliation keeps original request binding" `Quick
+            test_batch_reconciliation_preserves_original_input_binding
         ; test_case "operation reconciliation uses server-canonical message" `Quick
             test_operation_reconciliation_uses_server_canonical_message
         ; test_case "operation reconciliation binds original input" `Quick

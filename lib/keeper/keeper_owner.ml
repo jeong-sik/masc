@@ -191,6 +191,7 @@ type _ command =
       Operation_id.t -> (Chat_operation.t, error) result command
   | Cancel_queued_operation :
       Operation_id.t -> (Chat_operation.t, error) result command
+  | Batch_operations : Chat_operation.Operation_id.t -> (Chat_operation.t list, error) result command
   | Claim_next_operation : (Chat_operation.t option, error) result command
   | Succeed_running_operation :
       { operation_id : Operation_id.t
@@ -1175,6 +1176,11 @@ let start
           in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
+        | Command (Batch_operations operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read shared chat execution" (fun () ->
+            Chat_operation_store.batch_operations t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
         | Command (Claim_next_operation, resolve) ->
           let response =
             reject_if_shutdown shutdown_operation_id (fun () ->
@@ -1187,6 +1193,7 @@ let start
                     ~label:"claim next Keeper chat operation"
                     (fun () ->
                        Chat_operation_store.claim_next
+                         ~batch:Keeper_chat_operation_batch.select
                          t.operation_store
                          ~now:(t.now ()))
                   |> Result.map fst))
@@ -1448,6 +1455,7 @@ let move_queued_operation_to_end t operation_id =
 ;;
 
 let cancel_queued_operation t operation_id = request t (Cancel_queued_operation operation_id)
+let batch_operations t operation_id = request t (Batch_operations operation_id)
 let claim_next_operation t = request t Claim_next_operation
 
 let succeed_running_operation t ~operation_id ~outcome_ref =

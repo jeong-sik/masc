@@ -436,7 +436,7 @@ let decode_operation stmt =
     in
     Ok
       { Operation.operation_id
-      ; batch_execution_id = None
+      ; batch_membership = None
       ; admission_digest
       ; execution_digest
       ; sequence
@@ -473,26 +473,29 @@ let get_with_db db operation_id =
 
 let batch_execution_with_db db operation_id =
   with_statement db ~operation:"read batch membership"
-    "SELECT execution_id FROM operation_batch_members WHERE operation_id = ?" (fun stmt ->
+    "SELECT execution_id, admitted_digest FROM operation_batch_members WHERE operation_id = ?" (fun stmt ->
       let* () = bind_text db stmt ~operation:"bind member id" 1 (Id.to_string operation_id) in
       match Sqlite3.step stmt with
       | Sqlite3.Rc.DONE -> Ok None
-      | Sqlite3.Rc.ROW -> Id.of_string (Sqlite3.column_text stmt 0)
-          |> Result.map Option.some |> Result.map_error (fun detail -> Integrity_error detail)
+      | Sqlite3.Rc.ROW ->
+          let* execution_id = Id.of_string (Sqlite3.column_text stmt 0)
+            |> Result.map_error (fun detail -> Integrity_error detail) in
+          let* input_digest = validate_digest "batch admitted digest" (Sqlite3.column_text stmt 1) in
+          Ok (Some { Operation.execution_id; input_digest })
       | rc -> Error (Store_unavailable (sqlite_error db "read batch membership" rc)))
 ;;
 let project_batch_with_db db (operation : Operation.t) =
-  let* batch_execution_id = batch_execution_with_db db operation.operation_id in
-  match batch_execution_id with
+  let* batch_membership = batch_execution_with_db db operation.operation_id in
+  match batch_membership with
   | None -> Ok operation
-  | Some execution_id ->
+  | Some { Operation.execution_id; _ } ->
     let* leader = get_with_db db execution_id in
     (match leader with
      | None -> Error (Integrity_error "batch execution owner is missing")
      | Some leader ->
        let* () = if Operation.is_terminal operation.state && operation.state <> leader.state
          then Error (Integrity_error "batch member terminal fact disagrees with execution") else Ok () in
-       Ok { operation with batch_execution_id; state = leader.state;
+       Ok { operation with batch_membership; state = leader.state;
          input = if Operation.is_terminal leader.state then None else operation.input })
 ;;
 let get store operation_id =
@@ -507,7 +510,7 @@ let batch_operations store ~operation_id =
   match execution_id with
   | None -> let* operation = get store operation_id in
       (match operation with Some operation -> Ok [operation] | None -> Error (Unknown_operation operation_id))
-  | Some execution_id ->
+  | Some { Operation.execution_id; _ } ->
     let* ids = with_statement store.db ~operation:"read ordered batch"
       "SELECT operation_id FROM operation_batch_members WHERE execution_id = ? ORDER BY position" (fun stmt ->
         let* () = bind_text store.db stmt ~operation:"bind execution id" 1 (Id.to_string execution_id) in
@@ -941,7 +944,7 @@ let submit store ~now ~operation_id ~source ~input =
         let* sequence = next_sequence store.db in
         let operation =
           { Operation.operation_id
-          ; batch_execution_id = None
+          ; batch_membership = None
           ; admission_digest
           ; execution_digest
           ; sequence
@@ -985,8 +988,8 @@ let operation_or_unknown db operation_id =
   let* operation = get_with_db db operation_id in
   match operation with
   | Some operation ->
-    let* batch_execution_id = batch_execution_with_db db operation_id in
-    Ok { operation with batch_execution_id }
+    let* batch_membership = batch_execution_with_db db operation_id in
+    Ok { operation with batch_membership }
   | None -> Error (Unknown_operation operation_id)
 ;;
 
@@ -1104,7 +1107,7 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
     Keeper_execution_scope_id.equal execution.id
       (Keeper_execution_scope_id.direct_operation operation.Operation.operation_id)) executions in
   let* existing = batch_execution_with_db db head.operation_id in
-  if Option.is_some existing || scoped head then Ok { head with batch_execution_id = existing }
+  if Option.is_some existing || scoped head then Ok { head with batch_membership = existing }
   else
     let* candidates = with_statement db ~operation:"read fresh batch candidates"
       ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'queued' AND NOT EXISTS (SELECT 1 FROM operation_batch_members b WHERE b.operation_id = operations.operation_id) ORDER BY sequence")
@@ -1142,7 +1145,7 @@ let freeze_batch_with_db db ~select (head : Operation.t) =
           let* () = bind_text db stmt ~operation:"bind batch digest" 2 execution_digest in
           let* () = bind_text db stmt ~operation:"bind batch owner" 3 (Id.to_string head.operation_id) in
           expect_done db stmt ~operation:"freeze batch input") in
-      Ok { head with input = Some input; execution_digest; batch_execution_id = Some head.operation_id }
+      Ok { head with input = Some input; execution_digest; batch_membership = Some { Operation.execution_id = head.operation_id; input_digest = head.execution_digest } }
 ;;
 
 let claim_next ?batch store ~now =
@@ -1345,8 +1348,8 @@ let move_queued_to_front store ~now ~operation_id =
   let* () = ensure_open store in
   let* () = with_transaction store (fun () ->
     let* target = operation_or_unknown store.db operation_id in
-    let* () = match target.batch_execution_id with
-      | Some owner when not (Id.equal owner operation_id) -> Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
+    let* () = match target.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) -> Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
       | Some _ | None -> Ok () in
     let* () = match target.state with
       | Operation.Queued -> Ok ()

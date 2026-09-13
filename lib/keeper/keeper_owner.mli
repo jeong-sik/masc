@@ -324,6 +324,7 @@ val cancel_queued_operation
   -> Chat_operation.Operation_id.t
   -> (Chat_operation.t, error) result
 
+val batch_operations : t -> Chat_operation.Operation_id.t -> (Chat_operation.t list, error) result
 val claim_next_operation : t -> (Chat_operation.t option, error) result
 
 val succeed_running_operation

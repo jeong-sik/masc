@@ -659,6 +659,11 @@ let resume_direct_runtime_retry ~base_path ~keeper_name ~operation_id ~observed 
     Keeper_owner.resume_direct_runtime_retry owner ~operation_id ~observed)
 ;;
 
+let batch_operations ~base_path ~keeper_name operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.batch_operations owner operation_id)
+;;
+
 let exact_operation ~base_path ~keeper_name operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.exact_operation owner operation_id)

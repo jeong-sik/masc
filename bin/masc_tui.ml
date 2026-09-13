@@ -16657,7 +16657,12 @@ and is loaded on demand through keeper_skill.
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
+                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
+                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
+                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
+                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
+                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Timeline -> Addons.Connections | Addons.Connections -> Addons.Configurations | Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Timeline) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -16671,6 +16676,7 @@ and is loaded on demand through keeper_skill.
                               update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
+                          | Some snapshot, (Addons.Timeline | Addons.Connections) -> update (Addons.move_lane view delta)
                           | None, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
@@ -21673,7 +21679,7 @@ and is loaded on demand through keeper_skill.
                           ~mailbox:async_messages;
                         launch_code_file_load state ~mailbox:async_messages
                           ~path)))
-       | Some "o" | Some "O" when state.view = Lanes ->
+       | Some "o" | Some "O" | Some "A" when state.view = Lanes ->
            launch_lane_addons state ~mailbox:async_messages
              Masc_tui_lane_addons.Inspect
        | Some "o" when state.view = Changes ->

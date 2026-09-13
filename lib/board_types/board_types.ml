@@ -164,6 +164,7 @@ type post_origin = {
   turn_ref: Ids.Turn_ref.t option;
   source: string option;
   fusion_run_id: string option;
+  fusion_producer: string option;
 }
 
 (* RFC-0233 §7: constructor for a keeper-authored post's origin. A keeper post
@@ -175,7 +176,7 @@ type post_origin = {
    still set [source] (origin present, turn_ref absent) rather than fabricating
    one. *)
 let keeper_authored_origin ?turn_ref ~source () : post_origin =
-  { turn_ref; source = Some source; fusion_run_id = None }
+  { turn_ref; source = Some source; fusion_run_id = None; fusion_producer = None }
 
 type post = {
   id: Post_id.t;

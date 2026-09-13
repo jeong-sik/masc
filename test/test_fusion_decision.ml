@@ -37,7 +37,7 @@ let with_fixture f = Eio_main.run @@ fun env ->
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id ~contract
         ~title:"Evaluate alternatives" ~priority:2 ~description:"Choose and explain" |> require "task" in
       Workspace.claim_task_r config ~agent_name:"fusion-keeper" ~task_id:task.task_id () |> require "claim" |> ignore;
-      let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"} in
+      let origin : Board.post_origin = {turn_ref=None; source=Some "fusion"; fusion_run_id=Some "run-advice"; fusion_producer=Some "fusion-keeper"} in
       Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:"run-advice" ~author:"fusion-keeper"
         ~content:"Judge recommends A" ~meta_json:original_evidence ~post_kind:Board.System_post ~visibility:Board.Unlisted ~ttl_hours:0 ~origin ()
         |> require "real Fusion post" |> ignore;

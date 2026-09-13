@@ -93,7 +93,8 @@ let optional_meta fields =
    row at the caller. *)
 let post_origin_of_yojson (json : Yojson.Safe.t) : post_origin option =
   match json with
-  | `Assoc fields ->
+  | `Assoc fields when has_exact_field_set
+      ~allowed:["turn_ref";"source";"fusion_run_id";"fusion_producer"] fields ->
     let turn_ref =
       match List.assoc_opt "turn_ref" fields with
       | None -> Ok None
@@ -105,14 +106,19 @@ let post_origin_of_yojson (json : Yojson.Safe.t) : post_origin option =
     in
     let source = optional_string fields "source" in
     let fusion_run_id = optional_string fields "fusion_run_id" in
-    (match turn_ref, source, fusion_run_id with
-     | Ok turn_ref, Ok source, Ok fusion_run_id ->
+    let fusion_producer = optional_string fields "fusion_producer" in
+    (match turn_ref, source, fusion_run_id, fusion_producer with
+     | Ok turn_ref, Ok source, Ok fusion_run_id, Ok fusion_producer ->
        if Option.is_none turn_ref
           && Option.is_none source
           && Option.is_none fusion_run_id
        then None
-       else Some { turn_ref; source; fusion_run_id }
-     | Error (), _, _ | _, Error (), _ | _, _, Error () -> None)
+       else (match fusion_run_id, fusion_producer with
+         | None, None -> Some {turn_ref; source; fusion_run_id; fusion_producer}
+         | Some _, Some producer when String.trim producer <> "" ->
+             Some {turn_ref; source; fusion_run_id; fusion_producer}
+         | _ -> None)
+     | Error (), _, _, _ | _, Error (), _, _ | _, _, Error (), _ | _, _, _, Error () -> None)
   | _ -> None
 ;;
 

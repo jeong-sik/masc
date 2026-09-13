@@ -1,3 +1,5 @@
+module Store = Workspace_verification_store
+
 type authority = Task_producer of string | Goal_workspace
 
 type error =
@@ -108,59 +110,96 @@ let board_error = function
   | (Board.Comment_not_found _ | Board.Already_exists _ | Board.Already_voted _) as error ->
     Source_unavailable (Board_tool.board_error_to_string error)
 
-let read_board ~config ~authority ~args = protect (fun () ->
+let capture_board ~config ~authority ~post_id =
   let* () = require_workspace config in
   let* () = Board_dispatch.require_persisted_sources_readable () |> Result.map_error board_error in
-  let* post_id = required_id args "post_id" in
-  let* offset = optional_integer args "comment_offset" ~default:0 in
-  let* limit = optional_integer args "comment_limit"
-      ~default:Board.Limits.default_comment_page_limit in
-  let* () =
-    if offset < 0 || limit < 1 || limit > Board.Limits.max_comment_page_limit then
-      Error (Invalid_request "comment pagination is outside the Board descriptor contract")
-    else Ok () in
   let* post, comments = Board_dispatch.get_post_and_comments ~post_id ()
     |> Result.map_error board_error in
   let* () = require_visible authority post in
-    let total = List.length comments in
-    let offset = min offset total in
-    let selected = List.filteri (fun index _ -> index >= offset && index - offset < limit) comments in
-    let next = offset + List.length selected in
-    page_source ~args (`Assoc
-      [ "source", `String "board"
-      ; "post", Board.post_to_yojson post
-      ; "comments", `List (List.map Board.comment_to_yojson selected)
-      ; "pagination", `Assoc
-          [ "offset", `Int offset; "returned", `Int (List.length selected)
-          ; "total", `Int total; "has_more", `Bool (next < total)
-          ; "next_offset", (if next < total then `Int next else `Null) ] ]))
+  Ok (`Assoc ["source", `String "board"; "post", Board.post_to_yojson post;
+    "comments", `List (List.map Board.comment_to_yojson comments)])
 
 let fusion_error = function
   | Fusion_decision.Rejected detail -> Source_unavailable detail
   | Fusion_decision.Storage_failure detail -> Storage_failed detail
 
-let read_fusion ~config ~authority ~args = protect (fun () ->
+let capture_fusion ~config ~authority ~run_id =
   let* () = require_workspace config in
   let* () = Board_dispatch.require_persisted_sources_readable () |> Result.map_error board_error in
-  let* run_id = required_id args "run_id" in
   let* post = Fusion_decision.source_in_workspace ~run_id |> Result.map_error fusion_error in
-  let* () = require_visible authority post in
+  let* producer = match post.Board.origin with
+    | Some {fusion_run_id=Some actual; fusion_producer=Some producer; _}
+      when actual = run_id && String.trim producer <> "" -> Ok producer
+    | _ -> Error (Source_unavailable "Fusion source has no immutable producer identity") in
   let* () = match authority with
-    | Goal_workspace -> Ok ()
-    | Task_producer producer ->
-      if String.equal producer (Board.Agent_id.to_string post.author) then Ok ()
-      else Error (Access_denied "Fusion source belongs to another producer") in
-  (* Preserve the existing owner check for Task reads; a Goal reads shared
-     workspace advice under its own authority, without inventing a Keeper. *)
-  let* decisions = match authority with
-    | Task_producer producer ->
-      Fusion_decision.read_for_keeper ~config ~keeper:producer ~run_id
-      |> Result.map_error fusion_error
-    | Goal_workspace ->
-      Fusion_decision.read ~config ~run_id |> Result.map_error fusion_error in
-  page_source ~args (`Assoc
+    | Task_producer expected when expected = producer -> Ok ()
+    | Task_producer _ -> Error (Access_denied "Fusion source belongs to another producer")
+    | Goal_workspace -> require_visible authority post in
+  let* decisions = Fusion_decision.read ~config ~run_id |> Result.map_error fusion_error in
+  Ok (`Assoc
     [ "source", `String "fusion"
     ; "run_id", `String run_id
     ; "evidence_sha256", `String (Fusion_decision.evidence_sha256 post)
     ; "post", Board.post_to_yojson post
-    ; "keeper_decisions", `List decisions ]))
+    ; "keeper_decisions", `List decisions ])
+
+
+(* Captured once before the request commit; never capture on verifier read. *)
+let capture ~config ~authority ~references = protect (fun () ->
+  List.fold_left (fun result reference ->
+    let* items = result in
+    let* source = match Store.collaboration_reference reference with
+      | Some (Store.Board_source, post_id) -> capture_board ~config ~authority ~post_id
+      | Some (Store.Fusion_source, run_id) -> capture_fusion ~config ~authority ~run_id
+      | None -> Error (Invalid_request "expected board:<post-id> or fusion:<run-id>") in
+    let content = Yojson.Safe.to_string source in
+    let sha256 = Digestif.SHA256.(digest_string content |> to_hex) in
+    Ok (items @ [Store.Evidence_collaboration {reference; content; sha256}]))
+    (Ok []) (List.sort_uniq String.compare references))
+
+let submitted_source ~submitted_evidence reference =
+  let matches = List.filter_map (function
+    | Store.Evidence_collaboration item when item.reference = reference ->
+        Some (Store.Evidence_collaboration item)
+    | _ -> None) submitted_evidence in
+  match matches with
+  | [item] ->
+      (* Reuse the persistence decoder for hash and shape validation. *)
+      let* item = Store.submitted_evidence_item_of_yojson
+        (Store.submitted_evidence_item_to_yojson item)
+        |> Result.map_error (fun detail -> Storage_failed detail) in
+      (match item with
+       | Store.Evidence_collaboration {content; _} -> Ok (Yojson.Safe.from_string content)
+       | _ -> Error (Storage_failed "invalid submitted collaboration kind"))
+  | [] -> Error (Access_denied "source was not captured in this verification submission")
+  | _ -> Error (Storage_failed "duplicate submitted collaboration identity")
+
+let read_board ~submitted_evidence ~args = protect (fun () ->
+  let* post_id = required_id args "post_id" in
+  let* offset = optional_integer args "comment_offset" ~default:0 in
+  let* limit = optional_integer args "comment_limit" ~default:Board.Limits.default_comment_page_limit in
+  let* () = if offset < 0 || limit < 1 || limit > Board.Limits.max_comment_page_limit then
+    Error (Invalid_request "comment pagination is outside the Board descriptor contract") else Ok () in
+  let* source = submitted_source ~submitted_evidence ("board:" ^ post_id) in
+  match source with
+  | `Assoc ["source", `String "board"; "post", post; "comments", `List comments] ->
+      let* () = match Board.post_of_yojson post with
+        | Some decoded when Board.Post_id.to_string decoded.id = post_id -> Ok ()
+        | _ -> Error (Storage_failed "submitted Board identity does not match reference") in
+      let total = List.length comments in
+      let offset = min offset total in
+      let selected = List.filteri (fun index _ -> index >= offset && index - offset < limit) comments in
+      let next = offset + List.length selected in
+      page_source ~args (`Assoc ["source", `String "board"; "post", post;
+        "comments", `List selected; "pagination", `Assoc ["offset", `Int offset;
+          "returned", `Int (List.length selected); "total", `Int total;
+          "has_more", `Bool (next < total); "next_offset", (if next < total then `Int next else `Null)]])
+  | _ -> Error (Storage_failed "invalid submitted Board snapshot"))
+
+let read_fusion ~submitted_evidence ~args = protect (fun () ->
+  let* run_id = required_id args "run_id" in
+  let* source = submitted_source ~submitted_evidence ("fusion:" ^ run_id) in
+  match source with
+  | `Assoc fields when List.assoc_opt "source" fields = Some (`String "fusion")
+      && List.assoc_opt "run_id" fields = Some (`String run_id) -> page_source ~args source
+  | _ -> Error (Storage_failed "invalid submitted Fusion snapshot"))

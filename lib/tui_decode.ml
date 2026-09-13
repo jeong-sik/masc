@@ -9350,6 +9350,7 @@ let decode_task_history json =
    (Workspace_verification_store.submitted_evidence_item_to_yojson), so an
    unknown kind fails the decode rather than rendering as an empty row. *)
 type verification_evidence_item =
+  | Ev_collaboration of { ev_reference : string; ev_content : string; ev_sha256 : string }
   | Ev_note of string
   | Ev_artifact of {
       ev_reference : string;
@@ -9383,6 +9384,12 @@ let decode_verification_evidence json =
           match member field item with `String s -> Some s | _ -> None
         in
         match member "kind" item with
+        | `String "collaboration" ->
+            (match Workspace_verification_store.submitted_evidence_item_of_yojson item with
+             | Ok (Workspace_verification_store.Evidence_collaboration {reference; content; sha256}) ->
+                 Ok (Ev_collaboration {ev_reference=reference; ev_content=content; ev_sha256=sha256})
+             | Ok _ -> Error "evidence collaboration has a different kind"
+             | Error detail -> Error detail)
         | `String "note" ->
             (match str "content" with
              | Some content -> Ok (Ev_note content)

@@ -15,8 +15,12 @@ val error_to_string : error -> string
 (** Large responses are bounded JSON-text pages. The caller follows next_cursor
     with unchanged source arguments and concatenates content to recover the exact
     structured source. Each cursor pins SHA-256 and UTF-8 byte offset; every page
-    rechecks source authority and refuses changed source observations. *)
-val read_board : config:Workspace.config -> authority:authority -> args:Yojson.Safe.t ->
+    uses only the immutable submitted bytes and refuses mismatched cursors. *)
+val capture : config:Workspace.config -> authority:authority -> references:string list ->
+  (Workspace_verification_store.submitted_evidence_item list, error) result
+(** Capture explicit collaboration references before the submission commits.
+    Captured items carry all source bytes and ownership; reads never consult live Board state. *)
+val read_board : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
-val read_fusion : config:Workspace.config -> authority:authority -> args:Yojson.Safe.t ->
+val read_fusion : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
   (Yojson.Safe.t, error) result

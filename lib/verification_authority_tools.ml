@@ -24,7 +24,7 @@ let all_tools = [ Read_file; Search_files; Web_fetch; Board_source; Fusion_sourc
 type t =
   { ownership_root : string
   ; config : Workspace.config
-  ; collaboration_authority : Verification_collaboration_evidence.authority
+  ; submitted_evidence : Workspace_verification_store.submitted_evidence_item list
   ; producer_scope : producer_scope
   ; tools : (tool * Keeper_tool_descriptor.t) list
   }
@@ -49,7 +49,7 @@ let exact_fusion_run_schema =
                 ; ( "description"
                   , `String
                       "Exact Fusion run id (the run_id returned by masc_fusion) \
-                       whose original durable evidence to read." )
+                       whose submission-bound evidence to read." )
                 ] )
           ] )
     ; "required", `List [ `String "run_id" ]
@@ -106,7 +106,7 @@ let rec resolve_tools = function
     Ok (descriptor :: descriptors)
 ;;
 
-let create ~config ~producer =
+let create ~config ~producer ~submitted_evidence =
   let open Result.Syntax in
   let* producer_scope =
     match Keeper_meta_store.read_effective_meta config producer with
@@ -142,7 +142,7 @@ let create ~config ~producer =
     Env_config_core.strip_trailing_slashes ownership_root
   in
   Ok { ownership_root; config; producer_scope; tools
-     ; collaboration_authority = Verification_collaboration_evidence.Task_producer producer }
+     ; submitted_evidence }
 ;;
 
 (* The Goal proof surface. A Goal names no producer: it is a shared intent
@@ -157,7 +157,7 @@ let create ~config ~producer =
    jail here would be a second containment boundary to keep correct. The
    judge navigates from [root_layout] instead, which names the producers and
    the checkouts under them. *)
-let create_goal_proof ~(config : Workspace.config) =
+let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
   let open Result.Syntax in
   let* tools = resolve_tools [ Read_file; Web_fetch; Board_source; Fusion_source ] in
   let project_root =
@@ -168,7 +168,7 @@ let create_goal_proof ~(config : Workspace.config) =
       (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
   in
   Ok { ownership_root; config; producer_scope = Workspace_producer; tools
-     ; collaboration_authority = Verification_collaboration_evidence.Goal_workspace }
+     ; submitted_evidence }
 ;;
 
 (* The listing answers one question for the evaluator: where do the paths the
@@ -323,9 +323,9 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
       (match tool with
        | Read_file -> descriptor.description ^ " " ^ image_delivery_note
        | Board_source ->
-         "Read an exact Board post and its paginated comments as original structured evidence, including identities and full metadata. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
+         "Read a Board post and its paginated comments frozen in this verification submission, including identities and full metadata. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. Task reviews can read shared posts and their producer's own Direct posts; Goal reviews read shared workspace posts only. Read-only: no posting, voting or adoption."
        | Fusion_source ->
-         "Read original durable Fusion panel/judge/source-context evidence and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
+         "Read Fusion panel/judge/source-context evidence frozen in this verification submission and separately recorded Keeper decisions by required exact run_id. Task reviews read the actual producer's Fusion source; Goal reviews read shared workspace Fusion source. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate exact JSON before reviewing. This does not run Fusion or adopt advice."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -398,7 +398,7 @@ let run t tool ~args =
   let execution_result execution =
     result_of_execution execution |> Result.map_error (fun detail -> Runtime_error detail) in
   let collaboration_read read =
-    read ~config:t.config ~authority:t.collaboration_authority ~args
+    read ~submitted_evidence:t.submitted_evidence ~args
     |> Result.map Yojson.Safe.to_string
     |> Result.map_error (fun error -> Collaboration_error error)
   in

@@ -20,9 +20,11 @@
 type t
 
 val create :
-  config:Workspace.config -> producer:string -> (t, string) result
+  config:Workspace.config -> producer:string ->
+  submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> (t, string) result
 
-val create_goal_proof : config:Workspace.config -> (t, string) result
+val create_goal_proof : config:Workspace.config ->
+  submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> (t, string) result
 (** The Goal proof surface: read and web-fetch rooted at the shared playground
     prefix. A Goal names no producer, so there is no owned tree to bind to and
     no producer set to derive; this root is the same fixed workspace location

@@ -177,7 +177,7 @@ let with_surface ?(sandbox_profile = "remote_ssh") ?ssh_script f =
   if remote then write_runtime_toml ~base_path:config.base_path;
   ensure_producer config producer;
   let run () =
-    match VAT.create ~config ~producer with
+    match VAT.create ~submitted_evidence:[] ~config ~producer with
     | Error reason -> Alcotest.failf "surface creation failed: %s" reason
     | Ok surface -> f config surface
   in
@@ -441,7 +441,7 @@ let test_workspace_producer_gets_owned_read_surface () =
   let path = Filename.concat playground "evidence.txt" in
   Out_channel.with_open_text path (fun channel ->
     output_string channel "first line\nsecond line\n");
-  match VAT.create ~config ~producer:producer_name with
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     Alcotest.(check (list string))
@@ -495,7 +495,7 @@ let test_workspace_producer_without_a_playground_gets_a_stated_absence () =
   let bundle =
     Filename.concat Playground_paths.all_playgrounds_prefix producer_name
   in
-  match VAT.create ~config ~producer:producer_name with
+  match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
   | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
   | Ok surface ->
     let layout = VAT.root_layout surface |> require_layout in
@@ -527,7 +527,7 @@ let test_binary_lookup_failures_survive_observation_replay () =
   let producer_name = "binary-evidence-producer" in
   let playground = workspace_producer_playground config producer_name in
   let surface =
-    match VAT.create ~config ~producer:producer_name with
+    match VAT.create ~submitted_evidence:[] ~config ~producer:producer_name with
     | Ok surface -> surface
     | Error detail -> Alcotest.fail detail
   in
@@ -872,8 +872,8 @@ let test_goal_and_task_read_deliver_full_png () =
   Out_channel.with_open_bin image_path (fun out -> output_string out bytes);
   let sha = Digestif.SHA256.(digest_string bytes |> to_hex) in
   let encoded = Base64.encode_exn bytes in
-  let task_surface = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal_surface = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task_surface = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal_surface = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   List.iter (fun (surface, path) ->
     let args = `Assoc [ "file_path", `String path ] in
     let result = VAT.dispatch surface ~name:"tool_read_file" ~args in
@@ -954,8 +954,8 @@ let test_goal_and_task_inspect_real_pdf () =
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.pdf")
     (fun out -> output_string out "%PDF-1.7\nnot a PDF document\n");
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   let read surface path = VAT.dispatch surface ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String path]) in
   List.iter (fun (surface,prefix) ->
@@ -1032,8 +1032,8 @@ let test_goal_and_task_inspect_real_mp4 () =
   Out_channel.with_open_bin source (fun out -> output_string out bytes);
   Out_channel.with_open_bin (Filename.concat root "broken.mp4")
     (fun out -> output_string out (String.sub bytes 0 (String.length bytes / 2)));
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
-  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~submitted_evidence:[] ~config |> Result.get_ok in
   let read surface path = VAT.dispatch surface ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String path]) in
   List.iter (fun (surface,prefix) ->
@@ -1134,7 +1134,7 @@ let test_a_capture_without_the_mp4_extension_is_still_inspected () =
   List.iter (fun filename ->
   Out_channel.with_open_bin (Filename.concat root filename)
     (fun out -> output_string out bytes);
-  let task = VAT.create ~config ~producer:producer_name |> Result.get_ok in
+  let task = VAT.create ~submitted_evidence:[] ~config ~producer:producer_name |> Result.get_ok in
   let result = VAT.dispatch task ~name:"tool_read_file"
     ~args:(`Assoc ["file_path",`String filename]) in
   (match result with

@@ -2592,7 +2592,7 @@ let test_the_overlays_are_the_shared_contract () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"surface_chrome_rows" ~callees:[]
-       ~identifiers:[ "Masc_tui_frame.chrome_rows" ])
+       ~identifiers:[ "framed_chrome_rows" ])
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines

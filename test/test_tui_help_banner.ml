@@ -59,6 +59,26 @@ let test_sections_share_one_heading_style () =
         (List.exists (fun line -> contains shout line) drawn))
     [ "ACTIVE:"; "GLOBAL NAVIGATION"; "SLASH COMMANDS" ]
 
+(* The sheet's key column holds the key as the key table spells it. Wrapped in
+   brackets, [/] for find and [ / ] for the bracket keys read as one key. *)
+let test_keys_are_not_wrapped_in_brackets () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Board;
+  let rows =
+    List.map Masc_tui_theme.strip_sgr (Masc_tui_render_prim.help_lines state)
+  in
+  let has_row prefix =
+    List.exists (fun row -> String.starts_with ~prefix row) rows
+  in
+  Alcotest.(check bool) "the bracket keys are drawn as themselves" true
+    (has_row "  [ / ]  ");
+  Alcotest.(check bool) "and j/k with nothing around it" true (has_row "  j/k  ");
+  List.iter
+    (fun wrapped ->
+      Alcotest.(check bool) (Printf.sprintf "no %S" wrapped) false
+        (List.exists (fun row -> contains wrapped row) rows))
+    [ "[j/k]"; "[/]"; "[Tab]"; "[q]" ]
+
 let () =
   Alcotest.run "masc_tui_help_banner"
     [ ( "masthead"
@@ -66,6 +86,8 @@ let () =
             test_the_masthead_names_the_product_and_nothing_else_twice
         ; Alcotest.test_case "the masthead spends two rows" `Quick
             test_the_masthead_spends_two_rows
+        ; Alcotest.test_case "keys are not wrapped in brackets" `Quick
+            test_keys_are_not_wrapped_in_brackets
         ; Alcotest.test_case "sections share one heading style" `Quick
             test_sections_share_one_heading_style
         ] )

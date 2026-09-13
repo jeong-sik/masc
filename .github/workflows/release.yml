@@ -1,565 +1,92 @@
 name: Release
 
+# DIAGNOSTIC BRANCH ONLY. Never merge: no tag trigger or publication authority.
 on:
-  workflow_call:
-    inputs:
-      candidate_verification:
-        type: boolean
-        default: false
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-concurrency:
-  group: ${{ inputs.candidate_verification && format('candidate-release-{0}', github.run_id) || format('release-{0}', github.ref) }}
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  build:
+  owner-diagnostic:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-14  # Apple Silicon
-            arch: macos-arm64
-            shim-arch: ''    # the exec shim is a Linux guest binary; none here
-          - os: macos-15-intel
-            arch: macos-x64
-            shim-arch: ''
-          - os: ubuntu-24.04
-            arch: linux-x64
-            shim-arch: amd64
-          # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
-          # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
-          # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
-          - os: ubuntu-24.04-arm
-            arch: linux-arm64
-            shim-arch: arm64
-
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
-    # The Linux jobs build the server in a container at the glibc floor and
-    # the exec shim in another (an opam install in each on the first run).
-    timeout-minutes: 90
-
-    env:
-      # Where the built binaries are, for every step that runs one. macOS
-      # builds in place; Linux builds in a container and exports here, so the
-      # steps below must not name dune's output directory directly.
-      MASC_BIN_DIR: _build/default/bin
-
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check version truth
+      - name: Build the unchanged release container
         run: |
-          chmod +x scripts/check-version-truth.sh
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            scripts/check-version-truth.sh --tag "${GITHUB_REF_NAME}"
-          else
-            scripts/check-version-truth.sh
-          fi
-
-      - name: Installer behavior (terminal wizard and upgrades)
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/owner-diagnostic"
+          git rev-parse HEAD | tee "$RUNNER_TEMP/owner-diagnostic/source-sha"
+          bash scripts/build-linux-release.sh --keep --jobs 2 \
+            --out "$RUNNER_TEMP/owner-binaries" 2>&1 | tee "$RUNNER_TEMP/owner-diagnostic/build.log"
+      - name: Diagnose native Owner cases in the same container
         run: |
-          python3 test/test_installer_wizard.py
-          python3 test/test_installer_upgrade.py
-          python3 test/test_installer_uninstall.py
-          python3 test/test_package_macos_runtime.py
-          python3 test/test_installer_dependencies.py
-
-      # Linux builds inside a container (see the Build step), so only the
-      # macOS jobs need a toolchain on the runner itself.
-      - name: Setup OCaml
-        if: runner.os == 'macOS'
-        uses: ./.github/actions/setup-ocaml-toolchain
-
-      - name: Install native dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          # ripgrep 은 evidence 번들의 Grep 도구 시나리오가 요구한다.
-          # Linux 는 별도 스텝에서 apt 로 넣는다.
-          brew install flock gmp libpq openssl@3 zstd ripgrep poppler ffmpeg
-
-          libpq_prefix="$(brew --prefix libpq)"
-          openssl_prefix="$(brew --prefix openssl@3)"
-
-          {
-            echo "$libpq_prefix/bin"
-            echo "$openssl_prefix/bin"
-          } >> "$GITHUB_PATH"
-
-          {
-            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
-            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
-            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
-            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
-          } >> "$GITHUB_ENV"
-
-      - name: Pin private dependencies
-        if: runner.os == 'macOS'
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          # --with-bisect 는 --with-test 와 짝이다. bisect_ppx 의 opam 제약이
-          # ocaml < 5.0 이라, pin 없이 테스트 의존성을 풀면 solver 가
-          # OCaml 5.5.0 아래에서 해를 못 찾는다.
-          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
-
-      - name: Refresh apt index
-        if: runner.os == 'Linux'
-        run: bash scripts/ci/apt-refresh.sh
-
-      # release-evidence.sh 의 도구 표면 시나리오가 Grep 도구를 통해 rg 를
-      # 호출한다. ci.yml 은 잡마다 설치하지만 release.yml 에는 없었고,
-      # 러너 이미지에 rg 가 없으면 "rg executable not found" 로 번들이 깨진다.
-      - name: Install evidence tools (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y -qq ripgrep poppler-utils ffmpeg
-
-      - name: Install dependencies
-        if: runner.os == 'macOS'
-        run: |
-          for attempt in 1 2 3; do
-            opam install . --deps-only --with-test -y && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "opam install failed after ${attempt} attempts"
-              exit 1
+          set -euo pipefail
+          mapfile -t containers < <(docker ps --format '{{.Names}}' | grep -E '^masc-linux-release-build-[0-9]+$')
+          test "${#containers[@]}" -eq 1
+          container="${containers[0]}"
+          printf '%s\n' "$container" > "$RUNNER_TEMP/owner-diagnostic/container-name"
+          docker inspect --format '{{.Id}} {{.Config.Image}} {{.Config.User}}' "$container" \
+            | tee "$RUNNER_TEMP/owner-diagnostic/container-identity"
+          build_timestamp=$(git show -s --format=%ct HEAD)
+          docker exec -e MASC_BUILD_COMMIT="$GITHUB_SHA" -e MASC_BUILD_COMMIT_UNIX_TS="$build_timestamp" \
+            -e DUNE_SOURCEROOT=/src "$container" bash -lc '
+            set -euo pipefail
+            cd /src
+            eval "$(opam env --switch=masc)"
+            dune build --root . -j 2 test/test_keeper_owner.exe
+            python3 scripts/ci/stanza_env.py --dir test --deps test_keeper_owner
+            python3 scripts/ci/stanza_env.py --dir test test_keeper_owner
+          ' 2>&1 | tee "$RUNNER_TEMP/owner-diagnostic/owner-build-and-env.log"
+          set +e
+          docker exec -e DUNE_SOURCEROOT=/src "$container" bash -lc '
+            set -euo pipefail
+            cd /src
+            eval "$(opam env --switch=masc)"
+            env_lines=$(python3 scripts/ci/stanza_env.py --dir test test_keeper_owner)
+            suite_env=()
+            while IFS= read -r pair; do
+              [ -z "$pair" ] || suite_env+=("$pair")
+            done <<< "$env_lines"
+            cd /src/_build/default/test
+            unset EIO_BACKEND
+            printf "default backend: %s\n" "${EIO_BACKEND-<unset>}"
+            set +e
+            env ALCOTEST_VERBOSE=1 "${suite_env[@]}" \
+              timeout -s TERM -k 30 600 ./test_keeper_owner.exe
+            default_status=$?
+            printf "default backend exit=%s\n" "$default_status"
+            if [ "$default_status" -eq 124 ] || [ "$default_status" -eq 137 ]; then
+              printf "contrast backend: posix\n"
+              env ALCOTEST_VERBOSE=1 EIO_BACKEND=posix "${suite_env[@]}" \
+                timeout -s TERM -k 30 600 ./test_keeper_owner.exe
+              printf "posix backend exit=%s\n" "$?"
             fi
-            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
-            sleep 15
-          done
-
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          opam exec -- dune build --release \
-            bin/main_eio.exe \
-            bin/masc_tui.exe \
-            bin/masc_browser_host.exe \
-            bin/deployment_preflight_helper.exe
-
-      # Built in a container whose glibc is the support floor, not on the
-      # runner. A binary records the oldest glibc that provides each symbol it
-      # references, so building on ubuntu-24.04 silently raised the floor to
-      # 2.38 and the result refused to start on Debian 12 and Ubuntu 22.04
-      # (masc#35321). The script also bakes SQLite in and enforces the floor;
-      # scripts/check-glibc-floor.sh re-checks the packaged assets below.
-      - name: Build at the glibc floor (Linux, container)
-        if: runner.os == 'Linux'
-        run: |
-          chmod +x scripts/build-linux-release.sh scripts/check-glibc-floor.sh
-          contract_test=""
-          if [ "${{ matrix.arch }}" = "linux-x64" ]; then
-            contract_test="--run-contract-test"
-          fi
-          # Exported where a source checkout keeps its build, so MASC_BIN_DIR
-          # stays one value on both operating systems. The onboarding smoke
-          # below runs quickstart.sh, which starts start-masc.sh, and both name
-          # _build/default/bin/main_eio.exe directly; this runner has no OCaml
-          # toolchain, so anywhere else leaves start-masc.sh trying to build
-          # from source and exiting "dune not found".
-          scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" \
-            --lifecycle-out "$RUNNER_TEMP/masc-release-lifecycle" $contract_test
-
-      # Manual branch runs also serve isolated runtime/TUI experiments. Keep
-      # their compiled bytes even when a later unrelated release check fails.
-      # The release job downloads only masc-*; these are never release assets.
-      - name: Record runtime probe binaries
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          PROBE_COMMIT: ${{ github.sha }}
-          PROBE_ARCH: ${{ matrix.arch }}
-        run: |
-          python3 - <<'PYCODE'
-          import hashlib, json, os, shutil
-          from pathlib import Path
-          out = Path('runtime-probe')
-          out.mkdir()
-          files = {}
-          for name in ('main_eio', 'masc_tui', 'masc_browser_host'):
-              source = Path(os.environ['MASC_BIN_DIR']) / (name + '.exe')
-              target = out / (name + '.exe')
-              shutil.copy2(source, target)
-              files[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
-          (out / 'manifest.json').write_text(json.dumps({
-              'commit': os.environ['PROBE_COMMIT'], 'arch': os.environ['PROBE_ARCH'],
-              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
-              'release_validated': False, 'sha256': files,
-          }, indent=2) + '\n')
-          PYCODE
-
-      - name: Upload runtime probe binaries
-        if: github.event_name == 'workflow_dispatch'
+            exit "$default_status"
+          ' 2>&1 | tee "$RUNNER_TEMP/owner-diagnostic/native-cases.log"
+          result=${PIPESTATUS[0]}
+          exit "$result"
+      - name: Upload partial diagnostic logs
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: runtime-probe-${{ matrix.arch }}-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: runtime-probe/
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Runtime setup validates each supported connection
-        run: python3 test/test_install_runtime_setup.py --binary "$MASC_BIN_DIR"/main_eio.exe
-
-      - name: First conversation setup CLI
-        run: python3 test/test_setup_cli.py --binary "$MASC_BIN_DIR"/main_eio.exe
-
-      - name: Keeper creation CLI exits after HTTP response
-        run: python3 test/test_keeper_create_cli_exit.py "$MASC_BIN_DIR"/main_eio.exe
-
-      - name: Sandbox image CLI runtime routing
-        run: python3 test/test_sandbox_image_cli.py "$MASC_BIN_DIR"/main_eio.exe
-
-      # Exercise the image distributed as a recipe by the actual release CLI.
-      # This is guest tool readiness, not an authenticated Keeper/model turn.
-      - name: General sandbox image and guest tool smoke
-        if: runner.os == 'Linux'
+          name: owner-diagnostic-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/owner-diagnostic/
+          retention-days: 3
+          if-no-files-found: warn
+      - name: Remove only the retained diagnostic container
+        if: always()
         run: |
-          mkdir -p dist sandbox-smoke-workspace
-          image="masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}"
-          "$MASC_BIN_DIR"/main_eio.exe sandbox-image --tag "$image" \
-            > "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
-          docker run --rm --network none --read-only --cap-drop=ALL \
-            --user "$(id -u):$(id -g)" --tmpfs /tmp \
-            -v "$PWD/sandbox-smoke-workspace:/workspace" -w /workspace "$image" \
-            bash -lc '
-              set -eu
-              for tool in bash curl find gh git less ps python3 rg; do command -v "$tool"; done
-              git init --quiet
-              printf "release sandbox proof\n" > proof.txt
-              rg --fixed-strings "release sandbox proof" proof.txt
-              python3 -c "from pathlib import Path; assert Path(\"proof.txt\").read_text() == \"release sandbox proof\\n\""
-              printf "general-sandbox-tools: PASS\n"
-            ' >> "dist/general-sandbox-${{ matrix.arch }}.log" 2>&1
-          cat "dist/general-sandbox-${{ matrix.arch }}.log"
-          rm -r sandbox-smoke-workspace
-
-      # Prove the self-contained claim: neither shipped binary may keep a
-      # dynamic libsqlite3 dependency, or a bare Linux install breaks again.
-      - name: Assert Linux binaries carry no dynamic SQLite
-        if: runner.os == 'Linux'
-        run: |
-          for exe in main_eio masc_tui; do
-            if ldd "$MASC_BIN_DIR/$exe.exe" 2>/dev/null | grep -qi sqlite; then
-              echo "$exe.exe still dynamically links sqlite3:"
-              ldd "$MASC_BIN_DIR/$exe.exe" | grep -i sqlite
-              exit 1
-            fi
-          done
-          echo "server and TUI binaries carry no dynamic sqlite dependency"
-
-      # The Build step above compiles only the OCaml binaries. The server reads
-      # the dashboard SPA from assets/dashboard/ at runtime, so without this the
-      # freshly built server answers /dashboard with 503 and quickstart-smoke
-      # fails on the required Linux platforms -- which is why the v0.26.0 and
-      # v0.27.0 release builds failed at this step. Mirror ci.yml's dashboard
-      # toolchain (node 22 + pnpm 10.31.0).
-      - name: Set up Node for dashboard assets
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-
-      - name: Build dashboard assets
-        run: |
-          corepack enable && corepack prepare pnpm@10.31.0 --activate
-          (cd dashboard && pnpm install --frozen-lockfile)
-          scripts/build-dashboard-if-needed.sh --force
-
-      - name: Source quickstart onboarding smoke
-        run: scripts/quickstart-smoke.sh
-
-      - name: Release binary smoke (boot + README drift)
-        run: |
-          chmod +x scripts/release-binary-smoke.sh
-          scripts/release-binary-smoke.sh "$MASC_BIN_DIR"/main_eio.exe
-
-      # masc-tui refuses to start without an interactive TTY, so a runner
-      # cannot boot it the way the server binary is booted above. --help
-      # returns before that check, which is enough to prove the shipped file
-      # loads its dynamic libraries -- the one thing that differs between this
-      # runner and the machine that downloads the asset. Rendering is covered
-      # by test/test_tui_keyboard_input.py in CI, over a real PTY.
-      - name: Terminal UI binary smoke (dynamic link)
-        run: |
-          "$MASC_BIN_DIR"/masc_tui.exe --help < /dev/null > /tmp/masc-tui-help.txt
-          grep -q -- '--base-path' /tmp/masc-tui-help.txt
-
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp "$MASC_BIN_DIR"/main_eio.exe dist/masc-${{ matrix.arch }}
-          cp "$MASC_BIN_DIR"/masc_tui.exe dist/masc-tui-${{ matrix.arch }}
-          cp "$MASC_BIN_DIR"/masc_browser_host.exe dist/masc-browser-host-${{ matrix.arch }}
-          cp "$MASC_BIN_DIR"/deployment_preflight_helper.exe \
-            dist/masc-deployment-preflight-helper-${{ matrix.arch }}
-          cp scripts/check-runtime-deployment-preflight.sh \
-            dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
-          chmod +x dist/masc-${{ matrix.arch }}
-          chmod +x dist/masc-tui-${{ matrix.arch }}
-          chmod +x dist/masc-browser-host-${{ matrix.arch }}
-          chmod +x \
-            dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
-            dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
-
-      # The build step enforces the floor on what it produced; this enforces it
-      # on what actually ships. The two differ if a copy goes wrong, if a step
-      # between them replaces a file, or if MASC_BIN_DIR ever points somewhere
-      # other than the container's output — the ways a floor regression could
-      # reach users without the build itself failing.
-      - name: Assert shipped Linux binaries meet the glibc floor
-        if: runner.os == 'Linux'
-        run: |
-          chmod +x scripts/check-glibc-floor.sh
-          # Asked of the build script rather than repeated here. Two literals
-          # drift one at a time, and raising only this one checks the shipped
-          # assets against a floor nothing was built at, while raising only the
-          # other ships below the floor this asserts -- both pass quietly.
-          floor="$(bash scripts/build-linux-release.sh --print-floor)"
-          scripts/check-glibc-floor.sh "$floor" \
-            dist/masc-${{ matrix.arch }} \
-            dist/masc-tui-${{ matrix.arch }} \
-            dist/masc-browser-host-${{ matrix.arch }} \
-            dist/masc-deployment-preflight-helper-${{ matrix.arch }}
-
-      - name: Bundle relocatable macOS libraries and Python
-        if: runner.os == 'macOS'
-        run: |
-          python3 scripts/package-macos-runtime.py --dist dist \
-            --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
-            --source-commit "$(git rev-parse HEAD)"
-
-      - name: Bundle Linux Python
-        if: runner.os == 'Linux'
-        run: |
-          python3 scripts/package-linux-runtime.py --dist dist \
-            --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
-            --source-commit "$(git rev-parse HEAD)"
-
-      - name: Package binary-matched dashboard distribution
-        run: |
-          git diff --exit-code
-          runtime_args=(--runtime-archive "dist/masc-runtime-${{ matrix.arch }}.tar.gz"
-                        --runtime-root "$RUNNER_TEMP/masc-portable-stage")
-          python3 scripts/release-dashboard-bundle.py package \
-            --binary "dist/masc-${{ matrix.arch }}" \
-            --binary-asset "masc-${{ matrix.arch }}" \
-            --assets assets/dashboard \
-            --source-commit "$(git rev-parse HEAD)" \
-            --archive "dist/masc-dashboard-${{ matrix.arch }}.tar.gz" \
-            --companion masc-tui "dist/masc-tui-${{ matrix.arch }}" \
-            --companion masc-browser-host "dist/masc-browser-host-${{ matrix.arch }}" \
-            --companion masc-deployment-preflight-helper "dist/masc-deployment-preflight-helper-${{ matrix.arch }}" \
-            --companion masc-check-runtime-deployment-preflight "dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}" \
-            ${runtime_args[@]+"${runtime_args[@]}"}
-          cp scripts/release-dashboard-bundle.py \
-            "dist/masc-release-dashboard-bundle-${{ matrix.arch }}.py"
-
-      # RFC-0427 B-1: the exec shim ships with the server release instead of
-      # being built by the operator. It is a static musl binary built in a
-      # container on this runner's own architecture (no emulation), and it is
-      # probed once here: a shim that cannot answer --probe is not an asset.
-      # It is built before the installer smoke so the smoke can stage it and
-      # check that install.sh places it with its sha256 sidecar (B-2).
-      - name: Build exec shim (static ${{ matrix.shim-arch }})
-        if: matrix.shim-arch != ''
-        run: |
-          chmod +x scripts/remote-ssh/build-shim.sh
-          scripts/remote-ssh/build-shim.sh --arch "${{ matrix.shim-arch }}" --out dist
-          shim="dist/masc-exec-shim-linux-${{ matrix.shim-arch }}"
-          conf="$(mktemp)"
-          printf 'remote_root=/tmp\n' > "$conf"
-          probe="$(MASC_EXEC_SHIM_CONFIG="$conf" "$shim" --probe)"
-          echo "probe: $probe"
-          echo "$probe" | jq -e '.name == "masc-exec-shim" and (.version | test("^[0-9]+\\.")) and (.capabilities | type == "array")' >/dev/null
-          sha256sum "$shim"
-
-      # Preserve native files for isolated operator acceptance while the
-      # remaining evidence and installation gates run. These artifacts are
-      # deliberately outside the masc-* distribution download pattern.
-      - name: Record unverified native preflight provenance
-        env:
-          PREFLIGHT_ARCH: ${{ matrix.arch }}
-        run: |
-          python3 - <<'PYCODE'
-          import hashlib, json, os
-          from pathlib import Path
-          files = sorted(Path('dist').glob('masc-*')) + [
-              Path('scripts/install.sh'), Path('scripts/install-runtime-setup.py'),
-              Path('config/runtime.toml'), Path('config/agent-core-models-overlay.toml')]
-          receipt = dict(source_commit=os.environ['GITHUB_SHA'],
-                         platform=os.environ['PREFLIGHT_ARCH'],
-                         run_id=os.environ['GITHUB_RUN_ID'],
-                         run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
-                         release_verified=False, published=False,
-                         sha256={str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-                                 for p in files if p.is_file()})
-          Path('native-preflight.json').write_text(json.dumps(receipt, indent=2) + '\n')
-          PYCODE
-
-      - name: Upload unverified native preflight files
-        uses: actions/upload-artifact@v7
-        with:
-          name: preflight-native-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
-          retention-days: 7
-          if-no-files-found: error
-          path: |
-            dist/masc-*
-            scripts/install.sh
-            scripts/install-runtime-setup.py
-            config/runtime.toml
-            config/agent-core-models-overlay.toml
-            native-preflight.json
-
-      - name: Generate release evidence bundle
-        run: |
-          chmod +x scripts/release-evidence.sh
-          mkdir -p dist
-          lifecycle_args=()
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            lifecycle_args+=("$RUNNER_TEMP/masc-release-lifecycle")
-          fi
-          scripts/release-evidence.sh \
-            "$MASC_BIN_DIR"/main_eio.exe \
-            dist/release-evidence-${{ matrix.arch }}.md "${lifecycle_args[@]}"
-
-      # Exercise scripts/install.sh end to end against the just-packaged
-      # binaries: stage dist/ as a file:// release, install through the real
-      # installer (detect_asset + SHA256SUMS verification + placement), boot
-      # the installed server, and assert /health. This guards the installer's
-      # asset-name and checksum contract -- the download path that nothing
-      # else runs -- without any network access.
-      - name: Installer smoke (offline)
-        run: |
-          chmod +x scripts/install-smoke.sh
-          install_args=(dist "${{ matrix.arch }}")
-          if [ "${{ runner.os }}" = Linux ]; then
-            install_args+=("masc-release-smoke:${{ github.run_id }}-${{ matrix.arch }}")
-          fi
-          if [ "${{ runner.os }}" = macOS ]; then
-            /usr/bin/sandbox-exec -p '(version 1) (allow default) (deny file-read* (subpath "/opt/homebrew") (subpath "/usr/local"))' \
-              /usr/bin/env PATH=/usr/bin:/bin:/usr/sbin:/sbin /bin/bash scripts/install-smoke.sh "${install_args[@]}"
-          else
-            scripts/install-smoke.sh "${install_args[@]}"
-          fi
-
-      # A build runner has development libraries that a fresh user host lacks.
-      - name: Fresh Ubuntu installation (no OCaml or checkout dependencies)
-        if: runner.os == 'Linux'
-        run: |
-          docker run --rm \
-            -v "$PWD:/src:ro" -w /src ubuntu:24.04 bash -euc '
-              apt-get update -qq
-              apt-get install -y -qq --no-install-recommends ca-certificates curl python3 libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
-              bash scripts/install-smoke.sh dist "${{ matrix.arch }}"
-            '
-
-      - name: Upload failed installation diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: install-failure-${{ matrix.arch }}
-          if-no-files-found: ignore
-          path: |
-            dist/general-sandbox-*.log
-            dist/first-keeper-turn-*/
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: masc-${{ matrix.arch }}
-          overwrite: ${{ inputs.candidate_verification == true }}
-          path: dist/*
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repo for config seed hashes
-        uses: actions/checkout@v7
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: dist
-          pattern: masc-*
-          merge-multiple: true
-
-      - name: Verify advertised release assets
-        run: |
-          mkdir -p release-assets
-          cp scripts/install.sh release-assets/install.sh
-          cp scripts/install-runtime-setup.py release-assets/install-runtime-setup.py
-          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
-            for asset in \
-              "masc-$arch" \
-              "masc-tui-$arch" \
-              "masc-browser-host-$arch" \
-              "masc-deployment-preflight-helper-$arch" \
-              "masc-check-runtime-deployment-preflight-$arch" \
-              "masc-dashboard-$arch.tar.gz" \
-              "masc-release-dashboard-bundle-$arch.py"; do
-              if [ ! -f "dist/$asset" ]; then
-                echo "required release asset missing: $asset"
-                exit 1
-              fi
-              cp "dist/$asset" "release-assets/$asset"
-            done
-          done
-          for arch in macos-arm64 macos-x64 linux-x64 linux-arm64; do
-            asset="masc-runtime-$arch.tar.gz"
-            test -f "dist/$asset"
-            cp "dist/$asset" "release-assets/$asset"
-          done
-          # The exec shim (RFC-0427 B-1): one static Linux binary per guest
-          # architecture, named by the shim's own convention.
-          for shim in masc-exec-shim-linux-amd64 masc-exec-shim-linux-arm64; do
-            if [ ! -f "dist/$shim" ]; then
-              echo "required release asset missing: $shim"
-              exit 1
-            fi
-            cp "dist/$shim" "release-assets/$shim"
-          done
-
-      - name: Generate release checksums
-        run: |
-          cd release-assets
-          artifact_count="$(find . -maxdepth 1 -type f ! -name SHA256SUMS | wc -l | tr -d ' ')"
-          if [ "$artifact_count" -eq 0 ]; then
-            echo "no release artifacts found in dist"
+          set -euo pipefail
+          mapfile -t containers < <(docker ps --format '{{.Names}}' | grep -E '^masc-linux-release-build-[0-9]+$')
+          if [ "${#containers[@]}" -eq 1 ]; then
+            docker rm -f "${containers[0]}"
+          elif [ "${#containers[@]}" -gt 1 ]; then
+            echo 'Multiple builder containers; refusing ambiguous cleanup' >&2
             exit 1
           fi
-          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' \
-            | sort -z \
-            | xargs -0 sha256sum > SHA256SUMS
-          (cd ../config && sha256sum runtime.toml) >> SHA256SUMS
-          (cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS
-          # Team preset files, keyed by their repo-relative path so
-          # `install.sh --team` can verify each seeded file (presets/<name>/...).
-          (cd .. && for m in presets/*/manifest.txt; do
-             [ -f "$m" ] || continue
-             d="$(dirname "$m")"
-             while IFS= read -r rel; do
-               case "$rel" in ''|'#'*) continue ;; esac
-               sha256sum "$d/$rel"
-             done < "$m"
-           done) >> SHA256SUMS
-          cat SHA256SUMS
-
-      - name: Upload assembled distribution
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-distribution-attempt-${{ github.run_attempt }}
-          path: release-assets/*
-          if-no-files-found: error
-
-      - name: Create Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !inputs.candidate_verification
-        uses: softprops/action-gh-release@v3
-        with:
-          files: release-assets/*
-          generate_release_notes: true

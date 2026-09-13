@@ -6,6 +6,7 @@ let obj xs = `Assoc xs
 let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
 type failure = Before_effect of string | Outcome_unknown of string
+type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 type t = { command : string -> Yojson.Safe.t -> (Yojson.Safe.t,string) result;
   mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
 let create ~command = {command;contexts=[];next_tab=0;version=None}
@@ -102,10 +103,12 @@ let pointer t context args ~(viewport : Browser_lane.Pointer.viewport) ~start mo
   | _ -> Error (Outcome_unknown "invalid post-input observation")
 let dispatch t ~verb args =
   let pre r = Result.map_error (fun e -> Before_effect e) r in
-  if verb="browser.info" then
+  let on_tab use = let* context,id=pre (resolve t args) in use context id in
+  match verb with
+  | Browser_info ->
     (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])
      | None->Error (Before_effect "BiDi session metadata is unavailable"))
-  else if verb="tabs.list" then
+  | Tabs_list ->
     let* current = pre (tree t) in
     let rec rows index acc = function
       | [] -> Ok (`List (List.rev acc))
@@ -113,22 +116,19 @@ let dispatch t ~verb args =
         let* url=pre (string "url" p) in let* title=pre (required "title" p) in let* active=pre (required "active" p) in
         rows (index+1) (obj ["id",`Int id;"index",`Int index;"url",str url;"title",title;"active",active]::acc) rest in
     rows 0 [] current
-  else if not (List.mem verb ["page.read";"page.scene";"page.capture";"page.interact"])
-  then Error (Before_effect "unsupported BiDi browser verb")
-  else let* context,id=pre (resolve t args) in
-    match verb with
-    | "page.read" -> pre (let* p=read t context args in with_tab id p)
-    | "page.scene" -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
-        let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p)
-    | "page.capture" -> pre (
+  | Page_elements -> Error (Before_effect "unsupported BiDi browser verb")
+  | Page_read -> on_tab (fun context id -> pre (let* p=read t context args in with_tab id p))
+  | Page_scene -> on_tab (fun context id -> pre (let* fields=match args with `Assoc xs->Ok xs|_->Error "invalid scene arguments" in
+        let* p=scene t context (obj (("mode",str "read")::fields)) in with_tab id p))
+  | Page_capture -> on_tab (fun context id -> pre (
         let* p=page t context in let* viewport=scene t context (obj ["mode",str "viewport"]) in
         let* png=t.command "browsingContext.captureScreenshot" (obj ["context",str context]) in
         let* after=page t context in let* after_viewport=scene t context (obj ["mode",str "viewport"]) in
         let* url=string "url" p in let* after_url=string "url" after in
         if url<>after_url || viewport<>after_viewport then Error "viewport_changed_during_capture" else
         let* title=required "title" after in let* data=string "data" png in
-        Ok (obj ["tabId",`Int id;"url",str url;"title",title;"mimeType",str "image/png";"data",str data;"viewport",viewport]))
-    | "page.interact" ->
+        Ok (obj ["tabId",`Int id;"url",str url;"title",title;"mimeType",str "image/png";"data",str data;"viewport",viewport])))
+  | Page_interact -> on_tab (fun context _id ->
       let* fields=pre (match args with `Assoc xs->Ok xs|_->Error "invalid interaction") in
       let* request=pre (Browser_interaction.parse (obj (("lane",str "live")::fields))) in
       (match request.action with
@@ -143,8 +143,7 @@ let dispatch t ~verb args =
               (match field "effectStarted" failure with Some (`Bool false)->Error (Before_effect message)
                | _ -> Error (Outcome_unknown message))
             | None -> Ok result))
-      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction"))
-    | _ -> Error (Before_effect "unsupported BiDi browser verb")
+      | Browser_lane.Activate_tab -> Error (Before_effect "unsupported BiDi interaction")))
 
 module Endpoint = Ws_direct_core.Endpoint
 module Message = Ws_direct_core.Connection.Message
@@ -165,6 +164,9 @@ let with_connection ~env ~timeout ~url use =
       let* addr=match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
         | first::_->Ok first|[]->Error "BiDi loopback address unavailable" in
       let flow=Eio.Net.connect ~sw net addr in
+      let settle id result = match Hashtbl.find_opt pending id with
+        | None->()
+        | Some resolve->Hashtbl.remove pending id;Eio.Promise.resolve resolve result in
       let on_message (message:Message.t) =
         match message.kind with
         | Message.Binary->disconnect "unexpected binary BiDi response"
@@ -173,13 +175,9 @@ let with_connection ~env ~timeout ~url use =
           | exception Yojson.Json_error _->disconnect "invalid BiDi JSON"
           | json -> match field "type" json,field "id" json with
             | Some (`String "event"),_->()
-            | Some (`String ("success"|"error" as kind)),Some (`Int id)->
-              (match Hashtbl.find_opt pending id with
-              | None->()
-              | Some resolve->Hashtbl.remove pending id;
-                let result=if kind="success" then required "result" json else
-                  let* code=string "error" json in Error ("BiDi command rejected: " ^ code) in
-                Eio.Promise.resolve resolve result)
+            | Some (`String "success"),Some (`Int id)->settle id (required "result" json)
+            | Some (`String "error"),Some (`Int id)->
+              settle id (let* code=string "error" json in Error ("BiDi command rejected: " ^ code))
             | _->disconnect "invalid BiDi response envelope") in
       let builder _=Endpoint.handlers ~on_message
         ~on_close:(fun ~code:_ ~reason:_->disconnect "BiDi peer closed")

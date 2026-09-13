@@ -9,7 +9,7 @@ let test_context_identity () =
     | "script.callFunction" -> Ok (script_value (obj ["url",`String "https://same.example/";"title",`String "same";"active",`Bool true]))
     | _ -> Error "unexpected test command" in
   let peer=Peer.create ~command in
-  let ids () = match Peer.dispatch peer ~verb:"tabs.list" (obj []) with
+  let ids () = match Peer.dispatch peer ~verb:Peer.Tabs_list (obj []) with
     | Ok (`List rows) -> List.map (fun row->Yojson.Safe.Util.(row |> member "id" |> to_int)) rows
     | _ -> fail "tabs failed" in
   check (list int) "same URL does not merge opaque contexts" [1;2] (ids ());
@@ -18,8 +18,8 @@ let test_context_identity () =
 let test_unsupported () =
   let called=ref false in
   let peer=Peer.create ~command:(fun _ _->called:=true;Error "unexpected") in
-  (match Peer.dispatch peer ~verb:"page.arbitrary" (obj []) with
-   | Error (Peer.Before_effect _) -> () | _ -> fail "unsupported verb must be pre-effect");
+  (match Peer.dispatch peer ~verb:Peer.Page_elements (obj []) with
+   | Error (Peer.Before_effect _) -> () | _ -> fail "page.elements must fail before any effect");
   check bool "no protocol dispatch" false !called
 let test_pointer_validation () =
   let calls=ref [] in
@@ -35,7 +35,7 @@ let test_pointer_validation () =
   let base=["tabId",`Int 1;"expectedUrl",`String "https://example.test/";"viewport",viewport] in
   let rejected fields =
     calls:=[];
-    (match Peer.dispatch peer ~verb:"page.interact" (obj (base @ fields)) with
+    (match Peer.dispatch peer ~verb:Peer.Page_interact (obj (base @ fields)) with
      | Error (Peer.Before_effect _) -> () | _ -> fail "malformed pointer admitted");
     check (list string) "parser rejects before any page or input command"
       ["browsingContext.getTree"] !calls in

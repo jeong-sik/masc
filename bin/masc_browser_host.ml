@@ -16,7 +16,8 @@ let http_timeout_sec = 55.
 let extension_timeout_sec = 20.
 let reconnect_delay_sec = 5.
 
-type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
+type verb = Masc.Browser_bidi_peer.verb =
+  | Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact
 type command = { id : string; verb : verb; args : Yojson.Safe.t }
 type poll = Empty | Forward of command | Reject of string
 type exchange_phase = Writing_frame | Awaiting_reply
@@ -376,12 +377,9 @@ let run_bidi env config url =
           | Reject id->let* _=post ~clock ~client ~config ~info ~token "result" (failure id "unsupported BiDi verb")
               |> Result.map_error http_error_message in Ok true
           | Forward command->
-            let verb=match command.verb with Tabs_list->"tabs.list"|Page_read->"page.read"
-              | Page_scene->"page.scene"|Page_capture->"page.capture"|Page_interact->"page.interact"
-              | Page_elements->"page.elements"|Browser_info->"browser.info" in
             let timed_out=ref false in
             let result=try Eio.Time.with_timeout_exn clock extension_timeout_sec
-                (fun ()->Masc.Browser_bidi_peer.dispatch peer ~verb command.args)
+                (fun ()->Masc.Browser_bidi_peer.dispatch peer ~verb:command.verb command.args)
               with Eio.Time.Timeout->timed_out:=true;
                 Error (Masc.Browser_bidi_peer.Outcome_unknown "BiDi command deadline exceeded") in
             let* _=post ~clock ~client ~config ~info ~token "result" (answer command.id result)

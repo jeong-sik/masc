@@ -142,6 +142,15 @@ type _ command =
       -> (Keeper_meta_contract.keeper_meta option, error) result command
   | Exact_operation :
       Operation_id.t -> (Chat_operation.t option, error) result command
+  | Direct_checkpoint : Operation_id.t ->
+      (Keeper_checkpoint_ref.t option, error) result command
+  | Defer_direct_checkpoint :
+      { operation_id : Operation_id.t; execution_digest : string;
+        checkpoint : Keeper_checkpoint_ref.t } ->
+      (Chat_operation.t, error) result command
+  | Resume_direct_checkpoint :
+      { operation_id : Operation_id.t; observed : Keeper_checkpoint_ref.t } ->
+      (unit, error) result command
   | Direct_runtime_retry : Operation_id.t ->
       (Keeper_semantic_execution.runtime_retry option, error) result command
   | Defer_direct_runtime_retry :
@@ -813,7 +822,10 @@ let start
           | Ok (Some operation) ->
             (match operation.state with
              | Chat_operation.Queued ->
-               (match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
+               (match Chat_operation_store.direct_checkpoint t.operation_store ~operation_id with
+                | Ok (Some _) -> Ok ()
+                | Error error -> Error error
+                | Ok None -> match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
                 | Ok (Some _) -> Ok ()
                 | Ok None ->
                   (match Chat_operation_store.direct_gate_state t.operation_store ~operation_id with
@@ -994,6 +1006,23 @@ let start
             run_operation_read t ~label:"lookup Keeper chat operation" (fun () ->
               Chat_operation_store.get t.operation_store operation_id)
           in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Direct_checkpoint operation_id, resolve) ->
+          let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
+            Chat_operation_store.direct_checkpoint t.operation_store ~operation_id) in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
+          let response = run_operation_command t ~label:"defer direct cooperative checkpoint" (fun () ->
+            Chat_operation_store.defer_direct_checkpoint t.operation_store ~now:(t.now ())
+              ~operation_id ~execution_digest ~checkpoint) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          loop state shutdown_operation_id
+        | Command (Resume_direct_checkpoint {operation_id; observed}, resolve) ->
+          let response = run_operation_command t ~label:"resume direct cooperative checkpoint" (fun () ->
+            Chat_operation_store.resume_direct_checkpoint t.operation_store ~now:(t.now ())
+              ~operation_id ~observed) |> Result.map fst in
           Eio.Promise.resolve resolve response;
           loop state shutdown_operation_id
         | Command (Direct_runtime_retry operation_id, resolve) ->
@@ -1422,6 +1451,12 @@ let start
 
 let exact_projection t = request t Exact_projection
 let apply_meta t command = request t (Apply_meta command)
+let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
+let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
+  request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
+let resume_direct_checkpoint t ~operation_id ~observed =
+  request t (Resume_direct_checkpoint {operation_id; observed})
+
 let direct_runtime_retry t ~operation_id = request t (Direct_runtime_retry operation_id)
 let defer_direct_runtime_retry t ~operation_id ~execution_digest ~continuation =
   request t (Defer_direct_runtime_retry {operation_id; execution_digest; continuation})

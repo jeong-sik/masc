@@ -1553,6 +1553,22 @@ let pending_retry = function
   | None -> None
 ;;
 
+let pending_checkpoint = function
+  | Some { Semantic.phase = Semantic.Suspended checkpoint; _ }
+  | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Checkpointed checkpoint; _ }; _ } -> Some checkpoint
+  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
+      | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Settled _
+      | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
+          | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _ }
+  | None -> None
+;;
+let direct_checkpoint store ~operation_id =
+  let* () = ensure_open store in
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  Ok (pending_checkpoint execution)
+;;
+
 let direct_runtime_retry store ~operation_id =
   let* () = ensure_open store in
   let* operation = operation_or_unknown store.db operation_id in
@@ -1560,8 +1576,8 @@ let direct_runtime_retry store ~operation_id =
   Ok (pending_retry execution)
 ;;
 
-let requeue_runtime_retry_with_db db operation =
-  let* transition = Reducer.apply operation Reducer.Requeue_runtime_retry
+let requeue_continuation_with_db db operation =
+  let* transition = Reducer.apply operation Reducer.Requeue_continuation
     |> Result.map_error (reducer_error operation.Operation.operation_id) in
   let* () = with_statement db ~operation:"requeue checkpointed direct operation"
     "UPDATE operations SET state = 'queued', started_at = NULL WHERE operation_id = ? AND state = 'running'"
@@ -1612,7 +1628,7 @@ let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~conti
       let* () = match current with
         | None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
-      requeue_runtime_retry_with_db store.db operation) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> read_existing ()
   | Error (Store_unavailable _ as error) ->
@@ -1634,6 +1650,90 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
       | None -> Error (Integrity_error "direct operation has no durable continuation")
       | Some expected ->
         let* next = semantic_transition ~now (Semantic.Resume_runtime_retry observed) expected in
+        let* outstanding = semantic_rows store.db ~active_only:true in
+        if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
+            && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
+        then Error (Integrity_error "another semantic execution owns the running slot")
+        else (expected_next := Some next; update_semantic store.db ~expected next)) in
+  match result with
+  | Ok () -> Ok ()
+  | Error (Store_unavailable _ as error) ->
+    (match !expected_next with
+     | None -> Error error
+     | Some expected ->
+       (match semantic_get_with_db store.db expected.id with
+        | Ok (Some observed) when Semantic.to_json observed = Semantic.to_json expected -> Ok ()
+        | Ok _ | Error _ -> Error error))
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _) as error -> error
+;;
+
+let defer_direct_checkpoint store ~now ~operation_id ~execution_digest ~checkpoint =
+  let* () = ensure_open store in
+  let read_existing () =
+    let* operation = operation_or_unknown store.db operation_id in
+    let* execution = direct_execution_with_db store.db operation in
+    match operation.state, pending_checkpoint execution with
+    | Operation.Queued, Some existing when String.equal operation.execution_digest execution_digest
+        && Keeper_checkpoint_ref.equal existing checkpoint -> Ok operation
+    | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
+       | Operation.Failed _ | Operation.Cancelled _), (Some _ | None) ->
+      Error (Integrity_error "direct continuation commit is not confirmed") in
+  let result = with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    if not (String.equal operation.execution_digest execution_digest)
+    then Error (Invalid_input "direct continuation execution digest changed")
+    else match operation.state with
+    | Operation.Queued -> read_existing ()
+    | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)
+    | Operation.Running _ ->
+      let* current = direct_execution_with_db store.db operation in
+      let* execution = match current with
+        | Some execution -> Ok execution
+        | None ->
+          (match operation.input with
+           | None -> Error (Integrity_error "running direct operation has no input")
+           | Some input ->
+             let* created = Semantic.create ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+                 ~input ~sources:[] ~now
+               |> Result.map_error (fun error -> Invalid_input (Semantic.error_to_string error)) in
+             let* ready = semantic_transition ~now Semantic.Confirm_sources created in
+             semantic_transition ~now Semantic.Begin_execution ready) in
+      let* suspended = semantic_transition ~now (Semantic.Suspend checkpoint) execution in
+      let* () = match current with
+        | None -> insert_semantic store.db suspended
+        | Some current -> update_semantic store.db ~expected:current suspended in
+      let* requeued = requeue_continuation_with_db store.db operation in
+      (* A cooperative yield hands the slot to already submitted input. Keep
+         the operation identity/input frozen, but let newer steering run first. *)
+      let* sequence = next_sequence store.db in
+      let* () = with_statement store.db ~operation:"yield checkpoint queue position"
+        "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'" (fun stmt ->
+          let* () = bind_int64 store.db stmt ~operation:"bind checkpoint sequence" 1 sequence in
+          let* () = bind_text store.db stmt ~operation:"bind checkpoint operation" 2 (Id.to_string operation_id) in
+          expect_done store.db stmt ~operation:"yield checkpoint queue position") in
+      Ok { requeued with sequence }) in
+  match result with
+  | Ok _ -> read_existing ()
+  | Error (Store_unavailable _ as error) ->
+    (match read_existing () with Ok operation -> Ok operation | Error _ -> Error error)
+  | Error (Invalid_input _ | Unknown_operation _ | Not_queued _ | Not_running _
+      | Idempotency_conflict _ | Integrity_error _) as error -> error
+;;
+
+let resume_direct_checkpoint store ~now ~operation_id ~observed =
+  let* () = ensure_open store in
+  let expected_next = ref None in
+  let result = with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    match operation.state with
+    | Operation.Queued | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_running operation_id)
+    | Operation.Running _ ->
+      let* execution = direct_execution_with_db store.db operation in
+      match execution with
+      | None -> Error (Integrity_error "direct operation has no durable continuation")
+      | Some expected ->
+        let* next = semantic_transition ~now (Semantic.Resume_checkpoint observed) expected in
         let* outstanding = semantic_rows store.db ~active_only:true in
         if List.exists (fun (entry : Semantic.t) -> semantic_is_running entry.phase
             && not (Keeper_execution_scope_id.equal entry.id expected.id)) outstanding
@@ -1737,7 +1837,7 @@ let defer_direct_gate store ~now ~operation_id ~execution_digest ~waiting =
       let* suspended = semantic_transition ~now (Semantic.Suspend_gate waiting) execution in
       let* () = match current with None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
-      requeue_runtime_retry_with_db store.db operation) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> readback ()
   | Error (Store_unavailable _ as error) -> (match readback () with Ok operation -> Ok operation | Error _ -> Error error)
@@ -1782,7 +1882,7 @@ let defer_direct_gate_reconciliation store ~now ~operation_id ~execution_digest 
             Integrity_error (Semantic.error_to_string error)) in
       let* () = match current with None -> insert_semantic store.db suspended
         | Some current -> update_semantic store.db ~expected:current suspended in
-      requeue_runtime_retry_with_db store.db operation) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> readback ()
   | Error (Store_unavailable _ as error) -> (match readback () with Ok operation -> Ok operation | Error _ -> Error error)
@@ -1879,17 +1979,16 @@ let settle_direct_semantic_with_db db current command =
   let* execution = direct_execution_with_db db current in
   match execution with
   | None -> Ok ()
-  | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
-      | Semantic.Suspended _ | Semantic.Settled _
-      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Unconfirmed_sources
+  | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Settled _
+      | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _} -> Ok ()
-  | Some ({Semantic.phase = (Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
-      | Semantic.Recovering {origin = (Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _} as expected) ->
+  | Some ({Semantic.phase = (Semantic.Running | Semantic.Suspended _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+      | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _); _}); _} as expected) ->
     let* now, terminal = match command with
       | Reducer.Cancel_queued {completed_at} -> Ok (completed_at, Semantic.Cancelled)
       | Reducer.Succeed_running {completed_at; _} -> Ok (completed_at, Semantic.Completed)
       | Reducer.Fail_running {completed_at; failure} -> Ok (completed_at, Semantic.Failed failure.detail)
-      | Reducer.Start _ | Reducer.Requeue_runtime_retry | Reducer.Edit_queued _ | Reducer.Move_queued _ ->
+      | Reducer.Start _ | Reducer.Requeue_continuation | Reducer.Edit_queued _ | Reducer.Move_queued _ ->
         Error (Integrity_error "nonterminal command cannot settle direct continuation") in
     let* next = semantic_transition ~now (Semantic.Settle terminal) expected in
     update_semantic db ~expected next
@@ -2010,9 +2109,9 @@ let settle_running_after_restart store ~now =
     let* () = List.fold_left (fun result operation ->
       let* () = result in
       let* execution = direct_execution_with_db store.db operation in
-      match pending_retry execution, gate_state execution with
-      | None, None -> Ok ()
-      | Some _, _ | None, Some _ -> requeue_runtime_retry_with_db store.db operation |> Result.map (fun _ -> ())) (Ok ()) running in
+      match pending_checkpoint execution, pending_retry execution, gate_state execution with
+      | None, None, None -> Ok ()
+      | Some _, _, _ | None, Some _, _ | None, None, Some _ -> requeue_continuation_with_db store.db operation |> Result.map (fun _ -> ())) (Ok ()) running in
     let* _reconciled = reconcile_semantic_running_with_db store.db ~now in
     let* count = with_statement
       store.db

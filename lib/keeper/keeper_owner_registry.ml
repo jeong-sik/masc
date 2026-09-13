@@ -594,6 +594,19 @@ let with_owner_command ~base_path ~keeper_name f =
     f owner |> Result.map_error (fun error -> Command_rejected error)
 ;;
 
+let direct_checkpoint ~base_path ~keeper_name ~operation_id =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.direct_checkpoint owner ~operation_id)
+;;
+let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.defer_direct_checkpoint owner ~operation_id ~execution_digest ~checkpoint)
+;;
+let resume_direct_checkpoint ~base_path ~keeper_name ~operation_id ~observed =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.resume_direct_checkpoint owner ~operation_id ~observed)
+;;
+
 let direct_runtime_retry ~base_path ~keeper_name ~operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_runtime_retry owner ~operation_id)

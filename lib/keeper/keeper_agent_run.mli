@@ -1,4 +1,5 @@
 type direct_continuation =
+  | Checkpoint_continuation of Keeper_direct_checkpoint_continuation.admission
   | Runtime_continuation of Keeper_direct_runtime_continuation.admission
   | Gate_continuation of Keeper_direct_gate_continuation.admission
 

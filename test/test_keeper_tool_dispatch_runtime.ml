@@ -7991,7 +7991,7 @@ default = "official.primary"
         ~config:native_config ()) in
   run, capture, executions
 
-let test_direct_gate_current_history_resume ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
+let test_direct_gate_current_history_resume ?(retention_rollover=false) ?(advance_native=false) ?(recover_binding=false) ?(recover_retention=false) ?(one_shot=false) ?(native_output_rejected=false) ?(native_blocks=false) ?(native=false) ?(checkpoint_failure=false) ?(channel_session=false) ?(runtime_failure=false) ?(binding_failure=false) decision () =
   with_exec_fixture ~process:native ~bind_eio_context:native "direct_gate_current_history"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let require label = function Ok value -> value | Error _ -> fail (label ^ " failed") in
@@ -8106,11 +8106,32 @@ let test_direct_gate_current_history_resume ?(advance_native=false) ?(recover_bi
          else Gate.reconcile ~config ~meta) |> require "do not invent checkpoint";
         check bool "approval cannot authorize missing checkpoint replay" true
           ((Masc.Keeper_owner.claim_next_operation owner |> require "no blind retry") = None);
-        if recover_retention then Unix.unlink (Filename.concat session_dir "accepted-checkpoints"));
+        if retention_rollover then (
+          let independent = Keeper_chat_operation.Operation_id.of_string "independent-history-rollover" |> require "rollover operation" in
+          let independent_frame = Keeper_repetition_snapshot.admit frame
+            (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation independent)) |> require "rollover scope" in
+          for index = 1 to 20 do
+            let context = Agent_core.Context.create_sync () in
+            Masc.Keeper_repetition_scope.save context independent_frame;
+            let later = {original with Agent_core.Checkpoint.context;
+              turn_count=original.turn_count + index;
+              messages=[Agent_core.Types.user_msg ("Independent history " ^ string_of_int index)];
+              created_at=original.created_at +. float_of_int index} in
+            Checkpoint.save_agent_core_classified ~session_dir later |> require "rolling history during accepted-store outage" |> ignore
+          done);
+        if recover_retention then (
+          Unix.unlink (Filename.concat session_dir "accepted-checkpoints");
+          if retention_rollover then (
+            let binding = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "durable original payload" |> Option.get in
+            let reference = match Keeper_semantic_execution.preparation_checkpoint binding.preparation with
+              | Keeper_semantic_execution.Agent_core reference -> reference
+              | Keeper_semantic_execution.Official_client _ -> fail "rollover changed source owner" in
+            check bool "original source was actually pruned from rolling history" true
+              (match Checkpoint.find_exact_snapshot_for_retention ~session_dir ~reference with Error _ -> true | Ok _ -> false))));
       if advance_native then (
         let module Native = Masc.Keeper_official_client_session_store in
         let binding = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "original exact binding" |> Option.get in
-        let original_source = binding.preparation.checkpoint in
+        let original_source = Keeper_semantic_execution.preparation_checkpoint binding.preparation in
         let expected = Native.load ~base_path ~keeper_name |> require "original native owner" |> Option.get in
         let claimed = Native.claim ~base_path ~keeper_name ~expected:(Some expected)
           ~client_kind:expected.client_kind ~runtime_id:expected.runtime_id
@@ -8130,7 +8151,7 @@ let test_direct_gate_current_history_resume ?(advance_native=false) ?(recover_bi
           ((Masc.Keeper_owner.claim_next_operation owner |> require "no substituted retry") = None);
         let retained = Registry.direct_gate_binding ~base_path ~keeper_name ~operation_id |> require "retained original source" |> Option.get in
         check bool "failed reconciliation preserves exact original native session and turn" true
-          (retained.preparation.checkpoint = original_source));
+          (Keeper_semantic_execution.preparation_checkpoint retained.preparation = original_source));
       if recover_binding then (
         Gate.reconcile ~config ~meta |> require "recover original preparation after authority repair";
         check bool "repaired preparation leaves unresolved binding state" true
@@ -8652,6 +8673,8 @@ let () =
         (test_direct_gate_current_history_resume ~channel_session:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "new Gate and runtime failure retain both obligations" `Quick
         (test_direct_gate_current_history_resume ~runtime_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
+      test_case "pending original bytes survive rolling checkpoint pruning during retention outage" `Quick
+        (test_direct_gate_current_history_resume ~checkpoint_failure:true ~recover_retention:true ~retention_rollover:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "checkpoint retention failure preserves nonterminal original input" `Quick
         (test_direct_gate_current_history_resume ~checkpoint_failure:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "approved Gate resumes same input with newer history and exact replay" `Quick

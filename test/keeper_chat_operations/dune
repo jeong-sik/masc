@@ -18,5 +18,5 @@
 (test
  (name test_keeper_direct_gate_wait)
  (modules test_keeper_direct_gate_wait)
- (libraries alcotest masc.keeper_chat_operations masc.keeper_execution_scope
+ (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
   masc.keeper_checkpoint_ref masc.keeper_registry digestif unix))

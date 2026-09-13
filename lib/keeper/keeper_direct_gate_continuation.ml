@@ -126,10 +126,10 @@ let confirm_retention ~session_dir snapshot =
 
 let capture_preparation ?official_client ~config ~keeper_name ~operation_id ~session_dir ~session_id () =
   let* session_scope = session_scope ~config ~session_dir ~session_id in
-  let* checkpoint, snapshot = match official_client with
+  let* source, snapshot = match official_client with
     | Some (runtime_id, frame) ->
       capture_native ~base_path:config.Workspace.base_path ~keeper_name ~operation_id ~runtime_id ~frame
-      |> Result.map (fun checkpoint -> Semantic.Official_client checkpoint, None)
+      |> Result.map (fun checkpoint -> Semantic.Prepared_official_client checkpoint, None)
     | None ->
       let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
         |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
@@ -138,8 +138,9 @@ let capture_preparation ?official_client ~config ~keeper_name ~operation_id ~ses
       let* () = match Snapshot.active frame with
         | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
         | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
-      Ok (Semantic.Agent_core (Checkpoint.exact_snapshot_reference snapshot), Some snapshot) in
-  Ok ({Semantic.session_scope;checkpoint}, snapshot)
+      Ok (Semantic.Prepared_agent_core {reference=Checkpoint.exact_snapshot_reference snapshot;
+        canonical_checkpoint_bytes=Checkpoint.exact_snapshot_canonical_bytes snapshot}, Some snapshot) in
+  Ok ({Semantic.session_scope;source}, snapshot)
 
 let prepare_binding ~config ~keeper_name (binding : Semantic.gate_binding) =
   let base_path = config.Workspace.base_path in
@@ -149,7 +150,7 @@ let prepare_binding ~config ~keeper_name (binding : Semantic.gate_binding) =
     let* obligation = bind ~base_path ~keeper_name approval_id in
     if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation]))
     (Ok binding.obligations) binding.approval_ids in
-  match binding.preparation.checkpoint with
+  match Semantic.preparation_checkpoint binding.preparation with
   | Semantic.Official_client checkpoint ->
     let* () = match binding.runtime_suffix with None -> Ok () | Some _ -> Error "native Gate cannot own an Agent Core runtime checkpoint" in
     let* waiting = Semantic.official_client_gate_wait ~checkpoint ~session_scope ~obligations in
@@ -220,9 +221,14 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
           | Semantic.Official_client checkpoint -> validate_native ~base_path ~keeper_name checkpoint
           | Semantic.Agent_core reference ->
             let session_dir = scoped_session_dir ~config waiting.session_scope (Keeper_id.Trace_id.to_string reference.trace_id) in
-            let* snapshot = Checkpoint.find_exact_snapshot_for_retention ~session_dir ~reference
+            let* bytes = match binding.preparation.source with
+              | Semantic.Prepared_agent_core {canonical_checkpoint_bytes; _} -> Ok canonical_checkpoint_bytes
+              | Semantic.Prepared_official_client _ -> Error "Gate preparation changed source owner" in
+            let* snapshot = Checkpoint.exact_snapshot_of_canonical_bytes ~expected_session_id:reference.trace_id bytes
               |> Result.map_error (fun _ -> Printf.sprintf "original Gate source remains unavailable or invalid (trace=%s turn=%d sha256=%s)"
                 (Keeper_id.Trace_id.to_string reference.trace_id) reference.turn_count reference.sha256) in
+            let* () = if Keeper_checkpoint_ref.equal reference (Checkpoint.exact_snapshot_reference snapshot) then Ok ()
+              else Error "Gate preparation payload belongs to another checkpoint" in
             let* frame = Keeper_repetition_scope.load (Checkpoint.exact_snapshot_checkpoint snapshot).context
               |> Result.map_error Snapshot.error_to_string in
             let* () = match Snapshot.active frame with

@@ -122,12 +122,26 @@ let gate_wait_with_runtime_retry ~checkpoint ~session_scope ~obligations ~(runti
     if Keeper_checkpoint_ref.equal checkpoint runtime_retry.checkpoint
     then Ok {waiting with runtime_retry=Some runtime_retry}
     else Error "Gate and runtime continuation must share their exact checkpoint"
-type gate_preparation = { session_scope : session_scope; checkpoint : gate_checkpoint }
+type gate_preparation_source =
+  | Prepared_agent_core of { reference : Keeper_checkpoint_ref.t; canonical_checkpoint_bytes : string }
+  | Prepared_official_client of official_client_checkpoint
+type gate_preparation = { session_scope : session_scope; source : gate_preparation_source }
+let preparation_checkpoint preparation = match preparation.source with
+  | Prepared_agent_core {reference; _} -> Agent_core reference
+  | Prepared_official_client checkpoint -> Official_client checkpoint
 type gate_binding = { approval_ids:string list; obligations:gate_obligation list; runtime_suffix:runtime_suffix option; unconfirmed_wait:gate_wait option; preparation:gate_preparation }
 let gate_binding ~(preparation : gate_preparation) ~approval_ids ~obligations ~runtime_suffix =
-  let* () = match preparation.checkpoint with
-    | Agent_core _ -> Ok ()
-    | Official_client checkpoint -> validate_official_client_checkpoint checkpoint in
+  let* () = match preparation.source with
+    | Prepared_agent_core {reference;canonical_checkpoint_bytes} ->
+      let* observed = Keeper_checkpoint_ref.create ~trace_id:reference.trace_id ~turn_count:reference.turn_count
+        ~canonical_checkpoint_bytes |> Result.map_error (fun _ -> "invalid Gate preparation reference") in
+      let* () = if Keeper_checkpoint_ref.equal reference observed then Ok () else Error "Gate preparation bytes changed" in
+      let* checkpoint = Agent_core.Checkpoint.of_string canonical_checkpoint_bytes
+        |> Result.map_error (fun _ -> "invalid canonical Gate preparation checkpoint") in
+      if checkpoint.session_id = Keeper_id.Trace_id.to_string reference.trace_id
+         && checkpoint.turn_count = reference.turn_count then Ok ()
+      else Error "Gate preparation embedded checkpoint identity changed"
+    | Prepared_official_client checkpoint -> validate_official_client_checkpoint checkpoint in
   if approval_ids = [] || List.exists (fun id -> String.trim id = "") approval_ids
      || List.sort_uniq String.compare approval_ids <> List.sort String.compare approval_ids
      || not (List.for_all (fun (row : gate_obligation) -> List.mem row.approval_id approval_ids) obligations)
@@ -148,7 +162,7 @@ let gate_binding_with_wait ~binding ~(waiting : gate_wait) =
       && suffix.later_runtime_ids = retry.later_runtime_ids
     | Some _, None | None, Some _ -> false in
   let same_preparation = binding.preparation.session_scope = waiting.session_scope
-    && equal_gate_checkpoint binding.preparation.checkpoint waiting.checkpoint in
+    && equal_gate_checkpoint (preparation_checkpoint binding.preparation) waiting.checkpoint in
   if not same_runtime || not same_preparation || ids <> List.sort String.compare binding.approval_ids
      || not (List.for_all (fun prior -> List.mem prior waiting.obligations) binding.obligations)
   then Error "unconfirmed Gate source does not preserve original obligations"
@@ -341,7 +355,7 @@ let apply ~now action current =
           (match current.phase with
            | Running | Resuming_runtime_retry _ | Resuming_gate _ ->
              if String.trim diagnostic <> ""
-                && gate_checkpoint_owns binding.preparation.checkpoint (scope current)
+                && gate_checkpoint_owns (preparation_checkpoint binding.preparation) (scope current)
                 && Option.fold ~none:true
                      ~some:(fun (waiting : gate_wait) -> gate_checkpoint_owns waiting.checkpoint (scope current)) binding.unconfirmed_wait
                 && List.for_all (fun prior -> List.mem prior binding.obligations) current.gate_obligations
@@ -481,11 +495,12 @@ let gate_binding_json binding = `Assoc ([
   "approval_ids", `List (List.map (fun id -> `String id) binding.approval_ids);
   "obligations", `List (List.map gate_obligation_json binding.obligations);
   "runtime_suffix", Option.fold ~none:`Null ~some:runtime_suffix_json binding.runtime_suffix;
-  "preparation", `Assoc [
-    "session_scope", `List (List.map (fun value -> `String value) (session_scope_components binding.preparation.session_scope));
-    (match binding.preparation.checkpoint with
-     | Agent_core checkpoint -> "checkpoint", checkpoint_json checkpoint
-     | Official_client checkpoint -> "official_client", official_client_checkpoint_json checkpoint)]] @
+  "preparation", `Assoc ([
+    "session_scope", `List (List.map (fun value -> `String value) (session_scope_components binding.preparation.session_scope))] @
+    (match binding.preparation.source with
+     | Prepared_agent_core {reference;canonical_checkpoint_bytes} ->
+       ["checkpoint", checkpoint_json reference;"canonical_checkpoint_bytes",`String canonical_checkpoint_bytes]
+     | Prepared_official_client checkpoint -> ["official_client", official_client_checkpoint_json checkpoint]))] @
   (match binding.unconfirmed_wait with None -> [] | Some waiting -> ["unconfirmed_wait", gate_wait_json waiting]))
 let gate_resolution_json value = `Assoc ["obligation", gate_obligation_json value.obligation;
   "decision", (match value.decision with Gate_approved -> `Assoc ["kind", `String "approved"]
@@ -693,15 +708,19 @@ let gate_binding_of_json json =
   let json = field "preparation" fields in
   let source_name = match json with `Assoc fields when List.mem_assoc "official_client" fields -> "official_client"
     | _ -> "checkpoint" in
-  let* values = exact ["session_scope";source_name] json in
+  let* values = exact (["session_scope";source_name] @
+    if source_name = "checkpoint" then ["canonical_checkpoint_bytes"] else []) json in
   let* components = match field "session_scope" values with
     | `List rows -> decode_list (function `String value -> Ok value | _ -> Error "invalid session component") rows
     | _ -> Error "preparation scope must be a list" in
   let* session_scope = session_scope components in
-  let* checkpoint = if source_name = "official_client" then
-      official_client_checkpoint_of_json (field source_name values) |> Result.map (fun checkpoint -> Official_client checkpoint)
-    else checkpoint_of_json (field source_name values) |> Result.map (fun checkpoint -> Agent_core checkpoint) in
-  let* binding = gate_binding ~preparation:{session_scope;checkpoint} ~approval_ids ~obligations ~runtime_suffix in
+  let* source = if source_name = "official_client" then
+      official_client_checkpoint_of_json (field source_name values) |> Result.map (fun checkpoint -> Prepared_official_client checkpoint)
+    else
+      let* reference = checkpoint_of_json (field source_name values) in
+      let* canonical_checkpoint_bytes = string "canonical_checkpoint_bytes" values in
+      Ok (Prepared_agent_core {reference;canonical_checkpoint_bytes}) in
+  let* binding = gate_binding ~preparation:{session_scope;source} ~approval_ids ~obligations ~runtime_suffix in
   match List.assoc_opt "unconfirmed_wait" fields with
   | None -> Ok binding
   | Some json -> let* waiting = gate_wait_of_json json in gate_binding_with_wait ~binding ~waiting
@@ -802,7 +821,7 @@ let of_json json =
     let* () = match phase with
       | Recovering {origin=Gate_binding binding; _} ->
         if gate_obligations = binding.obligations
-           && gate_checkpoint_owns binding.preparation.checkpoint expected
+           && gate_checkpoint_owns (preparation_checkpoint binding.preparation) expected
            && Option.fold ~none:true ~some:(fun (waiting : gate_wait) -> gate_checkpoint_owns waiting.checkpoint expected) binding.unconfirmed_wait
         then Ok () else Error "Gate binding lost prior obligations or source ownership"
       | Recovering {origin=Gate_wait state; _} ->

@@ -12,14 +12,25 @@ let input = Operation.canonical_json (`Assoc ["message", `String "complete origi
   "attachments", `List [`String "original-evidence"]; "channel", `String "original-channel";
   "task", `String "original-task"]) |> require
 let source = `Assoc ["kind", `String "dashboard"]
+let canonical_bytes marker =
+  Agent_core.Checkpoint.to_string Agent_core.Checkpoint.{
+    version=checkpoint_version;session_id="original-trace";agent_name="gate-fixture";model="fixture";
+    system_prompt=None;messages=[Agent_core.Types.user_msg marker];usage=Agent_core.Types.empty_usage;
+    turn_count=3;created_at=1000.;tools=[];tool_choice=None;disable_parallel_tool_use=false;
+    temperature=None;top_p=None;top_k=None;min_p=None;enable_thinking=None;preserve_thinking=None;
+    response_format=Agent_core.Types.Off;reasoning_effort=None;cache_system_prompt=false;
+    context=Agent_core.Context.create_sync ();mcp_sessions=[];working_context=None}
 let checkpoint bytes = Keeper_checkpoint_ref.create
     ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
-    ~turn_count:3 ~canonical_checkpoint_bytes:bytes |> require
+    ~turn_count:3 ~canonical_checkpoint_bytes:(canonical_bytes bytes) |> require
 let obligation = Semantic.gate_obligation ~approval_id:"approval-original"
     ~tool_name:"tool_execute" ~input_hash:(Digestif.SHA256.(digest_string "original tool input" |> to_hex)) |> require
 let channel_scope = Semantic.session_scope ["channels"; "original-channel"] |> require
 let waiting = Semantic.gate_wait ~session_scope:channel_scope ~checkpoint:(checkpoint "input and effect references") ~obligations:[obligation] |> require
-let preparation : Semantic.gate_preparation = {session_scope=channel_scope;checkpoint=waiting.checkpoint}
+let preparation_source = function
+  | Semantic.Agent_core reference -> Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=canonical_bytes "input and effect references"}
+  | Semantic.Official_client checkpoint -> Semantic.Prepared_official_client checkpoint
+let preparation : Semantic.gate_preparation = {session_scope=channel_scope;source=preparation_source waiting.checkpoint}
 let rec remove path = match Unix.lstat path with
   | {Unix.st_kind=Unix.S_DIR; _} -> Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
   | _ -> Unix.unlink path
@@ -194,7 +205,7 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
       ~checkpoint:{Semantic.client_kind=Semantic.Codex; runtime_id="native.fixture"; session_id="native-session";
         turn_id="native-turn"; tool_surface_sha256=String.make 64 'a'; frame=wrong_frame} |> require in
     let wrong_binding = Semantic.gate_binding
-      ~preparation:{Semantic.session_scope=channel_scope;checkpoint=native_wait.checkpoint}
+      ~preparation:{Semantic.session_scope=channel_scope;source=preparation_source native_wait.checkpoint}
       ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None |> require in
     let wrong_binding = Semantic.gate_binding_with_wait ~binding:wrong_binding ~waiting:native_wait |> require in
     (match Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
@@ -234,7 +245,7 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
 
 let test_unprepared_source_reconciliation_after_restart () = with_path (fun path ->
   let preparation : Semantic.gate_preparation =
-    {session_scope=channel_scope;checkpoint=waiting.checkpoint} in
+    {session_scope=channel_scope;source=preparation_source waiting.checkpoint} in
   let binding = Semantic.gate_binding ~preparation ~approval_ids:[obligation.approval_id]
     ~obligations:[] ~runtime_suffix:None |> require in
   with_store path (fun store ->
@@ -265,6 +276,25 @@ let test_unprepared_source_reconciliation_after_restart () = with_path (fun path
     check bool "repaired source schedules the same complete original input" true
       (Operation.Operation_id.equal original resumed.operation_id && resumed.input = Some input)))
 
+let test_changed_preparation_bytes () =
+  let source = Semantic.Prepared_agent_core {reference=checkpoint "original exact bytes";
+    canonical_checkpoint_bytes="substituted bytes"} in
+  rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;source}
+    ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None)
+
+let test_invalid_preparation_checkpoint () =
+  List.iter (fun bytes ->
+    let reference = Keeper_checkpoint_ref.create ~trace_id:(Keeper_id.Trace_id.of_string "original-trace" |> require)
+      ~turn_count:3 ~canonical_checkpoint_bytes:bytes |> require in
+    rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;
+      source=Semantic.Prepared_agent_core {reference;canonical_checkpoint_bytes=bytes}}
+      ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None))
+    ["not JSON";"{}";
+     (let checkpoint = Agent_core.Checkpoint.of_string (canonical_bytes "valid") |> require in
+      Agent_core.Checkpoint.to_string {checkpoint with session_id="another-session"});
+     (let checkpoint = Agent_core.Checkpoint.of_string (canonical_bytes "valid") |> require in
+      Agent_core.Checkpoint.to_string {checkpoint with turn_count=4})]
+
 let test_invalid_native_preparation () =
   let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
     (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation original)) |> require in
@@ -272,12 +302,14 @@ let test_invalid_native_preparation () =
     {client_kind=Semantic.Codex;runtime_id="native.fixture";session_id="original-session";
      turn_id="original-turn";tool_surface_sha256=String.make 64 'a';frame} in
   List.iter (fun checkpoint ->
-    rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;checkpoint=Semantic.Official_client checkpoint}
+    rejected (Semantic.gate_binding ~preparation:{Semantic.session_scope=channel_scope;source=Semantic.Prepared_official_client checkpoint}
       ~approval_ids:[obligation.approval_id] ~obligations:[] ~runtime_suffix:None))
     [{valid with runtime_id=""};{valid with session_id=" "};{valid with turn_id=""};
      {valid with tool_surface_sha256="invalid"};{valid with frame=Keeper_repetition_snapshot.empty}]
 
 let () = run "direct Gate waiting" ["journal", [
+  test_case "hash-valid pending payload must decode with its original identity" `Quick test_invalid_preparation_checkpoint;
+  test_case "pending checkpoint bytes must match their exact reference" `Quick test_changed_preparation_bytes;
   test_case "native preparation rejects incomplete original identity" `Quick test_invalid_native_preparation;
   test_case "unprepared source recovers after restart with original session authority" `Quick test_unprepared_source_reconciliation_after_restart;
   test_case "a refused Gate binding is bad input, not a broken store" `Quick test_refused_binding_reads_as_input_not_corruption;

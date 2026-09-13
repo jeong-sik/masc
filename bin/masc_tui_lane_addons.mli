@@ -27,6 +27,7 @@ type action_menu = {
 type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
+  installer : Masc_tui_lane_installer.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;

@@ -13780,10 +13780,10 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:(if Option.exists (fun (menu : Masc_tui_lane_addons.action_menu) -> Option.is_some menu.form) view.action_menu
+    ~hints:(if Option.is_some view.installer || Option.exists (fun (menu : Masc_tui_lane_addons.action_menu) -> Option.is_some menu.form) view.action_menu
             then "Tab:field  Left/Right:choice  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
             else if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
-      else "j/k:select  Tab:focus  o:observe  a:actions  t:result  f:flow  D:details  J/K:scroll  n:install  E:edit  r:refresh  Esc:back")
+      else "j/k:select  Tab:focus  o:observe  a:actions  t:result  f:flow  D:details  J/K:scroll  i:install  n:TOML  E:edit  r:refresh  Esc:back")
     ~body:(fun ~budget c ->
       Masc_tui_lane_addons.lines ~width:(framed_inner_width cols) view
       |> List.filteri (fun index _ -> index >= view.scroll && index < view.scroll + budget)

@@ -27,6 +27,7 @@ type action_menu = {
 type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
+  installer : Masc_tui_lane_installer.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -34,7 +35,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { installer=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -264,7 +265,7 @@ let instance_lines view instances =
         @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string schema)))) instances)
 let technical_lines ~width view =
   let header = ["Optional cross-lane observations; Keeper and existing machine owners continue independently.";
-    " n:new TOML  E:edit selected TOML  r:inspect  Tab:installations/instances/rows  :advanced command";
+    " i:install  n:new TOML  E:edit selected TOML  r:inspect  Tab:installations/instances/rows  :advanced command";
     ("Focus: " ^ match view.focus with Configurations -> "TOML installations" | Instances -> "Instances" | Rows -> "Observation rows");
     (if view.loading then "Request pending; Esc returns to existing activity." else "Retained server observations")] in
   let error = match view.error with None -> [] | Some detail -> ["Error: " ^ detail] in
@@ -493,7 +494,7 @@ let compact_lines ~width view =
         installations @ instances @ configurations @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
-   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]
+   "i:install  j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
@@ -549,7 +550,14 @@ let flow_lines view =
      "f:back to observations  D:technical details  J/K:scroll"]
 
 let lines ~width view =
-  match view.action_menu with
+  match view.installer with
+  | Some installer ->
+      ((if view.loading then ["Reading package and image state · Esc:cancel"] else [])
+       @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
+       @ Masc_tui_lane_installer.lines installer)
+      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+        (Masc.Tui_decode.sanitize_terminal_text line))
+  | None -> match view.action_menu with
   | Some menu ->
       (["Run action on " ^ menu.target_title]
        @ Option.to_list (Option.map (fun error -> "Input error: " ^ error) view.error)

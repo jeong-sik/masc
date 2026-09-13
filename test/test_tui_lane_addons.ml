@@ -378,7 +378,37 @@ let context_flow_uses_declared_connections () =
     (List.mem "  project-observer -> project-metric · producer absent in this run"
       (UI.lines ~width:160 {view with snapshot=Some {snapshot with instances=[consumer]}}))
 
+let guided_installation () =
+  let module Install = Masc_tui_lane_installer in
+  let edit key state = match Install.handle ~key state |> ok with
+    | Install.Updated next -> next | _ -> fail "editing must not invoke a request" in
+  let path = Install.create () |> ok |> Install.paste ~text:"/packages/arbitrary/lane.toml" |> edit "\019" in
+  check string "manifest is requested only after explicit reviewed Enter" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" path |> ok with Preview path -> path | _ -> fail "expected preview");
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"topic":{"type":"string","minLength":1}},"required":["topic"],"additionalProperties":false}|} in
+  let preview image = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+    "image",image;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
+      "image",`String "worker:revision-1";"binding_schema",schema]] in
+  let form = Install.accept_preview (preview (`Assoc ["state",`String "unverified";"detail",`String "engine offline"])) |> ok in
+  check bool "failed image inspection remains explicit" true
+    (List.mem "Image unverified: engine offline" (Install.lines form));
+  let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"
+    |> Install.paste ~text:"project-run" |> edit "tab"
+    |> Install.paste ~text:"quoted \"topic\" and 한국어" |> edit "\019" in
+  let session = match Install.handle ~key:"enter" reviewed |> ok with
+    | Draft session -> session | _ -> fail "expected local declaration draft" in
+  check bool "wizard produces unsaved create document" true (session.base=None);
+  check string "declaration filename derives from entered installation" "research-observer.toml" session.file_name;
+  let document = match Otoml.Parser.from_string_result session.text with
+    | Ok document -> document | Error _ -> fail "generated TOML must parse" in
+  check string "actual manifest path survives TOML encoding" "/packages/arbitrary/lane.toml"
+    (Otoml.find_opt document Otoml.get_string ["manifest_path"] |> Option.get);
+  check string "quoted Unicode binding survives serialization" "quoted \"topic\" and 한국어"
+    (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;

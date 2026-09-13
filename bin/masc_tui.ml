@@ -1790,6 +1790,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
+  | Lane_package_preview_loaded of int * (Yojson.Safe.t, string) result
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -4530,6 +4531,21 @@ let map_lane_addons state f =
   match state.lane_addons with
   | Some view -> state.lane_addons <- Some (f view)
   | None -> state.lane_addons_cached <- f state.lane_addons_cached
+
+let launch_lane_package_preview state ~mailbox path =
+  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
+  if view.loading then () else (
+    state.lane_addons_generation <- state.lane_addons_generation + 1;
+    let generation = state.lane_addons_generation in
+    state.lane_addons <- Some {view with generation;loading=true;error=None};
+    let host=server_peer_host and port=state.port in
+    match Eio_context.get_switch_opt () with
+    | None -> map_lane_addons state (fun view -> {view with loading=false;error=Some "Eio switch unavailable"})
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
+        let result = try Masc_tui_http.get_json ~host ~port
+            ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)
+          with Eio.Cancel.Cancelled _ as exn -> raise exn | exn -> Error (Printexc.to_string exn) in
+        enqueue_async mailbox (Lane_package_preview_loaded (generation,result)); `Stop_daemon))
 
 let launch_lane_declaration state ~mailbox ~edit request =
   let module Document = Masc_tui_lane_declaration in
@@ -11456,6 +11472,13 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  | Lane_package_preview_loaded (generation,result) ->
+      map_lane_addons state (fun view ->
+        if view.generation<>generation || Option.is_none view.installer then view else
+        let result = Result.bind result Masc_tui_lane_installer.accept_preview in
+        match result with
+        | Ok installer -> {view with loading=false;installer=Some installer;error=None;scroll=0}
+        | Error detail -> {view with loading=false;error=Some detail})
   | Lane_addons_loaded (generation, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
@@ -11469,7 +11492,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
          when view.generation=generation && not view.loading
               && Option.is_none view.draft && Option.is_none view.document_key
-              && Option.is_none view.action_menu ->
+              && Option.is_none view.action_menu && Option.is_none view.installer ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -16176,6 +16199,9 @@ and is loaded on demand through keeper_skill.
       (match input with
        | Some (Pasted paste) when Option.is_some state.lane_addons ->
            (match state.lane_addons with
+            | Some ({installer=Some installer;_} as view) ->
+                state.lane_addons <- Some {view with installer=Some
+                  (Masc_tui_lane_installer.paste ~text:paste.Masc_tui_paste.text installer);scroll=0}
             | Some ({ action_menu=Some {form=Some _;_};_ } as view) ->
                 state.lane_addons <- Some (Masc_tui_lane_addons.paste_action
                   ~text:paste.Masc_tui_paste.text view)
@@ -16486,7 +16512,24 @@ and is loaded on demand through keeper_skill.
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = Some "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
-                (match view.action_menu, view.draft with
+                (match view.installer with
+                 | Some installer ->
+                     if key="pageup" || key="pagedown" then (
+                       let _, cols = get_terminal_size () in
+                       let last = List.length (Addons.lines ~width:(framed_inner_width cols) view)-1 in
+                       update {view with scroll=max 0 (min last (view.scroll + (if key="pagedown" then 1 else -1)))})
+                     else if view.loading then (
+                       if key="esc" then update {view with installer=None;loading=false;error=None;scroll=0})
+                     else (match Masc_tui_lane_installer.handle ~key installer with
+                       | Error detail -> update {view with error=Some detail}
+                       | Ok (Updated installer) -> update {view with installer=Some installer;error=None;scroll=0}
+                       | Ok Cancel -> update {view with installer=None;error=None;scroll=0}
+                       | Ok (Preview path) -> launch_lane_package_preview state ~mailbox:async_messages path
+                       | Ok (Draft session) ->
+                           if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
+                           then update {view with error=Some "A draft with this installation name is already open; choose another name or edit the existing draft."}
+                           else update (Addons.put_document {view with installer=None;error=None;scroll=0} session))
+                 | None -> match view.action_menu, view.draft with
                  | Some {form=Some _;_}, _ ->
                      if key="pageup" || key="pagedown" then (
                        let _, cols = get_terminal_size () in
@@ -16533,6 +16576,11 @@ and is loaded on demand through keeper_skill.
                      match key with
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
+                     | "i" ->
+                         if view.loading then update {view with error=Some "Wait for the current Lane request before opening installation."}
+                         else (match Masc_tui_lane_installer.create () with
+                          | Ok installer -> update {view with installer=Some installer;document_key=None;error=None;scroll=0}
+                          | Error detail -> update {view with error=Some detail})
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
                      | ":" -> update { view with draft = Some ""; naming=false; scroll = 0 }
                      | "E" ->
@@ -22393,7 +22441,8 @@ and is loaded on demand through keeper_skill.
            Status reads reuse the accepted request; they never submit it again. *)
         (match state.lane_addons with
          | Some view when not view.loading && Option.is_none view.draft
-              && Option.is_none view.document_key && Option.is_none view.action_menu ->
+              && Option.is_none view.document_key && Option.is_none view.action_menu
+              && Option.is_none view.installer ->
              let request = match Masc_tui_lane_addons.pending_action view with
                | Some action -> Masc_tui_lane_addons.Action_status action
                | None -> Masc_tui_lane_addons.Inspect in

@@ -86,6 +86,13 @@ let run_control ~mgr ~docker_command ~max_bytes ~operation args =
   | (Eio.Io _ | Unix.Unix_error _ | Sys_error _) as exn ->
       Error (Docker_failed { operation; detail = Printexc.to_string exn })
 
+let inspect_image ~mgr ~(package : package) ?(docker_command="docker") () =
+  let* raw = run_control ~mgr ~docker_command ~max_bytes:package.resources.max_reply_bytes
+      ~operation:"image inspect" ["image";"inspect";"--format";"{{.Id}}";package.image] in
+  let digest = String.trim raw in
+  if digest="" then Error (Docker_failed {operation="image inspect";detail="empty image identity"})
+  else Ok digest
+
 let mount_argument ({ source; destination } : mount) =
   if Filename.is_relative source || Filename.is_relative destination then
     Error (Invalid_package "mount source and destination must be absolute")

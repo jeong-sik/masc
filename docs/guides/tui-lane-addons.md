@@ -78,3 +78,26 @@ queued·running·confirmed·failed_before_effect·outcome_unknown과 executor·�
 Instances에서 소유자를 선택하고 Rows에서 그 인스턴스 행을 Space로 선택한 뒤 `e`로 근거를 고정한다. 직접 지정은 `:evidence {"instance_id":"<ID>","row_ids":["<row-ID>"]}`, 선택 전달은 `keeper_name`을 추가한다.
 `d` 또는 `:detach <instance-ID>`는 해당 설치와 소유 worker를 제거한다. DOS 설치 제거는 그 DOS 머신도 종료한다.
 통계·관측 패키지를 제거해도 별도 생산자는 계속 진행하며 과거 관측·근거는 남는다. `Esc`·`q`는 화면만 닫고, 기존 owner 작업 취소나 Keeper 필수 검토를 추가하지 않는다.
+
+### Guided package installation
+
+Press `i` in Lane Add-ons. Enter the manifest path **on the connected server**;
+relative paths resolve beneath that server's base path. `Ctrl-S`, then Enter,
+reads the real manifest and inspects its declared image in the Docker engine.
+An inspection failure is shown as unverified, never as proof that an image is
+missing. Preview does not create a container or pull/build an image.
+
+Enter installation ID, run ID and the package-advertised binding fields. Arrays
+use JSON input; text can be pasted. `Ctrl-S`, then Enter, creates a local TOML
+draft. Review it and press `s` to use the existing declaration save/application
+path. A saved declaration is not proof of an attached worker: inspect desired,
+applied, instance and observation state afterwards. Existing files are protected
+by create/revision conflict handling. Packages without a binding schema use the
+advanced `n` TOML editor. Image loading/pinning and source discovery remain
+explicit operations; the wizard does not invent paths, source IDs or image state.
+
+The read-only endpoint is `GET /api/v1/lane-addons/package-preview?manifest_path=...`.
+It returns the resolved manifest path, package metadata (including binding schema
+and presentation), and image inspection `available` plus digest or `unverified`
+plus the engine error. These values describe the preview read, not a reservation
+of package files or image tags for a later installation.

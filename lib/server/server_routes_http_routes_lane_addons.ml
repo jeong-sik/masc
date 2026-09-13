@@ -64,6 +64,23 @@ let get_inspect request reqd =
       dispatch state Runtime.Inspect args in
     respond request reqd result) request reqd
 
+let get_package_preview request reqd =
+  with_read_auth (fun state _request reqd ->
+    let result =
+      let* path = match query_fields request with
+        | ["manifest_path",path] when String.trim path<>"" -> Ok path
+        | _ -> Error "package preview requires one manifest_path" in
+      let config = Mcp_server.workspace_config state in
+      let path = if Filename.is_relative path then Filename.concat config.Workspace.base_path path else path in
+      let* package = Eio_unix.run_in_systhread (fun () -> Lane_addon_manifest.load ~path)
+          |> Result.map_error Lane_addon_manifest.error_to_string in
+      let image = match Lane_addon_worker.inspect_image ~mgr:state.Mcp_server.proc_mgr ~package () with
+        | Ok digest -> `Assoc ["state",`String "available";"digest",`String digest]
+        | Error error -> `Assoc ["state",`String "unverified";"detail",`String (Lane_addon_worker.error_to_string error)] in
+      Ok (`Assoc ["manifest_path",`String path;"package",Lane_addon_types.package_to_json package;
+                  "image",image]) in
+    respond request reqd result) request reqd
+
 let get_slice request reqd =
   with_read_auth (fun state _request reqd ->
     let result = let* args = decode_slice_query (query_fields request) in dispatch state Runtime.Slice args in
@@ -135,6 +152,7 @@ let register_delivery ~sw ~clock =
 let add_routes ~sw ~clock router =
   register_delivery ~sw ~clock;
   router
+  |> Http.Router.get "/api/v1/lane-addons/package-preview" get_package_preview
   |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
   |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
   |> Http.Router.get "/api/v1/lane-addons" get_inspect

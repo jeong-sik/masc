@@ -1,0 +1,12 @@
+{
+  "probe": "scripts/verify-installed-media-inspection.py",
+  "validator_tests": "scripts/test_installed_media_receipts.py",
+  "validator_cases": 6,
+  "validator_result": "pass",
+  "installed_release_read_only_check": {
+    "source_commit": "aad94bbf3fb90a4600496bf56d7590f02ff385ad",
+    "manifest_files_verified": 5431
+  },
+  "new_inspect_file_command_invoked": false,
+  "installed_media_acceptance": "not_run"
+}

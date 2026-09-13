@@ -30,6 +30,13 @@ val register_skill_export_handler :
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
+val read_declaration : config:Workspace.config -> Yojson.Safe.t ->
+  (Yojson.Safe.t, Lane_addon_declaration.error) result
+val save_declaration : config:Workspace.config -> Yojson.Safe.t ->
+  (Yojson.Safe.t, Lane_addon_declaration.error) result
+(** HTTP and Keeper editors share the configuration serializer with reconcile
+    and managed Detach. Saving bytes only nudges the existing maintenance owner;
+    its receipt never claims that a worker has already applied the change. *)
 (** Start independent server-owned configuration maintenance using the existing
     maintenance cadence. Runs once at startup and after owned cleanup completes. *)
 val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->

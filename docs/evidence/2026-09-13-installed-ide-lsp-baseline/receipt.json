@@ -1,0 +1,834 @@
+{
+  "mode": "baseline_only",
+  "probe_passed": false,
+  "scope": "Installed MASC full IDE, real HTTP and WebSocket, probe-owned worktree source. Same-file reselection refreshes the real file API; this is not an autonomous Keeper or automatic file-watch proof. Unrelated dashboard WebSockets and mutation requests are blocked, so overall dashboard connectivity is outside this probe.",
+  "runtime_build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+    "commit_source": "embedded",
+    "binary_commit": "4324764e959a5ff8b265b292e5bab9f68e550313",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "a38ff7f2e6ecbd9efe6dcfbb2469d67e56e837f3cad7eba0fa2f7eed6571643a",
+    "binary_commit_unix_ts": 1789229952,
+    "binary_commit_age_seconds": 3933,
+    "executable_path": "/private/tmp/masc-4324764-installed-candidate-20260913/.masc-releases/302dc3002136b2419610eaa9ed33fe48a90d1c929d1ee935832ff2d98943bd2d/masc",
+    "executable_dir": "/private/tmp/masc-4324764-installed-candidate-20260913/.masc-releases/302dc3002136b2419610eaa9ed33fe48a90d1c929d1ee935832ff2d98943bd2d",
+    "runtime_instance_id": "01a09684-c8f9-7000-bc9b-5e4f84d63395",
+    "started_at": "2026-09-12T16:47:59Z",
+    "uptime_seconds": 2205
+  },
+  "fixture": {
+    "repository_id": "lsp-acceptance-probe-20260913",
+    "root": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+    "source_relative": "lsp-acceptance-sample.ml",
+    "worktree_head": "83f31140dbce4908ce803c65081cd0f4d80a1454",
+    "initial_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+    "updated_sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3"
+  },
+  "repository": {
+    "id": "lsp-acceptance-probe-20260913",
+    "name": "Installed IDE LSP acceptance fixture",
+    "url": "https://github.com/jeong-sik/masc.git",
+    "codebase": "github.com_jeong-sik_masc",
+    "local_path": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+    "resolved_local_path": "/private/tmp/masc-installed-ide-lsp-fixture-20260913",
+    "aliases": [],
+    "default_branch": "main",
+    "keepers": [],
+    "status": "active",
+    "auto_sync": false,
+    "sync_interval": 300,
+    "created_at": 1789233118,
+    "updated_at": 1789233118
+  },
+  "baseline_status": "●\n실험 · 미검증\nInstalled IDE LSP acceptance fixture\nSOURCE\nlsp-acceptance-sample.ml\nrails hidden\ndashboard · reconnecting",
+  "installed_assets_verified": true,
+  "baseline_source": {
+    "shown_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+    "diagnostic_markers": 0,
+    "document_status_present": false
+  },
+  "baseline_observed": true,
+  "assets": [
+    {
+      "name": "index.html",
+      "sha256": "c4588c610ee5c11c4858ed699701856931e2668b1f079caa82e8429d687943ac",
+      "bytes": 621
+    },
+    {
+      "name": "assets/index-DGcCp0tr.js",
+      "sha256": "7fbc7a1372605452306923948f5e2ccdc0bee53e731d9839f487adb67746672d",
+      "bytes": 766874
+    },
+    {
+      "name": "assets/index-Dt0fLdQb.css",
+      "sha256": "dd457a4b6da7bdd71bbc7b9a21dc5e6fe59d460bd8822875ef7de4848894a48a",
+      "bytes": 1324101
+    },
+    {
+      "name": "assets/vendor-DoibHDuM.js",
+      "sha256": "c48c1e4f60608ec27faf09ab584d8aaf596a9a0f9acf8cbf9d6fc7932c8db1ff",
+      "bytes": 30250
+    },
+    {
+      "name": "assets/preload-helper-cC-D59TZ.js",
+      "sha256": "a0fe96b42dde4d53a567a44fbb1a4be77056bcf2fe4826166d0809bb1cefe465",
+      "bytes": 1264
+    },
+    {
+      "name": "assets/cost-types-C7iUt7Ax.js",
+      "sha256": "0fb2c48757ea911615f780afb99bc53fc2cbf6792f664402dd2cf9e16ae5bb4b",
+      "bytes": 396
+    },
+    {
+      "name": "assets/ide-context-lens-BMhw_4Gw.js",
+      "sha256": "ed9d62aefad2a163159db200dfc33b779ecae11a50da3d9b762e270d0ce14359",
+      "bytes": 16888
+    },
+    {
+      "name": "assets/folder-DbplT2iJ.js",
+      "sha256": "d0a0155557594bfac31fc28a522fe8722b490d148dab6debd2f44669d6d76c72",
+      "bytes": 225
+    },
+    {
+      "name": "assets/search-Bj0sh3h6.js",
+      "sha256": "6adea66df716d3569a1c95101e6837915bdcb0b0bf270749d4abf9a320a60773",
+      "bytes": 171
+    },
+    {
+      "name": "assets/repositories-_dE2zCO8.js",
+      "sha256": "2b72b73935ded8e43d2872f4254a66a16fa8232892d92482cded872c0112ba90",
+      "bytes": 2561
+    },
+    {
+      "name": "assets/ide-shell-Dsl3gVzw.js",
+      "sha256": "17515a5e498145407755e40f81552e8fecda598132c6b94988c23f44640cda6c",
+      "bytes": 484251
+    },
+    {
+      "name": "assets/file-text-CsfKPqXK.js",
+      "sha256": "40daf862944eceddb24e0cca0dbb8936326f1976217d2597c27e3b101da35dbc",
+      "bytes": 382
+    },
+    {
+      "name": "assets/fonts/Cinzel-Regular.ttf",
+      "sha256": "f4d83d34d1f6c741193e4acf4b3dff9531e5a67b6aa65228d00a7db72a4e0f34",
+      "bytes": 125468
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-117.woff2",
+      "sha256": "e89faf36222bbb664dd5c28e8969d6817faaf100d1ca532f294084591cc9c9b7",
+      "bytes": 14420
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-119.woff2",
+      "sha256": "994289a67b5f65801130b59217ecc8ce98e963cd1c34bbe56c984e829db71a1f",
+      "bytes": 16668
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-118.woff2",
+      "sha256": "0136b09150b3ef19b74dd55e2fc73a9e267a4da4ed3615542a191485da5afbf4",
+      "bytes": 14668
+    },
+    {
+      "name": "assets/fonts/JetBrainsMono-400-latin.woff2",
+      "sha256": "2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4",
+      "bytes": 31340
+    },
+    {
+      "name": "assets/goal-helpers-G7IxHPHw.js",
+      "sha256": "5d5a83ed47a52aa54e46c7303c0abbc3c71c53e405e5d2bff64a37b0a7e41e50",
+      "bytes": 3004
+    },
+    {
+      "name": "assets/dashboard-keeper-cost-C17uEJ3s.js",
+      "sha256": "0962c3af03307d54b1fa81a75bd9e623347b5cd108ea6b9ae240e534b39cee83",
+      "bytes": 2863
+    },
+    {
+      "name": "assets/gate-refresh--pwpn23c.js",
+      "sha256": "c69f016a9875b781ab6292e75f7bd3afde1776fcf5526cdae87b83cf3f3f0b00",
+      "bytes": 374
+    },
+    {
+      "name": "assets/keeper-composite-lookup-BkEMofyR.js",
+      "sha256": "8bf75d8d6e135fb0365f5ac73d16ae43d30bc153c7ee3ec21f60955a3a1fdb03",
+      "bytes": 126
+    },
+    {
+      "name": "assets/tab-refresh-Cnpd-6yD.js",
+      "sha256": "bf16b3b60b2c5d2f03ce9586c598684f85984b281fef3d922e69ae08c6f6ef25",
+      "bytes": 4530
+    },
+    {
+      "name": "assets/mission-signals-DTi59uph.js",
+      "sha256": "29e0ba7525cba3cfb9064a02199483d6d8f39d0076d0f2465d9c215f6da337ae",
+      "bytes": 247
+    },
+    {
+      "name": "assets/mission-actions-CHQiRmhB.js",
+      "sha256": "3d015211cdf4d1f86096e702928a5050738029d77a6a12cc459ff4d7ec92ecab",
+      "bytes": 5730
+    },
+    {
+      "name": "assets/operator-actions-n_gaF4B9.js",
+      "sha256": "bed43e5ee0b05e0a6c744a85b4cd994ef618d197028e0297e1be49a648fd8942",
+      "bytes": 1772
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-105.woff2",
+      "sha256": "120423813669c4943e90b31a1f4051ea954bbf5e17ea82c452c6e1a6bee2d69b",
+      "bytes": 25208
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-110.woff2",
+      "sha256": "bcd2f60fc886a27757d803cdaaf2cd6c68c357127dcda6979f6737c9ebd0e72d",
+      "bytes": 17604
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-98.woff2",
+      "sha256": "1398f9e025188301142d3ee01db91185db0091a26d9c56ce5decbf120e2dd9e8",
+      "bytes": 12232
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-116.woff2",
+      "sha256": "afc33bf7e12515219591d71d3adbb65f167652833878dc0e8da579884c7d6c39",
+      "bytes": 16172
+    },
+    {
+      "name": "assets/dashboard-mission-Cul5EDti.js",
+      "sha256": "930622c1b2219f41bd31cf2f669f9514a0cb3c214d68e059f6fc8ee22ea8f3a6",
+      "bytes": 533
+    },
+    {
+      "name": "assets/fonts/NotoSansKR-400-106.woff2",
+      "sha256": "9a00cb77a5426fb62a97e72af34550d76d3c6f9deed12c814a76b31d42196b01",
+      "bytes": 24688
+    },
+    {
+      "name": "assets/dashboard-config-BnwZvwKa.js",
+      "sha256": "3f8562ecdcebf7eb9468e09eb1d40cde2c22ec213767b2f9a63e0c0ba5b8b838",
+      "bytes": 2948
+    },
+    {
+      "name": "assets/effect-http-CXJ8aUlS.js",
+      "sha256": "2d37d98bf8301f2abe36aa46bd4e5af77eafbc6284e06815784706ae87074c0d",
+      "bytes": 567
+    },
+    {
+      "name": "assets/effect-runtime-DW5GioGO.js",
+      "sha256": "5f8243ba795d5c106bb744481436e35bf6e3f00d43f03c0eb7f666ac9efbc1d8",
+      "bytes": 175131
+    },
+    {
+      "name": "assets/runtime-probe-DontOQN5.js",
+      "sha256": "20b88d8a235bdabef8c7bcf1b9922f3b01bf8afff523fb0572664038cdb13b6b",
+      "bytes": 2298
+    }
+  ],
+  "events": [
+    {
+      "method": "GET",
+      "path": "/dashboard/",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-DGcCp0tr.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/index-Dt0fLdQb.css",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/vendor-DoibHDuM.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/preload-helper-cC-D59TZ.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/cost-types-C7iUt7Ax.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/ide-context-lens-BMhw_4Gw.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/folder-DbplT2iJ.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/search-Bj0sh3h6.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/repositories-_dE2zCO8.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/ide-shell-Dsl3gVzw.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/file-text-CsfKPqXK.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/Cinzel-Regular.ttf",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-117.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-119.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-118.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/JetBrainsMono-400-latin.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/goal-helpers-G7IxHPHw.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-keeper-cost-C17uEJ3s.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/gate-refresh--pwpn23c.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/keeper-composite-lookup-BkEMofyR.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/repositories",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/tab-refresh-Cnpd-6yD.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/mission-signals-DTi59uph.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/mission-actions-CHQiRmhB.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/operator-actions-n_gaF4B9.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-105.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/dev-token",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-110.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-98.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/gate",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-116.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/ide/presence",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/status",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/project-snapshot",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-mission-Cul5EDti.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/execution",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/fonts/NotoSansKR-400-106.woff2",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/shell",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/mcp",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/dashboard-config-BnwZvwKa.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/effect-http-CXJ8aUlS.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/project-snapshot",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/effect-runtime-DW5GioGO.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/briefing",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/config",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard/assets/runtime-probe-DontOQN5.js",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/ws",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/tree",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/children",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/tree",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/workspace/file",
+      "status": 200
+    },
+    {
+      "kind": "fixture_source_response",
+      "sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+      "bytes": 12
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/repositories/lsp-acceptance-probe-20260913",
+      "status": 200
+    }
+  ],
+  "protocol": [
+    {
+      "socket": 1,
+      "event": "browser_connection_requested",
+      "path": "/api/v1/ide/lsp",
+      "repository_id": "lsp-acceptance-probe-20260913",
+      "codebase": "github.com_jeong-sik_masc"
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "processId": null,
+          "clientInfo": {
+            "name": "masc-ide",
+            "version": "1.0.0"
+          },
+          "locale": "ko",
+          "rootUri": "",
+          "capabilities": {
+            "textDocument": {
+              "codeLens": {},
+              "inlayHint": {},
+              "diagnostic": {}
+            }
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "capabilities": {
+            "textDocumentSync": 2,
+            "completionProvider": {
+              "resolveProvider": true
+            },
+            "hoverProvider": true,
+            "definitionProvider": true,
+            "referencesProvider": true,
+            "documentHighlightProvider": true,
+            "documentSymbolProvider": true,
+            "foldingRangeProvider": true,
+            "selectionRangeProvider": true,
+            "documentLinkProvider": true,
+            "codeLensProvider": {
+              "resolveProvider": false
+            },
+            "codeActionProvider": true,
+            "inlayHintProvider": true,
+            "diagnosticProvider": {
+              "interFileDependencies": false,
+              "workspaceDiagnostics": false
+            }
+          },
+          "masc": {
+            "workspaceRoot": "/private/tmp/masc-installed-ide-lsp-fixture-20260913"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "initialized",
+        "params": {}
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml",
+            "languageId": "ocaml",
+            "version": 1,
+            "text": ""
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "masc/lspStatus",
+        "params": {
+          "langs": [
+            {
+              "lang": "ocaml",
+              "connected": true,
+              "command": "ocamllsp",
+              "last_error": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "textDocument/codeLens",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "textDocument/inlayHint",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          },
+          "range": {
+            "start": {
+              "line": 0,
+              "character": 0
+            },
+            "end": {
+              "line": 2,
+              "character": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "client",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "textDocument/diagnostic",
+        "params": {
+          "textDocument": {
+            "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+          }
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": []
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32603,
+          "message": "LSP error for request 3: no document found with uri: file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+        }
+      }
+    },
+    {
+      "socket": 1,
+      "direction": "server",
+      "message": {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "error": {
+          "code": -32603,
+          "message": "LSP error for request 4: Request not supported yet!"
+        }
+      }
+    }
+  ],
+  "navigation": [],
+  "blocked": [
+    {
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/v1/dashboard/nav-event"
+    },
+    {
+      "kind": "websocket",
+      "path": "/ws"
+    },
+    {
+      "kind": "websocket",
+      "path": "/ws"
+    }
+  ],
+  "errors": [],
+  "failures": []
+}

@@ -6571,6 +6571,110 @@ let test_composition_plan_failure_exposes_typed_cause () =
            Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
 ;;
 
+let test_composition_read_failure_preserves_same_turn
+    ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =
+  with_exec_fixture ~always_allow:true ~bind_eio_context:true "composition-read-recovery"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let declaration = {|[[compositions]]
+name = "navigate-read-recovery"
+execution = "inline"
+[[compositions.nodes]]
+id = "navigate"
+tool = "BrowserGoto"
+[compositions.nodes.input]
+kind = "literal"
+value = {tabId=7, url="https://example.org/next"}
+[[compositions.nodes]]
+id = "read"
+tool = "BrowserRead"
+after = ["navigate"]
+[compositions.nodes.input]
+kind = "literal"
+value = {lane="automation", tabId=7, mode="scene", expectedUrl="https://example.org/next"}
+|} ^ (if terminal then {|[[compositions.nodes]]
+id = "terminal"
+tool = "keeper_surface_post"
+after = ["read"]
+[compositions.nodes.input]
+kind = "literal"
+value = {surface="dashboard", content="must not run"}
+|} else "") in
+      let skill_catalog = skill_catalog_of_composition ~name:"navigate-read-recovery" declaration in
+      let reads = ref 0 and navigations = ref 0 in
+      let scene = `Assoc ["schema",`String "masc.browser.scene.v1";"tabId",`Int 7;
+        "documentId",`String "after-navigation";"url",`String "https://example.org/next";
+        "title",`String "Observed page";"view",`String "content";"scope",`Null;
+        "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+        "chars",`Int 0;"truncated",`Bool false;"nodes",`List []] in
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+      if break_evidence then (
+        let path = Filename.concat (Masc.Workspace.masc_root_dir config) "skill-composition-evidence-v1" in
+        Out_channel.with_open_bin path (fun channel -> output_string channel "occupied"));
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_goto _ ->
+          incr navigations;
+          if unknown_write then Browser_lane.Refused "navigation result unknown"
+          else Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
+            "url",`String "https://example.org/next";"title",`String "Observed page"]])
+        | Browser_lane.Page_scene _ ->
+          incr reads;
+          if !reads = 1 then (
+            if break_receipt then Masc.Keeper_tool_call_log.reset_for_testing ();
+            Browser_lane.Refused "Missing host permission for the tab")
+          else Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",scene])
+        | _ -> fail "unexpected browser effect in recovery fixture"));
+      let turn_ctx_cell = if observe then Some (Masc.Keeper_tool_call_log.create_turn_ctx_cell ()) else None in
+      let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+        ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work ~skill_catalog ?turn_ctx_cell () in
+      Fun.protect ~finally:(fun () -> bundle.cleanup ();
+        Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
+      (fun () ->
+        let projected = match Masc.Keeper_official_client_host.dynamic_tools
+          ~content_transport:Runtime_official_client_tool.Codex ~tool_approval:None
+          ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
+          ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
+          ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
+          ~context:(Some (Agent_core.Context.create_sync ()))
+          ~terminal_effect_state:bundle.terminal_effect_state ~terminal_error:(ref None)
+          ~raw_trace_run:None () with
+          | Ok tools -> tools | Error error -> fail (Agent_core.Error.to_string error) in
+        let find name = match List.find_opt
+          (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) -> tool.name=name) projected with
+          | Some tool -> tool | None -> fail ("missing materialized tool: " ^ name) in
+        let result = (find "keeper_compose_navigate-read-recovery").call
+          ~call_id:"composition-read-failure" (`Assoc []) in
+        check bool "composition still reports failure" false result.success;
+        let payload = parse_json result.content in
+        check string "aggregate effect evidence is unchanged"
+          (if unknown_write then "effect_outcome_unknown" else "proven_post_effect")
+          Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
+        let recoverable = observe && not break_receipt && not break_evidence && not terminal && not unknown_write in
+        check bool "only acknowledged ordinary read failures preserve the provider turn"
+          recoverable (Option.is_none result.abort_turn);
+        if recoverable then (
+          (match bundle.terminal_effect_state () with
+           | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+           | _ -> fail "read failure called the terminal failure hook");
+          let retried = (find "BrowserRead").call ~call_id:"same-turn-read-retry"
+            (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene";
+                     "expectedUrl",`String "https://example.org/next"]) in
+          check bool "next read succeeds in the same materialized provider turn" true retried.success;
+          check int "navigation is never replayed" 1 !navigations;
+          check int "only the failed read is retried" 2 !reads)
+        else match bundle.terminal_effect_state () with
+          | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+            if break_evidence then (
+              check string "broken evidence fixture reaches the directory preparation fence"
+                "composition recovery evidence persistence failed: Skill composition evidence directory preparation failed"
+                failure.diagnostic;
+              check bool "storage failure remains a typed runtime failure" true
+                (failure.failure_class = Tool_result.Runtime_failure);
+              check bool "canonical failed result is not a schema refusal" false
+                (String_util.contains_substring failure.diagnostic "does not match Tool_result.to_json"))
+          | _ -> fail "unsafe or unobserved composition escaped its terminal fence"))
+;;
+
 let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
   with_exec_fixture ~require_sandbox:true "composition-post-effect-terminal-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -8182,7 +8286,6 @@ let test_peer_delegate_schema_reaches_model_wires () =
       | Ok _ -> fail "expected one official-client delegate definition"
       | Error error -> fail (Agent_core.Error.to_string error))
       ["actual Keeper bundle", bundled; "plain MASC bridge", plain])
-
 let test_binary_write_reference_survives_replay () =
   with_exec_fixture "binary-write-reference" (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
     let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
@@ -8397,6 +8500,18 @@ let () =
         test_terminal_composition_materializes_terminal_completion;
       test_case "composition failure exposes typed plan cause" `Quick
         test_composition_plan_failure_exposes_typed_cause;
+      test_case "durable ordinary read failure permits same-turn read retry" `Quick
+        (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
+      test_case "no observer cannot authorize read recovery" `Quick
+        (test_composition_read_failure_preserves_same_turn ~observe:false ~break_receipt:false ~terminal:false ~unknown_write:false);
+      test_case "missing read receipt keeps composition fenced" `Quick
+        (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:true ~terminal:false ~unknown_write:false);
+      test_case "terminal graph cannot use ordinary read recovery" `Quick
+        (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:true ~unknown_write:false);
+      test_case "recovery evidence persistence failure keeps the turn fenced" `Quick
+        (test_composition_read_failure_preserves_same_turn ~break_evidence:true ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:false);
+      test_case "unknown navigation remains fenced" `Quick
+        (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:true);
       test_case "post-effect composition closes official-client loop" `Quick
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
       test_case "unknown-effect composition closes official-client loop" `Quick

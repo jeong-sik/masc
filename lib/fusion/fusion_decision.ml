@@ -48,8 +48,11 @@ let source ~keeper ~run_id =
   match Board_dispatch.find_post_by_run_id ~run_id with
   | Some post when Board.Agent_id.to_string post.author = keeper ->
     validate_source ~run_id post
-  (* Check ownership before provenance, using the same captured post. A foreign
-     run must not disclose its existence or whether its evidence is malformed. *)
+  (* A run owned by another Keeper and a run that does not exist answer with the
+     same sentence. Two sentences let a Keeper walk run ids and learn which ones
+     exist under someone else; neither case is this caller's evidence, so
+     neither needs a word of its own. The mismatch inside the owned branch above
+     keeps its own message -- that post is the caller's already. *)
   | Some _ | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
 
 let evidence_sha256 (post : Board.post) =

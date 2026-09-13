@@ -1,0 +1,7 @@
+{
+  "tag": "v0.35.12",
+  "release_run": 34669420878,
+  "archive": "masc-runtime-macos-arm64.tar.gz",
+  "sha256": "f0c5e741217196e19c3e1ec755548372c46bb978052adad5b211e2ae35986994",
+  "matched_release_checksums": true
+}

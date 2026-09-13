@@ -138,6 +138,48 @@ let test_the_two_refusals_do_not_read_alike () =
   check bool "a count refusal and a byte refusal say different things" true
     (String.compare over_pages over_bytes <> 0)
 
+let test_extracted_xml_is_bounded_before_parsing () =
+  if not poppler_available then skipped "extracted text budget"
+  else with_base_path (fun base_path ->
+    match Pdf.inspect ~max_extracted_bytes:1 ~base_path
+      ~max_image_bytes:(4 * 1024 * 1024) ~bytes:two_page_pdf () with
+    | Error (Pdf.Payload_budget_exceeded { bytes; limit }) ->
+      check int "extraction cap" 1 limit;
+      check bool "XML is larger than cap" true (bytes > limit)
+    | Error error -> fail (Pdf.error_to_string error)
+    | Ok _ -> fail "oversized extracted XML was parsed")
+
+let test_large_geometry_has_bounded_raster_dimensions () =
+  if not poppler_available then skipped "raster geometry"
+  else with_base_path (fun base_path ->
+    let bytes = Astring.String.cuts ~sep:"200 200" two_page_pdf
+      |> String.concat "20000 20000" in
+    match Pdf.inspect ~base_path ~max_image_bytes:(4 * 1024 * 1024) ~bytes () with
+    | Error error -> fail (Pdf.error_to_string error)
+    | Ok inspection ->
+      List.iter (fun (page : Pdf.page) ->
+        let uint32 offset =
+          let value = ref 0 in
+          for i = offset to offset + 3 do
+            value := (!value lsl 8) lor Char.code page.png.[i]
+          done;
+          !value
+        in
+        check bool "original geometry retained" true (page.width_points > 2000.);
+        check bool "PNG width bounded before render" true (uint32 16 <= Pdf.max_page_pixels);
+        check bool "PNG height bounded before render" true (uint32 20 <= Pdf.max_page_pixels))
+        inspection.pages)
+
+let test_source_budget_precedes_dependency_or_process_lookup () =
+  let bytes = String.make (Pdf.max_source_bytes + 1) 'x' in
+  match Pdf.inspect ~base_path:"unused-no-process-should-start"
+    ~max_image_bytes:1 ~bytes () with
+  | Error (Pdf.Payload_budget_exceeded { bytes; limit }) ->
+    check int "source size" (Pdf.max_source_bytes + 1) bytes;
+    check int "source ceiling" Pdf.max_source_bytes limit
+  | Error error -> fail (Pdf.error_to_string error)
+  | Ok _ -> fail "oversized source reached inspection"
+
 let () =
   run "verification pdf inspection budgets"
     [ ( "budgets"
@@ -147,6 +189,12 @@ let () =
             test_pages_under_the_per_page_limit_can_still_exceed_the_total
         ; test_case "a document inside both budgets is inspected" `Quick
             test_a_document_inside_both_budgets_is_inspected
+        ; test_case "extracted XML is bounded before parsing" `Quick
+            test_extracted_xml_is_bounded_before_parsing
+        ; test_case "large geometry is raster bounded" `Quick
+            test_large_geometry_has_bounded_raster_dimensions
+        ; test_case "source cap precedes dependency lookup" `Quick
+            test_source_budget_precedes_dependency_or_process_lookup
         ; test_case "the two refusals do not read alike" `Quick
             test_the_two_refusals_do_not_read_alike
         ] )

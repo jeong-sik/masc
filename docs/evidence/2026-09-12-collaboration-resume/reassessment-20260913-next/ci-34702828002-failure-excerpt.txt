@@ -1,0 +1,25 @@
+test suite	Test	2026-09-12T15:43:34.0753397Z File "bin/masc_cli_prerequisites.ml", line 1:
+test suite	Test	2026-09-12T15:43:34.0753935Z Error: The implementation bin/masc_cli_prerequisites.ml
+test suite	Test	2026-09-12T15:43:34.0754726Z        does not match the interface bin/masc_cli_prerequisites.mli:
+test suite	Test	2026-09-12T15:43:34.0755217Z        Values do not match:
+test suite	Test	2026-09-12T15:43:34.0755524Z          val run :
+test suite	Test	2026-09-12T15:43:34.0755829Z            base_path:string ->
+test suite	Test	2026-09-12T15:43:34.0756224Z            dependency:string -> action:string option -> int
+test suite	Test	2026-09-12T15:43:34.0756669Z        is not included in
+test suite	Test	2026-09-12T15:43:34.0757030Z          val run : dependency:string -> action:string option -> int
+test suite	Test	2026-09-12T15:43:34.0757494Z        The type
+test suite	Test	2026-09-12T15:43:34.0757856Z          base_path:string -> dependency:string -> action:string option -> int
+test suite	Test	2026-09-12T15:43:34.0758298Z        is not compatible with the type
+test suite	Test	2026-09-12T15:43:34.0758655Z          dependency:string -> action:string option -> int
+test suite	Test	2026-09-12T15:43:34.0759051Z        Labels base_path and dependency do not match
+test suite	Test	2026-09-12T15:43:34.0759520Z        File "bin/masc_cli_prerequisites.mli", line 3, characters 0-58:
+test suite	Test	2026-09-12T15:43:34.4147032Z 3010 |     Term.(const (fun base_path dependency action -> Masc_cli_prerequisites.run ~base_path ~dependency ~action) $ base_path $ dependency $ action)
+test suite	Test	2026-09-12T15:43:34.4147789Z                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test suite	Test	2026-09-12T15:43:34.4148191Z Error: The function Masc_cli_prerequisites.run has type
+test suite	Test	2026-09-12T15:43:34.4148521Z          dependency:string -> action:string option -> int
+test suite	Test	2026-09-12T15:43:34.4149038Z        It is applied to too many arguments
+test suite	Test	2026-09-12T15:43:34.4149347Z File "bin/main_eio.ml", line 3010, characters 80-89:
+test suite	Test	2026-09-12T15:43:34.4149974Z 3010 |     Term.(const (fun base_path dependency action -> Masc_cli_prerequisites.run ~base_path ~dependency ~action) $ base_path $ dependency $ action)
+test suite	Test	2026-09-12T15:43:34.4150608Z                                                                                        ^^^^^^^^^
+test suite	Test	2026-09-12T15:43:34.4150928Z   This extra argument is not expected.
+test suite	Test	2026-09-12T15:43:34.4653490Z ##[error]Process completed with exit code 1.

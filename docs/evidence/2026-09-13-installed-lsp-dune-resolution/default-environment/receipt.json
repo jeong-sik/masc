@@ -1,0 +1,35 @@
+{
+  "scope": "Direct owned ocamllsp process; same existing fixture URI/source and backend initialize envelope; not installed proxy replay",
+  "pid": 47680,
+  "exit_code": 0,
+  "source_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+  "published_diagnostics": null,
+  "server_messages": [
+    {
+      "id": 2,
+      "jsonrpc": "2.0",
+      "result": []
+    },
+    {
+      "id": 3,
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32600,
+        "message": "no document found with uri: file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml"
+      }
+    },
+    {
+      "id": 4,
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32603,
+        "message": "Request not supported yet!"
+      }
+    },
+    {
+      "id": 99,
+      "jsonrpc": "2.0",
+      "result": null
+    }
+  ]
+}

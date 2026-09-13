@@ -1,0 +1,122 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "browser-handoff-proof-29289000",
+    "count": 1,
+    "skipped_rows": 0,
+    "source": "turn_record",
+    "producer": "keeper_agent_run.run_turn|keeper_turn_record_writer",
+    "durable_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/keepers/browser-handoff-proof-29289000/turn-records",
+    "dashboard_surface": "/api/v1/keepers/:name/turn-records",
+    "freshness_slo_s": 420.0,
+    "live_turn_in_progress": false,
+    "live_turn_started_at_unix": null,
+    "live_turn_last_progress_at_unix": null,
+    "latest_ts_unix": 1789244527.952326,
+    "latest_ts_iso": "2026-09-12T20:22:07Z",
+    "latest_age_s": 4.006414890289307,
+    "health": "ok",
+    "stale_reason": null,
+    "memory_os": {
+      "keeper": "browser-handoff-proof-29289000",
+      "snapshot_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/config/keepers/browser-handoff-proof-29289000.memory-current.json",
+      "recall_enabled": true,
+      "revision": 0,
+      "updated_at": null,
+      "update_source": null,
+      "read_errors": [],
+      "facts": {
+        "shown": 0,
+        "current": 0,
+        "items": []
+      },
+      "change": {
+        "added": [],
+        "removed": [],
+        "retained": 0,
+        "invalidated": []
+      }
+    },
+    "entries": [
+      {
+        "record": {
+          "execution_ids": [
+            "exec-1789244520179-0001",
+            "exec-1789244520221-0002",
+            "exec-1789244523840-0003",
+            "exec-1789244527912-0006"
+          ],
+          "keeper": "browser-handoff-proof-29289000",
+          "agent_name": "browser-handoff-proof-29289000",
+          "turn_kind": "direct",
+          "trace_id": "trace-1789244506571-00000",
+          "absolute_turn": 1,
+          "turn_ref": "trace-1789244506571-00000#1",
+          "blocks": [
+            {
+              "block": "keeper_instructions",
+              "bytes": 8225,
+              "digest": "08dac5b59734b8a6ed54b92c71fc61ed63ed6c51d527f0b4c40e6ccfcad1c7c5"
+            },
+            {
+              "block": "skill_compositions",
+              "bytes": 133,
+              "digest": "fffb01cbd8228da727c34ed1bcdd3694667a5a4339333f3c4aec40eb959b8158"
+            },
+            {
+              "block": "dynamic_context",
+              "bytes": 188,
+              "digest": "287b150e8680674181677655f708cee297c25ef12fc10fc4be198990751507d0"
+            },
+            {
+              "block": "temporal_summary",
+              "bytes": 36,
+              "digest": "a5de9ee68165298db0b4ec184a48cfe60140c6c6bf4a4c62fe0cbc942d05f1e4"
+            }
+          ],
+          "input_components": [
+            {
+              "component": "prompt.dynamic_context",
+              "bytes": 188
+            },
+            {
+              "component": "prompt.keeper_instructions",
+              "bytes": 8225
+            },
+            {
+              "component": "prompt.skill_compositions",
+              "bytes": 133
+            },
+            {
+              "component": "prompt.temporal_summary",
+              "bytes": 36
+            },
+            {
+              "component": "tool_schemas",
+              "bytes": 118183
+            }
+          ],
+          "runtime_profile": "codex_subscription.gpt-5.6-luna",
+          "request_runtime_profile": null,
+          "request_body_bytes": null,
+          "transmitted_atoms": 1,
+          "total_atoms": 1,
+          "model_input_measurement": "durable_shape",
+          "raw_trace_run_ref": {
+            "worker_run_id": "wr-1a097488213-5d4a-0000",
+            "path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/keepers/browser-handoff-proof-29289000/raw-traces/turn-1789244506637-5d4a-000000.jsonl",
+            "start_seq": 1,
+            "end_seq": 10,
+            "agent_name": "browser-handoff-proof-29289000",
+            "session_id": "trace-1789244506571-00000"
+          },
+          "tool_surface_ref": "[masc:blob sha256=c5702f8d850ed65093a17c0ad4d1fcb6a653bb887bd8fb62f882e3edc91ca6fe bytes=6625 mime=application/json preview=\"[{\\\"name\\\":\\\"Execute\\\",\\\"schema_bytes\\\":1977},{\\\"name\\\":\\\"Grep\\\",\\\"schema_bytes\\\":909},{\\\"name\\\":\\\"Read\\\",\\\"schema_bytes\\\":1993},{\\\"name\\\":\\\"Edit\\\",\\\"schema_bytes\\\":1242},{\\\"name\\\":\\\"Write\\\",\\\"schema_bytes\\\":731},{\\\"name\\\":\\\"WebSearc\"]",
+          "temperature": 0.4,
+          "usage_scope": "unavailable",
+          "ts": 1789244527.952326
+        },
+        "diff_vs_prev": null
+      }
+    ]
+  }
+}

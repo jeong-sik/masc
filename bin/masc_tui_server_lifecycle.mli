@@ -49,20 +49,21 @@ val server_argv :
   masc_bin:string -> base_path:string -> host:string -> port:int -> string list
 (** The exact argv for the child server. No shell interpolation. *)
 
-type health_outcome =
+type 'exit health_outcome =
   | Ready  (** [/health] answered ok within the budget. *)
-  | Server_exited  (** the child died before answering. *)
+  | Server_exited of 'exit
+      (** the child died before answering; carries what [child_exit] said. *)
   | Timed_out of int  (** attempts exhausted; carries the attempts made. *)
 
 val wait_healthy :
   health_ok:(unit -> bool) ->
-  child_alive:(unit -> bool) ->
+  child_exit:(unit -> 'exit option) ->
   attempts:int ->
   sleep:(unit -> unit) ->
-  health_outcome
+  'exit health_outcome
 (** Poll [health_ok] up to [attempts] times, sleeping between tries via
     [sleep]. Returns [Ready] as soon as [health_ok] holds, [Server_exited]
-    the moment [child_alive] turns false, and [Timed_out] once the attempts
+    the moment [child_exit] answers, and [Timed_out] once the attempts
     run out. Pure over the injected effects, so tests drive it with fakes.
     [attempts <= 0] yields [Timed_out 0] without calling [sleep]. *)
 
@@ -71,9 +72,65 @@ type owned_server
 
 val owned_pgid : owned_server -> int
 
+(** {1 What a server said}
+
+    A server that refuses to start says why on stderr and exits, and part
+    of that happens before its own log under [.masc/logs] exists. The child's
+    stdout and stderr therefore go to a file the starter can read back. *)
+
+type startup_output =
+  | Written_to of string
+      (** The child's stdout and stderr go to this file, emptied at start. *)
+  | Not_kept of { path : string; reason : string }
+      (** [path] could not be opened for [reason]; the child's output went
+          to [/dev/null]. The start went ahead anyway. *)
+
+val startup_output_file : port:int -> string
+(** [.masc/logs/masc-server-<port>.log], relative to the base path: one file
+    per port, so a start on another port does not empty it. *)
+
+val startup_output_path : base_path:string -> port:int -> string
+(** {!startup_output_file} under [base_path]. *)
+
+val startup_output : owned_server -> startup_output
+
+val describe_output : startup_output -> string
+(** ["full output: <path>"], or why there is none -- the reason ahead of the
+    path, so a line cut at its width keeps it. *)
+
+type exit_observation =
+  | Still_running
+  | Exited_with of Unix.process_status
+  | Reaped_elsewhere
+      (** Something else in this process collected the status first. *)
+
+val observe_exit : owned_server -> exit_observation
+(** Non-blocking waitpid that reaps the child on exit. The first answer is
+    kept: later calls return the same observation. *)
+
 val is_running : owned_server -> bool
-(** Check the server child with non-blocking waitpid and reap it on exit.
-    Once observed exited, the handle stays exited. *)
+(** [observe_exit] is [Still_running]. *)
+
+type last_line =
+  | Said of string  (** The last non-blank line the child wrote. *)
+  | Said_nothing
+  | Unreadable of string  (** The output file could not be read. *)
+
+val last_line_of_text : string -> last_line
+(** The last non-blank line of [text], trimmed. Pure. *)
+
+val describe_last_line : last_line -> string
+(** The line itself, or what stood in for it. *)
+
+type exit_report = {
+  status : string;  (** ["exit 1"], a signal, or that the status is gone. *)
+  last_line : last_line;
+  output : startup_output;
+}
+
+val exit_report : owned_server -> exit_report option
+(** How the child ended and the last thing it wrote, read from the tail of
+    its output file. [None] while it is still running. *)
 
 val start :
   masc_bin:string ->
@@ -82,9 +139,9 @@ val start :
   port:int ->
   env:string array ->
   (owned_server, string) result
-(** Spawn [masc_bin] as a detached child in its own process group via
-    {!Process_eio_detached.spawn_detached_devnull}; the server writes its
-    own logs under [base_path]/.masc/logs so no stdout pipe is retained.
+(** Spawn [masc_bin] as a detached child in its own process group, stdout
+    and stderr to {!startup_output_path} (emptied first). No pipe is kept,
+    so the server is never blocked or broken by this process exiting.
     Returns the owned handle, or a message on spawn failure. *)
 
 val stop : owned_server -> grace_sec:float -> unit

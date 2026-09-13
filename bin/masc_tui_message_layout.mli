@@ -323,6 +323,10 @@ val dress_bare_links :
     a reset alone would strip the row's own dress from everything after the
     link. *)
 
+val count_noun : ?plural:string -> int -> string -> string
+(** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"].
+    [?plural] names an irregular plural: [count_noun ~plural:"entries" 3 "entry"]. *)
+
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.
 

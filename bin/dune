@@ -317,7 +317,7 @@
  (name masc_tui_server_lifecycle)
  (wrapped false)
  (modules masc_tui_server_lifecycle)
- (libraries masc.masc_process unix))
+ (libraries masc.masc_core masc.fs_compat masc.masc_process unix))
 
 ;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
 ;; Own library, no dependencies, so the rule runs under a test without a TTY,
@@ -464,6 +464,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_message_layout
   masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
@@ -862,7 +863,7 @@
  (name masc_tui_footer)
  (wrapped false)
  (modules masc_tui_footer)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_board_selection)
@@ -1137,7 +1138,7 @@
  (name masc_tui_runtime_config_view)
  (wrapped false)
  (modules masc_tui_runtime_config_view)
- (libraries yojson))
+ (libraries masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_runtime_config_receipt)
@@ -1161,6 +1162,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_message_layout
   masc
   masc_types
   masc_tui_ansi

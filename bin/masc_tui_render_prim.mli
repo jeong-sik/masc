@@ -212,6 +212,11 @@ val write_list_sidebar :
 
 val data_unreliable_row : cols:int -> string -> string
 
+val burn_hud_text : Masc_tui_types.state -> string option
+(** The tab row's [/burn] reading without styling: the fleet's cost, and each
+    Keeper's token total as a braille bar when any Keeper has spent one.
+    [None] while it is hidden. *)
+
 val fenced_document_text : language:string -> string -> string
 
 val lexed_span : string * String.t -> string
@@ -264,10 +269,24 @@ val planning_workspace_title :
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
+val keeper_control_hints :
+  ?offers_chat:bool ->
+  ?offers_back:bool ->
+  Masc_tui_types.state -> Keeper_control.reading option -> string
+(** The Keeper keys alone. A surface whose footer carries the armed or running
+    action as a status item ({!keeper_action_status}) asks for this, so the
+    fitter keeps that sentence whole instead of treating it as a droppable key. *)
+
+val keeper_action_status :
+  Masc_tui_types.state -> Masc_tui_footer.status_item list
+(** The armed or running Keeper action, if there is one. *)
+
 val keeper_action_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
+(** The armed or running sentence when there is one, otherwise
+    {!keeper_control_hints}. For the footers that do not pass status items. *)
 
 val system_log_level_style : Masc.Tui_decode.system_log_level -> string
 

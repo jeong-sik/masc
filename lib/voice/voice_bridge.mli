@@ -31,6 +31,22 @@ val say_catalogue_of_output : string -> catalogue_voice list
     to show, in words meant for a reader who will type the name instead. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
+(** Whether a say catalogue has a voice. say does not fail on a name it does
+    not have -- it speaks in another voice and exits 0 -- so this is the only
+    place the difference shows. Names compare without regard to ASCII case, as
+    say matches them; a bare name say prints only with a language is not in the
+    catalogue. *)
+type say_voice =
+  | Say_has_it
+  | Say_lacks_it of { installed : int }  (** how many voices the catalogue has *)
+
+val say_voice_in_catalogue : catalogue_voice list -> voice:string -> say_voice
+
+(** Ask a say endpoint for its catalogue and look [voice] up in it. A blank
+    voice is [Ok]: say then uses its own. [Error] says why the voice will not
+    be the one asked for, or why the catalogue could not be read. *)
+val check_say_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
+
 val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
 (** The container a kind's clips are written in. [say] encodes WAVE and has no
     MP3 encoder at all; everything reached over a wire answers MP3. The clip
@@ -99,10 +115,7 @@ val probe_outcome_to_string : probe_outcome -> string
 
 val spoke_detail : bytes:int -> voice:string -> string
 (** What an answered TTS probe reports: the byte count and the voice it asked
-    for. The voice is there because [say] does not fail on one it does not
-    have -- it speaks in the system voice and exits 0 -- so the bytes alone
-    cannot tell a keeper's own voice from the fallback. A blank voice reads as
-    the system voice rather than as [""]. *)
+    for. A blank voice reads as the system voice rather than as [""]. *)
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
 
 val probe_tts

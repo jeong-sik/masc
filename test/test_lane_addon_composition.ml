@@ -464,7 +464,12 @@ let test_native_msx_history_crosses_worker_freeze_and_detach () =
       let rec reconstruct count reference records =
         let artifact = List.find (fun item -> text "lane_uri" item = reference.Types.uri) artifacts
           |> member "artifact" in
-        let node = Yojson.Safe.from_string (read (text "sha256" artifact)) in
+        let artifact = match Tool_output.normalized_artifact_ref_of_json artifact with
+          | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+          | Tool_output.Not_normalized_artifact_ref
+          | Tool_output.Invalid_normalized_artifact_ref _ ->
+              fail "sequence publication has an invalid artifact reference" in
+        let node = Yojson.Safe.from_string (read artifact.sha256) in
         check int "published sequence count" count (member "entry_count" node |> Yojson.Safe.Util.to_int);
         if count = 0 then String.concat "" records
         else reconstruct (count - 1) (unwrap (Types.evidence_of_json (member "previous" node)))

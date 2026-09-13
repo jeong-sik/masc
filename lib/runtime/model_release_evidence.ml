@@ -31,9 +31,17 @@ let date_of_string text =
   | _ -> Error "expected YYYY-MM-DD calendar date"
 ;;
 
+(* One recommendation window, named once; the .mli records its basis next to
+   [recency]. The wire label [within_three_calendar_months] spells this number
+   out in words and moves together with it. *)
+let recency_window_months = 3
+let months_per_year = 12
+
 let three_month_cutoff date =
   let year, month =
-    if date.month > 3 then date.year, date.month - 3 else date.year - 1, date.month + 9
+    if date.month > recency_window_months
+    then date.year, date.month - recency_window_months
+    else date.year - 1, date.month + months_per_year - recency_window_months
   in
   let last_day =
     if Ptime.of_date (year, month, 31) <> None
@@ -58,6 +66,7 @@ type release_kind =
 
 type release =
   | Unknown
+  | Evidence_unavailable of string
   | Official of
       { released_on : date
       ; kind : release_kind
@@ -72,7 +81,7 @@ type recency =
   | Older_release
 
 let recency ~as_of = function
-  | Unknown -> Unknown_release
+  | Unknown | Evidence_unavailable _ -> Unknown_release
   | Official evidence ->
     if compare_date evidence.released_on as_of > 0
     then Future_release
@@ -177,28 +186,36 @@ let of_json json =
     | _ -> Error "models must be a list")
 ;;
 
-let lookup entries ~publisher ~model_id =
-  match
-    List.find_opt
-      (fun entry -> entry.publisher = publisher && entry.model_id = model_id)
-      entries
-  with
-  | None -> Unknown
-  | Some entry -> entry.release
+let lookup loaded ~publisher ~model_id =
+  match loaded with
+  | Error reason -> Evidence_unavailable reason
+  | Ok entries ->
+    (match
+       List.find_opt
+         (fun entry -> entry.publisher = publisher && entry.model_id = model_id)
+         entries
+     with
+     | None -> Unknown
+     | Some entry -> entry.release)
+;;
+
+let of_string contents =
+  try of_json (Yojson.Safe.from_string contents) with
+  | Yojson.Json_error _ -> Error "invalid embedded model release evidence"
 ;;
 
 let load_default () =
   match Embedded_config.read "model-releases.json" with
   | None -> Error "embedded model release evidence unavailable"
-  | Some contents ->
-    (try of_json (Yojson.Safe.from_string contents) with
-     | Yojson.Json_error _ -> Error "invalid embedded model release evidence")
+  | Some contents -> of_string contents
 ;;
 
 let to_json ~as_of release =
   let fields =
     match release with
     | Unknown -> [ "status", `String "unknown" ]
+    | Evidence_unavailable reason ->
+      [ "status", `String "unavailable"; "reason", `String reason ]
     | Official evidence ->
       [ "status", `String "official_release"
       ; "released_on", `String (date_to_string evidence.released_on)
@@ -211,30 +228,29 @@ let to_json ~as_of release =
     (fields
      @ [ "recency", `String (recency_name (recency ~as_of release))
        ; "as_of", `String (date_to_string as_of)
-       ; "account_availability", `String "not_checked"
        ])
 ;;
 
-let catalog_to_json ~as_of entries =
-  `Assoc ["schema", `String "masc.model_release_catalog.v1";
-    "status", `String "available";
-    "as_of", `String (date_to_string as_of);
-    "models", `List (List.map (fun entry ->
-      `Assoc ["publisher", `String entry.publisher; "model_id", `String entry.model_id;
-        "release", to_json ~as_of entry.release]) entries)]
+let catalog_to_json ~as_of loaded =
+  match loaded with
+  | Error reason ->
+    `Assoc ["schema", `String "masc.model_release_catalog.v1";
+      "status", `String "unavailable"; "reason", `String reason;
+      "as_of", `String (date_to_string as_of); "models", `List []]
+  | Ok entries ->
+    `Assoc ["schema", `String "masc.model_release_catalog.v1";
+      "status", `String "available";
+      "as_of", `String (date_to_string as_of);
+      "models", `List (List.map (fun entry ->
+        `Assoc ["publisher", `String entry.publisher; "model_id", `String entry.model_id;
+          "release", to_json ~as_of entry.release]) entries)]
 
 let current_date () =
   (* DET-OK: boundary read of current calendar date for model release recency. *)
   let now = Unix.gmtime (Unix.gettimeofday ()) in
   {year = now.tm_year + 1900; month = now.tm_mon + 1; day = now.tm_mday}
 
-let default_catalog_json () =
-  match load_default () with
-  | Ok entries -> catalog_to_json ~as_of:(current_date ()) entries
-  | Error _ -> `Assoc ["schema", `String "masc.model_release_catalog.v1";
-      "status", `String "unavailable"; "models", `List []]
+let default_catalog_json () = catalog_to_json ~as_of:(current_date ()) (load_default ())
 
 let default_model_json ~publisher ~model_id =
-  let release = match load_default () with
-    | Ok entries -> lookup entries ~publisher ~model_id | Error _ -> Unknown in
-  to_json ~as_of:(current_date ()) release
+  to_json ~as_of:(current_date ()) (lookup (load_default ()) ~publisher ~model_id)

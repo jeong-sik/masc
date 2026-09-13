@@ -3746,7 +3746,7 @@ let context_split_pane_height ~content_height ~common_len =
 let keeper_deletions_lines (state : state) ~cols =
   let lines = match state.keeper_deletions with
     | None -> ["삭제 기록을 불러오는 중입니다."]
-    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail; "r: 다시 조회"]
+    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
     | Some (Ok inventory) ->
       let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
@@ -3772,15 +3772,37 @@ let keeper_deletions_lines (state : state) ~cols =
               | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row) status;
-           (if row.can_retry then "t: 같은 작업의 남은 정리 재시도" else "이 단계는 정리 재시도 대상이 아닙니다.");
-           "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+             (Keeper_control.deletion_keeper_name row) status]
+          @ (if row.can_retry then [] else ["이 단계는 정리 재시도 대상이 아닙니다."])
+          @ ["종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
           @ String.split_on_char '\n'
               (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
   in
   List.concat_map (fun line ->
     Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
       (Terminal_text.single_line line)) lines
+
+(* The deletion overlay's keys for what it shows. [j/k] steps between records
+   and [t] retries the selected record only when it can be retried
+   (masc_tui.ml); the row named both on a failed read and on a single record,
+   where neither does anything. The body said [r] and [t] a second time under
+   the record, so those lines are gone and the row is the one place. *)
+let keeper_deletions_hints (state : state) ~scrollable =
+  let operations, can_retry =
+    match state.keeper_deletions with
+    | Some (Ok inventory) ->
+      ( List.length inventory.operations
+      , match List.nth_opt inventory.operations state.keeper_deletions_cursor with
+        | Some row -> row.Keeper_control.can_retry
+        | None -> false )
+    | Some (Error _) | None -> (0, false)
+  in
+  String.concat "  "
+    ((if operations > 1 then [ "j/k:작업" ] else [])
+     @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
+     @ [ "r:조회" ]
+     @ (if can_retry then [ "t:정리 재시도" ] else [])
+     @ [ "Esc:닫기" ])
 
 ;;
 

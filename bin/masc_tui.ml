@@ -1318,6 +1318,8 @@ let recall_newer (state : state) =
    two requests, and dropping "the row that reads like this" would take
    whichever came first. *)
 let forget_queued_history (state : state) (request : Keeper_chat.request) =
+  state.keeper_interactive_waiting <- List.filter (fun (_, id, _, _) ->
+    id <> request.Keeper_chat.request_id) state.keeper_interactive_waiting;
   state.msg_history <-
     List.filter
       (fun entry ->
@@ -11666,9 +11668,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             ("Queue snapshot (refresh with /queue)" :: lines @
              ["/queue pause · /queue resume · /queue cancel ID · /queue edit ID message · /queue last ID";
               "Events: /queue cancel-event REF INCARNATION reason · /queue priority-event REF INCARNATION immediate|normal|low";
-              "Esc stops the current turn and pauses queue consumption; /run-next prioritizes your message and resumes it."])
+              "Enter sends a conversation update; Esc stops the current turn and pauses queue consumption."])
       in
-      chat_notice state ~keeper_name:(Some keeper_name) ~role (String.concat "\n" lines)
+      chat_notice state ~keeper_name:(Some keeper_name) ~role (String.concat "\n" lines);
+      drain_queued_message state ~base_path ~mailbox
   | Lane_addons_loaded (generation, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else

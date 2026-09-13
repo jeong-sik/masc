@@ -232,7 +232,7 @@ let guided_actions () =
     | _ -> fail "object fixture expected" in
   let property_fields = match schema with `Assoc fields -> List.assoc "properties" fields | _ -> fail "schema" in
   let reverse_action = Yojson.Safe.from_string {|{"type":"object","required":["z","a"],
-    "additionalProperties":false,"properties":{"z":{"const":"last"},"a":{"const":"first"}}}|} in
+    "additionalProperties":false,"properties":{"z":{"type":"string","const":"last"},"a":{"type":"string","const":"first"}}}|} in
   let reverse_schema = replace "properties" (replace "action" reverse_action property_fields) schema in
   let reverse_view = UI.open_actions ~request_id:first.request_id {UI.initial with
     snapshot=Some {snapshot with instances=[{instance with action_schema=Some reverse_schema}]}} |> ok in

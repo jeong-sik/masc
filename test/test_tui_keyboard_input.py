@@ -9339,6 +9339,11 @@ def standalone_lane_fixture(
             "Selects the next Memory OS snapshot from immutable Keeper history.",
             False,
         ),
+        "workspace_curator_exact": (
+            "Synthesizes attributed proposals after committed workspace memory "
+            "changes; semantic verification is not performed.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -9393,6 +9398,9 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
+                standalone_lane_fixture(
+                    "workspace_curator_exact", "Workspace Curator"
+                ),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },
@@ -10042,9 +10050,13 @@ def keeper_lanes_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
-        # One k walks the band from Verifier to Librarian, whose run list is
-        # the exact-output summary.
+        # Two k walk the band from Verifier to Librarian, whose run list is
+        # the exact-output summary. Workspace Curator sits between them, as
+        # the projection orders the lanes; waiting for it on the way pins that
+        # the row is drawn where the server puts it.
+        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        send_and_wait(process, master_fd, output, b"k", banded_curator)
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
         # (#31290): before the follow, the selected row walked off the frame
@@ -10075,6 +10087,7 @@ def keeper_lanes_interaction(
         send_and_wait(process, master_fd, output, b"\x1b", banded_librarian)
         # Back on the last standalone row, so the j below still lands on the
         # first Keeper row.
+        send_and_wait(process, master_fd, output, b"j", banded_curator)
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         # j past the last standalone row lands back on the first Keeper row.
         send_and_wait(process, master_fd, output, b"j", banded_alpha)
@@ -10389,8 +10402,10 @@ def keeper_lanes_ia_interaction(
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
         banded_verifier = re.compile(rb"\x1b\[7m[^\x1b\n]*Verifier")
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
+        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        send_and_wait(process, master_fd, output, b"j", banded_curator)
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
             process, master_fd, output, b"\r", b"task task-9"
@@ -10444,6 +10459,7 @@ def keeper_lanes_ia_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k", banded_curator)
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
         send_and_wait(process, master_fd, output, b"\r", b"succeeded")

@@ -20,6 +20,11 @@ type state_snapshot = {
   mono_clock : Eio.Time.Mono.ty Eio.Resource.t option;
   root_switch : root_switch_binding option;
   net_initialized : bool;
+  (* The environment is restored with the rest. A fixture that binds it inside
+     [with_test_env] used to leave it behind, so once that fixture's
+     [Eio_main.run] returned, later tests in the same executable read a closed
+     environment back out of [get_env_opt]. *)
+  env : Eio_unix.Stdenv.base option;
 }
 
 let current_net : eio_net option Atomic.t = Atomic.make None
@@ -60,6 +65,7 @@ let snapshot_state () =
     mono_clock = Atomic.get current_mono_clock;
     root_switch = Atomic.get current_sw;
     net_initialized = Atomic.get net_initialized;
+    env = Atomic.get current_env;
   }
 
 let restore_state snapshot =
@@ -67,7 +73,8 @@ let restore_state snapshot =
   Atomic.set current_clock snapshot.clock;
   Atomic.set current_mono_clock snapshot.mono_clock;
   Atomic.set current_sw snapshot.root_switch;
-  Atomic.set net_initialized snapshot.net_initialized
+  Atomic.set net_initialized snapshot.net_initialized;
+  Atomic.set current_env snapshot.env
 
 let set_net net =
   Atomic.set current_net (Some (net :> eio_net));

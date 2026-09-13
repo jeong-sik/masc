@@ -1068,6 +1068,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
     | Some cell -> cell
     | None -> ref None
   in
+  let agent_before_attempt = !attempt_agent_ref in
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
@@ -1250,6 +1251,7 @@ let run_try_provider ?continuation_checkpoint (ctx : try_provider_ctx) candidate
      | None, _ -> ());
     let checkpoint_after =
       Keeper_turn_driver_helpers.checkpoint_after_attempt
+        ?agent_before_attempt ?session_id:ctx.session_id ?working_context:ctx.checkpoint_sidecar
         ?agent_ref:ctx.agent_ref
         !attempt_agent_ref
     in

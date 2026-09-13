@@ -11,4 +11,4 @@
   keeper_semantic_execution)
  (flags
   (:standard -w +4 -w +33))
- (libraries masc.keeper_operation_identity masc.keeper_execution_scope masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix yojson))
+ (libraries masc.agent_core masc.keeper_operation_identity masc.keeper_execution_scope masc.keeper_checkpoint_ref masc.keeper_registry digestif sqlite3 unix yojson))

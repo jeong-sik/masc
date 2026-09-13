@@ -938,10 +938,13 @@ let test_idle_window_rearms_when_the_tool_step_ends () =
 ;;
 
 (* A tool step with no end is bounded by the ceiling alone: the fixture goes
-   silent inside the step and exits long after the ceiling. *)
+   silent inside the step and exits long after the ceiling. The ceiling sits
+   above the idle window, so the budget the timeout reports tells which of the
+   two ended the turn: an armed idle window reports exactly
+   [tool_step_idle_window_s], the ceiling reports its larger remainder. *)
 let test_wall_clock_ceiling_bounds_a_tool_step_that_never_ends () =
   let fixture_exit_delay_s = 10.0 in
-  let ceiling_s = 0.5 in
+  let ceiling_s = 1.0 in
   with_fixture
     ~exit_delay_s:fixture_exit_delay_s
     [ init (); step ~index:1 ~state:"ACTIVE" ~step_type:"tool" () ]
@@ -961,6 +964,10 @@ let test_wall_clock_ceiling_bounds_a_tool_step_that_never_ends () =
            "ceiling bounds the reported timeout"
            true
            (seconds > 0.0 && seconds <= ceiling_s);
+         check bool
+           "the ceiling, not the idle window, ended the turn"
+           true
+           (seconds > tool_step_idle_window_s);
          check bool
            "the turn ended at the ceiling, not when the fixture exited"
            true

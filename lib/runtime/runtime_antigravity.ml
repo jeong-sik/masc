@@ -312,12 +312,14 @@ let parse_step_state stage value =
     value
 ;;
 
-(* [step_type] decides one thing: whether this step is a tool step, for the two
-   tool counters. Every non-[Tool] value is behaviourally identical, so a value
-   we have not seen carries no decision we could get wrong -- but rejecting it
-   ends the turn and parks the session, which blocks every later turn for that
-   Keeper. Live 2026-08-10: Antigravity began emitting "system_message" and
-   the affected Keeper stopped (#28027).
+(* [step_type] decides two things: whether this step is a tool step, for the
+   two tool counters, and whether the next read runs without an idle window
+   ([read_phase]). Every non-[Tool] value is behaviourally identical, and a
+   value we have not seen takes that same path: no count, idle window armed,
+   which is what every step got before the tool-step exemption. Rejecting it
+   instead ends the turn and parks the session, which blocks every later turn
+   for that Keeper. Live 2026-08-10: Antigravity began emitting
+   "system_message" and the affected Keeper stopped (#28027).
 
    #28029 opened this with [Unrecognized]; #28037 closed it again and named
    [System_message] instead. Naming the member that stalled a keeper leaves the
@@ -625,6 +627,10 @@ let initial_protocol_state =
   { init = None; result = None; tool_steps = 0; tool_errors = 0; last_step = None }
 ;;
 
+(* Only a tool step's ACTIVE update opens the exemption. Every other step
+   type, seen or unseen (agy's subagent steps carry a step_type the docs do
+   not name), keeps the idle window armed, which is what every step got
+   before, and a later step update of any type re-arms it. *)
 let read_phase state =
   match state.init with
   | None -> Awaiting_admission
@@ -859,19 +865,31 @@ let run_spawned ?home_dir ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~c
              (Timeout
                 (Option.value config.wall_clock_ceiling_s
                    ~default:Runtime_wall_clock.default_ceiling_s));
-         let timeout_s =
-           timeout_s_for_phase config (read_phase !state)
+         let phase = read_phase !state in
+         let read_timeout_s =
+           timeout_s_for_phase config phase
+           |> Runtime_wall_clock.cap_window wall_clock
+         in
+         (* Applying an event runs MASC's own callbacks (admission, stream
+            observers). The tool-step exemption is about the CLI's silence,
+            not about them, so they keep the model-turn bound. *)
+         let callback_timeout_s =
+           timeout_s_for_phase
+             config
+             (match phase with
+              | Awaiting_admission -> Awaiting_admission
+              | Model_turn | Tool_step_running -> Model_turn)
            |> Runtime_wall_clock.cap_window wall_clock
          in
          let line =
-           with_optional_timeout clock timeout_s (fun () ->
+           with_optional_timeout clock read_timeout_s (fun () ->
              Eio.Buf_read.line reader)
          in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
            (match
-              with_optional_timeout clock timeout_s (fun () ->
+              with_optional_timeout clock callback_timeout_s (fun () ->
                 apply_event
                   config
                   ~conversation_mode

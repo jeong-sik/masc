@@ -30,10 +30,11 @@ type config =
         admission callback. *)
   ; timeout_s : float option
     (** Maximum silence between valid stream-json messages while the model
-        turn is running. It is not a total turn-duration bound, and it does
-        not run inside a tool step: the CLI writes nothing between a tool
-        step's [ACTIVE] update and its [DONE] or [ERROR] update, so that
-        silence is the protocol and only [wall_clock_ceiling_s] bounds it.
+        turn is running. It is not a total turn-duration bound, and it is not
+        armed while the last step the CLI reported is a running tool step: the
+        CLI writes nothing between a tool step's [ACTIVE] update and its
+        [DONE] or [ERROR] update, so that silence is the protocol and only
+        [wall_clock_ceiling_s] bounds it.
         [None] removes the deadline after the first valid [init] event and its
         admission callback: the spawned client decides when its own turn ends.
         The post-spawn pre-init phase remains bounded by [admission_timeout_s].

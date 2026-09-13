@@ -2670,6 +2670,163 @@ let runtime_param_edit_backspace edit =
 let runtime_param_edit_clear edit =
   { edit with rpe_draft = ""; rpe_replace_on_type = false }
 
+
+(* One run of the voice setup wizard.
+
+   The questions, their order, and the rule for when a draft is complete come
+   from [Voice_wizard], which has no I/O and is shared with whatever surface
+   asks the same questions next. What lives here is only what a terminal needs:
+   the text being typed, the revision the session was opened against, and the
+   last thing the server said. *)
+type voice_wizard_session =
+  { vws_draft : Voice_wizard.draft
+  ; vws_step : Voice_wizard.step
+  ; vws_input : string
+  ; vws_replace_on_type : bool
+        (** The first keystroke replaces a prefilled value rather than appending
+            to it, the way {!runtime_param_edit} does: the prefill is a
+            suggestion, and typing over it is what an operator means. *)
+  ; vws_revision : string
+        (** What the configuration read as when this session opened. The save
+            carries it, so a session left open while something else wrote is
+            told rather than overwriting it. *)
+  ; vws_status : string option
+  ; vws_saving : bool
+  ; vws_probe : string list
+        (** What each endpoint answered after the save, one line each. The
+            wizard writes a configuration; whether anything on the other end
+            responds is measured, not inferred from the write succeeding. *)
+  }
+
+let voice_wizard_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) =
+  match step with
+  | Voice_wizard.Name -> draft.Voice_wizard.endpoint_id
+  | Voice_wizard.Address -> draft.Voice_wizard.address
+  | Voice_wizard.Credential -> draft.Voice_wizard.credential_variable
+  | Voice_wizard.Model -> draft.Voice_wizard.model
+  | Voice_wizard.Voice -> draft.Voice_wizard.voice
+  | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> ""
+
+let voice_wizard_with_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) value
+  : Voice_wizard.draft
+  =
+  match step with
+  | Voice_wizard.Name -> { draft with Voice_wizard.endpoint_id = value }
+  | Voice_wizard.Address -> { draft with Voice_wizard.address = value }
+  | Voice_wizard.Credential -> { draft with Voice_wizard.credential_variable = value }
+  | Voice_wizard.Model -> { draft with Voice_wizard.model = value }
+  | Voice_wizard.Voice -> { draft with Voice_wizard.voice = value }
+  | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> draft
+
+let voice_wizard_open ~section ~provider ~revision =
+  let draft = Voice_wizard.blank ~section ~provider in
+  let step =
+    match Voice_wizard.steps draft with
+    | first :: _ -> first
+    | [] -> Voice_wizard.Review
+  in
+  { vws_draft = draft
+  ; vws_step = step
+  ; vws_input = voice_wizard_value draft step
+  ; vws_replace_on_type = true
+  ; vws_revision = revision
+  ; vws_status = None
+  ; vws_saving = false
+  ; vws_probe = []
+  }
+
+let voice_wizard_append session text =
+  { session with
+    vws_input = (if session.vws_replace_on_type then text else session.vws_input ^ text)
+  ; vws_replace_on_type = false
+  ; vws_status = None
+  }
+
+let voice_wizard_backspace session =
+  { session with
+    vws_input =
+      (if session.vws_replace_on_type then ""
+       else Masc_tui_message_layout.drop_last_utf8_scalar session.vws_input)
+  ; vws_replace_on_type = false
+  ; vws_status = None
+  }
+
+let voice_wizard_clear session =
+  { session with vws_input = ""; vws_replace_on_type = false; vws_status = None }
+
+(* Typing is kept out of the draft until the step is left, so backing out of a
+   step does not carry a half-typed value with it. *)
+let voice_wizard_commit session =
+  let draft =
+    voice_wizard_with_value session.vws_draft session.vws_step
+      (String.trim session.vws_input)
+  in
+  { session with vws_draft = draft }
+
+let voice_wizard_go session step =
+  let session = voice_wizard_commit session in
+  { session with
+    vws_step = step
+  ; vws_input = voice_wizard_value session.vws_draft step
+  ; vws_replace_on_type = true
+  ; vws_status = None
+  }
+
+(* The step list is recomputed from the draft each time rather than kept: the
+   provider decides which steps exist, so changing it changes the list under
+   the session. *)
+let voice_wizard_neighbour session ~ahead =
+  let steps = Voice_wizard.steps (voice_wizard_commit session).vws_draft in
+  let rec walk previous = function
+    | [] -> None
+    | step :: rest ->
+      if step = session.vws_step
+      then if ahead then (match rest with next :: _ -> Some next | [] -> None) else previous
+      else walk (Some step) rest
+  in
+  walk None steps
+
+let voice_wizard_next session =
+  match voice_wizard_neighbour session ~ahead:true with
+  | Some step -> voice_wizard_go session step
+  | None -> voice_wizard_commit session
+
+let voice_wizard_previous session =
+  match voice_wizard_neighbour session ~ahead:false with
+  | Some step -> voice_wizard_go session step
+  | None -> session
+
+(* Providers are cycled rather than typed: the set is closed, and which ones a
+   section can use is a rule Voice_wizard owns. *)
+let voice_wizard_cycle_provider session =
+  let offered = Voice_wizard.providers_for session.vws_draft.Voice_wizard.section in
+  let rec next_after = function
+    | [] -> None
+    | provider :: rest ->
+      if provider = session.vws_draft.Voice_wizard.provider
+      then (match rest with candidate :: _ -> Some candidate | [] -> List.nth_opt offered 0)
+      else next_after rest
+  in
+  match next_after offered with
+  | None -> session
+  | Some provider ->
+    let draft =
+      Voice_wizard.blank ~section:session.vws_draft.Voice_wizard.section ~provider
+    in
+    (* The name survives a provider change; everything else is provider
+       vocabulary and would be wrong under the new one. *)
+    let draft =
+      { draft with
+        Voice_wizard.endpoint_id = session.vws_draft.Voice_wizard.endpoint_id
+      }
+    in
+    { session with
+      vws_draft = draft
+    ; vws_input = voice_wizard_value draft session.vws_step
+    ; vws_replace_on_type = true
+    ; vws_status = None
+    }
+
 let runtime_param_edit_toggle_bool edit =
   let next =
     match String.lowercase_ascii (String.trim edit.rpe_draft) with
@@ -3717,6 +3874,12 @@ type state = {
   mutable voice_config: Yojson.Safe.t option;
   mutable voice_config_error: string option;
   mutable voice_input_device: string option;
+  (* The admin setup read: each endpoint by id, kind and address. Kept apart
+     from voice_config because one route can answer while the other does not,
+     and a panel that folded them would report the wrong one as broken. *)
+  mutable voice_setup: Yojson.Safe.t option;
+  mutable voice_setup_error: string option;
+  mutable voice_wizard: voice_wizard_session option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -4730,6 +4893,7 @@ type text_input_target =
   | Text_ask_answer
   | Text_preset_name
   | Text_runtime_param
+  | Text_voice_wizard
   | Text_palette
   | Text_row_search
   | Text_identity_app_form
@@ -4753,6 +4917,13 @@ let text_input_target (state : state) ~compact_viewport =
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  (* A wizard is only ever open on its own pane and closing it clears this, so
+     its presence is the whole condition -- except that the pane is not drawn at
+     all on a viewport this small. Without the guard the operator saw "terminal
+     too small" while letters still went into a field they could not read and
+     Enter still saved the draft. The other text targets already carry it. *)
+  else if Option.is_some state.voice_wizard && not compact_viewport then
+    Some Text_voice_wizard
   else if state.view = Approvals && not compact_viewport
           && not state.context_inspector_open && Option.is_some state.ask_text_entry
   then Some Text_ask_answer
@@ -5426,6 +5597,9 @@ let create_state
   voice_config = None;
   voice_config_error = None;
   voice_input_device = None;
+  voice_setup = None;
+  voice_setup_error = None;
+  voice_wizard = None;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -7610,3 +7784,19 @@ let palette_matches (state : state) =
          Option.map (fun r -> (r, entry)) (rank entry))
   |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
   |> List.map snd
+
+(* The side walks under the same keys the provider does: both are closed sets,
+   and the reader is picking either way. *)
+let voice_wizard_cycle_section session =
+  let other =
+    match session.vws_draft.Voice_wizard.section with
+    | Voice_setup.Tts -> Voice_setup.Stt
+    | Voice_setup.Stt -> Voice_setup.Tts
+  in
+  let draft = Voice_wizard.with_section session.vws_draft other in
+  { session with
+    vws_draft = draft
+  ; vws_input = voice_wizard_value draft session.vws_step
+  ; vws_replace_on_type = true
+  ; vws_status = None
+  }

@@ -16,6 +16,7 @@ let target =
       | None -> "none"
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
+      | Some Tui_types.Text_voice_wizard -> "voice-wizard"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
@@ -95,6 +96,53 @@ let test_an_inline_setting_claims_over_the_palette () =
   state.Tui_types.palette_open <- true;
   check target "runtime param first" (Some Tui_types.Text_runtime_param)
     (resolved state)
+;;
+
+(* The wizard is a field like the others, and it is open on exactly one pane,
+   so its presence is the whole condition. It claims over the palette and row
+   search the same way a preset name does: what is being typed belongs to the
+   thing that was opened last. *)
+let voice_wizard_open state =
+  state.Tui_types.voice_wizard <-
+    Some
+      (Tui_types.voice_wizard_open ~section:Voice_setup.Tts
+         ~provider:Voice_wizard.Elevenlabs ~revision:"a-revision")
+;;
+
+let test_the_voice_wizard_claims_over_the_palette () =
+  let state = fresh_state () in
+  voice_wizard_open state;
+  state.Tui_types.palette_open <- true;
+  state.Tui_types.search <- Some "";
+  check target "the wizard first" (Some Tui_types.Text_voice_wizard) (resolved state)
+;;
+
+(* An inline setting is opened from inside the config pane the wizard is on,
+   so the two can be open at once; the one opened last is the runtime param,
+   and it takes the keys. *)
+let test_an_inline_setting_claims_over_the_voice_wizard () =
+  let state = fresh_state () in
+  voice_wizard_open state;
+  state.Tui_types.runtime_param_edit <-
+    Some
+      { Tui_types.rpe_key = "keeper.turn_budget"
+      ; rpe_value_type = "int"
+      ; rpe_draft = "12"
+      ; rpe_replace_on_type = true
+      ; rpe_mode = Tui_types.Friendly_value
+      ; rpe_choices = []
+      };
+  check target "the inline setting first" (Some Tui_types.Text_runtime_param)
+    (resolved state)
+;;
+
+(* Closing it hands the keys back rather than leaving them held by a field
+   nothing draws. *)
+let test_closing_the_wizard_releases_the_keys () =
+  let state = fresh_state () in
+  voice_wizard_open state;
+  state.Tui_types.voice_wizard <- None;
+  check target "nothing claims it now" None (resolved state)
 ;;
 
 let test_the_identity_form_claims_before_its_filter () =
@@ -267,6 +315,12 @@ let () =
             test_a_preset_name_being_typed_claims_over_the_palette;
           test_case "a preset draft claims only on its own pane" `Quick
             test_a_preset_draft_claims_only_on_its_own_pane;
+          test_case "the voice wizard claims over the palette" `Quick
+            test_the_voice_wizard_claims_over_the_palette;
+          test_case "an inline setting claims over the voice wizard" `Quick
+            test_an_inline_setting_claims_over_the_voice_wizard;
+          test_case "closing the wizard releases the keys" `Quick
+            test_closing_the_wizard_releases_the_keys;
           test_case "an inline setting claims over the palette" `Quick
             test_an_inline_setting_claims_over_the_palette;
           test_case "the identity form claims before its filter" `Quick

@@ -14386,6 +14386,292 @@ def run_browser_screenshot_regression(executable: str) -> None:
         release.set()
 
 
+# The voice setup wizard, drawn in a terminal. Its rules live in Voice_wizard
+# and its session in Masc_tui_types, both tested where they live, and a
+# structural suite asserts the call sites exist. None of those can say the box
+# appears, or that the keys reach it through a real terminal -- which is the one
+# claim the runbook could not make.
+VOICE_SETUP_FIXTURE = {
+    "revision": "fixture-voice-revision",
+    "tts": {
+        "default_model": "eleven_multilingual_v2",
+        "default_voice": "fixture-voice-id",
+        "agent_voices": {},
+        "endpoints": [
+            {
+                "id": "fixture-elevenlabs",
+                "kind": "elevenlabs_direct",
+                "enabled": True,
+                "api_key_env": "ELEVENLABS_API_KEY",
+            }
+        ],
+    },
+    "stt": {
+        "default_model": "whisper-1",
+        "endpoints": [
+            {
+                "id": "fixture-whisper",
+                "kind": "openai_compat",
+                "enabled": True,
+                "base_url": "http://127.0.0.1:2022/v1",
+            }
+        ],
+    },
+}
+
+VOICE_CONFIG_FIXTURE = {
+    "status": "loaded",
+    "tts": {
+        "default_model": "eleven_multilingual_v2",
+        "default_voice": "fixture-voice-id",
+        "active_endpoint": {
+            "configured": True,
+            "enabled": True,
+            "fallback_configured": False,
+        },
+    },
+    "stt": {
+        "default_model": "whisper-1",
+        "active_endpoint": {
+            "configured": True,
+            "enabled": True,
+            "fallback_configured": True,
+        },
+    },
+}
+
+
+def voice_wizard_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/voice/config"] = (200, VOICE_CONFIG_FIXTURE)
+    # One path, two meanings: the pane reads it and the wizard writes to it.
+    # The fixture table is keyed by path alone, so the body tells them apart --
+    # a read arrives with none.
+    fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (200, {"revision": "fixture-voice-revision-2"})
+        if body
+        else (200, VOICE_SETUP_FIXTURE)
+    )
+    return fixtures
+
+
+def press_and_settle(
+    process: "subprocess.Popen[bytes]",
+    master_fd: int,
+    output: bytearray,
+    data: bytes,
+    cap: float = 3.0,
+) -> bytes:
+    """Send [data] and answer everything drawn once the drawing stops.
+
+    Not send_and_wait: each keystroke in a typed word repaints the whole
+    screen, so a word arrives across as many frames as it has letters and a
+    single needle wait judges a frame that is still half a word behind. The
+    press is judged after its output stops, the way tab_until judges a
+    surface switch.
+    """
+    read_available(master_fd, output)
+    start = len(output)
+    write_all(master_fd, output, data)
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=5.0)
+    drain_until_quiet(process, master_fd, output, cap=cap)
+    return CSI_RE.sub(b"", bytes(output[start:]))
+
+
+def open_the_voice_pane(
+    process: "subprocess.Popen[bytes]", master_fd: int, output: bytearray
+) -> bytes:
+    """Walk the Config pane strip to voice, and answer the frame it landed on.
+
+    [p] cycles seven panes and voice is last, so the walk is bounded by the
+    strip rather than by a fixed count: a pane inserted ahead of voice would
+    otherwise leave this pressing one short.
+    """
+    tab_until(process, master_fd, output, b"MASC Config")
+    for _ in range(8):
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"p")
+        wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+        # The pane switch loads over HTTP, so later frames carry what the first
+        # does not. Judged after the frames stop, the way tab_until judges a
+        # surface switch.
+        drain_until_quiet(process, master_fd, output)
+        plain = CSI_RE.sub(b"", bytes(output[start:]))
+        if b"MASC Voice" in plain:
+            return plain
+    raise AssertionError("p never reached the voice pane")
+
+
+def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
+    """The pane names its endpoints, e opens the wizard, and the questions walk.
+
+    What this holds that the unit suites cannot: that the box is drawn at all,
+    that the closed-set steps move under the arrow keys, that typing lands in
+    the field and then in the draft summary, and that Esc leaves without a
+    write -- no save route is in the fixtures, so a wizard that posted on Esc
+    would be seen here as a failed request rather than silence.
+    """
+
+    def interact(
+        process: "subprocess.Popen[bytes]",
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The admin read is what names endpoints; the public route answers
+        # three booleans and no identity, so these two ids are proof the pane
+        # is drawing the read the wizard was built for.
+        listing = open_the_voice_pane(process, master_fd, output)
+        for needle in (b"fixture-elevenlabs", b"fixture-whisper", b"elevenlabs_direct"):
+            if needle not in listing:
+                raise AssertionError(f"the voice pane omitted {needle!r}")
+
+        def expect(frame: bytes, needle: bytes, what: str) -> None:
+            if needle not in frame:
+                raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
+
+        opened = press_and_settle(process, master_fd, output, b"e")
+        expect(opened, b"step 1/7", "the wizard did not open on the first of seven")
+        expect(opened, b"setup", "the wizard title did not draw")
+        expect(opened, b"speech out", "the first question did not show its answer")
+
+        # A closed set walks under the arrows. Over and back, so a binding that
+        # moves one way only is visible.
+        expect(
+            press_and_settle(process, master_fd, output, b"\x1b[C"),
+            b"speech in",
+            "the side did not switch under the right arrow",
+        )
+        expect(
+            press_and_settle(process, master_fd, output, b"\x1b[C"),
+            b"speech out",
+            "the side did not switch back",
+        )
+
+        # Enter walks forward. Provider is the second closed set.
+        provider = press_and_settle(process, master_fd, output, b"\r")
+        expect(provider, b"step 2/7", "enter did not reach the provider step")
+        expect(provider, b"elevenlabs", "the provider step showed no provider")
+
+        # Typing reaches the field, and leaving the step reaches the draft.
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 3/7",
+            "enter did not reach the name step",
+        )
+        # A letter is a full repaint, so a word costs as many repaints as it
+        # has letters; the default settle cap cut this one at nine.
+        # The name carries an [i] on purpose. The composer used to see every
+        # key before the field did and claimed [i] as "focus the composer", so
+        # this name reached the screen as "pty-endpo" and "nt" went into a
+        # keeper message.
+        typed = press_and_settle(process, master_fd, output, b"pty-endpoint", cap=15.0)
+        expect(typed, b"pty-endpoint", "the name did not reach the field")
+
+        credential = press_and_settle(process, master_fd, output, b"\r")
+        expect(credential, b"step 4/7", "enter did not reach the credential step")
+        # The draft summary is the only place the name can appear now: the
+        # field it was typed into belongs to the step just left.
+        expect(credential, b"pty-endpoint", "the name did not reach the draft summary")
+        expect(
+            credential,
+            b"ELEVENLABS_API_KEY",
+            "the credential step lost its prefilled variable",
+        )
+
+        # Up goes back and finds what was typed.
+        back = press_and_settle(process, master_fd, output, b"\x1b[A")
+        expect(back, b"step 3/7", "up did not go back a step")
+        expect(back, b"pty-endpoint", "going back lost the typed name")
+
+        # Forward again, filling what is left, so the last step can save.
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 4/7",
+            "enter did not return to the credential step",
+        )
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 5/7",
+            "enter did not reach the model step",
+        )
+        press_and_settle(process, master_fd, output, b"eleven_multilingual_v2", cap=15.0)
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 6/7",
+            "enter did not reach the voice step",
+        )
+        press_and_settle(process, master_fd, output, b"pty-voice-id", cap=15.0)
+        review = press_and_settle(process, master_fd, output, b"\r")
+        expect(review, b"step 7/7", "enter did not reach the review")
+        # With nothing missing the review offers to save. A gap would be listed
+        # here instead, which is the same screen answering the other way.
+        expect(review, b"enter saves this", "the review did not offer to save")
+        # The draft rows are read off the screen rather than off this frame:
+        # only the rows that changed are repainted, and these did not.
+        screen = screen_text(bytes(output))
+        expect(screen, b"pty-endpoint", "the review lost the name")
+        expect(screen, b"eleven_multilingual_v2", "the review lost the model")
+
+        # What the wizard actually puts on the wire. The server side is held by
+        # save_request -> apply -> loader in test/voice_wizard; this is the half
+        # that test cannot see, which is whether the pane sends it.
+        os.write(master_fd, b"\r")
+        body = json.loads(
+            wait_for_http_request(
+                process, master_fd, output, requests, path="/api/v1/voice/setup"
+            )
+        )
+        if body.get("expected_revision") != "fixture-voice-revision":
+            raise AssertionError(
+                f"the save did not carry the revision the pane read: {body!r}"
+            )
+        changes = {change.get("change"): change for change in body.get("changes", [])}
+        for wanted in ("put_endpoint", "set_default_model", "set_tts_default_voice"):
+            if wanted not in changes:
+                raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        endpoint = changes["put_endpoint"].get("endpoint", {})
+        if endpoint.get("id") != "pty-endpoint":
+            raise AssertionError(f"the endpoint is not the one typed: {endpoint!r}")
+        if endpoint.get("api_key_env") != "ELEVENLABS_API_KEY":
+            raise AssertionError(f"the credential variable was lost: {endpoint!r}")
+        # The name of the variable, never its value: runtime.toml is committed.
+        if any("sk-" in str(value) for value in endpoint.values()):
+            raise AssertionError(f"the save carried something key-shaped: {endpoint!r}")
+        if changes["set_tts_default_voice"].get("voice") != "pty-voice-id":
+            raise AssertionError(f"the default voice was lost: {changes!r}")
+
+        # Esc leaves. The pane is underneath and no step counter remains.
+        closed = press_and_settle(process, master_fd, output, b"\x1b")
+        expect(closed, b"fixture-elevenlabs", "the pane did not come back")
+        if b"step " in closed:
+            raise AssertionError(f"Esc did not close the wizard: {closed!r}")
+
+        # Quit is armed: this is the first press and the harness sends the
+        # confirming one. Not judged on a frame -- the arming notice and the
+        # exit race, and either is a correct answer to one press.
+        read_available(master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_voice_wizard_regression(executable: str) -> None:
+    requests: HttpRequests = []
+    # The probe that follows a save is left to fail: whether an endpoint
+    # answers is the endpoint's business, and a fixture that said yes would be
+    # saying it for them.
+    run_terminal_scenario(
+        executable,
+        description="The voice setup wizard opens, walks, saves, and leaves on Esc",
+        interact=voice_wizard_interaction(requests),
+        http_fixtures=voice_wizard_http_fixtures(),
+        http_requests=requests,
+    )
+
+
 def run_config_regression(executable: str) -> None:
     fixtures = overview_event_http_fixtures()
     initial = {
@@ -15839,6 +16125,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "voice-wizard":
+        run_voice_wizard_regression(os.path.abspath(sys.argv[1]))
+        print("tui Voice wizard regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":
         run_held_back_override_regression(os.path.abspath(sys.argv[1]))

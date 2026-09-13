@@ -176,7 +176,12 @@ let apply ~runtime_config_path ~expected_revision changes =
     checked contents changes
   in
   match Runtime.edit_config_text ~runtime_config_path edit with
-  | Ok _receipt -> Ok ()
+  (* The revision this write produced, out of the commit itself. Reading it
+     back afterwards is a second, unlocked observation: it answers a failure
+     for a write that landed, and when another writer commits in between it
+     answers that writer's revision -- which this caller would then hand back
+     as [expected_revision] without ever having seen what it described. *)
+  | Ok receipt -> Ok (revision_of receipt.Runtime.observation)
   | Error detail -> Error (Configuration_rejected detail)
   | exception Revision_changed -> Error Configuration_changed
   | exception Voice_invalid message -> Error (Voice_section_invalid message)

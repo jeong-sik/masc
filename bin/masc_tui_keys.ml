@@ -452,7 +452,7 @@ let for_surface = function
                  panes take the key and do nothing with it"
         (* Config combines persisted files, typed live params, and the local
            theme choice.  The pane strip says which meaning each key has. *)
-      ; b Navigate "p" "runtime.toml / models / params / prompts / themes"
+      ; b Navigate "p" "runtime.toml / models / params / prompts / presets / themes / voice"
       ; b Navigate "v" "runtime.toml read status"
           ~help:"source revision, validation issues, and application/restart details"
       ; b Navigate "9" "Runtime"
@@ -463,7 +463,9 @@ let for_surface = function
           ~help:"the tool catalog, receipts, and usage, off the ring under \
                  Config"
       ; b Act "e" "edit"
-          ~help:"params use a type-aware field; runtime.toml previews; prompts save an override"
+          ~help:"params use a type-aware field; runtime.toml previews; prompts \
+                 save an override; voice opens the setup wizard; models jumps \
+                 to that model's line in the source"
       ; b Act "E" "advanced JSON"
           ~help:"on params only: edit the exact JSON value"
       ; b Act "Enter" "edit / use"
@@ -472,6 +474,26 @@ let for_surface = function
           ~help:"params return to default; prompts clear override; themes follow terminal colours"
       ; b Act "f" "filter"
           ~help:"on themes, cycle All / Dark / Light schemes"
+        (* Pane-scoped writes. Each of these is the only key that does what it
+           does, and none of them were listed: presets could be made and put
+           back, and the prompt list could be switched between three readings,
+           with nothing on screen saying so. *)
+        (* Short labels: this row is one line and was already truncated at a
+           hundred columns before these five arrived. The pane each belongs to
+           and what it does are in the help, which the ? overlay draws in
+           full. *)
+      ; b Act "n" "new"
+          ~help:"on presets, name a preset holding the configuration as it stands"
+      ; b Act "u" "restore"
+          ~help:"on presets, put the selected one back; press twice to confirm"
+      ; b Act "i" "input"
+          ~help:"on prompts, the input this prompt was last given"
+      ; b Act "a" "fragments"
+          ~help:"on prompts, show or hide the internal pieces the main prompts \
+                 are built from; not on the runtime assets reading"
+      ; b Act "o" "assets"
+          ~help:"on prompts, switch between the read-only runtime assets and \
+                 the registry you can override"
       ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"

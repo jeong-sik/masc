@@ -12602,11 +12602,6 @@ let render_runtime_config_status state =
    empty is more often the wrong microphone than a threshold. *)
 let render_voice (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let buf = Buffer.create 2048 in
-  let field name value =
-    box_line buf cols
-      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset value)
-  in
   let member path json =
     List.fold_left
       (fun acc key ->
@@ -12622,53 +12617,53 @@ let render_voice (state : state) =
     | Some (`Int i) -> Some (string_of_int i)
     | Some _ | None -> None
   in
-  box_top buf cols;
-  box_line buf cols
-    (Printf.sprintf "%s  %s  %s"
-       (screen_title " MASC Voice")
-       (config_pane_strip state)
-       (connection_badge state));
-  box_line buf cols "";
-  (match (state.voice_config, state.voice_config_error) with
-   | _, Some message ->
-       (* The distinction the pane exists for, said in words rather than drawn
-          as an empty section. *)
-       box_line_styled buf cols ~style:(Theme.warn ()) "  voice did not load";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset)
-   | None, None ->
-       box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
-   | Some json, None ->
-       field "status" (Option.value (string_of [ "status" ] json) ~default:"?");
-       box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
-       field "voice"
-         (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
-       box_line buf cols "";
-       box_line buf cols (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
-       field "model"
-         (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
-       field "endpoint"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
-            ~default:"—");
-       field "fallback"
-         (Option.value
-            (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
-            ~default:"—"));
-  box_line buf cols "";
-  box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
-  field "device" (Option.value state.voice_input_device ~default:"unknown");
-  box_line buf cols "";
-  box_line buf cols
-    (Printf.sprintf
-       "  %sruntime.toml [voice] declares this; the server says what loaded%s"
-       Ansi.dim Ansi.reset);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh");
-  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"voice"
+    ~title:
+      (Printf.sprintf "%s  %s  %s"
+         (screen_title " MASC Voice")
+         (config_pane_strip state)
+         (connection_badge state))
+    ~hints:"p:next pane  r:refresh"
+    ~body:(fun ~budget:_ c ->
+      let field name value =
+        c.push (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset value)
+      in
+      (match (state.voice_config, state.voice_config_error) with
+       | _, Some message ->
+           (* The distinction the pane exists for, said in words rather than
+              drawn as an empty section. *)
+           c.push_styled ~style:(Theme.warn ()) "  voice did not load";
+           c.push (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset)
+       | None, None ->
+           c.push (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
+       | Some json, None ->
+           field "status" (Option.value (string_of [ "status" ] json) ~default:"?");
+           c.push_empty ();
+           c.push (Printf.sprintf "  %sTTS%s" Ansi.bold Ansi.reset);
+           field "model"
+             (Option.value (string_of [ "tts"; "default_model" ] json) ~default:"—");
+           field "voice"
+             (Option.value (string_of [ "tts"; "default_voice" ] json) ~default:"—");
+           c.push_empty ();
+           c.push (Printf.sprintf "  %sSTT%s" Ansi.bold Ansi.reset);
+           field "model"
+             (Option.value (string_of [ "stt"; "default_model" ] json) ~default:"—");
+           field "endpoint"
+             (Option.value
+                (string_of [ "stt"; "active_endpoint"; "enabled" ] json)
+                ~default:"—");
+           field "fallback"
+             (Option.value
+                (string_of [ "stt"; "active_endpoint"; "fallback_configured" ] json)
+                ~default:"—"));
+      c.push_empty ();
+      c.push (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
+      field "device" (Option.value state.voice_input_device ~default:"unknown");
+      c.push_empty ();
+      c.push
+        (Printf.sprintf
+           "  %sruntime.toml [voice] declares this; the server says what loaded%s"
+           Ansi.dim Ansi.reset))
 ;;
 
 let render_config (state : state) =

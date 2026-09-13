@@ -12020,6 +12020,14 @@ def fusion_list_detail_interaction(
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
+        #
+        # The wait ends on the verdict row, not on a column header. The
+        # headers are drawn before the harness snapshot arrives, under
+        # "(not loaded)", and the copy below reads the selected row: pressed
+        # between the two, Y had no row to copy. Measured on this scenario
+        # alone, 3 of 43 runs pressed Y about 20 ms before the snapshot and
+        # timed out; a second Y in the same session copied. glm-coding is the
+        # row's evaluator cell and nothing else on this screen draws it.
         harness_plain = CSI_RE.sub(
             b"",
             resize_and_wait(
@@ -12028,7 +12036,7 @@ def fusion_list_detail_interaction(
                 output,
                 rows=30,
                 columns=220,
-                needle=b"EVALUATOR",
+                needle=b"glm-coding",
                 controls=(FULL_REDRAW,),
             ),
         )

@@ -270,8 +270,8 @@ let action_lines view = match view.last_action with
               @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result)))
 type tone = Normal | Dim | Accent | Attention
-type visual_line = { active : bool; cells : (tone * string) list }
-let next_focus = function
+type visual_line = { cells : (tone * string) list }
+let _next_focus = function
   | Timeline -> Connections | Connections -> Configurations
   | Configurations -> Instances | Instances -> Rows | Rows -> Timeline
 let ordered_rows snapshot =
@@ -279,7 +279,7 @@ let ordered_rows snapshot =
   |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
     let time = Float.compare a.observed_at b.observed_at in
     if time=0 then String.compare a.id b.id else time)
-let move_observation view delta =
+let _move_observation view delta =
   match view.snapshot with
   | None -> view
   | Some snapshot ->
@@ -314,10 +314,10 @@ let move_lane view delta =
 let visual_lines ?(failed_note = "") ~height ~width view =
   let clean = Masc.Tui_decode.sanitize_terminal_text in
   let fit size text = Masc_tui_message_layout.fit_width (clean text) (max 0 size) in
-  let line ?(active=false) ?(tone=Normal) text = {active;cells=[tone,fit width text]} in
+  let line ?active:_ ?(tone=Normal) text = {cells=[tone,fit width text]} in
   let wrap ?(tone=Normal) text =
     Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (clean text)
-    |> List.map (fun text -> {active=false;cells=[tone,text]}) in
+    |> List.map (fun text -> {cells=[tone,text]}) in
   let window size cursor items =
     let first = max 0 (min (max 0 (List.length items-size)) (cursor-size/2)) in
     first, List.filteri (fun i _ -> i>=first && i<first+size) items in
@@ -364,7 +364,7 @@ let visual_lines ?(failed_note = "") ~height ~width view =
               let capacity = max 1 ((width-clock_width)/20) in
               let first_lane, visible = window capacity (lane_position 0 lanes) lanes in
               let cell_width = max 1 ((width-clock_width)/max 1 (List.length visible)) in
-              let row_cells ~active clock render = {active;
+              let row_cells ~active:_ clock render = {
                 cells=(Dim,fit clock_width clock) :: List.map (fun lane ->
                   let tone,text = render lane in tone,fit cell_width text) visible} in
               let times = List.map (fun (_, (row : Row.row)) -> row.observed_at) rows |> List.sort_uniq Float.compare in

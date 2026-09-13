@@ -12618,10 +12618,19 @@ let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
   | Good -> Theme.ok () | Warning -> Theme.warn () | Bad -> Theme.bad ()
 
+(* What the runtime.toml body spends above the source: the server identity,
+   one row per metadata line, and the rule under them. *)
+let config_heading_rows (state : state) =
+  1 + List.length (config_metadata_summary state) + 1
+
+(* The source rows the frame shows, and the height the cursor keeps itself
+   inside. One number for both: the frame is [surface_chrome]'s, so what it
+   spends is [surface_chrome_rows] and the heading above, not a literal. *)
 let config_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
-  max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows
-         - 7 - List.length (config_metadata_summary state))
+  max 1
+    (Masc_tui_types.surface_body_rows state ~terminal_rows
+     - surface_chrome_rows - config_heading_rows state)
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
   let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
@@ -12720,8 +12729,6 @@ let render_voice (state : state) =
 let render_config (state : state) =
   if state.runtime_config_status_open then render_runtime_config_status state else
   let terminal_rows, cols = get_terminal_size () in
-  let buf = Buffer.create 4096 in
-  box_top buf cols;
   let path_note =
     match state.runtime_config_view with
     | Some reading -> Ansi.dim ^ Terminal_text.single_line reading.rcv_path ^ Ansi.reset
@@ -12729,75 +12736,71 @@ let render_config (state : state) =
         ^ title_missing_reading ~error:state.runtime_config_view_error
         ^ Ansi.reset
   in
-  box_line buf cols
-    (Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")
-       (config_pane_strip state) path_note
-       (Printf.sprintf "%s%s%s" Ansi.dim
-          (let now = Unix.localtime (Unix.gettimeofday ()) in
-           Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-             now.Unix.tm_sec)
-          Ansi.reset)
-       (connection_badge state));
-  (* Where this server reads from, and how old the binary serving it is. A
-     stale binary answers every request as confidently as a current one, so
-     the age is the only thing on screen that separates them. *)
-  (match state.server_identity with
-   | None -> box_line buf cols (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
-   | Some identity ->
-       box_line buf cols
-         (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
-            (fit_width identity.Tui_decode.sid_base_path 28)
-            (fit_width identity.Tui_decode.sid_masc_root 32)
-            (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
-            Ansi.reset));
-  List.iter (fun (tone, text) ->
-    box_line_styled buf cols ~style:(config_metadata_style tone)
-      ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
-  box_divider buf cols;
-  let content_height = config_content_height state in
-  (match state.runtime_config_view_error, state.runtime_config_view with
-   | Some detail, _ ->
-       box_line buf cols ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
-       for _ = 2 to content_height do
-         box_empty buf cols
-       done
-   | None, None ->
-       box_line buf cols (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset);
-       for _ = 2 to content_height do
-         box_empty buf cols
-       done
-   | None, Some { rcv_rows = rows; _ } ->
-       let total = List.length rows in
-       let max_scroll = max 0 (total - content_height) in
-       let scroll = max 0 (min state.config_scroll max_scroll) in
-       let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
-       for i = 0 to content_height - 1 do
-         match Rows.at rows_window (scroll + i) with
-         | Some segments ->
-             (* Painted through [lexed_span], the table the Code surface reads.
-                The runtime config is TOML and the lexer already answers for it;
-                what was missing was anyone asking. *)
-             let line = String.concat "" (List.map lexed_span segments) in
-             let line =
-               Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
-                 Ansi.reset line
-             in
-             if scroll + i = state.runtime_config_cursor then
-               box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
-             else box_line buf cols line
-         | None -> box_empty buf cols
-       done);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (* Projected from the key table rather than spelled here. The literal
-            named five keys and no way out -- not because the row ran out of
-            cells (78 of 150 at the time) but because nobody wrote Esc or q
-            into it. It also named PgUp/PgDn, which the table did not have, so
-            the two had drifted in both directions. *)
-         (Masc_tui_keys.footer_hints_config ~pane:state.config_pane));
-  finish_surface state ~surface_key:"config" ~rows:terminal_rows ~cols buf
+  let title =
+    Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")
+      (config_pane_strip state) path_note
+      (Printf.sprintf "%s%s%s" Ansi.dim
+         (let now = Unix.localtime (Unix.gettimeofday ()) in
+          Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
+            now.Unix.tm_sec)
+         Ansi.reset)
+      (connection_badge state)
+  in
+  (* The frame, its fill and the footer are the contract's. The surface
+     subtracted a literal 7 and drew six fixed rows, so the footer stood one
+     row above the composer; the key handler read the same short number. *)
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"config" ~title
+    ~hints:
+      (* Projected from the key table rather than spelled here. The literal
+         named five keys and no way out -- not because the row ran out of
+         cells (78 of 150 at the time) but because nobody wrote Esc or q
+         into it. It also named PgUp/PgDn, which the table did not have, so
+         the two had drifted in both directions. *)
+      (Masc_tui_keys.footer_hints_config ~pane:state.config_pane)
+    ~body:(fun ~budget:_ c ->
+      (* Where this server reads from, and how old the binary serving it is.
+         A stale binary answers every request as confidently as a current
+         one, so the age is the only thing on screen that separates them. *)
+      (match state.server_identity with
+       | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
+       | Some identity ->
+           c.push
+             (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
+                (fit_width identity.Tui_decode.sid_base_path 28)
+                (fit_width identity.Tui_decode.sid_masc_root 32)
+                (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
+                Ansi.reset));
+      List.iter (fun (tone, text) ->
+        c.push_styled ~style:(config_metadata_style tone)
+          ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);
+      c.push_divider ();
+      let content_height = config_content_height state in
+      match state.runtime_config_view_error, state.runtime_config_view with
+      | Some detail, _ ->
+          c.push ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
+      | None, None ->
+          c.push (Ansi.dim ^ "  (loading\xe2\x80\xa6)" ^ Ansi.reset)
+      | None, Some { rcv_rows = rows; _ } ->
+          let total = List.length rows in
+          let max_scroll = max 0 (total - content_height) in
+          let scroll = max 0 (min state.config_scroll max_scroll) in
+          let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
+          for i = 0 to content_height - 1 do
+            match Rows.at rows_window (scroll + i) with
+            | Some segments ->
+                (* Painted through [lexed_span], the table the Code surface
+                   reads. The runtime config is TOML and the lexer already
+                   answers for it; what was missing was anyone asking. *)
+                let line = String.concat "" (List.map lexed_span segments) in
+                let line =
+                  Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
+                    Ansi.reset line
+                in
+                if scroll + i = state.runtime_config_cursor then
+                  c.push_selected (Masc_tui_theme.strip_sgr line)
+                else c.push line
+            | None -> ()
+          done)
 
 let render_surface (state : state) =
   match state.view with

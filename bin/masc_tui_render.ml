@@ -12591,7 +12591,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
-      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset value)
+      (Printf.sprintf "  %s%-12s%s %s" Ansi.dim name Ansi.reset
+         (Terminal_text.single_line value))
   in
   let draft = session.vws_draft in
   let side =
@@ -12651,7 +12652,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Model
    | Voice_wizard.Voice ->
      box_line buf cols
-       (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
+       (Printf.sprintf "    %s%s%s%s" Ansi.bold
+          (Terminal_text.single_line session.vws_input) Ansi.reset
           (if session.vws_saving then "" else "▏")));
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
@@ -12660,6 +12662,26 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Credential when String.trim session.vws_input = "" ->
      box_line buf cols
        (Printf.sprintf "    %sblank sends no Authorization header%s" Ansi.dim Ansi.reset)
+   (* The offered voices, with the one under the cursor marked. Shown rather
+      than left to typing because say does not fail on a name it does not have:
+      it speaks in the system voice, so a wrong name is silent. *)
+   | Voice_wizard.Voice when session.vws_voices <> [] ->
+     let count = List.length session.vws_voices in
+     let window = 5 in
+     let first = max 0 (min (session.vws_voice_cursor - (window / 2)) (count - window)) in
+     List.iteri
+       (fun index (_id, label) ->
+         let label = Terminal_text.single_line label in
+         if index >= first && index < first + window
+         then
+           box_line buf cols
+             (if index = session.vws_voice_cursor
+              then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold label Ansi.reset
+              else Printf.sprintf "    %s  %s%s" Ansi.dim label Ansi.reset))
+       session.vws_voices;
+     box_line buf cols
+       (Printf.sprintf "    %s%d of %d  \xe2\x86\x90/\xe2\x86\x92 to walk, or type an id%s"
+          Ansi.dim (session.vws_voice_cursor + 1) count Ansi.reset)
    | Voice_wizard.Address when String.trim session.vws_input = "" ->
      List.iter
        (fun (what, address) ->
@@ -12682,7 +12704,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | None -> ()
    | Some status ->
      box_line buf cols "";
-     box_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" status));
+     box_line_styled buf cols ~style:(Theme.warn ())
+       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
   (* Every endpoint, not just the first that answered. A chain stops at the
      first, which is why a dead fallback reads as healthy until the endpoint in
      front of it goes away. *)
@@ -12691,7 +12714,10 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | lines ->
      box_line buf cols "";
      box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
-     List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
+     List.iter
+       (fun line ->
+         box_line buf cols (Printf.sprintf "    %s" (Terminal_text.single_line line)))
+       lines);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -12699,15 +12725,70 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
   finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
 ;;
 
+(* Assigning a voice to a keeper: two lists side by side, the keeper walking
+   under up and down and the voice under the arrows. Drawn instead of the pane
+   rather than over it, because both are lists and a list over a list is two
+   cursors a reader has to keep apart. *)
+let render_voice_agent (state : state) (session : voice_agent_session) =
+  let terminal_rows, cols = get_terminal_size () in
+  let buf = Buffer.create 2048 in
+  let window = 6 in
+  let rows label items cursor draw =
+    box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
+    let count = List.length items in
+    if count = 0
+    then box_line buf cols (Printf.sprintf "    %s—%s" Ansi.dim Ansi.reset)
+    else (
+      let first = max 0 (min (cursor - (window / 2)) (count - window)) in
+      List.iteri
+        (fun index item ->
+          let label = Terminal_text.single_line (draw item) in
+          if index >= first && index < first + window
+          then
+            box_line buf cols
+              (if index = cursor
+               then Printf.sprintf "    %s\xe2\x96\xb8 %s%s" Ansi.bold label Ansi.reset
+               else Printf.sprintf "    %s  %s%s" Ansi.dim label Ansi.reset))
+        items;
+      box_line buf cols
+        (Printf.sprintf "    %s%d of %d%s" Ansi.dim (cursor + 1) count Ansi.reset))
+  in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Voice \xc2\xb7 keeper voices")
+       (config_pane_strip state)
+       (connection_badge state));
+  box_line buf cols "";
+  rows "keeper  (up/down)" session.vas_agents session.vas_agent_cursor (fun agent -> agent);
+  box_line buf cols "";
+  rows "voice  (left/right)" session.vas_voices session.vas_voice_cursor snd;
+  box_line buf cols
+    (Printf.sprintf "  voice ID (type or paste): %s%s%s"
+       Ansi.bold (Terminal_text.single_line session.vas_manual_voice) Ansi.reset);
+  (match session.vas_status with
+   | None -> ()
+   | Some status ->
+     box_line buf cols "";
+     box_line_styled buf cols ~style:(Theme.warn ())
+       (Printf.sprintf "  %s" (Terminal_text.single_line status)));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"enter:assign  esc:back");
+  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+;;
+
 let render_voice (state : state) =
-  match state.voice_wizard with
-  | Some session -> render_voice_wizard state session
-  | None ->
+  match state.voice_agent_voices, state.voice_wizard with
+  | Some session, _ -> render_voice_agent state session
+  | None, Some session -> render_voice_wizard state session
+  | None, None ->
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
-      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset value)
+      (Printf.sprintf "  %s%-18s%s %s" Ansi.dim name Ansi.reset
+         (Terminal_text.single_line value))
   in
   let member path json =
     List.fold_left
@@ -12760,8 +12841,8 @@ let render_voice (state : state) =
                     Some
                       (Printf.sprintf "    %-20s %s%-18s%s %s%s"
                          (Terminal_text.single_line id) Ansi.dim
-                         (Terminal_text.single_line kind)
-                         Ansi.reset (Terminal_text.single_line address) off))
+                         (Terminal_text.single_line kind) Ansi.reset
+                         (Terminal_text.single_line address) off))
               items
         | Some _ | None -> [])
   in
@@ -12794,7 +12875,9 @@ let render_voice (state : state) =
        (* The distinction the pane exists for, said in words rather than drawn
           as an empty section. *)
        box_line_styled buf cols ~style:(Theme.warn ()) "  voice did not load";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset)
+       box_line buf cols
+         (Printf.sprintf "  %s%s%s" Ansi.dim
+            (Terminal_text.single_line message) Ansi.reset)
    | None, None ->
        box_line buf cols (Printf.sprintf "  %sreading…%s" Ansi.dim Ansi.reset)
    | Some json, None ->
@@ -12829,7 +12912,9 @@ let render_voice (state : state) =
        box_line buf cols "";
        box_line_styled buf cols ~style:(Theme.warn ())
          "  the endpoint list could not be read";
-       box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim message Ansi.reset));
+       box_line buf cols
+         (Printf.sprintf "  %s%s%s" Ansi.dim
+            (Terminal_text.single_line message) Ansi.reset));
   box_line buf cols "";
   box_line buf cols (Printf.sprintf "  %sInput%s" Ansi.bold Ansi.reset);
   field "device" (Option.value state.voice_input_device ~default:"unknown");

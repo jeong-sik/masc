@@ -881,7 +881,7 @@ let test_config_footer_names_child_hops () =
      f are pane-scoped writes and views that were in no list at all -- which
      pane each belongs to is in the help the ? overlay draws. *)
   check str "Config names its three off-ring children"
-    "j/k:select / scroll  PgUp/PgDn:page  p:runtime.toml / models / params / prompts / presets / themes / voice  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments  o:assets  Esc:overview  r:reload  Tab:next"
+    "j/k:select / scroll  PgUp/PgDn:page  p:runtime.toml / models / params / prompts / presets / themes / voice  v:runtime.toml read status  9:Runtime  s:resources  t:tools  e:edit  E:advanced JSON  Enter:edit / use  x:default / clear  f:filter  n:new  u:restore  i:input  a:fragments / voice  o:assets  Esc:overview  r:reload  Tab:next"
     (Masc_tui_keys.footer_hints Config)
 
 let test_system_logs_owns_only_its_real_filter_keys () =

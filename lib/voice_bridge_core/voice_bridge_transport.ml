@@ -181,10 +181,14 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
    caller told "spoke" about an empty file has been told the wrong thing. *)
 let smallest_believable_audio_bytes = 100
 
-let run_audio_command_to_file (req : Voice_runtime_overlay.command_request) ~output_file =
+let command_timeout_seconds (endpoint : Voice_config.endpoint) =
+  Option.value endpoint.timeout_seconds
+    ~default:Env_config_runtime.Voice.http_request_timeout_sec
+
+let run_audio_command_to_file ~timeout_sec (req : Voice_runtime_overlay.command_request) ~output_file =
   let status, output =
     run_voice_status
-      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      ~timeout_sec
       req.Voice_runtime_overlay.argv
   in
   match status with
@@ -226,7 +230,7 @@ let speak_via_command_to_file endpoint ~message ~voice ~output_file =
   let* request =
     Voice_runtime_overlay.tts_command_for_endpoint endpoint ~voice ~message ~output_file
   in
-  run_audio_command_to_file request ~output_file
+  run_audio_command_to_file ~timeout_sec:(command_timeout_seconds endpoint) request ~output_file
 ;;
 
 (* Transcribing by running a command. The transcript is the command's own
@@ -238,7 +242,7 @@ let transcribe_via_command endpoint ~audio_file ~model =
   in
   let status, output =
     run_voice_status
-      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      ~timeout_sec:(command_timeout_seconds endpoint)
       request.Voice_runtime_overlay.argv
   in
   let command =
@@ -270,7 +274,7 @@ let list_voices_via_command endpoint =
   in
   let status, output =
     run_voice_status
-      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      ~timeout_sec:(command_timeout_seconds endpoint)
       request.Voice_runtime_overlay.argv
   in
   match status with

@@ -140,6 +140,21 @@ let require_string ~ctx ~field json =
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "%s.%s is required" ctx field)
 
+(* A declared timeout is spent as a real deadline by the command and HTTP
+   paths. Zero or a negative number gives the endpoint no time at all, and nan
+   or infinity gives it no bound: every comparison against nan is false, so a
+   deadline built from one never fires and the call waits forever. Refused
+   where it is read rather than repaired where it is used, so the operator is
+   told which endpoint carries the value instead of quietly getting a
+   different one. *)
+let optional_positive_seconds ~ctx ~field json =
+  match Json_util.get_float json field with
+  | None -> Ok None
+  | Some value when Float.is_finite value && value > 0. -> Ok (Some value)
+  | Some value ->
+    Error
+      (Printf.sprintf "%s.%s must be a positive number of seconds, not %g" ctx field value)
+
 let require_list ~ctx ~field json =
   match Json_util.get_array json field with
   | Some (`List items) -> Ok items
@@ -216,18 +231,16 @@ let endpoint_kind_of_string = function
            "endpoint.kind must be one of             openai_compat|elevenlabs_direct|voice_mcp|macos_say|whisper_cli (got %s)"
            value)
 
-(* Whether an endpoint of this kind is ever asked for the section's model by
-   name. The three that reach an address are, and so is whisper-cli, for which
-   the model is the file it loads. say takes no model at all: it is asked for a
-   voice, which is a different setting.
+(* Whether an endpoint of this kind is ever asked for the section's model.
+   HTTP speech and whisper-cli need one. say and the MCP agent_speak tool
+   consume a voice rather than a model.
 
    Exhaustive on purpose. A new kind has to answer this, because the section's
    requirement is computed from it and a wrong default would either demand a
    setting that means nothing or let one be skipped that does. *)
 let kind_needs_default_model = function
-  | Openai_compat | Elevenlabs_direct | Voice_mcp | Whisper_cli -> true
-  | Macos_say -> false
-
+  | Openai_compat | Elevenlabs_direct | Whisper_cli -> true
+  | Macos_say | Voice_mcp -> false
 let string_of_endpoint_kind = function
   | Openai_compat -> "openai_compat"
   | Elevenlabs_direct -> "elevenlabs_direct"
@@ -263,7 +276,7 @@ let parse_endpoint ~ctx json =
   let enabled =
     Option.value ~default:true (Json_util.get_bool json "enabled")
   in
-  let timeout_seconds = Json_util.get_float json "timeout_seconds" in
+  let* timeout_seconds = optional_positive_seconds ~ctx ~field:"timeout_seconds" json in
   (* A voice id is provider vocabulary, so it belongs to the endpoint that
      answers to it rather than to the workspace (#24068). *)
   let default_voice = Json_util.get_string_nonempty json "default_voice" in
@@ -407,7 +420,13 @@ let parse_tts json =
           (* Absent stays absent rather than becoming a blank standing for it:
              a section whose endpoints take no model has none, and every reader
              below has to say what it does about that. *)
-          Ok (Json_util.get_string_nonempty tts_json "default_model")
+          (match Json_util.assoc_member_opt "default_model" tts_json with
+           | None -> Ok None
+           | Some (`String _ as value) -> Ok (trim_nonempty_json value)
+           | Some value ->
+             Error
+               (Printf.sprintf "tts.default_model must be string, got %s"
+                  (Json_util.kind_name value)))
       in
       Ok
         (Some

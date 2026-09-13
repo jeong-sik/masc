@@ -17,8 +17,9 @@ hear.
 
 ### What is already there
 
-`/usr/bin/say` is in the base system and carries **nine Korean voices** among
-184 total. Nothing in the base system transcribes: macOS dictation is not
+`/usr/bin/say` listed **nine Korean voices** among 184 total on the measured
+machine. Installed voices vary; use the catalogue on the actual server.
+Nothing in the base system transcribes: macOS dictation is not
 scriptable, so hearing is the half that has to be fetched.
 
 ### The two downloads
@@ -45,18 +46,76 @@ downloads page instead of offering a command with nowhere to write. On Linux
 both steps are a link: whisper.cpp is built rather than packaged, and naming an
 apt package would install something else or nothing.
 
+### Doing it from the TUI instead
+
+`p` to the voice pane, then `e`. Speech out starts on ElevenLabs, which does
+not assume a macOS server. On a Mac, select `macos_say` at the provider step.
+
+Five questions, walked in a terminal and counted there:
+
+```
+step 1/5  Is this endpoint for speech out or speech in?
+step 2/5  Which provider serves this endpoint?      macos_say
+step 3/5  What should this endpoint be called?
+step 4/5  Which voice should speech out use by default?
+step 5/5  Here is what will change.                 enter saves this
+```
+
+No address, no credential, no model. say is found under the name its kind
+knows, nothing leaves the machine, and it is asked for a voice rather than a
+model. Its generated clip is PCM WAV; the capability URL, HTTP content type,
+keeper metadata and history expiry use that format. HTTP TTS clips remain MP3.
+
+Changing providers changes the questions and the counter. ElevenLabs has seven
+steps; say has five because it needs neither a credential nor a model.
+
+The say save carries a `put_endpoint` of kind `macos_say` with its own `default_voice`, and
+**no `set_default_model`** — a blank model written there would land on a
+section a sibling endpoint shares. Neither `base_url` nor `api_key_env`
+appears at all.
+
+Whisper CLI is available for speech in. It asks for a model file, with no
+address or credential.
+
+### Giving each keeper its own voice
+
+`a` on the voice pane. Two lists: the keepers this workspace has, and the
+voices the section's **first enabled** endpoint answers to — first rather than chosen,
+because a section's endpoints are a fallback chain for one voice and the one in
+front is whose vocabulary the assignment has to speak. If that endpoint has
+`default_voice`, it overrides keeper assignments, so the modal refuses to
+open. Remove that fixed endpoint voice before using keeper assignments.
+The setup wizard writes a fixed endpoint voice to keep provider-specific IDs
+apart; its saved endpoint therefore needs that edit before assignment.
+
+```
+keeper  (up/down)          voice  (left/right)
+  ▸ alpha                    ▸ Korean Bright Voice  (ko)
+    beta                       Han Aim  (ko)
+    gamma                      English Narrator
+```
+
+The axes move separately. A provider without a catalogue accepts a typed or
+pasted voice ID instead. `enter` writes one line of
+`[voice.tts.agent_voices]`; `esc` leaves.
+
+Each save carries the revision the pane read and takes back the one it answers
+with, so assigning several voices in a row does not tell the second one it is
+stale.
+
+The offered voices are the ones the configured server actually lists.
+
 ### What the configuration then says
 
 ```toml
 [voice.tts]
-default_model = "-"          # say takes no model; the section still needs the key
-default_voice = "Yuna"
+default_voice = "Yuna"       # no default_model: nothing in this section is asked for one
 
 [[voice.tts.endpoints]]
 id = "macos-say"
 kind = "macos_say"
 
-[voice.tts.agent_voices]
+[voice.tts.agent_voices]      # what `a` on the voice pane writes
 alpha = "Yuna"
 beta = "Eddy (한국어(한국))"
 
@@ -71,6 +130,12 @@ kind = "whisper_cli"
 `default_model` on the speech-in section is a **file path** here rather than a
 name, which is what the model means to a command that takes `-m`. A blank one
 is refused by name rather than defaulted to a path that may not exist.
+
+The speaking section above names no model at all, and that loads. The rule is
+not "a section names a model" but "a section names one when any endpoint in it
+would be asked for it by name" — and say is never asked. Put one ElevenLabs or
+OpenAI-compatible endpoint in the same section and the requirement comes back,
+because the section is shared.
 
 A `base_url` on either endpoint is refused when the configuration loads. These
 kinds run a command; an address on one would be read by nothing, and a field
@@ -152,9 +217,9 @@ other voice change goes through.
 > gets the default — move the line into `[voice.stt]`.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
-paths refuse by name before any endpoint is asked. Present, each must name its
-`default_model`: a blank one fails the load naming `tts.default_model` or
-`stt.default_model`, since a blank name would reach providers as `model_id ""`.
+paths refuse by name before any endpoint is asked. STT requires its
+`default_model`. TTS requires a model when an endpoint consumes one; a
+say-only or MCP-only section can omit it. A malformed supplied model is rejected.
 `[voice.capture]` and `[voice.gate]` are read as strictly as an endpoint is: a
 key the section does not know, or a value of the wrong type, fails the load
 naming `capture.<key>` or `gate.<key>`, and an absent key takes the default.

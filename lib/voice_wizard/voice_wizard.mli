@@ -16,11 +16,17 @@ type provider =
   | Elevenlabs
   | Openai_compatible
   | Mcp_tool
+  | Macos_say
+  | Whisper_cli
 
 val provider_label : provider -> string
 val provider_of_label : string -> provider option
 
 val providers_for : Voice_setup.section -> provider list
+
+(** The wire name of the kind this provider becomes, for a caller that has to
+    name a kind over HTTP without restating the mapping. *)
+val provider_kind_label : provider -> string
 (** Which providers can serve this section. [Mcp_tool] is offered for speech out
     and not for speech in: that kind synthesizes through a tool call and has no
     transcribe path. *)

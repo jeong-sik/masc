@@ -81,7 +81,8 @@ let catalog ?model_dir ~host ~distribution dependency =
              Fetched beside the final path and moved only after curl
              succeeded, so a run that dies part way leaves nothing at the path
              the configuration points at. *)
-          [ "curl"; "-fL"; "--create-dirs"; "-o"; final ^ ".part"; whisper_model_url ]
+          [ "curl"; "--fail"; "-L"; "--remove-on-error"; "--create-dirs";
+            "-o"; final ^ ".part"; whisper_model_url ]
         ; [ "mv"; final ^ ".part"; final ]
         ]
   in

@@ -289,9 +289,7 @@ let test_a_line_naming_no_voice_is_dropped () =
   Alcotest.(check int) "nothing to choose, nothing offered" 0
     (List.length (Bridge.say_catalogue_of_output "# just a comment\n\n"))
 
-(* Where a clip is stored, and how a reader finds it again. The token in the
-   URL says nothing about the container -- the endpoint that spoke decided
-   that -- so a reader looks for each one. *)
+(* Both containers resolve through their format-bound capabilities. *)
 let test_a_token_is_found_in_whichever_container_holds_it () =
   let dir = Filename.temp_file "masc_clip" "" in
   Sys.remove dir;
@@ -303,20 +301,26 @@ let test_a_token_is_found_in_whichever_container_holds_it () =
     close_out channel;
     path
   in
-  let wav_path = write "aaaa" Voice_bridge_core.Wav in
-  let mp3_path = write "bbbb" Voice_bridge_core.Mp3 in
-  (match Voice_bridge_core.find_clip ~dir ~token:"aaaa" with
+  let wav_id = String.make 32 'a' in
+  let mp3_id = String.make 32 'b' in
+  let wav_path = write wav_id Voice_bridge_core.Wav in
+  let mp3_path = write mp3_id Voice_bridge_core.Mp3 in
+  (match Voice_bridge_core.find_clip ~dir ~token:(wav_id ^ ".wav") with
    | Some (path, Voice_bridge_core.Wav) ->
      Alcotest.(check string) "the say clip" wav_path path
    | Some (_, Voice_bridge_core.Mp3) -> Alcotest.fail "a WAVE clip read as MP3"
    | None -> Alcotest.fail "a stored clip was reported as reaped");
-  (match Voice_bridge_core.find_clip ~dir ~token:"bbbb" with
+  (match Voice_bridge_core.find_clip ~dir ~token:mp3_id with
    | Some (path, Voice_bridge_core.Mp3) ->
      Alcotest.(check string) "the HTTP clip" mp3_path path
    | Some (_, Voice_bridge_core.Wav) -> Alcotest.fail "an MP3 clip read as WAVE"
    | None -> Alcotest.fail "a stored clip was reported as reaped");
   Alcotest.(check bool) "and a token nobody wrote is not found" true
-    (Voice_bridge_core.find_clip ~dir ~token:"cccc" = None);
+    (Voice_bridge_core.find_clip ~dir ~token:(String.make 32 'c') = None);
+  Alcotest.(check bool) "an MP3 capability cannot select an existing WAVE" true
+    (Voice_bridge_core.find_clip ~dir ~token:wav_id = None);
+  Alcotest.(check bool) "a WAVE capability cannot select an existing MP3" true
+    (Voice_bridge_core.find_clip ~dir ~token:(mp3_id ^ ".wav") = None);
   List.iter Sys.remove [ wav_path; mp3_path ];
   Sys.rmdir dir
 
@@ -329,10 +333,11 @@ let test_each_container_is_served_as_itself () =
     (Voice_bridge_core.clip_content_type Voice_bridge_core.Mp3)
 
 let test_a_clip_path_gives_its_token_back () =
-  Alcotest.(check (option string)) "a say clip" (Some "9f3c")
-    (Voice_bridge_core.clip_token_of_path "/x/audio/9f3c.wav");
-  Alcotest.(check (option string)) "an HTTP clip" (Some "9f3c")
-    (Voice_bridge_core.clip_token_of_path "/x/audio/9f3c.mp3");
+  let id = String.make 32 'd' in
+  Alcotest.(check (option string)) "a say clip" (Some (id ^ ".wav"))
+    (Voice_bridge_core.clip_token_of_path ("/x/audio/" ^ id ^ ".wav"));
+  Alcotest.(check (option string)) "an HTTP clip" (Some id)
+    (Voice_bridge_core.clip_token_of_path ("/x/audio/" ^ id ^ ".mp3"));
   Alcotest.(check (option string)) "and something that is not a clip" None
     (Voice_bridge_core.clip_token_of_path "/x/audio/notes.txt")
 
@@ -399,6 +404,35 @@ let test_speech_in_always_needs_a_model () =
     Alcotest.(check bool) "and the refusal names the field" true
       (Astring.String.is_infix ~affix:"stt.default_model" message)
 
+let test_an_mcp_only_section_needs_no_model () =
+  match
+    Voice_config.parse_json
+      (Yojson.Safe.from_string
+         {|{"tts":{"default_voice":"voice","endpoints":[{"id":"tool","kind":"voice_mcp","mcp_url":"http://fixture.invalid/mcp"}]}}|})
+  with
+  | Ok { Voice_config.tts = Some tts; _ } ->
+    Alcotest.(check (option string)) "MCP is not given a model" None tts.Voice_config.default_model
+  | Ok _ -> Alcotest.fail "the speaking section should load"
+  | Error message -> Alcotest.fail message
+
+let test_a_present_optional_model_must_still_be_a_string () =
+  List.iter
+    (fun value ->
+      let json =
+        `Assoc
+          [ "tts", `Assoc
+              [ "default_voice", `String "Yuna"
+              ; "default_model", value
+              ; "endpoints", `List
+                  [ `Assoc [ "id", `String "speaker"; "kind", `String "macos_say" ] ]
+              ] ]
+      in
+      match Voice_config.parse_json json with
+      | Ok _ -> Alcotest.fail "a malformed optional model must be rejected"
+      | Error message ->
+        Alcotest.(check bool) "the refusal names the setting" true
+          (Astring.String.is_infix ~affix:"tts.default_model" message))
+    [ `Int 123; `Bool false; `Null; `List [] ]
 let () =
   Alcotest.run
     "voice_local_command"
@@ -434,14 +468,6 @@ let () =
         ; Alcotest.test_case "a failure reports its last line not its first" `Quick
             test_a_failure_reports_its_last_line_not_its_first
         ] )
-    ; ( "what the section has to name"
-      , [ Alcotest.test_case "a say-only section needs no model" `Quick
-            test_a_say_only_section_needs_no_model
-        ; Alcotest.test_case "a section with an asked endpoint still needs one" `Quick
-            test_a_section_with_an_asked_endpoint_still_needs_one
-        ; Alcotest.test_case "speech in always needs a model" `Quick
-            test_speech_in_always_needs_a_model
-        ] )
     ; ( "the voices say has"
       , [ Alcotest.test_case "every printed voice becomes a row" `Quick
             test_every_printed_voice_becomes_a_row
@@ -451,6 +477,18 @@ let () =
             test_a_parenthesised_name_keeps_its_parenthesis
         ; Alcotest.test_case "a line naming no voice is dropped" `Quick
             test_a_line_naming_no_voice_is_dropped
+        ] )
+    ; ( "what the section has to name"
+      , [ Alcotest.test_case "a say-only section needs no model" `Quick
+            test_a_say_only_section_needs_no_model
+        ; Alcotest.test_case "a section with an asked endpoint still needs one" `Quick
+            test_a_section_with_an_asked_endpoint_still_needs_one
+        ; Alcotest.test_case "speech in always needs a model" `Quick
+            test_speech_in_always_needs_a_model
+        ; Alcotest.test_case "an MCP-only section needs no model" `Quick
+            test_an_mcp_only_section_needs_no_model
+        ; Alcotest.test_case "a present optional model must be a string" `Quick
+            test_a_present_optional_model_must_still_be_a_string
         ] )
     ; ( "what each kind will not do"
       , [ Alcotest.test_case "each half refuses the other" `Quick

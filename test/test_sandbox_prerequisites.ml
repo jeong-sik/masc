@@ -110,7 +110,9 @@ let test_whisper_offers_a_package_and_a_model () =
        way then leaves nothing at the path the voice configuration names. *)
     check (list string) "the model, fetched to where it was told"
       [ "curl"
-      ; "-fL"
+      ; "--fail"
+      ; "-L"
+      ; "--remove-on-error"
       ; "--create-dirs"
       ; "-o"
       ; "/somewhere/cache/whisper/ggml-large-v3-turbo.bin.part"
@@ -141,11 +143,9 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
   List.iter
     (fun distribution ->
       let actions = whisper (S.Linux S.X64) distribution in
-      (* Two now: the binary and the model. The branch named the binary and
-         stopped, so an operator who followed this plan to its end still had
-         nothing for -m. Both are links here because no cache directory was
-         given. *)
-      check int "two actions, and both are links" 2 (List.length actions);
+      check int "binary instructions and model downloads" 2 (List.length actions);
+      ignore (find "whisper_cli_build_instructions" actions);
+      ignore (find "whisper_model_page" actions);
       List.iter
         (fun (action : P.action) ->
           match action.action_effect with
@@ -154,6 +154,20 @@ let test_linux_gets_instructions_rather_than_a_guessed_package () =
             fail "no package name is guessed for Linux")
         actions)
     [ P.Debian; P.Ubuntu; P.Other ]
+
+let test_failed_whisper_download_is_not_published () =
+  let action =
+    find "whisper_model_download"
+      (P.catalog ~model_dir:"/fixture/cache" ~host:(mac S.Arm64 26)
+         ~distribution:P.Other P.Whisper_cli)
+  in
+  let called = ref [] in
+  let result =
+    P.execute action ~run:(fun argv -> called := argv :: !called; Error "HTTP 404")
+  in
+  check bool "a rejected download remains failed" true
+    (match result with P.Failed { step = 1; _ } -> true | _ -> false);
+  check int "publish never runs after download failure" 1 (List.length !called)
 
 
 (* The model step is written once and used by both hosts. Left per-host, the
@@ -167,7 +181,9 @@ let test_linux_with_a_cache_gets_the_same_download () =
   | P.Run_commands [ fetch; publish ] ->
     check (list string) "the same fetch macOS gets"
       [ "curl"
-      ; "-fL"
+       ; "--fail"
+       ; "-L"
+       ; "--remove-on-error"
       ; "--create-dirs"
       ; "-o"
       ; "/var/cache/whisper/ggml-large-v3-turbo.bin.part"
@@ -182,7 +198,6 @@ let test_linux_with_a_cache_gets_the_same_download () =
       publish
   | P.Run_commands _ | P.Open_official_installer _ | P.Install_official_cli _ ->
     fail "linux with a cache directory must get the download too"
-
 let () = run "prerequisite actions" ["user-selected plans",[
   test_case "distribution data is never shell" `Quick test_distribution_boundary;
   test_case "OS and architecture eligibility" `Quick test_platform_choices;
@@ -193,6 +208,8 @@ let () = run "prerequisite actions" ["user-selected plans",[
   "hearing on a fresh machine",[
   test_case "whisper offers a package and a model" `Quick
     test_whisper_offers_a_package_and_a_model;
+  test_case "failed whisper download is not published" `Quick
+    test_failed_whisper_download_is_not_published;
   test_case "without a directory the model is a page" `Quick
     test_without_a_directory_the_model_is_a_page_not_a_command;
   test_case "linux gets instructions rather than a guessed package" `Quick

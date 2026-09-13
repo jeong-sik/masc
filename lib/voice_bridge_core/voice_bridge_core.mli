@@ -15,6 +15,15 @@
 
 (** {1 Request timeout} *)
 
+type clip_format = Mp3 | Wav
+val audio_extension : clip_format -> string
+val audio_content_type : clip_format -> string
+val audio_format_of_path : string -> clip_format option
+val audio_token_of_file : string -> string option
+val audio_file_of_token : string -> (string * clip_format) option
+(** Voice clip capability names: 32 hexadecimal characters for MP3, or the
+    same token followed by [.wav] for PCM wave audio. *)
+
 val playback_dedup_window_sec : float
 
 val request_timeout_seconds : unit -> float
@@ -125,9 +134,6 @@ val masc_base_dir : unit -> string
 val ensure_audio_dir : unit -> unit
 (** [mkdir -p <masc_base_dir>/audio]. *)
 
-type clip_format =
-  | Mp3
-  | Wav
 (** The container a synthesized clip is written in.
 
     The filename is [<token><extension>] and that extension is what the
@@ -138,8 +144,8 @@ type clip_format =
     providers answer MP3. *)
 
 val clip_formats : clip_format list
-(** Every format a clip can be stored in, so a reader resolving a token
-    covers all of them rather than assuming one. *)
+(** The supported clip containers. Capability lookup still selects exactly
+    the format encoded by its token. *)
 
 val clip_extension : clip_format -> string
 val clip_content_type : clip_format -> string
@@ -149,11 +155,13 @@ val audio_dir : unit -> string
 
 val find_clip : dir:string -> token:string -> (string * clip_format) option
 (** The clip [token] names under [dir], and the format it is stored in.
-    [None] when no format has it: never synthesized, or reaped. *)
+    A WAVE capability ends in [.wav]; a bare capability names MP3.
+    [None] for an invalid capability or a missing file in that exact format. *)
 
 val clip_token_of_path : string -> string option
 (** The token a clip path carries, for building the URL the dashboard
-    fetches it by. [None] when the path is not a clip. *)
+    fetches it by. WAVE keeps [.wav] in the token. [None] when the filename
+    does not carry a valid 128-bit capability and supported format. *)
 
 (** {1 Structured logging helpers} *)
 

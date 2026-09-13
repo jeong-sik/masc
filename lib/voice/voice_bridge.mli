@@ -111,10 +111,8 @@ val probe_tts
     section -- the same two states {!Voice_config.load_detailed} separates, kept
     apart here for the same reason. *)
 
-(** How an endpoint transcribes, if it does. A kind added to
-    {!Voice_config.endpoint_kind} stops {!transcriber_of_kind} compiling until
-    it has an answer here -- the step that was missing when the two command
-    kinds reached main while the probe still matched on three. *)
+(** How a typed adapter transcribes, if it does. Normal capture and the probe
+    share the same exhaustive transport decision. *)
 type transcriber =
   | Over_http
   | By_command
@@ -123,11 +121,9 @@ type transcriber =
 val transcriber_of_kind : Voice_config.endpoint_kind -> transcriber
 
 val transcript_of_stt_json : Yojson.Safe.t -> (string, string) result
-(** The transcript inside what an HTTP endpoint answered. [Error] when the body
-    carries no [text] string: that is an answer this code cannot read, not a
-    microphone that heard nothing, and the probe reports those two differently
-    on purpose. *)
-
+(** Decode an HTTP transcript. A missing or non-string [text] is an error,
+    whereas an explicitly empty string is a valid transcript. Shared by
+    normal transcription and the endpoint probe. *)
 val probe_stt
   :  audio_file:string
   -> unit

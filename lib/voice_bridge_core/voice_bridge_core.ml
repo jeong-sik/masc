@@ -1,5 +1,40 @@
 (** Voice_bridge core — config, helpers, audio path utils, local playback. *)
 
+type clip_format = Mp3 | Wav
+
+let audio_extension = function Mp3 -> ".mp3" | Wav -> ".wav"
+let audio_content_type = function Mp3 -> "audio/mpeg" | Wav -> "audio/wav"
+
+let audio_format_of_path path =
+  match Filename.extension path with
+  | ".mp3" -> Some Mp3
+  | ".wav" -> Some Wav
+  | _ -> None
+
+let valid_audio_id token =
+  (* Random_id.hex ~bytes:16 produces the existing 128-bit capability. *)
+  String.length token = 32
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true | _ -> false)
+       token
+
+let audio_file_of_token token =
+  let id, format =
+    match Filename.chop_suffix_opt ~suffix:".wav" token with
+    | Some id -> id, Wav
+    | None -> token, Mp3
+  in
+  if valid_audio_id id then Some (id ^ audio_extension format, format) else None
+
+let audio_token_of_file path =
+  match audio_format_of_path path with
+  | None -> None
+  | Some format ->
+    let filename = Filename.basename path in
+    let id = Filename.chop_extension filename in
+    if not (valid_audio_id id) then None
+    else Some (match format with Mp3 -> id | Wav -> filename)
+
 (** MASC Voice Bridge - Eio-native Implementation
 
     Enables multi-agent voice collaboration via turn-based speaking.
@@ -475,31 +510,19 @@ let ensure_audio_dir () =
    the two failures do not even agree on how to fail.
 
    Naming the format is what keeps that silence out of reach: every writer
-   says which container it produces, and every reader resolves a token by
-   asking which of these is on disk. *)
-type clip_format =
-  | Mp3
-  | Wav
-
-(* Every format a clip can be stored in, so that a reader resolving a token
-   covers all of them. Ordered as the cheapest guess first: HTTP providers
-   answer MP3 and are the common case. *)
+   says which container it produces, and the capability keeps that choice
+   when a reader resolves the file. *)
+(* The supported containers, shared with format-aware callers. *)
 let clip_formats = [ Mp3; Wav ]
 
-let clip_extension = function
-  | Mp3 -> ".mp3"
-  | Wav -> ".wav"
+let clip_extension = audio_extension
 
-let clip_content_type = function
-  | Mp3 -> "audio/mpeg"
-  | Wav -> "audio/wav"
+let clip_content_type = audio_content_type
 
 let audio_dir () = Filename.concat (masc_base_dir ()) "audio"
 
-(* The clip a token names, and the format it turned out to be stored in.
-
-   The token alone does not say which container was used -- the endpoint
-   that spoke did -- so this looks for each one rather than assuming. *)
+(* Resolve only the format named by the capability. A missing MP3 must not
+   silently select a WAVE file with the same random identifier, or vice versa. *)
 let find_clip ~dir ~token =
   let exists path =
     try Sys.file_exists path with
@@ -508,22 +531,15 @@ let find_clip ~dir ~token =
        history render over one directory. *)
     | Sys_error _ | Unix.Unix_error _ -> false
   in
-  List.find_map
-    (fun format ->
-      let path = Filename.concat dir (token ^ clip_extension format) in
-      if exists path then Some (path, format) else None)
-    clip_formats
+  match audio_file_of_token token with
+  | None -> None
+  | Some (filename, format) ->
+    let path = Filename.concat dir filename in
+    if exists path then Some (path, format) else None
 
 (* The token a clip filename carries, for the reverse direction: the speak
    path has a path and needs the URL the dashboard fetches it by. *)
-let clip_token_of_path path =
-  let name = Filename.basename path in
-  List.find_map
-    (fun format ->
-      match Filename.chop_suffix_opt ~suffix:(clip_extension format) name with
-      | Some token when token <> "" -> Some token
-      | Some _ | None -> None)
-    clip_formats
+let clip_token_of_path = audio_token_of_file
 
 let provider_metadata_keys =
   [ "provider_name"; "provider_kind"; "provider_family"; "provider_auth"; "endpoint_id"; "endpoint_url" ]

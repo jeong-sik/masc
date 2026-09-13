@@ -205,7 +205,10 @@ let with_catalogue_processes f =
     Out_channel.with_open_bin (path name) (fun channel -> output_string channel body);
     Unix.chmod (path name) 0o700
   in
-  let env_names = [ "PATH"; "MASC_TEST_CATALOGUE_DIR"; "MASC_TEST_CATALOGUE_KEY" ] in
+  let env_names =
+    [ "PATH"; "MASC_TEST_CATALOGUE_DIR"; "MASC_TEST_CATALOGUE_KEY"
+    ; "MASC_CONFIG_DIR"; "MASC_BASE_PATH"; "MASC_BASE_PATH_INPUT" ]
+  in
   let previous = List.map (fun name -> name, Sys.getenv_opt name) env_names in
   let read name = In_channel.with_open_bin (path name) In_channel.input_all in
   Fun.protect
@@ -213,13 +216,23 @@ let with_catalogue_processes f =
       List.iter
         (fun (name, value) -> Unix.putenv name (Option.value value ~default:""))
         previous;
-      Array.iter (fun name -> Sys.remove (path name)) (Sys.readdir root);
-      Unix.rmdir root)
+      let rec remove path =
+        match (Unix.lstat path).Unix.st_kind with
+        | Unix.S_DIR ->
+          Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+          Unix.rmdir path
+        | _ -> Sys.remove path
+      in
+      remove root)
     (fun () ->
       write "curl"
         {|#!/bin/sh
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/argv"
 /bin/cat > "$MASC_TEST_CATALOGUE_DIR/stdin"
+if [ -f "$MASC_TEST_CATALOGUE_DIR/stt-response" ]; then
+  /bin/cat "$MASC_TEST_CATALOGUE_DIR/stt-response"
+  exit 0
+fi
 printf '%s\n' '{"voices":[{"voice_id":"http-voice"}],"has_more":false}'
 |};
       write "say"
@@ -227,10 +240,20 @@ printf '%s\n' '{"voices":[{"voice_id":"http-voice"}],"has_more":false}'
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/say-argv"
 printf '%s\n' 'Command Voice  ko_KR  # hello'
 |};
+      write "whisper-cli"
+        {|#!/bin/sh
+printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/whisper-argv"
+printf '%s\n' '명령 음성'
+|};
+      write "slow-whisper"
+        {|#!/bin/sh
+/bin/sleep 0.05
+printf '%s\n' 'heard after delay'
+|};
       Unix.putenv "PATH" root;
       Unix.putenv "MASC_TEST_CATALOGUE_DIR" root;
       Unix.putenv "MASC_TEST_CATALOGUE_KEY" "fixture-catalogue-secret";
-      Eio_main.run (fun _ -> f ~read))
+      Eio_main.run (fun _ -> f ~read ~root))
 
 let listed_id endpoint =
   match Voice.list_voices endpoint with
@@ -238,24 +261,24 @@ let listed_id endpoint =
   | Ok _ -> Alcotest.fail "expected exactly one voice"
   | Error message -> Alcotest.fail message
 
-let test_resolved_alias_selects_the_same_transport_as_the_request () =
-  with_catalogue_processes (fun ~read:_ ->
+let test_declared_kind_selects_the_same_transport_as_the_request () =
+  with_catalogue_processes (fun ~read:_ ~root:_ ->
     let endpoint =
-      { (endpoint ~kind:Voice_config.Macos_say ~base_url:None) with
-        Voice_config.id = "elevenlabs"
+      { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
+        Voice_config.id = "say"
       ; api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
       }
     in
-    Alcotest.(check string) "HTTP alias wins over the declared command kind"
+    Alcotest.(check string) "declared HTTP transport wins over a command-shaped ID"
       "http-voice" (listed_id endpoint);
     let endpoint =
-      { endpoint with Voice_config.id = "say"; kind = Voice_config.Elevenlabs_direct }
+      { endpoint with Voice_config.id = "elevenlabs"; kind = Voice_config.Macos_say }
     in
-    Alcotest.(check string) "command alias wins over the declared HTTP kind"
+    Alcotest.(check string) "declared command transport wins over an HTTP-shaped ID"
       "Command Voice" (listed_id endpoint))
 
 let test_catalogue_credentials_reach_stdin_and_never_argv () =
-  with_catalogue_processes (fun ~read ->
+  with_catalogue_processes (fun ~read ~root:_ ->
     let endpoint =
       { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
         Voice_config.api_key_env = Some "MASC_TEST_CATALOGUE_KEY"
@@ -276,7 +299,7 @@ let test_catalogue_credentials_reach_stdin_and_never_argv () =
       "xi-api-key: fixture-catalogue-secret\n" (read "stdin"))
 
 let test_catalogue_requests_dispatch_every_endpoint_kind () =
-  with_catalogue_processes (fun ~read:_ ->
+  with_catalogue_processes (fun ~read:_ ~root:_ ->
     List.iter
       (fun (kind, expected) ->
         let request =
@@ -303,6 +326,160 @@ let test_catalogue_requests_dispatch_every_endpoint_kind () =
       ; "voice_mcp", None
       ; "whisper_cli", None
       ])
+
+let test_say_probe_refuses_an_uninstalled_voice_before_synthesis () =
+  with_catalogue_processes (fun ~read ~root ->
+    let config = Filename.concat root "runtime.toml" in
+    Out_channel.with_open_bin config (fun out ->
+      output_string out
+        {|[voice.tts]
+default_voice = "Uninstalled Voice"
+[[voice.tts.endpoints]]
+id = "speaker"
+kind = "macos_say"
+|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    (match Voice.probe_tts ~message:"hello" () with
+     | Ok [ { Voice.outcome = Voice.Refused message; _ } ] ->
+       Alcotest.(check string) "the missing voice is named"
+         "voice config endpoint speaker has no installed voice named \"Uninstalled Voice\""
+         message
+     | Ok _ -> Alcotest.fail "the probe must refuse the unavailable voice"
+     | Error message -> Alcotest.fail message);
+    Alcotest.(check string) "say was only asked to list voices, never synthesize"
+      "-v\n?\n" (read "say-argv"))
+
+let test_normal_transcription_uses_the_command_transport () =
+  with_catalogue_processes (fun ~read ~root ->
+    Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out ->
+      output_string out
+        {|[voice.stt]
+default_model = "/fixture/model.bin"
+[[voice.stt.endpoints]]
+id = "elevenlabs"
+kind = "whisper_cli"
+|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+     | Ok (`Assoc fields) ->
+       Alcotest.(check bool) "normal transcription returns command text" true
+         (List.assoc_opt "text" fields = Some (`String "명령 음성"));
+       Alcotest.(check bool) "the status is a real transcription" true
+         (List.assoc_opt "status" fields = Some (`String "transcribed"))
+     | Ok _ -> Alcotest.fail "expected a transcription object"
+     | Error message -> Alcotest.fail message);
+    Alcotest.(check string) "the configured model and recording reached whisper"
+      "-m\n/fixture/model.bin\n-l\nauto\n-nt\n-f\n/fixture/audio.wav\n"
+      (read "whisper-argv");
+    match Voice.probe_stt ~audio_file:"/fixture/audio.wav" () with
+    | Ok [ { Voice.outcome = Voice.Answered message; _ } ] ->
+      Alcotest.(check string) "the diagnostic takes the same transport"
+        "heard 명령 음성" message
+    | Ok _ -> Alcotest.fail "the working command should answer the probe"
+    | Error message -> Alcotest.fail message)
+
+let test_audio_capabilities_keep_the_generated_format () =
+  List.iter
+    (fun (format, suffix, mime, token_suffix) ->
+      let id = String.make 32 'a' in
+      let filename = id ^ suffix in
+      let token = id ^ token_suffix in
+      Alcotest.(check (option string)) "producer capability"
+        (Some token) (Voice.audio_token_of_file filename);
+      match Voice.audio_file_of_token token with
+      | Some (served_filename, served_format) ->
+        Alcotest.(check string) "the HTTP and history readers find the actual file"
+          filename served_filename;
+        Alcotest.(check bool) "the format survives the URL" true (format = served_format);
+        Alcotest.(check string) "the MIME describes the file" mime
+          (Voice.audio_content_type served_format)
+      | None -> Alcotest.fail "a generated capability must be accepted")
+    [ Voice.Mp3, ".mp3", "audio/mpeg", ""
+    ; Voice.Wav, ".wav", "audio/wav", ".wav" ];
+  List.iter
+    (fun token ->
+      Alcotest.(check bool) "malformed capabilities cannot select a path" true
+        (Option.is_none (Voice.audio_file_of_token token)))
+    [ "../clip.wav"; String.make 31 'a' ^ ".wav"; String.make 32 'g'; "clip.mp3" ]
+
+let test_http_transcription_distinguishes_malformed_and_empty () =
+  with_catalogue_processes (fun ~read:_ ~root ->
+    Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out ->
+      output_string out
+        {|[voice.stt]
+default_model = "fixture-model"
+[[voice.stt.endpoints]]
+id = "listener"
+kind = "elevenlabs_direct"
+api_key_env = "MASC_TEST_CATALOGUE_KEY"
+|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    let respond body =
+      Out_channel.with_open_bin (Filename.concat root "stt-response")
+        (fun out -> output_string out body)
+    in
+    List.iter
+      (fun body ->
+        respond body;
+        (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "an unreadable response must not become a transcript");
+        match Voice.probe_stt ~audio_file:"/fixture/audio.wav" () with
+        | Ok [ { Voice.outcome = Voice.Refused _; _ } ] -> ()
+        | Ok _ -> Alcotest.fail "the probe must refuse an unreadable response"
+        | Error message -> Alcotest.fail message)
+      [ {|{}|}; {|{"text":null}|}; {|{"text":42}|}; {|[]|} ];
+    List.iter
+      (fun text ->
+        respond (Yojson.Safe.to_string (`Assoc [ "text", `String text ]));
+        (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+         | Ok (`Assoc fields) ->
+           Alcotest.(check bool) "the exact valid transcript survives" true
+             (List.assoc_opt "text" fields = Some (`String text));
+           Alcotest.(check bool) "a valid empty transcript is still transcribed" true
+             (List.assoc_opt "status" fields = Some (`String "transcribed"))
+         | Ok _ -> Alcotest.fail "expected a transcription object"
+         | Error message -> Alcotest.fail message);
+        match Voice.probe_stt ~audio_file:"/fixture/audio.wav" () with
+        | Ok [ { Voice.outcome = Voice.Answered message; _ } ] ->
+          Alcotest.(check string) "the probe preserves the same distinction"
+            (if text = "" then "reached, and heard nothing in the audio"
+             else "heard " ^ text)
+            message
+        | Ok _ -> Alcotest.fail "a valid transcript must answer the probe"
+        | Error message -> Alcotest.fail message)
+      [ ""; "명령 음성" ])
+
+let test_command_transcription_honors_endpoint_timeout () =
+  with_catalogue_processes (fun ~read:_ ~root ->
+    let configure timeout =
+      Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out ->
+        output_string out
+          ({|[voice.stt]
+default_model = "/fixture/model.bin"
+[[voice.stt.endpoints]]
+id = "slow"
+kind = "whisper_cli"
+command = "slow-whisper"
+|} ^ timeout))
+    in
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    configure "timeout_seconds = 0.001\n";
+    (match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "the endpoint deadline must stop the delayed command");
+    configure "";
+    match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+    | Ok _ -> ()
+    | Error message -> Alcotest.fail ("the configured fallback should allow the command: " ^ message))
 
 let test_catalogue_credentials_are_typed () =
   let decode credential =
@@ -429,17 +606,26 @@ let test_catalogue_deadline_stops_the_whole_scan () =
            ~remaining_seconds:(fun () -> 0.) ~fetch_page catalogue_request with
    | Error _ -> Alcotest.(check int) "an expired deadline dispatches nothing" 1 !calls
    | Ok _ -> Alcotest.fail "an expired deadline must not dispatch")
-
 let () =
   Alcotest.run
     "voice_catalog"
     [ ( "request dispatch and credentials"
-      , [ Alcotest.test_case "resolved aliases select the request transport" `Quick
-            test_resolved_alias_selects_the_same_transport_as_the_request
+      , [ Alcotest.test_case "declared kind selects the request transport" `Quick
+            test_declared_kind_selects_the_same_transport_as_the_request
         ; Alcotest.test_case "credentials reach stdin and never argv" `Quick
             test_catalogue_credentials_reach_stdin_and_never_argv
         ; Alcotest.test_case "catalogue requests dispatch every endpoint kind" `Quick
             test_catalogue_requests_dispatch_every_endpoint_kind
+        ; Alcotest.test_case "say probe refuses an uninstalled voice" `Quick
+            test_say_probe_refuses_an_uninstalled_voice_before_synthesis
+        ; Alcotest.test_case "normal transcription uses the command transport" `Quick
+            test_normal_transcription_uses_the_command_transport
+        ; Alcotest.test_case "HTTP transcription distinguishes malformed and empty" `Quick
+            test_http_transcription_distinguishes_malformed_and_empty
+        ; Alcotest.test_case "command transcription honors endpoint timeout" `Quick
+            test_command_transcription_honors_endpoint_timeout
+        ; Alcotest.test_case "audio capabilities keep the generated format" `Quick
+            test_audio_capabilities_keep_the_generated_format
         ; Alcotest.test_case "catalogue credentials are typed" `Quick
             test_catalogue_credentials_are_typed
         ; Alcotest.test_case "all catalogue pages share one deadline" `Quick

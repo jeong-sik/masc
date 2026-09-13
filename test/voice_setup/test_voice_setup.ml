@@ -372,6 +372,57 @@ let test_removing_the_last_endpoint_is_refused () =
     | Ok _revision -> Alcotest.fail "an stt section with no endpoints must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
+let test_provider_voices_do_not_replace_the_existing_section_voice () =
+  with_config runtime_base (fun path ->
+    let say =
+      { (endpoint ~id:"speaker" ~kind:Voice_config.Macos_say ()) with
+        Voice_config.default_voice = Some "Yuna" }
+    in
+    let eleven =
+      { (endpoint ~id:"hosted" ~kind:Voice_config.Elevenlabs_direct ()) with
+        Voice_config.default_voice = Some "provider-specific-id" }
+    in
+    let commit changes =
+      match apply path changes with
+      | Ok _revision -> ()
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    commit [ Voice_setup.Put_endpoint (Voice_setup.Tts, say) ];
+    commit
+      [ Voice_setup.Set_default_model (Voice_setup.Tts, "hosted-model")
+      ; Voice_setup.Put_endpoint (Voice_setup.Tts, eleven) ];
+    match Voice_config.parse_runtime_toml_text (read path) with
+    | Ok (Some { Voice_config.tts = Some tts; _ }) ->
+      Alcotest.(check string) "the initial fallback remains unchanged" "Yuna" tts.default_voice;
+      Alcotest.(check (list (option string))) "each endpoint keeps its vocabulary"
+        [ Some "Yuna"; Some "provider-specific-id" ]
+        (List.map (fun (endpoint : Voice_config.endpoint) -> endpoint.default_voice) tts.endpoints)
+    | Ok _ -> Alcotest.fail "the speaking section should exist"
+    | Error message -> Alcotest.fail message)
+
+let test_a_dotted_keeper_voice_can_be_written_replaced_and_removed () =
+  with_config fixture (fun path ->
+    let set voice =
+      match apply path [ Voice_setup.Set_agent_voice ("team.alpha", voice) ] with
+      | Ok _revision -> ()
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    let voices () =
+      match Voice_config.parse_runtime_toml_text (read path) with
+      | Ok (Some { Voice_config.tts = Some tts; _ }) -> tts.agent_voices
+      | Ok _ -> Alcotest.fail "the speaking section should exist"
+      | Error message -> Alcotest.fail message
+    in
+    set (Some "one");
+    Alcotest.(check (option string)) "the raw dotted keeper name was written"
+      (Some "one") (List.assoc_opt "team.alpha" (voices ()));
+    set (Some "two");
+    Alcotest.(check (option string)) "the literal keeper key was replaced"
+      (Some "two") (List.assoc_opt "team.alpha" (voices ()));
+    set None;
+    Alcotest.(check (option string)) "the literal keeper key was removed"
+      None (List.assoc_opt "team.alpha" (voices ())))
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -396,6 +447,10 @@ let () =
             test_changes_that_depend_on_each_other_land_together
         ; Alcotest.test_case "an agent voice is set and cleared" `Quick
             test_an_agent_voice_is_set_and_cleared
+        ; Alcotest.test_case "provider voices preserve the section fallback" `Quick
+            test_provider_voices_do_not_replace_the_existing_section_voice
+        ; Alcotest.test_case "dotted keeper voice can be replaced and removed" `Quick
+            test_a_dotted_keeper_voice_can_be_written_replaced_and_removed
         ; Alcotest.test_case "send_on_stop is written as a boolean" `Quick
             test_send_on_stop_is_written_as_a_boolean
         ; Alcotest.test_case "a field left None is dropped" `Quick

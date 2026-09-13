@@ -53,14 +53,78 @@ let gap_names draft =
     (fun gap -> Voice_wizard.gap_message gap)
     (Voice_wizard.gaps draft)
 
-(* An MCP tool synthesizes through a tool call and has no transcribe path.
-   Offering it for speech in would produce an endpoint every probe reports as
-   not asked. *)
-let test_speech_in_is_not_offered_an_mcp_tool () =
-  Alcotest.(check int) "speech out has three providers" 3
-    (List.length (Voice_wizard.providers_for Voice_setup.Tts));
-  Alcotest.(check bool) "speech in is not offered the tool kind" false
-    (List.mem Voice_wizard.Mcp_tool (Voice_wizard.providers_for Voice_setup.Stt))
+(* Each side is offered exactly what can do its half, named rather than
+   counted: a count stays green while the wrong provider sits in the list.
+
+   An MCP tool and say both synthesize and have no transcribe path, so
+   offering either for speech in would produce an endpoint every probe reports
+   as not asked. whisper-cli is the mirror.
+
+   The initial choice must not require a macOS server. *)
+let provider_labels section =
+  List.map Voice_wizard.provider_label (Voice_wizard.providers_for section)
+
+let test_each_side_is_offered_what_can_do_its_half () =
+  Alcotest.(check (list string))
+    "speech out starts with a provider available across platforms"
+    [ "elevenlabs"; "macos_say"; "openai_compatible"; "mcp_tool" ]
+    (provider_labels Voice_setup.Tts);
+  Alcotest.(check (list string))
+    "speech in, and nothing in it only speaks"
+    [ "whisper_cli"; "elevenlabs"; "openai_compatible" ]
+    (provider_labels Voice_setup.Stt)
+
+(* say is asked for a voice, not a model, so it is not asked for an address, a
+   credential or a model either. Three questions and a review. *)
+let test_say_is_asked_for_almost_nothing () =
+  let draft =
+    Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say
+  in
+  Alcotest.(check (list string))
+    "a name and a voice, and nothing that means nothing to a command"
+    [ "section"; "provider"; "name"; "voice"; "review" ]
+    (steps draft)
+
+(* whisper-cli is asked for the model, because for it the model is the file it
+   loads. Not for an address or a credential: nothing leaves the machine. *)
+let test_whisper_is_asked_for_the_model_only () =
+  let draft =
+    Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Whisper_cli
+  in
+  Alcotest.(check (list string))
+    "a name and the model file"
+    [ "section"; "provider"; "name"; "model"; "review" ]
+    (steps draft)
+
+(* Writing a blank model for say would write over a model that a sibling
+   endpoint in the same section does need. *)
+let test_say_writes_no_model () =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say) with
+      Voice_wizard.endpoint_id = "macos-say"
+    ; voice = "Yuna"
+    }
+  in
+  match Voice_wizard.changes draft with
+  | Error gaps ->
+    Alcotest.failf "a complete say draft was refused: %s"
+      (String.concat "; " (List.map Voice_wizard.gap_message gaps))
+  | Ok changes ->
+    Alcotest.(check bool) "no model change is written" false
+      (List.exists
+         (function
+           | Voice_setup.Set_default_model _ -> true
+           | Voice_setup.Put_endpoint _ | Voice_setup.Remove_endpoint _
+           | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_agent_voice _ -> false)
+         changes);
+    Alcotest.(check bool) "the voice is written" true
+      (List.exists
+         (function
+           | Voice_setup.Put_endpoint (_, endpoint) ->
+             endpoint.Voice_config.default_voice = Some "Yuna"
+           | Voice_setup.Set_tts_default_voice _ | Voice_setup.Remove_endpoint _
+           | Voice_setup.Set_default_model _ | Voice_setup.Set_agent_voice _ -> false)
+         changes)
 
 let test_the_questions_depend_on_the_provider () =
   Alcotest.(check (list string))
@@ -74,7 +138,7 @@ let test_the_questions_depend_on_the_provider () =
        (Voice_wizard.blank ~section:Voice_setup.Stt ~provider:Voice_wizard.Openai_compatible));
   Alcotest.(check (list string))
     "a tool endpoint is not asked for a credential"
-    [ "section"; "provider"; "name"; "address"; "model"; "voice"; "review" ]
+    [ "section"; "provider"; "name"; "address"; "voice"; "review" ]
     (steps (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool))
 
 let test_elevenlabs_arrives_with_what_is_the_same_everywhere () =
@@ -231,12 +295,31 @@ let test_moving_keeps_a_provider_that_serves_both () =
   Alcotest.(check bool) "still openai-compatible" true
     (moved.Voice_wizard.provider = Voice_wizard.Openai_compatible)
 
+let test_mcp_writes_no_unused_model () =
+  let draft =
+    { (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Mcp_tool) with
+      endpoint_id = "tool"; address = "http://fixture.invalid/mcp"; voice = "voice" }
+  in
+  match Voice_wizard.changes draft with
+  | Error _ -> Alcotest.fail "MCP does not require a model"
+  | Ok changes ->
+    Alcotest.(check bool) "no unused model is written" false
+      (List.exists
+         (function Voice_setup.Set_default_model _ -> true | _ -> false)
+         changes)
+
 let () =
   Alcotest.run
     "voice_wizard"
     [ ( "which questions"
-      , [ Alcotest.test_case "speech in is not offered an mcp tool" `Quick
-            test_speech_in_is_not_offered_an_mcp_tool
+      , [ Alcotest.test_case "each side is offered what can do its half" `Quick
+            test_each_side_is_offered_what_can_do_its_half
+        ; Alcotest.test_case "say is asked for almost nothing" `Quick
+            test_say_is_asked_for_almost_nothing
+        ; Alcotest.test_case "whisper is asked for the model only" `Quick
+            test_whisper_is_asked_for_the_model_only
+        ; Alcotest.test_case "say writes no model" `Quick test_say_writes_no_model
+        ; Alcotest.test_case "MCP writes no unused model" `Quick test_mcp_writes_no_unused_model
         ; Alcotest.test_case "the questions depend on the provider" `Quick
             test_the_questions_depend_on_the_provider
         ; Alcotest.test_case "elevenlabs arrives with what is the same everywhere" `Quick

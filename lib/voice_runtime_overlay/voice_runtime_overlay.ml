@@ -135,9 +135,9 @@ let adapter_for_endpoint_kind = function
 ;;
 
 let adapter_for_endpoint (endpoint : Voice_config.endpoint) =
-  match resolve_adapter endpoint.id with
-  | Some adapter -> adapter
-  | None -> adapter_for_endpoint_kind endpoint.kind
+  (* IDs name entries; only the declared kind chooses their transport.
+     Provider selection still accepts aliases through resolve_adapter. *)
+  adapter_for_endpoint_kind endpoint.kind
 ;;
 
 let endpoint_matches_provider_label label (endpoint : Voice_config.endpoint) =

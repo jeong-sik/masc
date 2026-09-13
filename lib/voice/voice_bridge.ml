@@ -11,28 +11,29 @@ let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_fi
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
 let transcribe_via_command = Voice_bridge_transport.transcribe_via_command
 
-(* How an endpoint transcribes, if it does. Written as a type rather than read
-   off the kind at each site: the two command kinds reached main while the STT
-   probe still matched on three, and a kind added to
-   {!Voice_config.endpoint_kind} now stops this function compiling until it has
-   an answer here. *)
+(* Normal transcription and its probe share one exhaustive transport decision. *)
 type transcriber =
   | Over_http
   | By_command
   | Does_not_transcribe
 
-let transcriber_of_kind = function
-  | Voice_config.Openai_compat | Voice_config.Elevenlabs_direct -> Over_http
-  | Voice_config.Whisper_cli -> By_command
+let transcriber_of_transport = function
+  | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct -> Over_http
+  | Voice_runtime_overlay.Whisper_cli -> By_command
   (* Both of these speak. Neither listens: [macos_say] is the say command, and
      voice_mcp carries a tool call, not audio. *)
-  | Voice_config.Voice_mcp | Voice_config.Macos_say -> Does_not_transcribe
+  | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Macos_say -> Does_not_transcribe
 
-(* What an endpoint reached over HTTP answered. A body carrying no [text]
-   string is not a silent microphone -- it is an answer this code does not
-   read -- and the probe reports the empty transcript as having heard nothing.
-   Kept apart here so that the one distinction the probe exists to draw is not
-   erased by a body it did not understand. *)
+let transcriber_of_kind kind =
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint_kind kind in
+  transcriber_of_transport adapter.transport
+
+let transcriber_of_endpoint endpoint =
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  transcriber_of_transport adapter.transport
+
+(* Decode the provider boundary before either normal capture or the probe
+   interprets the transcript. An unreadable body is not a quiet microphone. *)
 let transcript_of_stt_json json =
   match json with
   | `Assoc fields ->
@@ -117,8 +118,9 @@ let clip_format_for_kind (kind : Voice_config.endpoint_kind) =
 ;;
 
 let audio_url_of_file audio_file =
-  match Voice_bridge_core.clip_token_of_path audio_file with
-  | Some token -> Some (Masc_network_defaults.voice_audio_path token)
+  match Voice_bridge_core.audio_token_of_file audio_file with
+  | Some token ->
+    Some (Masc_network_defaults.voice_audio_path token)
   | None -> None
 ;;
 
@@ -192,36 +194,22 @@ let transcribe_audio ~audio_file ?language_code () =
              "all enabled STT endpoints failed: %s"
              (String.concat " | " (List.rev attempted)))
       | endpoint :: rest ->
-        (* Asked the way this endpoint answers. The command kinds were wired
-           into the probe and not into this loop, so a configured whisper_cli
-           endpoint -- the only kind that transcribes without a server -- was
-           sent an HTTP request it has no address for and reported as failed,
-           while [voice-verify --audio] on the same configuration worked.
-           [transcriber_of_kind] is the same closed answer the probe reads, so
-           a kind added later stops this compiling until it has one. *)
-        let heard =
-          match transcriber_of_kind endpoint.Voice_config.kind with
-          | Does_not_transcribe ->
-            (* Named rather than attempted. An endpoint that speaks, listed
-               under [voice.stt], is a configuration to correct; an HTTP
-               attempt reported it as a network failure instead. *)
-            Error "this endpoint kind speaks and does not transcribe"
+        let transcription =
+          match transcriber_of_endpoint endpoint with
+          | Over_http -> transcribe_via_http_stt endpoint ~audio_file ~model
           | By_command ->
-            (* The command answers with its own output and knows no language
-               field; [language_code] is then the caller's or unknown. *)
-            Result.map
-              (fun transcript -> transcript, None)
+            Result.map (fun text -> `Assoc [ "text", `String text ])
               (transcribe_via_command endpoint ~audio_file ~model)
-          | Over_http ->
-            (match transcribe_via_http_stt endpoint ~audio_file ~model with
-             | Ok json ->
-               Result.map
-                 (fun text -> text, Json_util.get_string json "language_code")
-                 (transcript_of_stt_json json)
-             | Error error -> Error error)
+          | Does_not_transcribe ->
+            Error "this endpoint transport does not transcribe"
         in
-        (match heard with
-         | Ok (text, reported_language) ->
+        let decoded =
+          let* json = transcription in
+          let* text = transcript_of_stt_json json in
+          Ok (json, text)
+        in
+        (match decoded with
+         | Ok (json, text) ->
            let lang =
              match language_code with
              | Some lc -> lc
@@ -230,7 +218,7 @@ let transcribe_audio ~audio_file ?language_code () =
                   command answers with its transcript and no such field, so
                   "unknown" here is the endpoint having been silent about it
                   -- the same word this loop has always used. *)
-               (match reported_language with
+               (match Json_util.get_string json "language_code" with
                 | Some lc -> lc
                 | None -> "unknown")
            in
@@ -265,6 +253,9 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
+(* The dashboard's own attempt, which only knows the HTTP endpoints. A section
+   that names no model has none of those to try, so there is nothing to attempt
+   rather than something to attempt with a blank name. *)
 let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
   (* The dashboard's own attempt, which only knows the HTTP endpoints. A
      section that names no model has none of those to try, so there is nothing
@@ -430,6 +421,15 @@ let list_voices (endpoint : Voice_config.endpoint) =
          endpoint.Voice_config.id)
 ;;
 
+let validate_macos_voice endpoint ~voice =
+  let* voices = list_voices endpoint in
+  if List.exists (fun entry -> String.equal entry.voice_id voice) voices
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf "voice config endpoint %s has no installed voice named %S"
+         endpoint.Voice_config.id voice)
+
 let probe_tts ?(agent_id = "probe") ~message () =
   match Voice_config.load_detailed () with
   | Error error -> Error (Voice_config.load_error_to_string error)
@@ -440,24 +440,26 @@ let probe_tts ?(agent_id = "probe") ~message () =
        Ok
          (List.map
             (fun (endpoint : Voice_config.endpoint) ->
+              let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
               let outcome =
                 if not endpoint.Voice_config.enabled
                 then Skipped "disabled in the configuration"
-                else if
-                  (* say synthesizes without HTTP, so the question is whether
-                     this kind speaks at all, not whether it speaks over a
-                     wire. Asking the second one reported the kind a fresh mac
-                     actually has as not asked. *)
-                  match endpoint.Voice_config.kind with
-                  | Voice_config.Voice_mcp | Voice_config.Whisper_cli -> true
-                  | Voice_config.Openai_compat
-                  | Voice_config.Elevenlabs_direct
-                  | Voice_config.Macos_say -> false
-                then Skipped "this endpoint kind does not synthesize"
-                else (
-                  let output_file =
-                    make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
+                else match adapter.transport with
+                | Voice_runtime_overlay.Voice_mcp ->
+                  Skipped "this endpoint synthesizes through MCP; this probe does not invoke MCP"
+                | Voice_runtime_overlay.Whisper_cli ->
+                  Skipped "this endpoint transcribes and does not synthesize"
+                | Voice_runtime_overlay.Openai_compat
+                | Voice_runtime_overlay.Elevenlabs_direct
+                | Voice_runtime_overlay.Macos_say -> (
+                  let format =
+                    match adapter.transport with
+                    | Voice_runtime_overlay.Macos_say -> Voice_bridge_core.Wav
+                    | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct
+                    | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Whisper_cli ->
+                      Voice_bridge_core.Mp3
                   in
+                  let output_file = make_audio_file ~format in
                   (* The voice is resolved per endpoint: an id is provider
                      vocabulary, so the one that suits this endpoint is the one
                      to ask it for (#24068). *)
@@ -468,14 +470,15 @@ let probe_tts ?(agent_id = "probe") ~message () =
                      path does, so that what it reports is what a turn would
                      get rather than a second opinion. *)
                   let result =
-                    match endpoint.Voice_config.kind with
-                    | Voice_config.Macos_say ->
+                    match adapter.transport with
+                    | Voice_runtime_overlay.Macos_say ->
+                      let* () = validate_macos_voice endpoint ~voice in
                       Voice_bridge_transport.speak_via_command_to_file
                         endpoint ~message ~voice ~output_file
-                    | Voice_config.Openai_compat
-                    | Voice_config.Elevenlabs_direct
-                    | Voice_config.Voice_mcp
-                    | Voice_config.Whisper_cli ->
+                    | Voice_runtime_overlay.Openai_compat
+                    | Voice_runtime_overlay.Elevenlabs_direct
+                    | Voice_runtime_overlay.Voice_mcp
+                    | Voice_runtime_overlay.Whisper_cli ->
                       (match tts.Voice_config.default_model with
                        | None ->
                          Error
@@ -535,7 +538,7 @@ let probe_stt ~audio_file () =
                        else Printf.sprintf "heard %s" spoken)
                   in
                   let model = stt.Voice_config.default_model in
-                  match transcriber_of_kind endpoint.Voice_config.kind with
+                  match transcriber_of_endpoint endpoint with
                   | Does_not_transcribe ->
                     Skipped "this endpoint kind does not transcribe"
                   | Over_http ->
@@ -784,7 +787,6 @@ let attempt_tts_endpoint
       ~net
       ~agent_id
       ~message
-      ~voice
       ~model
       ~priority
       ~tts
@@ -792,6 +794,7 @@ let attempt_tts_endpoint
       endpoint
   =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  let voice = Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id in
   match adapter.transport with
   (* One branch for every way of producing the audio, because everything after
      it -- playing the file, the dedup record, what gets reported -- is the
@@ -799,10 +802,18 @@ let attempt_tts_endpoint
   | Voice_runtime_overlay.Openai_compat
   | Voice_runtime_overlay.Elevenlabs_direct
   | Voice_runtime_overlay.Macos_say ->
-    let audio_file = make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind) in
+    let format =
+      match adapter.transport with
+      | Voice_runtime_overlay.Macos_say -> Voice_bridge_core.Wav
+      | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct
+      | Voice_runtime_overlay.Voice_mcp | Voice_runtime_overlay.Whisper_cli ->
+        Voice_bridge_core.Mp3
+    in
+    let audio_file = make_audio_file ~format in
     (match
        (match adapter.transport with
         | Voice_runtime_overlay.Macos_say ->
+          let* () = validate_macos_voice endpoint ~voice in
           Voice_bridge_transport.speak_via_command_to_file
             endpoint
             ~message
@@ -1079,7 +1090,6 @@ let agent_speak_json
             ; "reason", `String "identical message was played recently"
             ]))
     else (
-      let voice = get_voice_for_agent agent_id in
       let provider =
         provider
         |> Option.map String.trim
@@ -1104,7 +1114,6 @@ let agent_speak_json
                ~net
                ~agent_id
                ~message
-               ~voice
                ~model
                ~priority
                ~tts

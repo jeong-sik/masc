@@ -543,7 +543,7 @@ val load_page :
     when present. [surface] is the sole lane identity. [delivery_key] appears
     only on rows persisted by the idempotent append-once paths, verbatim as the
     typed delivery identity object. When [base_dir] is supplied, the history
-    endpoint marks audio clips as [expired] when the underlying MP3 file is
+    endpoint marks audio clips as [expired] when the underlying audio file is
     gone. *)
 val to_json_array :
   ?base_dir:string ->

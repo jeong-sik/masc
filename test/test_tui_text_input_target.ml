@@ -17,6 +17,7 @@ let target =
       | Some Tui_types.Text_preset_name -> "preset-name"
       | Some Tui_types.Text_runtime_param -> "runtime-param"
       | Some Tui_types.Text_voice_wizard -> "voice-wizard"
+      | Some Tui_types.Text_voice_agent -> "voice-agent"
       | Some Tui_types.Text_palette -> "palette"
       | Some Tui_types.Text_row_search -> "row-search"
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
@@ -105,8 +106,7 @@ let test_an_inline_setting_claims_over_the_palette () =
 let voice_wizard_open state =
   state.Tui_types.voice_wizard <-
     Some
-      (Tui_types.voice_wizard_open ~section:Voice_setup.Tts
-         ~provider:Voice_wizard.Elevenlabs ~revision:"a-revision")
+      (Tui_types.voice_wizard_open ~section:Voice_setup.Tts ~revision:"a-revision")
 ;;
 
 let test_the_voice_wizard_claims_over_the_palette () =
@@ -297,11 +297,24 @@ let test_ask_answer_input_ownership () =
   check target "retained answer cannot capture another surface" None (resolved state)
 ;;
 
+let test_voice_assignment_owns_typing_and_paste () =
+  let state = fresh_state () in
+  state.Tui_types.voice_agent_voices <-
+    Some (Tui_types.voice_agent_open ~agents:[ "alpha" ] ~revision:"r");
+  state.Tui_types.palette_open <- true;
+  check target "assignment receives voice IDs" (Some Tui_types.Text_voice_agent) (resolved state);
+  state.Tui_types.palette_open <- false;
+  check target "hidden compact assignment cannot receive typing or paste" None
+    (resolved ~compact_viewport:true state);
+  check target "visible assignment owns input again" (Some Tui_types.Text_voice_agent)
+    (resolved state)
+
 let () =
   Alcotest.run
     "tui text input target"
     [ ( "which field takes text",
         [ test_case "ask answer input ownership" `Quick test_ask_answer_input_ownership;
+          test_case "voice assignment owns typing and paste" `Quick test_voice_assignment_owns_typing_and_paste;
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
           test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;

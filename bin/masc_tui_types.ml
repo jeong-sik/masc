@@ -2692,11 +2692,93 @@ type voice_wizard_session =
             told rather than overwriting it. *)
   ; vws_status : string option
   ; vws_saving : bool
+  ; vws_voices : (string * string) list
+        (** The voices the endpoint says it has, as (id, what to show).
+            Offered on the voice step rather than left to typing, because say
+            does not fail on a name it does not have -- it speaks in the system
+            voice, so a name typed from memory is wrong silently. Empty when
+            the kind publishes no catalogue, and the step is a plain field
+            then. *)
+  ; vws_voice_cursor : int
+  ; vws_catalogue_request : unit ref option
+  ; vws_identity : unit ref
   ; vws_probe : string list
         (** What each endpoint answered after the save, one line each. The
             wizard writes a configuration; whether anything on the other end
             responds is measured, not inferred from the write succeeding. *)
   }
+
+(* Assigning a voice to one keeper. Separate from the wizard because it is
+   shaped differently: the wizard walks questions to write one endpoint, this
+   walks two lists to write one line of [voice.tts.agent_voices].
+
+   It exists because a workspace with more than one keeper and one voice cannot
+   tell them apart by ear, and because say ships nine Korean voices for free --
+   the reason to give each keeper its own is no longer a purchase. *)
+type voice_agent_session =
+  { vas_agents : string list
+  ; vas_agent_cursor : int
+  ; vas_voices : (string * string) list
+  ; vas_voice_cursor : int
+  ; vas_revision : string
+        (** What the configuration read as when this opened, carried by the
+            save the way the wizard carries it. *)
+  ; vas_status : string option
+  ; vas_saving : bool
+  ; vas_identity : unit ref
+  ; vas_manual_voice : string
+  }
+
+let voice_agent_open ~agents ~revision =
+  { vas_agents = agents
+  ; vas_agent_cursor = 0
+  ; vas_voices = []
+  ; vas_voice_cursor = 0
+  ; vas_revision = revision
+  ; vas_status = None
+  ; vas_saving = false
+  ; vas_identity = ref ()
+  ; vas_manual_voice = ""
+  }
+
+let walk_cursor cursor ~count ~ahead =
+  if count = 0 then 0 else ((cursor + if ahead then 1 else -1) + count) mod count
+
+let voice_agent_walk_agents session ~ahead =
+  { session with
+    vas_agent_cursor =
+      walk_cursor session.vas_agent_cursor ~count:(List.length session.vas_agents) ~ahead
+  ; vas_status = None
+  }
+
+let voice_agent_walk_voices session ~ahead =
+  { session with
+    vas_voice_cursor =
+      walk_cursor session.vas_voice_cursor ~count:(List.length session.vas_voices) ~ahead
+  ; vas_status = None
+  ; vas_manual_voice = ""
+  }
+
+let voice_agent_append session text =
+  { session with
+    vas_manual_voice = session.vas_manual_voice ^ text; vas_voice_cursor = -1
+  ; vas_status = None }
+
+let voice_agent_backspace session =
+  { session with
+    vas_manual_voice = Masc_tui_message_layout.drop_last_utf8_scalar session.vas_manual_voice
+  ; vas_status = None }
+
+let voice_agent_selected session =
+  match List.nth_opt session.vas_agents session.vas_agent_cursor with
+  | None -> None
+  | Some agent ->
+    let manual = String.trim session.vas_manual_voice in
+    if manual <> "" then Some (agent, manual)
+    else if session.vas_voice_cursor < 0 then None
+    else
+      Option.map (fun (voice_id, _) -> agent, voice_id)
+        (List.nth_opt session.vas_voices session.vas_voice_cursor)
 
 let voice_wizard_value (draft : Voice_wizard.draft) (step : Voice_wizard.step) =
   match step with
@@ -2718,7 +2800,14 @@ let voice_wizard_with_value (draft : Voice_wizard.draft) (step : Voice_wizard.st
   | Voice_wizard.Voice -> { draft with Voice_wizard.voice = value }
   | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Review -> draft
 
-let voice_wizard_open ~section ~provider ~revision =
+(* Opened on whichever provider the section offers first. Provider ordering
+   belongs to Voice_wizard, including its platform-neutral default. *)
+let voice_wizard_open ~section ~revision =
+  let provider =
+    match Voice_wizard.providers_for section with
+    | first :: _ -> first
+    | [] -> Voice_wizard.Elevenlabs
+  in
   let draft = Voice_wizard.blank ~section ~provider in
   let step =
     match Voice_wizard.steps draft with
@@ -2732,8 +2821,71 @@ let voice_wizard_open ~section ~provider ~revision =
   ; vws_revision = revision
   ; vws_status = None
   ; vws_saving = false
+  ; vws_voices = []
+  ; vws_voice_cursor = 0
+  ; vws_catalogue_request = None
+  ; vws_identity = ref ()
   ; vws_probe = []
   }
+
+(* Highlight the current input if it is listed. Only an untouched empty input
+   accepts the first-row suggestion; a late reply must not replace typing. *)
+let voice_wizard_with_voices session voices =
+  let input =
+    if session.vws_replace_on_type && session.vws_input = "" then
+      match voices with (id, _) :: _ -> id | [] -> ""
+    else session.vws_input
+  in
+  let cursor =
+    let rec find index = function
+      | [] -> -1
+      | (id, _) :: rest -> if String.equal id input then index else find (index + 1) rest
+    in
+    find 0 voices
+  in
+  { session with
+    vws_voices = voices
+  ; vws_voice_cursor = cursor
+  ; vws_input = input
+  ; vws_status = None
+  ; vws_catalogue_request = None
+  }
+
+let voice_wizard_begin_catalogue session =
+  let request = ref () in
+  ({ session with
+     vws_catalogue_request = Some request
+   ; vws_voices = []
+   ; vws_voice_cursor = -1
+   ; vws_status = None
+   }, request)
+
+let voice_wizard_catalogue_result session ~request result =
+  match session.vws_catalogue_request with
+  | Some current when current == request && session.vws_step = Voice_wizard.Voice ->
+    (match result with
+     | Ok voices -> voice_wizard_with_voices session voices
+     | Error message ->
+       { session with
+         vws_catalogue_request = None; vws_voices = []; vws_voice_cursor = -1
+       ; vws_status = Some message })
+  | Some _ | None -> session
+
+(* Walking the offered voices. The chosen row becomes the input, so leaving the
+   step commits the id the endpoint named rather than anything retyped. *)
+let voice_wizard_walk_voices session ~ahead =
+  match session.vws_voices with
+  | [] -> session
+  | voices ->
+    let count = List.length voices in
+    let cursor = ((session.vws_voice_cursor + (if ahead then 1 else -1)) + count) mod count in
+    let id = match List.nth_opt voices cursor with Some (id, _) -> id | None -> "" in
+    { session with
+      vws_voice_cursor = cursor
+    ; vws_input = id
+    ; vws_replace_on_type = false
+    ; vws_status = None
+    }
 
 let voice_wizard_append session text =
   { session with
@@ -2825,6 +2977,9 @@ let voice_wizard_cycle_provider session =
     ; vws_input = voice_wizard_value draft session.vws_step
     ; vws_replace_on_type = true
     ; vws_status = None
+    ; vws_voices = []
+    ; vws_voice_cursor = -1
+    ; vws_catalogue_request = None
     }
 
 let runtime_param_edit_toggle_bool edit =
@@ -3880,6 +4035,7 @@ type state = {
   mutable voice_setup: Yojson.Safe.t option;
   mutable voice_setup_error: string option;
   mutable voice_wizard: voice_wizard_session option;
+  mutable voice_agent_voices: voice_agent_session option;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -4894,6 +5050,7 @@ type text_input_target =
   | Text_preset_name
   | Text_runtime_param
   | Text_voice_wizard
+  | Text_voice_agent
   | Text_palette
   | Text_row_search
   | Text_identity_app_form
@@ -4917,6 +5074,8 @@ let text_input_target (state : state) ~compact_viewport =
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
   else if Option.is_some state.runtime_param_edit then Some Text_runtime_param
+  else if Option.is_some state.voice_agent_voices && not compact_viewport then
+    Some Text_voice_agent
   (* A wizard is only ever open on its own pane and closing it clears this, so
      its presence is the whole condition -- except that the pane is not drawn at
      all on a viewport this small. Without the guard the operator saw "terminal
@@ -6049,6 +6208,7 @@ let create_state
   workspace;
   port;
   refresh_interval;
+  voice_agent_voices = None;
 }
 
 let visible_system_log_entries (state : state) =
@@ -7799,4 +7959,7 @@ let voice_wizard_cycle_section session =
   ; vws_input = voice_wizard_value draft session.vws_step
   ; vws_replace_on_type = true
   ; vws_status = None
+  ; vws_voices = []
+  ; vws_voice_cursor = -1
+  ; vws_catalogue_request = None
   }

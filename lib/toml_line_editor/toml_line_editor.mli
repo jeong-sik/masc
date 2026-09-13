@@ -48,7 +48,8 @@ val key_of_line : string -> string option
 
 val edit_table_scalar :
   string -> path:string -> key:string -> value:string option -> string
-(** Set or remove a scalar key inside [[path]]. *)
+(** Set or remove a scalar key inside [[path]]. [key] is the raw literal name;
+    rendering quotes punctuation such as dots, while lookup compares that name. *)
 
 val edit_table_multiline_array :
   string -> path:string -> key:string -> values:string list -> string

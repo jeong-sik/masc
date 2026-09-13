@@ -2,32 +2,53 @@ type provider =
   | Elevenlabs
   | Openai_compatible
   | Mcp_tool
+  | Macos_say
+  | Whisper_cli
 
 let provider_label = function
   | Elevenlabs -> "elevenlabs"
   | Openai_compatible -> "openai_compatible"
   | Mcp_tool -> "mcp_tool"
+  | Macos_say -> "macos_say"
+  | Whisper_cli -> "whisper_cli"
 ;;
 
 let provider_of_label = function
   | "elevenlabs" -> Some Elevenlabs
   | "openai_compatible" -> Some Openai_compatible
   | "mcp_tool" -> Some Mcp_tool
+  | "macos_say" -> Some Macos_say
+  | "whisper_cli" -> Some Whisper_cli
   | _ -> None
 ;;
 
-(* Speech in is not offered an MCP tool: that kind synthesizes through a tool
-   call and has no transcribe path, so offering it would produce an endpoint
-   every probe reports as not asked. *)
+(* Each side is offered only what can do its half.
+
+   Speech in is not offered an MCP tool or say: both synthesize and have no
+   transcribe path, so offering either would produce an endpoint every probe
+   reports as not asked. Speech out is not offered whisper-cli for the mirror
+   reason.
+
+   The initial choice is available across platforms. macOS speech remains an
+   explicit option; the client cannot assume the server runs on a Mac. *)
 let providers_for = function
-  | Voice_setup.Tts -> [ Elevenlabs; Openai_compatible; Mcp_tool ]
-  | Voice_setup.Stt -> [ Elevenlabs; Openai_compatible ]
+  | Voice_setup.Tts -> [ Elevenlabs; Macos_say; Openai_compatible; Mcp_tool ]
+  | Voice_setup.Stt -> [ Whisper_cli; Elevenlabs; Openai_compatible ]
 ;;
 
 let kind_of_provider = function
   | Elevenlabs -> Voice_config.Elevenlabs_direct
   | Openai_compatible -> Voice_config.Openai_compat
   | Mcp_tool -> Voice_config.Voice_mcp
+  | Macos_say -> Voice_config.Macos_say
+  | Whisper_cli -> Voice_config.Whisper_cli
+;;
+
+(* The wire name of the kind a provider becomes. One place, so a caller that
+   has to name a kind over HTTP does not restate the mapping and drift from
+   it. *)
+let provider_kind_label provider =
+  Voice_config.string_of_endpoint_kind (kind_of_provider provider)
 ;;
 
 type draft =
@@ -52,11 +73,13 @@ let blank ~section ~provider =
   ; endpoint_id = ""
   ; address = (match provider with
                | Elevenlabs -> Voice_config.default_elevenlabs_base_url
-               | Openai_compatible | Mcp_tool -> "")
+               (* A command has no address. *)
+               | Openai_compatible | Mcp_tool | Macos_say | Whisper_cli -> "")
   ; credential_variable =
       (match provider with
        | Elevenlabs -> elevenlabs_credential_variable
-       | Openai_compatible | Mcp_tool -> "")
+       (* Nothing leaves the machine for a command, so there is no key. *)
+       | Openai_compatible | Mcp_tool | Macos_say | Whisper_cli -> "")
   ; model = ""
   ; voice = ""
   ; timeout_seconds = None
@@ -101,7 +124,15 @@ let gaps draft =
     match draft.provider with
     | Elevenlabs -> [ Endpoint_id_is_blank; Credential_variable_is_blank; Model_is_blank ]
     | Openai_compatible -> [ Endpoint_id_is_blank; Address_is_blank; Model_is_blank ]
-    | Mcp_tool -> [ Endpoint_id_is_blank; Address_is_blank; Model_is_blank ]
+    | Mcp_tool -> [ Endpoint_id_is_blank; Address_is_blank ]
+    (* say needs a name and a voice and nothing else: no address, no
+       credential, and no model, because it is asked for a voice rather than a
+       model. The voice is added below with the rest of speech out. *)
+    | Macos_say -> [ Endpoint_id_is_blank ]
+    (* whisper-cli needs the model, which is the file it loads rather than a
+       name a provider looks up. No address and no credential: nothing leaves
+       the machine. *)
+    | Whisper_cli -> [ Endpoint_id_is_blank; Model_is_blank ]
   in
   let required =
     match draft.section with
@@ -127,18 +158,20 @@ let endpoint_of_draft draft : Voice_config.endpoint =
   ; kind
   ; base_url = (match draft.provider with
                 | Elevenlabs | Openai_compatible -> optional draft.address
-                | Mcp_tool -> None)
+                | Mcp_tool | Macos_say | Whisper_cli -> None)
   ; mcp_url = (match draft.provider with
                | Mcp_tool -> optional draft.address
-               | Elevenlabs | Openai_compatible -> None)
+               | Elevenlabs | Openai_compatible | Macos_say | Whisper_cli -> None)
   ; health_url = None
   ; api_key_env = optional draft.credential_variable
   ; enabled = true
   ; timeout_seconds = draft.timeout_seconds
-  ; default_voice = None
-  (* The wizard offers the three kinds that have an address. Naming the
-     executable belongs to the two command kinds, which it does not offer yet,
-     and each of those knows the name it is normally installed under. *)
+  ; default_voice =
+      (match draft.section with
+       | Voice_setup.Tts -> optional draft.voice
+       | Voice_setup.Stt -> None)
+  (* Command providers use their installed names. This wizard does not accept
+     an executable path override. *)
   ; command = None
   }
 ;;
@@ -147,17 +180,21 @@ let changes draft =
   match gaps draft with
   | _ :: _ as gaps -> Error gaps
   | [] ->
-    let model = String.trim draft.model in
-    (* The section's default_model is set alongside the endpoint, not after it:
-       a section that exists must name one, so an endpoint written on its own
-       would leave a file the loader refuses. *)
-    let voice =
-      match draft.section with
-      | Voice_setup.Tts -> [ Voice_setup.Set_tts_default_voice (String.trim draft.voice) ]
-      | Voice_setup.Stt -> []
+    (* The section's model is set alongside the endpoint, not after it: a
+       section whose endpoints are asked for one must name it, so an endpoint
+       written on its own would leave a file the loader refuses.
+
+       say is not asked for one, so nothing is written for it -- a blank would
+       be written over a model that a sibling endpoint in the same section does
+       need. *)
+    let model =
+      match draft.provider with
+      | Elevenlabs | Openai_compatible | Whisper_cli ->
+        [ Voice_setup.Set_default_model (draft.section, String.trim draft.model) ]
+      | Macos_say | Mcp_tool -> []
     in
     Ok
-      ((Voice_setup.Set_default_model (draft.section, model) :: voice)
+      (model
        @ [ Voice_setup.Put_endpoint (draft.section, endpoint_of_draft draft) ])
 ;;
 
@@ -176,19 +213,32 @@ let steps draft =
     match draft.provider with
     | Elevenlabs -> []
     | Openai_compatible | Mcp_tool -> [ Address ]
+    (* Nothing to ask: a command is found on PATH under the name its kind
+       knows, and a path override is edited into the file by someone who
+       already knows they need one. *)
+    | Macos_say | Whisper_cli -> []
   in
   let credential =
     match draft.provider with
     | Elevenlabs | Openai_compatible -> [ Credential ]
     | Mcp_tool -> []
+    (* Nothing leaves the machine, so there is no key to name. *)
+    | Macos_say | Whisper_cli -> []
   in
   let voice =
     match draft.section with
     | Voice_setup.Tts -> [ Voice ]
     | Voice_setup.Stt -> []
   in
-  ((Section :: Provider :: Name :: address) @ credential @ [ Model ] @ voice)
-  @ [ Review ]
+  (* say is asked for a voice, not a model, so the model step is not shown for
+     it. Showing it would ask for a setting the endpoint ignores, and the
+     answer would be written into the section anyway. *)
+  let model =
+    match draft.provider with
+    | Elevenlabs | Openai_compatible | Whisper_cli -> [ Model ]
+    | Macos_say | Mcp_tool -> []
+  in
+  ((Section :: Provider :: Name :: address) @ credential @ model @ voice) @ [ Review ]
 ;;
 
 let step_prompt = function

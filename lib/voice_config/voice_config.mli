@@ -67,8 +67,9 @@ type voice_tuning = {
 
 type tts_config = {
   default_model : string option;
-      (** Required once the [tts] section exists, and never blank: every
-          endpoint in the section is asked for this model by name. *)
+      (** Required when an endpoint consumes a model, such as HTTP speech.
+          A say-only or MCP-only section may omit it. A present value must
+          still have the correct string type. *)
   default_voice : string;
   default_voice_settings : voice_tuning;
   agent_voices : (string * string) list;
@@ -81,8 +82,8 @@ type tts_config = {
 
 type stt_config = {
   default_model : string;
-      (** Required once the [stt] section exists, for the same reason as
-          {!tts_config.default_model}. *)
+      (** Required once the [stt] section exists: every transcription
+          transport consumes a model name or a model file path. *)
   endpoints : endpoint list;
   send_on_stop : bool;
       (** Whether ending a capture also sends what was heard.
@@ -220,8 +221,9 @@ val parse_json : Yojson.Safe.t -> (t, string) result
     a file.
 
     [tts] and [stt] are optional sections and parse to [None] when absent;
-    present, each requires its [default_model] (and [tts] its
-    [default_voice]) and a non-empty [endpoints] list. [capture] is
+    present, each requires a non-empty [endpoints] list. [stt] requires a
+    [default_model]; [tts] requires [default_voice] and requires a model only
+    when one of its endpoints consumes it. [capture] is
     optional and defaults per key to {!default_capture}; a key it does not
     know, or a key of the wrong type, is an [Error] naming
     [capture.<key>], the same way an unknown endpoint field is. *)

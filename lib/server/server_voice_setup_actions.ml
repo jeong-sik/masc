@@ -155,23 +155,6 @@ let endpoint_allowed_fields =
   [ "id"; "kind"; "enabled"; "timeout_seconds"; "base_url"; "mcp_url"; "health_url";
     "api_key_env"; "default_voice" ]
 
-(* [Voice_runtime_overlay.adapter_for_endpoint] resolves the id before it
-   consults the kind, so an id that is an alias for another adapter wins over
-   what the request declared: id = "elevenlabs" with kind = "openai_compat"
-   reaches ElevenLabs with its authentication shape while this API reports an
-   OpenAI-compatible endpoint. Refused here rather than written, because a
-   config whose declared kind is not the transport the runtime uses is one no
-   reader of it can trust. Making the kind authoritative in that resolver is the
-   other way round and changes how files already written resolve. *)
-let id_agrees_with_kind ~id ~kind =
-  match Voice_runtime_overlay.resolve_adapter id with
-  | None -> true
-  | Some resolved ->
-    String.equal
-      resolved.Voice_runtime_overlay.canonical_name
-      (Voice_runtime_overlay.adapter_for_endpoint_kind kind)
-        .Voice_runtime_overlay.canonical_name
-
 let endpoint_of_json json =
   let what = "an endpoint" in
   let* fields = fields json in
@@ -191,21 +174,6 @@ let endpoint_of_json json =
   let* health_url = optional_string ~what fields "health_url" in
   let* api_key_env = optional_string ~what fields "api_key_env" in
   let* default_voice = optional_string ~what fields "default_voice" in
-  let* () =
-    if id_agrees_with_kind ~id ~kind
-    then Ok ()
-    else
-      Error
-        (Invalid_request
-           (Printf.sprintf
-              "endpoint id %S already names the %S transport, which is not the declared \
-               kind %S; the runtime would resolve the id and reach the other one"
-              id
-              (match Voice_runtime_overlay.resolve_adapter id with
-               | Some resolved -> resolved.Voice_runtime_overlay.canonical_name
-               | None -> "")
-              (Voice_config.string_of_endpoint_kind kind)))
-  in
   Ok
     { Voice_config.id
     ; kind

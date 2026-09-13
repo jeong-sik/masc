@@ -514,12 +514,10 @@ let test_the_observation_names_a_command_override () =
       output_string
         out
         (before
-         ^ "\n[[voice.tts.endpoints]]\nid = \"say\"\nkind = \"macos_say\"\ncommand = \
+         ^ "\n[voice.tts]\ndefault_model = \"fixture-model\"\ndefault_voice = \"Fixture Voice\"\n\n[[voice.tts.endpoints]]\nid = \"say\"\nkind = \"macos_say\"\ncommand = \
             \"/opt/bin/say\"\n"));
-    (* The tts section the appended endpoint belongs to still needs its required
-       fields, so this only asserts the field survives when the file parses. *)
     match Actions.observe ~base_path with
-    | Error _ -> ()
+    | Error error -> Alcotest.fail (Actions.error_message error)
     | Ok json ->
       let commands =
         match member "endpoints" (member "tts" json) with
@@ -532,9 +530,8 @@ let test_the_observation_names_a_command_override () =
             endpoints
         | _ -> []
       in
-      if commands <> []
-      then
-        Alcotest.(check bool) "the override is named" true (List.mem "/opt/bin/say" commands))
+      Alcotest.(check (list string)) "the configured override is observed"
+        [ "/opt/bin/say" ] commands)
 
 let endpoint_change extra =
   `Assoc
@@ -684,12 +681,139 @@ let test_the_observation_names_every_settings_section () =
         ; "gate", [ "always_allow"; "exempt_agents" ]
         ])
 
+
+(* The revision the route answers with has to be the one this write produced,
+   not whatever a read after the commit happens to see. Taken from a second,
+   unlocked read, it answered a failure for a write that landed, and under a
+   concurrent writer it answered that writer's revision -- which the client
+   would then send back as [expected_revision] without ever having observed
+   what it described. The check a caller can make is the one that matters:
+   editing again with it works. *)
+let test_the_answered_revision_is_the_one_this_write_made () =
+  with_workspace (fun ~base_path ~path ->
+    let endpoint id =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint",
+          `Assoc
+            [ "id", `String id
+            ; "kind", `String "elevenlabs_direct"
+            ; "api_key_env", `String "ELEVENLABS_API_KEY"
+            ]
+        ]
+    in
+    let answered =
+      match Actions.apply ~base_path (request (revision ~base_path) [ endpoint "first" ]) with
+      | Error error -> Alcotest.fail (Actions.error_message error)
+      | Ok answer -> string_member "revision" answer
+    in
+    Alcotest.(check string) "and it is what the file now carries" (revision ~base_path)
+      answered;
+    (* The wizard stays open and saves again with what it was handed. *)
+    match Actions.apply ~base_path (request answered [ endpoint "second" ]) with
+    | Error error ->
+      Alcotest.failf "editing again with the answered revision was refused: %s"
+        (Actions.error_message error)
+    | Ok _ -> ignore (read path))
+
+(* runtime.toml up to its [voice] section: a workspace whose voice, if any, is
+   configured somewhere else. *)
+let runtime_without_voice =
+  let marker = "\n[voice.stt]" in
+  match Astring.String.find_sub ~sub:marker runtime_toml with
+  | Some index -> String.sub runtime_toml 0 index ^ "\n"
+  | None -> Alcotest.fail "the fixture should carry a [voice.stt] section"
+
+(* A client that picked between base_url and mcp_url itself showed base_url for
+   a voice_mcp endpoint carrying both, while the call went to mcp_url. The
+   observation names the address the transport resolves. *)
+let test_observe_names_the_address_the_transport_contacts () =
+  with_workspace (fun ~base_path ~path ->
+    Out_channel.with_open_bin path (fun out ->
+      output_string out
+        (runtime_toml
+         ^ {|
+[voice.tts]
+default_model = "model"
+default_voice = "voice"
+
+[[voice.tts.endpoints]]
+id = "speaker"
+kind = "voice_mcp"
+base_url = "http://127.0.0.1:9100"
+mcp_url = "http://127.0.0.1:9200/mcp"
+enabled = true
+|}));
+    match Actions.observe ~base_path with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok json ->
+      let only section =
+        match member "endpoints" (member section json) with
+        | `List [ endpoint ] -> endpoint
+        | _ -> Alcotest.failf "expected exactly one %s endpoint" section
+      in
+      Alcotest.(check string) "voice_mcp is called at mcp_url, not base_url"
+        "http://127.0.0.1:9200/mcp" (string_member "address" (only "tts"));
+      Alcotest.(check string) "an OpenAI-compatible endpoint at its base_url"
+        "http://127.0.0.1:2022/v1" (string_member "address" (only "stt")))
+
+(* With no [voice] section the loader reads the standalone JSON, so that file is
+   the configuration in effect. The observation used to parse only runtime.toml
+   and answer null for every section of a workspace whose voice worked; a write
+   would then have created a section that replaced everything the file set. *)
+let test_a_standalone_source_is_observed_and_not_written_over () =
+  with_workspace (fun ~base_path ~path ->
+    Out_channel.with_open_bin path (fun out -> output_string out runtime_without_voice);
+    let standalone = Voice_config.voice_config_file_in base_path in
+    let json =
+      {|{"tts": {"default_model": "eleven_multilingual_v2", "default_voice": "Yuna",
+         "endpoints": [{"id": "from-json", "kind": "elevenlabs_direct",
+                        "api_key_env": "ELEVENLABS_API_KEY"}]}}|}
+    in
+    Out_channel.with_open_bin standalone (fun out -> output_string out json);
+    (match Actions.observe ~base_path with
+     | Error error -> Alcotest.fail (Actions.error_message error)
+     | Ok observed ->
+       let source = member "source" observed in
+       Alcotest.(check string) "the source is the standalone file" "standalone_json"
+         (string_member "kind" source);
+       Alcotest.(check string) "named by its path" standalone (string_member "path" source);
+       (match member "endpoints" (member "tts" observed) with
+        | `List [ endpoint ] ->
+          Alcotest.(check string) "its endpoints are listed" "from-json"
+            (string_member "id" endpoint)
+        | _ -> Alcotest.fail "expected the standalone file's one tts endpoint"));
+    let change =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint",
+          `Assoc
+            [ "id", `String "whisper-local"
+            ; "kind", `String "openai_compat"
+            ; "base_url", `String "http://127.0.0.1:2022/v1"
+            ]
+        ]
+    in
+    match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+    | Ok _ -> Alcotest.fail "a section over the standalone source must be refused"
+    | Error (Actions.Setup_failed (Voice_setup.Standalone_source_active refused)) ->
+      Alcotest.(check string) "the refusal names the file in effect" standalone refused;
+      Alcotest.(check string) "runtime.toml is untouched" runtime_without_voice (read path);
+      Alcotest.(check string) "and so is the standalone file" json (read standalone)
+    | Error error -> Alcotest.fail (Actions.error_message error))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
     [ ( "reading"
       , [ Alcotest.test_case "observe names the endpoints" `Quick
             test_observe_names_the_endpoints
+        ; Alcotest.test_case "observe names the address the transport contacts" `Quick
+            test_observe_names_the_address_the_transport_contacts
+        ; Alcotest.test_case "a standalone source is observed and not written over" `Quick
+            test_a_standalone_source_is_observed_and_not_written_over
         ] )
     ; ( "unknown input is refused by name"
       , [ Alcotest.test_case "an unknown kind" `Quick test_an_unknown_kind_is_refused_by_name
@@ -701,6 +825,8 @@ let () =
             test_apply_writes_and_answers_with_the_new_revision
         ; Alcotest.test_case "a stale revision is a conflict" `Quick
             test_a_stale_revision_is_a_conflict
+        ; Alcotest.test_case "the answered revision is the one this write made" `Quick
+            test_the_answered_revision_is_the_one_this_write_made
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
         ] )
     ; ( "a kind is taken or refused for what it can do"

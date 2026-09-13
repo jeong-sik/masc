@@ -40,8 +40,8 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
   ; b Act "e" "edit"
-      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override",
-      Some [ Config_runtime; Config_models; Config_params; Config_prompts ]
+      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
   ; b Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
   ; b Act "Enter" "edit / use"

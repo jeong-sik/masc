@@ -1807,14 +1807,32 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
      -- and for say only the second one can catch a wrong name, because say
-     speaks in the system voice rather than failing on one it does not have. *)
-  let tts =
-    match agent with
-    | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
-    | None -> Masc.Voice_bridge.probe_tts ~message ()
-  in
-  let stt =
-    Option.map (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ()) audio
+     speaks in another voice rather than failing on one it does not have. The
+     probe looks the name up in say's own list and refuses one that is not
+     there. *)
+  (* Under an event loop, because a voice_mcp endpoint is asked over the same
+     MCP HTTP client a turn uses, and that client needs a switch, a clock and
+     a connection pool. The HTTP and command kinds run a process and do not
+     depend on it. *)
+  let tts, stt =
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        Eio_context.set_env env;
+        Eio_context.set_switch sw;
+        Eio_context.set_net (Eio.Stdenv.net env);
+        Eio_context.set_clock (Eio.Stdenv.clock env);
+        Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+          let tts =
+            match agent with
+            | Some agent_id -> Masc.Voice_bridge.probe_tts ~agent_id ~message ()
+            | None -> Masc.Voice_bridge.probe_tts ~message ()
+          in
+          let stt =
+            Option.map
+              (fun audio_file -> audio_file, Masc.Voice_bridge.probe_stt ~audio_file ())
+              audio
+          in
+          tts, stt)))
   in
   let section name = function
     | Ok attempts -> name, `List (List.map Masc.Voice_bridge.probe_attempt_json attempts)
@@ -1966,19 +1984,18 @@ let voice_local_setup_exit base_path speak_voice hear_model =
           first, then this again."
          base_path runtime_config_path (Filename.quote base_path))
   else
-  match Voice_setup.observe ~runtime_config_path with
+  let standalone_path = Voice_config.voice_config_file_in base_path in
+  match Voice_setup.observe ~runtime_config_path ~standalone_path with
   | Error error -> refuse (Voice_setup.error_message error)
-  | Ok (revision, existing) ->
-    let standalone_path = Voice_config.voice_config_file_in base_path in
+  (* The writer refuses this too, under its lock; said here first so nothing
+     below is decided against a configuration this command cannot write. *)
+  | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
+    refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
+  | Ok (revision, active) ->
+    let existing = Option.map snd active in
     let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
     let stt = Option.bind existing (fun config -> config.Voice_config.stt) in
-    if Option.is_none existing && Sys.file_exists standalone_path then
-      refuse
-        (Printf.sprintf
-           "Voice settings are read from %s. Configure voice in that active file; \
-            local setup will not create a TOML section that overrides it."
-           standalone_path)
-    else if Option.is_some hear_model
+    if Option.is_some hear_model
       && Option.exists
            (fun (config : Voice_config.stt_config) -> List.exists
              (fun endpoint -> endpoint.Voice_config.kind <> Voice_config.Whisper_cli)
@@ -1996,6 +2013,21 @@ let voice_local_setup_exit base_path speak_voice hear_model =
            tts then
       refuse "The endpoint macos-say already names another provider; nothing was written."
     else
+      (* The name is typed here, and say does not fail on one it does not
+         have: it speaks in another voice and exits 0. Measured 2026-09-13,
+         -v NoSuchVoice wrote the same bytes as -v Yuna. Written unchecked, the
+         mistake surfaced only as a keeper with the wrong voice. The endpoint
+         this writes runs plain say, so that is the catalogue asked. *)
+      match
+        match speak_voice with
+        | None -> Ok ()
+        | Some voice ->
+          Masc.Voice_bridge.check_say_voice
+            (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+            ~voice
+      with
+      | Error reason -> refuse (reason ^ ". Nothing was written.")
+      | Ok () ->
       let speaking =
         match speak_voice with
         | None -> []
@@ -2031,9 +2063,12 @@ let voice_local_setup_exit base_path speak_voice hear_model =
             "Nothing to set up: pass --voice to speak, --model to listen, or both.";
           2
       | changes ->
-          match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
+          match
+            Voice_setup.apply ~runtime_config_path ~standalone_path
+              ~expected_revision:revision changes
+          with
           | Error error -> refuse (Voice_setup.error_message error)
-          | Ok () ->
+          | Ok _revision ->
               print_endline "voice is configured";
               0
 
@@ -2047,8 +2082,10 @@ let voice_local_setup_cmd =
           ~docv:"NAME"
           ~doc:
             "Speak with this system voice. The name is the whole label say prints, \
-             parentheses included: say does not fail on a name it does not have, and a \
-             bare name that exists in several languages selects one of them silently.")
+             parentheses included, compared without regard to case. A name say does not \
+             list is refused and nothing is written: say itself would speak it in another \
+             voice without failing, and a bare name that exists in several languages \
+             selects one of them silently.")
   in
   let model =
     Arg.(

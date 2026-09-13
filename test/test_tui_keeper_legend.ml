@@ -18,7 +18,7 @@ let contains needle haystack =
 let make_state () = create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
 
 let legend () =
-  Masc_tui_render_prim.keeper_action_hints (make_state ()) None
+  Masc_tui_render_prim.keeper_control_hints (make_state ()) None
 
 let test_the_legend_is_split_into_items () =
   let items =

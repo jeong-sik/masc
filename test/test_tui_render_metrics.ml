@@ -357,12 +357,24 @@ let test_pulse_roster_waits_for_the_local_read () =
 ;;
 
 let test_section_pills_line () =
-  let line_fleet = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_fleet in
-  check bool "fleet line bounded" true (Layout.display_width line_fleet <= 100);
-  let line_res = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_resources in
-  check bool "res line bounded" true (Layout.display_width line_res <= 100);
-  let line_tools = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_tools in
-  check bool "tools line bounded" true (Layout.display_width line_tools <= 100)
+  let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools ] in
+  List.iter
+    (fun active ->
+      let line = Render_metrics.section_pills_line ~cols:100 ~active in
+      let plain = Masc_tui_theme.strip_sgr line in
+      let label = Types.metrics_section_label active in
+      check bool (label ^ ": line bounded") true (Layout.display_width line <= 100);
+      check bool (label ^ ": the section being read wears the mark") true
+        (contains plain ("\xe2\x96\xb8" ^ label));
+      List.iter
+        (fun other ->
+          check bool (label ^ ": every section is named") true
+            (contains plain (Types.metrics_section_label other)))
+        sections;
+      (* 1-3 and s are the footer's; the strip does not spell them again. *)
+      check bool (label ^ ": no key spelling") false
+        (contains plain "[1-3" || contains plain "Sections"))
+    sections
 ;;
 
 let test_section_fleet_lines () =

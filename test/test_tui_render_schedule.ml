@@ -1586,6 +1586,14 @@ let test_an_absent_date_does_not_move_the_age () =
     (Masc_tui_message_layout.display_width with_both)
     (Masc_tui_message_layout.display_width without_date)
 
+(* A post with no time has no age. Read as the epoch, it drew twenty thousand
+   days folded into the column as "2…d09h". *)
+let test_a_board_post_without_a_time_has_no_age () =
+  check string "a known time is a span" "1h00m"
+    (Schedule.board_age_text ~now:7200. (Some 3600.));
+  check string "no time is a dash, not an age" "\xe2\x80\x94"
+    (Schedule.board_age_text ~now:7200. None)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -1705,5 +1713,7 @@ let () =
             test_capped_page_cannot_report_an_empty_store
         ; test_case "wake readings stay four separate answers" `Quick
             test_wake_readings_stay_four_separate_answers
+        ; test_case "a board post without a time has no age" `Quick
+            test_a_board_post_without_a_time_has_no_age
         ] )
     ]

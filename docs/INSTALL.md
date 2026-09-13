@@ -325,6 +325,47 @@ for approval, inspect its pending request in the chat or **Approvals** view.
 Do not interpret a pending request or a listening HTTP server as successful
 model inference or tool execution.
 
+### Talking to `imp` by voice (macOS)
+
+The setup journey asks **3 · Give imp a voice (optional)** between the model
+connection and the sandbox. Speaking uses `say`, which every Mac has, so it
+downloads nothing. Hearing is a second question and needs `whisper-cli`, a
+1.6GB model file, and `sox` for the microphone; the journey offers all three.
+Choosing **Stay text only** or `q` leaves the voice settings untouched.
+
+Outside the journey, choose the voice from the list `say` prints. A name that
+is not in that list is refused and nothing is written:
+
+```bash
+masc voice-local-setup --base-path "$HOME/masc-workspace" --list-voices
+masc voice-local-setup --base-path "$HOME/masc-workspace" --voice "Yuna" \
+  --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc voice-verify --base-path "$HOME/masc-workspace" --agent imp --audio utterance.wav
+```
+
+`voice-verify` synthesizes one sentence and transcribes the audio file, and says
+`answered` or `refused` with the reason for each endpoint.
+
+In the TUI, open imp's chat. An empty draft shows
+`(^Y to speak, ^A to keep listening)`:
+
+| Key | What it does |
+|---|---|
+| `Ctrl-Y` | record a sentence into the draft; press again to stop and keep it |
+| `Enter` | send the draft |
+| `Ctrl-A` | keep listening: each captured sentence starts the next capture |
+| `Esc` | discard a recording in progress |
+
+`[voice.stt] send_on_stop = true` sends the draft when a capture ends, so no
+Enter is needed.
+
+imp answers in text. It speaks only when it calls its voice tool, and the clip
+is then attached to the chat line: the dashboard shows it as a player that you
+start, and the TUI does not play it. Nothing plays on this computer while
+`[voice.local_playback]` is absent.
+
+[VOICE-RUNBOOK.md](VOICE-RUNBOOK.md) has the measured runs behind each step.
+
 For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and follow the [client setup](../README.md#mcp-client-setup).
 
 ## Images and the Linux/microVM boundary

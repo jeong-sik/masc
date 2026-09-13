@@ -308,6 +308,21 @@ let endpoint_base_url (endpoint : Voice_config.endpoint) =
   | _ -> Option.map normalize_base_url endpoint.base_url
 ;;
 
+(* The address a request to this endpoint is sent to, resolved the way the
+   transport resolves it. A surface that picked between [base_url] and
+   [mcp_url] itself showed [base_url] for a voice_mcp endpoint carrying both,
+   while the call went to [mcp_url]. A command kind is not contacted at an
+   address, so it has none. *)
+let endpoint_address (endpoint : Voice_config.endpoint) =
+  match (adapter_for_endpoint endpoint).transport with
+  | Voice_mcp ->
+    (match session_mcp_url_of_endpoint endpoint with
+     | Ok url -> Some url
+     | Error _ -> None)
+  | Openai_compat | Elevenlabs_direct -> endpoint_base_url endpoint
+  | Macos_say | Whisper_cli -> None
+;;
+
 let is_elevenlabs_voice_id value =
   let len = String.length value in
   len >= 20
@@ -476,7 +491,7 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
 
    say publishes its own catalogue, and a fresh mac needs it more than a hosted
    provider does: say does not fail on a voice it does not have. It exits 0 and
-   speaks in the system voice, so a mistyped name is silent -- measured
+   speaks in another voice, so a mistyped name is silent -- measured
    2026-09-12, where "Eddy" alone gave an English voice reading Korean and
    "Eddy (한국어(한국))" gave the Korean one. A name typed from memory is a
    coin flip; a name picked from this list is not. *)

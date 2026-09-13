@@ -284,6 +284,23 @@ module Theme = struct
   end
 end
 
+(* A row of places a reader can switch between, with the one being read
+   marked: the mark and the name in the information colour, the others dim,
+   two cells apart. The surface strip above every screen draws its entries this
+   way, and the smaller strips inside a screen -- Activity's two readings,
+   Config's panes, Planning's tabs, Metrics' sections -- each drew their own
+   variant: a "|" between names on two of them, a space before the unmarked
+   names on two, a different colour on one. *)
+let tab_strip (tabs : (string * bool) list) =
+  String.concat "  "
+    (List.map
+       (fun (label, current) ->
+         if current then
+           Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
+           ^ Ansi.reset
+         else Ansi.dim ^ label ^ Ansi.reset)
+       tabs)
+
 (** One owner for the visual distinction between conversation roles.
 
     Role and state are different axes: a Keeper message is not a success, and
@@ -487,7 +504,8 @@ module Terminal_text = struct
     Option.value ~default (optional_single_line value)
 
   let single_lines values = List.map single_line values
-  let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
+  let short_timestamp text =
+    Masc.Tui_decode.short_timestamp_for_terminal ~localtime:Unix.localtime text
   (* The screen's clock is the terminal's zone. This is the one place that
      names it, so every row clock and the header clock agree. *)
   let clock_timestamp text =
@@ -497,12 +515,12 @@ end
 (** Task status icon *)
 let task_status_icon status =
   match status with
-  | Masc_domain.Done _ -> "\xe2\x97\x8f"  (* filled circle *)
+  | Masc_domain.Done _ -> Masc_tui_theme.Glyph.progress_done
   | Masc_domain.Claimed _
   | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _ -> "\xe2\x97\x90"  (* half circle *)
-  | Masc_domain.Todo -> "\xe2\x97\x8b"  (* empty circle *)
-  | Masc_domain.Cancelled _ -> "\xc3\x97"
+  | Masc_domain.AwaitingVerification _ -> Masc_tui_theme.Glyph.progress_active
+  | Masc_domain.Todo -> Masc_tui_theme.Glyph.progress_waiting
+  | Masc_domain.Cancelled _ -> Masc_tui_theme.Glyph.progress_ended
 
 (** Priority indicator. Empty for everything but the top priority — the glyph
     owner in [Masc_tui_theme.Glyph] says which ranks speak at all. *)
@@ -578,71 +596,6 @@ let framed_empty buf cols =
     Ansi.gray Ansi.box_v Ansi.reset
     (String.make inner ' ')
     Ansi.gray Ansi.box_v Ansi.reset)
-
-(* 3D block drop shadow framing for modal overlays. The modal body width is
-   shrunk by 1 column and a solid block (█) is drawn along the right edge in
-   dim weight, preserving the exact cols display width without wrapping. *)
-let shadow_block = "\xe2\x96\x88"
-
-let framed_shadow_top buf cols =
-  if cols < 20 then framed_top buf cols
-  else
-    let rule = draw_hline (framed_rule_width (cols - 1)) in
-    Buffer.add_string buf
-      (Printf.sprintf "%s%s%s%s%s \n"
-         Ansi.gray Ansi.box_tl rule Ansi.box_tr Ansi.reset)
-
-let framed_shadow_bottom buf cols =
-  if cols < 20 then framed_bottom buf cols
-  else
-    let rule = draw_hline (framed_rule_width (cols - 1)) in
-    Buffer.add_string buf
-      (Printf.sprintf "%s%s%s%s%s%s%s%s\n"
-         Ansi.gray Ansi.box_bl rule Ansi.box_br Ansi.reset
-         Ansi.dim shadow_block Ansi.reset)
-
-let framed_shadow_divider buf cols =
-  if cols < 20 then framed_divider buf cols
-  else
-    let rule = draw_hline (framed_rule_width (cols - 1)) in
-    Buffer.add_string buf
-      (Printf.sprintf "%s%s%s%s%s%s%s%s\n"
-         Ansi.gray Ansi.box_l rule Ansi.box_r Ansi.reset
-         Ansi.dim shadow_block Ansi.reset)
-
-let framed_shadow_line buf cols content =
-  if cols < 20 then framed_line buf cols content
-  else
-    let inner = framed_inner_width (cols - 1) in
-    Buffer.add_string buf
-      (Printf.sprintf "%s%s%s %s %s%s%s%s%s%s\n"
-         Ansi.gray Ansi.box_v Ansi.reset
-         (fit_width content inner)
-         Ansi.gray Ansi.box_v Ansi.reset
-         Ansi.dim shadow_block Ansi.reset)
-
-let framed_shadow_line_styled buf cols ~style content =
-  if cols < 20 then framed_line_styled buf cols ~style content
-  else
-    let inner = framed_inner_width (cols - 1) in
-    let content = fit_width content inner in
-    Buffer.add_string buf
-      (Printf.sprintf "%s%s%s %s%s%s %s%s%s%s%s%s\n"
-         Ansi.gray Ansi.box_v Ansi.reset
-         style content Ansi.reset
-         Ansi.gray Ansi.box_v Ansi.reset
-         Ansi.dim shadow_block Ansi.reset)
-
-let framed_shadow_empty buf cols =
-  if cols < 20 then framed_empty buf cols
-  else
-    let inner = framed_inner_width (cols - 1) in
-    Buffer.add_string buf
-      (Printf.sprintf "%s%s%s %s %s%s%s%s%s%s\n"
-         Ansi.gray Ansi.box_v Ansi.reset
-         (String.make inner ' ')
-         Ansi.gray Ansi.box_v Ansi.reset
-         Ansi.dim shadow_block Ansi.reset)
 
 (* Full-screen surfaces draw without the outer box: the terminal edge is
    already the frame, and a border around everything separates nothing (the

@@ -27,9 +27,9 @@ let config_bindings =
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages the runtime.toml and prompts panes; the other five \
-             panes take the key and do nothing with it",
-      Some [ Config_runtime; Config_prompts ]
+      ~help:"pages runtime.toml, and the detail of prompts and presets; the \
+             other four panes take the key and do nothing with it",
+      Some [ Config_runtime; Config_prompts; Config_presets ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -40,8 +40,8 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
   ; b Act "e" "edit"
-      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override",
-      Some [ Config_runtime; Config_models; Config_params; Config_prompts ]
+      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
   ; b Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
   ; b Act "Enter" "edit / use"
@@ -52,6 +52,28 @@ let config_bindings =
       Some [ Config_params; Config_prompts; Config_themes ]
   ; b Act "f" "filter"
       ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+    (* Pane-scoped writes. Each of these is the only key that does what it
+       does, and none of them were listed: presets could be made and put
+       back, and the prompt list could be switched between three readings,
+       with nothing on screen saying so. Short labels: the pane each belongs
+       to and what it does are in the help, which the ? overlay draws in
+       full. *)
+  ; b Act "n" "new"
+      ~help:"on presets, name a preset holding the configuration as it stands",
+      Some [ Config_presets ]
+  ; b Act "u" "restore"
+      ~help:"on presets, put the selected one back; press twice to confirm",
+      Some [ Config_presets ]
+  ; b Act "i" "input"
+      ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
+  ; b Act "a" "fragments"
+      ~help:"on prompts, show or hide the internal pieces the main prompts \
+             are built from; not on the runtime assets reading",
+      Some [ Config_prompts ]
+  ; b Act "o" "assets"
+      ~help:"on prompts, switch between the read-only runtime assets and \
+             the registry you can override",
+      Some [ Config_prompts ]
   ; b Act "Esc" "overview", None
   ; b Meta "r" "reload", None
   ; b Meta "Tab" "next", None
@@ -148,6 +170,7 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
+          ~help:"Events, or the server's own log lines; l opens Logs as well"
       ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
@@ -156,13 +179,14 @@ let for_surface = function
          leaves the surface, so two rows read as two bindings. *)
       ; b Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Overview"
-      ; b Navigate "g / G" "newest / oldest"
+      (* One row per action. g and G reach the ends Home and End reach, and
+         l the tab 2 opens; a row for each spent two of the footer's places
+         on actions it already showed, and at 120 columns the fitter dropped
+         Enter -- the key that opens an event -- to keep them. The rows are
+         the spellings every other reader shares; the extras are in help. *)
       ; b Navigate "Home/End" "newest / oldest"
-          ~help:"the same two ends as g and G, under the keys every other \
-                 reader uses; the ring counts back from the newest, so its \
-                 top is now"
-      ; b Navigate "l" "logs"
-          ~help:"the server's own log lines, off the ring under Activity"
+          ~help:"g and G as well; the ring counts back from the newest, so \
+                 its top is now"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -219,6 +243,10 @@ let for_surface = function
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
+      ; b Act "Ctrl-Y" "speak"
+          ~help:"record into the draft; again to stop and keep what was said"
+      ; b Act "Ctrl-A" "keep listening"
+          ~help:"continuous capture on/off: each sentence starts the next capture"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
@@ -419,7 +447,10 @@ let for_surface = function
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
+      ; b Act "Esc" "clear / back"
+          ~help:"clear the filter, or return to Overview"
+      ; b Search "/" "filter"
+          ~help:"show only keepers whose id or state matches"
       ; b Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta
@@ -619,13 +650,55 @@ let hints_of_bindings bindings =
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
 
+(* A pane's own keys, then the keys all seven panes share. *)
+let config_pane_bindings pane =
+  let own =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with
+        | Some panes when List.mem pane panes -> Some binding
+        | Some _ | None -> None)
+      config_bindings
+  in
+  let shared =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with None -> Some binding | Some _ -> None)
+      config_bindings
+  in
+  (own, shared)
+
+(* The pane's own keys lead the row and the shared ones follow. A cut row
+   gives up its back first, and the shared keys are the ones a reader already
+   met on the pane before -- the reason r, Tab and q close every row. Sorted
+   as one list, the hops to Runtime, Resources and Tools outlived every key a
+   pane answers itself: at 120 columns presets lost n and u, and the runtime
+   assets lost o, their only way back to the registry. *)
+let config_row ~own ~shared =
+  String.concat "  "
+    (List.filter
+       (fun row -> not (String.equal row ""))
+       [ hints_of_bindings own; hints_of_bindings shared ])
+
 let footer_hints_config ~pane =
-  config_bindings
-  |> List.filter_map (fun (binding, panes) ->
-       match panes with
-       | None -> Some binding
-       | Some panes -> if List.mem pane panes then Some binding else None)
-  |> hints_of_bindings
+  let own, shared = config_pane_bindings pane in
+  config_row ~own ~shared
+
+(* The prompts pane's read-only half. [o] swaps the registry for the assets
+   shipped with the binary, and there [a], [i], [e] and [x] answer with a
+   notice rather than acting (masc_tui.ml), so the row leaves them out and
+   names where [o] goes back to. *)
+let footer_hints_prompt_assets =
+  let registry_only = [ "a"; "i"; "e"; "x" ] in
+  let own, shared = config_pane_bindings Config_prompts in
+  let own =
+    own
+    |> List.filter (fun binding -> not (List.mem binding.key registry_only))
+    |> List.map (fun binding ->
+           if String.equal binding.key "o" then { binding with label = "registry" }
+           else binding)
+  in
+  config_row ~own ~shared
 
 (* The Overview footer is the same table plus one runtime fact the renderer
    owns: whether j/k currently drives the task list (task_focus) or the
@@ -893,6 +966,17 @@ let keeper_detail_tab_hint tab =
           (fun binding -> binding.key ^ ":" ^ binding.label)
           (keeper_detail_tab_bindings tab))
 
+(* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
+   [listing_meta] spells them -- is said once, under Global. Repeated under
+   every surface it took three of the dozen rows an 80x24 sheet shows of the
+   reader's own section. A surface that names one of those keys its own way
+   ([r] reload on Config) keeps that row: it says something Global does not.
+   Footers keep the tail, since a footer is all a surface shows. *)
+let sheet_bindings surface =
+  List.filter
+    (fun binding -> not (List.mem binding listing_meta))
+    (for_surface surface)
+
 let help_sections ?current () =
   let sections =
     List.map
@@ -916,7 +1000,7 @@ let help_sections ?current () =
                  Masc_tui_types.keeper_detail_tabs
            | _ -> []
          in
-         (surface, (title, entries (for_surface surface) @ tab_entries)))
+         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =

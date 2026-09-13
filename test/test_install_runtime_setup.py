@@ -1122,36 +1122,119 @@ base_url = "https://voice.fixture.invalid/v1"
             runtime.write_text(runtime.read_text() + voice)
             yield base, runtime
 
+    # voice-local-setup looks --voice up in the list say prints before it
+    # writes. The host running this may have no say at all -- the release job
+    # is Linux -- or a different list, so these run against a say that lists
+    # Yuna and nothing else, which is the host they describe.
+    FAKE_SAY = ("#!/bin/sh\n"
+                "if [ \"$1\" = -v ] && [ \"$2\" = '?' ]; then\n"
+                "  printf 'Yuna                ko_KR    # hello\\n'; exit 0\n"
+                "fi\n"
+                "exit 1\n")
+
     def configure(self, base, *arguments):
         assert BINARY is not None
         env = {key: value for key, value in os.environ.items()
                if not key.startswith(('MASC_', 'AGENT_CORE_'))}
-        return subprocess.run(
-            [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
-            capture_output=True, text=True, env=env, check=False)
+        with tempfile.TemporaryDirectory(prefix='voice-fake-say-') as bin_dir:
+            say = Path(bin_dir) / 'say'
+            say.write_text(self.FAKE_SAY)
+            say.chmod(0o755)
+            env['PATH'] = bin_dir + os.pathsep + env.get('PATH', '')
+            return subprocess.run(
+                [BINARY, 'voice-local-setup', '--base-path', str(base), *arguments],
+                capture_output=True, text=True, env=env, check=False)
 
-    def test_mcp_voice_probe_reports_its_own_transport_limit(self):
+    def test_a_voice_say_does_not_list_is_refused_and_nothing_is_written(self):
+        # say does not fail on a name it does not have: measured 2026-09-13,
+        # say -v NoSuchVoice exited 0 with the same bytes as -v Yuna, and
+        # before this check the command wrote default_voice = "NoSuchVoice".
+        for name in ('NoSuchVoice', 'Yu'):
+            with self.subTest(name=name), self.workspace() as (base, runtime):
+                before = runtime.read_bytes()
+                result = self.configure(base, '--voice', name)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn(f'say has no voice named "{name}"', result.stderr)
+                self.assertIn('Nothing was written.', result.stderr)
+                self.assertEqual(runtime.read_bytes(), before)
+        # say matches names without regard to case, so the check does too.
+        with self.workspace() as (base, runtime):
+            result = self.configure(base, '--voice', 'yuna')
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    @contextlib.contextmanager
+    def voice_mcp_server(self, status=200):
+        """A voice MCP endpoint that records each tools/call and answers it."""
+        import http.server
+        import threading
+        calls = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get('Content-Length', '0'))
+                calls.append(json.loads(self.rfile.read(length)))
+                body = json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {
+                    'content': [{'type': 'text', 'text': '{"status": "spoken"}'}]}}).encode()
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_address[1]}/mcp', calls
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def verify_voice(self, voice):
+        with self.workspace(voice) as (base, runtime):
+            env = {key: value for key, value in os.environ.items()
+                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            env.update(MASC_BASE_PATH=str(base), MASC_CONFIG_DIR=str(runtime.parent))
+            return subprocess.run([BINARY, 'voice-verify', '--json', '--message', 'check'],
+                                  capture_output=True, text=True, env=env, check=False)
+
+    # A configuration whose only speaker is an MCP tool used to be reported as
+    # nothing answering, and voice-verify exited 1 for a voice that worked. The
+    # probe asks agent_speak, the tool a turn calls.
+    def test_mcp_voice_probe_asks_agent_speak(self):
         assert BINARY is not None
-        for enabled in (True, False):
-            with self.subTest(enabled=enabled):
-                voice = ('\n[voice.tts]\ndefault_voice = "fixture"\n'
-                         'default_model = "fixture-model"\n'
-                         '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
-                         f'enabled = {str(enabled).lower()}\n')
-                with self.workspace(voice) as (base, runtime):
-                    env = {key: value for key, value in os.environ.items()
-                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
-                    env.update(MASC_BASE_PATH=str(base), MASC_CONFIG_DIR=str(runtime.parent))
-                    result = subprocess.run([BINARY, 'voice-verify', '--json'],
-                                            capture_output=True, text=True, env=env, check=False)
-                    self.assertEqual(result.returncode, 1, result.stderr)
-                    attempts = json.loads(result.stdout)['tts']
-                    self.assertIsInstance(attempts, list, result.stdout)
-                    attempt = attempts[0]
-                    self.assertEqual(attempt['state'], 'skipped')
-                    self.assertEqual(attempt['detail'],
-                                     'this verifier does not probe the MCP synthesis transport'
-                                     if enabled else 'disabled in the configuration')
+        for status, state, code in ((200, 'answered', 0), (500, 'refused', 1)):
+            with self.subTest(status=status), self.voice_mcp_server(status) as (url, calls):
+                result = self.verify_voice(
+                    '\n[voice.tts]\ndefault_voice = "fixture-voice"\ndefault_model = "fixture-model"\n'
+                    '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
+                    f'mcp_url = "{url}"\n')
+                self.assertEqual(result.returncode, code, result.stdout + result.stderr)
+                attempt = json.loads(result.stdout)['tts'][0]
+                self.assertEqual(attempt['state'], state, attempt)
+                self.assertEqual(len(calls), 1, calls)
+                params = calls[0]['params']
+                self.assertEqual(params['name'], 'agent_speak')
+                self.assertEqual(params['arguments']['message'], 'check')
+                self.assertEqual(params['arguments']['voice'], 'fixture-voice')
+                if state == 'answered':
+                    self.assertIn('fixture-voice', attempt['detail'])
+
+    def test_a_disabled_mcp_endpoint_is_not_asked(self):
+        assert BINARY is not None
+        with self.voice_mcp_server() as (url, calls):
+            result = self.verify_voice(
+                '\n[voice.tts]\ndefault_voice = "fixture-voice"\ndefault_model = "fixture-model"\n'
+                '[[voice.tts.endpoints]]\nid = "mcp"\nkind = "voice_mcp"\n'
+                f'mcp_url = "{url}"\nenabled = false\n')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            attempt = json.loads(result.stdout)['tts'][0]
+            self.assertEqual(attempt['state'], 'skipped')
+            self.assertEqual(attempt['detail'], 'disabled in the configuration')
+            self.assertEqual(calls, [])
 
     def test_speaking_keeps_remote_defaults_and_scopes_the_local_voice(self):
         import tomllib

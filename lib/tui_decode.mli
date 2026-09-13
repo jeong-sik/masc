@@ -52,10 +52,13 @@ val preview_line : string -> string
     bytes, this one is for text whose breaks are content: a file's edit, a
     tool call's arguments. *)
 
-val short_timestamp_for_terminal : string -> string
-(** Keep at most the first 19 source bytes, then sanitize the result. Slicing
-    before the terminal boundary ensures a split UTF-8 scalar cannot recreate a
-    raw C1 byte. Empty timestamps render as [(never)]. *)
+val short_timestamp_for_terminal :
+  localtime:(float -> Unix.tm) -> string -> string
+(** [YYYY-MM-DD HH:MM:SS] of an RFC 3339 timestamp in the zone [localtime]
+    converts to, then sanitized. A timestamp the codec cannot read keeps at most
+    its first 19 source bytes; slicing before the terminal boundary ensures a
+    split UTF-8 scalar cannot recreate a raw C1 byte. Empty timestamps render as
+    [(never)]. *)
 
 val clock_timestamp_for_terminal :
   localtime:(float -> Unix.tm) -> string -> string
@@ -2353,6 +2356,9 @@ val decode_context_observation :
   (context_observation, string) result
 val context_unavailable_reason_to_string : context_unavailable_reason -> string
 val is_success_http_status : int -> bool
+val http_status_error : status_code:int -> body:string -> string
+(** A non-2xx answer as one terminal-safe line: [HTTP <status>: ] and then the
+    body's ["error"] sentence when it has one, otherwise the body's head. *)
 (** Transport owns the target URL; keep it before the verbose failure reason. *)
 val http_transport_error : verb:string -> url:string -> detail:string -> string
 val decode_json_response_body :

@@ -1,0 +1,122 @@
+{
+  "status": 200,
+  "response": {
+    "keeper": "browser-handoff-proof-39143000",
+    "count": 1,
+    "skipped_rows": 0,
+    "source": "turn_record",
+    "producer": "keeper_agent_run.run_turn|keeper_turn_record_writer",
+    "durable_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/keepers/browser-handoff-proof-39143000/turn-records",
+    "dashboard_surface": "/api/v1/keepers/:name/turn-records",
+    "freshness_slo_s": 420.0,
+    "live_turn_in_progress": false,
+    "live_turn_started_at_unix": null,
+    "live_turn_last_progress_at_unix": null,
+    "latest_ts_unix": 1789272339.9556,
+    "latest_ts_iso": "2026-09-13T04:05:39Z",
+    "latest_age_s": 4.885292053222656,
+    "health": "ok",
+    "stale_reason": null,
+    "memory_os": {
+      "keeper": "browser-handoff-proof-39143000",
+      "snapshot_store": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/config/keepers/browser-handoff-proof-39143000.memory-current.json",
+      "recall_enabled": true,
+      "revision": 0,
+      "updated_at": null,
+      "update_source": null,
+      "read_errors": [],
+      "facts": {
+        "shown": 0,
+        "current": 0,
+        "items": []
+      },
+      "change": {
+        "added": [],
+        "removed": [],
+        "retained": 0,
+        "invalidated": []
+      }
+    },
+    "entries": [
+      {
+        "record": {
+          "execution_ids": [
+            "exec-1789272250635-0001",
+            "exec-1789272250637-0002",
+            "exec-1789272264039-0003",
+            "exec-1789272275194-0006",
+            "exec-1789272289173-0009",
+            "exec-1789272297315-000c"
+          ],
+          "keeper": "browser-handoff-proof-39143000",
+          "agent_name": "browser-handoff-proof-39143000",
+          "turn_kind": "direct",
+          "trace_id": "trace-1789272239130-00000",
+          "absolute_turn": 1,
+          "turn_ref": "trace-1789272239130-00000#1",
+          "blocks": [
+            {
+              "block": "keeper_instructions",
+              "bytes": 8225,
+              "digest": "cabd1b429fd9dc045916890b9529f05a3fbacde5fb668ccdf4b6c1fd9f46e061"
+            }
+          ],
+          "input_components": [
+            {
+              "component": "message_assistant_text",
+              "bytes": 941
+            },
+            {
+              "component": "message_tool_result",
+              "bytes": 32019
+            },
+            {
+              "component": "message_tool_use",
+              "bytes": 1264
+            },
+            {
+              "component": "message_user",
+              "bytes": 1224
+            },
+            {
+              "component": "prompt.keeper_instructions",
+              "bytes": 8225
+            },
+            {
+              "component": "tool_schemas",
+              "bytes": 57386
+            }
+          ],
+          "runtime_profile": "glm-coding.glm-5.3-flash",
+          "request_runtime_profile": "glm-coding.glm-5.3-flash",
+          "request_body_bytes": 107216,
+          "transmitted_atoms": 6,
+          "total_atoms": 6,
+          "model_input_measurement": "wire_shape",
+          "raw_trace_run_ref": {
+            "worker_run_id": "wr-1a098efac4c-1751-0000",
+            "path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-browser-handoff-yq3d680h/.masc/keepers/browser-handoff-proof-39143000/raw-traces/turn-1789272239180-1751-000000.jsonl",
+            "start_seq": 1,
+            "end_seq": 57,
+            "agent_name": "agent_core-glm-coding.glm-5.3-flash",
+            "session_id": "trace-1789272239130-00000"
+          },
+          "selected_model": "glm-5.3-flash",
+          "finish_reason": "completed",
+          "tool_surface_ref": "[masc:blob sha256=cd227a442df8082413575eb26255c1d2cf97f60b08306e5d37b85dd98b4ecebe bytes=2472 mime=application/json preview=\"[{\\\"name\\\":\\\"Execute\\\",\\\"schema_bytes\\\":1977},{\\\"name\\\":\\\"Grep\\\",\\\"schema_bytes\\\":909},{\\\"name\\\":\\\"Read\\\",\\\"schema_bytes\\\":1993},{\\\"name\\\":\\\"Edit\\\",\\\"schema_bytes\\\":1242},{\\\"name\\\":\\\"Write\\\",\\\"schema_bytes\\\":731},{\\\"name\\\":\\\"WebSearc\"]",
+          "context_window": 200000,
+          "request_latency_ms": 42580,
+          "ttfrc_ms": 26014.729976654053,
+          "temperature": 0.4,
+          "input_tokens": 28501,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 25856,
+          "output_tokens": 2187,
+          "usage_scope": "per_request",
+          "ts": 1789272339.9556
+        },
+        "diff_vs_prev": null
+      }
+    ]
+  }
+}

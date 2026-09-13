@@ -489,7 +489,21 @@ A configuring surface can set it, which is the point of it living here:
 ```
 
 through `POST /api/v1/voice/setup` — the same revision-guarded writer every
-other voice change goes through.
+other voice change goes through. The TUI reads it when it starts.
+
+It sends from whichever editor holds the draft. Measured with `masc_tui` on the
+workspace from [Talking to imp, measured](#talking-to-imp-measured), `imp`
+booted, the `rec` stand-in speaking `말을 마치면 바로 보내지는지 봅니다.`, keys
+`2`, Enter on `imp`, `m`, `Ctrl-Y`:
+
+| | |
+|---|---|
+| the transcript appears | 10.1s after `Ctrl-Y` |
+| `▶ YOU 말을 마치면 바로 보내지는지 봅니다.` in the chat | the same redraw — nothing pressed |
+| imp's first reply on screen | 41.3s after `Ctrl-Y` |
+
+From the composer row under any other surface (`i`, then `Ctrl-Y`) it sends the
+same way, and the chat pane comes forward as it does for Enter.
 
 `[voice.tts]` and `[voice.stt]` are optional. Absent, the speak and transcribe
 paths refuse by name before any endpoint is asked. `[voice.stt]` always names a
@@ -888,7 +902,8 @@ every line below copied from the terminal. The token is the workspace's own:
 
 ```sh
 MASC=http://127.0.0.1:8971
-TOKEN=$(cat "$MASC_BASE_PATH/.masc/auth/admin.token")
+masc login --base-path "$BASE" --client-env MASC_TOKEN
+TOKEN=$(cat "$BASE/.masc/auth/local-admin.token")
 ```
 
 **1 — what is configured now.** A fresh workspace has nothing:
@@ -921,11 +936,7 @@ POST /api/v1/voice/setup
 → {"applied":true,"revision":"436a6857…"}
 ```
 
-No `default_model` anywhere, and the section loads. Against a build without
-that narrowing the same request answered
-`the edit does not load as a voice configuration, so it was not written:
-runtime.toml [voice]: tts.default_model is required` — measured on both, an
-hour apart.
+No `default_model` anywhere, and the section loads.
 
 **4 — make it speak, for real:**
 

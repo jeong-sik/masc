@@ -2645,6 +2645,148 @@ def ctrl_y_reaches_the_tui_interaction(
     os.write(master_fd, b"q")
 
 
+SPOKEN_TRANSCRIPT = "a sentence the fake whisper heard"
+
+# A microphone that says one thing: room noise, a second of a 440 Hz tone at
+# real-time rate, then room noise until the capture stops it. The capture
+# watches the growing file, so the rate is what lets its trailing-silence wait
+# see an end. SIGTERM is how the capture stops sox; the header is filled then.
+FAKE_REC = """#!{python}
+import math, random, signal, struct, sys, time
+args = sys.argv[1:]
+out = args[args.index('signed-integer') + 1]
+rate = 16000
+def header(n):
+    return (b'RIFF' + struct.pack('<I', 36 + n) + b'WAVEfmt '
+            + struct.pack('<IHHIIHH', 16, 1, 1, rate, rate * 2, 2, 16) + b'data' + struct.pack('<I', n))
+def noise(frames):
+    return b''.join(struct.pack('<h', random.randint(-40, 40)) for _ in range(frames))
+if 'trim' in args:
+    seconds = float(args[args.index('trim') + 2])
+    data = noise(int(seconds * rate))
+    open(out, 'wb').write(header(len(data)) + data)
+    sys.exit(0)
+tone = b''.join(struct.pack('<h', int(8000 * math.sin(2 * math.pi * 440 * i / rate))) for i in range(rate))
+f = open(out, 'wb')
+f.write(header(0))
+written = 0
+def finish(*_):
+    f.seek(0); f.write(header(written)); f.close(); sys.exit(0)
+signal.signal(signal.SIGTERM, finish)
+start = time.monotonic()
+for block in (noise(rate // 2), tone):
+    for i in range(0, len(block), 3200):
+        piece = block[i:i + 3200]
+        f.write(piece); f.flush(); written += len(piece)
+        time.sleep(max(0, start + written / (rate * 2) - time.monotonic()))
+while True:
+    piece = noise(rate // 10)
+    f.write(piece); f.flush(); written += len(piece)
+    time.sleep(max(0, start + written / (rate * 2) - time.monotonic()))
+"""
+
+
+def seed_send_on_stop_workspace(fake_bin: str) -> WorkspaceSetup:
+    def seed(base_path: str) -> None:
+        config = Path(base_path) / ".masc" / "config"
+        config.mkdir(parents=True, exist_ok=True)
+        (config / "runtime.toml").write_text(
+            "[voice.stt]\n"
+            f'default_model = "{fake_bin}/model.bin"\n'
+            "send_on_stop = true\n"
+            "\n"
+            "[[voice.stt.endpoints]]\n"
+            'id = "whisper-local"\n'
+            'kind = "whisper_cli"\n'
+            "enabled = true\n"
+            f'command = "{fake_bin}/whisper-cli"\n',
+            encoding="utf-8",
+        )
+
+    return seed
+
+
+def wait_for_spoken_send(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    requests: HttpRequests,
+) -> None:
+    # Half a second of room, a second of tone, the two-second trailing wait,
+    # then the fake transcriber: well inside the budget.
+    deadline = time.monotonic() + 20.0
+    while not any(path == "/api/v1/keepers/chat/stream" for path, _ in requests):
+        read_available(master_fd, output)
+        if process.poll() is not None:
+            raise AssertionError("TUI exited before the spoken draft was sent")
+        if time.monotonic() > deadline:
+            plain = CSI_RE.sub(b"", bytes(output[-4000:]))
+            raise AssertionError(f"send_on_stop left the transcript in the draft: {plain!r}")
+        select.select([master_fd], [], [], 0.05)
+    body = next(body for path, body in requests if path == "/api/v1/keepers/chat/stream")
+    message = json.loads(body).get("message")
+    if message != SPOKEN_TRANSCRIPT:
+        raise AssertionError(f"the keeper was sent {message!r}, not the transcript")
+
+
+def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> Interaction:
+    """The composer row under every other surface sends a capture the same way."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"i", b"^Y to speak")
+        os.write(master_fd, b"\x19")
+        wait_for_spoken_send(process, master_fd, output, requests)
+        # A sent message brings the chat pane forward, as Enter on the row does.
+        wait_for_output(
+            process, master_fd, output, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+            start=0, timeout=3.0,
+        )
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Interaction:
+    """[voice.stt].send_on_stop sends what a capture heard from the chat pane.
+
+    The chat pane is where an operator types most, and it has its own editor:
+    the composer row is never focused there. A transcript that was handed to
+    the row's send key from this pane stayed in the draft and nothing was
+    sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        os.write(master_fd, b"\x19")
+        wait_for_spoken_send(process, master_fd, output, requests)
+        escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def keeper_message_missing_target_interaction(requests: HttpRequests) -> Interaction:
     draft = b"beta-periodic-draft-29453"
     chat_path = "/api/v1/keepers/chat/stream"
@@ -13413,6 +13555,42 @@ def run_cli_base_path_regression(executable: str) -> None:
     )
 
 
+def run_send_on_stop_regression(executable: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="masc-tui-voice-bin-") as fake_bin:
+        scripts = {
+            "rec": FAKE_REC.format(python=sys.executable),
+            "play": "#!/bin/sh\nexit 0\n",
+            "whisper-cli": f"#!/bin/sh\necho '{SPOKEN_TRANSCRIPT}'\n",
+        }
+        for name, body in scripts.items():
+            path = Path(fake_bin) / name
+            path.write_text(body, encoding="utf-8")
+            path.chmod(0o755)
+        for description, interaction in (
+            ("send_on_stop sends a capture from the chat pane",
+             send_on_stop_from_the_chat_pane_interaction),
+            ("send_on_stop sends a capture from the composer row",
+             send_on_stop_from_the_composer_row_interaction),
+        ):
+            requests: HttpRequests = []
+            run_terminal_scenario(
+                executable,
+                description=description,
+                interact=interaction(requests),
+                http_fixtures={
+                    "/api/v1/keepers/chat/stream": (
+                        503,
+                        {"error": "stop after the spoken request capture"},
+                    )
+                },
+                http_requests=requests,
+                prepare_workspace=seed_send_on_stop_workspace(fake_bin),
+                # Only the stand-ins: a real sox on this machine would open the
+                # microphone and the speakers.
+                extra_env={"PATH": f"{fake_bin}:/usr/bin:/bin"},
+            )
+
+
 def run_ctrl_y_regression(executable: str) -> None:
     run_terminal_scenario(
         executable,
@@ -15594,6 +15772,10 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
         run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
         print("tui CLI base-path regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "send-on-stop":
+        run_send_on_stop_regression(os.path.abspath(sys.argv[1]))
+        print("tui send_on_stop regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "ctrl-y":
         run_ctrl_y_regression(os.path.abspath(sys.argv[1]))

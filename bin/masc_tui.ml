@@ -1318,6 +1318,26 @@ let clear_staged_attachments (state : state) =
   state.msg_attachments_since <- None
 ;;
 
+(* The chat pane's Enter: the draft goes to the keeper, the pane returns to
+   the newest row, and a line held while the operator was composing may go
+   too. Named because two things end a draft this way -- the Enter key on this
+   surface, and a voice capture that ends the sentence itself
+   ([voice.stt].send_on_stop) -- and they have to be the same answer. *)
+let submit_chat_draft (state : state) ~(submit_message : string -> unit)
+    ~(drain_queue : unit -> unit) =
+  let text = Buffer.contents state.msg_input in
+  if String.trim text <> "" then begin
+    (* Back to the newest row: the turn that is about to start is drawn
+       there, and staying scrolled back would hide the send. *)
+    set_msg_scroll state 0;
+    forget_recall state;
+    submit_message text;
+    (* The composer is empty after a submit, so a line held only because the
+       operator was mid-compose ([composing_for_keeper]) can dispatch now. When
+       the submit folded onto that held line, this is what sends the merge. *)
+    drain_queue ()
+  end
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
@@ -1428,18 +1448,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     leave_keeper_message state ~drain_queue;
     true
   | "\r" ->
-    let text = Buffer.contents state.msg_input in
-    if String.trim text <> "" then begin
-      (* Back to the newest row: the turn that is about to start is drawn
-         there, and staying scrolled back would hide the send. *)
-      set_msg_scroll state 0;
-      forget_recall state;
-      submit_message text;
-      (* The composer is empty after a submit, so a line held only because the
-         operator was mid-compose ([composing_for_keeper]) can dispatch now. When
-         the submit folded onto that held line, this is what sends the merge. *)
-      drain_queue ()
-    end;
+    submit_chat_draft state ~submit_message ~drain_queue;
     true
   (* The same two keys the composer row binds, because this surface has its own
      editor and never reaches that row: [handle_composer_key] is skipped
@@ -11278,18 +11287,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            The section is [voice.stt], where the voice setup routes write and
            GET /api/v1/voice/config publishes it.
 
-           Sent by handing the composer the send key rather than calling the
-           send path: that path decides what a draft is (a message, a slash
-           command, a preset) and which surface comes forward, and a second
-           caller would be a second answer to those questions. A capture in
+           Sent the way the surface holding the draft sends it, so a spoken
+           draft is not a second kind of draft. The chat pane has its own
+           editor and the composer row is never focused there -- handing the
+           row the send key from this pane was a key nothing took, and the
+           transcript stayed in the draft. Anywhere else the row is the editor,
+           and its send key decides what a draft is (a message, a slash
+           command, a preset) and which surface comes forward. A capture in
            continuous mode re-arms above before this, so the microphone is
            already listening for the next sentence when this returns. *)
         if state.voice_send_on_stop
         then (
-          let (_ : bool) =
-            handle_composer_key state ~base_path ~mailbox Composer.send_key
-          in
-          ()))
+          if state.view = Keepers Keeper_message
+          then
+            submit_chat_draft state
+              ~submit_message:(send_operator_text state ~base_path ~mailbox)
+              ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox)
+          else (
+            let (_ : bool) =
+              handle_composer_key state ~base_path ~mailbox Composer.send_key
+            in
+            ())))
   | Voice_silent { keeper; reason } ->
       if state.voice_capture = Some keeper then (
         state.voice_capture <- None;

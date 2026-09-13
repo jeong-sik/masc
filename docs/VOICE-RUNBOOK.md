@@ -123,7 +123,7 @@ point the workspace and the model connection are already saved.
 The workspace this walk wrote answered:
 
 ```
-masc voice-verify --audio utterance.wav
+masc voice-verify --base-path <workspace> --audio utterance.wav
   macos-say       macos_say     answered: 85908 bytes of audio in "Yuna"
   whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
 ```
@@ -134,7 +134,21 @@ masc voice-verify --audio utterance.wav
 masc init --base-path ~/work
 masc voice-local-setup --base-path ~/work --list-voices
 masc voice-local-setup --base-path ~/work --voice "Yuna" --model ~/.cache/whisper/ggml-large-v3-turbo.bin
+masc voice-verify --base-path ~/work --audio utterance.wav
 ```
+
+Every command names the workspace. The voice loader finds `runtime.toml`
+through the environment, and a directory is not taken as a workspace just
+because the command runs inside it: with no `--base-path`, no `MASC_BASE_PATH`
+and no recorded default, `voice-verify` answers
+
+```
+voice config missing: no workspace is resolved (MASC_BASE_PATH and MASC_CONFIG_DIR are unset), and no <cwd>/.masc/voice_config.json
+```
+
+and names the lookup it did make in the other cases — `no masc configuration
+at <base>/.masc/config` for a directory never initialized, `no [voice] section
+in <base>/.masc/config/runtime.toml` for a workspace without one.
 
 Voice is a section of the configuration `masc init` writes. On a directory
 that was never initialized, `voice-local-setup --voice` answers, exit 1 and
@@ -201,8 +215,8 @@ other keeper speaks in `[voice.tts] default_voice`. Measured on the
 configuration above:
 
 ```
-masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
-masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
+masc voice-verify --base-path ~/work --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
+masc voice-verify --base-path ~/work --agent beta   →   85908 bytes of audio in "Yuna"
 ```
 
 A `default_voice` on the **endpoint** outranks both, for every keeper at that
@@ -236,22 +250,22 @@ A name that is not in `say -v '?'` is a mapping that never took.
 
 ### The whole loop, measured
 
-A fresh workspace, no server started, nothing listening on a port:
+A fresh workspace, run from another directory with only `HOME` and `PATH` set,
+no server started, nothing listening on a port:
 
 ```
-masc init --base-path /tmp/fresh                      0.79s   1,504 lines written
-masc voice-local-setup --base-path /tmp/fresh \
-     --list-voices                                    3.05s   184 voices, 9 Korean
-masc voice-local-setup --base-path /tmp/fresh \
-     --voice Yuna                                     0.59s   9 lines added
-masc voice-local-setup --base-path /tmp/fresh \
-     --model ~/models/whisper/ggml-large-v3-turbo.bin 0.37s   7 lines added
+masc init --base-path /tmp/fresh                                    1,504 lines written
+masc voice-local-setup --base-path /tmp/fresh --list-voices         184 voices, 9 Korean
+masc voice-local-setup --base-path /tmp/fresh --voice Yuna
+masc voice-local-setup --base-path /tmp/fresh --model <ggml-large-v3-turbo.bin>
+                                                                    16 lines added in all
 ```
 
-`voice-local-setup` changed none of the 1,504 lines `init` wrote. Then:
+`voice-local-setup` changed none of the 1,504 lines `init` wrote. With `alpha`
+mapped to a Korean voice:
 
 ```
-masc voice-verify --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
+masc voice-verify --base-path /tmp/fresh --agent alpha --audio utterance.wav --message "안녕하세요 키퍼입니다"
 
 tts
   macos-say       macos_say     answered: 119044 bytes of audio in "Eddy (한국어(한국))"
@@ -260,10 +274,13 @@ stt  (utterance.wav, 144,276 bytes)
   whisper-local   whisper_cli   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
 ```
 
-| Leg | Wall |
+| Leg | Wall, three runs |
 |---|---|
-| speak only | 0.75s |
-| speak and hear | 3.79s |
+| speak only | 0.72s, 0.57s, 0.58s |
+| speak and hear | 3.42s, 1.99s, 1.89s |
+
+Single runs of the setup commands varied 2–4x between walks — `init` took
+0.79s on one and 1.89s on another — so no figure is given for them.
 
 The sentence came back as spoken, full stop included; masc passed `-l auto`
 and named no language.
@@ -330,6 +347,33 @@ counting a 0 exit as success.
 A failure reports the **end** of the command's output: `whisper-cli` prints
 nine lines about which Metal library it loaded before it names the model file
 it could not open.
+
+**whisper-cli does not refuse audio it cannot read.** For a container it does
+not decode it prints `error: failed to read audio file` to stderr and exits 0
+with nothing on stdout — the same answer as a recording of silence. The same
+sentence, encoded eight ways, through whisper-cpp 1.9.2:
+
+| Container | First bytes | whisper-cli |
+|---|---|---|
+| WAV | `RIFF…WAVE` | transcribes |
+| FLAC | `fLaC` | transcribes |
+| MP3, ID3-tagged | `ID3` | transcribes |
+| MP3, from the first frame | `FF F3` | transcribes |
+| WebM | `1A 45 DF A3` | exit 0, empty |
+| Ogg Opus | `OggS` … `OpusHead` | exit 0, empty |
+| AIFF-C | `FORM…AIFC` | exit 0, empty |
+| M4A | `…ftyp` | exit 0, empty |
+
+masc reads the first 36 bytes before running whisper-cli and refuses the four
+it does not read, naming the container:
+
+```
+masc voice-verify --base-path ~/work --audio probe.webm
+  whisper-local   whisper_cli   refused: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM
+```
+
+A container whose first bytes are none of the eight — Ogg Vorbis, AAC — is
+handed to whisper-cli, since none of those was measured.
 
 ## Configuration
 
@@ -664,6 +708,7 @@ masc voice-verify                          # TTS only
 masc voice-verify --audio utterance.wav    # TTS and STT
 masc voice-verify --json                   # one JSON object instead of the report
 masc voice-verify --message "확인합니다"     # say it in the language you actually use
+masc voice-verify --base-path ~/work       # a workspace that is not MASC_BASE_PATH
 ```
 
 Exit status is 0 when at least one endpoint answered, 1 when none did. A
@@ -861,6 +906,21 @@ POST /api/v1/voice/transcribe   (raw wav body)
 and no such field. whisper-cli detects the language (`-l auto`) but reports it
 on its own stderr, not on the wire. A caller that names a language is answered
 with that name.
+
+The dashboard microphone is not transcribed on a `whisper_cli`-only
+workspace. `voice-input.ts` posts what the browser's `MediaRecorder` recorded,
+under the recorder's own type (`audio/webm` when it names none), and the route
+answers WebM and M4A bodies before whisper-cli runs:
+
+```
+POST /api/v1/voice/transcribe   (raw webm body)
+→ 400 {"error":"all enabled STT endpoints failed: whisper-local: whisper-cli reads WAV, FLAC or MP3, and this audio is WebM"}
+   0.004s wall
+```
+
+The dashboard puts that `error` string in an error toast. Speaking into the
+TUI, which records WAV with `rec`, and posting WAV, FLAC or MP3 from a device
+are transcribed.
 
 ### What each route refuses, measured
 

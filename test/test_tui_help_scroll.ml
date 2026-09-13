@@ -13,18 +13,54 @@ let check_int = Alcotest.(check int)
 let check_bool = Alcotest.(check bool)
 let check_string = Alcotest.(check string)
 
-(* Stand-ins for the real sections: the fold cares about how many lines there
-   are, not what they say. *)
+(* Stand-ins for the real sections. A plain run of lines is one section; the
+   sheet the overlay draws is headings and their rows, each ended by a blank
+   line, the way [help_lines] writes them. *)
 let lines n = List.init n (fun i -> Printf.sprintf "line %d" i)
 
+let sectioned ~sections ~rows =
+  List.concat
+    (List.init sections (fun s ->
+         (Printf.sprintf "heading %d" s
+          :: List.init (rows - 1) (fun r -> Printf.sprintf "section %d row %d" s r))
+         @ [ "" ]))
+
 let test_wide_terminal_halves_the_sheet () =
-  let sheet = Masc_tui_help.sheet ~cols:120 (lines 76) in
-  check_int "76 lines fold into 38 rows" 38 (List.length sheet)
+  let sheet = Masc_tui_help.sheet ~cols:120 (sectioned ~sections:4 ~rows:18) in
+  check_int "four 18-row sections fold into two pairs and a gap" 37
+    (List.length sheet)
 
 let test_odd_line_count_keeps_the_tail () =
-  let sheet = Masc_tui_help.sheet ~cols:120 (lines 75) in
-  check_int "an odd sheet still holds every line" 38 (List.length sheet);
-  check_bool "the last row exists" true (List.length sheet > 0)
+  let sheet = Masc_tui_help.sheet ~cols:120 (sectioned ~sections:3 ~rows:18) in
+  check_int "a third section sits alone under the pair" 37 (List.length sheet);
+  let contains needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  check_bool "the lone section keeps its last row" true
+    (contains "section 2 row 16" (List.nth sheet 36))
+
+(* A column cut at a line count started partway through a section, so the top
+   of the right column was keys under no heading. Each row now starts a
+   section on both sides or continues the one above it. *)
+let test_a_heading_stays_above_its_rows () =
+  let starts_with prefix text =
+    let text = String.trim text in
+    String.length text >= String.length prefix
+    && String.sub text 0 (String.length prefix) = prefix
+  in
+  let sheet =
+    Masc_tui_help.sheet ~cols:120
+      [ "heading A"; "a1"; "a2"; ""; "heading B"; "b1"; ""; "heading C"; "c1"; "" ]
+  in
+  check_int "A and B side by side (3), a gap (1), then C (2)" 6 (List.length sheet);
+  let first = List.hd sheet in
+  let right_column = String.sub first 59 (String.length first - 59) in
+  check_bool "the first row opens both sections" true
+    (starts_with "heading A" first && starts_with "heading B" right_column);
+  check_bool "the third section starts its own row" true
+    (starts_with "heading C" (List.nth sheet 4))
 
 let test_narrow_terminal_draws_one_line_per_row () =
   let sheet = Masc_tui_help.sheet ~cols:80 (lines 76) in
@@ -51,7 +87,7 @@ let viewport ~cols ~rows lines =
   , Masc_tui_frame.content_height ~rows )
 
 let test_holding_j_does_not_bank_presses () =
-  let count, height = viewport ~cols:120 ~rows:30 (lines 76) in
+  let count, height = viewport ~cols:120 ~rows:30 (sectioned ~sections:4 ~rows:18) in
   let ceiling = Masc_tui_scroll.maximum ~count ~height in
   let rec press_down n scroll =
     if n = 0 then scroll
@@ -64,7 +100,7 @@ let test_holding_j_does_not_bank_presses () =
 
 let test_the_line_count_is_not_the_bound () =
   (* The number the old ceiling used, against the one the frame can spend. *)
-  let sheet_lines = lines 76 in
+  let sheet_lines = sectioned ~sections:4 ~rows:18 in
   let count, height = viewport ~cols:120 ~rows:30 sheet_lines in
   check_bool "a bound taken from the lines overshoots the sheet" true
     (List.length sheet_lines - 1 > Masc_tui_scroll.maximum ~count ~height)
@@ -116,6 +152,8 @@ let () =
             test_wide_terminal_halves_the_sheet
         ; Alcotest.test_case "odd line count keeps the tail" `Quick
             test_odd_line_count_keeps_the_tail
+        ; Alcotest.test_case "a heading stays above its rows" `Quick
+            test_a_heading_stays_above_its_rows
         ; Alcotest.test_case "narrow terminal draws one line per row" `Quick
             test_narrow_terminal_draws_one_line_per_row
         ; Alcotest.test_case "header prepends full width without folding" `Quick

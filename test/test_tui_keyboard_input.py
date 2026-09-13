@@ -10053,9 +10053,13 @@ def keeper_lanes_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
-        # One k walks the band from Verifier to Librarian, whose run list is
-        # the exact-output summary.
+        # Two k walk the band from Verifier to Librarian, whose run list is
+        # the exact-output summary. Workspace Curator sits between them, as
+        # the projection orders the lanes; waiting for it on the way pins that
+        # the row is drawn where the server puts it.
+        banded_curator = re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator")
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        send_and_wait(process, master_fd, output, b"k", banded_curator)
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
         # (#31290): before the follow, the selected row walked off the frame
@@ -10086,6 +10090,7 @@ def keeper_lanes_interaction(
         send_and_wait(process, master_fd, output, b"\x1b", banded_librarian)
         # Back on the last standalone row, so the j below still lands on the
         # first Keeper row.
+        send_and_wait(process, master_fd, output, b"j", banded_curator)
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         # j past the last standalone row lands back on the first Keeper row.
         send_and_wait(process, master_fd, output, b"j", banded_alpha)

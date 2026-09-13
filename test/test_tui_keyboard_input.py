@@ -5645,6 +5645,7 @@ class AtomicChatFixture:
         self.lock = threading.Lock()
         self.started_at = time.time()
         self.run_next_calls = 0
+        self.interrupt_requests: list[dict[str, Any]] = []
         self.release = threading.Event()
         self.interrupted = threading.Event()
         self.release_interrupt = threading.Event()
@@ -5757,6 +5758,8 @@ class AtomicChatFixture:
                 raise AssertionError(f"Esc ignored the locally working direct execution {expected}: {request!r}")
         elif request.get("interrupt_token") != self.turn_token:
             raise AssertionError(f"Esc targeted another turn: {request!r}")
+        with self.lock:
+            self.interrupt_requests.append(request)
         self.paused = True
         self.interrupted.set()
         if not self.release_interrupt.wait(timeout=20):
@@ -5890,10 +5893,43 @@ def chat_working_target_interaction(fixture: AtomicChatFixture) -> Interaction:
             os.write(master_fd, b"\x1b")
             if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
                 raise AssertionError("Esc did not target the locally working direct execution")
+            # A newer queued request must not cause a duplicate Esc to send
+            # another interrupt while the first acknowledgement is pending.
+            os.write(master_fd, b"\x1b")
+            time.sleep(0.08)  # delimit the terminal's lone Escape before typing
+            read_available(master_fd, output)
+            send_and_wait(process, master_fd, output, b"after-stop", composer_showing(b"after-stop"))
+            send_and_wait(process, master_fd, output, b"\r", b"waiting for the stop or resume acknowledgement")
+            if len(fixture.interrupt_requests) != 1 or len(fixture.submitted) != 2:
+                raise AssertionError("double Esc duplicated control or released input before acknowledgement")
+            fixture.release_interrupt.set()
+            wait_for_atomic_admissions(process, master_fd, output, fixture, 3)
+            if fixture.submitted[2]["admission_intent"]["control_token"] != "control-after-stop":
+                raise AssertionError("held Enter did not use the one stop acknowledgement")
+            fixture.release.set()
+            wait_for_output(process, master_fd, output, b"reply-after-stop", start=0, timeout=10)
+            escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+            os.write(master_fd, b"q")
+        finally:
             fixture.release_interrupt.set()
             fixture.release.set()
-            wait_for_output(process, master_fd, output, b"reply-follow-up", start=0, timeout=10)
+    return interact
+
+
+def chat_pending_stop_leave_interaction(fixture: AtomicChatFixture) -> Interaction:
+    """An unanswered stop permits leaving the view after the existing Esc grace."""
+    def interact(process, master_fd, _slave_fd, output, _base_path):
+        try:
+            open_atomic_chat(process, master_fd, output)
+            send_and_wait(process, master_fd, output, b"working-question", composer_showing(b"working-question"))
+            send_and_wait(process, master_fd, output, b"\r", b"IN PROGRESS")
+            os.write(master_fd, b"\x1b")
+            if not wait_for_fixture_event(process, master_fd, output, fixture.interrupted, timeout=5):
+                raise AssertionError("stop acknowledgement was not held")
             escape_to_keeper_detail(process, master_fd, output, name=b"alpha")
+            if fixture.release_interrupt.is_set() or len(fixture.interrupt_requests) != 1:
+                raise AssertionError("leaving required an acknowledgement or sent another interrupt")
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             os.write(master_fd, b"q")
         finally:
@@ -13041,6 +13077,9 @@ def run_keyboard_regression(executable: str) -> None:
     working = AtomicChatFixture(first_working=True)
     run_terminal_scenario(executable, description="Working direct execution outranks stale autonomous observer",
         interact=chat_working_target_interaction(working), http_fixtures=working.fixtures, refresh=0.2)
+    pending = AtomicChatFixture(first_working=True)
+    run_terminal_scenario(executable, description="Pending stop leaves chat without another interrupt",
+        interact=chat_pending_stop_leave_interaction(pending), http_fixtures=pending.fixtures, refresh=0.2)
     reconcile_requests: HttpRequests = []
     reconcile_fixtures, reconcile_gate = chat_reconcile_http_fixtures()
     run_terminal_scenario(
@@ -13612,6 +13651,9 @@ def run_atomic_chat_regression(executable: str) -> None:
     run_terminal_scenario(executable, description="New Enter does not await unrelated reconciliation",
         interact=chat_reconcile_interaction(gate, requests), http_fixtures=fixtures,
         http_requests=requests)
+    pending = AtomicChatFixture(first_working=True)
+    run_terminal_scenario(executable, description="Pending stop leaves chat without another interrupt",
+        interact=chat_pending_stop_leave_interaction(pending), http_fixtures=pending.fixtures, refresh=0.2)
     run_quit_waiting_regression(executable)
 
 

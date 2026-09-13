@@ -391,13 +391,9 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
      door back. One seam for every surface, which is what makes the setting
      a setting instead of per-screen behaviour. *)
   let hints = if state.hints_visible then hints else "?:help" in
-  (* A "/" search shows its query where every surface already looks for its
-     keys. One seam instead of a per-surface indicator. *)
-  let hints =
-    match search_marker state with
-    | Some marker -> marker ^ "  " ^ hints
-    | None -> hints
-  in
+  (* Search status is literal text, not key hints: runs of spaces belong
+     to the user's query and must survive compact hint-item fitting. *)
+  let literal_prefix = search_marker state in
   (* What the last keypress did, in front of the keys for the same reason the
      search query is: the status tail is dropped whole before a single hint
      is, so a fact placed there cannot be read on a surface whose own keys
@@ -527,7 +523,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             }
         ]
   in
-  Masc_tui_footer.line
+  Masc_tui_footer.line ?literal_prefix
     ~status:(status @ identity @ conflict @ answering @ answered)
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 

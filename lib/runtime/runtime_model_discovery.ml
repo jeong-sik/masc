@@ -1,5 +1,6 @@
 type protocol = Openai | Anthropic | Kimi | Ollama
-type connection = { protocol : protocol; provider_id : string; endpoint : string;
+type provider = Anonymous_endpoint | Named_provider of string
+type connection = { protocol : protocol; provider : provider; endpoint : string;
                     credential : Runtime_schema.credential option }
 type model = { id : string; label : string; context : int option; tools : bool option;
                listed_at : Yojson.Safe.t option }
@@ -50,7 +51,7 @@ let connection_of_json = function
          | _ -> Error Invalid_connection in
        let* credential = credential in
        Ok { protocol; endpoint; credential;
-            provider_id = (match provider_id with Some id -> id | None -> "") }
+            provider = (match provider_id with Some id -> Named_provider id | None -> Anonymous_endpoint) }
      | _ -> Error Invalid_connection)
   | _ -> Error Invalid_connection
 let model protocol = function
@@ -124,9 +125,17 @@ let to_json models =
       "tools", optional (fun value -> `Bool value) model.tools;
       "provider_listed_at", optional Fun.id model.listed_at;
       "release_date", `Null]) models)]
+let resolve_credential connection =
+  let requirement = match connection.provider, connection.credential with
+    | Anonymous_endpoint, None -> Runtime_adapter.Not_required
+    | Anonymous_endpoint, Some credential -> Runtime_adapter.explicit_credential_requirement credential
+    | Named_provider provider_id, credential ->
+      Runtime_adapter.credential_requirement ~provider_id credential in
+  Runtime_adapter.resolve_credential_requirement requirement
+  |> Result.map_error (fun _ -> Credential_unavailable)
+
 let discover ~sw ~net connection =
-  let* api_key = Runtime_adapter.resolve_api_key ~provider_id:connection.provider_id
-    ~credential:connection.credential |> Result.map_error (fun _ -> Credential_unavailable) in
+  let* api_key = resolve_credential connection in
   let kind = match connection.protocol with
     | Openai -> Llm_provider.Provider_config.OpenAI_compat
     | Anthropic -> Anthropic | Kimi -> Kimi | Ollama -> Ollama in

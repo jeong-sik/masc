@@ -113,7 +113,7 @@ let skill_action_lines actions =
          (Terminal_text.single_line action.runtime_id)
          (Terminal_text.single_line action.tool_name)
          (Terminal_text.single_line identity)
-         (Terminal_text.single_line action.observed_at))
+         (Terminal_text.short_timestamp action.observed_at))
     actions
 
 let async_request_observation_lines (state : state) =
@@ -338,7 +338,13 @@ let tools_display_lines (state : state) =
   let effective_lines =
     lazy begin
     match state.tools_inventory with
-    | None -> [ (Theme.warn ()), " Effective Keeper Surface — not loaded" ]
+    (* Unread and failed are two answers. "not loaded" under the red
+       "tool inventory load failed" row sent the reader to [r] for a read
+       that had already been made and refused. *)
+    | None ->
+        [ ( (if Option.is_some state.tools_error then Theme.bad () else Theme.warn ())
+          , " Effective Keeper Surface " ^ title_missing_reading ~error:state.tools_error )
+        ]
     | Some { Masc.Tui_decode.ts_effective = None; _ } ->
         [ (Theme.warn ()), " Effective Keeper Surface — no Keeper selected" ]
     | Some

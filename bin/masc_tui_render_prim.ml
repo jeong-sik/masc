@@ -502,6 +502,22 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 
+(* The slash word being typed, painted: the run already pressed in the accent,
+   a word that is no command in the bad tone. [restore] is the colour the row
+   around it is drawn in, so a painted span hands that back rather than
+   resetting it. *)
+let slash_hint_text ~restore draft =
+  let paint (span : Masc_tui_command.hint_span) =
+    match span with
+    | Masc_tui_command.Typed text ->
+        Masc_tui_theme.tone Masc_tui_theme.Accent ^ text ^ restore
+    | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
+    | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
+  in
+  match Masc_tui_command.hint_spans (Masc_tui_command.hint draft) with
+  | [] -> None
+  | spans -> Some (String.concat "" (List.map paint spans))
+
 let composer_line state ~cols =
   match browser_lane_on_screen state with
   | Some view ->
@@ -527,14 +543,27 @@ let composer_line state ~cols =
       when state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
-        "  (^Y to speak, ^A to keep listening)"
+        "  " ^ Composer.voice_keys_hint
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) -> ""
   in
+  (* A slash command sent from this row runs as it does from the chat pane,
+     but only the chat pane's footer said what the word being typed was:
+     "/tsk" read here as a message until Enter, and the candidates for "/t"
+     showed nowhere. The hint follows the draft, so the cursor, which is
+     placed after the draft, does not move. *)
+  let slash_hint =
+    match composer.Composer.focus with
+    | Composer.Focused -> slash_hint_text ~restore:tone draft
+    | Composer.Unfocused -> None
+  in
   let body =
-    if String.equal draft "" then prompt ^ hint else prompt ^ draft
+    match String.equal draft "", slash_hint with
+    | true, _ -> prompt ^ hint
+    | false, None -> prompt ^ draft
+    | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
@@ -571,6 +600,24 @@ let composer_cursor state ~rows ~cols =
         }
 
 ;;
+
+(* The Overview's Pulse: Keeper turns that finished in each of the last eight
+   fifteen-second windows, oldest first. The finishes are counted from two
+   successive keeper-turn readings, so until one reading has come back there is
+   nothing to count -- and eight flat bars said "nothing finished" for a read
+   that had not been made or had been refused. The shared words say which. *)
+let overview_pulse_text (state : state) ~now =
+  match state.keeper_turns_observed_at with
+  | None -> title_missing_reading ~error:state.keeper_turns_error
+  | Some _ ->
+      let buckets = Array.make 8 0 in
+      List.iter
+        (fun (_, ts) ->
+          let idx = min 7 (int_of_float (Float.max 0.0 (now -. ts) /. 15.0)) in
+          let slot = 7 - idx in
+          buckets.(slot) <- buckets.(slot) + 1)
+        state.keeper_turn_finishes;
+      Chart.sparkline (Array.to_list buckets)
 
 (* The strip above every surface: the Tab ring with the active family
    highlighted. Wider terminals see the whole ring; narrower ones see a
@@ -1152,6 +1199,14 @@ let connection_badge (state : state) =
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 
+(* The coordinator's badge beside a reading of the surface's own. The badge
+   brings its colour and its reset, so a style laid over the whole row painted
+   only the words in front of it -- "coordinator HTTP" went red beside a green
+   [connected] when a browser read failed -- and the reset left the failure
+   itself uncoloured. Each part wears its colour where it stands. *)
+let coordinator_status_row (state : state) ~style status =
+  "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
+
 
 let count_frame_lines buf =
   let len = Buffer.length buf in
@@ -1727,6 +1782,40 @@ let board_score_style votes =
   else if votes < 0 then (Theme.bad ())
   else (Theme.muted ())
 
+(* A value in brackets: [text], folded in the middle only when it runs past
+   [max_cells]. Four places fitted the value with [fit_width] first, which
+   pads as well as cuts, so a short one closed its bracket after a run of
+   spaces -- "[post-a      ]", "[executing ]", "[active    ]". A row that
+   needs the bracket to line up pads after it. *)
+let bracketed ~max_cells text =
+  let text =
+    if Message_layout.display_width text <= max_cells then text
+    else Message_layout.fit_middle max_cells text
+  in
+  "[" ^ text ^ "]"
+
+(* The Board reader's title row: the screen, which post, its hearth, its score
+   and its replies. The id is folded at the list's ID column. Replies read "💬3"
+   and then "c0" at zero -- a second spelling for the same count -- and are one
+   spelling now, receding at zero. *)
+let board_read_title ~screen ~id ~hearth ~votes ~replies =
+  let id = bracketed ~max_cells:Render_schedule.board_id_width id in
+  let hearth_tag =
+    match hearth with
+    | Some h when not (String.equal h "") ->
+        Printf.sprintf "  %s#%s%s" (Theme.info ()) h Ansi.reset
+    | _ -> ""
+  in
+  let score =
+    if votes > 0 then Printf.sprintf "▲%+d" votes
+    else if votes < 0 then Printf.sprintf "▼%d" votes
+    else " 0"
+  in
+  Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
+    (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
+    (board_score_style votes) score Ansi.reset
+    (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
+
 
 (* Three steps for three bands, from the palette every other reading on this
    screen draws through. Emphasis only ever restates what the count beside it
@@ -1806,6 +1895,22 @@ let planning_phase_label = function
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
 
+(* The key a goal detail takes for each lifecycle request, and the words its
+   Actions and ARMED rows say it with. The Actions row called [c] "Complete"
+   beside a Next line saying [c] submits the goal for verification, and the
+   ARMED row called it "Request Completion": the key sends the goal to the
+   completion judge, and completing it is a confirmation this screen does not
+   offer. *)
+let planning_action_key = function
+  | Goal_phase.Public_action.Request_complete -> "c"
+  | Goal_phase.Public_action.Drop -> "x"
+  | Goal_phase.Public_action.Reopen -> "o"
+
+let planning_action_label = function
+  | Goal_phase.Public_action.Request_complete -> "Request completion"
+  | Goal_phase.Public_action.Drop -> "Drop"
+  | Goal_phase.Public_action.Reopen -> "Reopen"
+
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
    are nine cells and the column was eight, so nearly every planning row read
@@ -1841,6 +1946,61 @@ let planning_phase_color = function
   | Goal_phase.Dropped -> (Theme.muted ())
 
 ;;
+
+(* The goal count, the completed share and one counter per phase. With no goals
+   the row read the count, a sentence saying the count, and five zero counters
+   over a list that says "(no goals)" itself. The count is the whole reading
+   there.
+
+   Executing, Completed and Dropped wear the {!Masc_tui_theme.Glyph} progress
+   marks the Backlog row under them wears for running, done and cancelled.
+   Verifying and awaiting confirmation are stages only a Goal has, so their
+   diamonds are theirs. *)
+let planning_rollup_row ~cols (rollup : planning_rollup) =
+  let total_goals =
+    (* Every phase counts, or the denominator drops the goals waiting on a
+       human and reports a completion share higher than the truth. *)
+    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
+    + rollup.pr_done + rollup.pr_dropped
+  in
+  let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
+  if total_goals = 0 then count
+  else
+    let bar_width = if cols < 90 then 8 else 12 in
+    let progress_bar =
+      Printf.sprintf "[%s] %2d%% (%d/%d)"
+        (Masc_tui_context_bars.ratio_bar ~width:bar_width
+           ~numerator:rollup.pr_done ~denominator:total_goals)
+        (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
+    in
+    let counter phase glyph name value =
+      Printf.sprintf "%s%s %s: %d%s" (planning_phase_color phase) glyph name value
+        Ansi.reset
+    in
+    Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
+      (String.concat "  "
+         [ counter Goal_phase.Executing Masc_tui_theme.Glyph.progress_active
+             "Exec" rollup.pr_active
+         ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
+         ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
+             rollup.pr_awaiting_confirmation
+         ; counter Goal_phase.Completed Masc_tui_theme.Glyph.progress_done
+             "Done" rollup.pr_done
+         ; counter Goal_phase.Dropped Masc_tui_theme.Glyph.progress_ended
+             "Drop" rollup.pr_dropped
+         ])
+
+(* The Backlog counts, each with the mark its Task rows wear. Claimed had no
+   mark here while a claimed Task row draws the half circle, so the one count a
+   reader could match to a row was the one left bare. *)
+let planning_backlog_counts (backlog : planning_backlog) =
+  let open Masc_tui_theme.Glyph in
+  [ ("todo", backlog.pb_todo, progress_waiting ^ " todo")
+  ; ("claimed", backlog.pb_claimed, progress_active ^ " claimed")
+  ; ("running", backlog.pb_running, progress_active ^ " running")
+  ; ("done", backlog.pb_done, progress_done ^ " done")
+  ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
+  ]
 
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
@@ -1927,7 +2087,8 @@ let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
     ]
   | None, None -> []
 
-let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [])
+    state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1956,20 +2117,29 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state readi
         (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
+  let toggle_key =
+    match Option.bind reading Keeper_control.primary with
+    | Some action -> Keeper_control.action_key action
+    | None -> "p"
+  in
   (* [key:label] items, two spaces apart: the shape every other footer
      uses, so Masc_tui_footer can split the row, drop the lowest priority
      item when the row is tight, and keep the keys it never drops. Written
      "key label" and joined with a middle dot, the whole legend was one
      item nothing could split -- at 60 columns the row cut mid-word and
      "q quit", last in the list, went first. The two keys the footer pins
-     lead with a plain key so it can read them past the colour. *)
-      String.concat "  "
-          [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
-          ; toggle
-          ; hint Keeper_control.Wakeup "wake"
+     lead with a plain key so it can read them past the colour.
+
+     Each item carries its key, so a detail tab that answers one of these
+     keys itself can take it off the row. The Sandbox tab's [s] sets the
+     remote_ssh backend, and the row beside it still said "s:shutdown". *)
+  let items =
+          [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
+          ; toggle_key, toggle
+          ; Keeper_control.action_key Keeper_control.Wakeup, hint Keeper_control.Wakeup "wake"
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
-          ; (match state.connection_status with
+          ; "s", (match state.connection_status with
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
              | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
@@ -1978,52 +2148,42 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state readi
                the toggle. Without its own hint the footer showed that keeper a
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
-          ; hint Keeper_control.Delete "delete"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
+          ; Keeper_control.action_key Keeper_control.Delete, hint Keeper_control.Delete "delete"
+          ; "e", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
+          ; "a", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
           ; (if state.view = Keepers Keeper_detail then
-               if state.detail_tab = Detail_sandbox then
-                 (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":container logs"
-               else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
-          ; gate_hint
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent)
+               "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
+             else "l", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
+          ; "t", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
+          ; "g", gate_hint
+          ; (if state.view = Keepers Keeper_detail then "U" else "u"),
+            (Masc_tui_theme.tone Masc_tui_theme.Accent)
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
             ^ Ansi.reset ^ ":runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
+          ; "c", (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
              else Ansi.dim ^ "c:chat" ^ Ansi.reset)
-          ; (if offers_back then "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
-          ; Ansi.dim ^ "r:refresh" ^ Ansi.reset
-          ; "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
+          ; (if offers_back then "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
+             else "right/enter", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
+          ; "r", Ansi.dim ^ "r:refresh" ^ Ansi.reset
+          ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
           ]
+  in
+  items
+  |> List.filter (fun (key, _) ->
+         not
+           (List.exists
+              (fun atom -> List.mem atom taken)
+              (Masc_tui_keys.key_atoms key)))
+  |> List.map snd
+  |> String.concat "  "
 
 
 (* One colour per level so an operator scanning the column sees severity before
    reading the text. A level this build does not name keeps its own text and
    renders unstyled rather than borrowing another level's colour. *)
-
-(* What the footer says about the Keeper actions: the armed or running sentence
-   when there is one, otherwise the keys. The sentence's words come from
-   {!Masc_tui_footer}, which is also where the Keepers list reads them as a
-   status item, so the two footers cannot word the same state differently. *)
-let keeper_action_state_text (state : state) =
-  match keeper_action_status state with
-  | item :: _ ->
-    Option.map
-      (fun (projected : Masc_tui_footer.projected_status) ->
-        Ansi.bold ^ (Theme.warn ()) ^ projected.text ^ Ansi.reset)
-      (Masc_tui_footer.status_item_projection item)
-  | [] -> None
-
-let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
-  match keeper_action_state_text state with
-  | Some text -> text
-  | None -> keeper_control_hints ~offers_chat ~offers_back state reading
 
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
@@ -2433,7 +2593,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%s, scroll %d]  %s" (Masc_tui_message_layout.count_noun total "line") scroll ds.ds_esc_hint
+       Printf.sprintf "[lines %s]  %s" (Masc_tui_scroll.window_text ~scroll ~height:content_height total) ds.ds_esc_hint
      else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -2574,11 +2734,41 @@ let help_masthead (_state : state) =
   ]
 
 
+(* The rows one help entry takes in [width] cells: [lead] (its key or usage,
+   [lead_cells] wide) with the start of [text], and the rest of [text] on rows
+   that start at [column], where every entry's text starts.
+
+   The sheet cut each entry to its column. Two columns at 120 cells are 57
+   each, and 23 of the 29 slash-command rows and 16 of the 20 Config rows ran
+   past that, so a summary ended in an ellipsis where it said what the key
+   does. A usage too long to leave [help_text_minimum_cells] beside it puts the
+   text on the rows under it, rather than one word to a row. *)
+let help_text_minimum_cells = 20
+
+(* The key column: two cells of indent, the key padded to this, and a space. *)
+let help_key_cells = 16
+
+let help_entry_rows ~width ~lead ~lead_cells ~column text =
+  let indent = String.make column ' ' in
+  let under words =
+    List.map
+      (fun piece -> indent ^ piece)
+      (Message_layout.wrap_words ~max_cells:(max 1 (width - column)) words)
+  in
+  let beside = width - lead_cells in
+  if lead_cells > column && beside < help_text_minimum_cells then
+    lead :: under text
+  else
+    match Message_layout.wrap_words ~max_cells:(max 1 beside) text with
+    | [] -> [ lead ]
+    | [ first ] -> [ lead ^ first ]
+    | first :: rest -> (lead ^ first) :: under (String.concat " " rest)
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
-let help_lines (state : state) =
+let help_lines ~width (state : state) =
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -2604,29 +2794,31 @@ let help_lines (state : state) =
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
     header_line
-    :: List.map
+    :: List.concat_map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-16s%s %s"
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (String.trim key)
-             Ansi.reset
-             action)
+           let key_cell = Printf.sprintf "%-*s" help_key_cells (String.trim key) in
+           help_entry_rows ~width
+             ~lead:
+               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  key_cell Ansi.reset)
+             ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
+             ~column:(2 + help_key_cells + 1) action)
          entries
     @ [ "" ]
   in
   let slash_commands =
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
-    :: List.map
+    :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
               [/help] list reads through the same two functions: the sheet
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
-           Printf.sprintf "  %s%s%s%s%s"
-             (Theme.warn ())
-             text
-             Ansi.reset
-             (Masc_tui_command.help_summary_padding text)
+           let padding = Masc_tui_command.help_summary_padding text in
+           help_entry_rows ~width
+             ~lead:(Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
+             ~lead_cells:(2 + Message_layout.display_width (text ^ padding))
+             ~column:(2 + Masc_tui_command.help_summary_column)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]
@@ -2646,17 +2838,69 @@ let help_lines (state : state) =
 
 module Context_bars = Masc_tui_context_bars
 
-let context_component_style = function
-  | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
-      Ansi.bold ^ Theme.category Theme.Slot_2
-  | Turn_record.Prompt_block _ -> Ansi.bold
-  | Turn_record.Tool_schemas -> (Theme.warn ())
-  | Turn_record.Message_user -> (Theme.info ())
-  | Turn_record.Message_tool_use | Turn_record.Message_tool_result -> (Masc_tui_theme.tone Masc_tui_theme.Accent)
-  | Turn_record.Message_system | Turn_record.Message_assistant_text
-  | Turn_record.Message_thinking | Turn_record.Message_redacted_thinking
-  | Turn_record.Message_image | Turn_record.Message_document
-  | Turn_record.Message_audio -> Ansi.reset
+(* One colour and one shade per producer, on every tab. Seven kinds took
+   seven colours picked kind by kind: two of them were the terminal's default,
+   so "Assistant text" and "Keeper instructions" were the same white row, and
+   the shade beside them cycled with the row's position, which put the same
+   shade on unrelated kinds and moved it when the sizes changed. Colour says
+   where the bytes came in; the composition tree, the request tab's kinds and
+   the proof tab's blocks all read from this one answer. *)
+let context_source_style = function
+  | Masc_tui_context_inspector.Turn_prompt_assembly -> Theme.warn ()
+  | Masc_tui_context_inspector.Effective_tool_surface ->
+      Masc_tui_theme.tone Masc_tui_theme.Accent
+  | Masc_tui_context_inspector.Provider_message_list ->
+      Theme.category Theme.Slot_2
+
+(* Shade as well as colour, so the groups stay apart where the terminal
+   reports no colour support. *)
+let context_source_glyph = function
+  | Masc_tui_context_inspector.Turn_prompt_assembly -> Context_bars.bar_full
+  | Masc_tui_context_inspector.Effective_tool_surface -> Context_bars.bar_dark
+  | Masc_tui_context_inspector.Provider_message_list -> Context_bars.bar_medium
+
+(* What the shades stand for, for a tab that draws them without a column
+   naming the producer beside every row. *)
+let context_source_legend =
+  String.concat
+    (Ansi.dim ^ "  \xc2\xb7  " ^ Ansi.reset)
+    (List.map
+       (fun source ->
+         context_source_style source
+         ^ context_source_glyph source
+         ^ Ansi.reset ^ Ansi.dim ^ " "
+         ^ Masc_tui_context_inspector.input_source_label source
+         ^ Ansi.reset)
+       Masc_tui_context_inspector.input_sources)
+
+let context_component_style component =
+  context_source_style (Masc_tui_context_inspector.input_source component)
+
+(* The elbow a composition row hangs from. One producer with a single
+   component gets a straight run rather than a branch that forks into
+   nothing. *)
+let context_branch ~index ~last =
+  if last = 0 then " \xe2\x94\x80\xe2\x94\x80 "
+  else if index = 0 then " \xe2\x94\x80\xe2\x94\xac "
+  else if index = last then "  \xe2\x94\x94 "
+  else "  \xe2\x94\x9c "
+
+(* Everything a composition row spends outside the producer name and the
+   component name: the indent, the elbow, the shade, the share and the byte
+   count with their separators. Taken from the row below so the two move
+   together. *)
+let context_flow_row_chrome_cells = 2 + 4 + 1 + 1 + 1 + 6 + 2 + 9
+
+(* The longest component name the record can carry ("Keeper instructions",
+   "Redacted thinking") sits inside this, so the column is as wide as the
+   names rather than as wide as the terminal. *)
+let context_flow_label_cells = 24
+
+let pad_cells ~width text =
+  text
+  ^ String.make
+      (max 0 (width - Message_layout.display_width text))
+      ' '
 
 
 let context_evidence_style = function
@@ -2890,11 +3134,11 @@ let context_composition_lines ~cols ~turn_back
                 turns_behind_latest Ansi.reset
             ]
         in
-        (* Biggest share first. The record's order is neither prompt order nor
-           size order, and the stacked bar only reads as a picture when its
-           shades run from the largest share down: there are four shades and a
-           turn can carry nine components, so an unsorted row puts the repeated
-           shade next to unrelated sizes. *)
+        (* Grouped by the producer the bytes entered through, in the order a
+           turn assembles them, and biggest share first inside a group. The
+           list was ranked by size alone: it named seven kinds in one column
+           and never said that three of them are the prompt this turn built
+           and three more are the conversation the provider was handed. *)
         let ranked =
           List.stable_sort
             (fun (left : Turn_record.input_component)
@@ -2902,40 +3146,89 @@ let context_composition_lines ~cols ~turn_back
               compare right.bytes left.bytes)
             components
         in
+        let by_source =
+          List.filter_map
+            (fun source ->
+              match
+                List.filter
+                  (fun (component : Turn_record.input_component) ->
+                    Inspector.input_source component.component = source)
+                  ranked
+              with
+              | [] -> None
+              | grouped -> Some (source, grouped))
+            Inspector.input_sources
+        in
         let bar =
           if total = 0 then []
           else
             [ "  "
               ^ Context_bars.stacked_bar ~width:bar_width
                   ~segments:
-                    (List.map
-                       (fun (component : Turn_record.input_component) ->
-                         ( context_component_style component.component
-                         , component.bytes ))
-                       ranked)
+                    (List.concat_map
+                       (fun (source, grouped) ->
+                         List.map
+                           (fun (component : Turn_record.input_component) ->
+                             ( context_source_style source
+                             , context_source_glyph source
+                             , component.bytes ))
+                           grouped)
+                       by_source)
             ]
         in
+        let source_width =
+          List.fold_left
+            (fun widest (source, _) ->
+              max widest
+                (String.length (Inspector.input_source_label source)))
+            0 by_source
+        in
+        (* Wide enough for the longest component name and no wider: the share
+           and the byte count belong beside the name they describe, not at the
+           far edge of a 140-column overlay. *)
+        let label_width =
+          min context_flow_label_cells
+            (max 10 (width - source_width - context_flow_row_chrome_cells))
+        in
         let rows =
-          List.mapi
-            (fun index (component : Turn_record.input_component) ->
-              let share =
-                if total = 0 then 0.
-                else float component.bytes /. float total *. 100.
-              in
-              (* A component with bytes in it must not print as 0.0%: the
-                 screen would then name a kind and deny it in the same row. *)
-              let share_text =
-                if component.bytes > 0 && share < 0.05 then "<0.1%"
-                else Printf.sprintf "%.1f%%" share
-              in
-              let style = context_component_style component.component in
-              Printf.sprintf "  %s%s %-22s%s %6s  %s%9s%s" style
-                (Context_bars.segment_glyph index)
-                (Inspector.input_component_label component.component)
-                Ansi.reset share_text Ansi.dim
-                (Inspector.format_bytes component.bytes)
-                Ansi.reset)
-            ranked
+          List.concat_map
+            (fun (source, grouped) ->
+              let style = context_source_style source in
+              let last = List.length grouped - 1 in
+              List.mapi
+                (fun index (component : Turn_record.input_component) ->
+                  let share =
+                    if total = 0 then 0.
+                    else float component.bytes /. float total *. 100.
+                  in
+                  (* A component with bytes in it must not print as 0.0%: the
+                     screen would then name a kind and deny it in the same
+                     row. *)
+                  let share_text =
+                    if component.bytes > 0 && share < 0.05 then "<0.1%"
+                    else Printf.sprintf "%.1f%%" share
+                  in
+                  String.concat ""
+                    [ "  "
+                    ; Ansi.dim
+                    ; pad_cells ~width:source_width
+                        (if index = 0 then Inspector.input_source_label source
+                         else "")
+                    ; context_branch ~index ~last
+                    ; Ansi.reset
+                    ; style
+                    ; context_source_glyph source
+                    ; " "
+                    ; pad_cells ~width:label_width
+                        (Inspector.input_component_label component.component)
+                    ; Ansi.reset
+                    ; Printf.sprintf " %6s  " share_text
+                    ; Ansi.dim
+                    ; Printf.sprintf "%9s" (Inspector.format_bytes component.bytes)
+                    ; Ansi.reset
+                    ])
+                grouped)
+            by_source
         in
         (* Attributed bytes and serialized bytes are compared on the same turn, never
            across two. They still disagree: on 2026-09-01 the attributed total
@@ -2954,7 +3247,20 @@ let context_composition_lines ~cols ~turn_back
                    (Inspector.format_bytes observation.body_bytes))
           | Some _ | None -> []
         in
-        gap @ bar @ rows @ against_wire
+        (* The arrow says the rows above are what the request below is made
+           of. Drawn only when both readings are the same turn: where the
+           composition is older, [gap] says so and an arrow into this turn's
+           request would deny it. *)
+        let into_request =
+          if turns_behind_latest > 0 then []
+          else
+            let indent = String.make (2 + source_width + 2) ' ' in
+            [ Ansi.dim ^ indent ^ "\xe2\x94\x82" ^ Ansi.reset
+            ; Ansi.dim ^ indent ^ "\xe2\x96\xbc  serialized and dispatched"
+              ^ Ansi.reset
+            ]
+        in
+        gap @ bar @ rows @ into_request @ against_wire
   in
   (* The per-turn input the provider itself counted, newest first, one row
      per dispatched turn the page holds. A provider that reports its usage
@@ -3036,7 +3342,16 @@ let context_composition_lines ~cols ~turn_back
     @ velocity_lines
     @ List.concat (List.mapi row selection.Inspector.recent)
   in
+  (* Read top to bottom as the turn is built: what came in, what was sent,
+     how far back it reached, and what the provider counted on the turns
+     before it. The request stood above the components it is made of, so the
+     screen opened on a total whose parts were three sections further down. *)
   [ identity; turn; trace; "" ]
+  @ [ "  "
+      ^ Context_bars.band ~width ~title:"COMPOSITION"
+          ~caption:"where this turn's bytes came in"
+    ]
+  @ component_lines @ [ "" ]
   @ [ "  "
       ^ Context_bars.band ~width ~title:"SERIALIZED REQUEST"
           ~caption:"bytes prepared before dispatch"
@@ -3050,11 +3365,6 @@ let context_composition_lines ~cols ~turn_back
     ]
   @ history_lines
   @ [ "" ]
-  @ [ "  "
-      ^ Context_bars.band ~width ~title:"COMPOSITION"
-          ~caption:"how this turn's content divides by kind"
-    ]
-  @ component_lines @ [ "" ]
   @ recent_turns_lines @ [ "" ]
   @ prose
       "Three measurements of one turn, not three views of one number: none of \
@@ -3124,39 +3434,62 @@ let context_exact_input_summary ~width
   List.iter
     (fun (item : Inspector.exact_input_item) ->
       let key = Inspector.exact_input_category item.kind in
+      let source = Inspector.exact_input_source item.kind in
       match Hashtbl.find_opt tally key with
       | None ->
           order := key :: !order;
-          Hashtbl.replace tally key (1, item.bytes)
-      | Some (count, bytes) ->
-          Hashtbl.replace tally key (count + 1, bytes + item.bytes))
+          Hashtbl.replace tally key (1, item.bytes, source)
+      | Some (count, bytes, source) ->
+          Hashtbl.replace tally key (count + 1, bytes + item.bytes, source))
     items;
   let groups =
     List.filter_map
       (fun key ->
         match Hashtbl.find_opt tally key with
         | None -> None
-        | Some (count, bytes) -> Some (key, count, bytes))
+        | Some (count, bytes, source) -> Some (key, count, bytes, source))
       (List.rev !order)
+  in
+  (* Producer first, then size, the way the composition tab groups the same
+     bytes: a reader who learned there that the pink shade is the conversation
+     handed to the provider reads it here without a second legend. *)
+  let source_rank source =
+    let rec index position = function
+      | [] -> List.length Inspector.input_sources
+      | candidate :: rest ->
+          if candidate = source then position else index (position + 1) rest
+    in
+    index 0 Inspector.input_sources
   in
   let ranked =
     List.stable_sort
-      (fun (_, _, left) (_, _, right) -> compare right left)
+      (fun (_, _, left_bytes, left_source) (_, _, right_bytes, right_source) ->
+        match compare (source_rank left_source) (source_rank right_source) with
+        | 0 -> compare right_bytes left_bytes
+        | order -> order)
       groups
   in
-  let total = List.fold_left (fun sum (_, _, bytes) -> sum + bytes) 0 ranked in
+  let total =
+    List.fold_left (fun sum (_, _, bytes, _) -> sum + bytes) 0 ranked
+  in
   let bar_width = min 60 width in
   let bar =
     if total = 0 then []
     else
       [ "  "
         ^ Context_bars.stacked_bar ~width:bar_width
-            ~segments:(List.map (fun (_, _, bytes) -> "", bytes) ranked)
+            ~segments:
+              (List.map
+                 (fun (_, _, bytes, source) ->
+                   ( context_source_style source
+                   , context_source_glyph source
+                   , bytes ))
+                 ranked)
       ]
   in
   let rows =
-    List.mapi
-      (fun index (key, count, bytes) ->
+    List.map
+      (fun (key, count, bytes, source) ->
         let share =
           if total = 0 then 0. else float bytes /. float total *. 100.
         in
@@ -3170,9 +3503,10 @@ let context_exact_input_summary ~width
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s %s %s%3d %s%s  %9s  %6s"
-          (Context_bars.segment_glyph index)
-          label Ansi.dim count
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  %6s"
+          (context_source_style source)
+          (context_source_glyph source)
+          label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
           (Masc_tui_context_inspector.format_bytes bytes)
@@ -3355,16 +3689,28 @@ let context_exact_input_lines ~cols state ~response ~response_parts
                if selected then ">", Theme.selection else " ", Ansi.reset
              in
              let label_width = max 8 (width - 20) in
+             (* The list carries the producer's colour the summary above it
+                groups by, except under the selection band, whose own styling
+                owns the whole row. *)
+             let label =
+               fit_width (Inspector.exact_input_label item.kind) label_width
+             in
+             let label =
+               if selected then label
+               else
+                 context_source_style (Inspector.exact_input_source item.kind)
+                 ^ label ^ Ansi.reset
+             in
              Printf.sprintf "%s %s %2d %s  %s  %9s%s" style marker (index + 1)
-               (kind_letter index item)
-               (fit_width (Inspector.exact_input_label item.kind) label_width)
+               (kind_letter index item) label
                (Inspector.format_bytes item.bytes) Ansi.reset)
           items
       in
       let legend =
-        Context_bars.wrap ~width
-          "F fixed prompt · H history · N new this turn · S schema"
-        |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+        ("  " ^ context_source_legend)
+        :: (Context_bars.wrap ~width
+              "F fixed prompt · H history · N new this turn · S schema"
+           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in
       if cols >= keeper_split_threshold_cols then
@@ -3741,7 +4087,7 @@ let context_split_pane_height ~content_height ~common_len =
 let keeper_deletions_lines (state : state) ~cols =
   let lines = match state.keeper_deletions with
     | None -> ["삭제 기록을 불러오는 중입니다."]
-    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail; "r: 다시 조회"]
+    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
     | Some (Ok inventory) ->
       let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
@@ -3767,15 +4113,37 @@ let keeper_deletions_lines (state : state) ~cols =
               | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row) status;
-           (if row.can_retry then "t: 같은 작업의 남은 정리 재시도" else "이 단계는 정리 재시도 대상이 아닙니다.");
-           "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+             (Keeper_control.deletion_keeper_name row) status]
+          @ (if row.can_retry then [] else ["이 단계는 정리 재시도 대상이 아닙니다."])
+          @ ["종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
           @ String.split_on_char '\n'
               (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
   in
   List.concat_map (fun line ->
     Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
       (Terminal_text.single_line line)) lines
+
+(* The deletion overlay's keys for what it shows. [j/k] steps between records
+   and [t] retries the selected record only when it can be retried
+   (masc_tui.ml); the row named both on a failed read and on a single record,
+   where neither does anything. The body said [r] and [t] a second time under
+   the record, so those lines are gone and the row is the one place. *)
+let keeper_deletions_hints (state : state) ~scrollable =
+  let operations, can_retry =
+    match state.keeper_deletions with
+    | Some (Ok inventory) ->
+      ( List.length inventory.operations
+      , match List.nth_opt inventory.operations state.keeper_deletions_cursor with
+        | Some row -> row.Keeper_control.can_retry
+        | None -> false )
+    | Some (Error _) | None -> (0, false)
+  in
+  String.concat "  "
+    ((if operations > 1 then [ "j/k:작업" ] else [])
+     @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
+     @ [ "r:조회" ]
+     @ (if can_retry then [ "t:정리 재시도" ] else [])
+     @ [ "Esc:닫기" ])
 
 ;;
 

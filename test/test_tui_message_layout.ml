@@ -1389,9 +1389,10 @@ let test_age_reads_as_seconds_then_minutes () =
    its 28 rows through it: [12045m~], five figures cut by a seven-cell column,
    so a day-old run and a nine-day-old run were the same shape.
 
-   The widest reading is what a column has to hold, so it is pinned: a span
-   just under a year is seven cells, which is what the Fusion column already
-   was. *)
+   The widest reading is what a column has to hold, so it is pinned: six
+   cells, "99d23h", and from a hundred days the days alone. A span just under
+   a year was seven, which the seven-cell Fusion column held and the six-cell
+   Board and Keeper columns did not. *)
 let test_an_age_climbs_to_hours_and_days () =
   List.iter
     (fun (seconds, expected) ->
@@ -1405,7 +1406,8 @@ let test_an_age_climbs_to_hours_and_days () =
     ; (86399., "23h59m")
     ; (86400., "1d00h")
     ; (722_730., "8d08h")
-    ; (31_535_999., "364d23h")
+    ; (8_639_999., "99d23h")
+    ; (31_535_999., "364d")
     ];
   check bool "the widest reading fits the column it is drawn in" true
     (match Layout.age_text ~now:31_535_999. ~since:0. with
@@ -2229,6 +2231,27 @@ let test_a_count_takes_the_number_it_counts () =
   check string "and its singular" "1 entry"
     (Layout.count_noun ~plural:"entries" 1 "entry")
 
+
+(* The Board and Keeper roster ages are six cells. Days and hours from a
+   hundred days on drew seven, and the column cut the day count out. *)
+let test_a_span_fits_a_six_cell_column () =
+  let hour = 3600. in
+  let day = 24. *. hour in
+  check string "under a hundred days keeps the hours" "99d23h"
+    (Layout.span_text ((99. *. day) +. (23. *. hour)));
+  check string "a hundred days keeps only the days" "100d"
+    (Layout.span_text ((100. *. day) +. (5. *. hour)));
+  check string "a year is days alone" "365d"
+    (Layout.span_text ((365. *. day) +. (10. *. hour)));
+  List.iter
+    (fun seconds ->
+      let text = Layout.span_text seconds in
+      check bool
+        (Printf.sprintf "%s fits six cells" text)
+        true
+        (Layout.display_width text <= 6))
+    [ 59.; 3599.; day -. 1.; (100. *. day) -. 1.; 99_999. *. day ]
+
 let () =
   run "tui_message_layout"
     [
@@ -2410,5 +2433,7 @@ let () =
             test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
         ; test_case "a count takes the number it counts" `Quick
             test_a_count_takes_the_number_it_counts
+        ; test_case "a span fits a six-cell column" `Quick
+            test_a_span_fits_a_six_cell_column
         ] )
     ]

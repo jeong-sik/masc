@@ -630,7 +630,12 @@ let keeper_call_association state ~keeper_name
           (Option.equal String.equal state.keeper_calls_keeper
              (Some keeper_name))
       then Call_log_not_loaded
-      else if state.keeper_calls_loading then Call_log_loading
+      (* Refresh keeps the last snapshot for this Keeper. Replacing it with
+         a loading row drops every expanded output, changing the transcript's
+         height twice per poll and moving the reader's viewport. Only the
+         first read has no durable detail to draw yet. *)
+      else if state.keeper_calls_loading && Option.is_none state.keeper_calls
+      then Call_log_loading
       else
       match state.keeper_calls_error, state.keeper_calls with
       | Some detail, _ -> Call_log_unavailable detail
@@ -1875,7 +1880,9 @@ let render_keeper_message (state : state) =
                 (Option.equal String.equal state.msg_file_changes_keeper
                    (Some keeper_name))
             then "diffs pending"
-            else if state.msg_file_changes_loading then "diffs loading"
+            else if state.msg_file_changes_loading
+                    && Option.is_none state.msg_file_changes
+            then "diffs loading"
             else
               match state.msg_file_changes_error, state.msg_file_changes with
               | Some _, Some snapshot -> snapshot_status ~stale:true snapshot
@@ -2819,6 +2826,22 @@ let render_keeper_message (state : state) =
        caret did not. Reading the rows already in the frame, with the same
        [frame_lines] that builds it, cannot disagree with it. *)
     let rows_above_composer = count_frame_lines chat_buf in
+    (* An empty draft names the voice keys, as the composer row does under
+       every other surface. This pane binds them too and is the one an operator
+       speaks from, yet nothing on it said so: the key list in the footer has
+       no room for them. Measured 2026-09-13 at 120 columns, the footer read
+       [Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail]
+       and the draft row was a bare prompt. The hint sits after the caret, so
+       the caret column does not move, and it goes while a capture or
+       continuous mode runs, because the footer's meter says it louder. *)
+    let voice_hint =
+      if String.equal input ""
+         && state.keeper_message_focus = Right_pane
+         && Option.is_none state.voice_capture
+         && Option.is_none state.voice_continuous
+      then Ansi.dim ^ "  " ^ Masc_tui_composer.voice_keys_hint ^ Ansi.reset
+      else ""
+    in
     List.iteri
       (fun index line ->
         (* Only the first line carries the prompt; the rest line up under it so
@@ -2828,7 +2851,9 @@ let render_keeper_message (state : state) =
         let prefix =
           if index = 0 then Message_layout.chat_input_prompt_prefix else "    "
         in
-        box_line chat_buf chat_cols ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line))
+        let hint = if index = 0 then voice_hint else "" in
+        box_line chat_buf chat_cols
+          ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ prefix ^ Ansi.reset ^ line ^ hint))
       composer;
 
     let input_row =
@@ -2930,18 +2955,7 @@ let render_keeper_message (state : state) =
        actually pressed, which is what tells them how far along the word they
        are. *)
     let slash_hint =
-      let paint (span : Masc_tui_command.hint_span) =
-        match span with
-        | Masc_tui_command.Typed text -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Wrong text -> (Theme.bad ()) ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
-      in
-      match
-        Masc_tui_command.hint_spans
-          (Masc_tui_command.hint (Buffer.contents state.msg_input))
-      with
-      | [] -> None
-      | spans -> Some (String.concat "" (List.map paint spans))
+      slash_hint_text ~restore:Ansi.default_fg (Buffer.contents state.msg_input)
     in
     let footer_hints =
       match slash_hint with

@@ -870,7 +870,7 @@ def selected_keeper_from_screen(value: str) -> str | None:
         if not normalized.startswith(prefix):
             continue
         remainder = normalized[len(prefix) :]
-        if remainder in ("not loaded", "no Keeper selected"):
+        if remainder == "no Keeper selected":
             return None
         endings = [
             index for marker in (" (", " — ") if (index := remainder.find(marker)) >= 0

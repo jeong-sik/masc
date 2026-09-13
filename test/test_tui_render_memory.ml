@@ -221,7 +221,9 @@ let test_an_empty_memory_page_uses_the_shared_notes () =
   check bool "a failed page says the shared failure note" true
     (contains Types.page_failed_note failed_body);
   check bool "and not its own server-error words" false
-    (contains "server error" failed_body)
+    (contains "server error" failed_body);
+  check bool "the body leaves the fleet key to the footer" false
+    (contains "Fleet Memory Search" (lines unread))
 ;;
 
 let test_render_memory_body_with_keepers () =
@@ -788,6 +790,68 @@ let test_render_memory_overflow_selection () =
   assert_selected_visible ()
 ;;
 
+let test_facts_selection_follows_the_rendered_viewport () =
+  let state = three_kinds_state () in
+  state.view <- Types.Memory;
+  state.memory_facts_keeper <- Some "alpha";
+  state.memory_facts_sort <- Types.Sort_claim;
+  let facts =
+    List.init 24 (fun index ->
+      { Decode.mf_claim = Printf.sprintf "fact-%02d %s" index
+          (if index mod 2 = 0 then "short" else String.make 180 'x')
+      ; mf_category = "general"
+      ; mf_origin = "manual"
+      ; mf_first_seen = 100.0
+      ; mf_last_seen = 200.0
+      ; mf_memory_id = string_of_int index
+      ; mf_events = Decode.no_memory_fact_events
+      })
+  in
+  state.memory_facts <- Some
+    { Decode.mfs_keeper = "alpha"
+    ; mfs_ordinary = Decode.Memory_store_present
+        { mos_revision = 1; mos_updated_at = 200.0; mos_facts = facts }
+    ; mfs_source = Decode.Memory_store_read_error "source unavailable"
+    };
+  let assert_visible ~cols ~budget () =
+    let used = ref 0 and selected = ref [] in
+    let push _ = incr used in
+    Render_memory.render_memory_facts_body ~cols ~budget state
+      ~push ~push_styled:(fun ~style:_ line -> push line)
+      ~push_selected:(fun line ->
+        if !used < budget then selected := line :: !selected;
+        incr used)
+      ~push_divider:(fun () -> push "") ~push_empty:(fun () -> push "");
+    let row = List.nth (Types.memory_fact_rows state) state.memory_facts_cursor in
+    let expected = Render_memory.memory_fact_row_line ~cols row
+      |> Masc_tui_theme.strip_sgr in
+    check (list string) "the selected fact is drawn inside the body" [ expected ] !selected
+  in
+  let move ~cols ~budget cursor =
+    let height = Render_memory.memory_facts_content_height ~cols ~budget ~cursor state in
+    state.memory_facts_cursor <- cursor;
+    state.memory_facts_scroll <-
+      Masc_tui_scroll.ensure_visible ~cursor ~height state.memory_facts_scroll;
+    assert_visible ~cols ~budget ()
+  in
+  (* j/k, page-sized jumps, and End share the target cursor's layout. Long
+     claims alternate with short ones so every step changes the detail. *)
+  for cursor = 0 to 23 do move ~cols:80 ~budget:18 cursor done;
+  for cursor = 23 downto 0 do move ~cols:80 ~budget:18 cursor done;
+  List.iter (move ~cols:80 ~budget:18) [ 8; 16; 23; 0 ];
+  (* Resizing is a redraw before input, so the renderer also follows a
+     selection whose old scroll was computed for a larger body. *)
+  move ~cols:140 ~budget:40 23;
+  assert_visible ~cols:60 ~budget:16 ();
+  (* The search banner, retained read error and store error all consume
+     actual rows above the list. Filtered End still selects a visible fact. *)
+  state.search_last <- "fact-1";
+  state.memory_facts_error <- Some "refresh unavailable";
+  let count = List.length (Types.memory_fact_rows state) in
+  move ~cols:80 ~budget:18 (count - 1);
+  move ~cols:80 ~budget:18 0
+;;
+
 let () =
   run "tui_render_memory"
     [ ( "age_label"
@@ -811,6 +875,8 @@ let () =
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "memory_body_cursor_clamping" `Quick test_render_memory_body_cursor_clamping
         ; test_case "memory_facts_body" `Quick test_render_memory_facts_body
+        ; test_case "facts selection follows the rendered viewport" `Quick
+            test_facts_selection_follows_the_rendered_viewport
         ; test_case "an empty memory page uses the shared notes" `Quick
             test_an_empty_memory_page_uses_the_shared_notes
         ] )

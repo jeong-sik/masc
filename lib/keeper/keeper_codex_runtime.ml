@@ -318,7 +318,8 @@ let codex_error_to_core_error = function
   | Runtime_codex_app_server.Invalid_config detail ->
     config_error ~field:"codex_app_server" detail
   | Runtime_codex_app_server.Subscription_required detail ->
-    config_error ~field:"codex_subscription" detail
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "codex_app_server"; detail })
   | Runtime_codex_app_server.Context_window_exceeded
       { message; tool_effect_attempted = false } ->
     Agent_core.Error.Api
@@ -492,7 +493,7 @@ let native_posture_note = function
   | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
 ;;
 
-let run_without_lifecycle ~on_session_settled ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -563,11 +564,12 @@ let run_without_lifecycle ~on_session_settled ~official_client_continuation ~run
        that reaches [claim]. *)
     let* native_posture =
       Host.resolve_native_posture
+        ~required:required_native_posture
         ~base_path
         ~keeper_name
         ~client_label:"Codex"
         ~default:Runtime_native_tools.codex_default
-        ~none_supported:false
+        ~none_supported:(Runtime_execution.supports_native_none (Codex_app_server config))
     in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
@@ -729,6 +731,7 @@ let run_without_lifecycle ~on_session_settled ~official_client_continuation ~run
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -814,6 +817,7 @@ let run_without_lifecycle ~on_session_settled ~official_client_continuation ~run
     let* host_dynamic_tools =
       Host.dynamic_tools
         ~content_transport:Runtime_official_client_tool.Codex
+        ~accepts_image_input
         (* These lanes drive a provider CLI that has no place to show an
            operator prompt mid-turn, so a decision asking for one is rejected
            rather than admitted. *)
@@ -1224,7 +1228,7 @@ let note_transport_uncertainty effect_disposition =
   | true | false -> ()
 ;;
 
-let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+let run ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context
@@ -1295,7 +1299,8 @@ let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects
             previous_capacity_bytes
             capacity_bytes)
       ~attempt:(fun ~capacity_bytes ->
-        run_without_lifecycle ~on_session_settled ~official_client_continuation
+        run_without_lifecycle ~accepts_image_input ~on_session_settled ~official_client_continuation
+          ~required_native_posture
           ~runtime_id
           ~keeper_name
     ~pre_tool_rejects

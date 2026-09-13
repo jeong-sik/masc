@@ -179,6 +179,7 @@ docker exec -u root "$container" bash -c '
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends \
     pkg-config m4 git curl ca-certificates unzip binutils python3 \
+    ripgrep poppler-utils ffmpeg \
     libgmp-dev libssl-dev libzstd-dev libsqlite3-dev libpq-dev \
     libev-dev libffi-dev zlib1g-dev libncurses-dev \
     libprotobuf-dev protobuf-compiler

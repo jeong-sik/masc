@@ -171,6 +171,22 @@ base path:
 The writer is the one the HTTP setup route uses: the same revision guard, and
 the same refusal to publish a section the loader would reject.
 
+`--voice` is looked up in the list `--list-voices` prints before anything is
+written, ignoring ASCII case as `say` does. `say` would speak a name it does not
+print in another voice and exit 0, so a name that is not in the list is
+refused, exit 1, with `runtime.toml` left as it was. Measured 2026-09-13 on an initialized workspace:
+
+| `--voice` | exit | `runtime.toml` | stderr |
+|---|---|---|---|
+| `NoSuchVoice` | 1 | unchanged | `say has no voice named "NoSuchVoice", and would speak in another one without failing; masc voice-local-setup --list-voices prints the 184 it has. Nothing was written.` |
+| `Eddy` | 1 | unchanged | `say has no voice named "Eddy", …` |
+| `eddy (한국어(한국))` | 0 | written | |
+| `Yuna` | 0 | written | |
+| `Yuna`, with no `say` on `PATH` | 1 | unchanged | `the voices say has could not be listed to check "Yuna": say is not installed. Nothing was written.` |
+
+Before the lookup, `--voice NoSuchVoice` exited 0 and wrote
+`default_voice = "NoSuchVoice"`.
+
 ### What the configuration says
 
 After a voice, a model, and one keeper mapped by hand:
@@ -266,8 +282,9 @@ Both exited 0.
 `say -v Eddy` picks one of the fourteen `Eddy (…)` voices. Only the whole label
 is in the list, so only the whole label passes.
 
-The lookup runs in the probe and nowhere else. Listing took 0.56–0.59 s per
-call, and a keeper would wait that long before every sentence. A keeper mapped
+The lookup runs in this probe and in `voice-local-setup --voice`, not when a
+keeper speaks. Listing took 0.56–0.59 s per call, and a keeper would wait that
+long before every sentence. A keeper mapped
 to a missing voice still speaks, in another voice, with nothing logged, until
 `voice-verify --agent` is run for it.
 
@@ -762,6 +779,21 @@ separates them.
 The binding is a control code because every printable key in a focused row is
 draft text.
 
+The chat pane binds the same keys, and an empty draft there names them the way
+the composer row does. Measured 2026-09-13 on imp's chat in a 120-column pty,
+the last rows of the pane, with the footer's build-location notice left out:
+
+```
+    >   (^Y to speak, ^A to keep listening)
+
+  Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail  …?
+```
+
+The hint goes once a character is typed, and while a capture or continuous mode
+runs, when the footer shows the meter instead. The footer's own key list has no
+room for the voice keys; the help sheet for the chat names `Ctrl-Y` and
+`Ctrl-A`.
+
 On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
 (`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the
 terminal and gives it back on exit and around Ctrl-Z, the same way it takes
@@ -902,6 +934,11 @@ same one the speak and transcribe paths would have refused with.
 
 Each TTS probe is a real synthesis request. On a metered provider that costs
 what one short sentence costs; the audio is discarded once its size is counted.
+
+A `voice_mcp` endpoint is asked through its `agent_speak` tool, the call a
+keeper turn makes, so the sentence is played wherever that MCP server plays
+audio. The tool hands back no file, and its answer reads
+`agent_speak answered in "<voice>"` without a byte count.
 
 ### Making an utterance to probe STT with
 
@@ -1151,3 +1188,92 @@ A catalogue request carries the kind and, at most, the **name** of the
 variable holding the provider's key — never a value, because `runtime.toml`
 is committed. It carries no address and no command path: a route cannot check
 where one points, so the read uses the kind's own destination.
+
+## Setting voice up from the TUI
+
+`p` until the pane strip reaches voice, then `e`.
+
+The pane itself reads two routes. `/api/v1/voice/config` is public and answers
+whether things load; `/api/v1/voice/setup` is admin-gated and names each
+endpoint, so the pane lists them by id, kind and address. A chain that has
+quietly gone dead looks healthy in the first and is visible in the second.
+
+### The questions
+
+| Step | Asked when |
+|---|---|
+| side | always — speech out or speech in |
+| provider | always |
+| name | always — how the entry is addressed later |
+| address | not for ElevenLabs, which carries its own |
+| credential variable | not for an MCP tool |
+| model | always |
+| voice | speech out only |
+| review | always |
+
+`enter` moves forward, `up` moves back, `esc` leaves without writing. The side
+and the provider walk on `←` / `→` / space, because both are closed sets;
+everything else is typed. `ctrl-u` clears a field.
+
+Two blanks are real answers rather than unfinished ones:
+
+- **a blank credential variable** sends no Authorization header, which is what a
+  local server that never asked for one answers 200 to;
+- **a blank address** offers the addresses a local server usually listens on, as
+  starting points. The wizard cannot tell what is running on a port — the probe
+  decides that.
+
+### What saving does
+
+The save carries the revision the pane read. A wizard left open while something
+else wrote is told its read went stale rather than overwriting that writer.
+
+On success the pane reloads, and for speech out every configured endpoint is
+asked to say one sentence. Each answer is shown, **including the refusals** —
+that is the part a fallback chain hides by stopping at the first endpoint that
+answers.
+
+Speech in is not probed there: transcription needs audio the pane does not have.
+Use `masc voice-verify --audio FILE`, and see above for making a file.
+
+### What it will not do
+
+The wizard does not install or start anything. It registers an address and
+checks whether something answers on it. Starting a local server is still
+`scripts/whisper-server.sh start` in the `me` repo, or whatever that server's own
+command is.
+
+### How much of this was measured
+
+The CLI numbers above came from real runs against the real endpoints. The
+screen did not: nobody has opened this wizard in a terminal yet, because doing
+so needs a server booted from this branch and a stray `--base-path` boot has
+rewritten the recorded default workspace before (#35101).
+
+What stands in for that, and what it is worth:
+
+| Claim | Held by | What it cannot tell you |
+|---|---|---|
+| the questions, their order, and when a draft is enough | `test/voice_wizard` | nothing about the terminal |
+| step position, typed text, and what survives going back | `test/voice_wizard_session` | nothing about the terminal |
+| the pane hands over to the wizard; every mover has a key | `test/test_tui_voice_wizard_wiring.ml` | that the drawing is legible |
+| the wire shape both ends agree on | save request → apply → loader, in `test/voice_wizard` | that the pane sends it |
+| the wizard drawn and walked in a real terminal, and what it puts on the wire | `dune build @test/runtest-test_tui_keyboard_input-voice-wizard` | that a live server accepts it |
+
+The last row is the one that found something. Everything above it was green
+while typing an endpoint name containing `i` put the `i` into a keeper message
+and sent the rest of the word after it: the composer sees every key before the
+field does, and the list of places it must not do that named six fields by hand
+and did not name this one. `whisper` reached the screen as `wh`.
+
+That scenario now walks to the end and presses save, and reads the request the
+wizard posts: the revision the pane was showing, a `put_endpoint` carrying the
+name that was typed, the default model, the default voice — and the **name** of
+the credential variable, never a value, which is asserted rather than assumed
+because `runtime.toml` is committed. The other half, that such a request
+actually writes a loadable `[voice]` section, is `save_request` → `apply` →
+loader in `test/voice_wizard`.
+
+So both ends of the wire are measured against the same shape. What nobody has
+done is run the two against each other with a real server on the other side.
+

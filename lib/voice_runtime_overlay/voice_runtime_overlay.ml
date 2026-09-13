@@ -28,6 +28,11 @@ type http_request =
   ; body_json : Yojson.Safe.t
   }
 
+type voice_listing_request =
+  { listing_url : string
+  ; listing_headers : (string * string) list
+  }
+
 (* A command to run, argv already split. No shell: a message to speak is
    arbitrary text, and handing it to a shell would make quoting the thing that
    decides what runs. *)
@@ -130,9 +135,9 @@ let adapter_for_endpoint_kind = function
 ;;
 
 let adapter_for_endpoint (endpoint : Voice_config.endpoint) =
-  match resolve_adapter endpoint.id with
-  | Some adapter -> adapter
-  | None -> adapter_for_endpoint_kind endpoint.kind
+  (* IDs name entries; only the declared kind chooses their transport.
+     Provider selection still accepts aliases through resolve_adapter. *)
+  adapter_for_endpoint_kind endpoint.kind
 ;;
 
 let endpoint_matches_provider_label label (endpoint : Voice_config.endpoint) =
@@ -179,16 +184,28 @@ let endpoint_auth_env_name (endpoint : Voice_config.endpoint) =
   auth_env_name ?endpoint_api_key_env:endpoint.api_key_env adapter
 ;;
 
-let transport_supports_http_tts (adapter : adapter) =
-  match adapter.transport with
-  | Openai_compat | Elevenlabs_direct -> true
-  (* Neither of these speaks HTTP. They are reached by running a command, and
-     the caller picks that path by asking for a command request instead. *)
-  | Voice_mcp | Macos_say | Whisper_cli -> false
+(* How a transport speaks, if it does. A type rather than a predicate, the way
+   [Voice_bridge.transcriber] already is (#35558). The boolean this replaces
+   answered false for three unrelated reasons: macos_say speaks by running a
+   command, voice_mcp speaks through a tool call, and whisper_cli does not speak
+   at all. A transport added to {!transport} joined the false side without a
+   word and its endpoints were reported as not asked; now it cannot be added
+   until it says which of the four it is. *)
+type speaker =
+  | Over_http
+  | By_command
+  | By_mcp_tool
+  | Does_not_speak
+
+let speaker_of_transport = function
+  | Openai_compat | Elevenlabs_direct -> Over_http
+  | Macos_say -> By_command
+  | Voice_mcp -> By_mcp_tool
+  | Whisper_cli -> Does_not_speak
 ;;
 
-let endpoint_supports_http_tts endpoint =
-  adapter_for_endpoint endpoint |> transport_supports_http_tts
+let speaker_of_endpoint endpoint =
+  (adapter_for_endpoint endpoint).transport |> speaker_of_transport
 ;;
 
 (* RFC-0166: the default per-agent voice mapping was a closed roster
@@ -308,6 +325,21 @@ let endpoint_base_url (endpoint : Voice_config.endpoint) =
   | _ -> Option.map normalize_base_url endpoint.base_url
 ;;
 
+(* The address a request to this endpoint is sent to, resolved the way the
+   transport resolves it. A surface that picked between [base_url] and
+   [mcp_url] itself showed [base_url] for a voice_mcp endpoint carrying both,
+   while the call went to [mcp_url]. A command kind is not contacted at an
+   address, so it has none. *)
+let endpoint_address (endpoint : Voice_config.endpoint) =
+  match (adapter_for_endpoint endpoint).transport with
+  | Voice_mcp ->
+    (match session_mcp_url_of_endpoint endpoint with
+     | Ok url -> Some url
+     | Error _ -> None)
+  | Openai_compat | Elevenlabs_direct -> endpoint_base_url endpoint
+  | Macos_say | Whisper_cli -> None
+;;
+
 let is_elevenlabs_voice_id value =
   let len = String.length value in
   len >= 20
@@ -406,6 +438,56 @@ let http_request_for_tts
          { url = Printf.sprintf "%s/text-to-speech/%s" base_url voice_id
          ; headers
          ; body_json
+         })
+;;
+
+(* The voices an endpoint will admit to having.
+
+   Only ElevenLabs answers this. Its list lives on a different API version than
+   everything else masc sends it -- /v1 carries speech, /v2 carries the
+   catalogue -- so the version is swapped rather than the path appended, and a
+   base_url that does not end in a version is left alone and asked as it is.
+
+   An OpenAI-compatible server has no such route: /v1/audio/speech takes a
+   voice name and there is no listing beside it in the spec, and the two local
+   servers this runbook names answer 404. Saying that is the honest answer, not
+   a gap to fill with a guess at a vendor path. *)
+let elevenlabs_catalogue_url base_url =
+  let version = "/v1" in
+  let length = String.length base_url and version_length = String.length version in
+  if length >= version_length
+     && String.equal (String.sub base_url (length - version_length) version_length) version
+  then String.sub base_url 0 (length - version_length) ^ "/v2/voices"
+  else base_url ^ "/voices"
+;;
+
+let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
+  let adapter = adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Macos_say | Whisper_cli ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s runs a command and has no HTTP voice catalogue"
+         endpoint.id)
+  | Openai_compat ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s speaks the OpenAI shape, which has no voice list \
+          to ask for: type the voice name the server expects"
+         endpoint.id)
+  | Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached through a tool, which is asked to \
+          speak rather than asked what it can speak with"
+         endpoint.id)
+  | Elevenlabs_direct ->
+    (match endpoint_base_url endpoint with
+     | None -> Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+     | Some base_url ->
+       Ok
+         { listing_url = elevenlabs_catalogue_url base_url
+         ; listing_headers = [ "xi-api-key", api_key ]
          })
 ;;
 

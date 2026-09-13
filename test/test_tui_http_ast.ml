@@ -1063,7 +1063,15 @@ let test_planning_phase_uses_goal_ssot () =
   check int "projection rejects an unknown canonical phase" 1
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"
-       ~needle:"unknown planning goal phase")
+       ~needle:"unknown planning goal phase");
+  (* The goal detail lit all three lifecycle keys on every phase, so a
+     verifying goal offered two the server refuses. Which key is lit is the
+     transition matrix's answer, asked in the binding that draws the row. *)
+  check bool "goal detail lights its keys from the transition matrix" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"planning_detail_pane"
+       ~callee:"Goal_phase.moves_goal"
+     >= 1)
 ;;
 
 let test_tui_current_projection_wiring () =
@@ -1625,7 +1633,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "keeper detail spells the pane key the footer way" 1
     (Ast_grep.count_exact_string_literals_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
-       ~binding_name:"render_keeper_detail" ~needle:"  h/l:pane  ");
+       ~binding_name:"render_keeper_detail" ~needle:"h/l:pane  ");
+  (* And the row goes through the footer the Keepers list uses. Cut with
+     [fit_width] it kept the front and lost [Left / Esc] and [q] at the back:
+     at 80 columns it ended "t:c…". *)
+  let in_detail callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_detail" ~callee
+  in
+  check int "keeper detail draws its row through footer_line" 1
+    (in_detail "footer_line");
+  check int "and does not cut it by hand" 0 (in_detail "Message_layout.fit_width");
   (* #30210 replaced the byte-at-a-time read with a buffered refill, so the
      wait moved with it. The contract did not: whichever binding blocks for
      input owns the deadline, and EINTR has to come back as a retry rather
@@ -2325,6 +2343,7 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
       [ "Board_detail.view_for"; "String.equal"; "Link.scan" ]
     "board_read_pane"
     [ "bp_id"
+    ; "bp_hearth"
     ; "bp_author"
     ; "bp_title"
     ; "bp_created_at"
@@ -2366,6 +2385,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
+  (* The roster's last-seen clock went out as a slice of the wire text. *)
+  check_fields "render_clients" [ "cr_name"; "cr_agent_type"; "cr_last_seen" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
@@ -2542,6 +2563,20 @@ let test_the_board_header_and_rows_share_one_layout () =
   check int "and so is every row" 1 (in_board "Render_schedule.board_row")
 ;;
 
+(* The answering overlay is the contract's as well. A short list closed its
+   box under the preview panel and put the footer mid-screen; the list now
+   fills its height so the panel and the footer keep the bottom rows. *)
+let test_the_answering_overlay_is_the_shared_contract () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_answering" ~callee
+  in
+  check int "the answering overlay draws through the contract" 1
+    (calls "surface_chrome");
+  check int "the answering overlay finishes no frame by hand" 0
+    (calls "finish_surface")
+;;
+
 (* The Board list's frame is the shared contract's, not a count of its own.
 
    It spent [rows - 11] on posts while it drew nine fixed rows: the constant
@@ -2590,7 +2625,18 @@ let test_the_overlays_are_the_shared_contract () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"surface_chrome_rows" ~callees:[]
-       ~identifiers:[ "framed_chrome_rows" ])
+       ~identifiers:[ "framed_chrome_rows" ]);
+  (* The context inspector is the contract's as well, and its tabs are the
+     shared strip rather than footer-grammar labels told apart by colour. *)
+  let inspector callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_context_inspector" ~callee
+  in
+  check int "the context inspector draws through the contract" 1
+    (inspector "surface_chrome");
+  check int "the context inspector finishes no frame by hand" 0
+    (inspector "finish_surface");
+  check int "its tabs are the shared strip" 1 (inspector "tab_strip")
 ;;
 
 (* The runtime.toml pane's frame is the shared contract's too. It subtracted
@@ -2606,7 +2652,23 @@ let test_the_config_frame_is_the_shared_contract () =
   check int "nothing finishes the frame by hand" 0 (in_config "finish_surface");
   check int "and no row is filled by hand" 0 (in_config "box_empty");
   check int "the source height is the one the cursor reads" 1
-    (in_config "config_content_height")
+    (in_config "config_content_height");
+  (* The panes take their keys from the table. Params, prompts, presets and
+     models spelled their own rows, three of them in Korean on an English
+     screen, and presets offered PgUp/PgDn, which its handler never paged. *)
+  List.iter
+    (fun (binding_name, callee) ->
+      check int (binding_name ^ " takes its keys from the table") 1
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_render.ml" ~binding_name ~callee))
+    [ "render_config", "Masc_tui_keys.footer_hints_config"
+    ; "render_runtime_params", "Masc_tui_keys.footer_hints_config"
+    ; "render_prompt_registry", "Masc_tui_keys.footer_hints_config"
+    ; "render_presets", "Masc_tui_keys.footer_hints_config"
+    ; "render_themes", "Masc_tui_keys.footer_hints_config"
+    ; "render_config_models", "Masc_tui_keys.footer_hints_config"
+    ; "render_voice", "Masc_tui_keys.footer_hints_config"
+    ]
 ;;
 
 (* Code and Resources open on a title row -- name, clock, connection badge --
@@ -2777,6 +2839,10 @@ let () =
           "the board header and rows share one layout"
           `Quick
           test_the_board_header_and_rows_share_one_layout;
+        test_case
+          "the answering overlay is the shared contract"
+          `Quick
+          test_the_answering_overlay_is_the_shared_contract;
         test_case
           "the overlays are the shared contract"
           `Quick

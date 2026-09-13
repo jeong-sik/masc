@@ -41,13 +41,6 @@ val apportion : width:int -> weights:int list -> int list
     Returns all zeros when [width] is not positive or the weights sum to zero.
     The result always has the same length as [weights]. *)
 
-val segment_glyph : int -> string
-(** [segment_glyph index] is the shade for the [index]th segment of a stacked
-    bar, cycling full, dark, medium, light. Shade as well as colour, so the
-    segments stay apart in a terminal that reports no colour support. The cycle
-    repeats past the fourth segment; by then the shares are small and the row
-    order still pairs a segment with its line. *)
-
 val band : width:int -> title:string -> caption:string -> string
 (** [band ~width ~title ~caption] is a rule of exactly [width] cells carrying
     [title] at the left and [caption] at the right, with no leading indent.
@@ -87,7 +80,20 @@ val reach_pointer : width:int -> transmitted:int -> total:int -> string
     a cell or two; when the sent run leaves no room on the left, the label sits
     to the right of the cut instead. *)
 
-val stacked_bar : width:int -> segments:(string * int) list -> string
+val bar_full : string
+val bar_dark : string
+val bar_medium : string
+(** The shades a caller hands to {!stacked_bar}, named here so the row and the
+    rows under it draw the same group with the same character. *)
+
+val stacked_bar :
+  width:int -> segments:(string * string * int) list -> string
 (** [stacked_bar ~width ~segments] draws one row of [width] cells split across
-    [segments] by {!apportion}, where each segment is its style and its weight.
-    Segment [i] uses [segment_glyph i]. *)
+    [segments] by {!apportion}, where each segment is its style, the glyph it
+    is drawn with, and its weight.
+
+    The glyph comes from the caller rather than from the segment's position,
+    because the rows under the bar are grouped: shade and colour say which
+    group a run belongs to, and a shade that cycled with the index would put
+    the same shade on two groups while the row order changed with the
+    sizes. *)

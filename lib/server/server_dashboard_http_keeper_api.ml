@@ -408,7 +408,12 @@ let keeper_chat_history_freshness config name =
         (Option.fold ~none:"unknown" ~some:string_of_int line_number)
         detail
   in
-  Printf.sprintf "%s|%s|%s" chat_stamp trace_stamp turn_record_stamp
+  (* Historical trace enrichment also reads committed tool-call rows. Observe
+     that dependency even when a separate writer or queued flush appends after
+     the chat, raw trace and TurnRecord files stopped changing. Keeper hooks
+     commit synchronously before publishing their completion. *)
+  let tool_call_stamp = Keeper_tool_call_log.committed_revision () in
+  Printf.sprintf "%s|%s|%s|%d" chat_stamp trace_stamp turn_record_stamp tool_call_stamp
 ;;
 
 (* The canonical autonomous User/Assistant/Tool exchange lives in the Keeper's

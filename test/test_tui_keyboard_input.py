@@ -101,6 +101,12 @@ LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
 
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
+# Masc_tui_scroll.window_text: where a scrolled window stands in its list,
+# "first-last/count". The Keeper detail pane draws it on its own row; the diff
+# surfaces put it in "[lines ...]".
+WINDOW_TEXT_RE = re.compile(rb"(?<![\d/-])(\d+)-(\d+)/(\d+)(?![\d/])")
+LINES_WINDOW_RE = re.compile(rb"\[lines (\d+)-(\d+)/(\d+)\]")
+
 def composer_showing(text: bytes, *, prefix: bytes = b"> ") -> re.Pattern[bytes]:
     """The composer's prefix and what was typed after it are styled separately
     -- the origin colour ends with the prefix and the body starts after a reset
@@ -2443,18 +2449,31 @@ def keeper_detail_overscroll_interaction(
                 controls=(FULL_REDRAW,),
                 final_cursor=b"\x1b[?25l",
             )
-            indicators = re.findall(rb"\[(\d+)/(\d+)\]", detail)
+            # The indicator is the window the pane drew, "first-last/count"
+            # (Masc_tui_scroll.window_text). Opened at the top, its first row
+            # is 1 and its height is the rows the pane shows; the scroll
+            # positions are the rows past that height, plus the top.
+            indicators = WINDOW_TEXT_RE.findall(CSI_RE.sub(b"", detail))
             if not indicators:
                 raise AssertionError(
                     f"Keeper detail did not expose a scroll indicator: {detail!r}"
                 )
-            position_count = int(indicators[-1][1])
+            first, last, total = (int(value) for value in indicators[-1])
+            if first != 1:
+                raise AssertionError(
+                    f"Keeper detail did not open at its first row: {detail!r}"
+                )
+            height = last - first + 1
+            position_count = total - height + 1
             if position_count < 3:
                 raise AssertionError(
                     f"Keeper detail fixture has too few scroll positions: {detail!r}"
                 )
 
-            bottom = f"[{position_count}/{position_count}]".encode()
+            def window(top: int) -> bytes:
+                return f"{top}-{top + height - 1}/{total}".encode()
+
+            bottom = window(position_count)
             send_and_wait(
                 process,
                 master_fd,
@@ -2484,7 +2503,7 @@ def keeper_detail_overscroll_interaction(
             )
             refresh_gate.release.set()
 
-            previous = f"[{position_count - 1}/{position_count}]".encode()
+            previous = window(position_count - 1)
             send_and_wait(process, master_fd, output, b"k", previous)
             send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
             send_and_wait(
@@ -2501,7 +2520,7 @@ def keeper_detail_overscroll_interaction(
                 b"\r",
                 b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
             )
-            top = f"[1/{position_count}]".encode()
+            top = window(1)
             if top not in beta:
                 raise AssertionError(
                     f"new Keeper detail did not reset to the top: {beta!r}"
@@ -2797,6 +2816,9 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     the composer row is never focused there. A transcript that was handed to
     the row's send key from this pane stayed in the draft and nothing was
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
+
+    The empty draft names the key first, as the composer row does: this pane
+    bound ^Y and ^A and nothing on it said so.
     """
 
     def interact(
@@ -2811,8 +2833,14 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         )
+        read_available(master_fd, output)
+        chat_opened_at = len(output)
         send_and_wait(
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        wait_for_output(
+            process, master_fd, output, b"(^Y to speak, ^A to keep listening)",
+            start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
@@ -7104,16 +7132,27 @@ def memory_journal_timeline_interaction(
         )
 
         # Ctrl-N walks the same cycle without the composer: full -> hidden.
-        hidden = send_and_wait(process, master_fd, output, b"\x0e", b"journal:off")
+        # Each check reads only the frame that drew the new mode. The bytes
+        # send_and_wait returns start at the key press, so a refresh frame the
+        # loop drew before it read the key -- still in the previous mode --
+        # can sit in front of it: under the full keyboard suite the hidden
+        # check once found the row in the frame before "journal:off".
+        hidden = frame_containing(
+            send_and_wait(process, master_fd, output, b"\x0e", b"journal:off"),
+            b"journal:off",
+        )
         if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
         # ... and hidden -> summary, the resting default.
-        restored = send_and_wait(
-            process,
-            master_fd,
-            output,
-            b"\x0e",
+        restored = frame_containing(
+            send_and_wait(
+                process,
+                master_fd,
+                output,
+                b"\x0e",
+                b"Librarian committed current memory revision 9",
+            ),
             b"Librarian committed current memory revision 9",
         )
         if b"journal:off" in restored:
@@ -10240,13 +10279,13 @@ def keeper_lanes_ia_interaction(
             master_fd,
             output,
             b"r",
-            b"lane run detail returned 503",
+            b"lane run detail: HTTP 503",
         )
         compact_narrow_refresh_error_plain = CSI_RE.sub(
             b"", compact_narrow_refresh_error
         )
         stale_evidence = (
-            b"lane run detail returned 503",
+            b"lane run detail: HTTP 503",
             b"JUDGMENT  ADVISORY APPROVE",
             b"Left / Esc",
         )
@@ -10491,7 +10530,10 @@ def changes_keeper_and_arrow_detail_interaction(
     tall = send_and_wait(
         process, master_fd, output, b"\x1b[C", b"turn 11  task task-11  applied"
     )
-    if b"scroll 0]" not in CSI_RE.sub(b"", tall):
+    # "[lines first-last/count]": the window the diff drew. At the top its
+    # first row is 1; at the end its last row is the count.
+    opened = LINES_WINDOW_RE.findall(CSI_RE.sub(b"", tall))
+    if not opened or int(opened[-1][0]) != 1:
         raise AssertionError(
             f"the tall diff did not open at the top: {CSI_RE.sub(b'', tall)!r}"
         )
@@ -10499,19 +10541,27 @@ def changes_keeper_and_arrow_detail_interaction(
     os.write(master_fd, b"j" * 60)
     wait_for_terminal_input_consumed(slave_fd)
     drain_until_quiet(process, master_fd, output)
-    settled = CSI_RE.sub(b"", bytes(output[mark:])).decode("utf-8")
-    at_end = re.findall(r"scroll (\d+)\]", settled)
+    settled = CSI_RE.sub(b"", bytes(output[mark:]))
+    at_end = LINES_WINDOW_RE.findall(settled)
     if not at_end:
         raise AssertionError(
             f"the tall diff drew no scroll indicator: {settled[-800:]!r}"
         )
-    bottom = int(at_end[-1])
-    if bottom == 0:
+    first, last, total = (int(value) for value in at_end[-1])
+    if first == 1:
         raise AssertionError(
             f"the tall diff did not scroll at all: {settled[-800:]!r}"
         )
+    if last != total:
+        raise AssertionError(
+            f"the tall diff stopped short of its end: {settled[-800:]!r}"
+        )
     send_and_wait(
-        process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
+        process,
+        master_fd,
+        output,
+        b"k",
+        f"lines {first - 1}-{last - 1}/{total}]".encode("ascii"),
     )
     send_and_wait(process, master_fd, output, b"\x1b[D", b"TURN")
     send_and_wait(
@@ -11755,7 +11805,7 @@ def schedule_detail_interaction() -> Interaction:
             b"masc://keepers/alpha",
             b"schedule-stimulus-proof-701",
             b"schedule-occurrence-proof-701",
-            b"2026-08-25T09:30:20",
+            b"2026-08-25 09:30:20",
             b"Turn finished",
             b"WORK RESULT",
             b"bounded by its start and finish rows",
@@ -12044,6 +12094,14 @@ def fusion_list_detail_interaction(
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
         # about the whole list, so they need the whole list in one frame.
+        #
+        # The wait ends on the verdict row, not on a column header. The
+        # headers are drawn before the harness snapshot arrives, under
+        # "(not loaded)", and the copy below reads the selected row: pressed
+        # between the two, Y had no row to copy. Measured on this scenario
+        # alone, 3 of 43 runs pressed Y about 20 ms before the snapshot and
+        # timed out; a second Y in the same session copied. glm-coding is the
+        # row's evaluator cell and nothing else on this screen draws it.
         harness_plain = CSI_RE.sub(
             b"",
             resize_and_wait(
@@ -12052,7 +12110,7 @@ def fusion_list_detail_interaction(
                 output,
                 rows=30,
                 columns=220,
-                needle=b"EVALUATOR",
+                needle=b"glm-coding",
                 controls=(FULL_REDRAW,),
             ),
         )
@@ -12512,7 +12570,7 @@ def run_observer_reconnect_regression(executable: str) -> None:
             resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
             wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
-            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
             releases[0].set()
             wait_for_output(process, master_fd, output, b"Retained feed events: 2", start=0, timeout=10)
@@ -12638,7 +12696,7 @@ def run_acting_call_evidence_regression(executable: str) -> None:
             drain_until_quiet(process, master_fd, output)
             if b"ACTING EVENT EVIDENCE" in output[aggregate_start:]:
                 raise AssertionError("Aggregated turn opened as an exact call")
-            send_and_wait(process, master_fd, output, b"f", b"actions)")
+            send_and_wait(process, master_fd, output, b"f", b"scope actions")
             io_head = send_and_wait(process, master_fd, output, b"j\r", b"Tool use ID: skill-call-exact")
             for scheduling in (b"Execution mode: concurrent", b"Planned index (zero-based): 3",
                                b"Batch index (zero-based) / size: 1 / 2"):
@@ -12720,7 +12778,7 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
         # its in-flight call.
         acting = send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
         for needle, what in (
-            (b"(1 of 1 held, turns)", "the held and shown counts"),
+            ("(1 row \u00b7 1 event held)".encode(), "the shown rows and held events"),
             (b"alpha", "the keeper that acted"),
             (b"turn 7", "the turn"),
             (b"read_file", "the in-flight tool"),
@@ -12729,14 +12787,15 @@ def observer_feed_interaction(requests: HttpRequests) -> Interaction:
                 raise AssertionError(f"Acting did not draw {what}: {acting!r}")
         # The count belongs to the open reading, not to the Logs tab it
         # follows: a dot stands between the strip and the count.
-        if "Logs  \u00b7  (1 of 1 held, turns)".encode() not in CSI_RE.sub(b"", acting):
+        if "Logs  \u00b7  (1 row \u00b7 1 event held)".encode() not in CSI_RE.sub(b"", acting):
             raise AssertionError(
                 f"Activity's count sat against the Logs tab: {CSI_RE.sub(b'', acting)!r}"
             )
         # One f lands on the flat actions log, where the call is its own row
-        # and carries the task.
+        # and carries the task. The title counts the same here; the scope row
+        # under the feed says which log is open.
         flat = send_and_wait(
-            process, master_fd, output, b"f", b"(1 of 1 held, actions)"
+            process, master_fd, output, b"f", b"scope actions"
         )
         for needle, what in (
             ("\u25b6 call".encode(), "the call glyph and label"),
@@ -13349,6 +13408,9 @@ def run_keyboard_regression(executable: str) -> None:
         description="Schedule operational detail and page navigation",
         interact=schedule_detail_interaction(),
         http_fixtures=schedule_fixtures,
+        # The recorded times are drawn in the terminal's zone; UTC keeps the
+        # expected "2026-08-25 09:30:20" the same on every machine.
+        extra_env={"TZ": "UTC"},
     )
     run_terminal_scenario(
         executable,
@@ -14411,6 +14473,449 @@ def run_browser_screenshot_regression(executable: str) -> None:
             preload_input=GRAPHICS_SUPPORTED_REPLY)
     finally:
         release.set()
+
+
+# The voice setup wizard, drawn in a terminal. Its rules live in Voice_wizard
+# and its session in Masc_tui_types, both tested where they live, and a
+# structural suite asserts the call sites exist. None of those can say the box
+# appears, or that the keys reach it through a real terminal -- which is the one
+# claim the runbook could not make.
+VOICE_SETUP_FIXTURE = {
+    "revision": "fixture-voice-revision",
+    "tts": {
+        "default_model": "eleven_multilingual_v2",
+        "default_voice": "fixture-voice-id",
+        "agent_voices": {},
+        "endpoints": [
+            {
+                "id": "fixture-elevenlabs",
+                "kind": "elevenlabs_direct",
+                "enabled": True,
+                "api_key_env": "ELEVENLABS_API_KEY",
+                "address": "https://api.elevenlabs.io/v1",
+            },
+            # Both addresses, the way a voice_mcp entry may carry them. The
+            # transport calls mcp_url; the server says so in "address".
+            {
+                "id": "fixture-mcp",
+                "kind": "voice_mcp",
+                "enabled": True,
+                "base_url": "http://127.0.0.1:9100",
+                "mcp_url": "http://127.0.0.1:9200/mcp",
+                "address": "http://127.0.0.1:9200/mcp",
+            },
+        ],
+    },
+    "stt": {
+        "default_model": "whisper-1",
+        "endpoints": [
+            {
+                "id": "fixture-whisper",
+                "kind": "openai_compat",
+                "enabled": True,
+                "base_url": "http://127.0.0.1:2022/v1",
+                "address": "http://127.0.0.1:2022/v1",
+            }
+        ],
+    },
+}
+
+VOICE_CONFIG_FIXTURE = {
+    "status": "loaded",
+    "tts": {
+        "default_model": "eleven_multilingual_v2",
+        "default_voice": "fixture-voice-id",
+        "active_endpoint": {
+            "configured": True,
+            "enabled": True,
+            "fallback_configured": False,
+        },
+    },
+    "stt": {
+        "default_model": "whisper-1",
+        "active_endpoint": {
+            "configured": True,
+            "enabled": True,
+            "fallback_configured": True,
+        },
+    },
+}
+
+
+def voice_wizard_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/voice/config"] = (200, VOICE_CONFIG_FIXTURE)
+    # One path, two meanings: the pane reads it and the wizard writes to it.
+    # The fixture table is keyed by path alone, so the body tells them apart --
+    # a read arrives with none.
+    fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (200, {"revision": "fixture-voice-revision-2"})
+        if body
+        else (200, VOICE_SETUP_FIXTURE)
+    )
+    return fixtures
+
+
+def press_and_settle(
+    process: "subprocess.Popen[bytes]",
+    master_fd: int,
+    output: bytearray,
+    data: bytes,
+    cap: float = 3.0,
+) -> bytes:
+    """Send [data] and answer everything drawn once the drawing stops.
+
+    Not send_and_wait: each keystroke in a typed word repaints the whole
+    screen, so a word arrives across as many frames as it has letters and a
+    single needle wait judges a frame that is still half a word behind. The
+    press is judged after its output stops, the way tab_until judges a
+    surface switch.
+    """
+    read_available(master_fd, output)
+    start = len(output)
+    write_all(master_fd, output, data)
+    wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=5.0)
+    drain_until_quiet(process, master_fd, output, cap=cap)
+    return CSI_RE.sub(b"", bytes(output[start:]))
+
+
+def open_the_voice_pane(
+    process: "subprocess.Popen[bytes]", master_fd: int, output: bytearray
+) -> bytes:
+    """Walk the Config pane strip to voice, and answer the frame it landed on.
+
+    [p] cycles seven panes and voice is last, so the walk is bounded by the
+    strip rather than by a fixed count: a pane inserted ahead of voice would
+    otherwise leave this pressing one short.
+    """
+    tab_until(process, master_fd, output, b"MASC Config")
+    for _ in range(8):
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"p")
+        wait_for_output(process, master_fd, output, FRAME_END, start=start, timeout=3.0)
+        # The pane switch loads over HTTP, so later frames carry what the first
+        # does not. Judged after the frames stop, the way tab_until judges a
+        # surface switch.
+        drain_until_quiet(process, master_fd, output)
+        plain = CSI_RE.sub(b"", bytes(output[start:]))
+        if b"MASC Voice" in plain:
+            return plain
+    raise AssertionError("p never reached the voice pane")
+
+
+def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
+    """The pane names its endpoints, e opens the wizard, and the questions walk.
+
+    What this holds that the unit suites cannot: that the box is drawn at all,
+    that the closed-set steps move under the arrow keys, that typing lands in
+    the field and then in the draft summary, and that Esc leaves without a
+    write -- no save route is in the fixtures, so a wizard that posted on Esc
+    would be seen here as a failed request rather than silence.
+    """
+
+    def interact(
+        process: "subprocess.Popen[bytes]",
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        # The admin read is what names endpoints; the public route answers
+        # three booleans and no identity, so these two ids are proof the pane
+        # is drawing the read the wizard was built for.
+        listing = open_the_voice_pane(process, master_fd, output)
+        for needle in (b"fixture-elevenlabs", b"fixture-whisper", b"elevenlabs_direct"):
+            if needle not in listing:
+                raise AssertionError(f"the voice pane omitted {needle!r}")
+        # The address drawn is the one the server resolved. The pane used to
+        # prefer base_url and showed an address a voice_mcp endpoint is never
+        # called at.
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        if b"127.0.0.1:9200/mcp" not in screen or b"127.0.0.1:9100" in screen:
+            raise AssertionError(f"the voice_mcp row did not show its mcp_url: {screen!r}")
+
+        def expect(frame: bytes, needle: bytes, what: str) -> None:
+            if needle not in frame:
+                raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
+
+        opened = press_and_settle(process, master_fd, output, b"e")
+        expect(opened, b"step 1/7", "the wizard did not open on the first of seven")
+        expect(opened, b"setup", "the wizard title did not draw")
+        expect(opened, b"speech out", "the first question did not show its answer")
+
+        # A closed set walks under the arrows. Over and back, so a binding that
+        # moves one way only is visible.
+        expect(
+            press_and_settle(process, master_fd, output, b"\x1b[C"),
+            b"speech in",
+            "the side did not switch under the right arrow",
+        )
+        expect(
+            press_and_settle(process, master_fd, output, b"\x1b[C"),
+            b"speech out",
+            "the side did not switch back",
+        )
+
+        # Enter walks forward. Provider is the second closed set.
+        provider = press_and_settle(process, master_fd, output, b"\r")
+        expect(provider, b"step 2/7", "enter did not reach the provider step")
+        expect(provider, b"elevenlabs", "the provider step showed no provider")
+
+        # Typing reaches the field, and leaving the step reaches the draft.
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 3/7",
+            "enter did not reach the name step",
+        )
+        # A letter is a full repaint, so a word costs as many repaints as it
+        # has letters; the default settle cap cut this one at nine.
+        # The name carries an [i] on purpose. The composer used to see every
+        # key before the field did and claimed [i] as "focus the composer", so
+        # this name reached the screen as "pty-endpo" and "nt" went into a
+        # keeper message.
+        typed = press_and_settle(process, master_fd, output, b"pty-endpoint", cap=15.0)
+        expect(typed, b"pty-endpoint", "the name did not reach the field")
+
+        credential = press_and_settle(process, master_fd, output, b"\r")
+        expect(credential, b"step 4/7", "enter did not reach the credential step")
+        # The draft summary is the only place the name can appear now: the
+        # field it was typed into belongs to the step just left.
+        expect(credential, b"pty-endpoint", "the name did not reach the draft summary")
+        expect(
+            credential,
+            b"ELEVENLABS_API_KEY",
+            "the credential step lost its prefilled variable",
+        )
+
+        # Up goes back and finds what was typed.
+        back = press_and_settle(process, master_fd, output, b"\x1b[A")
+        expect(back, b"step 3/7", "up did not go back a step")
+        expect(back, b"pty-endpoint", "going back lost the typed name")
+
+        # Forward again, filling what is left, so the last step can save.
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 4/7",
+            "enter did not return to the credential step",
+        )
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 5/7",
+            "enter did not reach the model step",
+        )
+        press_and_settle(process, master_fd, output, b"eleven_multilingual_v2", cap=15.0)
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"step 6/7",
+            "enter did not reach the voice step",
+        )
+        press_and_settle(process, master_fd, output, b"pty-voice-id", cap=15.0)
+        review = press_and_settle(process, master_fd, output, b"\r")
+        expect(review, b"step 7/7", "enter did not reach the review")
+        # With nothing missing the review offers to save. A gap would be listed
+        # here instead, which is the same screen answering the other way.
+        expect(review, b"enter saves this", "the review did not offer to save")
+        # The draft rows are read off the screen rather than off this frame:
+        # only the rows that changed are repainted, and these did not.
+        screen = screen_text(bytes(output))
+        expect(screen, b"pty-endpoint", "the review lost the name")
+        expect(screen, b"eleven_multilingual_v2", "the review lost the model")
+
+        # What the wizard actually puts on the wire. The server side is held by
+        # save_request -> apply -> loader in test/voice_wizard; this is the half
+        # that test cannot see, which is whether the pane sends it.
+        os.write(master_fd, b"\r")
+        body = json.loads(
+            wait_for_http_request(
+                process, master_fd, output, requests, path="/api/v1/voice/setup"
+            )
+        )
+        if body.get("expected_revision") != "fixture-voice-revision":
+            raise AssertionError(
+                f"the save did not carry the revision the pane read: {body!r}"
+            )
+        changes = {change.get("change"): change for change in body.get("changes", [])}
+        for wanted in ("put_endpoint", "set_default_model", "set_tts_default_voice"):
+            if wanted not in changes:
+                raise AssertionError(f"the save omitted {wanted}: {body!r}")
+        endpoint = changes["put_endpoint"].get("endpoint", {})
+        if endpoint.get("id") != "pty-endpoint":
+            raise AssertionError(f"the endpoint is not the one typed: {endpoint!r}")
+        if endpoint.get("api_key_env") != "ELEVENLABS_API_KEY":
+            raise AssertionError(f"the credential variable was lost: {endpoint!r}")
+        # The name of the variable, never its value: runtime.toml is committed.
+        if any("sk-" in str(value) for value in endpoint.values()):
+            raise AssertionError(f"the save carried something key-shaped: {endpoint!r}")
+        if changes["set_tts_default_voice"].get("voice") != "pty-voice-id":
+            raise AssertionError(f"the default voice was lost: {changes!r}")
+
+        # Esc leaves. The pane is underneath and no step counter remains.
+        closed = press_and_settle(process, master_fd, output, b"\x1b")
+        expect(closed, b"fixture-elevenlabs", "the pane did not come back")
+        if b"step " in closed:
+            raise AssertionError(f"Esc did not close the wizard: {closed!r}")
+
+        # Quit is armed: this is the first press and the harness sends the
+        # confirming one. Not judged on a frame -- the arming notice and the
+        # exit race, and either is a correct answer to one press.
+        read_available(master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_voice_wizard_regression(executable: str) -> None:
+    requests: HttpRequests = []
+    # The probe that follows a save is left to fail: whether an endpoint
+    # answers is the endpoint's business, and a fixture that said yes would be
+    # saying it for them.
+    run_terminal_scenario(
+        executable,
+        description="The voice setup wizard opens, walks, saves, and leaves on Esc",
+        interact=voice_wizard_interaction(requests),
+        http_fixtures=voice_wizard_http_fixtures(),
+        http_requests=requests,
+    )
+
+
+VOICE_SCROLL_ROWS = 24
+
+
+def voice_scroll_http_fixtures() -> HttpFixtures:
+    """More endpoints and probe rows than a 30-row terminal holds."""
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/voice/config"] = (200, VOICE_CONFIG_FIXTURE)
+    endpoints = [
+        {
+            "id": f"tts-endpoint-{index:02d}",
+            "kind": "elevenlabs_direct",
+            "enabled": True,
+            "api_key_env": "ELEVENLABS_API_KEY",
+            "address": "https://api.elevenlabs.io/v1",
+        }
+        for index in range(1, VOICE_SCROLL_ROWS + 1)
+    ]
+    setup = {**VOICE_SETUP_FIXTURE, "tts": {**VOICE_SETUP_FIXTURE["tts"], "endpoints": endpoints}}
+    fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (200, {"revision": "fixture-voice-revision-2"})
+        if body
+        else (200, setup)
+    )
+    fixtures["/api/v1/voice/probe/tts"] = (
+        200,
+        {
+            "endpoints": [
+                {
+                    "endpoint_id": f"probe-row-{index:02d}",
+                    "kind": "elevenlabs_direct",
+                    "state": "answered",
+                    "detail": "24285 bytes of audio",
+                }
+                for index in range(1, VOICE_SCROLL_ROWS + 1)
+            ]
+        },
+    )
+    return fixtures
+
+
+def voice_scroll_interaction() -> Interaction:
+    """The endpoint list and the probe report can be read to their last row.
+
+    Both used to be laid out into the frame with no offset, and the frame keeps
+    its leading rows: the tail -- and past a point the footer -- was drawn and
+    cut, with no key that brought it back.
+    """
+
+    def interact(
+        process: "subprocess.Popen[bytes]",
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        def expect(frame: bytes, needle: bytes, what: str) -> None:
+            if needle not in frame:
+                raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
+
+        def refuse(frame: bytes, needle: bytes, what: str) -> None:
+            if needle in frame:
+                raise AssertionError(f"{what}: {needle!r} present in {frame!r}")
+
+        first = b"tts-endpoint-01"
+        last = f"tts-endpoint-{VOICE_SCROLL_ROWS:02d}".encode()
+        open_the_voice_pane(process, master_fd, output)
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        expect(screen, first, "the pane did not list the endpoints")
+        refuse(screen, last, "the fixture no longer overflows the terminal")
+        expect(screen, b"j/k:select / scroll", "the pane footer did not say how to scroll")
+
+        press_and_settle(process, master_fd, output, b"\x1b[F")
+        screen = screen_text(bytes(output))
+        expect(screen, last, "End did not reach the last endpoint")
+        expect(screen, b"q:quit", "the footer was cut at the end of the list")
+
+        press_and_settle(process, master_fd, output, b"\x1b[H")
+        screen = screen_text(bytes(output))
+        expect(screen, first, "Home did not return to the first endpoint")
+        refuse(screen, last, "Home left the list at its end")
+
+        press_and_settle(process, master_fd, output, b"e")
+        for step in (b"\r", b"\r"):
+            press_and_settle(process, master_fd, output, step)
+        press_and_settle(process, master_fd, output, b"scroll-endpoint", cap=15.0)
+        for step in (b"\r", b"\r"):
+            press_and_settle(process, master_fd, output, step)
+        press_and_settle(process, master_fd, output, b"eleven_multilingual_v2", cap=15.0)
+        press_and_settle(process, master_fd, output, b"\r")
+        press_and_settle(process, master_fd, output, b"scroll-voice", cap=15.0)
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"enter saves this",
+            "the wizard did not reach a review it could save",
+        )
+
+        probe_last = f"probe-row-{VOICE_SCROLL_ROWS:02d}".encode()
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\r")
+        wait_for_output(
+            process, master_fd, output, b"probe-row-01", start=start, timeout=10.0
+        )
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        expect(screen, b"what answered", "the probe report did not draw")
+        refuse(screen, probe_last, "the probe fixture no longer overflows the terminal")
+        expect(screen, b"PgUp/PgDn:scroll", "the wizard footer did not say how to scroll")
+
+        # A press at the end draws nothing new, so each one is judged by the
+        # screen after the output stops rather than by a frame arriving.
+        for _ in range(4):
+            if probe_last in screen_text(bytes(output)):
+                break
+            write_all(master_fd, output, b"\x1b[6~")
+            drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        expect(screen, probe_last, "PgDn did not reach the last probe row")
+        expect(screen, b"Esc:cancel", "the wizard footer was cut at the end of the report")
+
+        closed = press_and_settle(process, master_fd, output, b"\x1b")
+        refuse(closed, b"step ", "Esc did not close the wizard")
+        read_available(master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_voice_scroll_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="The voice endpoint list and the probe report scroll to their ends",
+        interact=voice_scroll_interaction(),
+        http_fixtures=voice_scroll_http_fixtures(),
+    )
 
 
 def run_config_regression(executable: str) -> None:
@@ -15930,6 +16435,11 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[2] == "config":
         run_config_regression(os.path.abspath(sys.argv[1]))
         print("tui Config regression: PASS")
+        return
+    if len(sys.argv) == 3 and sys.argv[2] == "voice-wizard":
+        run_voice_wizard_regression(os.path.abspath(sys.argv[1]))
+        run_voice_scroll_regression(os.path.abspath(sys.argv[1]))
+        print("tui Voice wizard regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":
         run_held_back_override_regression(os.path.abspath(sys.argv[1]))

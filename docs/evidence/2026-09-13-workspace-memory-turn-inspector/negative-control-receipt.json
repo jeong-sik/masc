@@ -1,0 +1,30 @@
+{
+  "status": "inspected",
+  "keeper": "exhibit-editor",
+  "turn_ref": "trace-1789042595401-00001#502",
+  "worker_run_id": "wr-1a097573239-5fc6-0000",
+  "turn_kind": "autonomous",
+  "finish_reason": "completed",
+  "raw_stop_reason": "Types.EndTurn",
+  "proposal_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "complete_fragment_occurrences_in_captured_input": 0,
+  "exact_id_read_invocations": [],
+  "system_prompt_integrity": "verified",
+  "message_artifact_integrity": "not_verified",
+  "semantic_adoption": "not_verified",
+  "source_authenticity": "not_attested",
+  "limits": [
+    "Captured pre-dispatch input does not prove remote provider receipt.",
+    "Message artifact byte counts and hashes are not verified; Python JSON serialization is not the original Yojson byte stream.",
+    "Text occurrence does not establish its dynamic-context origin.",
+    "A successful tool completion does not prove full proposal delivery, reading or understanding.",
+    "Inspect raw tool results, artifact reads and subsequent behavior before claiming adoption."
+  ],
+  "source_sha256": {
+    "turn_records": "f48075d9e9d56f6b9f1bdd1df76af49c587fcc7a7a4a2921c13430326cb087a5",
+    "provider_input": "51bd709721bdc90323fa487a5baa0a79b521990e8f9c0a2de8259619b469d34a",
+    "raw_trace": "80db4199f8018353f31f2db78a286d9e6ee3bbe825aec4f3d7068166040fba24",
+    "publication": "3802547aea0ef8045fbb4e05837bca649047da31e92ac9a504a1c6aaff444528",
+    "fragment": "b640a5b9ad2b1bf3e7190e5a93f7aed3000df9ef470be92a3ab011d3407d8187"
+  }
+}

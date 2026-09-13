@@ -15,6 +15,16 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_tool_execute_script_paths)
+ (modules test_keeper_tool_execute_script_paths)
+ ; Deliberately minimal: the script-paths vocabulary now lives with its
+ ; judge in masc.exec_policy (task-634 / #26289 — a single library owns
+ ; both naming and judging, since exec_policy cannot depend on
+ ; keeper_tooling without a cycle). masc.exec_policy does not depend on
+ ; dos_lane (ocaml-dos pin), so this suite stays independent of it.
+ (libraries alcotest masc.exec_policy masc.masc_exec masc.masc_exec_bash_parser))
+
+(test
  (name test_keeper_codex_current_context)
  (modules test_keeper_codex_current_context)
  (libraries masc_test_deps))
@@ -1119,6 +1129,24 @@
  (modules test_tool_call_id_is_not_invented)
  (libraries alcotest ast_grep))
 
+; The wizard is drawn and keyed from two large dispatchers; these assert the
+; call sites rather than trusting the key help table.
+
+(test
+ (name test_tui_config_key_help_matches_the_panes)
+ (modules test_tui_config_key_help_matches_the_panes)
+ ; The pane count is read out of the renderer source, so it is a dep.
+ (deps %{workspace_root}/bin/masc_tui_render_prim.ml)
+ (libraries alcotest ast_grep masc_tui_keys masc_tui_types))
+
+(test
+ (name test_tui_voice_wizard_wiring)
+ (modules test_tui_voice_wizard_wiring)
+ ; Read through Ast_grep, so the sources are deps: without them the test reads
+ ; a cached verdict and stays green while the wiring it asserts is gone.
+ (deps %{workspace_root}/bin/masc_tui.ml %{workspace_root}/bin/masc_tui_render.ml)
+ (libraries alcotest ast_grep))
+
 (test
  (name test_keeper_turn_finish_cancel_protect)
  (modules test_keeper_turn_finish_cancel_protect)
@@ -2199,6 +2227,11 @@
 (include stanzas/test_rfc3339_format_owner.inc)
 (include stanzas/test_env_snapshot_reports_applied_default.inc)
 (include stanzas/test_verification_authority_tools.inc)
+
+(test
+ (name test_verification_presentation)
+ (modules test_verification_presentation)
+ (libraries masc_test_deps))
 (include stanzas/test_verification_collaboration_evidence.inc)
 (include stanzas/test_keeper_microvm_backend.inc)
 (include stanzas/test_keeper_paste_delivery.inc)
@@ -3264,7 +3297,14 @@
 (test
  (name test_tui_text_input_target)
  (modules test_tui_text_input_target)
- (libraries alcotest fmt masc masc_tui_types masc_tui_ask_projection))
+ (libraries
+  alcotest
+  fmt
+  masc
+  masc_tui_types
+  masc_tui_ask_projection
+  masc.voice_setup
+  masc.voice_wizard))
 
 (test
  (name test_tui_runtime_param_picker)
@@ -3373,7 +3413,13 @@
 (test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
- (libraries alcotest masc masc_tui_preset_text masc_tui_fetched))
+ (libraries
+  alcotest
+  masc
+  masc_tui_fetched
+  masc_tui_keys
+  masc_tui_preset_text
+  masc_tui_types))
 
 (test
  (name test_tui_surface_needs)
@@ -3547,6 +3593,7 @@
  (libraries
   alcotest
   masc_tui_footer
+  masc_tui_keys
   masc_tui_render_prim
   masc_tui_theme
   masc_tui_types))
@@ -3554,7 +3601,14 @@
 (test
  (name test_tui_help_banner)
  (modules test_tui_help_banner)
- (libraries alcotest masc_tui_render_prim masc_tui_theme masc_tui_types))
+ (libraries
+  alcotest
+  masc_tui_command
+  masc_tui_keys
+  masc_tui_message_layout
+  masc_tui_render_prim
+  masc_tui_theme
+  masc_tui_types))
 
 (test
  (name test_tui_agenda)
@@ -3716,6 +3770,8 @@
   masc
   masc_tui_composer
   masc_tui_composer_projection
+  masc_tui_render_prim
+  masc_tui_theme
   masc_tui_types)
  (deps
   (source_tree ../bin)))
@@ -3843,6 +3899,15 @@
 (alias
  (name runtest)
  (deps (alias runtest-test_tui_approval_progress)))
+
+(rule
+ (alias runtest-test_tui_chat_input_safety)
+ (deps test_tui_chat_input_safety.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action (run python3 %{dep:test_tui_chat_input_safety.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_chat_input_safety)))
 
 (rule
  (alias runtest-test_tui_snapshot_response_order)
@@ -3979,6 +4044,22 @@
 ; (run 34072434219). That step had never run anywhere either. The lane is
 ; named so it can be dispatched on its own while that is open.
 
+
+(rule
+ (alias runtest-test_tui_keyboard_input-voice-wizard)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe}
+   voice-wizard)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_keyboard_input-voice-wizard)))
 
 (rule
  (alias runtest-test_tui_keyboard_input-code-memo)
@@ -4925,12 +5006,17 @@
 (include stanzas/test_tui_data_unreliable_row.inc)
 (include stanzas/test_tui_tab_strip.inc)
 (include stanzas/test_tui_burn_hud.inc)
+(include stanzas/test_tui_coordinator_status_row.inc)
 (include stanzas/test_tui_board_list_reading.inc)
+(include stanzas/test_tui_planning_summary_rows.inc)
 (include stanzas/test_tui_listing_rows_under_the_list.inc)
 (include stanzas/test_tui_keys.inc)
+(include stanzas/test_tui_board_read_title.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
+(include stanzas/test_tui_overview_pulse.inc)
 (include stanzas/test_tui_mermaid.inc)
+(include stanzas/test_tui_keeper_deletions_hints.inc)
 
 (include stanzas/test_ide_memo.inc)
 
@@ -5532,6 +5618,16 @@
  (deps (alias runtest-test_tui_reading_ends)))
 
 (rule
+ (alias runtest-test_tui_selection_visibility)
+ (deps test_tui_selection_visibility.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
+ (action
+  (run python3 %{dep:test_tui_selection_visibility.py} %{dep:../bin/masc_tui.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_tui_selection_visibility)))
+
+(rule
  (alias runtest-test_tui_browser_lane_scroll)
  (deps test_tui_browser_lane_scroll.py test_tui_keyboard_input.py ../bin/masc_tui.exe)
  (action
@@ -5827,7 +5923,7 @@
 (test
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
- (libraries masc_test_deps masc.browser_lane masc.msx_lane eio eio_main yojson unix))
+ (libraries masc_test_deps masc.browser_lane masc.msx_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_surface)
@@ -5978,3 +6074,7 @@
  (name test_runtime_adapter_credential_requirement)
  (modules test_runtime_adapter_credential_requirement)
  (libraries masc_test_deps))
+
+(include stanzas/test_browser_bidi_peer.inc)
+
+(include stanzas/test_operator_media_inspection.inc)

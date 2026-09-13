@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import time
 import zlib
 
 import test_tui_keyboard_input as h
@@ -55,12 +56,12 @@ def label(source: str, count: int) -> bytes:
     return f"{name}: {count}".encode()
 
 
-def open_source(source, process, master, output):
+def open_source(source, process, master, output, count=0):
     if source == "schedules":
-        h.palette_go(process, master, output, b"go schedules", label(source, 0))
+        h.palette_go(process, master, output, b"go schedules", label(source, count))
     else:
         h.palette_go(process, master, output, b"go metrics", b"MASC Metrics")
-        h.send_and_wait(process, master, output, b"3", label(source, 0))
+        h.send_and_wait(process, master, output, b"3", label(source, count))
 
 
 def capture(binary_sha, source, scenario, process, master, output):
@@ -126,11 +127,22 @@ def slow_poll(binary, binary_sha, source):
     fixtures, current = fixtures_and_reading(source, 2)
     path = PATHS[source]
     slow = h.GatedHttpResponse(current, subsequent_response=current, hold_seconds=10.0)
+    _, initial = fixtures_and_reading(source, 0)
+    next_read = h.GatedHttpResponse(current, hold_seconds=10.0)
+    initial_served = False
     watching_ticks = threading.Event()
     two_ticks = threading.Event()
     resumed = threading.Event()
     tick_count = 0
     tick_lock = threading.Lock()
+    began = time.monotonic()
+    events = []
+
+    def trace(event):
+        events.append({"event": event, "elapsed_s": time.monotonic() - began,
+                       "calls": slow.calls, "completed": slow.completed.is_set(),
+                       "released": slow.release.is_set()})
+
     # Every full refresh probes compact server identity before loading the
     # surface. Fleet health (/health?full=1) is view-specific and is never
     # requested by Schedules, so it cannot witness that screen's timer.
@@ -141,35 +153,60 @@ def slow_poll(binary, binary_sha, source):
         if watching_ticks.is_set():
             with tick_lock:
                 tick_count += 1
+                trace(f"health tick {tick_count}")
                 if tick_count >= 2:
                     two_ticks.set()
         return health
 
     def source_read():
-        result = slow()
-        if slow.calls > 1:
+        nonlocal initial_served
+        if not initial_served:
+            initial_served = True
+            return initial
+        if slow.release.is_set():
+            trace("poll resumed; response held")
             resumed.set()
+            return next_read()
+        trace("source entered")
+        result = slow()
+        trace(f"source returned HTTP {result[0]}")
         return result
 
     fixtures["/health"] = health_read
+    fixtures[path] = source_read
 
     def interact(process, master, _slave, output, _base):
         try:
-            open_source(source, process, master, output)
-            fixtures[path] = source_read
-            # No key starts this read: it comes from the actual TUI timer.
+            # Stay on Overview: navigation and r explicitly supersede reads,
+            # whose delayed HTTP arrivals cannot be distinguished from polls
+            # at the fixture. The startup response is 0; only the real timer
+            # can start the following slow read, without any superseded reads.
             assert h.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)
+            trace("watching timer ticks")
             watching_ticks.set()
             assert h.wait_for_fixture_event(process, master, output, two_ticks, timeout=5.0)
+            trace("checking pending read")
+            assert not slow.completed.is_set(), f"{source} fixture expired before the pending-read assertion"
             assert slow.calls == 1, f"automatic polls replaced the pending {source} read: {slow.calls}"
-            start = len(output)
             slow.release.set()
-            h.wait_for_output(process, master, output, label(source, 2), start=start, timeout=5.0)
             assert h.wait_for_fixture_event(process, master, output, resumed, timeout=5.0)
+            # A resumed poll means the slow response settled. Hold all later
+            # replies (including surface-entry refreshes), so only that slow
+            # response can supply the 2 rows observed on the destination.
+            open_source(source, process, master, output, count=2)
             capture(binary_sha, source, "slow poll publishes and polling resumes",
                     process, master, output)
+            next_read.release.set()
+            assert h.wait_for_fixture_event(process, master, output, next_read.completed, timeout=5.0)
             os.write(master, b"q")
         finally:
+            next_read.release.set()
+            trace("scenario cleanup")
+            print("SNAPSHOT_POLL_TIMELINE " + json.dumps({
+                "source": source, "binary_sha256": binary_sha,
+                "refresh_s": 0.2, "fixture_hold_s": slow.hold_seconds,
+                "events": events,
+            }), flush=True)
             slow.release.set()
 
     h.run_terminal_scenario(binary, description=f"{source}: automatic polling preserves a slow read",

@@ -6,6 +6,7 @@ type instance = {
   revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option;
+  binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
@@ -18,8 +19,14 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
+type action_menu = {
+  target_id : string; target_incarnation : string; target_title : string; request_id : string;
+  schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+}
 type focus = Configurations | Instances | Rows
+type presentation = Summary | Technical | Flow
 type t = {
+  presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
   row_cursor : int; selected : string list; scroll : int; focus : focus;
@@ -42,3 +49,8 @@ val lines : width:int -> t -> string list
 
 val action_json : action_request -> Yojson.Safe.t
 val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string) result
+
+val open_actions : request_id:string -> t -> (t, string) result
+val move_action : t -> int -> t
+val submit_action : t -> (action_request, string) result
+val pending_action : t -> action_request option

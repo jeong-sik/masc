@@ -389,6 +389,20 @@ let input_source = function
   | Turn_record.Message_audio ->
       Provider_message_list
 
+(* The tabs name the same three producers: the prompt the turn assembles, the
+   tool surface it was given, and the conversation handed to the provider. A
+   kind belongs to exactly one, so the screen can colour by producer instead of
+   by row order. *)
+let exact_input_source = function
+  | System_prompt -> Turn_prompt_assembly
+  | Message _ -> Provider_message_list
+  | Tool_schema _ -> Effective_tool_surface
+
+(* Flow order: what the turn assembles, then what it was given, then what it
+   carries forward. The composition reads top to bottom in this order. *)
+let input_sources =
+  [ Turn_prompt_assembly; Effective_tool_surface; Provider_message_list ]
+
 let input_source_label = function
   | Turn_prompt_assembly -> "turn prompt assembly"
   | Effective_tool_surface -> "effective tool surface"

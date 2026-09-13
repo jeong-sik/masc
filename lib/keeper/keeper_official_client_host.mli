@@ -223,6 +223,7 @@ val prepare_turn :
 
 val dynamic_tools :
   content_transport:Runtime_official_client_tool.content_transport ->
+  accepts_image_input:bool ->
   tool_approval:Agent_core.Hooks.tool_approval_callback option ->
   runtime_label:string ->
   keeper_name:string ->
@@ -242,6 +243,12 @@ val dynamic_tools :
   unit ->
   (dynamic_tool list, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
+
+    [accepts_image_input] is the runtime's answer to "may a tool result carry an
+    image", read from {!Runtime_agent.runtime_accepts_image_input} so it is the
+    same composition dispatch applies to a turn's own media. When it is [false]
+    an image-bearing result becomes a delivery error before settlement, rather
+    than a payload the provider rejects after the tool has already run.
 
     [on_tool_boundary], when supplied, replaces the provider-local repetition
     detector. It runs after tool settlement and result observers, including when
@@ -352,13 +359,15 @@ val admit_native_posture :
     what a refusal does to the turn. *)
 
 val resolve_native_posture :
+  required:Runtime_native_tools.posture option ->
   base_path:string ->
   keeper_name:string ->
   client_label:string ->
   default:Runtime_native_tools.posture ->
   none_supported:bool ->
   (Runtime_native_tools.posture, Agent_core.Error.t) result
-(** Read the keeper's declared posture from its profile TOML (cached loader),
+(** A required invocation posture is never degraded; failed admission returns
+    an error. Without one, read the keeper's declared posture from its profile TOML (cached loader),
     fall back to [default] when the profile declares nothing, then apply
     {!admit_native_posture} against the keeper's current approval stance.
     A profile that fails to load is a config error, not a silent default.

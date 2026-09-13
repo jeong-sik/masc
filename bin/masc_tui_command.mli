@@ -57,6 +57,8 @@ type t =
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
   | Run_next
+  | Answer_tool_approval of bool
+      (** [/approve] or [/deny] answers this Keeper's held tool call. *)
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)
@@ -154,6 +156,9 @@ val usage : command_help -> string
 val help_usage : command_help -> string
 (** {!usage} plus the command's other spellings in parentheses. The column both
     the [/help] list and the cheat sheet draw. *)
+
+val help_summary_column : int
+(** Where a help row's summary starts, counted from the usage's first cell. *)
 
 val help_summary_padding : string -> string
 (** The spaces between a {!help_usage} column and its summary, so the two

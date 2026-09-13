@@ -767,16 +767,22 @@ pane focused `j`/`k` scrolls the item itself. Narrow terminals keep the same
 facts in one column; `Enter` opens exact text at full width.
 
 `1:stack` is three measurements of one turn, not three views of one number,
-and the section says so at the bottom. SERIALIZED REQUEST is the request the
-dispatcher actually serialized, in bytes and in the provider's own token
-count. HISTORY REACH is how much of the Keeper's recent history that request
-carried: atoms are the indivisible units a cut falls between, so a tool call
-and the result it answers travel together or not at all, and the count says
-how many stayed behind — which is where "why does it not remember that"
-usually ends. COMPOSITION divides the turn's attributed bytes by where they
-came from (tool results, memory recall, schemas) and is a proportion table,
-not a breakdown of the request: the attributed total and the serialized bytes
-are measured at different points and the gap is not explained. A provider
+and the section says so at the bottom. It reads top to bottom in the order the
+turn is built. COMPOSITION comes first: the turn's attributed bytes grouped by
+the producer they entered through — the prompt this turn assembled, the tool
+surface it was given, and the conversation handed to the provider — with each
+producer's components under it, largest first. One colour and one shade per
+producer, the same three on all three tabs, so a shade read here is the same
+shade on the request and proof tabs. It is a proportion table, not a breakdown
+of the request: the attributed total and the serialized bytes are measured at
+different points and the gap is not explained, and the arrow into SERIALIZED
+REQUEST is drawn only when both readings describe the same turn. SERIALIZED
+REQUEST is the request the dispatcher actually serialized, in bytes and in the
+provider's own token count. HISTORY REACH is how much of the Keeper's recent
+history that request carried: atoms are the indivisible units a cut falls
+between, so a tool call and the result it answers travel together or not at
+all, and the count says how many stayed behind — which is where "why does it
+not remember that" usually ends. A provider
 that reports usage across the whole conversation rather than per request
 gets no window percentage here, only the number it reported and a note that
 this request's own share was not. RECENT TURNS, the section at the bottom,

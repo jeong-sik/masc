@@ -13753,16 +13753,28 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"lanes"
     ~title:(screen_title " MASC Lane Add-ons")
-    ~hints:"n:new TOML  E:edit TOML  s:save  Tab:focus  j/k:select  J/K:scroll  e:evidence  o:observe  d:detach  r:inspect  Esc:back"
+    ~hints:"1:timeline  2:links  3:installations  4:workers  5:rows  Tab:area  j/k:select  J/K:scroll  r:refresh  Esc:back"
     ~body:(fun ~budget c ->
-      let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
-      let scroll = max 0 (min view.scroll (List.length lines - budget)) in
-      lines
-      |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
-      |> List.iteri (fun index line ->
-          if index=0 && scroll=0 then
-            c.push_styled ~style:(Ansi.bold ^ Theme.info ()) line
-          else c.push line))
+      match Masc_tui_lane_addons.visual_lines ~height:budget ~width:(framed_inner_width cols) view with
+      | Some lines ->
+          let scroll = max 0 (min view.scroll (List.length lines-budget)) in
+          lines |> List.filteri (fun i _ -> i>=scroll && i<scroll+budget)
+          |> List.iter (fun (line : Masc_tui_lane_addons.visual_line) ->
+            if line.active then c.push_selected (String.concat "" (List.map snd line.cells))
+            else c.push (String.concat "" (List.map (fun (tone,text) ->
+              let style = match tone with
+                | Masc_tui_lane_addons.Normal -> Ansi.reset
+                | Dim -> Theme.recede () | Accent -> Theme.info () | Attention -> Theme.warn () in
+              style ^ text ^ Ansi.reset) line.cells)))
+      | None ->
+          let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
+          let scroll = max 0 (min view.scroll (List.length lines - budget)) in
+          lines
+          |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
+          |> List.iteri (fun index line ->
+              if index=0 && scroll=0 then
+                c.push_styled ~style:(Ansi.bold ^ Theme.info ()) line
+              else c.push line))
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw

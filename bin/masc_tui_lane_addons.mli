@@ -18,7 +18,7 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
-type focus = Configurations | Instances | Rows
+type focus = Timeline | Connections | Configurations | Instances | Rows
 type t = {
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -36,6 +36,12 @@ val put_document : t -> Document.session -> t
 val selected_instance : t -> instance option
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
+type tone = Normal | Dim | Accent | Attention
+type visual_line = { active : bool; cells : (tone * string) list }
+val visual_lines : height:int -> width:int -> t -> visual_line list option
+val move_observation : t -> int -> t
+val move_lane : t -> int -> t
+val next_focus : focus -> focus
 val lines : ?height:int -> width:int -> t -> string list
 (** Printable rows wrapped to the actual frame width. Rendering and scrolling
     must use the same width so every field and receipt remains reachable. *)

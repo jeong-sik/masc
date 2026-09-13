@@ -16512,7 +16512,15 @@ and is loaded on demand through keeper_skill.
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" when view.focus = Addons.Instances -> selected (fun id -> Addons.Observe id)
                      | "d" when view.focus = Addons.Instances -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with scroll=0; document_key=None; focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
+                     | "\t" | "tab" -> update { view with scroll=0; document_key=None; focus = Addons.next_focus view.focus }
+                     | "1" | "2" | "3" | "4" | "5" ->
+                         let focus = match key with
+                           | "1" -> Addons.Timeline | "2" -> Addons.Connections
+                           | "3" -> Addons.Configurations | "4" -> Addons.Instances
+                           | _ -> Addons.Rows in
+                         update {view with focus;scroll=0;document_key=None}
+                     | "left" | "right" when view.focus=Addons.Timeline ->
+                         update (Addons.move_lane view (if key="right" then 1 else -1))
                      | "J" | "K" ->
                          let terminal_rows, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -16526,13 +16534,14 @@ and is loaded on demand through keeper_skill.
                           | Some snapshot, Addons.Configurations ->
                               let size = Option.fold ~none:0 ~some:(fun (c : Addons.configuration) -> List.length c.declarations) snapshot.configuration in
                               update {view with scroll=0; configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
-                          | Some snapshot, Addons.Instances -> update { view with scroll=0; instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
+                          | Some _, Addons.Timeline -> update (Addons.move_observation view delta)
+                          | Some snapshot, (Addons.Instances | Addons.Connections) -> update { view with scroll=0; instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with scroll=0; row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
                           | None, _ -> update view)
-                     | " " when view.focus = Addons.Rows ->
+                     | " " when (view.focus = Addons.Rows || view.focus = Addons.Timeline) ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
-                     | "e" when view.focus = Addons.Rows && view.selected <> [] ->
+                     | "e" when (view.focus = Addons.Rows || view.focus = Addons.Timeline) && view.selected <> [] ->
                          (match Addons.selected_instance view with None -> () | Some instance ->
                            launch_lane_addons state ~mailbox:async_messages
                              (Addons.Evidence (`Assoc ["instance_id", `String instance.id;

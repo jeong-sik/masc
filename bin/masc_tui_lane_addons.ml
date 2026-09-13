@@ -18,7 +18,7 @@ type action_request = { instance_id : string; incarnation : string; request_id :
 type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of string
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
-type focus = Configurations | Instances | Rows
+type focus = Timeline | Connections | Configurations | Instances | Rows
 type t = {
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -28,7 +28,7 @@ type t = {
 }
 let initial = { snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
-  focus = Configurations; draft = None; naming = false; configuration_cursor = 0;
+  focus = Timeline; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
 let ( let* ) = Result.bind
 let field name = function
@@ -176,7 +176,7 @@ let selected_source_path view =
     Option.bind snapshot.configuration (fun config ->
       let path = match view.focus with
         | Configurations -> Option.map (fun (d : declaration) -> d.source_path) (selected_declaration view)
-        | Instances | Rows -> Option.bind (selected_instance view) (fun instance ->
+        | Timeline | Connections | Instances | Rows -> Option.bind (selected_instance view) (fun instance ->
             List.find_map (fun (d : declaration) ->
               if d.instance_id=Some instance.id && Some d.source_path=instance.source_path
               then Some d.source_path else None) config.declarations) in
@@ -243,10 +243,241 @@ let instance_lines view instances =
     @ (match item.action_schema with None -> [] | Some schema ->
         ["   action schema · incarnation " ^ item.incarnation]
         @ List.map (fun line -> "     " ^ line) (String.split_on_char '\n' (Yojson.Safe.pretty_to_string schema)))) instances)
+let action_lines view = match view.last_action with
+    | None -> []
+    | Some request -> ["Action request " ^ request.request_id ^ " · t:read status (never replays)";
+        "  instance " ^ request.instance_id ^ " · incarnation " ^ request.incarnation]
+        @ (match view.action_receipt with
+          | None -> ["  receipt unknown; t queries this exact request"]
+          | Some receipt -> ["  state " ^ (match receipt.Action.state with
+              | Action.Queued -> "queued" | Action.Running -> "running" | Action.Confirmed -> "confirmed"
+              | Action.Failed_before_effect -> "failed_before_effect" | Action.Outcome_unknown -> "outcome_unknown");
+              "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
+              @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
+              @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result)))
+type tone = Normal | Dim | Accent | Attention
+type visual_line = { active : bool; cells : (tone * string) list }
+let next_focus = function
+  | Timeline -> Connections | Connections -> Configurations
+  | Configurations -> Instances | Instances -> Rows | Rows -> Timeline
+let ordered_rows snapshot =
+  List.mapi (fun index row -> index, row) snapshot.output.rows
+  |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
+    let time = Float.compare a.observed_at b.observed_at in
+    if time=0 then String.compare a.id b.id else time)
+let move_observation view delta =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      let rows = ordered_rows snapshot in
+      let rec find position = function
+        | [] -> 0
+        | (index, _) :: rest -> if index=view.row_cursor then position else find (position+1) rest in
+      let position = max 0 (min (List.length rows-1) (find 0 rows + delta)) in
+      match List.nth_opt rows position with
+      | None -> view
+      | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None}
+let lane_ids snapshot = List.map (fun (row : Row.row) -> row.lane_id) snapshot.output.rows
+  |> List.sort_uniq String.compare
+let move_lane view delta =
+  match view.snapshot, selected_row view with
+  | Some snapshot, Some row ->
+      let lanes = lane_ids snapshot in
+      let rec find index = function [] -> 0 | lane :: rest ->
+        if lane=row.lane_id then index else find (index+1) rest in
+      let index = max 0 (min (List.length lanes-1) (find 0 lanes + delta)) in
+      (match List.nth_opt lanes index with
+       | None -> view
+       | Some lane ->
+           let candidates = List.filter (fun (_, (candidate : Row.row)) -> candidate.lane_id=lane) (ordered_rows snapshot) in
+           let target = match List.find_opt (fun (_, (candidate : Row.row)) -> candidate.observed_at>=row.observed_at) candidates with
+             | Some _ as target -> target
+             | None -> List.nth_opt candidates (List.length candidates-1) in
+           match target with
+           | None -> view
+           | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None})
+  | _ -> view
+let visual_lines ~height ~width view =
+  let clean = Masc.Tui_decode.sanitize_terminal_text in
+  let fit size text = Masc_tui_message_layout.fit_width (clean text) (max 0 size) in
+  let line ?(active=false) ?(tone=Normal) text = {active;cells=[tone,fit width text]} in
+  let wrap ?(tone=Normal) text =
+    Masc_tui_message_layout.split_cells ~max_cells:(max 1 width) (clean text)
+    |> List.map (fun text -> {active=false;cells=[tone,text]}) in
+  let window size cursor items =
+    let first = max 0 (min (max 0 (List.length items-size)) (cursor-size/2)) in
+    first, List.filteri (fun i _ -> i>=first && i<first+size) items in
+  let tabs = line ~tone:Accent (String.concat " " (List.map (fun (focus,label) ->
+    if view.focus=focus then "[" ^ label ^ "]" else label)
+    [Timeline,"1:Time";Connections,"2:Links";Configurations,"3:TOML";Instances,"4:Workers";Rows,"5:Rows"])) in
+  let status = match view.error with
+    | Some error -> wrap ~tone:Attention ("Error: " ^ error)
+    | None -> [line ~tone:Dim (if view.loading then "Refreshing · retained observations" else "Recorded observations · r:refresh")] in
+  let notifications =
+    (match view.draft with None -> [] | Some draft -> wrap ((if view.naming then "New TOML filename: " else ":") ^ draft))
+    @ (match selected_document view with None -> [] | Some document -> List.concat_map wrap (Document.summary document)) in
+  match view.focus with
+  | Configurations | Instances | Rows -> None
+  | Timeline | Connections ->
+      let content = match view.snapshot with
+      | None -> [line ~tone:Dim "No response yet · r:inspect"]
+      | Some snapshot ->
+        match view.focus with
+        | Timeline ->
+            let rows = ordered_rows snapshot in
+            let lanes = lane_ids snapshot in
+            let selected = selected_row view in
+            if rows=[] then
+              [line "No observations recorded."; line ~tone:Dim "3:install a package  4:select worker and observe";
+               line ~tone:Attention (match snapshot.complete with Some true -> "Slice complete · no rows"
+                 | Some false -> "PARTIAL slice · no rows" | None -> "Slice completeness unknown")]
+              @ List.concat_map (fun (source : Row.coverage) -> wrap ~tone:(if source.complete then Normal else Attention)
+                  (source.source_id ^ " · " ^ (if source.complete then "complete" else "partial") ^
+                   Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail)) snapshot.output.coverage
+            else
+              let selected_lane = Option.map (fun (row : Row.row) -> row.lane_id) selected in
+              let rec lane_position i = function [] -> 0 | lane :: rest ->
+                if Some lane=selected_lane then i else lane_position (i+1) rest in
+              (* Reserve one clock column; lane columns stay readable and pan
+                 with selection instead of compressing every lane into a glyph. *)
+              let clock_width = min 24 (max 1 (width/2)) in
+              let capacity = max 1 ((width-clock_width)/20) in
+              let first_lane, visible = window capacity (lane_position 0 lanes) lanes in
+              let cell_width = max 1 ((width-clock_width)/max 1 (List.length visible)) in
+              let row_cells ~active clock render = {active;
+                cells=(Dim,fit clock_width clock) :: List.map (fun lane ->
+                  let tone,text = render lane in tone,fit cell_width text) visible} in
+              let times = List.map (fun (_, (row : Row.row)) -> row.observed_at) rows |> List.sort_uniq Float.compare in
+              let selected_time = Option.map (fun (row : Row.row) -> row.observed_at) selected in
+              let rec time_position i = function [] -> 0 | time :: rest ->
+                if Some time=selected_time then i else time_position (i+1) rest in
+              (* tabs, hints, status, range, headings, legend, selection summary
+                 and one detail row have priority over additional event rows. *)
+              let event_budget = max 1 (height-10) in
+              let first_time, times_visible = window event_budget (time_position 0 times) times in
+              let stamp time =
+                try let t=Unix.gmtime time in
+                  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d.%03d"
+                    (t.Unix.tm_year+1900) (t.Unix.tm_mon+1) t.Unix.tm_mday
+                    t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+                    (int_of_float ((time -. floor time)*.1000.))
+                with Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "epoch %.6g" time in
+              let label lane = match String.index_opt lane '/' with
+                | None -> lane
+                | Some split -> String.sub lane (split+1) (String.length lane-split-1) ^ " · " ^
+                    String.sub lane (max 0 (split-6)) (min split 6) in
+              let partial = snapshot.complete=Some false ||
+                List.exists (fun (source : Row.coverage) -> not source.complete) snapshot.output.coverage in
+              let coverage = if partial then "PARTIAL" else match snapshot.complete,snapshot.output.coverage with
+                | Some true, _ -> "slice complete"
+                | None, _ :: _ -> "reported sources complete"
+                | None, [] -> "coverage unknown" in
+              [line ~tone:(if partial then Attention else Dim)
+                (Printf.sprintf "%s · %d marked · %d source reports" coverage (List.length view.selected) (List.length snapshot.output.coverage));
+               line ~tone:Dim (Printf.sprintf "Lanes %d–%d/%d · events %d–%d/%d · UTC ↓"
+                (first_lane+1) (first_lane+List.length visible) (List.length lanes)
+                (first_time+1) (first_time+List.length times_visible) (List.length times));
+               row_cells ~active:false "Observed UTC" (fun lane -> Accent, (if Some lane=selected_lane then "> " else "│ ") ^ label lane)]
+              @ List.map (fun time ->
+                row_cells ~active:(Some time=selected_time) (stamp time) (fun lane ->
+                  let events = List.filter (fun (_, (row : Row.row)) -> row.observed_at=time && row.lane_id=lane) rows in
+                  match events with
+                  | [] -> Dim,"│"
+                  | (_, first) :: rest ->
+                      let chosen = match selected with Some row when row.observed_at=time && row.lane_id=lane -> row | _ -> first in
+                      let mark = match chosen.kind with Row.Event -> "●" | Row.Value -> "◆" | Row.Relation -> "↔" in
+                      let count = if rest=[] then "" else Printf.sprintf "+%d " (List.length rest) in
+                      (if Some lane=selected_lane then Accent else Normal),
+                      (if Some lane=selected_lane && Some time=selected_time then ">" else " ") ^
+                      (if List.mem chosen.id view.selected then "[x]" ^ mark else mark) ^ count ^ " " ^ chosen.title)) times_visible
+              @ [line ~tone:Dim "● event  ◆ value  ↔ relation · blank = no recorded event"]
+              @ (match selected with None -> [] | Some row ->
+                  wrap ("Selected: " ^ row.lane_id ^ " · " ^ row.title)
+                  @ wrap ("Observed UTC: " ^ stamp row.observed_at ^ Printf.sprintf " · epoch %.6f" row.observed_at)
+                  @ wrap ("Row " ^ row.id)
+                  @ wrap ("Evidence target: " ^ (match selected_instance view with
+                      | None -> "none · 4:select a worker"
+                      | Some item -> item.title ^ " · " ^ item.id) ^ " · e:export marked rows")
+                  @ (match row.clock with None -> [line ~tone:Dim "Source clock: not supplied"]
+                     | Some clock -> wrap ("Source clock: " ^ clock.domain ^ " = " ^ clock.value))
+                  @ wrap ("Actor: " ^ Option.value ~default:"not supplied" row.actor ^ " · subject " ^ row.subject_id)
+                  @ (if row.related_ids=[] then [] else
+                     [line ~tone:Accent "Declared relations (no inferred causality)"]
+                     @ List.concat_map (fun id ->
+                       match List.find_opt (fun (_, (candidate : Row.row)) -> candidate.id=id) rows with
+                       | None -> wrap ~tone:Attention ("↔ " ^ id ^ " · outside this slice")
+                       | Some (_, target) -> wrap ("↔ " ^ target.lane_id ^ " · " ^ target.title ^ " · " ^ id)) row.related_ids)
+                  @ List.concat_map wrap (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))))
+              @ [line ~tone:Accent "Coverage for this slice"]
+              @ List.concat_map (fun (source : Row.coverage) -> wrap ~tone:(if source.complete then Normal else Attention)
+                  (source.source_id ^ " · " ^ (if source.complete then "complete" else "partial") ^
+                   " · cursor " ^ Option.value ~default:"unknown" source.cursor ^
+                   Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail)) snapshot.output.coverage
+        | Connections ->
+            let _, instances = window (max 1 (height/4)) view.instance_cursor
+              (List.mapi (fun i item -> i,item) snapshot.instances) in
+            let input_names item = match Masc.Lane_addon_sources.parse item.binding with
+              | Error _ -> "invalid binding"
+              | Ok sources -> String.concat ", " (List.map (function
+                  | Masc.Lane_addon_sources.Lane_output {installation_id;output_id;_} -> installation_id ^ "/" ^ Option.value ~default:"*" output_id
+                  | Snapshot_file {id;_} | Msx_capture {id} | Browser_document {id;_} -> id) sources) in
+            let columns ~active a b c =
+              let column = max 1 ((width-6)/3) in
+              {active;cells=[Dim,fit column a;Accent," → ";Normal,fit column b;Accent," → ";Dim,fit (width-6-2*column) c]} in
+            [line ~tone:Dim "Declared inputs → worker → named outputs"]
+            @ (if width>=80 then [columns ~active:false "INPUT" "WORKER / PHASE" "OUTPUT"] else [])
+            @ (if instances=[] then [line "No workers attached · 3:installations"] else [])
+            @ List.map (fun (i,item) ->
+                if width>=80 then columns ~active:(i=view.instance_cursor)
+                    (input_names item) (item.title ^ " · " ^ phase_label item.phase)
+                    (String.concat ", " (List.map fst item.outputs))
+                else line ~active:(i=view.instance_cursor)
+                  (Printf.sprintf "%s%s · %s · %s" (if i=view.instance_cursor then "> " else "  ") item.title
+                    (phase_label item.phase) (if Option.is_some item.action_schema then "actions available" else "observation"))) instances
+            @ (match selected_instance view with None -> [] | Some item ->
+                [line ~tone:Accent "Inputs"]
+                @ (match Masc.Lane_addon_sources.parse item.binding with
+                  | Error error -> wrap ~tone:Attention ("Binding unavailable: " ^ error)
+                  | Ok [] -> [line ~tone:Dim "  No bound sources"]
+                  | Ok sources -> List.concat_map (fun source ->
+                      let module S = Masc.Lane_addon_sources in
+                      let id, origin = match source with
+                        | S.Snapshot_file {id;path} -> id, "file " ^ path
+                        | S.Msx_capture {id} -> id, "MSX capture"
+                        | S.Browser_document {id;selection;tab_id;target_id;environment;_} ->
+                            let lane = match selection with S.Live _ -> "live" | S.Automation -> "automation" in
+                            id,Printf.sprintf "browser %s · tab %d · %s · %s" lane tab_id environment target_id
+                        | S.Lane_output {id;installation_id;output_id} ->
+                            id, installation_id ^ "/" ^ Option.value ~default:"all outputs" output_id in
+                      wrap ("  " ^ origin ^ " → " ^ id)) sources)
+                @ wrap ("  ↓ " ^ item.title ^ " · " ^ item.id ^ " · run " ^ item.run_id)
+                @ [line ~tone:Accent "Outputs"]
+                @ (if item.outputs=[] then [line ~tone:Dim "  No named output ports"] else
+                    List.concat_map (fun (id,selection) -> wrap ("  " ^ id ^ " → " ^ (match selection with
+                      | Row.All_lanes -> "all supplied lanes"
+                      | Row.Selected_lanes lanes -> String.concat ", " lanes))) item.outputs)
+                @ [line ~tone:Dim "Connections describe bindings, not successful delivery.";
+                   line ~tone:Accent "Coverage for this slice (all workers)"]
+                @ List.concat_map (fun (source : Row.coverage) -> wrap ~tone:(if source.complete then Normal else Attention)
+                    (source.source_id ^ " · " ^ (if source.complete then "complete" else "partial") ^
+                     " · cursor " ^ Option.value ~default:"unknown" source.cursor)) snapshot.output.coverage)
+        | Configurations | Instances | Rows -> [] in
+      Some ([tabs;line ~tone:Dim (match view.focus with
+        | Timeline -> "j/k:event  ←/→:lane  Space:mark  5:row details  J/K:scroll"
+        | Connections -> "j/k:worker  4:worker actions  3:edit installations"
+        | Configurations | Instances | Rows -> "")] @ notifications @ status @ content
+        @ List.concat_map wrap (action_lines view)
+        @ (match view.receipt with None -> [] | Some json ->
+            List.concat_map wrap ("Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json))))
+
 let lines ?(height=24) ~width view =
+  match visual_lines ~height ~width view with
+  | Some lines -> List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
+  | None ->
   let tab focus label = if view.focus = focus then "[ " ^ label ^ " ]" else "  " ^ label ^ "  " in
-  let header = [String.concat "  " [tab Configurations "Installations"; tab Instances "Instances"; tab Rows "Observations"];
+  let header = [String.concat "  " [tab Configurations "3 Installs"; tab Instances "4 Workers"; tab Rows "5 Rows"];
     (match view.focus with
+     | Timeline | Connections -> "1:timeline  2:links"
      | Configurations -> "n:new TOML  E:edit selected TOML  Tab:next area"
      | Instances -> "o:observe  d:detach  E:edit TOML  :act {…}:action  t:status"
      | Rows -> "Space:select evidence  e:export  Tab:next area");
@@ -273,6 +504,7 @@ let lines ?(height=24) ~width view =
           (List.length (List.sort_uniq String.compare (List.map (fun (row : Row.row) -> row.lane_id) snapshot.output.rows)))
           (List.length snapshot.output.rows) (List.length view.selected)] in
         let content = match view.focus with
+        | Timeline | Connections -> []
         | Configurations ->
             (match snapshot.configuration with
              | None -> ["TOML configuration status unknown · r:refresh"]
@@ -321,18 +553,7 @@ let lines ?(height=24) ~width view =
     "Last receipt:" :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string json) in
   let draft = match view.draft with None -> [] | Some draft -> [(if view.naming then "New TOML filename: " else ":") ^ draft] in
   let documents = match selected_document view with None -> [] | Some document -> Document.summary document in
-  let action = match view.last_action with
-    | None -> []
-    | Some request -> ["Action request " ^ request.request_id ^ " · t:read status (never replays)";
-        "  instance " ^ request.instance_id ^ " · incarnation " ^ request.incarnation]
-        @ (match view.action_receipt with
-          | None -> ["  receipt unknown; t queries this exact request"]
-          | Some receipt -> ["  state " ^ (match receipt.Action.state with
-              | Action.Queued -> "queued" | Action.Running -> "running" | Action.Confirmed -> "confirmed"
-              | Action.Failed_before_effect -> "failed_before_effect" | Action.Outcome_unknown -> "outcome_unknown");
-              "  requester " ^ receipt.requester ^ " · executor " ^ Option.value ~default:"unknown" receipt.executor]
-              @ (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
-              @ (match receipt.result with None -> [] | Some result -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string result))) in
+  let action = action_lines view in
   let compact lines = List.map (fun line -> Masc_tui_message_layout.fit_width
     (Masc.Tui_decode.sanitize_terminal_text line) (max 1 width)) lines in
   compact header @ compact error @ draft @ documents @ content @ action @ error @ receipt

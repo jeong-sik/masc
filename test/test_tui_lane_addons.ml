@@ -114,7 +114,7 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
-  let view = {UI.initial with snapshot=Some snapshot;configuration_cursor=1} in
+  let view = {UI.initial with snapshot=Some snapshot;focus=UI.Configurations;configuration_cursor=1} in
   check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
     (Option.get (UI.selected_declaration view)).source_path;
   check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")
@@ -214,11 +214,49 @@ let selection_stays_visible () =
     check bool "unselected row details are not expanded" false (List.mem "Row row-0" lines))
     [40,16;80,24;120,50]
 
+let concurrent_scene () =
+  let module Row = Masc.Lane_addon_types in
+  let owner = "35e30f7a-66d1-4e44-a4ed-762be081ee91" in
+  let row id lane observed_at clock : Row.row = {
+    id;lane_id=owner ^ "/" ^ lane;kind=Row.Event;title=id;observed_at;
+    subject_id="shared";clock;actor=None;fields=[];evidence=[];related_ids=[]} in
+  let rows = [row "browser read" "browser" 1789257600. (Some {domain="dom";value="revision-2"});
+    row "frame advanced" "game" 1789257600. (Some {domain="frame";value="154618"});
+    row "next day" "game" 1789344000. None] in
+  let snapshot : UI.snapshot = {instances=[];configuration=None;complete=Some false;
+    output={rows;coverage=[{source_id="frames";incarnation=owner;cursor=None;complete=false;detail=Some "source unavailable"}]}} in
+  let view = {UI.initial with snapshot=Some snapshot} in
+  let visual view = Option.get (UI.visual_lines ~height:30 ~width:120 view) in
+  let lines view = UI.lines ~height:30 ~width:120 view in
+  check bool "same timestamp is one aligned row" true
+    (List.exists (fun (line : UI.visual_line) ->
+      let cells = List.map snd line.cells in
+      List.exists (fun text -> String.contains text '>') cells && List.length cells>=4) (visual view));
+  check bool "partial source summary remains visible" true
+    (List.exists (String.starts_with ~prefix:"PARTIAL") (lines view));
+  check bool "full date survives" true
+    (List.exists (String.starts_with ~prefix:"2026-09-14") (lines view));
+  let next = UI.move_lane view 1 in
+  check (option string) "horizontal comparison keeps shared timestamp" (Some "frame advanced")
+    (Option.map (fun (row : Row.row) -> row.id) (UI.selected_row next));
+  let previous = UI.move_lane next (-1) in
+  check int "back to simultaneous event" view.row_cursor previous.row_cursor;
+  let next = UI.move_observation next 1 in
+  check (option string) "vertical move follows observed chronology" (Some "next day")
+    (Option.map (fun (row : Row.row) -> row.id) (UI.selected_row next));
+  let extreme = {snapshot with output={snapshot.output with rows=[row "extreme" "time" Float.max_float None]}} in
+  ignore (lines {view with snapshot=Some extreme});
+  List.iter (fun width ->
+    check bool "visual cells stay within terminal width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line<=width)
+        (UI.lines ~height:20 ~width {view with selected=["browser read"]}))) [40;64;120]
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
   test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
   test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
+  test_case "concurrent scene preserves clocks, coverage and selection" `Quick concurrent_scene;
   test_case "large inventories keep the selected lane visible" `Quick selection_stays_visible;
   test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable]]

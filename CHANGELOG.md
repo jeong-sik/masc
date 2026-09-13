@@ -15,6 +15,7 @@
 - Fusion: runs include the active Task contract and Goal criteria by default, original deliberation is retrieved by canonical run id, and a decision names only the Task its run was requested for (#35501, #35511, #35843).
 - Verifier: review tools are confined and original PDF inspection is bounded (#35387).
 - Voice: setup no longer overwrites per-Keeper voices, configures hearing as well as speech, and a second `voice-local-setup` run keeps the voice where the first put it. `voice-verify` works with `--base-path` (#35725, #35775, #35787, #35795).
+- Voice: an endpoint's declared kind chooses its transport, so an id that spells another provider's name no longer reaches that provider (#35526).
 - Voice: `voice-verify` and `voice-local-setup` refuse a `say` voice this machine does not list; `say` itself speaks in another voice without failing (#35870, #35874).
 - Voice: whisper-cli rejects audio it cannot read before running, naming the format; the dashboard microphone uploads 16 kHz mono WAV so whisper-cli workspaces transcribe it; a clip is labelled WAVE or MP3 by what it is, and a reply that played nowhere is reported as synthesized rather than spoken (#35800, #35806, #35717, #35827).
 - Voice: a command that could not run is no longer reported as not installed, running `voice-local-setup` before `init` explains itself instead of printing a raw `Sys_error`, a padded endpoint id names the endpoint it removes, and a hearing plan includes the recorder it needs rather than only a transcriber, naming it when it is missing (#35749, #35763, #35732, #35733).
@@ -28,7 +29,7 @@
 - TUI: footers, hint rows and the cheat sheet take their keys from the key table and spell them the same way (#35638, #35734, #35759, #35774, #35807, #35418, #35842, #35844, #35848, #35859, #35877, #35878, #35879, #35876, #35903, #35905, #35830).
 - TUI: overlays, pickers and panes draw through the shared surface and overlay frame, and tab strips draw one way (#35792, #35812, #35847, #35863, #35868, #35869, #35871, #35825, #35856, #35810).
 - TUI: timestamps and last-seen times read in the terminal's zone, a Board post with no time has no age, and ages past a hundred days keep the day count in six cells (#35888, #35893, #35886, #35891).
-- TUI: expanded tool details stay expanded across a refresh, Esc on the Memory table clears its filter before leaving, a retry on a direct image link drops the body it cached, the Code file pane asks for the directory it moved into, palette slot answers are read rather than typed, the palette lists each destination once, the themes and models lists take the page keys, and the TUI and setup keep why a server they started exited before it was ready (#35907, #35841, #35836, #35821, #35779, #35846, #35902, #35864).
+- TUI: a manual refresh keeps the readings and scroll on screen, list selection stays visible across resizes and mode changes, the Memory facts selection stays inside the drawn viewport, expanded tool details stay expanded across a refresh, Esc on the Memory table clears its filter before leaving, a retry on a direct image link drops the body it cached, the Code file pane asks for the directory it moved into, palette slot answers are read rather than typed, the palette lists each destination once, the themes and models lists take the page keys, and the TUI and setup keep why a server they started exited before it was ready (#35914, #35908, #35909, #35907, #35841, #35836, #35821, #35779, #35846, #35902, #35864).
 - TUI: the chat header separates phase from runtime, `/about` states only what it was given, `/burn` shows cost, a conflict warning leads the footer, counts use one pluralisation helper, and the truncation mark is one mark that keeps the port in diagnostics (#35802, #35798, #35865, #35862, #35867, #35396).
 - TUI: row counts in Task Review, Changes and Logs match the rows drawn; copied context includes the selected browser target action; the cheat sheet wraps an entry instead of cutting it, puts each section title above its keys and uses one heading style; smaller label and layout corrections across Activity, Keepers, Planning, Goals, Memory, Code and Browser Lane (#35790, #35686, #35896, #35786, #35818, #35731, #35769, #35776, #35840, #35850, #35851, #35872, #35881, #35882, #35883, #35892, #35895, #35722).
 
@@ -36,6 +37,7 @@
 
 - Voice: an endpoint is asked which voices it has (ElevenLabs over HTTP with every catalogue page under one deadline, `say` through its own list), and the TUI voice pane names the endpoints it has (#35483, #35437).
 - Voice: setup asks for a voice during installation, with voice that runs without a server; a probe names the voice it asked for and can probe as a Keeper (#35631, #35665).
+- Verifier: a configured official-client verifier runs the selected direct runtime for completion verification, without expanding a same-named lane or falling back to another runtime (#35372).
 - Verifier: original MP4 streams with full decode results, original PPTX slides, notes and rendered pages, and original Board and Fusion sources can be inspected (#35532, #35578, #35536).
 - Setup: PDF tools are installed and checked as prerequisites, and workspace presentation dependencies are prepared (#35409, #35565).
 - Keeper: a direct execution held at a Gate continues in its original official-client session (#35742).
@@ -44,7 +46,7 @@
 - Lanes: installation TOML is editable from the Dashboard and Keepers, the TUI manages TOML Lane packages and generic actions, a generic sampled value difference package ships, and MSX input history is retained with captured frames (#35588, #35672, #35687, #35701).
 - Browser: `masc-browser-host --bidi-url` attaches to an explicitly enabled loopback Firefox BiDi endpoint for shared live input (#35819).
 - Server: the endpoint probe answers over HTTP/2 (#35676).
-- TUI: the palette reaches both halves of Task Review, a detail read that is waiting says how long it has waited, and `/` says how many entries matched and stays after Enter (#35668, #35502, #35410).
+- TUI: the palette reaches both halves of Task Review, a detail read that is waiting says how long it has waited, `/` says how many entries matched and stays after Enter, the composer row on every surface names the slash command being typed, and Lane Add-ons open from the Lanes screen (#35668, #35502, #35410, #35910, #35915).
 
 ### Changed
 

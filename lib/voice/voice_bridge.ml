@@ -282,16 +282,8 @@ let available_tts_endpoints ?provider (tts : Voice_config.tts_config) =
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-(* The dashboard's own attempt, which only knows the HTTP endpoints. A section
-   that names no model has none of those to try, so there is nothing to attempt
-   rather than something to attempt with a blank name. *)
-let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_device () =
-  (* The dashboard's own attempt, which only knows the HTTP endpoints. A
-     section that names no model has none of those to try, so there is nothing
-     to attempt rather than something to attempt with a blank name. *)
-  match model with
-  | None -> None
-  | Some model ->
+(* Resolve the HTTP endpoint's model, independently of the MCP winner. *)
+let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~audio_device () =
   let endpoints = available_tts_endpoints tts in
   let rec try_endpoint = function
     | [] -> None
@@ -299,7 +291,9 @@ let try_http_tts_for_dashboard ~tts ~agent_id ~message ~voice ~model ~audio_devi
       let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
       if Voice_runtime_overlay.speaker_of_transport adapter.transport
          = Voice_runtime_overlay.Over_http
-      then (
+      then (match Voice_config.model_at_endpoint ~default_model:tts.default_model endpoint with
+        | None -> try_endpoint rest
+        | Some model ->
         let audio_file =
           make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
         in
@@ -1009,7 +1003,6 @@ let attempt_tts_endpoint
                  ~agent_id
                  ~message
                  ~voice
-                 ~model
                  ~audio_device
                  ()
              with
@@ -1038,17 +1031,10 @@ let try_http_tts_for_browser_audio
       ~tts
       ~agent_id
       ~message
-      ~model
       ~priority
       ?audio_device
       endpoints
   =
-  (* Same reason as the dashboard chain above: these are the HTTP endpoints,
-     every one of them asked for the model by name, so a section that names
-     none has nothing here to try. *)
-  match model with
-  | None -> None
-  | Some model ->
   let http_endpoints =
     List.filter
       (fun endpoint ->
@@ -1059,6 +1045,9 @@ let try_http_tts_for_browser_audio
   let rec try_endpoints = function
     | [] -> None
     | endpoint :: rest ->
+      match Voice_config.model_at_endpoint ~default_model:tts.default_model endpoint with
+      | None -> try_endpoints rest
+      | Some model ->
       let audio_file =
         make_audio_file ~format:(clip_format_for_kind endpoint.Voice_config.kind)
       in
@@ -1212,7 +1201,6 @@ let agent_speak_json
                ~tts
                ~agent_id
                ~message
-               ~model
                ~priority
                ?audio_device
                endpoints

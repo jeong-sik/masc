@@ -13377,42 +13377,38 @@ let render_keeper_deletions (state : state) =
           if index >= scroll && index < scroll + budget then c.push text)
         lines)
 
+(* The cheat sheet, through the overlay contract. It drew its box and its rows
+   by hand and closed the box under the last row, so a sheet shorter than the
+   screen -- a narrow filter, a tall terminal -- put the footer mid-screen. *)
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  framed_top buf cols;
-  (* The title says what state the sheet is in; the keys that change it are
-     the footer's, which draws h and Esc on this overlay and never drops Esc.
-     Both rows spelled them, so the title said the footer twice. *)
-  framed_line buf cols
-    (screen_title " MASC Cheat Sheet" ^ "  " ^ Ansi.dim
-    ^ "hints "
-    ^ (if state.hints_visible then "on" else "off")
-    ^ Ansi.reset);
-  framed_divider buf cols;
   let header = help_masthead state in
-  let lines = help_lines state in
-  let rendered_rows = Masc_tui_help.sheet ~header ~cols lines in
-  let content_height = framed_content_height ~rows in
-  let scroll =
-    Masc_tui_scroll.normalize
-      ~count:(List.length rendered_rows) ~height:content_height state.help_scroll
-  in
-  rendered_rows
-  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
-  |> List.iter (fun line -> framed_line buf cols line);
-  framed_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       (* The sheet that names every other surface's keys did not name its own.
-          It is longer than any terminal -- at 150x78 the later sections are
-          still off screen -- so [G] is the difference between reading them and
-          pressing [j] forty times, and nothing said [G] exists. The keys are
-          handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
-       ~hints:
-         "j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close");
-  finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
+  let rendered_rows = Masc_tui_help.sheet ~header ~cols (help_lines state) in
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"help"
+    ~frame:Chrome_overlay
+    (* The title says what state the sheet is in; the keys that change it are
+       the footer's, which draws h and Esc on this overlay and never drops Esc.
+       Both rows spelled them, so the title said the footer twice. *)
+    ~title:
+      (screen_title " MASC Cheat Sheet" ^ "  " ^ Ansi.dim
+      ^ "hints "
+      ^ (if state.hints_visible then "on" else "off")
+      ^ Ansi.reset)
+    (* The sheet that names every other surface's keys did not name its own.
+       It is longer than any terminal -- at 150x78 the later sections are
+       still off screen -- so [G] is the difference between reading them and
+       pressing [j] forty times, and nothing said [G] exists. The keys are
+       handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
+    ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+    ~body:(fun ~budget c ->
+      let scroll =
+        Masc_tui_scroll.normalize
+          ~count:(List.length rendered_rows) ~height:budget state.help_scroll
+      in
+      List.iteri
+        (fun index line ->
+          if index >= scroll && index < scroll + budget then c.push line)
+        rendered_rows)
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
@@ -13528,30 +13524,19 @@ let render_answering (state : state) =
   finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
 ;;
 
+(* The agenda, through the overlay contract. Its sections are usually a few
+   rows, and drawn by hand the box closed under them: the footer stood on row
+   11 of a 26-row terminal with the composer alone at the bottom. The title was
+   "Agenda & Upcoming Timers"; the sections are what is coming up and what is
+   waiting on the operator, and the other overlays open on MASC and their name. *)
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 2048 in
-  framed_top buf cols;
-  framed_line
-    buf
-    cols
-    (* j/k and Esc are in the footer row below this overlay. *)
-    (screen_title " Agenda & Upcoming Timers");
-  framed_divider buf cols;
   let lines =
     Agenda.overlay
       ~now:(Unix.gettimeofday ())
       ~localtime:Unix.localtime
       ~cols:(framed_inner_width cols)
       (Masc_tui_types.agenda state)
-  in
-  let content_height = framed_content_height ~rows in
-  let scroll =
-    Masc_tui_scroll.normalize
-      ~count:(List.length lines)
-      ~height:content_height
-      state.agenda_scroll
   in
   let paint (line : Agenda.line) =
     match line.Agenda.tone with
@@ -13560,13 +13545,19 @@ let render_agenda (state : state) =
     | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
     | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
   in
-  lines
-  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
-  |> List.iter (fun line -> framed_line buf cols (paint line));
-  framed_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
-  finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"agenda"
+    ~frame:Chrome_overlay
+    ~title:(screen_title " MASC Agenda")
+    ~hints:"j/k:scroll  Esc:close"
+    ~body:(fun ~budget c ->
+      let scroll =
+        Masc_tui_scroll.normalize
+          ~count:(List.length lines) ~height:budget state.agenda_scroll
+      in
+      List.iteri
+        (fun index line ->
+          if index >= scroll && index < scroll + budget then c.push (paint line))
+        lines)
 ;;
 
 let render_terminal_too_small state ~rows ~cols =

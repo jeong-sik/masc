@@ -116,8 +116,7 @@ let argv_stage_destinations (stage : Masc_exec.Shell_ir.simple) : named =
             | None -> match_specs rest
             | Some rest -> (
               let rec collect acc n = function
-                | rest when (match max_count with Some m -> n >= m | None -> false) ->
-                  ignore rest;
+                | _rest when (match max_count with Some m -> n >= m | None -> false) ->
                   Destinations (List.rev acc)
                 | [] -> Destinations (List.rev acc)
                 | Masc_exec.Shell_ir.Lit (s, meta) :: tail ->

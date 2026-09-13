@@ -17,12 +17,20 @@ type operator_verdict_request =
   ; notes : string
   }
 
+(** [GET|POST /api/v1/goals/confirmation] failures. [Confirmation_rejected]
+    is the caller's 400 ([{ok:false, error}]); [Goal_store_unavailable] is
+    503 with the RFC-0444 envelope ({!Goal_unavailable_envelope.to_yojson}). *)
+type confirmation_error =
+  | Confirmation_rejected of string
+  | Goal_store_unavailable of Goal_store.unavailable
+
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 module For_testing : sig
   val commit_goal_confirmation_json : config:Workspace.config -> operator_id:string ->
-    Yojson.Safe.t -> (Yojson.Safe.t, string) result
+    Yojson.Safe.t -> (Yojson.Safe.t, confirmation_error) result
+  val confirmation_error_to_string : confirmation_error -> string
   val parse_operator_verdict_json :
     Yojson.Safe.t -> (operator_verdict_request, string) result
 

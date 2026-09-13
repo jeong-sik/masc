@@ -27,7 +27,14 @@ let test_read_and_selection () =
   expect "next tab wraps" (moved.selected_tab = Some 1);
   expect "request carries selected tab"
     (request_body moved = `Assoc ["lane", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 1]);
-  expect "previous tab wraps" ((select_tab (-1) moved).selected_tab = Some 2)
+  expect "previous tab wraps" ((select_tab (-1) moved).selected_tab = Some 2);
+  let direct = select_tab_index 0 view in
+  expect "direct tab index selects the observed first tab" (direct.selected_tab = Some 1);
+  expect "direct tab index clears the old scene" (direct.scene = None && direct.scroll = 0);
+  expect "direct tab index does not reload the current tab"
+    (select_tab_index 1 view == view);
+  expect "out of range direct tab index is inert"
+    ((select_tab_index 8 view).selected_tab = view.selected_tab)
 
 let test_raw_refresh_scroll_identity () =
   let initial = loaded () in

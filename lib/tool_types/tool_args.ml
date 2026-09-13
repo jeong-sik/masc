@@ -57,6 +57,8 @@ type error_code =
   | Not_implemented       (** Feature exists in schema but not in runtime *)
   | Internal_error        (** Unexpected server-side failure *)
   | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound) *)
+  | Unavailable           (** A store this build cannot read (RFC-0444: the goal store). The
+                              envelope names reason, field, file, mirror and reset step. *)
 
 let error_code_to_string = function
   | Validation_error -> "validation_error"
@@ -69,6 +71,7 @@ let error_code_to_string = function
   | Not_implemented -> "not_implemented"
   | Internal_error -> "internal_error"
   | Precondition_failed -> "precondition_failed"
+  | Unavailable -> "goal_store_unavailable"
 
 (** {1 Raw JSON String Builders}
 

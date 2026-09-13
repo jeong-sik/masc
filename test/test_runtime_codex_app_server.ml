@@ -133,7 +133,7 @@ let warm_fresh_executable path =
 ;;
 
 let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s lines =
+    ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s ?pipe_holder_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -176,6 +176,12 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
       drop 4 lines)
     else drop 3 lines
   in
+  (* A background child that inherits stdout and stderr and outlives the
+     CLI, the shape an orphaned MCP server leaves behind. It starts before
+     the terminal lines so the race with termination cannot skip it. *)
+  Option.iter
+    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
+    pipe_holder_s;
   List.iteri
     (fun index line ->
        if index >= terminal_line_delay_start_index
@@ -197,7 +203,7 @@ let fixture_script ?(close_before_turn = false) ?(inject_items = false) ?capture
 ;;
 
 let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?terminal_line_delay_start_index ?before_final_stdin_drain_s lines f =
+    ?terminal_line_delay_start_index ?before_final_stdin_drain_s ?pipe_holder_s lines f =
   let path =
     fixture_script
       ?close_before_turn
@@ -207,6 +213,7 @@ let with_fixture ?close_before_turn ?inject_items ?capture_path ?initial_line_de
       ?terminal_line_delay_s
       ?terminal_line_delay_start_index
       ?before_final_stdin_drain_s
+      ?pipe_holder_s
       lines
   in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
@@ -425,6 +432,39 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
            ] -> ()
          | _ -> fail "Codex native command activity was projected as a MASC tool")
+;;
+
+(* The stderr drain used to be an ordinary fiber of the process switch, so a
+   served turn waited for a background child to release stderr: unbounded for
+   an orphaned MCP server. [turn_return_window_s] bounds the whole measured
+   run (Eio_main start, spawn, protocol, exit): spawning the shell measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, and the
+   regression it guards against takes the holder's full 20 s. *)
+let turn_return_window_s = 5.0
+let pipe_holder_outliving_the_turn_s = 20.0
+
+let test_turn_returns_before_a_background_child_releases_the_pipes () =
+  with_fixture
+    ~pipe_holder_s:pipe_holder_outliving_the_turn_s
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; agent_message_delta
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       let started = Unix.gettimeofday () in
+       match run_fixture path with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result ->
+         let elapsed = Unix.gettimeofday () -. started in
+         check int "no MASC dynamic calls" 0 result.dynamic_tool_calls;
+         check bool
+           (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
+           true
+           (elapsed < turn_return_window_s))
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
@@ -4570,6 +4610,10 @@ let () =
             "native command stays distinct from dynamic tools"
             `Quick
             test_native_command_events_stay_distinct_from_dynamic_tools
+        ; test_case
+            "turn returns before a background child releases the pipes"
+            `Quick
+            test_turn_returns_before_a_background_child_releases_the_pipes
         ; test_case
             "dynamic tool abort stops provider loop"
             `Quick

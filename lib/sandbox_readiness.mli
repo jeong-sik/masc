@@ -10,6 +10,11 @@ type entry = { backend : backend; state : state; guest_verification : guest_veri
 type selection = { backend : backend; network_mode : Keeper_types_profile_sandbox.network_mode;
                    remote_endpoint : string option }
 type command_error = Missing_command | Command_failed
+type declaration_fault = Declaration_invalid | Declaration_unreadable
+(** Why imp's declared sandbox could not be turned into a selection:
+    [Declaration_unreadable] carries the OS message from opening imp.toml,
+    [Declaration_invalid] carries the parse or selection reason. *)
+type configuration_error = { kind : declaration_fault; detail : string }
 type runner = string list -> (string, command_error) result
 val all : backend list
 val backend_id : backend -> string
@@ -20,12 +25,18 @@ val detect_host : run:runner -> host
 val probe : host:host -> run:runner -> require_rootless:bool -> require_userns:bool -> backend -> entry
 val recommend : host:host -> configured:backend option -> entry list -> backend option
 val catalog_json : host:host -> configured:backend option -> entry list -> Yojson.Safe.t
+val declaration : base_path:string -> (selection, configuration_error) result
+(** Read imp's declared sandbox from the workspace. No request overrides and
+    no host default: a microvm profile without a named backend is invalid. *)
+val configuration_error_json : configuration_error -> Yojson.Safe.t
 val inspect : base_path:string option -> Yojson.Safe.t
 (** Observe the declared sandbox and host services without changing either.
-    An unreadable declaration is returned as an explicit configuration error. *)
+    A declaration that cannot be read or selected is returned under
+    [configuration_error] as [configuration_error_json], never as a sentence
+    that hides the reason. *)
 val state_message : state -> string
 val system_runner : runner
-val selection_of_contents : host:host -> path:string -> contents:string ->
+val selection_of_contents : path:string -> contents:string ->
   profile:Keeper_sandbox_config.sandbox_profile option ->
   microvm_backend:Keeper_microvm_backend.t option ->
   network_mode:Keeper_types_profile_sandbox.network_mode option -> (selection, string) result

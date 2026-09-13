@@ -1677,8 +1677,10 @@ def select_sandbox(binary, base_path, port=8945):
             raise SetupError('Sandbox inspection failed. Run masc sandbox-catalog for details.')
         if response.returncode != 0 or catalog.get('schema') != 'masc.sandbox_readiness.v1':
             raise SetupError('MASC could not inspect sandbox prerequisites.')
-        if catalog.get('configuration_error'):
-            print(terminal_text(catalog['configuration_error']), file=sys.stderr)
+        error = catalog.get('configuration_error')
+        if error is not None:
+            # {kind, detail}: kind is the closed reason class, detail the OS or parse message.
+            print(terminal_text(error['kind'] + ': ' + error['detail']), file=sys.stderr)
         rows = [row for row in catalog['candidates'] if advanced or not row['advanced']]
         rows.sort(key=lambda row: not row['recommended'])
         labels = [names.get(row['id'], row['id']) + (' · recommended' if row['recommended'] else '')

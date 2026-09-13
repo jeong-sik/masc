@@ -123,7 +123,10 @@ def run(binary):
             assert b"Enter:read region" in h.screen_text(frame), frame
             h.send_and_wait(process, fd, output, b"\t", b"[>2 region")
             frame = h.send_and_wait(process, fd, output, b"\r", b"SELECTED ARTICLE CONTENT")
-            assert b"Selected region" in h.screen_text(frame), frame
+            # #36036 keeps the semantic scope context, so the scoped read names the
+            # region role and label instead of the generic "Selected region".
+            assert b"Selected main" in h.screen_text(frame), frame
+            assert b"Article body" in h.screen_text(frame), frame
             clipboard = re.compile(rb"\x1b\]52;c;([A-Za-z0-9+/=]+)\x07")
             frame = h.send_and_wait(process, fd, output, b"y", clipboard)
             copied = json.loads(base64.b64decode(clipboard.search(frame).group(1), validate=True))

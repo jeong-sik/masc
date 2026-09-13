@@ -1449,17 +1449,84 @@ let test_default_source_snapshot_uses_explicit_base_path () =
     check string "snapshot keeper path" keeper_path error.keeper_path;
     check string "snapshot failing path" keeper_path error.failing_path
 
-let test_absent_profile_is_legitimate_empty_defaults () =
-  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir:_ ->
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
+(* Proves F386 at the loader: a keeper nothing declares is refused with
+   [Declaration_not_found] naming the keeper and the path the loader looked
+   at. On origin/main the same call answered with empty defaults, so every
+   reader downstream ran on a profile no file had written. *)
+let test_absent_profile_is_declaration_not_found () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let expected_path = Filename.concat keepers_dir "absent.toml" in
+  let error =
+    expect_profile_load_error
       ~base_path
-      "absent"
+      ~keeper_name:"absent"
+      ~kind:(KTP.Declaration_not_found "absent")
+      ~failing_path:expected_path
+  in
+  check string "keeper path is the expected declaration" expected_path
+    error.keeper_path;
+  check bool "detail names the keeper and the path" true
+    (String_util.contains_substring error.detail "absent"
+     && String_util.contains_substring error.detail expected_path)
+
+(* Proves F087: a deny list naming a tool no descriptor offers the model
+   fails the load with [Unknown_deny_tool] -- at the loader, in the snapshot
+   and on the pre-dispatch path alike -- and a model-visible name still
+   loads. On origin/main the file loaded and turn setup logged a WARN row
+   while the surface denied nothing. *)
+let test_unknown_deny_tool_refuses_load () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  let path = Filename.concat keepers_dir "denier.toml" in
+  let declaration deny =
+    Printf.sprintf
+      "[keeper]\ninstructions = \"Answer the question.\"\n\n[keeper.tools]\ndeny = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") deny))
+  in
+  let known =
+    match
+      Masc.Keeper_tool_descriptor.model_visible_descriptors ()
+      |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+    with
+    | name :: _ -> name
+    | [] -> fail "no descriptor is model-visible"
+  in
+  write_file path (declaration [ known; "no-such-tool" ]);
+  let error =
+    expect_profile_load_error
+      ~base_path
+      ~keeper_name:"denier"
+      ~kind:(KTP.Unknown_deny_tool [ "no-such-tool" ])
+      ~failing_path:path
+  in
+  check bool "detail names the unnamed entry" true
+    (String_util.contains_substring error.detail "no-such-tool");
+  check (list string) "unknown_deny_tools keeps only the unnamed entry"
+    [ "no-such-tool" ]
+    (KTP.unknown_deny_tools [ known; "no-such-tool" ]);
+  let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
+  (match KTP.snapshot_profile_defaults snapshot "denier" with
+   | Ok _ -> fail "snapshot admitted the unnamed deny entry"
+   | Error captured ->
+     check bool "snapshot preserves the refusal" true (captured = error));
+  (match
+     Masc.Keeper_unified_turn_pre_dispatch.load_profile_defaults
+       ~base_path
+       ~keeper_name:"denier"
+   with
+   | Ok _ -> fail "unnamed deny entry reached runtime execution construction"
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ }))
+     ->
+     check string "typed agent-core config field" "keeper.profile" field
+   | Error err ->
+     failf "expected typed InvalidConfig, got %s" (Agent_core.Error.to_string err));
+  write_file path (declaration [ known ]);
+  match
+    KTP.load_keeper_profile_defaults_result_for_base_path ~base_path "denier"
   with
   | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
   | Ok defaults ->
-    check (option string) "no manifest" None defaults.manifest_path;
-    check (option string) "no instructions" None defaults.instructions
+    check (list string) "a model-visible name loads" [ known ]
+      defaults.KTP.tool_deny
 
 let test_keeper_config_directory_probe_is_typed () =
   let path = Filename.temp_file "keeper-config-not-dir" ".toml" in
@@ -1851,8 +1918,11 @@ let test_projection_profile_snapshot_freshness () =
   let removed = KTP.read_keeper_profile_snapshot ~base_path in
   check (list string) "next projection observes deletion" ["snapshot-b"]
     (KTP.snapshot_configured_keeper_names removed);
-  check (option bool) "deleted declaration gets ordinary missing defaults" None
-    (Option.map Masc.Keeper_activation_mode.restore_owner (snapshot_defaults_exn removed "snapshot-a").activation_mode)
+  match KTP.snapshot_profile_defaults removed "snapshot-a" with
+  | Ok _ -> fail "deleted declaration must not load as empty defaults"
+  | Error error ->
+    check bool "deleted declaration is not found" true
+      (error.kind = KTP.Declaration_not_found "snapshot-a")
 
 let test_projection_profile_snapshot_error_parity () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
@@ -1868,19 +1938,60 @@ let test_projection_profile_snapshot_error_parity () =
   check (list string) "invalid declarations remain configured" ["malformed"; "uninstructed"]
     (KTP.snapshot_configured_keeper_names snapshot)
 
-let test_projection_profile_snapshot_filename_identity () =
+(* Proves F386 at the snapshot: a declaration whose keeper.name differs from
+   its file name is refused under both names, so the roster -- which asks by
+   keeper.name -- classifies it Declaration_invalid. On origin/main the
+   keeper.name lookup missed the filename index and answered with empty
+   defaults, and the roster called the declaration fine. *)
+let test_projection_profile_snapshot_refuses_name_mismatch () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
-  write_file (Filename.concat keepers_dir "file-key.toml")
+  let path = Filename.concat keepers_dir "file-key.toml" in
+  write_file path
     "[keeper]\nname = \"declared-key\"\ninstructions = \"Answer the question.\"\nactivation_mode = \"manual\"\n";
   let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
   check (list string) "discovery uses declared name" ["declared-key"]
     (KTP.snapshot_configured_keeper_names snapshot);
   List.iter (fun name ->
-    let captured = snapshot_defaults_exn snapshot name in
-    match KTP.load_keeper_profile_defaults_result_for_base_path ~base_path name with
-    | Ok live -> check bool "lookup still uses the filename" true (captured = live)
-    | Error error -> fail (KTP.keeper_toml_load_error_to_string error))
-    ["file-key"; "declared-key"]
+    match KTP.snapshot_profile_defaults snapshot name with
+    | Ok _ -> failf "mismatched declaration loaded under %s" name
+    | Error error ->
+      check bool "mismatch is an invalid name" true (error.kind = KTP.Invalid_name);
+      check string "mismatch names the file" path error.failing_path;
+      check bool "detail names both spellings" true
+        (String_util.contains_substring error.detail "declared-key"
+         && String_util.contains_substring error.detail "file-key"))
+    ["file-key"; "declared-key"];
+  match Masc.Keeper_declared_roster.missing ~base_path ~persisted_names:[] with
+  | [ row ] ->
+    check string "roster row carries the declared name" "declared-key"
+      row.Masc.Keeper_declared_roster.name;
+    check bool "roster classifies the mismatch as invalid" true
+      (List.mem Masc.Keeper_declared_roster.Declaration_invalid
+         row.Masc.Keeper_declared_roster.requirements)
+  | rows -> failf "expected one roster row, got %d" (List.length rows)
+
+(* Proves F386 at the snapshot: asking a snapshot for a basename it holds no
+   declaration for is [Declaration_not_found] naming the expected path, and
+   the live loader says the same. On origin/main the snapshot answered with
+   empty defaults. *)
+let test_projection_profile_snapshot_missing_name_is_not_found () =
+  with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
+  write_file (Filename.concat keepers_dir "present.toml")
+    "[keeper]\ninstructions = \"Answer the question.\"\n";
+  let snapshot = KTP.read_keeper_profile_snapshot ~base_path in
+  ignore (snapshot_defaults_exn snapshot "present");
+  match KTP.snapshot_profile_defaults snapshot "absent" with
+  | Ok _ -> fail "snapshot answered a missing basename with defaults"
+  | Error error ->
+    check bool "kind names the keeper" true
+      (error.kind = KTP.Declaration_not_found "absent");
+    check string "failing path is the expected declaration"
+      (Filename.concat keepers_dir "absent.toml") error.failing_path;
+    (match
+       KTP.load_keeper_profile_defaults_result_for_base_path ~base_path "absent"
+     with
+     | Ok _ -> fail "live load answered a missing declaration with defaults"
+     | Error live -> check bool "snapshot and live agree" true (error = live))
 
 let test_projection_profile_snapshot_fleet_wiring () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
@@ -2040,8 +2151,10 @@ let () =
             test_invalid_child_profile_fails_closed_before_dispatch;
           test_case "default source snapshot uses explicit base path" `Quick
             test_default_source_snapshot_uses_explicit_base_path;
-          test_case "absent profile is valid empty defaults" `Quick
-            test_absent_profile_is_legitimate_empty_defaults;
+          test_case "absent profile is Declaration_not_found" `Quick
+            test_absent_profile_is_declaration_not_found;
+          test_case "unnamed deny entry refuses the load" `Quick
+            test_unknown_deny_tool_refuses_load;
           test_case "config directory probe is typed" `Quick
             test_keeper_config_directory_probe_is_typed;
         ] );
@@ -2050,7 +2163,10 @@ let () =
           test_case "fleet projection shares captured declarations" `Quick test_projection_profile_snapshot_fleet_wiring;
           test_case "projection snapshot sees changes on next capture" `Quick test_projection_profile_snapshot_freshness;
           test_case "projection snapshot preserves profile errors" `Quick test_projection_profile_snapshot_error_parity;
-          test_case "projection snapshot preserves filename lookup" `Quick test_projection_profile_snapshot_filename_identity;
+          test_case "projection snapshot refuses a keeper.name/file mismatch" `Quick
+            test_projection_profile_snapshot_refuses_name_mismatch;
+          test_case "projection snapshot missing basename is Declaration_not_found" `Quick
+            test_projection_profile_snapshot_missing_name_is_not_found;
           test_case "empty dir" `Quick test_discover_empty_dir;
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;

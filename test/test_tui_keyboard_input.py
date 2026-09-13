@@ -7278,21 +7278,25 @@ def chat_visibility_modes_interaction(
                 start=pane_start,
                 timeout=5.0,
             )
-        initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=end_of_needle(output, b"gate:auto_judge", pane_start),
+            timeout=5.0,
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
-        if identity_row != title_row + 1:
+        initial += bytes(output[pane_start:])
+        # The Skill can arrive before the gate identity. Reconstruct the
+        # accumulated screen at the completed observation barrier instead of
+        # selecting the first frame that happened to contain the Skill name.
+        completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+        observed_rows = screen_rows(completed)
+        title_row = screen_row_of(
+            observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
@@ -9309,6 +9313,10 @@ def standalone_lane_fixture(
             "Selects the next Memory OS snapshot from immutable Keeper history.",
             False,
         ),
+        "workspace_curator_exact": (
+            "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -9363,6 +9371,7 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
+                standalone_lane_fixture("workspace_curator_exact", "Workspace Curator"),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },
@@ -10013,9 +10022,11 @@ def keeper_lanes_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
-        # One k walks the band from Verifier to Librarian, whose run list is
+        # Walk past Workspace Curator from Verifier to Librarian, whose run list is
         # the exact-output summary.
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        send_and_wait(process, master_fd, output, b"k",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
         # (#31290): before the follow, the selected row walked off the frame
@@ -10286,6 +10297,10 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
+        # The surface heading can precede the asynchronously loaded roster.
+        # Wait for the target row before asking the cursor to move to it.
+        wait_for_output(process, master_fd, output, b"beta", start=0, timeout=3.0)
+
         send_and_wait(
             process,
             master_fd,
@@ -10363,6 +10378,8 @@ def keeper_lanes_ia_interaction(
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        send_and_wait(process, master_fd, output, b"j",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
             process, master_fd, output, b"\r", b"task task-9"
@@ -10416,6 +10433,8 @@ def keeper_lanes_ia_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
         send_and_wait(process, master_fd, output, b"\r", b"succeeded")

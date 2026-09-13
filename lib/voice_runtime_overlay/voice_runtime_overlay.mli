@@ -87,6 +87,38 @@ val tts_command_for_endpoint
 (** The command that transcribes one file. [model] is a path here rather than a
     name, which is what the section's model means to this command; blank is
     refused by name rather than defaulted to a path that may not exist. *)
+type audio_container =
+  | Wave
+  | Flac
+  | Mp3
+  | Webm
+  | Ogg_opus
+  | Aiff
+  | Mp4
+  | Unrecognized
+(** The container an audio file declares in its first bytes. *)
+
+val audio_container_probe_bytes : int
+(** How many leading bytes {!audio_container_of_leading_bytes} reads. *)
+
+val audio_container_of_leading_bytes : string -> audio_container
+(** The container named by a file's first {!audio_container_probe_bytes} bytes
+    (fewer is fine; a short prefix is [Unrecognized] unless it already names
+    one). *)
+
+val audio_container_name : audio_container -> string
+
+type whisper_cli_input =
+  | Reads
+  | Does_not_read
+  | Not_measured
+
+val whisper_cli_input : audio_container -> whisper_cli_input
+(** Whether whisper-cli reads a container, measured with whisper-cpp 1.9.2:
+    WAV, FLAC and MP3 are read; WebM, Ogg Opus, AIFF and MP4 are not, and for
+    those whisper-cli exits 0 with an empty transcript rather than failing.
+    [Not_measured] is left for whisper-cli to answer. *)
+
 val stt_command_for_endpoint
   :  Voice_config.endpoint
   -> audio_file:string

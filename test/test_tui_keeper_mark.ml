@@ -79,6 +79,36 @@ let test_the_legend_names_every_mark_once () =
   check_bool "the legend covers unread" true (List.mem "unread" words);
   check_string "a working keeper heads the legend" "healthy" (List.hd words)
 
+(* The Mode S cell draws letters, and the sheet is where a reader learns them.
+   Both come from this module, so a letter the cell draws is a letter the
+   legend explains. *)
+let test_the_column_legend_explains_every_letter_the_cell_draws () =
+  let contains haystack needle =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  let modes =
+    [ Reading.Activation_manual; Reading.Activation_on_demand; Reading.Activation_autonomous ]
+  in
+  let mode_letters = List.map Mark.activation_letter modes in
+  check_int "each activation mode draws its own letter" (List.length modes)
+    (List.length (List.sort_uniq String.compare mode_letters));
+  let sandboxes = List.filter_map Mark.sandbox_of_profile [ "docker"; "microvm"; "local" ] in
+  check_int "the three declared profiles are sandboxes" 3 (List.length sandboxes);
+  check_bool "a profile this build does not know is not one of them" true
+    (Option.is_none (Mark.sandbox_of_profile "mock"));
+  let sandbox_letters = List.map Mark.sandbox_letter sandboxes in
+  check_int "each sandbox draws its own letter" 3
+    (List.length (List.sort_uniq String.compare sandbox_letters));
+  let keys = String.concat " " (List.map fst Mark.column_legend) in
+  List.iter
+    (fun letter -> check_bool ("the legend shows letter " ^ letter) true (contains keys letter))
+    (mode_letters @ sandbox_letters);
+  List.iter
+    (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
+    [ "HEALTH"; "LIFECYCLE"; "LAST"; "Mode"; "S " ]
+
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
@@ -94,5 +124,7 @@ let () =
             test_every_mark_is_one_column_wide
         ; Alcotest.test_case "the legend names every mark once" `Quick
             test_the_legend_names_every_mark_once
+        ; Alcotest.test_case "the column legend explains every letter" `Quick
+            test_the_column_legend_explains_every_letter_the_cell_draws
         ] )
     ]

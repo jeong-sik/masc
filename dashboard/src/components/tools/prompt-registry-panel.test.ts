@@ -8,7 +8,7 @@ void vi
 const mocks = vi.hoisted(() => ({
   clearPromptOverride: vi.fn(async () => ({ ok: true, message: 'override cleared' })),
   fetchDashboardPrompts: vi.fn(),
-  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
+  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' } as Awaited<ReturnType<typeof import('../../api').savePromptOverride>>)),
 }))
 
 vi.mock('../../api', () => ({
@@ -408,6 +408,22 @@ describe('PromptRegistryPanel', () => {
       window.confirm = originalConfirm
       await fireEvent.input(searchInput(), { target: { value: '' } })
     }
+  })
+
+  it.each([
+    [{ status: 'queued' }, 'workspace curator 재확인 요청됨. 실행 완료는 아직 확인되지 않았습니다.'],
+    [{ status: 'no_owner' }, '활성 workspace curator가 없어 재확인을 요청하지 못했습니다.'],
+    [{ status: 'unavailable', detail: 'workspace unavailable' }, 'workspace curator 재확인 요청 실패: workspace unavailable'],
+  ] as const)('shows the curator notification outcome after persistence: %s', async (refresh, expected) => {
+    mocks.savePromptOverride.mockResolvedValueOnce({ ok: true, message: 'override set', curator_refresh: refresh })
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+    const applyButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('오버라이드 적용'),
+    ) as HTMLButtonElement
+    await fireEvent.click(applyButton)
+    await waitFor(() => expect(container.textContent).toContain(expected))
   })
 
   it('rebinds the draft when reload removes the selected prompt before saving', async () => {

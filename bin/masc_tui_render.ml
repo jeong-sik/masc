@@ -13164,16 +13164,45 @@ let render_config (state : state) =
     ~body:(fun ~budget:_ c ->
       (* Where this server reads from, and how old the binary serving it is.
          A stale binary answers every request as confidently as a current
-         one, so the age is the only thing on screen that separates them. *)
+         one, so the age is the only thing on screen that separates them.
+
+         The age is measured first and the paths take what is left: they
+         were padded to 28 and 32 cells and cut from the right, so on a
+         workspace under /var/folders both read as the same "/var/folders/
+         bv/cjrbl01x52s…" while the age behind them left the row. A path's
+         deciding end is its tail, which [fit_middle] keeps. *)
       (match state.server_identity with
        | None -> c.push (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
        | Some identity ->
+           let base = Terminal_text.single_line identity.Tui_decode.sid_base_path in
+           let masc = Terminal_text.single_line identity.Tui_decode.sid_masc_root in
+           let age = binary_age_text identity.Tui_decode.sid_binary_commit_age_s in
+           let labels = "  base " ^ "   masc " ^ "   binary " in
+           let room =
+             framed_inner_width cols
+             - Message_layout.display_width labels
+             - Message_layout.display_width age
+           in
+           let base_cells = Message_layout.display_width base in
+           let masc_cells = Message_layout.display_width masc in
+           let base, masc =
+             if base_cells + masc_cells <= room then base, masc
+             else
+               (* A path that fits its half keeps its whole self and the
+                  other takes the rest; two long ones split the room. The
+                  shorter path is never cut to make room for a blank. *)
+               let half = room / 2 in
+               let base_room, masc_room =
+                 if base_cells <= half then base_cells, room - base_cells
+                 else if masc_cells <= half then room - masc_cells, masc_cells
+                 else half, room - half
+               in
+               ( Message_layout.fit_middle base_room base
+               , Message_layout.fit_middle masc_room masc )
+           in
            c.push
-             (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
-                (fit_width identity.Tui_decode.sid_base_path 28)
-                (fit_width identity.Tui_decode.sid_masc_root 32)
-                (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
-                Ansi.reset));
+             (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim base masc
+                age Ansi.reset));
       List.iter (fun (tone, text) ->
         c.push_styled ~style:(config_metadata_style tone)
           ("  " ^ Terminal_text.single_line text)) (config_metadata_summary state);

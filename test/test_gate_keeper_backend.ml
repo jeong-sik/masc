@@ -3003,16 +3003,34 @@ let test_keeper_stream_bridge_timeout_quarantines_the_open_tool_once () =
    that attempt was the last one, the Completion path's [fail_stream] finds the
    scope already cut and adds nothing: one kind on the wire, not that kind plus
    a second [sse_stream_incomplete]. An open tool block is quarantined once,
-   under the failure's own kind. *)
+   under the failure's own kind, ahead of the bare diagnosis. The scope may
+   still close normally afterwards (the OpenAI Responses parser reports
+   [response.incomplete] and then the terminal), so the terminal events of a
+   cut scope are still projected and add no diagnosis. *)
+type cut_stream_shape =
+  | Without_tool
+  | With_open_tool
+
 let test_keeper_stream_bridge_cut_stream_is_diagnosed_once () =
   let open Agent_core.Types in
+  let diagnoses events =
+    List.filter
+      (function
+        | Keeper_chat_events.Agent_core_stream_protocol_error _ -> true
+        | _ -> false)
+      events
+  in
+  let terminal =
+    [ MessageDelta { stop_reason = Some MaxTokens; usage = None }; MessageStop ]
+  in
   List.iter
-    (fun (label, failure) ->
+    (fun (label, kind, failure) ->
+       let tool_call_id = "tc-" ^ label in
        let open_tool =
          [ ContentBlockStart
              { index = 0
              ; content_type = "tool_use"
-             ; tool_id = Some ("tc-" ^ label)
+             ; tool_id = Some tool_call_id
              ; tool_name = Some "keeper_memory_search"
              }
          ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"q\":" }
@@ -3020,21 +3038,59 @@ let test_keeper_stream_bridge_cut_stream_is_diagnosed_once () =
        in
        List.iter
          (fun (shape, prefix) ->
-            let events, state = translate_agent_core_stream (prefix @ [ failure ]) in
-            let kinds = stream_protocol_error_kinds events in
-            check bool (label ^ " " ^ shape ^ " reports its own kind only") true
-              (kinds <> [] && List.for_all (String.equal label) kinds);
+            let shape_name =
+              match shape with
+              | Without_tool -> label ^ " without a tool"
+              | With_open_tool -> label ^ " with an open tool"
+            in
+            let events, state =
+              translate_agent_core_stream (prefix @ [ failure ] @ terminal)
+            in
+            (match shape, diagnoses events with
+             | ( Without_tool
+               , [ Keeper_chat_events.Agent_core_stream_protocol_error
+                     { kind = reported; quarantined_occurrence = None; _ }
+                 ] )
+               when reported = kind -> ()
+             | ( With_open_tool
+               , [ Keeper_chat_events.Agent_core_stream_protocol_error
+                     { kind = first
+                     ; tool_call_id = Some quarantined
+                     ; quarantined_occurrence = Some _
+                     ; _
+                     }
+                 ; Keeper_chat_events.Agent_core_stream_protocol_error
+                     { kind = second; quarantined_occurrence = None; _ }
+                 ] )
+               when first = kind && second = kind
+                    && String.equal quarantined tool_call_id -> ()
+             | (Without_tool | With_open_tool), _ ->
+               fail (shape_name ^ ": not diagnosed exactly once under its own kind"));
+            check bool (shape_name ^ ": the cut scope still delivers its terminal") true
+              (List.exists
+                 (function
+                   | Keeper_chat_events.Agent_core_stream_message_delta _ -> true
+                   | _ -> false)
+                 events
+               && List.exists
+                    (function
+                      | Keeper_chat_events.Agent_core_stream_message_stop -> true
+                      | _ -> false)
+                    events);
             let after_terminal =
               Keeper_chat_agent_core_stream_bridge.fail_stream state
                 ~reason:"stream ended before completion"
             in
             check (list string)
-              (label ^ " " ^ shape ^ ": fail_stream adds nothing after the cut") []
+              (shape_name ^ ": fail_stream adds nothing after the cut") []
               (stream_protocol_error_kinds
                  after_terminal.Keeper_chat_agent_core_stream_bridge.chat_events))
-         [ "without a tool", []; "with an open tool", open_tool ])
-    [ "sse_stream_incomplete", StreamIncomplete { reason = "max_output_tokens" }
+         [ Without_tool, []; With_open_tool, open_tool ])
+    [ ( "sse_stream_incomplete"
+      , Keeper_chat_events.Sse_stream_incomplete
+      , StreamIncomplete { reason = "max_output_tokens" } )
     ; ( "sse_stream_repeating"
+      , Keeper_chat_events.Sse_stream_repeating
       , StreamRepeating { paragraph = "again"; occurrences = 4; bytes_seen = 400 } )
     ]
 

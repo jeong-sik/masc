@@ -365,15 +365,15 @@ let test_image_reaches_the_cli_user_message () =
 (* A media type the block cannot carry is rejected before the CLI is spawned,
    so the caller learns which image is wrong instead of reading a provider 400
    attributed to the model several seconds later. *)
-let test_unsupported_image_media_type_is_rejected () =
+let test_unsupported_image_media_type_is_rejected ?(media_type="image/tiff") ?(base64_data="AAAA") ?(expected="image/tiff") () =
   let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
   let image =
-    { Runtime_claude_code.media_type = "image/tiff"; base64_data = "AAAA" }
+    { Runtime_claude_code.media_type; base64_data }
   in
   match Runtime_claude_code.validate_turn config ~prompt:"x" ~images:[ image ] with
   | Ok () -> failwith "an unsupported media type must not validate"
   | Error (Runtime_claude_code.Invalid_config detail) ->
-    if not (String_util.contains_substring detail "image/tiff")
+    if not (String_util.contains_substring detail expected)
     then failwith ("error should name the rejected media type: " ^ detail)
   | Error other ->
     failwith
@@ -2251,7 +2251,10 @@ let () =
       , [ test_case "image reaches the CLI user message" `Quick
             test_image_reaches_the_cli_user_message
         ; test_case "unsupported media type is rejected" `Quick
-            test_unsupported_image_media_type_is_rejected
+            (fun () -> test_unsupported_image_media_type_is_rejected ())
+        ; test_case "malformed Base64 image is rejected before client dispatch" `Quick
+            (fun () -> test_unsupported_image_media_type_is_rejected
+              ~media_type:"image/png" ~base64_data:"%%%" ~expected:"valid Base64" ())
         ] )
     ; "session", [ test_case "resume identity" `Quick test_resume_preserves_session_identity ]
     ; "live", [ test_case "subscription turn" `Slow test_live_subscription ]

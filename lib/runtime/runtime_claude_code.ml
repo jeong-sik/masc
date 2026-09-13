@@ -1619,14 +1619,9 @@ let validate_images images =
                 where
                 image.media_type
                 (String.concat ", " supported_image_media_types)))
-      else if String.trim image.base64_data = ""
-      then Error (Invalid_config (where ^ ".base64_data must not be empty"))
-      else if String.exists (fun c -> c = '\n' || c = '\r') image.base64_data
-      then
-        Error
-          (Invalid_config
-             (where ^ ".base64_data must not contain newlines"))
-      else loop (index + 1) rest
+      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
+        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
+        | Ok () -> loop (index + 1) rest
   in
   loop 0 images
 ;;

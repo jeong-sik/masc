@@ -590,7 +590,7 @@ let test_unsupported_media_is_a_delivery_error () =
    set before it spawns. MCP's own ImageContent leaves the set open, so without
    the same gate here a tool result reached the provider in a format the turn
    path had already rejected -- and only after the tool had run. *)
-let test_image_media_type_outside_the_shared_set_is_refused () =
+let test_image_media_type_outside_the_shared_set_is_refused ?(media_type="image/svg+xml") ?(data="PHN2Zz48L3N2Zz4=") ?(expected=["image/svg+xml";"image/png"]) () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   let bridge = Runtime_official_client_mcp_http.start ~sw ~net:env#net
     ~secure_random:env#secure_random ~server_name:"masc"
@@ -600,7 +600,7 @@ let test_image_media_type_outside_the_shared_set_is_refused () =
           { Runtime_official_client_mcp.success = true
           ; content = "diagram receipt"
           ; content_blocks = Some [Agent_core.Types.Image
-              {media_type="image/svg+xml"; data="PHN2Zz48L3N2Zz4="; source_type=Base64}]
+              {media_type; data; source_type=Base64}]
           }
       ; after_response_sent = (fun () -> ()) }) () in
   let endpoint, authorization = config_fields bridge in
@@ -615,8 +615,7 @@ let test_image_media_type_outside_the_shared_set_is_refused () =
   check bool "the refusal names the media type and keeps the receipt" true
     (match content with
      | [detail; receipt] ->
-       String_util.contains_substring detail "image/svg+xml"
-       && String_util.contains_substring detail "image/png"
+       List.for_all (String_util.contains_substring detail) expected
        && receipt = "diagram receipt"
      | _ -> false)
 ;;
@@ -662,7 +661,10 @@ let () =
         ; test_case "unsupported media is an explicit delivery error" `Quick
             test_unsupported_media_is_a_delivery_error
         ; test_case "image media type outside the shared set is refused" `Quick
-            test_image_media_type_outside_the_shared_set_is_refused
+            (fun () -> test_image_media_type_outside_the_shared_set_is_refused ())
+        ; test_case "malformed Base64 tool image preserves explicit failure and receipt" `Quick
+            (fun () -> test_image_media_type_outside_the_shared_set_is_refused
+              ~media_type:"image/png" ~data:"%%%" ~expected:["valid Base64"] ())
         ; test_case "structured text is sanitized before it reaches the client"
             `Quick test_structured_text_is_sanitized_before_it_reaches_the_client
         ] )

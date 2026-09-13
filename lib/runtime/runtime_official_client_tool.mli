@@ -65,6 +65,9 @@ val official_client_image_media_types : string list
     {!Runtime_claude_code.validate_images} so a turn image and a tool-result
     image are judged by one list. *)
 
+val validate_base64_image_data : string -> (unit, string) result
+(** Shared initial-image and tool-result validation before client delivery. *)
+
 val project_content :
   content_transport -> content:string ->
   content_blocks:Agent_core.Types.content_block list option ->

@@ -1401,6 +1401,10 @@ let json_error_sentence body =
    failure, so only the head travels. *)
 let raw_error_body_head_bytes = 240
 
+let http_transport_error ~verb ~url ~detail =
+  Printf.sprintf "(%s %s failed: %s)" (sanitize_terminal_text url)
+    (sanitize_terminal_text verb) (sanitize_terminal_text detail)
+
 let http_status_error ~status_code ~body =
   let body = String.trim body in
   let detail =
@@ -1409,19 +1413,14 @@ let http_status_error ~status_code ~body =
     | None ->
       if body = "" then "empty response body"
       else if String.length body > raw_error_body_head_bytes then
-        (* The row that draws this keeps both ends of the sentence, so the tail
-           has to say something. A bare "..." put the byte the cut happened to
-           land on where the reader looks for the end of the message, and the
-           row then preserved that byte as if it were the point. Naming the
-           size instead makes both ends carry: the head is what the server
-           started with, the tail is how much of it there was and why it was
-           not read as JSON. *)
-        Printf.sprintf "%s... (%d bytes, not JSON)"
+        (* The fallback can also be valid JSON without a usable error field.
+           Report its size without claiming a JSON parse failure. *)
+        Printf.sprintf "%s... (%d bytes, response body)"
           (String.sub body 0 raw_error_body_head_bytes)
           (String.length body)
       else body
   in
-  Printf.sprintf "HTTP %d: %s" status_code detail
+  Printf.sprintf "HTTP %d: %s" status_code (sanitize_terminal_text detail)
 
 let decode_json_response_body ~allow_empty ~status_code ~body :
     (Yojson.Safe.t, string) result =

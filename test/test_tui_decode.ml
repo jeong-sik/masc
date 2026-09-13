@@ -1538,11 +1538,7 @@ let test_decode_json_response_body_rejects_error_status () =
          the server already wrote the sentence. *)
       Alcotest.(check string) "http error" "HTTP 400: bad confirm" err
 
-(* A non-JSON error body is cut here for length, and the row that draws it cuts
-   again for the column budget while keeping both ends. So the tail this cut
-   leaves is the tail the operator reads. A bare "..." made that tail the byte
-   the 240-byte boundary happened to land on -- an arbitrary character the row
-   then preserved as if it were the end of the message. *)
+(* Raw bodies are bounded; their metadata does not claim a JSON parse result. *)
 let test_decode_json_response_body_bounded_body_names_its_size () =
   let body = String.make 900 'x' in
   match
@@ -1553,7 +1549,7 @@ let test_decode_json_response_body_bounded_body_names_its_size () =
   | Error err ->
       Alcotest.(check string)
         "the tail names the size, not the byte the cut landed on"
-        ("HTTP 502: " ^ String.make 240 'x' ^ "... (900 bytes, not JSON)")
+        ("HTTP 502: " ^ String.make 240 'x' ^ "... (900 bytes, response body)")
         err
 
 (* The bound applies to the raw body only. A server that wrote the sentence
@@ -1569,6 +1565,28 @@ let test_decode_json_response_body_keeps_a_long_json_sentence_whole () =
   | Error err ->
       Alcotest.(check string) "sentence kept whole"
         ("HTTP 503: " ^ sentence) err
+
+let test_http_error_fallback_and_controls () =
+  Alcotest.(check string) "transport reports its actual URL before the reason"
+    "(http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
+    (Tui_decode.http_transport_error ~verb:"GET"
+      ~url:"http://127.0.0.1:8935/api/overview" ~detail:"connect backoff");
+  let decode body =
+    match Tui_decode.decode_json_response_body ~allow_empty:false ~status_code:502 ~body with
+    | Error detail -> detail
+    | Ok _ -> Alcotest.fail "HTTP failure cannot succeed" in
+  let body = Yojson.Safe.to_string (`Assoc ["message", `String (String.make 400 'x')]) in
+  Alcotest.(check string) "valid JSON without an error sentence remains a raw body"
+    (Printf.sprintf "HTTP 502: %s... (%d bytes, response body)"
+      (String.sub body 0 240) (String.length body)) (decode body);
+  List.iter (fun body ->
+    Alcotest.(check string) "HTTP errors expose controls as data"
+      "HTTP 502: bad\\x1B[2J\\x0Dline" (decode body))
+    ["bad\x1B[2J\rline";
+     Yojson.Safe.to_string (`Assoc ["error", `String "bad\x1B[2J\rline"])];
+  let split_utf8 = String.make 239 'x' ^ "한글" in
+  Alcotest.(check bool) "byte-bounded fallback is valid terminal UTF-8" true
+    (String.is_valid_utf_8 (decode split_utf8))
 
 let test_decode_json_response_body_allows_empty_success () =
   match
@@ -9068,6 +9086,8 @@ let () =
           test_decode_json_response_body_rejects_error_status;
         Alcotest.test_case "body allows empty success" `Quick
           test_decode_json_response_body_allows_empty_success;
+        Alcotest.test_case "HTTP fallback and terminal controls" `Quick
+          test_http_error_fallback_and_controls;
         Alcotest.test_case "bounded body names its size" `Quick
           test_decode_json_response_body_bounded_body_names_its_size;
         Alcotest.test_case "long json sentence is kept whole" `Quick

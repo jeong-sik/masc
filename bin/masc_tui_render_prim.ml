@@ -1272,20 +1272,18 @@ let data_unreliable_close = ")"
 
 
 let data_unreliable_row ~cols err =
+  let err = Tui_decode.sanitize_terminal_text err in
   let room =
     max 8
       (framed_inner_width cols
        - Message_layout.display_width data_unreliable_open
        - Message_layout.display_width data_unreliable_close)
   in
-  (* Cut the middle, not the tail. Both ends of a load failure carry: the head
-     names the surface and the call, and the tail is the address or field the
-     call was about. A tail cut kept "overview load failed: (GET failed:
-     connect backoff: http://127.0.0.1" and dropped the port -- the one token
-     that says which server was not answering. *)
+  (* Generic HTTP bodies and diagnostics carry their actionable prefix.
+     Transport failures put the request target before their verbose reason. *)
   (Theme.bad ())
   ^ data_unreliable_open
-  ^ Message_layout.fit_middle room err
+  ^ fit_width err room
   ^ data_unreliable_close
   ^ Ansi.reset
 

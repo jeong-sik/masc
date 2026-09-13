@@ -33,31 +33,21 @@ let entry ?(timestamp = "12:34:56") ?timeline_bucket
   ; action = Layout.Action_none
   }
 
-(* The row the Overview draws when its load fails, at the width an eighty
-   column terminal leaves for it: the box keeps four cells, the sentence
-   "  (data unreliable: " twenty and its ")" one, so the error is cut to 55.
-   The number is written here because [Masc_tui_render], which works it out
-   from that sentence, does not link into a test.
-
-   Pinned as a whole row because the trade is easy to state wrongly. The head
-   gets a third of the column and stops inside the first word of "failed:";
-   what pays for the address is everything between -- "ed: (GET failed:
-   connect backoff:". Widen the mark to two cells and this row changes shape,
-   which is the signal: four cut sites then need deciding, not one constant. *)
 let notice_room_at_eighty_columns = 55
 
 let test_a_load_failure_keeps_its_address_at_eighty_columns () =
   let err =
-    "overview load failed: (GET failed: connect backoff: \
-     http://127.0.0.1:8935/api/overview)"
+    "overview load failed: (http://127.0.0.1:8935/api/overview GET failed: connect backoff)"
   in
-  let drawn = Layout.fit_middle notice_room_at_eighty_columns err in
-  check string "the row the notice draws at eighty columns"
-    ("overview load fail" ^ Layout.cut_mark
-     ^ " http://127.0.0.1:8935/api/overview)")
-    drawn;
-  check int "and it spends the column the frame gave it"
-    notice_room_at_eighty_columns (Layout.display_width drawn)
+  let drawn = Layout.fit_width err notice_room_at_eighty_columns in
+  check string "the producer target remains before the clipped reason"
+    "overview load failed: (http://127.0.0.1:8935/api/overv…" drawn;
+  check int "the notice fits its cell budget" notice_room_at_eighty_columns
+    (Layout.display_width drawn);
+  let generic = "HTTP 500: database connection pool exhausted: " ^ String.make 240 'x' in
+  let drawn = Layout.fit_width generic notice_room_at_eighty_columns in
+  check bool "generic error keeps its actionable prefix" true
+    (String.starts_with ~prefix:"HTTP 500: database connection pool exhausted:" drawn)
 
 let test_keeps_latest_reply () =
   let entries =

@@ -5,6 +5,9 @@ Usage: python3 test_browser_bidi_host.py HOST FIREFOX
 No WebExtension, profile reuse, or production MASC. The HTTP peer is the
 native poll/result contract; actual commands execute in Firefox.
 """
+import argparse
+import hashlib
+import traceback
 import base64
 import http.server
 import json
@@ -20,7 +23,24 @@ import time
 import uuid
 
 
-def run(host, firefox):
+def run(host, firefox, out=None):
+    evidence = Path(out) if out else Path(tempfile.mkdtemp(prefix="masc-bidi-proof-"))
+    evidence.mkdir(parents=True, exist_ok=True)
+    receipts = []
+    outcome = {"passed": False, "cleanup": [], "cleanup_errors": []}
+
+    def retained(value):
+        if isinstance(value, list):
+            return [retained(item) for item in value]
+        if isinstance(value, dict):
+            if value.get("mimeType") == "image/png" and isinstance(value.get("data"), str):
+                png = base64.b64decode(value["data"], validate=True)
+                digest = hashlib.sha256(png).hexdigest()
+                (evidence / (digest + ".png")).write_bytes(png)
+                return {**value, "data": {"sha256": digest, "bytes": len(png), "path": digest + ".png"}}
+            return {key: retained(item) for key, item in value.items()}
+        return value
+
     with tempfile.TemporaryDirectory(prefix="masc-bidi-native-") as directory:
         root = Path(directory)
         token = "owned-bidi-test-lane-token"
@@ -70,6 +90,9 @@ def run(host, firefox):
                     reply = {"ok": True}
                 else:
                     raise AssertionError(self.path)
+                receipts.append({"path": self.path, "request": retained(body), "response": retained(reply),
+                    "clientId": self.headers["x-browser-client-id"],
+                    "browserVersion": self.headers["x-browser-version"]})
                 data = json.dumps(reply).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
@@ -94,7 +117,8 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             port = sock.getsockname()[1]
         (root / "profile").mkdir()
         ff = native = None
-        log = (root / "firefox.log").open("wb")
+        log = (evidence / "firefox.log").open("wb")
+        native_log = (evidence / "native.log").open("wb")
         try:
             ff = subprocess.Popen([firefox, "--headless", "--no-remote", "--profile", str(root / "profile"),
                 "--remote-debugging-port", str(port), fixture_url, fixture_url], stdout=log, stderr=log)
@@ -109,8 +133,8 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
                     time.sleep(.05)
             native = subprocess.Popen([host, "--base-path", str(root), "--token-file", str(root / "token"),
                 "--server", f"http://127.0.0.1:{server.server_port}", "--bidi-url", f"ws://127.0.0.1:{port}/session"],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            assert ready.wait(20), "native peer did not register"
+                stdin=subprocess.DEVNULL, stdout=native_log, stderr=native_log)
+            assert ready.wait(20), f"native peer did not register; stderr retained in {evidence / 'native.log'}"
 
             def call(verb, args):
                 ident = str(uuid.uuid4())
@@ -174,21 +198,56 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             unsupported = call("page.elements", {"tabId": first})
             assert not unsupported["ok"] and unsupported["effectPhase"] == "not_started"
             assert len({row[0] for row in metadata}) == 1 and all(row[1] for row in metadata)
-            print(json.dumps({"passed": True, "tabs": matching, "version": metadata[0][1]}))
+            outcome.update(passed=True, tabs=matching, version=metadata[0][1])
+        except BaseException:
+            outcome["error"] = traceback.format_exc()
+            print(f"Native BiDi failure diagnostics: {evidence / 'native.log'}", file=sys.stderr)
+            raise
         finally:
-            for process in (native, ff):
-                if process is not None and process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.communicate(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.communicate(timeout=5)
-            log.close()
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=5)
+            original_error = sys.exc_info()[1]
+
+            def clean(stage, action):
+                try:
+                    action()
+                except BaseException as error:
+                    outcome["cleanup_errors"].append({"stage": stage, "error": repr(error)})
+
+            for name, process in (("native", native), ("firefox", ff)):
+                if process is None:
+                    continue
+
+                def stop_process():
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                            outcome["cleanup_errors"].append({"stage": name, "error": "required SIGKILL"})
+                    outcome["cleanup"].append({"name": name, "pid": process.pid, "exit": process.returncode})
+
+                clean(name, stop_process)
+            clean("firefox-log", log.close)
+            clean("native-log", native_log.close)
+            clean("http-shutdown", server.shutdown)
+            clean("http-close", server.server_close)
+            clean("http-thread", lambda: thread.join(timeout=5))
+            if thread.is_alive():
+                outcome["cleanup_errors"].append({"stage": "http-thread", "error": "still alive"})
+            if outcome["cleanup_errors"]:
+                outcome["passed"] = False
+            (evidence / "receipts.json").write_text(json.dumps(receipts, indent=2))
+            (evidence / "outcome.json").write_text(json.dumps(outcome, indent=2))
+            print(json.dumps({"out": str(evidence), **outcome}))
+            if outcome["cleanup_errors"] and original_error is None:
+                raise AssertionError("owned process cleanup failed; see outcome.json")
 
 
 if __name__ == "__main__":
-    run(*sys.argv[1:])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("host")
+    parser.add_argument("firefox")
+    parser.add_argument("--out", type=Path)
+    args = parser.parse_args()
+    run(args.host, args.firefox, args.out)

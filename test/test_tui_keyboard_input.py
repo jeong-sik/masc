@@ -8481,8 +8481,8 @@ def assert_runtime_row(
 
     The runtime half is the text the chat header draws around the model
     name, not the model name alone: #35458 folded the turn gauge into one
-    line and the header now says "<state> configured: <model>", where it
-    used to say "<state> <model>". The two callers below kept the old
+    line and the header now says "<state> \u00b7 configured: <model>", where
+    it used to say "<state> <model>". The two callers below kept the old
     spelling and stopped matching any row, which reads as "the header lost
     the health" rather than "the header renamed the field".
     """
@@ -8579,7 +8579,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             beta_frame,
             health=b"idle",
-            runtime=b"paused configured: anthropic.claude-sonnet-4",
+            runtime=b"paused \xc2\xb7 configured: anthropic.claude-sonnet-4",
             description="switched beta chat",
         )
         for expected in (
@@ -8624,7 +8624,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         assert_runtime_row(
             alpha_frame,
             health=b"healthy",
-            runtime=b"running configured: anthropic.claude-opus-5",
+            runtime=b"running \xc2\xb7 configured: anthropic.claude-opus-5",
             description="restored alpha chat",
         )
         for expected in (

@@ -4019,7 +4019,7 @@ let standalone_lane_json ?purpose ?(status = "idle") ?(retained = 3)
    [configuration_state]. Decoding that word into a variant is what lets the
    detail pane say which of the two it is. *)
 let test_decode_standalone_lane_configuration_is_a_closed_set () =
-  (* All four lanes, because the snapshot decoder demands each known lane
+  (* All known lanes, because the snapshot decoder demands each known lane
      exactly once and a one-lane fixture never reaches the configuration
      word at all. Only the board lane's state varies. *)
   let snapshot configuration_state =
@@ -4038,6 +4038,7 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
             ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
             ; standalone_lane_json "librarian_exact" "Librarian"
             ; standalone_lane_json "verifier_exact" "Verifier"
+            ; standalone_lane_json "workspace_curator_exact" "Workspace Curator"
             ] )
       ]
   in

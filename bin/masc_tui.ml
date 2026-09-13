@@ -7023,7 +7023,9 @@ let take_pending_attachments state =
 ;;
 
 let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
-  let control_generation = keeper_chat_control_generation state request.Keeper_chat.keeper_name in
+  let control_generation = match admission_intent with
+    | Keeper_chat.Interactive _ -> advance_keeper_chat_control state request.Keeper_chat.keeper_name
+    | Keeper_chat.Queue_only -> keeper_chat_control_generation state request.Keeper_chat.keeper_name in
   let submitted_at, origin =
     match promoted with
     | None -> Unix.gettimeofday (), Direct_submission
@@ -13167,6 +13169,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       if generation = keeper_chat_control_generation state keeper_name then
         state.keeper_chat_control_tokens <- (keeper_name, token) ::
           List.remove_assoc keeper_name state.keeper_chat_control_tokens
+      else launch_keeper_turns_load state ~mailbox
   | Keeper_turns_loaded (generation, result) ->
       state.keeper_turns_inflight <- false;
       (match result with

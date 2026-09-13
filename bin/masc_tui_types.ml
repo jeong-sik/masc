@@ -5398,10 +5398,14 @@ let promoted_inflight_for_keeper state keeper_name =
 let keeper_chat_control_generation state keeper_name =
   Option.value ~default:0 (List.assoc_opt keeper_name state.keeper_chat_control_generations)
 
-let begin_keeper_chat_control state keeper_name =
+let advance_keeper_chat_control state keeper_name =
   let generation = keeper_chat_control_generation state keeper_name + 1 in
   state.keeper_chat_control_generations <- (keeper_name, generation) ::
     List.remove_assoc keeper_name state.keeper_chat_control_generations;
+  generation
+
+let begin_keeper_chat_control state keeper_name =
+  let generation = advance_keeper_chat_control state keeper_name in
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
   generation
 

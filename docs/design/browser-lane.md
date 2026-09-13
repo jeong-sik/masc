@@ -167,8 +167,7 @@ action. No browser action is replayed by this mechanism.
 
 The native host now supplies `deadlineMs` from its existing extension timeout.
 Install the matching host and extension together. Extension 0.7.0 adds the
-`webNavigation` permission for these document events. This permission does not
-add a Slack connector or bot token requirement.
+`webNavigation` permission for these document events.
 
 References: [Firefox navigation events](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/webNavigation),
 [document replacement during injection](https://bugzilla.mozilla.org/show_bug.cgi?id=2047009).

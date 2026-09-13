@@ -372,6 +372,26 @@ let test_removing_the_last_endpoint_is_refused () =
     | Ok () -> Alcotest.fail "an stt section with no endpoints must be refused"
     | Error error -> Alcotest.fail (Voice_setup.error_message error))
 
+(* A voice chosen for a command-run endpoint goes on the section when there is
+   no section yet, and on the endpoint only when one already exists to collide
+   with.
+
+   The distinction is load-bearing rather than tidy: an endpoint voice outranks
+   [voice.tts.agent_voices], so writing one where it is not needed retires
+   every per-keeper voice at that endpoint without saying so. Measured on a
+   fresh workspace 2026-09-13 -- a keeper mapped to Eddy was spoken in Yuna
+   with the endpoint line present, in Eddy without it. *)
+let test_a_local_voice_goes_on_the_section_until_one_exists () =
+  Alcotest.(check bool)
+    "a fresh workspace: the voice is the workspace default"
+    true
+    (Voice_setup.voice_placement ~section_exists:false = Voice_setup.On_the_section);
+  Alcotest.(check bool)
+    "a workspace whose section names another provider's voice: on the endpoint"
+    true
+    (Voice_setup.voice_placement ~section_exists:true = Voice_setup.On_the_endpoint)
+;;
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -396,6 +416,8 @@ let () =
             test_changes_that_depend_on_each_other_land_together
         ; Alcotest.test_case "an agent voice is set and cleared" `Quick
             test_an_agent_voice_is_set_and_cleared
+        ; Alcotest.test_case "a local voice goes on the section until one exists"
+            `Quick test_a_local_voice_goes_on_the_section_until_one_exists
         ; Alcotest.test_case "send_on_stop is written as a boolean" `Quick
             test_send_on_stop_is_written_as_a_boolean
         ; Alcotest.test_case "a field left None is dropped" `Quick

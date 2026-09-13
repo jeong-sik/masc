@@ -754,9 +754,25 @@ let next_sequence ?(require_existing = false) journal =
   | Error Journal_missing when not require_existing -> Ok 0
   | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _) as error -> error
   | Ok entries ->
-    let highest = List.fold_left (fun highest entry -> max highest entry.seq) (-1) entries in
-    if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
-    else Ok (highest + 1)
+    let rec last previous = function
+      | [] -> Ok previous
+      | entry :: rest ->
+        (match previous with
+         | Some prior when entry.seq <= prior.seq ->
+           Error (Journal_corrupt "operation journal sequences are not increasing")
+         | Some _ | None -> last (Some entry) rest) in
+    (match last None entries with
+     | Error _ as error -> error
+     | Ok latest ->
+       let complete = match latest with
+         | Some { event = (Keeper_chat_events.Run_finished _ | Event_error _); _ } -> true
+         | Some _ | None -> false in
+       if require_existing && not complete then
+         Error (Journal_corrupt "continuation journal has no durable terminal segment boundary")
+       else
+         let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
+         if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
+         else Ok (highest + 1))
 ;;
 
 (** {1 Replay position} *)

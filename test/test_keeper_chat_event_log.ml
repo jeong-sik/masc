@@ -779,7 +779,12 @@ let test_continued_short_reply_uses_monotonic_journal_ids () =
       @ List.init 20 (fun _ -> E.Text_delta "working")
       @ [E.Continuation_checkpoint {message=""; request_id=Some "continued"};
          E.Text_message_end; E.Run_finished {run_id="run"}] in
-    List.iter (E.publish first) first_events;
+    let before_terminal = List.filter (function E.Run_finished _ -> false | _ -> true) first_events in
+    List.iter (E.publish first) before_terminal;
+    (match L.next_sequence ~require_existing:true journal with
+     | Error (L.Journal_corrupt _) -> ()
+     | _ -> Alcotest.fail "missing terminal append must not reuse a possibly delivered cursor");
+    E.publish first (E.Run_finished {run_id="run"});
     let after = L.After_seq (cursor () - 1) in
     let live = ref [] in
     let resumed = E.create ~first_seq:(cursor ()) ~on_publish:(fun ~seq ~ts event ->

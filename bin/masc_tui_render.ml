@@ -13435,28 +13435,15 @@ let answering_viewport (state : state) =
   ( List.length (answering_lines state)
   , max 1 (framed_content_height ~rows - answering_preview_rows) )
 
+(* The answering overlay, through the overlay contract. Drawn by hand, a short
+   list closed the box right under the preview panel, so the footer stood on
+   row 10 of a 26-row terminal. The list now fills its height, the preview
+   panel sits on the frame's last rows, and the frame fills nothing because
+   nothing is left. Its title was "Live Keeper Turns & Answering" with a half
+   circle glyph; the key table names the overlay "answering". *)
 let render_answering (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 2048 in
-  framed_top buf cols;
-  framed_line
-    buf
-    cols
-    (* Enter and Esc are in the footer row below this overlay. *)
-    (screen_title " Live Keeper Turns & Answering" ^ "  "
-     ^ (Theme.info ()) ^ "\xe2\x97\x90" ^ Ansi.reset);
-  framed_divider buf cols;
   let lines = answering_lines state in
-  let content_height =
-    max 1 (framed_content_height ~rows - answering_preview_rows)
-  in
-  let scroll =
-    Masc_tui_scroll.normalize
-      ~count:(List.length lines)
-      ~height:content_height
-      state.answering_scroll
-  in
   let paint ~selected (line : Masc_tui_answering.line) =
     let tone_prefix =
       match line.Masc_tui_answering.tone with
@@ -13474,15 +13461,6 @@ let render_answering (state : state) =
     in
     caret ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset
   in
-  lines
-  |> List.mapi (fun i line -> (i, line))
-  |> List.filter (fun (i, _) -> i >= scroll && i < scroll + content_height)
-  |> List.iter (fun (i, line) ->
-         framed_line buf cols (paint ~selected:(i = state.answering_cursor) line));
-  (* The fixed preview panel: what the cursor's keeper is doing right now,
-     from the turns poll's live glance. Drawn empty rather than omitted so
-     the list above never reflows with the cursor. *)
-  framed_divider buf cols;
   let preview_lines =
     let cursor_preview =
       match List.nth_opt lines state.answering_cursor with
@@ -13520,12 +13498,35 @@ let render_answering (state : state) =
         ; ""
         ]
   in
-  List.iter (fun line -> framed_line buf cols line) preview_lines;
-  framed_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:"j/k:move  Enter:open chat  Esc:close");
-  finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"answering"
+    ~frame:Chrome_overlay
+    (* Enter and Esc are in the footer row below this overlay. *)
+    ~title:(screen_title " MASC Answering")
+    ~hints:"j/k:move  Enter:open chat  Esc:close"
+    ~body:(fun ~budget c ->
+      let content_height = max 1 (budget - answering_preview_rows) in
+      let scroll =
+        Masc_tui_scroll.normalize
+          ~count:(List.length lines)
+          ~height:content_height
+          state.answering_scroll
+      in
+      let drawn = ref 0 in
+      List.iteri
+        (fun i line ->
+          if i >= scroll && i < scroll + content_height then begin
+            incr drawn;
+            c.push (paint ~selected:(i = state.answering_cursor) line)
+          end)
+        lines;
+      for _ = !drawn + 1 to content_height do
+        c.push_empty ()
+      done;
+      (* The fixed preview panel: what the cursor's keeper is doing right now,
+         from the turns poll's live glance. Drawn empty rather than omitted so
+         the list above never reflows with the cursor. *)
+      c.push_divider ();
+      List.iter c.push preview_lines)
 ;;
 
 let render_agenda (state : state) =

@@ -2587,7 +2587,17 @@ let test_the_overlays_are_the_shared_contract () =
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:"bin/masc_tui_render_prim.ml"
        ~binding_name:"surface_chrome_rows" ~callees:[]
-       ~identifiers:[ "framed_chrome_rows" ])
+       ~identifiers:[ "framed_chrome_rows" ]);
+  (* The answering overlay is the contract's as well; its list fills its
+     height so the preview panel and the footer keep the bottom rows. *)
+  let answering callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_answering" ~callee
+  in
+  check int "the answering overlay draws through the contract" 1
+    (answering "surface_chrome");
+  check int "the answering overlay finishes no frame by hand" 0
+    (answering "finish_surface")
 ;;
 
 (* The runtime.toml pane's frame is the shared contract's too. It subtracted

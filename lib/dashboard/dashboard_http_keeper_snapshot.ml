@@ -176,9 +176,11 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             | Ok rows -> rows
             | Error _ -> []
           in
+          let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
+            Workspace_memory_publication.observe ~base_path:config.base_path) in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~config
             ~profile_defaults:defaults ~current_task ~active_goal_summaries
-            ~task_skill_surfaces ~repository_freshness ~observation ()
+            ~task_skill_surfaces ~workspace_memory ~repository_freshness ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user

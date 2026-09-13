@@ -155,6 +155,9 @@ let status_item_projection = function
     Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity }
   | Port _ -> None
 
+let with_literal_prefix prefix hints =
+  match prefix with None -> hints | Some text -> text ^ "  " ^ hints
+
 let body hints statuses =
   match statuses with
   | [] -> "  " ^ hints
@@ -268,13 +271,13 @@ let item_is_pinned item =
             && String.equal (String.sub key (String.length key - 4) 4) " Esc"))
       never_dropped_keys
 
-let drop_hint_items ~max_cells hints =
+let drop_hint_items ?literal_prefix ~max_cells hints =
   let items =
     split_on_double_space hints
     |> List.filter (fun item -> not (String.equal (String.trim item) ""))
   in
   let fits kept =
-    let candidate = "  " ^ String.concat "  " kept ^ "  " ^ cut_marker in
+    let candidate = "  " ^ with_literal_prefix literal_prefix (String.concat "  " kept) ^ "  " ^ cut_marker in
     Masc_tui_message_layout.display_width candidate <= max_cells
   in
   (* The last item that may be dropped, by index. [None] once only pinned
@@ -291,7 +294,7 @@ let drop_hint_items ~max_cells hints =
   let rec fit kept =
     match kept with
     | [] -> None
-    | _ when fits kept -> Some ("  " ^ String.concat "  " kept ^ "  " ^ cut_marker)
+    | _ when fits kept -> Some ("  " ^ with_literal_prefix literal_prefix (String.concat "  " kept) ^ "  " ^ cut_marker)
     | _ ->
       (match last_droppable kept with
        | None -> None
@@ -299,8 +302,8 @@ let drop_hint_items ~max_cells hints =
   in
   fit items
 
-let rec fit_body ~max_cells ~hints ~omissions statuses =
-  let rendered = body hints statuses in
+let rec fit_body ?literal_prefix ~max_cells ~hints ~omissions statuses =
+  let rendered = body (with_literal_prefix literal_prefix hints) statuses in
   if Masc_tui_message_layout.display_width rendered <= max_cells then rendered
   else
     match statuses, omissions with
@@ -309,7 +312,7 @@ let rec fit_body ~max_cells ~hints ~omissions statuses =
          items go first ({!drop_hint_items}); cell truncation is what is left
          when even one item will not fit. Both end in {!cut_marker}, which
          says the row was cut and says where the rest is. *)
-      (match drop_hint_items ~max_cells hints with
+      (match drop_hint_items ?literal_prefix ~max_cells hints with
        | Some fitted -> fitted
        | None ->
          let room =
@@ -318,25 +321,27 @@ let rec fit_body ~max_cells ~hints ~omissions statuses =
          if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
          else Masc_tui_message_layout.fit_width rendered room ^ more_key)
     | _, retention :: rest ->
-      fit_body ~max_cells ~hints ~omissions:rest
+      fit_body ?literal_prefix ~max_cells ~hints ~omissions:rest
         (List.filter (fun status -> status.retention <> retention) statuses)
-    | _, [] -> fit_body ~max_cells ~hints ~omissions:[] []
+    | _, [] -> fit_body ?literal_prefix ~max_cells ~hints ~omissions:[] []
 
 (** [line ~dim ~reset ~max_cells ~port ~hints] is one footer line, terminated by a
     newline. [Port] closes every footer and is appended here; [status] carries
     only the extra facts a surface has, in the order they should read.
 
+    [literal_prefix] carries surface status such as a search query. Its spaces
+    are preserved while the separately supplied hints are split into items.
     Key hints retain the row before status facts do. When the facts do not fit,
     whole typed items are omitted in this order: refresh interval, build, base
     path, port, workspace mismatch. Only an overlong surface-owned hint uses
     cell-safe truncation
     as the final fallback. *)
-let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
+let line ?literal_prefix ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])
   in
   let fitted =
-    fit_body ~max_cells:(max 0 max_cells) ~hints ~omissions:omission_order
+    fit_body ?literal_prefix ~max_cells:(max 0 max_cells) ~hints ~omissions:omission_order
       statuses
   in
   Printf.sprintf "%s%s%s\n" dim fitted reset

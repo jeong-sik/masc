@@ -10,6 +10,7 @@ type attempt_outcome =
     closes the same-turn retry boundary before user/tool code can run. *)
 
 val run :
+  ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->

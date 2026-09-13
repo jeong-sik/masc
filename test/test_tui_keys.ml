@@ -1425,6 +1425,136 @@ let surfaces_that_answer_the_row_search =
   ; "Resources", Resources
   ]
 
+let test_code_search_count_tracks_fetched_source () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  let load path rows =
+    match Masc_tui_fetched.start ~equal:String.equal state.code_file ~key:path with
+    | Masc_tui_fetched.Already_loading -> Alcotest.fail "fixture already loading"
+    | Masc_tui_fetched.Started (next, request) ->
+        state.code_file <- Masc_tui_fetched.complete ~equal:String.equal next request (Ok rows)
+  in
+  let count query = surface_search_count state Code ~query in
+  load "large.ml" (Array.init 20_000 (fun index ->
+    [((if index mod 2 = 0 then "needle" else "other"), "")]));
+  Alcotest.(check (option int)) "large file count" (Some 10_000) (count "needle");
+  let first_reading = !code_search_count_memo in
+  Alcotest.(check (option int)) "repaint keeps the count" (Some 10_000) (count "needle");
+  Alcotest.(check bool) "repaint reuses the settled reading" true
+    (first_reading == !code_search_count_memo);
+  Alcotest.(check (option int)) "query change recounts" (Some 0) (count "absent");
+  load "large.ml" [|[("needle", "")]|];
+  Alcotest.(check (option int)) "same-path replacement recounts" (Some 1) (count "needle");
+  state.code_focus_file <- Left_pane;
+  Alcotest.(check (option int)) "tree does not reuse file matches" (Some 0) (count "needle");
+  state.code_focus_file <- Right_pane;
+  state.repository_changes_open <- true;
+  Alcotest.(check (option int)) "overlay without a source has no count" None (count "needle");
+  state.repository_changes_open <- false;
+  state.code_file <- Masc_tui_fetched.clear state.code_file;
+  Alcotest.(check (option int)) "closed file has no source" None (count "needle");
+  load "empty.ml" [||];
+  Alcotest.(check (option int)) "loaded empty file has zero matches" (Some 0) (count "needle")
+
+let test_detail_search_counts_follow_the_active_pane () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.search_last <- "needle";
+  state.harness <- Some
+    { Tui_decode.hs_verdicts =
+        [{ Tui_decode.hv_at = 1.; hv_task_id = "task-1";
+           hv_task_title = "needle"; hv_agent = "agent"; hv_gate = "gate";
+           hv_verdict = "approve"; hv_evaluator = "evaluator";
+           hv_fallback_reason = None; hv_notes_hash = "hash" }];
+      hs_calibration = None; hs_overview = None };
+  state.system_logs <- Some
+    { Tui_decode.sys_entries =
+        [{ Tui_decode.sl_seq = 1; sl_ts = "2026-09-13T00:00:00Z";
+           sl_level = Tui_decode.System_info;
+           sl_source = Tui_decode.System_structured;
+           sl_module = "test"; sl_keeper = None; sl_turn = None;
+           sl_message = "needle"; sl_details = `Null; sl_category = None }];
+      sys_total = 1; sys_latest_seq = 1 };
+  let check_pane label surface set_detail =
+    state.view <- surface;
+    let count () = surface_search_count state surface ~query:state.search_last in
+    Alcotest.(check (option int)) (label ^ " list count") (Some 1) (count ());
+    Alcotest.(check bool) (label ^ " list has a cursor") true
+      (Option.is_some (scrolled_surface_rows state surface));
+    set_detail true;
+    Alcotest.(check (option int)) (label ^ " detail has no count or n/N") None (count ());
+    Alcotest.(check (option (list string))) (label ^ " detail has no search rows")
+      None (surface_row_texts state surface);
+    Alcotest.(check bool) (label ^ " detail has no cursor") false
+      (Option.is_some (scrolled_surface_rows state surface));
+    set_detail false;
+    Alcotest.(check (option int)) (label ^ " return restores count") (Some 1) (count ());
+    Alcotest.(check bool) (label ^ " return restores cursor") true
+      (Option.is_some (scrolled_surface_rows state surface));
+    Alcotest.(check string) (label ^ " keeps settled query") "needle" state.search_last
+  in
+  check_pane "Harness" Harness
+    (fun detail -> state.harness_detail <- if detail then Some ("task-1", 1.) else None);
+  check_pane "System logs" System_logs
+    (fun detail -> state.system_logs_detail_seq <- if detail then Some 1 else None)
+
+let test_changes_diff_uses_visible_search_rows () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let payload = Yojson.Safe.from_string {|{
+    "keeper":"alpha", "window_hours":24, "calls_in_window":1,
+    "over_budget":0, "malformed":0,
+    "changes":[{"at":1, "keeper":"alpha", "turn":1, "task_id":"task-1",
+      "execution_id":"exec-change", "line_evidence":null,
+      "location":{"kind":"repo","repo_id":"masc","path":"needle.ml"},
+      "change":{"kind":"write","content":"let value = 1"}, "succeeded":true}]
+  }|} in
+  state.changes <- Some (match Tui_decode.decode_file_change_snapshot payload with
+    | Ok snapshot -> snapshot | Error detail -> Alcotest.fail detail);
+  state.view <- Changes;
+  state.search_last <- "needle";
+  let check_list label =
+    Alcotest.(check (option int)) (label ^ " visible count") (Some 1)
+      (surface_search_count state Changes ~query:state.search_last);
+    Alcotest.(check bool) (label ^ " cursor available") true
+      (Option.is_some (scrolled_surface_rows state Changes)) in
+  check_list "list";
+  state.changes_diff_row <- Some 0;
+  Alcotest.(check (option (list string))) "diff has no hidden search rows" None
+    (surface_row_texts state Changes);
+  Alcotest.(check (option int)) "diff has no hidden list count" None
+    (surface_search_count state Changes ~query:state.search_last);
+  Alcotest.(check bool) "diff cannot move a hidden list cursor" false
+    (Option.is_some (scrolled_surface_rows state Changes));
+  state.changes_diff_row <- None;
+  check_list "return";
+  state.changes_diff_row <- Some 1;
+  Alcotest.(check bool) "stale index does not open a diff" false
+    (Option.is_some (opened_file_change state));
+  check_list "refresh removed open row";
+  Alcotest.(check string) "settled query survives" "needle" state.search_last
+
+let test_workspace_activity_offers_no_row_search () =
+  (* [h] on a repository row replaces the list with that repository's own
+     activity rows and its own cursor, and the handler there takes every key
+     the surface has, "/" and n and N among them. What sits behind it is the
+     repository list, so a settled query counted rows that no key on this
+     screen could reach and the footer reported the number. *)
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let repository : Tui_decode.repository =
+    { rp_id = "masc"; rp_name = "masc"; rp_codebase = None; rp_url = ""
+    ; rp_local_path = "."; rp_resolved_local_path = "/tmp/masc"
+    ; rp_default_branch = "main"; rp_status = "ready"; rp_keepers = []
+    ; rp_auto_sync = false }
+  in
+  state.view <- Repositories;
+  state.repositories <-
+    Some { Tui_decode.rs_repositories = [ repository ]; rs_total = 1 };
+  Alcotest.(check (option int)) "the repository list answers the search"
+    (Some 1) (surface_search_count state Repositories ~query:"masc");
+  state.workspace_activity_repo <- Some "masc";
+  Alcotest.(check (option int)) "Workspace Activity answers no search"
+    None (surface_search_count state Repositories ~query:"masc")
+
 let test_every_searchable_surface_names_its_search () =
   (* A key that works and is not listed is the same drift as a listed key
      that does nothing, pointing the other way. Eight of these ten answered
@@ -1612,6 +1742,14 @@ let () =
             `Quick test_the_code_footer_names_the_keys_of_the_pane_it_draws
         ; Alcotest.test_case "every searchable surface names its search"
             `Quick test_every_searchable_surface_names_its_search
+        ; Alcotest.test_case "Code search counts follow immutable fetched rows"
+            `Quick test_code_search_count_tracks_fetched_source
+        ; Alcotest.test_case "Changes diff uses visible search rows" `Quick
+            test_changes_diff_uses_visible_search_rows
+        ; Alcotest.test_case "detail search counts follow the active pane"
+            `Quick test_detail_search_counts_follow_the_active_pane
+        ; Alcotest.test_case "Workspace Activity offers no row search"
+            `Quick test_workspace_activity_offers_no_row_search
         ; Alcotest.test_case "a surface without rows offers no row search"
             `Quick test_a_surface_without_rows_offers_no_row_search
         ] )

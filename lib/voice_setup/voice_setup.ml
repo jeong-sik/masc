@@ -193,5 +193,22 @@ type voice_placement =
   | On_the_section
   | On_the_endpoint
 
-let voice_placement ~section_exists =
-  if section_exists then On_the_endpoint else On_the_section
+(* Whether a TTS endpoint answers to a voice name shaped for something other
+   than [say]. Named per kind rather than as "not macos_say" so a kind added to
+   {!Voice_config.endpoint_kind} has to decide here. Whisper_cli cannot be a
+   speech-out endpoint; it is counted as another provider so that an entry the
+   loader would refuse never causes a section default to be overwritten. *)
+let names_a_voice_say_cannot_read (endpoint : Voice_config.endpoint) =
+  match endpoint.Voice_config.kind with
+  | Voice_config.Macos_say -> false
+  | Voice_config.Openai_compat
+  | Voice_config.Elevenlabs_direct
+  | Voice_config.Voice_mcp
+  | Voice_config.Whisper_cli -> true
+
+let voice_placement = function
+  | None -> On_the_section
+  | Some (tts : Voice_config.tts_config) ->
+    if List.exists names_a_voice_say_cannot_read tts.Voice_config.endpoints
+    then On_the_endpoint
+    else On_the_section

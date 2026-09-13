@@ -36,11 +36,15 @@ let test_linux_install_is_explicit () =
     (List.exists (fun (a:P.action) -> a.id="docker_distribution_install")
       (actions (S.Linux S.Arm64) P.Other S.Docker));
   let called = ref [] in
-  let result = P.execute ~run:(fun argv -> called := argv :: !called; Error "SECRET_DIAGNOSTIC") action in
+  (* The runner reports a kind, not text, so a child's diagnostics have no way
+     into the receipt: the reason is built from the kind and the catalog's own
+     argv. *)
+  let result = P.execute ~run:(fun argv -> called := argv :: !called; Error P.Did_not_finish) action in
   check int "stop at first failure" 1 (List.length !called);
   check bool "failed action retained" true (match result with P.Failed {step=1;_} -> true | _ -> false);
   let serialized = Yojson.Safe.to_string (P.outcome_to_json result) in
-  check bool "raw diagnostics not projected" false (String_util.contains_substring serialized "SECRET_DIAGNOSTIC")
+  check bool "the reason is the catalog's sentence" true
+    (String_util.contains_substring serialized "did not finish")
 let test_completion_never_means_ready () =
   let action = find "apple_container_official_install" (actions (mac S.Arm64 26) P.Other S.Apple_container) in
   check bool "opening page remains pending" true
@@ -57,14 +61,14 @@ let test_official_clients_are_explicit_and_not_ready () =
       check bool "native client installer needs no sudo" false action.requires_admin;
       (match action.action_effect with P.Install_official_cli _ -> () | _ -> fail "missing native installer action");
       let calls = ref [] in
-      let outcome = P.execute ~run:(fun argv -> calls := argv :: !calls; Error "PRIVATE_FAILURE") action in
+      let outcome = P.execute ~run:(fun argv -> calls := argv :: !calls; Error P.Did_not_finish) action in
       check int "failed download never executes script" 1 (List.length !calls);
       let argv = List.hd !calls in
       check string "only HTTPS downloader starts" "curl" (List.hd argv);
       check bool "redirect protocol bounded to HTTPS" true (List.mem "--proto-redir" argv && List.mem "=https" argv);
       let json = Yojson.Safe.to_string (P.outcome_to_json outcome) in
       check bool "failed action stays failed" true (match outcome with P.Failed _ -> true | _ -> false);
-      check bool "private error not echoed" false (String_util.contains_substring json "PRIVATE_FAILURE"))
+      check bool "no invented reason text" false (String_util.contains_substring json "PRIVATE_FAILURE"))
       [mac S.Arm64 26; S.Linux S.X64])
     [P.Codex_cli,"codex_native_install"; P.Claude_cli,"claude_native_install"; P.Antigravity_cli,"agy_native_install"]
 
@@ -85,12 +89,54 @@ let test_pdf_tools_reuse_selected_package_managers () =
    and the model at this URL answered 200 with content-length 1,624,555,275. *)
 let whisper host distribution = P.catalog ~host ~distribution P.Whisper_cli
 
+(* A fresh mac has no Homebrew, and two of the hearing steps are Homebrew
+   steps. Measured before this: the receipt said the step "did not finish" and
+   to check its terminal output, when brew had never run and there was none. *)
+let test_a_missing_homebrew_is_named_with_where_it_comes_from () =
+  let actions = whisper (mac S.Arm64 26) P.Other in
+  let reason_of id failure =
+    match P.execute ~run:(fun _ -> Error failure) (find id actions) with
+    | P.Failed {step = 1; reason} -> reason
+    | _ -> fail "a failed first step must be reported as step 1"
+  in
+  let homebrew = reason_of "sox_brew_install" P.Program_not_found in
+  check bool (Printf.sprintf "names Homebrew (%s)" homebrew) true
+    (String_util.contains_substring homebrew "Homebrew is not installed");
+  check bool "and where it comes from" true
+    (String_util.contains_substring homebrew "https://brew.sh");
+  check bool "and does not send the reader to output that does not exist" false
+    (String_util.contains_substring homebrew "terminal output")
+
+let test_a_missing_program_that_is_not_homebrew_is_named_as_itself () =
+  let actions =
+    P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac S.Arm64 26)
+      ~distribution:P.Other P.Whisper_cli
+  in
+  (match P.execute ~run:(fun _ -> Error P.Program_not_found) (find "whisper_model_download" actions) with
+   | P.Failed {reason; _} ->
+     check bool (Printf.sprintf "names curl (%s)" reason) true
+       (String_util.contains_substring reason "curl is not on PATH");
+     check bool "and not Homebrew" false (String_util.contains_substring reason "Homebrew")
+   | _ -> fail "a missing program must fail the step");
+  match P.execute ~run:(fun _ -> Error P.Could_not_start) (find "whisper_cli_brew_install" actions) with
+  | P.Failed {reason; _} ->
+    check bool (Printf.sprintf "a program that would not start is named (%s)" reason) true
+      (String_util.contains_substring reason "brew could not be started")
+  | _ -> fail "a program that could not start must fail the step"
+
 let test_whisper_offers_a_package_and_a_model () =
   let actions =
     P.catalog ~model_dir:"/somewhere/cache/whisper" ~host:(mac S.Arm64 26)
       ~distribution:P.Other P.Whisper_cli
   in
   check int "a transcriber, a model, and a recorder" 3 (List.length actions);
+  (* Where the model lands is stated, not left to be read out of argv: the fetch
+     goes to a .part and is moved, so the -o argument is not the file. *)
+  check (option string) "the download states the final path it writes"
+    (Some "/somewhere/cache/whisper/ggml-large-v3-turbo.bin")
+    (find "whisper_model_download" actions).writes;
+  check (option string) "an install writes no file a reader needs"
+    None (find "whisper_cli_brew_install" actions).writes;
   (match (find "whisper_cli_brew_install" actions).action_effect with
    | P.Run_commands steps ->
      check (list (list string)) "the formula, installed and not started"
@@ -225,6 +271,10 @@ let () = run "prerequisite actions" ["user-selected plans",[
   "hearing on a fresh machine",[
   test_case "whisper offers a package and a model" `Quick
     test_whisper_offers_a_package_and_a_model;
+  test_case "a missing Homebrew is named with where it comes from" `Quick
+    test_a_missing_homebrew_is_named_with_where_it_comes_from;
+  test_case "a missing program that is not Homebrew is named as itself" `Quick
+    test_a_missing_program_that_is_not_homebrew_is_named_as_itself;
   test_case "without a directory the model is a page" `Quick
     test_without_a_directory_the_model_is_a_page_not_a_command;
   test_case "linux gets instructions rather than a guessed package" `Quick

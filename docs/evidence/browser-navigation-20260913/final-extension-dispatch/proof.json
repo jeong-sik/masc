@@ -1,0 +1,2217 @@
+{
+  "scene_source_sha256": "92147af0d320728e33bbfb8b7b47da190b6be2a4ce34560f87cdb16a56edc712",
+  "source_commit": "b40259fc4baf9187936a0686301b937d76b7104e",
+  "probe_sha256": "ac89a9b171e0c2f3afc8e589101347df294e6b8af5027766f340e8e61c816add",
+  "browser_sha256": "000d78c41741027daa41fcf86ffacd4e46123304b292f5a4c890f5601ef209fe",
+  "driver_sha256": "5d82307edc8549124bd4e7b6f275e1228e0a530e5abbfb294be3f310486561a4",
+  "events_before_resource_release": [
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "args": {
+        "tabId": 2,
+        "view": "content",
+        "maxChars": 20000
+      },
+      "answer": {
+        "id": 1,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "e0d22255870381a1f1643f30fe7194fc",
+          "url": "http://127.0.0.1:58644/initial",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /initial",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 228.39999389648438,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/initial#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 46,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "args": {
+        "action": "follow_link",
+        "tabId": 2,
+        "expectedUrl": "http://127.0.0.1:58644/initial",
+        "documentId": "e0d22255870381a1f1643f30fe7194fc",
+        "nodeId": "n2"
+      },
+      "answer": {
+        "id": 2,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/initial",
+          "url": "http://127.0.0.1:58644/initial",
+          "destinationUrl": "http://127.0.0.1:58644/first",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/initial",
+            "documentId": "e0d22255870381a1f1643f30fe7194fc"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "args": {
+        "tabId": 2,
+        "view": "content",
+        "maxChars": 20000
+      },
+      "answer": {
+        "id": 3,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "866704ad67592f392b161952bf5e1109",
+          "url": "http://127.0.0.1:58644/first",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /first",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 203.51666259765625,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      }
+    },
+    {
+      "kind": "case",
+      "name": "document-change",
+      "events": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879221,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879224,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879225,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "4a0b080f-ca28-8ebf-788d-3ffab60c351b",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879226,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "3bbcd9df-ea91-548c-c45b-1462f030dc93",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879231,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "3bbcd9df-ea91-548c-c45b-1462f030dc93",
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ],
+      "followed": {
+        "id": 2,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/initial",
+          "url": "http://127.0.0.1:58644/initial",
+          "destinationUrl": "http://127.0.0.1:58644/first",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/initial",
+            "documentId": "e0d22255870381a1f1643f30fe7194fc"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "read": {
+        "id": 3,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "866704ad67592f392b161952bf5e1109",
+          "url": "http://127.0.0.1:58644/first",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /first",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 203.51666259765625,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      },
+      "observedState": {
+        "ready": "interactive",
+        "heading": "Observed /first"
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "args": {
+        "action": "follow_link",
+        "tabId": 2,
+        "expectedUrl": "http://127.0.0.1:58644/first",
+        "documentId": "866704ad67592f392b161952bf5e1109",
+        "nodeId": "n2"
+      },
+      "answer": {
+        "id": 4,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/first",
+          "url": "http://127.0.0.1:58644/first",
+          "destinationUrl": "http://127.0.0.1:58644/first",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/first",
+            "documentId": "866704ad67592f392b161952bf5e1109"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "args": {
+        "tabId": 2,
+        "view": "content",
+        "maxChars": 20000
+      },
+      "answer": {
+        "id": 5,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "7feb39616a884b4954b6b671a5ace136",
+          "url": "http://127.0.0.1:58644/first",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /first",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 203.51666259765625,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      }
+    },
+    {
+      "kind": "case",
+      "name": "same-url-link",
+      "events": [
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879245,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "3bbcd9df-ea91-548c-c45b-1462f030dc93",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879246,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879251,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "07d93b30-9fe9-4903-6462-9389217ee5f1",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879254,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "07d93b30-9fe9-4903-6462-9389217ee5f1",
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ],
+      "followed": {
+        "id": 4,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/first",
+          "url": "http://127.0.0.1:58644/first",
+          "destinationUrl": "http://127.0.0.1:58644/first",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/first",
+            "documentId": "866704ad67592f392b161952bf5e1109"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "read": {
+        "id": 5,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "7feb39616a884b4954b6b671a5ace136",
+          "url": "http://127.0.0.1:58644/first",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /first",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 203.51666259765625,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      },
+      "observedState": {
+        "ready": "interactive",
+        "heading": "Observed /first"
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "args": {
+        "action": "follow_link",
+        "tabId": 2,
+        "expectedUrl": "http://127.0.0.1:58644/first",
+        "documentId": "7feb39616a884b4954b6b671a5ace136",
+        "nodeId": "n3"
+      },
+      "answer": {
+        "id": 6,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/first",
+          "url": "http://127.0.0.1:58644/first",
+          "destinationUrl": "http://127.0.0.1:58644/redirect",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/first",
+            "documentId": "7feb39616a884b4954b6b671a5ace136"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "args": {
+        "tabId": 2,
+        "view": "content",
+        "maxChars": 20000
+      },
+      "answer": {
+        "id": 7,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "79759e492d06db4e8b8dadc31cd964f5",
+          "url": "http://127.0.0.1:58644/final",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /final",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 208.89999389648438,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/final#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      }
+    },
+    {
+      "kind": "case",
+      "name": "redirect",
+      "events": [
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879266,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "07d93b30-9fe9-4903-6462-9389217ee5f1",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/redirect",
+            "timeStamp": 1789264879266,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/final",
+            "timeStamp": 1789264879276,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": [
+              "server_redirect"
+            ]
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "http://127.0.0.1:58644/final",
+            "timeStamp": 1789264879280,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ],
+      "followed": {
+        "id": 6,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/first",
+          "url": "http://127.0.0.1:58644/first",
+          "destinationUrl": "http://127.0.0.1:58644/redirect",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/first",
+            "documentId": "7feb39616a884b4954b6b671a5ace136"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "read": {
+        "id": 7,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "79759e492d06db4e8b8dadc31cd964f5",
+          "url": "http://127.0.0.1:58644/final",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /final",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 208.89999389648438,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/final#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      },
+      "observedState": {
+        "ready": "interactive",
+        "heading": "Observed /final"
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "args": {
+        "action": "follow_link",
+        "tabId": 2,
+        "expectedUrl": "http://127.0.0.1:58644/final",
+        "documentId": "79759e492d06db4e8b8dadc31cd964f5",
+        "nodeId": "n4"
+      },
+      "answer": {
+        "id": 8,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/final",
+          "url": "http://127.0.0.1:58644/final",
+          "destinationUrl": "http://127.0.0.1:58644/final#hash",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/final",
+            "documentId": "79759e492d06db4e8b8dadc31cd964f5"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "args": {
+        "tabId": 2,
+        "view": "content",
+        "maxChars": 20000
+      },
+      "answer": {
+        "id": 9,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "79759e492d06db4e8b8dadc31cd964f5",
+          "url": "http://127.0.0.1:58644/final#hash",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /final",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 208.89999389648438,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/final#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      }
+    },
+    {
+      "kind": "case",
+      "name": "hash",
+      "events": [
+        {
+          "type": "onReferenceFragmentUpdated",
+          "details": {
+            "url": "http://127.0.0.1:58644/final#hash",
+            "timeStamp": 1789264879292,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        }
+      ],
+      "followed": {
+        "id": 8,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/final",
+          "url": "http://127.0.0.1:58644/final",
+          "destinationUrl": "http://127.0.0.1:58644/final#hash",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/final",
+            "documentId": "79759e492d06db4e8b8dadc31cd964f5"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "read": {
+        "id": 9,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "schema": "masc.browser.scene.v1",
+          "documentId": "79759e492d06db4e8b8dadc31cd964f5",
+          "url": "http://127.0.0.1:58644/final#hash",
+          "title": "",
+          "viewport": {
+            "width": 1366,
+            "height": 683,
+            "scrollX": 0,
+            "scrollY": 0
+          },
+          "nodes": [
+            {
+              "kind": "text",
+              "nodeId": "n1",
+              "tag": "h1",
+              "text": "Observed /final",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 24.633331298828125,
+                  "width": 208.89999389648438,
+                  "height": 32
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 0)",
+              "fontSize": 32,
+              "fontWeight": "700",
+              "whiteSpace": "normal"
+            },
+            {
+              "kind": "control",
+              "nodeId": "n2",
+              "tag": "a",
+              "text": "destination",
+              "rects": [
+                {
+                  "x": 8,
+                  "y": 82.86666870117188,
+                  "width": 70.23333740234375,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/first",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n3",
+              "tag": "a",
+              "text": "redirect",
+              "rects": [
+                {
+                  "x": 78.23333740234375,
+                  "y": 82.86666870117188,
+                  "width": 48.866668701171875,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/redirect",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n4",
+              "tag": "a",
+              "text": "hash",
+              "rects": [
+                {
+                  "x": 127.10000610351562,
+                  "y": 82.86666870117188,
+                  "width": 29.333328247070312,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/final#hash",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            },
+            {
+              "kind": "control",
+              "nodeId": "n5",
+              "tag": "a",
+              "text": "broken",
+              "rects": [
+                {
+                  "x": 156.43333435058594,
+                  "y": 82.86666870117188,
+                  "width": 44.43333435058594,
+                  "height": 16
+                }
+              ],
+              "sourceContext": null,
+              "color": "rgb(0, 0, 238)",
+              "fontSize": 16,
+              "fontWeight": "400",
+              "whiteSpace": "normal",
+              "href": "http://127.0.0.1:58644/broken",
+              "controlType": "a",
+              "disabled": false,
+              "editable": false,
+              "clickable": true
+            }
+          ],
+          "chars": 44,
+          "truncated": false,
+          "scope": null,
+          "view": "content",
+          "coverage": "top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness"
+        }
+      },
+      "observedState": {
+        "ready": "interactive",
+        "heading": "Observed /final"
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.interact",
+      "args": {
+        "action": "follow_link",
+        "tabId": 2,
+        "expectedUrl": "http://127.0.0.1:58644/final#hash",
+        "documentId": "79759e492d06db4e8b8dadc31cd964f5",
+        "nodeId": "n5"
+      },
+      "answer": {
+        "id": 10,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/final#hash",
+          "url": "http://127.0.0.1:58644/final#hash",
+          "destinationUrl": "http://127.0.0.1:58644/broken",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/final#hash",
+            "documentId": "79759e492d06db4e8b8dadc31cd964f5"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      }
+    },
+    {
+      "kind": "reply",
+      "verb": "page.scene",
+      "args": {
+        "tabId": 2,
+        "view": "content",
+        "maxChars": 20000
+      },
+      "answer": {
+        "id": 11,
+        "ok": false,
+        "error": "Missing host permission for the tab"
+      }
+    },
+    {
+      "kind": "case",
+      "name": "destination-error",
+      "events": [
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/final",
+            "timeStamp": 1789264879322,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/broken",
+            "timeStamp": 1789264879322,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/broken",
+            "timeStamp": 1789264879349,
+            "error": "Error code 2152398868",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/broken",
+            "timeStamp": 1789264879384,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "4091d2e4-7ae7-e283-d6d7-e2cf43ac0d87",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "about:neterror?e=netReset&u=http%3A//127.0.0.1%3A58644/broken&c=UTF-8&captivePortalState=unknown&d=%ED%8E%98%EC%9D%B4%EC%A7%80%20%EB%A1%9C%EB%93%9C%20%EC%A4%91%20%EC%84%9C%EB%B2%84%EC%99%80%EC%9D%98%20%EC%97%B0%EA%B2%B0%EC%9D%B4%20%EC%B4%88%EA%B8%B0%ED%99%94%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.&a=",
+            "timeStamp": 1789264879427,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "4091d2e4-7ae7-e283-d6d7-e2cf43ac0d87",
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ],
+      "followed": {
+        "id": 10,
+        "ok": true,
+        "data": {
+          "tabId": 2,
+          "action": "follow_link",
+          "urlBefore": "http://127.0.0.1:58644/final#hash",
+          "url": "http://127.0.0.1:58644/final#hash",
+          "destinationUrl": "http://127.0.0.1:58644/broken",
+          "navigationSource": {
+            "url": "http://127.0.0.1:58644/final#hash",
+            "documentId": "79759e492d06db4e8b8dadc31cd964f5"
+          },
+          "title": "",
+          "scrollX": 0,
+          "scrollY": 0
+        }
+      },
+      "read": {
+        "id": 11,
+        "ok": false,
+        "error": "Missing host permission for the tab"
+      },
+      "observedState": null
+    },
+    {
+      "kind": "native-events",
+      "events": [
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879221,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879224,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879225,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "4a0b080f-ca28-8ebf-788d-3ffab60c351b",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879226,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "3bbcd9df-ea91-548c-c45b-1462f030dc93",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879231,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "3bbcd9df-ea91-548c-c45b-1462f030dc93",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879245,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "3bbcd9df-ea91-548c-c45b-1462f030dc93",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879246,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879251,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "07d93b30-9fe9-4903-6462-9389217ee5f1",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879254,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "07d93b30-9fe9-4903-6462-9389217ee5f1",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/first",
+            "timeStamp": 1789264879266,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "07d93b30-9fe9-4903-6462-9389217ee5f1",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/redirect",
+            "timeStamp": 1789264879266,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/final",
+            "timeStamp": 1789264879276,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": [
+              "server_redirect"
+            ]
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "http://127.0.0.1:58644/final",
+            "timeStamp": 1789264879280,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onReferenceFragmentUpdated",
+          "details": {
+            "url": "http://127.0.0.1:58644/final#hash",
+            "timeStamp": 1789264879292,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/final",
+            "timeStamp": 1789264879322,
+            "error": "Error code 2152398850",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onBeforeNavigate",
+          "details": {
+            "url": "http://127.0.0.1:58644/broken",
+            "timeStamp": 1789264879322,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onErrorOccurred",
+          "details": {
+            "url": "http://127.0.0.1:58644/broken",
+            "timeStamp": 1789264879349,
+            "error": "Error code 2152398868",
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "28b7e132-0771-a92a-75a0-b1a6a1f747bf",
+            "tabId": 2,
+            "windowId": 3
+          }
+        },
+        {
+          "type": "onCommitted",
+          "details": {
+            "url": "http://127.0.0.1:58644/broken",
+            "timeStamp": 1789264879384,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "4091d2e4-7ae7-e283-d6d7-e2cf43ac0d87",
+            "tabId": 2,
+            "windowId": 3,
+            "transitionType": "link",
+            "transitionQualifiers": []
+          }
+        },
+        {
+          "type": "onDOMContentLoaded",
+          "details": {
+            "url": "about:neterror?e=netReset&u=http%3A//127.0.0.1%3A58644/broken&c=UTF-8&captivePortalState=unknown&d=%ED%8E%98%EC%9D%B4%EC%A7%80%20%EB%A1%9C%EB%93%9C%20%EC%A4%91%20%EC%84%9C%EB%B2%84%EC%99%80%EC%9D%98%20%EC%97%B0%EA%B2%B0%EC%9D%B4%20%EC%B4%88%EA%B8%B0%ED%99%94%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.&a=",
+            "timeStamp": 1789264879427,
+            "frameId": 0,
+            "parentFrameId": -1,
+            "documentId": "4091d2e4-7ae7-e283-d6d7-e2cf43ac0d87",
+            "tabId": 2,
+            "windowId": 3
+          }
+        }
+      ]
+    },
+    {
+      "kind": "done"
+    }
+  ],
+  "http_requests": [
+    {
+      "method": "GET",
+      "path": "/initial",
+      "time": 1789264879.128649
+    },
+    {
+      "method": "GET",
+      "path": "/favicon.ico",
+      "time": 1789264879.190745
+    },
+    {
+      "method": "GET",
+      "path": "/first",
+      "time": 1789264879.222902
+    },
+    {
+      "method": "GET",
+      "path": "/slow.png",
+      "time": 1789264879.2326138
+    },
+    {
+      "method": "GET",
+      "path": "/first",
+      "time": 1789264879.248367
+    },
+    {
+      "method": "GET",
+      "path": "/slow.png",
+      "time": 1789264879.255764
+    },
+    {
+      "method": "GET",
+      "path": "/redirect",
+      "time": 1789264879.2706509
+    },
+    {
+      "method": "GET",
+      "path": "/final",
+      "time": 1789264879.2728589
+    },
+    {
+      "method": "GET",
+      "path": "/slow.png",
+      "time": 1789264879.2824252
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.324123
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.324468
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.3247302
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.324969
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.325172
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.3253639
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.325702
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.32591
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.3261492
+    },
+    {
+      "method": "GET",
+      "path": "/broken",
+      "time": 1789264879.326426
+    }
+  ],
+  "failure": null,
+  "cleanup": [
+    {
+      "stage": "webdriver session delete",
+      "ok": true
+    },
+    {
+      "stage": "driver stop",
+      "ok": true
+    },
+    {
+      "stage": "HTTP shutdown",
+      "ok": true
+    },
+    {
+      "stage": "HTTP close",
+      "ok": true
+    },
+    {
+      "stage": "driver log close",
+      "ok": true
+    }
+  ],
+  "scope": "exact candidate background with final connect disabled; manual onHostMessage replies with synthetic 10000ms per-command deadlines (native host uses 20000ms); no native MASC server/host proof",
+  "background_sha256": "e95636f2d6df68f4316b44c466748380cd38f3cdfe99c32deb68ab332d4a9c6e",
+  "interaction_source_sha256": "2d20c1c656f99a46dc6402f387e9888dc82ca9f9e9cfa4a3f97846c1a0d0f905"
+}

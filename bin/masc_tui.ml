@@ -8777,7 +8777,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next ->
       Buffer.clear state.msg_input;
-      (match state.msg_target_keeper_name with
+      if Option.is_some state.keeper_run_next_pending || Option.is_some state.keeper_run_next_inflight then
+        notice ~role:Message_local "A run-next request is already pending"
+      else (match state.msg_target_keeper_name with
        | None -> notice ~role:Message_error "Select a Keeper first"
        | Some name ->
          match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with

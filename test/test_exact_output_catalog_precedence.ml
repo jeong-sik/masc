@@ -517,16 +517,29 @@ let test_cli_slots_survive_resolution_and_keep_a_lane_alive () =
       | Ok slots -> Alcotest.(check (list string))
           "completion authority retains configured official clients" cli slots
       | Error detail -> Alcotest.fail detail);
-     (* Carrying the id and being able to judge with it are different answers.
-        No runtime table here names this official client, and the server reports
-        exact_output_authority_available from the readiness one, so that is the
-        answer that has to refuse. *)
+     (* Carrying the id and being able to judge with it are different answers,
+        and the server reports exact_output_authority_available from the
+        readiness one. with_configured_verifier_cli materializes this official
+        client, so here readiness has to accept it... *)
+     (match Runtime.verifier_exact_lane_readiness () with
+      | Ok () -> ()
+      | Error detail ->
+        Alcotest.failf "readiness refused a configured official client: %s" detail));
+  (* ...and refuse the same lane once its cli slot names nothing in the runtime
+     table. Publication carries cli ids verbatim and accepts it; readiness must not. *)
+  let unmaterialized = "official.unmaterialized" in
+  (match Registry.publish
+      ~required_lane_ids:[ "verifier_exact" ]
+      ~lanes:[ { id = "verifier_exact"; slot_ids = []; cli_slot_ids = [ unmaterialized ] } ]
+      snapshot with
+   | Error error -> Alcotest.fail (Registry.publication_error_to_string error)
+   | Ok _ ->
      (match Runtime.verifier_exact_lane_readiness () with
       | Error detail ->
         Alcotest.(check bool)
           "readiness names the cli slot that resolves to no runtime"
           true
-          (String_util.contains_substring detail (List.hd cli))
+          (String_util.contains_substring detail unmaterialized)
       | Ok () ->
         Alcotest.fail "readiness accepted a cli slot with no materialized runtime"));
   (match Registry.publish

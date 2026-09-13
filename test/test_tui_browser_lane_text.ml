@@ -204,7 +204,8 @@ let () =
   let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
     {view with scene=Some heading_scene; scene_cursor=0}) in
   assert (heading_lines = ["[>1] ## Post title"; "Post body"]);
-  let article = {node_id="article"; role=Masc.Browser_scene.Article; label="Post A"} in
+  let article : Masc.Browser_scene.region_ref =
+    {node_id="article"; role=Masc.Browser_scene.Article; label="Post A"} in
   let article_heading = {heading with ancestor_region=Some article} in
   let article_body = {body with ancestor_region=Some article} in
   let article_scene = {scene with content={content with nodes=[article_heading;article_body]}} in

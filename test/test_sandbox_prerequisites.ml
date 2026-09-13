@@ -91,6 +91,13 @@ let test_whisper_offers_a_package_and_a_model () =
       ~distribution:P.Other P.Whisper_cli
   in
   check int "a transcriber, a model, and a recorder" 3 (List.length actions);
+  (* Where the model lands is stated, not left to be read out of argv: the fetch
+     goes to a .part and is moved, so the -o argument is not the file. *)
+  check (option string) "the download states the final path it writes"
+    (Some "/somewhere/cache/whisper/ggml-large-v3-turbo.bin")
+    (find "whisper_model_download" actions).writes;
+  check (option string) "an install writes no file a reader needs"
+    None (find "whisper_cli_brew_install" actions).writes;
   (match (find "whisper_cli_brew_install" actions).action_effect with
    | P.Run_commands steps ->
      check (list (list string)) "the formula, installed and not started"

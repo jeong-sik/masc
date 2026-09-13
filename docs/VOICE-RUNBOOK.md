@@ -152,6 +152,51 @@ Speaking stayed on. The model path is read from the action that downloads it
 rather than spelled here, so the section cannot name a file the download put
 somewhere else.
 
+### Walked again with nothing exported, 2026-09-13
+
+The walk above ran in a shell that had `MASC_BASE_PATH` set, which hid two
+defects. Walked a second time with only `HOME` (a fresh directory holding the
+model) and `PATH` (`whisper-cli` and `/usr/bin`, no `rec`), answering 9, 1, 5:
+
+| | before | after |
+|---|---|---|
+| the voice question | **not shown** — the step printed nothing at all | 9 Korean voices, as above |
+| the model the step found | `…/ggml-large-v3-turbo.bin.part` — never exists after a download | `…/ggml-large-v3-turbo.bin` |
+| hearing | always "speak but not listen" | configured |
+| no `rec` on PATH | nothing said | `imp can transcribe audio sent to it, but masc records from the microphone with sox's rec, which is not installed. …` |
+
+**The question was not shown** because the voice listing ran without
+`--base-path`. Every masc command resolves a workspace before it runs, the
+listing included, and this step comes before the one that records a default
+workspace. With nothing to resolve the listing exits 1:
+
+| `voice-local-setup --list-voices` | exit | stdout |
+|---|---|---|
+| no `--base-path`, no `MASC_BASE_PATH`, no recorded default | 1 | 0 bytes |
+| `--base-path` at a directory never initialized | 0 | 14,420 bytes |
+| `--base-path` at an initialized workspace | 0 | 14,420 bytes |
+
+The step discarded stderr and read the empty list as "this computer has no
+voices", so it returned without a word. It now passes the workspace it is
+setting up, and a listing that fails prints its last stderr line instead.
+
+**The model was never found** because the step took curl's `-o` argument as the
+model's location, and the download fetches to a `.part` beside the final path
+and moves it only after curl succeeds. The catalog now publishes the final path
+as `writes` on the download action, and the step reads that. A test reads the
+real binary's catalog as well as the fixture, because the fixture was the copy
+that had kept the old argv while the catalog moved on.
+
+The workspace this walk wrote was then checked end to end:
+
+```
+voice-verify --audio utterance.wav
+  macos-say       answered: 85908 bytes of audio in "Yuna"
+  whisper-local   answered: heard 안녕하세요. 오늘 음성 설정을 마쳤습니다.
+```
+
+With `rec` on `PATH` the same walk printed no sox line.
+
 ### Cancelling here does not cancel setup
 
 `q` at the voice question prints

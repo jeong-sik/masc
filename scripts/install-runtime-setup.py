@@ -1616,7 +1616,7 @@ def select_sandbox(binary, base_path, port=8945):
         return arguments + ['--network-mode', mode]
 
 
-def local_voices(binary):
+def local_voices(binary, base):
     """The voices this machine has, as `say` prints them.
 
     The list is not a convenience. `say` does not fail on a voice it does not
@@ -1625,13 +1625,28 @@ def local_voices(binary):
     languages picks one of them. Measured on macOS 26: "Eddy" read Korean in
     English at 4.7KB where "Eddy (한국어(한국))" gave 72KB.
     """
-    result = subprocess.run([str(binary), 'voice-local-setup', '--list-voices'],
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-    if result.returncode != 0 or not result.stdout:
+    # --base-path because every masc command resolves a workspace before it
+    # runs, the listing included, even though it reads `say` and nothing under
+    # the workspace. Measured 2026-09-13 with no MASC_BASE_PATH and no recorded
+    # default: exit 1 and an empty stdout. This step runs before the one that
+    # records a default, so without the flag the list depended on whatever the
+    # launcher happened to export.
+    result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base, '--list-voices'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode != 0:
+        # Said rather than swallowed: an empty list here skips the voice
+        # question without a word, and the reader cannot tell that from a
+        # computer that has no voices. The reason is the last line, after the
+        # binary's own start-up log.
+        lines = [line for line in (result.stderr or '').splitlines() if line.strip()]
+        print('Could not list the voices on this computer, so voice is skipped: {}'.format(
+                  terminal_text(lines[-1]) if lines else 'exit {}'.format(result.returncode)),
+              file=sys.stderr)
         return []
     try:
         listing = json.loads(result.stdout)
     except ValueError:
+        print('The voice listing was not JSON, so voice is skipped.', file=sys.stderr)
         return []
     voices = listing.get('voices')
     return voices if isinstance(voices, list) else []
@@ -1653,14 +1668,15 @@ def whisper_model_path(binary):
         catalog = json.loads(result.stdout)
     except ValueError:
         return None
+    # The download says where it leaves the model, as `writes`. This used to
+    # take curl's -o argument, and when the fetch moved to a .part beside the
+    # final path that argument named a file that never exists once the download
+    # succeeds -- so hearing was never configured through this step. Measured
+    # 2026-09-13: this function returned ".../ggml-large-v3-turbo.bin.part".
     for action in catalog.get('actions') or []:
-        effect = action.get('effect') or {}
-        for step in effect.get('argv_steps') or []:
-            if not isinstance(step, list) or '-o' not in step:
-                continue
-            destination = step.index('-o') + 1
-            if destination < len(step):
-                return step[destination]
+        if action.get('id') == 'whisper_model_download':
+            writes = action.get('writes')
+            return writes if isinstance(writes, str) and writes else None
     return None
 
 
@@ -1696,7 +1712,7 @@ def ask_local_voice(binary, base):
     and nothing to install. Hearing needs whisper-cli and a model, which is
     why it is asked separately and only after the answer to the first is yes.
     """
-    voices = local_voices(binary)
+    voices = local_voices(binary, base)
     if not voices:
         # Not an error to report: a computer whose `say` publishes no
         # catalogue has no voice to offer, and the journey continues.
@@ -1728,6 +1744,15 @@ def ask_local_voice(binary, base):
             model = ask_text('Path to the whisper model file')
         if model and Path(model).is_file() and shutil.which('whisper-cli'):
             arguments += ['--model', model]
+            # Transcribing is configured either way: a device that posts audio
+            # needs nothing else. But masc's own capture records with sox's
+            # rec, and without it the first capture in the TUI is where the
+            # reader finds out. The menu above offers sox; this is for a reader
+            # who left it without taking that step.
+            if not shutil.which('rec'):
+                print('imp can transcribe audio sent to it, but masc records from the microphone with '
+                      "sox's rec, which is not installed. Install sox (masc prerequisite-actions whisper "
+                      'names the command) before speaking into the TUI.', file=sys.stderr)
         else:
             print('Listening needs both whisper-cli and a model file, so imp will speak but not listen. '
                   'Run masc voice-local-setup --model <file> once both are ready.', file=sys.stderr)

@@ -364,9 +364,11 @@ call's result says
 ```
 
 because `[voice.local_playback]` is absent and absent means off. `spoken` is
-the status only when this host played the clip. The dashboard draws the clip
-as `<audio controls>` with no autoplay, and the TUI does not play clips at all,
-so until someone presses play in the dashboard the reply is silent.
+the status only when this host played the clip. The TUI does not play clips at
+all. The dashboard's chat line for imp showed the clip as a card — a waveform,
+`0:14`, and the sentence — over an `<audio>` element with controls, no
+autoplay, and `paused` still true after the page had loaded. Until someone
+presses play there, the reply is silent.
 
 imp relays that. Asked to say `오늘 음성 설정을 마쳤습니다` aloud, it called
 `keeper_voice_speak` at 168.9s and replied at 203.6s:
@@ -1011,6 +1013,21 @@ Chromium 149, with a synthesized sentence as the fake microphone and a
 A recording the browser cannot decode is not uploaded; the dashboard shows
 `녹음을 WAV 로 바꾸지 못했습니다: …` in an error toast. The upload is 32KB per
 second whatever is said — twice the WebM in the measurement above.
+
+The same, through the dashboard page itself: headless Chromium 149 opened
+`/dashboard?agent=admin&token=…#keepers?keeper=imp` on that workspace, with
+`question.wav` (4.8s) as the fake microphone.
+
+| Step | What the page did |
+|---|---|
+| the composer's `음성으로 입력` button, 0.6s after load | showed a recording bar with a `완료` button |
+| `완료` after 5.5s | `POST /api/v1/voice/transcribe` with `content-type: audio/wav` → `200 transcribed` |
+| 2.8s after `완료` | a `받아쓰기` card above the composer holding the transcript |
+
+The transcript was `안녕하세요 한 문장으로 자기소개 를 해주세요 안녕하세요 한 문장으로 자기`:
+Chromium loops a fake microphone file, so 5.5s of recording held the 4.8s
+sentence and the start of it again. The card is a draft. Nothing is sent to
+the keeper until `전송`.
 
 ### What each route refuses, measured
 

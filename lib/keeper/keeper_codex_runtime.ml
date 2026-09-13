@@ -248,6 +248,9 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_codex_app_server.Native_tool_started observation ->
           Option.iter
+            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
+            observation.tool_name;
+          Option.iter
             (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
             on_native_action;
           Host.record_raw_native_tool
@@ -268,6 +271,9 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
                ; tool_name = observation.tool_name
                })
         | Runtime_codex_app_server.Native_tool_finished observation ->
+          Option.iter
+            (Keeper_turn_preview.note_tool ~keeper_name ~now:(Time_compat.now ()))
+            observation.tool_name;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -632,10 +638,37 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let developer_instructions =
       Some
         ((prepared.system_prompt :: native_posture_note native_posture)
-         @ developer_messages
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)
+    in
+    (* Only a new thread receives developer items. A resumed vendor thread
+       retains its original ones, and updating thread/resume configuration
+       does not replace them -- which is the gap this adapter still has: a
+       Keeper whose instructions changed mid-thread is read by the model
+       under the instructions the thread started with.
+
+       Injecting them on a resume does not close it. thread/inject_items
+       persists what it is given and includes it in every later request
+       (OpenAI's app-server documentation says so), and [developer_messages]
+       carries the observation frame rebuilt every turn. Per-turn world state
+       in a persisted history is the feedback loop Keeper_unified_prompt
+       forbids by name: 943 of 945 user messages in one keeper's checkpoint
+       were byte-identical world-state frames, 59% of the payload (#25193,
+       operator decision 2026-07-20). The instructions alone would accumulate
+       the same way, one copy per turn, and the API has no receipt or
+       idempotency key, so a Retry_previous after a lost turn/start appends
+       what the previous attempt already wrote.
+
+       The durable form this needs is the one the session store already uses
+       for the tool surface: a digest whose change drops the settlement and
+       starts a fresh thread ([reconcile_tool_surface]). That wants the turn
+       intent separated from the identity half of [prepared.system_prompt]
+       first, or every turn would restart the thread. Tracked separately. *)
+    let developer_context =
+      match thread_mode with
+      | Runtime_codex_app_server.Start -> developer_messages
+      | Runtime_codex_app_server.Resume _ -> []
     in
     (* Reported from [prepared.messages], the post-window list, gated on the
        same [thread_mode] that decides whether [thread/inject_items] runs at
@@ -729,7 +762,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        tokens; they bound the request, they do not price it. *)
     Log.Keeper.info
       ~keeper_name
-      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d \
+      "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d developer_context_bytes=%d \
        history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d"
       runtime_label
       (match thread_mode with
@@ -737,6 +770,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
        | Runtime_codex_app_server.Resume _ -> "resume")
       (String.length prompt)
       (Option.fold ~none:0 ~some:String.length client_config.developer_instructions)
+      (List.fold_left (fun bytes text -> bytes + String.length text) 0 developer_context)
       (List.length history)
       (Runtime_codex_app_server.history_bytes history)
       (List.length dynamic_tools)
@@ -941,6 +975,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
          ?reasoning_effort:effective_reasoning_effort
          ~thread_mode
          ~history
+         ~developer_context
          ?on_stream_event
          ~on_thread_ready:(fun ~thread_id ->
            update_session "active transition" (fun expected ->

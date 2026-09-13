@@ -169,6 +169,28 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
+(* 2026-09-13: two Fusion description changes, measured apart and now carried
+   together; no tool is added by either.
+
+   masc_fusion_status +336 (109,572 across 126 tools, CI 34706931145 at
+   596c9dc3): the description now says what a run_id read returns -- the
+   original durable Board evidence, panel answers, judge advice, source context
+   and evidence hash -- and that missing evidence is reported rather than read
+   as an expired post. Without that, a Keeper attributes panel positions from
+   metadata it did not check. The tool declares defer_loading = true, so these
+   bytes reach the wire only on a turn that names it; this figure counts them
+   because model_visible_schemas reads the descriptor, not the loading
+   declaration.
+
+   masc_fusion task_id +162 (109,398 across 126 tools, CI 34705880512 at
+   09c8510e), from main: the parameter now says what happens when neither
+   task_id nor goal_id is given -- the runtime picks the caller's active Task
+   from authoritative ownership -- and that the captured contract and Goal
+   criteria are separate from the caller's own summary. Without that a Keeper
+   omits the argument expecting no Task, or restates the contract into the
+   summary.
+
+   Set to the measurements with no added headroom. *)
 (* 2026-09-13: the DOS lane adds seven deferred tools -- masc_dos_load, _eject,
    _screen, _step, _press, _type, _peek. CI 34705960512 measured 114,705 bytes
    / 133 tools before trimming; the declarations then lost 883 rendered bytes
@@ -204,7 +226,11 @@ open Alcotest
    1,663-byte declaration editor addition preserves main's existing headroom.
    The combined production renderer is checked by the following native CI;
    this arithmetic is not a claim that the combined source has run yet. *)
-let ceiling_bytes = 116_163
+(* Both deltas, on main's ceiling. They were measured independently and neither
+   contains the other, so the sum is the combined surface rather than one
+   change counted twice. main's existing headroom is preserved and the merge
+   adds none; CI measures the result. *)
+let ceiling_bytes = 116_163 + 162 + 336
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

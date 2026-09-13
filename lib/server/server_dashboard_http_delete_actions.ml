@@ -537,7 +537,13 @@ let purge_keeper_artifacts config ~keeper_name ~remove_configuration context =
             | Keeper_configuration_artifact
             | Keeper_chat_store_artifact
             | Agent_artifact_bundle _ -> ());
-           (match remove_path_strict path with
+           (match (match artifact with
+             | Keeper_configuration_artifact ->
+               Runtime.with_manifest_config_lock ~manifest_path:path
+                 ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path
+                   ~base_path:config.Workspace.base_path)
+                 (fun () -> remove_path_strict path)
+             | _ -> remove_path_strict path) with
             | Error _ as error -> error
             | Ok outcome ->
               (match artifact with

@@ -394,6 +394,8 @@ blocking_pr_lints() {
   run_lint "Sandbox OCaml version" bash scripts/check-sandbox-ocaml-version.sh
   run_lint "Checkpoint legacy purge" \
     bash scripts/check-checkpoint-installation-legacy-purge.sh
+  run_lint "Checkpoint legacy purge regression" \
+    bash scripts/test-checkpoint-installation-legacy-purge.sh
   run_lint "Dashboard nav-event parity" \
     bash scripts/check-dashboard-nav-event-parity.sh
   # This one also takes scripts/tla-check.sh off the not-wired list, which

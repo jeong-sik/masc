@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/release-evidence.sh [PATH_TO_BINARY] [OUTPUT_MARKDOWN]
+Usage: scripts/release-evidence.sh [PATH_TO_BINARY] [OUTPUT_MARKDOWN] [VERIFIED_LIFECYCLE_DIR]
 
 Captures a reproducible release-evidence bundle for a built masc binary.
 The bundle includes:
@@ -19,7 +19,7 @@ Raw captures and lifecycle logs stay in private temporary storage and are remove
 EOF
 }
 
-if (($# > 2)); then
+if (($# > 3)); then
   usage >&2
   exit 1
 fi
@@ -31,6 +31,7 @@ fi
 
 readonly BINARY="${1:-_build/default/bin/main_eio.exe}"
 readonly OUTFILE="${2:-.release-evidence/release-evidence.md}"
+readonly PROVIDED_LIFECYCLE_DIR="${3:-}"
 readonly BOOT_WAIT_SEC="${BOOT_WAIT_SEC:-20}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -370,7 +371,12 @@ normalize_http_json "$project_snapshot_headers" "$project_snapshot_body" "$proje
 # The live smoke has completed. Stop its isolated server before executing the
 # lifecycle matrix so process/port-sensitive scenarios observe a clean host.
 stop_server
-python3 scripts/keeper-full-lifecycle-evidence.py --output-dir "$lifecycle_dir"
+if [[ -n "$PROVIDED_LIFECYCLE_DIR" ]]; then
+  mkdir -p "$lifecycle_dir"
+  cp -R "$PROVIDED_LIFECYCLE_DIR/." "$lifecycle_dir/"
+else
+  python3 scripts/keeper-full-lifecycle-evidence.py --output-dir "$lifecycle_dir"
+fi
 python3 scripts/keeper-full-lifecycle-evidence.py \
   --verify \
   --output-dir "$lifecycle_dir"

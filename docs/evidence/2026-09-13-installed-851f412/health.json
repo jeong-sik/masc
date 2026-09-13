@@ -1,0 +1,23 @@
+{
+  "status": "ok",
+  "overall_status": "ok",
+  "operator_action_required": false,
+  "keeper_config_error_count": 0,
+  "build": {
+    "release_version": "0.35.14",
+    "binary_version": "0.35.14",
+    "commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "commit_source": "embedded",
+    "binary_commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "41a75acff6d190e767cebee3b53c371ed643293a41e1f1b5d93a6c5ab88c180d",
+    "binary_commit_unix_ts": 1789237013.0,
+    "binary_commit_age_seconds": 1214,
+    "executable_path": "/private/tmp/masc-851f412-installed-candidate-20260913/.masc-releases/9cf2e6e2497f396c5a23dfd2f2c36b7a2dbe99ca7fa8fbd43e2c11cf95916c1d/masc",
+    "executable_dir": "/private/tmp/masc-851f412-installed-candidate-20260913/.masc-releases/9cf2e6e2497f396c5a23dfd2f2c36b7a2dbe99ca7fa8fbd43e2c11cf95916c1d",
+    "runtime_instance_id": "01a096e7-947f-7000-bb88-1a938b79b4ab",
+    "started_at": "2026-09-12T18:35:54Z",
+    "uptime_seconds": 73
+  }
+}

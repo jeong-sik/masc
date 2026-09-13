@@ -532,6 +532,11 @@ let with_durable_lock ~lock_path f =
 ;;
 
 module For_testing = struct
+  let holders_and_waiters ~lock_path =
+    match SMap.find_opt lock_path (Atomic.get table).entries with
+    | None -> 0
+    | Some entry -> Atomic.get entry.active
+
   let with_durable_lock_observed_with_release_failure
       ~release_failure
       ~lock_path

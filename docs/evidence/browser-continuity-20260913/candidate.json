@@ -1,0 +1,40 @@
+{
+  "source_commit": "20f45f0119ad59f96b9ea70876ef3990b79917e2",
+  "worktree": "/private/tmp/masc-browser-continuity-native",
+  "branch": "test/browser-continuity-native",
+  "base": "5b3ade8f4bc4058457de71e4b54ac1f1fd225172",
+  "composition_recovery": "00e8dbb0ba549cc024db4c79205f054e2a64fc92",
+  "viewport_cadence": "9d3403a1df",
+  "native_run": 34718635528,
+  "test_run": 34718636492,
+  "status": "corrected_combined_native_and_focused_tests_dispatched",
+  "prs": [
+    35703,
+    35704,
+    35708
+  ],
+  "evidence_pr": 35706,
+  "evidence_head": "1bd61125ce361466fbe591341ea0561a55f45365",
+  "viewport_head": "9d3403a1df",
+  "read_recovery_test": {
+    "run": 34718463377,
+    "source_commit": "00e8dbb0ba549cc024db4c79205f054e2a64fc92",
+    "status": "dispatched"
+  },
+  "remaining": [
+    "diagnose targeted composition Test failure from completed logs",
+    "run CI native screenshot PTY regression and real Firefox gestures",
+    "run natural three-channel Keeper trial with combined source",
+    "extend evidence with new measured results before claiming success"
+  ],
+  "prior_candidates": [
+    {
+      "source_commit": "b079feb43d99827daebfd104b27ad8fb283635ed",
+      "native_run": 34717951491,
+      "test_run": 34717953055,
+      "status": "cancelled after confirmed optional-callback compiler error",
+      "compiler_log": "/tmp/composition-read-recovery-ci.log"
+    }
+  ],
+  "viewport_follow": "411c6eb5c86aa7ea4b774d6e8edd9705427ea369"
+}

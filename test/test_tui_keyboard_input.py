@@ -350,16 +350,17 @@ def approvals_header(count: int) -> re.Pattern[bytes]:
     """The Approvals title and the number of asks on it.
 
     What follows the number inside the parens is where those asks came from --
-    held calls, Gate rows, operator entries -- and the renderer writes that
-    breakdown whenever the count is above zero. Spelling the header as
-    "(3)" asserted the parenthesis closes right after the number, which is a
-    fact about that breakdown rather than about how many asks are waiting.
+    held calls, Gate rows, operator entries, only the ones with rows. With one
+    kind the number is that kind's, painted in its colour ("(3 op)"); with
+    more the total leads ("(5: 2 gate · 3 op)"). Spelling the header as "(3)"
+    asserted the parenthesis closes right after the number, which is a fact
+    about that breakdown rather than about how many asks are waiting.
     """
     return re.compile(
         re.escape(b"MASC Approvals")
-        + rb"(?:\x1b\[[0-9;]*m)* \("
+        + rb"(?:\x1b\[[0-9;]*m)* \((?:\x1b\[[0-9;]*m)*"
         + str(count).encode()
-        + rb"[ )]"
+        + rb"[ ):]"
     )
 
 
@@ -3945,12 +3946,19 @@ def approval_selection_identity_interaction(
             timeout=3.0,
         )
         tab_until(process, master_fd, output, b"MASC Keepers")
-        tab_until(
+        landed = tab_until(
             process,
             master_fd,
             output,
             approvals_header(3),
         )
+        # Three operator entries, no held call, no Gate row: the title names
+        # the one kind that has rows and says no zero for the two that do not.
+        landed_plain = CSI_RE.sub(b"", frame_containing(landed, approvals_header(3)))
+        if b"MASC Approvals (3 op)" not in landed_plain or b"0 held" in landed_plain:
+            raise AssertionError(
+                f"Approvals title did not read its count by kind: {landed_plain!r}"
+            )
         selected = send_and_wait(process, master_fd, output, b"j", b"keeper_probe")
         selected_plain = CSI_RE.sub(b"", selected)
         if not re.search(

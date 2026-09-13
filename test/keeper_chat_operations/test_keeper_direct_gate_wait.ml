@@ -160,7 +160,24 @@ let test_unbound_gate_and_runtime_survive_restart () = with_path (fun path ->
     check bool "original task attachments and channel retained" true ((get store).input=Some input);
     check bool "no model claim without binding authority" true (claim store = None)))
 
+(* The binding, its obligations and its diagnostic come from the caller, and the
+   transition rule refuses a blank diagnostic. That refusal has to read as bad
+   input: [Integrity_error] is how this store says its own record is broken, and
+   an owner that sees it stops trusting the database rather than the request. *)
+let test_refused_binding_reads_as_input_not_corruption () = with_path (fun path ->
+  let binding = Semantic.gate_binding ~approval_ids:["producer-created-approval"]
+    ~obligations:[obligation] ~runtime_suffix:None |> require in
+  with_store path (fun store ->
+    let operation = admit store in
+    (match Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
+             ~execution_digest:operation.Operation.execution_digest ~binding ~diagnostic:"" with
+     | Error (Store.Invalid_input _) -> ()
+     | Error error -> fail ("a refused binding reported " ^ Store.error_to_string error)
+     | Ok _ -> fail "a blank diagnostic was accepted");
+    check bool "the claimed operation survives a refused binding" true ((get store) = operation)))
+
 let () = run "direct Gate waiting" ["journal", [
+  test_case "a refused Gate binding is bad input, not a broken store" `Quick test_refused_binding_reads_as_input_not_corruption;
   test_case "unbound Gate identity and runtime suffix survive restart" `Quick test_unbound_gate_and_runtime_survive_restart;
   test_case "session scope rejects traversal and ambiguous components" `Quick test_session_scope_validation;
   test_case "fresh Gate and frozen runtime retry survive restart together" `Quick test_fresh_gate_and_runtime_retry_restart;

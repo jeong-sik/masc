@@ -1,0 +1,21 @@
+{
+  "scope": "source-browser-synthetic-api",
+  "url": "http://127.0.0.1:5198/dashboard/dev-fixtures/internal-agents-monitor-fixture.html",
+  "actor": "/workspace/shared-memory-fixture",
+  "outcome": "passed",
+  "workspace_run_visible": true,
+  "keeper_owner_count": 0,
+  "fake_keeper_links": 0,
+  "keeper_api_requests": 0,
+  "errors": [],
+  "requests": [
+    "/api/v1/dashboard/exact-lane-runs",
+    "/api/v1/dashboard/verification-runs",
+    "/api/v1/dashboard/fusion-runs",
+    "/api/v1/dashboard/standalone-lanes",
+    "/api/v1/dashboard/exact-lane-runs/workspace-curator-browser"
+  ],
+  "limits": [
+    "No native worker or installed runtime execution is asserted by this browser fixture"
+  ]
+}

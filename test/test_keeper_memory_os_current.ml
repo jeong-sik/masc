@@ -1615,10 +1615,138 @@ let test_a_keeper_write_during_a_librarian_pass_keeps_both () =
       (List.sort compare (fact_ids committed.facts)))
 ;;
 
+let test_commit_notifications_follow_all_writers_outside_locks () =
+  let module Notifications = Masc.Keeper_memory_commit_notifications in
+  with_temp_keepers @@ fun keepers_dir ->
+  let physical_keepers_dir = Unix.realpath keepers_dir in
+  let observed = ref [] in
+  let unsubscribe = Notifications.subscribe (fun (event : Notifications.event) ->
+    if String.equal event.keepers_dir physical_keepers_dir then (
+      (* Reacquiring both locks would deadlock if a writer dispatched in its
+         transaction. Reading here also checks that the notification follows
+         the authoritative snapshot, not a proposed or journal-only change. *)
+      let snapshot =
+        Masc.Keeper_memory_os_aggregate_lock.with_lock
+          ~keepers_dir ~keeper_id:event.keeper_id (fun () ->
+            File_lock_eio.with_lock
+              (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:event.keeper_id)
+              (fun () -> Current.read_for_keepers_dir ~keepers_dir ~keeper_id:event.keeper_id))
+      in
+      (* Registry mutation is also safe inside a dispatched callback. *)
+      let stop = Notifications.subscribe (fun _ -> ()) in
+      stop ();
+      observed := (event, snapshot) :: !observed))
+  in
+  let stop_failure = Notifications.subscribe (fun event ->
+    if String.equal event.Notifications.keepers_dir physical_keepers_dir then
+      raise (Failure "subscriber failure fixture"))
+  in
+  Fun.protect ~finally:(fun () -> unsubscribe (); stop_failure ()) (fun () ->
+    let first = fact ~claim:"first committed claim" () in
+    let second = fact ~claim:"second committed claim" () in
+    ignore (replace ~keepers_dir ~facts:[ first ] () |> require_ok);
+    (match replace ~keepers_dir ~expected_revision:(Some 0) () with
+     | Error _ -> () | Ok _ -> fail "revision conflict should fail");
+    ignore (apply_disposition ~keepers_dir ~new_claims:[ second ] () |> require_ok);
+    ignore (Current.upsert_fact ~keepers_dir ~keeper_id:"keeper" ~now:300.
+      ~source:(source Current.Explicit_write) first |> require_upsert_ok);
+    (match Current.retract_fact ~keepers_dir ~keeper_id:"keeper" ~now:400.
+      ~source:(source Current.Explicit_retract) ~memory_id:(Types.memory_id first)
+      ~reason:"explicitly withdrawn" () with
+     | Ok _ -> () | Error _ -> fail "retraction should commit");
+    check int "all four central writers notify once; failure does not" 4 (List.length !observed);
+    List.rev !observed |> List.iteri (fun index (event, snapshot) ->
+      check int "committed revision" (index + 1) event.Notifications.revision;
+      check bool "ordinary store" true (event.store = Notifications.Ordinary);
+      match snapshot with
+      | Ok (Some snapshot) -> check int "already readable" event.revision snapshot.Current.revision
+      | Ok None | Error _ -> fail "notified snapshot was not readable");
+    unsubscribe ();
+    unsubscribe ();
+    ignore (replace ~keepers_dir ~expected_revision:(Some 4) () |> require_ok);
+    check int "unsubscribed listener stays detached" 4 (List.length !observed))
+;;
+
+let test_commit_notifications_do_not_depend_on_journal () =
+  let module Notifications = Masc.Keeper_memory_commit_notifications in
+  with_temp_keepers @@ fun keepers_dir ->
+  let physical_keepers_dir = Unix.realpath keepers_dir in
+  let journal = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Unix.mkdir journal 0o700;
+  let observed = ref [] in
+  let stop = Notifications.subscribe (fun event ->
+    if String.equal event.Notifications.keepers_dir physical_keepers_dir then
+      observed := event.revision :: !observed)
+  in
+  Fun.protect ~finally:stop (fun () ->
+    ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
+    check (list int) "snapshot commit notifies despite failed journal append" [ 1 ] !observed;
+    (* A different keeper's unreadable snapshot fails before it can commit. *)
+    let blocked = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"blocked" in
+    Unix.mkdir blocked 0o700;
+    (try
+       match Current.upsert_fact ~keepers_dir ~keeper_id:"blocked" ~now:200.
+         ~source:(source Current.Explicit_write) (fact ()) with
+       | Error _ -> () | Ok _ -> fail "unreadable store unexpectedly committed"
+     with Sys_error _ | Unix.Unix_error _ -> ());
+    check (list int) "storage failure emits no commit" [ 1 ] !observed)
+;;
+
+let test_commit_notification_directory_is_physical () =
+  let module Notifications = Masc.Keeper_memory_commit_notifications in
+  with_temp_keepers @@ fun keepers_dir ->
+  let alias = Filename.concat keepers_dir "directory-alias" in
+  Unix.symlink keepers_dir alias;
+  let directories = ref [] in
+  let stop = Notifications.subscribe (fun event ->
+    if String.equal event.Notifications.keeper_id "alias-keeper" then
+      directories := event.keepers_dir :: !directories)
+  in
+  Fun.protect ~finally:(fun () -> stop (); Sys.remove alias) (fun () ->
+    ignore (Current.upsert_fact ~keepers_dir:alias ~keeper_id:"alias-keeper" ~now:200.
+      ~source:(source Current.Explicit_write) (fact ()) |> require_upsert_ok);
+    check (list string) "directory alias resolves before notification"
+      [ Unix.realpath keepers_dir ] !directories)
+;;
+
+let test_commit_notification_preserves_cancellation () =
+  let module Notifications = Masc.Keeper_memory_commit_notifications in
+  with_temp_keepers @@ fun keepers_dir ->
+  let physical_keepers_dir = Unix.realpath keepers_dir in
+  let observed = ref [] in
+  let stop_observer = Notifications.subscribe (fun event ->
+    if String.equal event.Notifications.keepers_dir physical_keepers_dir then
+      observed := event.revision :: !observed)
+  in
+  let cancellation = Eio.Cancel.Cancelled (Failure "subscriber cancellation fixture") in
+  (* Most recently registered listener runs first, exercising cancellation
+     before the observer that must still learn of the committed snapshot. *)
+  let stop_cancel = Notifications.subscribe (fun event ->
+    if String.equal event.Notifications.keepers_dir physical_keepers_dir then
+      raise cancellation)
+  in
+  Fun.protect ~finally:(fun () -> stop_observer (); stop_cancel ()) (fun () ->
+    (try
+       ignore (replace ~keepers_dir ~facts:[ fact () ] ());
+       fail "subscriber cancellation was swallowed"
+     with Eio.Cancel.Cancelled _ as exn ->
+       check bool "same cancellation propagated" true (exn == cancellation));
+    check (list int) "other subscriber still sees the real commit" [ 1 ] !observed;
+    let snapshot = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+      |> require_ok |> require_some in
+    check int "cancelled notification does not revoke snapshot" 1 snapshot.revision)
+;;
+
 let () =
   run
     "keeper_memory_os_current"
-    [ ( "current snapshot"
+    [ ( "commit notification"
+      , [ test_case "all writers notify outside locks" `Quick test_commit_notifications_follow_all_writers_outside_locks
+        ; test_case "snapshot authority independent of journal" `Quick test_commit_notifications_do_not_depend_on_journal
+        ; test_case "directory alias emits physical identity" `Quick test_commit_notification_directory_is_physical
+        ; test_case "cancellation propagates after commit notifications" `Quick test_commit_notification_preserves_cancellation
+        ] )
+    ; ( "current snapshot"
       , [ test_case "fresh replace and delta" `Quick test_fresh_replace_and_delta
         ; test_case
             "derivation contract canonicalizes premise sets"

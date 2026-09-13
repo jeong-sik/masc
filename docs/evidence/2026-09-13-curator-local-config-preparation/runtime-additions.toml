@@ -1,0 +1,27 @@
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
+[models.qwen3-8-27b]
+api-name = "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen3-8-27b.capabilities]
+supports-tool-choice = false
+thinking-control-format = "ollama_think"
+supports-top-k = true
+supports-seed = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama.qwen3-8-27b]
+
+[runtime.exact_output_lanes.workspace_curator_exact]
+slots = ["ollama.qwen3-8-27b"]

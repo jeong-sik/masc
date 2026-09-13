@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/tmp/masc-a7855af-installed-candidate-20260913/masc-deployment-preflight-helper",
+    "validate-stores",
+    "--base-path",
+    "/Users/dancer/.masc-integration/collaboration-baseline-68c7668"
+  ],
+  "exit_code": 0,
+  "stdout_sha256": "e83a81bebff2dc7931bf8187cdb7227be1d9774e49546abb2968aa17c5200e6e",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "scope": "read-only decoder diagnostic while live writer remains active; not deployment preflight acceptance"
+}

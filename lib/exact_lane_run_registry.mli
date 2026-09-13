@@ -5,6 +5,7 @@ type lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
+  | Workspace_curator
 
 val all_lanes : lane list
 (** Every registry lane, for consumers that enumerate the wire vocabulary

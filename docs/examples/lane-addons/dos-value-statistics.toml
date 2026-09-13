@@ -1,0 +1,14 @@
+# Install beside dos-value-difference.toml and the DOS producer. Adjust paths
+# when copying declarations into the active configuration directory.
+id = "dos-value-statistics"
+run_id = "dos-demo"
+manifest_path = "../../../addons/output-statistics/lane.toml"
+
+[binding]
+
+[[binding.sources]]
+source_id = "changes"
+kind = "lane_output"
+installation_id = "dos-value-difference"
+output_id = "difference"
+selection = "latest_completed"

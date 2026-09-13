@@ -121,7 +121,8 @@ val with_keeper_assignment_transaction :
   ('a config_lock_receipt, string) result
 (** Hold the process-wide and durable [runtime.toml] locks while observing and
     acting on one Keeper assignment. Callers that also hold a Keeper manifest
-    lock must always acquire that manifest lock first. *)
+    lock must always acquire that manifest lock first. An unresolved journal
+    rejects the callback before it observes or mutates the assignment. *)
 
 val keeper_assignment_revision :
   keeper_assignment_transaction -> keeper_assignment_revision
@@ -457,6 +458,11 @@ module For_testing : sig
   val snapshot : unit -> snapshot
   val restore : snapshot -> unit
 
+  val with_config_lock_with_journal_sync_parent :
+    sync_parent:(string -> unit) -> runtime_config_path:string ->
+    (unit -> unit) -> (unit, string) result
+  (** Production writer admission with an injected journal-parent sync. *)
+
   val keeper_dispatch_runtime_ids :
     default_runtime_id:string ->
     assignments:(string * string) list ->
@@ -521,6 +527,7 @@ type exact_lane =
   | Librarian
   | Hitl_auto_judge
   | Board_attention
+  | Workspace_curator
   | Verifier
 
 val all_exact_lanes : exact_lane list
@@ -923,4 +930,12 @@ val enter_setup_required : reason:Runtime_startup_state.reason -> unit -> unit
 
 val with_config_lock : runtime_config_path:string -> (unit -> ('a, string) result) -> ('a, string) result
 (** Serialize an owner configuration activation with the existing file writers.
+    Reject an unresolved configuration journal before invoking the action.
     The action must not recursively invoke a config writer. *)
+
+val with_manifest_config_lock :
+  runtime_config_path:string -> manifest_path:string ->
+  (unit -> ('a, string) result) -> ('a, string) result
+(** Manifest-only mutations use the same manifest-then-runtime lock order as
+    composite Keeper configuration writes. The action must not reacquire either
+    lock. Both locks cover the authoritative read and mutation. *)

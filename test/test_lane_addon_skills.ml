@@ -80,7 +80,8 @@ let backend stops : Lane.For_testing.backend = {
 }
 
 let dispatch fixture operation fields =
-  Lane.dispatch ~config:fixture.config ~operation (`Assoc fields) |> unwrap
+  Lane.dispatch ~config:fixture.config ~operation (`Assoc fields)
+  |> Result.map_error Lane.error_to_string |> unwrap
 let inspect fixture = dispatch fixture Lane.Inspect []
 let reconcile fixture =
   Lane.reconcile_configuration ~config:fixture.config ~directory:fixture.declarations |> unwrap

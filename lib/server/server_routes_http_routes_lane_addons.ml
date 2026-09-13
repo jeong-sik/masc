@@ -46,6 +46,7 @@ let respond request reqd = function
 
 let dispatch ?caller state operation args =
   Runtime.dispatch ?caller ~config:(Mcp_server.workspace_config state) ~operation args
+  |> Result.map_error Runtime.error_to_string
 
 let query_fields request =
   Uri.query (Uri.of_string request.Httpun.Request.target)
@@ -86,6 +87,27 @@ let post ~operation ~tool_name request reqd =
       let result = let* args = decode_body body in dispatch ~caller state operation args in
       respond request reqd result)) request reqd
 
+let respond_declaration request reqd = function
+  | Ok json -> respond_json_value_with_cors request reqd json
+  | Error (error : Lane_addon_declaration.error) ->
+      let status = match error.code with
+        | Invalid_request | Invalid_declaration -> `Bad_request
+        | Not_found -> `Not_found | Revision_conflict -> `Conflict | Io_error -> `Internal_server_error in
+      respond_json_value_with_cors ~status request reqd (Lane_addon_declaration.error_to_json error)
+
+let read_declaration request reqd =
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_read" (fun state _caller _request reqd ->
+    let args = `Assoc (List.map (fun (key,value) -> key,`String value) (query_fields request)) in
+    respond_declaration request reqd (Runtime.read_declaration ~config:(Mcp_server.workspace_config state) args)) request reqd
+
+let save_declaration request reqd =
+  with_tool_actor_auth ~tool_name:"masc_lane_declaration_save" (fun state _caller _request reqd ->
+    Http.Request.read_body_async reqd (fun body ->
+      let result = match decode_body body with
+        | Error message -> Error {Lane_addon_declaration.code=Invalid_request;message;current=None}
+        | Ok args -> Runtime.save_declaration ~config:(Mcp_server.workspace_config state) args in
+      respond_declaration request reqd result)) request reqd
+
 let register_delivery ~sw ~clock =
   Runtime.register_delivery_handler (fun ~config ~caller ~keeper_name ~prompt ->
     match current_server_state () with
@@ -113,6 +135,8 @@ let register_delivery ~sw ~clock =
 let add_routes ~sw ~clock router =
   register_delivery ~sw ~clock;
   router
+  |> Http.Router.get "/api/v1/lane-addons/declaration" read_declaration
+  |> Http.Router.post "/api/v1/lane-addons/declaration" save_declaration
   |> Http.Router.get "/api/v1/lane-addons" get_inspect
   |> Http.Router.get "/api/v1/lane-addons/slice" get_slice
   |> Http.Router.get "/api/v1/lane-addons/actions" get_action

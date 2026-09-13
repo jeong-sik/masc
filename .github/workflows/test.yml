@@ -169,7 +169,7 @@ jobs:
           # running the suite needs: dune-project gates alcotest,
           # qcheck-core, qcheck-alcotest and bisect_ppx behind :with-test.
           install-flags: --with-test
-          os-packages: jq ripgrep poppler-utils libreoffice-impress python3-venv
+          os-packages: jq ripgrep poppler-utils ffmpeg libreoffice-impress python3-venv
 
       - name: Prepare managed presentation verification inputs
         run: python3 scripts/ci/prepare-presentation-verifier.py

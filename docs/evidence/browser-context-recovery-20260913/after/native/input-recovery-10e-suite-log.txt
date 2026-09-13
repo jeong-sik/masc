@@ -1,0 +1,92 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] dune build test/test_browser_surface.exe 
+[targeted] test/test_browser_surface: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_browser_surface: start 2026-09-12T19:51:00Z
+::group::{browser surface}
+Testing `browser surface'.
+This run has ID `PZS0MCSA'.
+
+ASSERT malformed connection in tabs is caller validation, not changed-state rejection
+ASSERT malformed connection in tabs has no dispatched effect
+ASSERT malformed connection in tabs carries typed invalid-input detail
+ASSERT malformed connection in read is caller validation, not changed-state rejection
+ASSERT malformed connection in read has no dispatched effect
+ASSERT malformed connection in read carries typed invalid-input detail
+ASSERT argument failure happens before interaction effects
+ASSERT malformed connection in follow is caller validation, not changed-state rejection
+ASSERT malformed connection in follow has no dispatched effect
+ASSERT malformed connection in follow carries typed invalid-input detail
+ASSERT navigation guard on text read is caller validation, not changed-state rejection
+ASSERT navigation guard on text read has no dispatched effect
+ASSERT navigation guard on text read carries typed invalid-input detail
+ASSERT malformed scene source is caller validation, not changed-state rejection
+ASSERT malformed scene source has no dispatched effect
+ASSERT malformed scene source carries typed invalid-input detail
+ASSERT malformed scene scope is caller validation, not changed-state rejection
+ASSERT malformed scene scope has no dispatched effect
+ASSERT malformed scene scope carries typed invalid-input detail
+ASSERT malformed scene URL is caller validation, not changed-state rejection
+ASSERT malformed scene URL has no dispatched effect
+ASSERT malformed scene URL carries typed invalid-input detail
+ASSERT missing scene tab is caller validation, not changed-state rejection
+ASSERT missing scene tab has no dispatched effect
+ASSERT missing scene tab carries typed invalid-input detail
+ASSERT malformed act is caller validation, not changed-state rejection
+ASSERT malformed act has no dispatched effect
+ASSERT malformed act carries typed invalid-input detail
+ASSERT unknown session action is caller validation, not changed-state rejection
+ASSERT unknown session action has no dispatched effect
+ASSERT unknown session action carries typed invalid-input detail
+ASSERT malformed navigation URL is caller validation, not changed-state rejection
+ASSERT malformed navigation URL has no dispatched effect
+ASSERT malformed navigation URL carries typed invalid-input detail
+ASSERT malformed requests queued no command to the connected browser
+ASSERT valid identity of an absent browser remains a state rejection
+ASSERT correcting the argument succeeds without reconnecting or changing the page
+ASSERT corrected response retains the observed connection
+  [OK]          behavior          0   input correction resumes on the same co...
+ASSERT exact scoped scene accepted
+ASSERT delayed navigation cannot return old URL as destination
+ASSERT matching SPA URL is observable without new document or content readiness claim
+ASSERT tool surface accepts matching destination guard
+ASSERT tool surface rejects old URL
+ASSERT redirect does not bypass original URL guard
+ASSERT unguarded observation exposes final redirect URL
+ASSERT verified observed URL can be pinned without another follow
+ASSERT same URL old document is not navigation progress
+ASSERT redirect inspection retains old-document rejection without URL pin
+ASSERT redirect destination can be inspected while preserving source guard
+ASSERT SPA changed URL permits same document observation
+ASSERT same URL newly loaded document is observable
+ASSERT connector ignoring scope must fail rather than return whole page
+ASSERT connector ignoring region view must fail
+ASSERT duplicate scope fields rejected
+  [OK]          behavior          1   scoped scene acknowledgement.
+ASSERT active tab then explicit tab, independent of website
+ASSERT closed selected tab fails
+ASSERT closed selection must not read another tab
+  [OK]          behavior          2   read any website by active or explicit ...
+ASSERT empty tabs are a successful empty observation
+ASSERT empty browser does not read an arbitrary page
+  [OK]          behavior          3   empty browser has no page.
+  [OK]          behavior          4   invalid input is refused.
+  [OK]          behavior          5   backend failure is visible.
+ASSERT capture requires an explicit tab
+ASSERT explicit capture succeeds
+ASSERT wrong tab result refused
+ASSERT non-image payload refused
+  [OK]          behavior          6   capture target and image identity.
+ASSERT ambiguous failure stays actionable
+ASSERT both browser identities discoverable
+ASSERT model-facing error preserves the same discovery payload
+ASSERT no dispatch before explicit selection
+ASSERT no dispatch before explicit selection
+  [OK]          behavior          7   Keeper discovers ambiguous clients with...
+ASSERT new client cannot consume next hop
+ASSERT reply identifies the original single client
+ASSERT page belongs to the pinned browser
+  [OK]          behavior          8   live read pins client across both hops.
+
+Test Successful in 0.017s. 9 tests run.
+::endgroup::
+[targeted] test/test_browser_surface: OK in 0s

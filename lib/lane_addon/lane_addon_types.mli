@@ -48,6 +48,8 @@ type package = {
   resources : resources;
 }
 type phase = Attached | Observing | Failed of string | Detaching | Detached
+val evidence_to_json : evidence -> Yojson.Safe.t
+val evidence_of_json : Yojson.Safe.t -> (evidence, string) result
 val row_to_json : row -> Yojson.Safe.t
 val row_of_json : Yojson.Safe.t -> (row, string) result
 val output_to_json : output -> Yojson.Safe.t

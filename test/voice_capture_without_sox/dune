@@ -1,0 +1,7 @@
+; A capture on a machine with no sox, run through the real recorder path.
+; PATH is pointed at an empty directory, so the recorder is refused before a
+; process exists and no microphone is opened.
+
+(test
+ (name test_voice_capture_without_sox)
+ (libraries alcotest eio eio_main unix masc masc.masc_process))

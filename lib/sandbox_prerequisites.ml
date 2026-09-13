@@ -28,6 +28,8 @@ let claude_source = "https://code.claude.com/docs/en/setup"
 let whisper_source = "https://github.com/ggml-org/whisper.cpp"
 let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
 let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
+let sox_formula_source = "https://formulae.brew.sh/formula/sox"
+let sox_source = "https://sourceforge.net/projects/sox/"
 
 (* The model masc asks whisper for by default. Measured 2026-09-12: this file
    is 1,624,555,275 bytes, and on an M3 Max it transcribed a Korean sentence in
@@ -99,16 +101,49 @@ let rec catalog ?model_dir ~host ~distribution dependency =
         ~source_url:whisper_formula_source ~requires_admin:false
         [["brew";"install";"whisper-cpp"]]
     in
-    [ install; whisper_model_step () ]
+    (* Transcribing is not the whole of hearing: masc's own capture records
+       with sox's [rec] and marks the start and end of a recording with sox's
+       [play]. Neither is in the base system, and neither failure says so --
+       the tones are swallowed at debug level and the recorder surfaces its
+       own process error. A device that posts audio to
+       [POST /api/v1/voice/transcribe] needs none of this; a person speaking
+       into masc does. *)
+    let recorder =
+      commands ~id:"sox_brew_install"
+        ~label:"Install sox, which masc records with"
+        ~detail:"Installs the sox formula (2.4MB on this machine, version 14.4.2). It provides rec, which masc records a capture with, and play, which sounds the start and end tones. Without it masc can transcribe a file but cannot make one."
+        ~source_url:sox_formula_source ~requires_admin:false
+        [["brew";"install";"sox"]]
+    in
+    [ install; whisper_model_step (); recorder ]
   (* Homebrew is the only route this catalog can name a command for. Elsewhere
      the build is the project's own, and guessing a package would install
      something that may not exist. *)
+  (* sox is packaged here, unlike whisper.cpp, so the recorder is a command
+     rather than a link even where the transcriber is not. Written per
+     distribution because naming one package manager for every Linux installs
+     something else or nothing. *)
   | Whisper_cli, Linux _ ->
+    let recorder =
+      match distribution with
+      | Debian | Ubuntu ->
+        commands ~id:"sox_apt_install"
+          ~label:"Install sox, which masc records with"
+          ~detail:"Installs the sox package. It provides rec, which masc records a capture with, and play, which sounds the start and end tones. Without it masc can transcribe a file but cannot make one."
+          ~source_url:sox_source ~requires_admin:true
+          [["apt-get";"install";"-y";"sox"]]
+      | Other ->
+        open_ ~id:"sox_project_page"
+          ~label:"Open the sox project page"
+          ~detail:"masc records a capture with sox's rec and sounds its tones with sox's play. Install it the way this distribution packages it."
+          ~source_url:sox_source sox_source
+    in
     [ open_ ~id:"whisper_cli_build_instructions"
         ~label:"Open whisper.cpp build instructions"
         ~detail:"Build whisper.cpp for this machine, then point the voice configuration at the binary and a ggml model."
         ~source_url:whisper_source whisper_source
     ; whisper_model_step ()
+    ; recorder
     ]
   | Codex_cli, _ -> [install_cli Codex; open_ ~id:"codex_official_install" ~label:"Open official Codex installation"
       ~detail:"Follow the official client installation. Return here to detect the client, sign in, and verify your selected model."

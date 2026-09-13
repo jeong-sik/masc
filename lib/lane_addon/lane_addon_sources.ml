@@ -154,12 +154,19 @@ let msx_capture ~store ~id =
   let image = `Assoc ["format", `String "rgb8"; "width", `Int frame.Msx_lane.width;
     "height", `Int frame.Msx_lane.height; "rgb_base64", `String (Base64.encode_string frame.Msx_lane.rgb)] in
   let* screen = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store (Yojson.Safe.to_string image)) in
+  let* ledger = Eio_unix.run_in_systhread (fun () ->
+    Lane_addon_store.retain_jsonl store ~history:capture.Msx_lane.incarnation
+      ~entry_count:capture.input_count ~newest_first:capture.input_ledger
+      ~encode:(fun entry -> Yojson.Safe.to_string (Msx_lane.entry_json entry) ^ "\n")) in
+  let input_ledger = ledger.Lane_addon_store.reference in
   let cursor = `String (string_of_int capture.Msx_lane.input_count) in
   let observation = `Assoc ["id", `String (Printf.sprintf "%s/%d/%.6f" capture.incarnation frame.number observed_at);
     "kind", `String "capture"; "observed_at", `Float observed_at; "actor", `Null;
-    "evidence", `List [evidence_json screen]; "screen", evidence_json screen;
+    "evidence", `List [evidence_json screen; evidence_json input_ledger]; "screen", evidence_json screen;
     "machine_id", `String "workspace-msx"; "incarnation", `String capture.incarnation;
-    "frame", `Int frame.number; "input_cursor", cursor] in
+    "frame", `Int frame.number; "input_cursor", cursor;
+    "input_ledger", `Assoc ["format", `String "msx-input-jsonl-sequence";
+      "entry_count", `Int capture.input_count; "evidence", evidence_json input_ledger]] in
   Ok (envelope ~id ~incarnation:capture.incarnation ~cursor ~complete:true ~detail:`Null [observation])
 let browser_document ~store ~max_bytes ~id ~selection ~tab_id ~target_id ~environment ~request_id =
   let lane, client_id = match selection with

@@ -1,11 +1,13 @@
 (** Optional observers run in independent server-owned fibers. No Keeper tool
     set, input queue, turn switch or environment owner is replaced. *)
 type operation = Attach | Inspect | Observe | Detach | Slice | Evidence | Act | Action_status
+type error = Request_rejected of string | Runtime_failed of string
+val error_to_string : error -> string
 val register_delivery_handler :
   (config:Workspace.config -> caller:string -> keeper_name:string -> prompt:string ->
     (Yojson.Safe.t, string) result) -> unit
 val dispatch : ?caller:string -> config:Workspace.config -> operation:operation -> Yojson.Safe.t ->
-  (Yojson.Safe.t, string) result
+  (Yojson.Safe.t, error) result
 (** Root-domain notification only: no I/O and no package callback. Existing
     activity can wake observers; repeated notifications coalesce visibly. *)
 val notify_activity : config:Workspace.config -> unit
@@ -30,6 +32,13 @@ val register_skill_export_handler :
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
+val read_declaration : config:Workspace.config -> Yojson.Safe.t ->
+  (Yojson.Safe.t, Lane_addon_declaration.error) result
+val save_declaration : config:Workspace.config -> Yojson.Safe.t ->
+  (Yojson.Safe.t, Lane_addon_declaration.error) result
+(** HTTP and Keeper editors share the configuration serializer with reconcile
+    and managed Detach. Saving bytes only nudges the existing maintenance owner;
+    its receipt never claims that a worker has already applied the change. *)
 (** Start independent server-owned configuration maintenance using the existing
     maintenance cadence. Runs once at startup and after owned cleanup completes. *)
 val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->

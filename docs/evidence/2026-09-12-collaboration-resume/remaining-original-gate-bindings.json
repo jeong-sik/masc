@@ -1,0 +1,116 @@
+{
+  "observed_at": "2026-09-12T12:57:36.034263+00:00",
+  "keeper": "exhibit-designer",
+  "rows": [
+    {
+      "created_at": 1789047804.422589,
+      "current_sources": [],
+      "frame": {
+        "active": {
+          "id": "kmsg-e92b5cc304ada4b9c1ab6b2662da7071",
+          "kind": "direct_operation"
+        },
+        "schema": "masc.keeper_repetition_scopes.v1",
+        "scopes": [
+          {
+            "id": {
+              "id": "kmsg-e92b5cc304ada4b9c1ab6b2662da7071",
+              "kind": "direct_operation"
+            },
+            "observations": []
+          }
+        ]
+      },
+      "id": {
+        "id": "kmsg-e92b5cc304ada4b9c1ab6b2662da7071",
+        "kind": "direct_operation"
+      },
+      "input": {
+        "payload": {
+          "attachments": [],
+          "message": "같은 task-001의 마무리 검수입니다. 현재 실제 poster.png를 확인했습니다: 제목, 오프라인 배지, 2026-10-17 14:00–17:00, 은빛정류장 전시실, 초등 고학년과 보호자, 입장료 무료는 올바르게 보입니다. 그러나 성공 조건인 ‘허구의 행사임을 명시’가 빠졌습니다. 포스터에 간결한 허구 행사 표시를 추가하고 실제 이미지로 다시 검수해주세요. 이전 Board 글 p-c36a80b0af5448a967fcfdae547f263f는 입장료 문구를 묣료 등으로 잘못 반복하며 이미지와 다르게 전달했습니다. 실제 산출물에 근거한 명확한 정정 댓글과 파일 전달을 exhibit-editor에게 남겨 책자와 합칠 수 있게 해주세요. Task 소유자는 exhibit-editor이며, 원본 PDF에서 생성한 3페이지 PNG 검증과 최종 제출이 아직 남아 있습니다.",
+          "schema": "masc.keeper_chat_operation.input.v1",
+          "surface_context": null,
+          "turn_instructions": null,
+          "user_blocks": []
+        }
+      },
+      "input_sha256": "a9888a1412124e42d3472309e8fbc5cb2c6ee161642cada66e39e09253542b5f",
+      "phase": {
+        "detail": "Gate yield checkpoint belongs to another operation",
+        "kind": "recovering",
+        "origin": {
+          "binding": {
+            "approval_ids": [
+              "appr_01a08b8e-e2ae-7000-9e8d-f82445c84bc1"
+            ],
+            "obligations": [],
+            "runtime_suffix": null
+          },
+          "kind": "gate_binding"
+        }
+      },
+      "revision": 3,
+      "schema": "masc.keeper_semantic_execution.v1",
+      "sources": [],
+      "updated_at": 1789047804.422589
+    },
+    {
+      "created_at": 1789049265.56079,
+      "current_sources": [],
+      "frame": {
+        "active": {
+          "id": "kmsg-4a5167ad0b67bf0c5c3f1beb16e7580e",
+          "kind": "direct_operation"
+        },
+        "schema": "masc.keeper_repetition_scopes.v1",
+        "scopes": [
+          {
+            "id": {
+              "id": "kmsg-4a5167ad0b67bf0c5c3f1beb16e7580e",
+              "kind": "direct_operation"
+            },
+            "observations": []
+          }
+        ]
+      },
+      "id": {
+        "id": "kmsg-4a5167ad0b67bf0c5c3f1beb16e7580e",
+        "kind": "direct_operation"
+      },
+      "input": {
+        "payload": {
+          "attachments": [],
+          "message": "task-002를 맡아 같은 전시 《기억의 정원》을 움직이는 GIF와 오리지널 사운드(WAV·MP3)로 확장해 주세요. task-002 계약에 산출물과 실제 디코딩 검증 조건이 있습니다. 이미 완성한 자기 포스터와 같은 디자인 맥락을 이어가되 새 파일은 multimedia/에 두세요. 기존 task-001 완료 증거와 편집자의 Goal 검증은 유지합니다. 움직임·리듬·음색의 선택은 맡깁니다. 필요하면 동료와 중요한 표현 방향을 논의하고, 실제 도구가 부족하면 구체적으로 알려 주세요. 기존 포스터의 전달 경로가 막힌 사실은 별도 기능 수정 중입니다. 이번에는 자신의 파일과 도구로 실제 재생 가능한 결과를 완성하고 검증 제출해 주세요.",
+          "schema": "masc.keeper_chat_operation.input.v1",
+          "surface_context": null,
+          "turn_instructions": null,
+          "user_blocks": []
+        }
+      },
+      "input_sha256": "a1c79a2787b1396d0742d970a9ee957f0b4fe11bc3da77b5c52bc8a60289a462",
+      "phase": {
+        "detail": "Gate yield checkpoint belongs to another operation",
+        "kind": "recovering",
+        "origin": {
+          "binding": {
+            "approval_ids": [
+              "appr_01a08ba1-1840-7000-b6a6-4b23a81b42da",
+              "appr_01a08ba1-18a7-7000-ada2-01ae161f0c3c",
+              "appr_01a08ba1-1914-7000-80b2-e3b7c13d84ed",
+              "appr_01a08ba5-28d8-7000-9653-b660b003f8a9"
+            ],
+            "obligations": [],
+            "runtime_suffix": null
+          },
+          "kind": "gate_binding"
+        }
+      },
+      "revision": 3,
+      "schema": "masc.keeper_semantic_execution.v1",
+      "sources": [],
+      "updated_at": 1789049265.56079
+    }
+  ],
+  "scope": "Two original September10 operations retain unresolved Gate bindings without original native authority. No cancellation or recovery performed here. Full health ok does not mean every historical operation is settled."
+}

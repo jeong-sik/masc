@@ -50,7 +50,7 @@ def supplied(seq, frame, *, machine="workspace-msx", incarnation="machine-A",
     capture = {"id": f"capture-{incarnation}-{seq}", "kind": "capture", "observed_at": 1000 + seq,
                "actor": None, "evidence": [reference(f"raw-capture-{incarnation}-{seq}")],
                "machine_id": machine, "incarnation": incarnation, "frame": frame,
-               "screen": reference(f"screen-{incarnation}-{seq}"), "input_cursor": "0"}
+               "screen": reference(f"screen-{incarnation}-{seq}"), "input_cursor": "0", "input_ledger": None}
     captured = {**status("existing-machine", incarnation), "observations": [capture]}
     _, _, responses = exchange("msx-observer", [[captured]], {"machine_id": machine})
     output = responses[0]["structuredContent"]

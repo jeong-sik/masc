@@ -1,0 +1,52 @@
+build (macos-15-intel, macos-x64)	Build	2026-09-12T15:48:23.8077540Z 96 |          Keeper_tool_call_index.by_execution_ids
+build (macos-15-intel, macos-x64)	Build	2026-09-12T15:48:23.8078630Z               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build (macos-15-intel, macos-x64)	Build	2026-09-12T15:48:23.8079790Z Error: Unbound module Keeper_tool_call_index
+build (macos-15-intel, macos-x64)	Build	2026-09-12T15:48:23.9129860Z ##[error]Process completed with exit code 1.
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	﻿2026-09-12T15:40:06.4697396Z ##[group]Run opam exec -- dune build --release \
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4697816Z [36;1mopam exec -- dune build --release \[0m
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4698086Z [36;1m  bin/main_eio.exe \[0m
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4698308Z [36;1m  bin/masc_tui.exe \[0m
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4698531Z [36;1m  bin/masc_browser_host.exe \[0m
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4698801Z [36;1m  bin/deployment_preflight_helper.exe[0m
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4732788Z shell: /usr/bin/bash -e {0}
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4733022Z env:
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4733192Z   OPAMCOLOR: always
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4733395Z   OPAMCONFIRMLEVEL: unsafe-yes
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4733617Z   OPAMERRLOGLEN: 0
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:40:06.4733825Z   OPAMEXTERNALSOLVER: builtin-0install
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:41:37.1042777Z 96 |          Keeper_tool_call_index.by_execution_ids
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:41:37.1043061Z               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:41:37.1043339Z Error: Unbound module Keeper_tool_call_index
+build (ubuntu-24.04-arm, linux-arm64, arm64)	Build	2026-09-12T15:41:37.1823679Z ##[error]Process completed with exit code 1.
+build (macos-14, macos-arm64)	Build	﻿2026-09-12T15:41:48.2926890Z ##[group]Run opam exec -- dune build --release \
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2927220Z [36;1mopam exec -- dune build --release \[0m
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2927490Z [36;1m  bin/main_eio.exe \[0m
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2927690Z [36;1m  bin/masc_tui.exe \[0m
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2927900Z [36;1m  bin/masc_browser_host.exe \[0m
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2928200Z [36;1m  bin/deployment_preflight_helper.exe[0m
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2987540Z shell: /bin/bash -e {0}
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2987730Z env:
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2987890Z   OPAMCOLOR: always
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2988080Z   OPAMCONFIRMLEVEL: unsafe-yes
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2988300Z   OPAMERRLOGLEN: 0
+build (macos-14, macos-arm64)	Build	2026-09-12T15:41:48.2988500Z   OPAMEXTERNALSOLVER: builtin-0install
+build (macos-14, macos-arm64)	Build	2026-09-12T15:44:35.8304150Z 96 |          Keeper_tool_call_index.by_execution_ids
+build (macos-14, macos-arm64)	Build	2026-09-12T15:44:35.8304610Z               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build (macos-14, macos-arm64)	Build	2026-09-12T15:44:35.8305030Z Error: Unbound module Keeper_tool_call_index
+build (macos-14, macos-arm64)	Build	2026-09-12T15:44:35.8700100Z ##[error]Process completed with exit code 1.
+build (ubuntu-24.04, linux-x64, amd64)	Build	﻿2026-09-12T15:39:56.3246163Z ##[group]Run opam exec -- dune build --release \
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3246871Z [36;1mopam exec -- dune build --release \[0m
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3247429Z [36;1m  bin/main_eio.exe \[0m
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3247885Z [36;1m  bin/masc_tui.exe \[0m
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3248360Z [36;1m  bin/masc_browser_host.exe \[0m
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3248929Z [36;1m  bin/deployment_preflight_helper.exe[0m
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3298554Z shell: /usr/bin/bash -e {0}
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3299318Z env:
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3299531Z   OPAMCOLOR: always
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3300079Z   OPAMCONFIRMLEVEL: unsafe-yes
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3300356Z   OPAMERRLOGLEN: 0
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:39:56.3300598Z   OPAMEXTERNALSOLVER: builtin-0install
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:42:08.2743756Z 96 |          Keeper_tool_call_index.by_execution_ids
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:42:08.2744075Z               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:42:08.2744384Z Error: Unbound module Keeper_tool_call_index
+build (ubuntu-24.04, linux-x64, amd64)	Build	2026-09-12T15:42:08.3417066Z ##[error]Process completed with exit code 1.

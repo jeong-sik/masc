@@ -480,6 +480,20 @@ let refresh_preserves_operator_target () =
   check bool "new incarnation requires explicit selection" true (UI.selected_instance replaced=None);
   check bool "timeline cannot act through a replaced row owner" true
     (UI.selected_instance {replaced with focus=UI.Timeline}=None);
+  let draft = Draft.create "worker.toml" |> ok in
+  let editing = UI.put_document {view with focus=UI.Configurations} draft in
+  let changed declaration instances = UI.reconcile_snapshot editing {snapshot with instances;
+    configuration=Some {directory="/config";complete=true;declarations=[declaration]}} in
+  List.iter (fun (label,declaration,instances) ->
+    let replaced = changed declaration instances in
+    check bool (label ^ " invalidates same-path operator selection") true
+      (UI.selected_declaration replaced=None && UI.selected_instance replaced=None);
+    check bool (label ^ " retains the independent document draft") true
+      (UI.selected_document replaced=Some draft))
+    ["installation",{(declaration "worker") with installation_id=Some "new-installation"},snapshot.instances;
+     "instance",{(declaration "worker") with instance_id=Some "other"},snapshot.instances;
+     "run",declaration "worker",[{(worker "worker") with run_id="new-run"}];
+     "incarnation",declaration "worker",[{(worker "worker") with incarnation="new-incarnation"}]];
   let failed = {view with focus=UI.Timeline;error=Some "network failed"} in
   check bool "stale snapshot exposes refresh failure" true
     (List.exists (String.starts_with ~prefix:"Error: network failed")

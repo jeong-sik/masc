@@ -221,10 +221,12 @@ let reconcile_snapshot view snapshot =
       let configuration_cursor = anchor (fun (declaration : declaration) -> declaration.source_path)
           (declarations previous) (declarations snapshot) view.configuration_cursor in
       let declaration_owner snapshot cursor =
-        Option.bind (at_cursor (declarations snapshot) cursor) (fun declaration ->
-          Option.bind declaration.instance_id (fun id ->
-            List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances))
-        |> Option.map (fun (instance : instance) -> instance.id, instance.incarnation) in
+        Option.map (fun (declaration : declaration) ->
+          let worker = Option.bind declaration.instance_id (fun id ->
+            List.find_opt (fun (instance : instance) -> instance.id=id) snapshot.instances)
+            |> Option.map (fun (instance : instance) -> instance.id, instance.incarnation, instance.run_id) in
+          declaration.installation_id, declaration.instance_id, worker)
+          (at_cursor (declarations snapshot) cursor) in
       let configuration_cursor =
         if declaration_owner previous view.configuration_cursor = declaration_owner snapshot configuration_cursor
         then configuration_cursor else -1 in

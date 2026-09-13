@@ -34,6 +34,13 @@ def run(host, firefox):
             def log_message(self, *_args):
                 pass
 
+            def do_GET(self):
+                data = fixture.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
             def do_POST(self):
                 if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
                     chunks = []
@@ -75,12 +82,13 @@ def run(host, firefox):
         # Two identical URL tabs are opened by the owned Firefox command line.
         fixture = root / "fixture.html"
         fixture.write_text('''<!doctype html><title>BiDi native fixture</title>
-<style>body{margin:0}#pad{width:500px;height:300px;background:lightblue}</style>
-<div id="pad">untouched</div><script>
+<style>body{margin:0;min-height:2000px}#pad{width:500px;height:300px;background:lightblue}</style>
+<a href="#followed">Observed destination</a><div id="pad">untouched</div><script>
 const pad=document.querySelector('#pad'); let down=false;
 pad.onpointerdown=e=>{down=e.isTrusted;pad.setPointerCapture(e.pointerId)};
 pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
 </script>''')
+        fixture_url = f"http://127.0.0.1:{server.server_port}/fixture"
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
@@ -89,7 +97,7 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
         log = (root / "firefox.log").open("wb")
         try:
             ff = subprocess.Popen([firefox, "--headless", "--no-remote", "--profile", str(root / "profile"),
-                "--remote-debugging-port", str(port), fixture.as_uri(), fixture.as_uri()], stdout=log, stderr=log)
+                "--remote-debugging-port", str(port), fixture_url, fixture_url], stdout=log, stderr=log)
             deadline = time.monotonic() + 20
             while True:
                 try:
@@ -113,13 +121,13 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
 
             tabs = call("tabs.list", {})
             assert tabs["ok"], tabs
-            matching = [tab for tab in tabs["data"] if tab["url"] == fixture.as_uri()]
+            matching = [tab for tab in tabs["data"] if tab["url"] == fixture_url]
             assert len(matching) == 2, matching
             first, second = (tab["id"] for tab in matching)
             before = call("page.read", {"tabId": second})
             shot = call("page.capture", {"tabId": first})
             assert shot["ok"] and base64.b64decode(shot["data"]["data"]).startswith(b"\x89PNG")
-            args = {"tabId": first, "action": "drag", "expectedUrl": fixture.as_uri(),
+            args = {"tabId": first, "action": "drag", "expectedUrl": fixture_url,
                 "viewport": shot["data"]["viewport"], "from": {"x": .05, "y": .05}, "to": {"x": .2, "y": .2}}
             stale = {**args, "viewport": {**args["viewport"], "documentId": "stale"}}
             rejected = call("page.interact", stale)
@@ -130,6 +138,37 @@ pad.onpointerup=e=>{pad.textContent='drag:'+down+':'+e.isTrusted+':'+e.clientX};
             assert moved["ok"] is True, moved
             after = call("page.read", {"tabId": first})
             assert "drag:true:true:" in after["data"]["text"], after
+            other = call("page.read", {"tabId": second})
+            assert other["ok"] and other["data"] == before["data"]
+            bounded = call("page.read", {"tabId": first, "maxChars": 5})
+            assert bounded["ok"] and len(bounded["data"]["text"]) == 5 and bounded["data"]["truncated"]
+            html = call("page.read", {"tabId": first, "includeHtml": True, "maxChars": 5})
+            assert html["ok"] is False and html["effectPhase"] == "not_started"
+            observed = call("page.scene", {"tabId": first, "view": "content", "maxChars": 50000})
+            assert observed["ok"], observed
+            scene = observed["data"]
+            links = [node for node in scene["nodes"] if node.get("href") == fixture_url + "#followed"]
+            assert len(links) == 1, scene
+            followed = call("page.interact", {"tabId": first, "action": "follow_link",
+                "expectedUrl": fixture_url, "documentId": scene["documentId"], "nodeId": links[0]["nodeId"]})
+            assert followed["ok"] and followed["data"]["destinationUrl"] == fixture_url + "#followed", followed
+            # This fixture uses same-document fragment navigation. It does not
+            # assert a full-navigation lifecycle barrier or replay the follow.
+            fresh = call("page.read", {"tabId": first})
+            assert fresh["ok"] and fresh["data"]["url"] == fixture_url + "#followed", fresh
+            fresh_shot = call("page.capture", {"tabId": first})
+            assert fresh_shot["ok"], fresh_shot
+            wheel = call("page.interact", {"tabId": first, "action": "scroll_at",
+                "expectedUrl": fresh["data"]["url"], "viewport": fresh_shot["data"]["viewport"],
+                "point": {"x": .5, "y": .5}, "x": 0, "y": 120})
+            assert wheel["ok"], wheel
+            deadline = time.monotonic() + 5
+            while True:
+                scrolled = call("page.capture", {"tabId": first})
+                assert scrolled["ok"], scrolled
+                if scrolled["data"]["viewport"]["scrollY"] > 0:
+                    break
+                assert time.monotonic() < deadline, "wheel effect absent; input not replayed"
             other = call("page.read", {"tabId": second})
             assert other["ok"] and other["data"] == before["data"]
             unsupported = call("page.elements", {"tabId": first})

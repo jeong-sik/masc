@@ -7,14 +7,14 @@ let str s = `String s
 let required name json = match field name json with Some v -> Ok v | None -> Error ("missing " ^ name)
 type failure = Before_effect of string | Outcome_unknown of string
 type t = { command : string -> Yojson.Safe.t -> (Yojson.Safe.t,string) result;
-  mutable contexts : (string * int) list; mutable next_tab : int }
-let create ~command = {command;contexts=[];next_tab=0}
+  mutable contexts : (string * int) list; mutable next_tab : int; mutable version : string option }
+let create ~command = {command;contexts=[];next_tab=0;version=None}
 let metadata t =
   let* result = t.command "session.new" (obj ["capabilities",obj []]) in
   let* caps = required "capabilities" result in
   let* name = string "browserName" caps in
   if name <> "firefox" then Error "BiDi peer must be Firefox"
-  else string "browserVersion" caps
+  else let* version=string "browserVersion" caps in t.version<-Some version;Ok version
 let evaluate t context body args =
   let declaration = "function(args) { " ^ Browser_scene_script.runtime
     ^ "\nreturn JSON.stringify((function(){" ^ body ^ "}).call(null,args)); }" in
@@ -61,7 +61,7 @@ let read t context args =
   let* cap = match field "maxChars" args with None -> Ok 50000
     | Some (`Int n) when n > 0 && n <= 100000 -> Ok n | _ -> Error "invalid maxChars" in
   match field "includeHtml" args with
-  | Some (`Bool true) -> script t context (Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj [])
+  | Some (`Bool true) -> Error "BiDi page.read does not support includeHtml; use a bounded scene read"
   | None | Some (`Bool false) -> script t context
       "const chars=Array.from(document.body?.innerText??''); const cap=arguments[0].cap; return {url:location.href,title:document.title,text:chars.slice(0,cap).join(''),chars:chars.length,truncated:chars.length>cap};" (obj ["cap",`Int cap])
   | _ -> Error "invalid includeHtml"
@@ -84,7 +84,8 @@ let pointer t context args action =
       Ok (obj ["type",str "pointer";"id",str "masc-pointer";"parameters",obj ["pointerType",str "mouse"];
         "actions",`List ([move start;button "pointerDown"] @ middle @ [button "pointerUp"])]) in
   (* No replay after dispatch. Release is itself a protocol action and remains
-     inside this command's deadline; failure poisons the connection at the host. *)
+     bounded by the transport deadline. Protected release cleanup may outlast
+     the host command deadline by that bound; failure ends the client. *)
   let released=ref (Ok ()) in
   let applied=Eio.Switch.run (fun sw ->
     if action<>"scroll_at" then Eio.Switch.on_release sw (fun ()->
@@ -98,7 +99,10 @@ let pointer t context args action =
   | _ -> Error (Outcome_unknown "invalid post-input observation")
 let dispatch t ~verb args =
   let pre r = Result.map_error (fun e -> Before_effect e) r in
-  if verb="tabs.list" then
+  if verb="browser.info" then
+    (match t.version with Some version->Ok (obj ["name",str "Firefox";"version",str version])
+     | None->Error (Before_effect "BiDi session metadata is unavailable"))
+  else if verb="tabs.list" then
     let* current = pre (tree t) in
     let rec rows index acc = function
       | [] -> Ok (`List (List.rev acc))

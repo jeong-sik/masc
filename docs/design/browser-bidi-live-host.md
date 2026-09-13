@@ -18,9 +18,13 @@ by BiDi pointer or wheel actions. This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
 share the existing host command deadline; connection setup has that same bound.
+Protected pointer-release cleanup can additionally run up to one transport
+deadline after the outer command deadline. A timeout is not an instantaneous
+release guarantee.
 Closing the socket does not issue browser.close or browsingContext.close.
 
-This initial peer does not implement page.elements, live activate_tab, uploads,
+This initial peer rejects includeHtml (the source-document helper has no caller
+cap), and does not implement page.elements, live activate_tab, uploads,
 download collection, or the extension's navigation commit barrier. A successful
 follow receipt does not guarantee application content is ready; existing guarded
 read recovery remains necessary. A BiDi session enables browser-wide automation

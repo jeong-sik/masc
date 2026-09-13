@@ -3670,11 +3670,13 @@ def keeper_ask_answer_interaction(
 
         # Open an approval's detail. The answer flow is drawn by the list, so
         # this is where [a] used to set the mode and change nothing on screen.
-        detail = send_and_wait(
-            process, master_fd, output, b"\r", b"Esc: back to the list"
-        )
+        # The detail opens on its own title, "MASC Approval"; the way out is
+        # the footer's to say (#35985). The list's title is "MASC Approvals",
+        # so the wait rules out the trailing s.
+        detail_title = re.compile(rb"MASC Approval(?!s)")
+        detail = send_and_wait(process, master_fd, output, b"\r", detail_title)
         if b"Questions waiting on you" in CSI_RE.sub(
-            b"", frame_containing(detail, b"Esc: back to the list")
+            b"", frame_containing(detail, detail_title)
         ):
             raise AssertionError(
                 "the detail draws the questions; this scenario no longer tests "

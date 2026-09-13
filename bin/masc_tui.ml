@@ -3321,7 +3321,9 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
     state.keeper_calls_keeper <- Some keeper_name;
     state.keeper_calls_loading <- true;
     state.keeper_calls_refresh_pending <- false;
-    state.keeper_calls_error <- None;
+    (* A retry has not repaired the previous read failure yet. Keep that
+       observation until a successful response replaces it. *)
+    if not same_scope then state.keeper_calls_error <- None;
     let host = server_peer_host in
     let port = state.port in
     let run () =
@@ -5253,7 +5255,6 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
       let generation = state.msg_file_changes_generation in
       state.msg_file_changes_loading <- true;
       state.msg_file_changes_refresh_pending <- false;
-      state.msg_file_changes_error <- None;
       let host = server_peer_host in
       let port = state.port in
       let run () =

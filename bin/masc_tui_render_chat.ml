@@ -630,7 +630,12 @@ let keeper_call_association state ~keeper_name
           (Option.equal String.equal state.keeper_calls_keeper
              (Some keeper_name))
       then Call_log_not_loaded
-      else if state.keeper_calls_loading then Call_log_loading
+      (* Refresh keeps the last snapshot for this Keeper. Replacing it with
+         a loading row drops every expanded output, changing the transcript's
+         height twice per poll and moving the reader's viewport. Only the
+         first read has no durable detail to draw yet. *)
+      else if state.keeper_calls_loading && Option.is_none state.keeper_calls
+      then Call_log_loading
       else
       match state.keeper_calls_error, state.keeper_calls with
       | Some detail, _ -> Call_log_unavailable detail
@@ -1875,7 +1880,9 @@ let render_keeper_message (state : state) =
                 (Option.equal String.equal state.msg_file_changes_keeper
                    (Some keeper_name))
             then "diffs pending"
-            else if state.msg_file_changes_loading then "diffs loading"
+            else if state.msg_file_changes_loading
+                    && Option.is_none state.msg_file_changes
+            then "diffs loading"
             else
               match state.msg_file_changes_error, state.msg_file_changes with
               | Some _, Some snapshot -> snapshot_status ~stale:true snapshot

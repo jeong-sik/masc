@@ -358,6 +358,10 @@ let keeper_world_event_rows_fusion_title_cancelled =
   "keeper.world.event_rows.fusion_title_cancelled"
 ;;
 
+let keeper_world_event_rows_fusion_result_lookup =
+  "keeper.world.event_rows.fusion_result_lookup"
+;;
+
 let keeper_world_event_rows_fusion_cancelled_preview =
   "keeper.world.event_rows.fusion_cancelled_preview"
 ;;

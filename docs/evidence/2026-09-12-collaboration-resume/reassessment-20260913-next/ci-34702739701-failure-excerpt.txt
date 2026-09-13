@@ -1,0 +1,16 @@
+test suite	Test	2026-09-12T15:43:12.5060326Z │ [FAIL]        dispatch          5   foreign source, wrong origin and no ...  │
+test suite	Test	2026-09-12T15:43:12.5061229Z └──────────────────────────────────────────────────────────────────────────────┘
+test suite	Test	2026-09-12T15:43:12.5061842Z FAIL source lookup unexpectedly succeeded
+test suite	Test	2026-09-12T15:43:12.5062664Z Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+test suite	Test	2026-09-12T15:43:12.5063660Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+test suite	Test	2026-09-12T15:43:12.5064487Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+test suite	Test	2026-09-12T15:43:12.5065430Z Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+test suite	Test	2026-09-12T15:43:12.5066694Z Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+test suite	Test	2026-09-12T15:43:12.5067882Z Called from Eio_linux__Sched.run.(fun) in file "lib_eio_linux/sched.ml", line 468, characters 22-90
+test suite	Test	2026-09-12T15:43:12.5068835Z Re-raised at Eio_linux__Sched.run in file "lib_eio_linux/sched.ml", line 479, characters 22-57
+test suite	Test	2026-09-12T15:43:12.5069803Z Called from Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 506, characters 8-18
+test suite	Test	2026-09-12T15:43:12.5070828Z Re-raised at Eio_linux__Sched.with_eventfd in file "lib_eio_linux/sched.ml", line 511, characters 4-39
+test suite	Test	2026-09-12T15:43:12.5071847Z Called from Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", lines 543-545, characters 8-109
+test suite	Test	2026-09-12T15:43:12.5072851Z Re-raised at Eio_linux__Sched.with_sched in file "lib_eio_linux/sched.ml", line 556, characters 8-43
+test suite	Test	2026-09-12T15:43:12.5073989Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+test suite	Test	2026-09-12T15:43:12.5075226Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35

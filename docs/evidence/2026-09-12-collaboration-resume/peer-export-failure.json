@@ -1,0 +1,65 @@
+{
+  "tool_calls": [
+    {
+      "ts": 1789204391.759984,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_transfer",
+      "input": {
+        "action": "export",
+        "path": "poster.png",
+        "purpose": "task-001 최종 포스터. exhibit-editor가 received/designer-poster.png로 materialize한 뒤 실제 이미지를 열어 행사 정보와 렌더링을 검수하고, 수신 바이트 수와 SHA256을 기존 Board 대화에 보고할 파일."
+      },
+      "output": "tool output artifact storage failed",
+      "success": false,
+      "duration_ms": 107.4371337890625
+    },
+    {
+      "ts": 1789204414.105844,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_transfer",
+      "input": {
+        "action": "export",
+        "path": "poster.png",
+        "purpose": "Verified task-001 final poster; receiver must materialize as received/designer-poster.png, inspect the imported image, and report exact received bytes and SHA256 in the existing Board conversation."
+      },
+      "output": "tool output artifact storage failed",
+      "success": false,
+      "duration_ms": 342.45991706848145
+    },
+    {
+      "ts": 1789204500.804093,
+      "keeper": "exhibit-designer",
+      "tool": "keeper_artifact_transfer",
+      "input": {
+        "action": "export",
+        "path": "verify_render.py",
+        "purpose": "Diagnostic export only to distinguish binary-size failure from artifact-store failure; do not delegate."
+      },
+      "output": "tool output artifact storage failed",
+      "success": false,
+      "duration_ms": 2321.413993835449
+    }
+  ],
+  "stored_blob": {
+    "bytes": 484694,
+    "sha256": "1e4a8fc123bbc43033de9b4e2b642244d6481d81832428dc75f3338343ebad16"
+  },
+  "finding": "Blob persisted correctly, but typed artifact projection requires a result manifest that export did not attach. No recipient materialization proven.",
+  "repair": {
+    "pr": 35364,
+    "head": "4c082dac16",
+    "targeted_test_run": 34685539828,
+    "worktree": "/tmp/masc-peer-export-manifest",
+    "source_review": "root and implementing reviewer agree missing manifest causes conversion failure",
+    "validation": "source parsing and diff checks passed; corrected target CI in progress at reassessment",
+    "deployed": false,
+    "targeted_suites": [
+      "test_keeper_tool_dispatch_runtime",
+      "test_tool_bridge_externalize"
+    ],
+    "superseded_test_run": {
+      "id": 34685512137,
+      "reason": "cancelled: requested nonexistent test_tool_bridge suite"
+    }
+  }
+}

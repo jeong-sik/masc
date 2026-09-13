@@ -987,9 +987,11 @@ let run_keeper_invocation_turn_admitted_inner
               let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
                   Keeper_turn_outcome.Continuation_checkpoint in
               let retained = if checkpoint_yield then
-                  Keeper_direct_checkpoint_continuation.defer
-                    ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                    ~session_dir ~session_id
+                  match result.checkpoint with
+                  | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
+                      ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
+                      ~session_dir ~session_id ~checkpoint
+                  | None -> Error "cooperative turn has no agent-core checkpoint; official-client continuation requires its own retained authority"
                 else Ok () in
               (match retained with
                | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail

@@ -40,6 +40,10 @@ the text scene only move the terminal reader.
 The scene status composition (`articles`, `links`, `controls`, and `images`)
 is a typed observation hint for choosing a route; it does not prove that a
 feed is complete or that every reply is loaded.
+Directly observed Text nodes tagged `h1`–`h6` use the observed heading level as
+a small outline prefix. Use that visual cue to find a post title or section
+boundary, but do not infer a missing heading from styling, text resemblance,
+ARIA, or nested markup.
 
 After an article is scoped, keep the displayed role and label with the body
 when reporting it. The copied context must retain that observed scope label

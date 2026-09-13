@@ -66,8 +66,30 @@ type kind =
       disabled : bool;
       href : string option;
     }
+(* HTML local names are observed browser data. Classify the closed heading
+   subset once at this boundary so TUI presentation can render an outline
+   without repeatedly matching tags or inventing selectors. *)
+type text_role =
+  | Plain_text
+  | Heading of int
+
+let text_role_of_tag tag =
+  match String.lowercase_ascii (String.trim tag) with
+  | "h1" -> Heading 1
+  | "h2" -> Heading 2
+  | "h3" -> Heading 3
+  | "h4" -> Heading 4
+  | "h5" -> Heading 5
+  | "h6" -> Heading 6
+  | _ -> Plain_text
+
 type node = { node_id : string; kind : kind; tag : string; text : string;
   rects : rect list; color : string; font_size : float; font_weight : string; white_space : string; source_context : Browser_source_context.t }
+let text_role (node : node) =
+  match node.kind with
+  | Text -> text_role_of_tag node.tag
+  | Raster | Region _ | Control _ -> Plain_text
+
 type t = { document_id : string; url : string; title : string; width : float; height : float;
   scroll_x : float; scroll_y : float; nodes : node list; truncated : bool;
   view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }

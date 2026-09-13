@@ -156,6 +156,15 @@ let () =
   (match lines with
    | "[>1]" :: content_lines when String.concat "" content_lines = node.text -> ()
    | _ -> failwith "scene wrapping lost Unicode/ASCII text or the selected target prefix");
+  assert (Masc.Browser_scene.text_role_of_tag "H6" = Masc.Browser_scene.Heading 6);
+  assert (Masc.Browser_scene.text_role_of_tag "p" = Masc.Browser_scene.Plain_text);
+  let heading = {node with node_id="heading"; tag="h2"; text="Post title"} in
+  let body = {node with node_id="body"; tag="p"; text="Post body"} in
+  assert (Masc.Browser_scene.text_role {heading with kind=Raster} = Masc.Browser_scene.Plain_text);
+  let heading_scene = {scene with content={content with nodes=[heading;body]}} in
+  let heading_lines = fst (Masc_tui_types.browser_lane_page_layout ~cols:80
+    {view with scene=Some heading_scene; scene_cursor=0}) in
+  assert (heading_lines = ["[>1] ## Post title"; "Post body"]);
   let pending = {view with load=Loading (42,Scene_read 1)} in
   assert ((Lane.accept_scene ~generation:41 (Ok scene) pending).load = pending.load);
   assert ((Lane.accept_scene ~generation:42 (Ok {scene with tab_id=2}) pending).scene = None);

@@ -139,6 +139,11 @@ The image viewport retains its browser scrolling controls.
 The scene is DOM-order text, controls and image placeholders. CSS geometry is
 available to tools; this first TUI projection does not reproduce CSS layout or
 compose inline raster regions. Use image view for the browser's painted result.
+Directly observed Text nodes whose HTML tag is `h1`–`h6` are shown with a `#`
+outline prefix, so article titles and section headings remain visible while
+reading the DOM-order body. The prefix comes from the observed tag
+classification at the scene boundary; it does not infer headings from text,
+CSS, ARIA, or nested span/link structure.
 TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.

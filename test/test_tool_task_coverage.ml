@@ -221,7 +221,7 @@ let create_executing_goal ctx ~goal_id =
       ()
   with
   | Ok goal -> goal
-  | Error message -> failwith message
+  | Error error -> failwith (Goal_store.write_error_to_string error)
 
 let add_goal_linked_task ctx ~goal_id ~title =
   let result =
@@ -246,10 +246,12 @@ let keeper_transition ctx args =
   | None -> failwith "Keeper transition dispatch returned None"
 
 let assert_goal_still_executing ctx ~goal_id =
-  match Goal_store.get_goal ctx.Task.Tool.config ~goal_id with
-  | Some { phase = Goal_phase.Executing; _ } -> ()
-  | Some _ -> failwith "task completion must not mutate the linked Goal"
-  | None -> failwith "linked Goal disappeared"
+  match Goal_store.find_goal ctx.Task.Tool.config ~goal_id with
+  | Goal_store.Goal_found { phase = Goal_phase.Executing; _ } -> ()
+  | Goal_store.Goal_found _ -> failwith "task completion must not mutate the linked Goal"
+  | Goal_store.Goal_absent -> failwith "linked Goal disappeared"
+  | Goal_store.Store_unavailable u ->
+    failwith ("linked Goal store unreadable: " ^ Goal_store.unavailable_to_string u)
 
 let register_test_keeper ctx ~keeper_name =
   match

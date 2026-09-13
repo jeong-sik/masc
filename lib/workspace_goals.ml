@@ -162,7 +162,7 @@ let parse_optional_transition_action args field =
 ;;
 
 (* A phase write is decided against the phase the caller read with
-   [Goal_store.get_goal] — outside the store lock. Writing that decision with
+   [Goal_store.find_goal] — outside the store lock. Writing that decision with
    a plain overwrite lets a second concurrent transition (also decided on the
    same earlier phase) land a state the FSM never validated, e.g. Dropped on
    top of Verifying. The compare-and-update closes that window: when the
@@ -192,7 +192,12 @@ let update_goal_phase (ctx : context) (goal : Goal_store.goal) ~phase ?note () :
   | Ok (Goal_store.Goal_updated updated) -> Ok updated
   | Ok (Goal_store.Goal_phase_mismatch actual) ->
     Error (Concurrent_transition { expected = goal.phase; actual })
-  | Error msg -> Error (Store_error msg)
+  (* [Store_unavailable] keeps the Internal_error surface until RFC-0444
+     PR-2 gives the tool a typed Unavailable code; the rendered line still
+     names reason, file, mirror and reset step. *)
+  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+          | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
+    Error (Store_error (Goal_store.write_error_to_string error))
 ;;
 
 let phase_write_error_result ~tool_name ~start_time (error : phase_write_error) =
@@ -249,8 +254,11 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok (), Ok phase ->
     match Goal_store.list_goals_result ctx.config ?phase () with
-    | Error detail ->
-      error_result_typed ~tool_name ~start_time ~code:Internal_error detail
+    (* RFC-0444 PR-2 replaces this Internal_error line with the typed
+       Unavailable envelope (reason, field, file, mirror, reset_step). *)
+    | Error unavailable ->
+      error_result_typed ~tool_name ~start_time ~code:Internal_error
+        (Goal_store.unavailable_to_string unavailable)
     | Ok goals ->
     let rollup = Goal_store.compute_rollup goals in
     (* RFC-0387 (stage 1): the verification ledger joins each goal here (not
@@ -329,8 +337,14 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?priority
             ()
         with
-        | Error msg ->
+        | Error (Goal_store.Rejected msg) ->
           error_result_typed ~tool_name ~start_time ~code:Validation_error msg
+        (* A store this build cannot read is not a caller mistake: it keeps
+           the Internal_error surface until RFC-0444 PR-2 types the code. *)
+        | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+                | Goal_store.Persist_failed _ as error) ->
+          error_result_typed ~tool_name ~start_time ~code:Internal_error
+            (Goal_store.write_error_to_string error)
         | Ok (goal, action) ->
           let action_name =
             match action with
@@ -583,7 +597,14 @@ let commit_verifier_decision ~tool_name ~start_time config ~goal_id
               | _ -> Error detail)
         | Ok (Goal_phase.Already _) -> Error "proof verdict did not name a phase transition") in
     (match committed with
-     | Error detail -> error_result_typed ~tool_name ~start_time ~code:Conflict detail
+     (* RFC-0444 PR-2 gives the unreadable store its own Unavailable code. *)
+     | Error (Goal_store.Store_unavailable unavailable) ->
+       error_result_typed ~tool_name ~start_time ~code:Internal_error
+         (Goal_store.unavailable_to_string unavailable)
+     | Error (Goal_store.Goal_not_found _ | Goal_store.Rejected _
+             | Goal_store.Persist_failed _ as error) ->
+       error_result_typed ~tool_name ~start_time ~code:Conflict
+         (Goal_store.write_error_to_string error)
      | Ok (goal, (record, changed)) ->
        if changed then (
          emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
@@ -621,13 +642,17 @@ let reconcile_committed_proof config ~goal_id =
           | Ok (Goal_phase.Already _) -> Error "proof reconciliation did not name a phase transition"
           | Ok (Goal_phase.Move_to phase) ->
             Ok (goal_after_proof goal phase note, (Reconciled phase, Some verdict)))) in
+  (* The scan contract stays a string in PR-1; RFC-0444 PR-5 turns it into
+     [Scan_skipped of unavailable]. *)
   Result.map (fun ((goal : Goal_store.goal), (outcome, verdict)) ->
     Option.iter (fun verdict -> emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
       ~payload:(gate_event_payload ctx ~phase:goal.phase verdict)) verdict;
     outcome) result
+  |> Result.map_error Goal_store.write_error_to_string
 ;;
 
 let request_current_proof config ~goal_id =
+  Result.map_error Goal_store.write_error_to_string @@
   Goal_store.transact_goal config ~goal_id (fun goal ->
     match goal.phase with
     | Goal_phase.Executing | Goal_phase.Verifying ->
@@ -647,6 +672,7 @@ let recover_current_proof config ~goal_id =
     | Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped ->
         Ok (goal, false))
   |> Result.map snd
+  |> Result.map_error Goal_store.write_error_to_string
 ;;
 
 (* A repeated [request_complete] on [Verifying] is the explicit retry that
@@ -677,7 +703,11 @@ let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~act
                 (Goal_verification.mark_proof_pending ctx.config ~goal_id
                    ~criterion:(Goal_store.criterion_of_goal goal)))) in
   match result with
-  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+  (* Internal_error until RFC-0444 PR-2 types the Unavailable code. *)
+  | Error (Goal_store.Store_unavailable _ | Goal_store.Goal_not_found _
+          | Goal_store.Rejected _ | Goal_store.Persist_failed _ as error) ->
+    error_result_typed ~tool_name ~start_time ~code:Internal_error
+      (Goal_store.write_error_to_string error)
   | Ok (goal, (record, reconciled)) ->
       (match goal.phase, record with
        | Goal_phase.Verifying, Some { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
@@ -734,10 +764,15 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
-    (match Goal_store.get_goal ctx.config ~goal_id with
-     | None ->
+    (match Goal_store.find_goal ctx.config ~goal_id with
+     | Goal_store.Goal_absent ->
        error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-     | Some goal ->
+     (* A store this build cannot read is never "goal not found" (RFC-0444
+        S5). PR-2 gives it the typed Unavailable code and envelope. *)
+     | Goal_store.Store_unavailable unavailable ->
+       error_result_typed ~tool_name ~start_time ~code:Internal_error
+         (Goal_store.unavailable_to_string unavailable)
+     | Goal_store.Goal_found goal ->
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
@@ -844,6 +879,7 @@ let confirm_completion config ~goal_id ~operator_id ~request_id
       | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
       | Goal_phase.Already _ -> goal in
     Ok (updated, (record, updated.phase <> goal.phase, confirming_operator)))
+  |> Result.map_error Goal_store.write_error_to_string
   |> Result.map (fun ((goal : Goal_store.goal), (record, changed, confirming_operator)) ->
     if changed then emit_goal_event {config; agent_name = confirming_operator} ~goal_id
       ~event_type:"goal_phase" ~payload:(`Assoc ["phase", Goal_phase.to_yojson goal.phase;

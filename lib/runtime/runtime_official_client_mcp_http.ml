@@ -150,7 +150,14 @@ type dispatch_error =
       }
 
 let dispatch t ~request ~tool_specs ~call_tool message =
-  Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
+  (* This mutex reserves dispatch order; it does not own an in-place protocol
+     transaction. Session transitions use atomic compare-and-set, and tool
+     effects have their own durable boundary in the Keeper host. Every yielding
+     callback therefore leaves session state valid when cancelled. [use_ro]
+     preserves exclusive ordering but unlocks on cancellation instead of
+     protecting an arbitrarily long tool call or poisoning the reservation.
+     The short observation updates below retain their own protected mutex. *)
+  Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
     match protocol_version_header t request with
     | Error detail -> Error (Protocol_header_error detail)
     | Ok () ->

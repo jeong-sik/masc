@@ -585,6 +585,60 @@ let test_unsupported_media_is_a_delivery_error () =
     (List.map (fun item -> member "text" item |> Yojson.Safe.Util.to_string) content)
 ;;
 
+exception Stop_turn
+
+let test_turn_cancel_reaches_active_tool_and_releases_dispatch () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun outer ->
+  let ready, publish = Eio.Promise.create () in
+  let entered, mark_entered = Eio.Promise.create () in
+  let cancelled, mark_cancelled = Eio.Promise.create () in
+  let release, unblock = Eio.Promise.create () in
+  let settled, mark_settled = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw:outer (fun () ->
+    (try Eio.Switch.run (fun turn ->
+      let bridge = Runtime_official_client_mcp_http.start ~sw:turn ~net:env#net
+        ~secure_random:env#secure_random ~server_name:"masc"
+        ~tool_specs:(fun () -> [`Assoc ["name", `String "wait"]])
+        ~call_tool:(fun ~name:_ ~call_id:_ ~arguments:_ ->
+          Eio.Promise.resolve mark_entered ();
+          (try Eio.Promise.await release
+           with Eio.Cancel.Cancelled _ as exn ->
+             Eio.Promise.resolve mark_cancelled ();
+             raise exn);
+          Some { Runtime_official_client_mcp_http.outcome =
+              { Runtime_official_client_mcp.success = true; content = "released"; content_blocks = None }
+            ; after_response_sent = (fun () -> ()) }) () in
+      Eio.Promise.resolve publish (bridge, turn);
+      Eio.Fiber.await_cancel ())
+     with Stop_turn -> ());
+    Eio.Promise.resolve mark_settled ());
+  let bridge, turn = Eio.Promise.await ready in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version = initialize_session ~sw:outer ~net:env#net ~endpoint ~authorization in
+  let request_finished, finish_request = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw:outer (fun () ->
+    (try ignore (request ~protocol_version ~sw:outer ~net:env#net ~endpoint ~authorization
+      (json_request 7 "tools/call" (`Assoc ["name", `String "wait"; "arguments", `Assoc []])))
+     with End_of_file | Eio.Io _ -> ());
+    Eio.Promise.resolve finish_request ());
+  Eio.Promise.await entered;
+  Eio.Switch.fail turn Stop_turn;
+  (* The test's fallback releases the callback even on the broken protected
+     path, so a regression fails finitely instead of hanging switch teardown. *)
+  let reached_tool = Eio.Fiber.first
+    (fun () -> Eio.Promise.await cancelled; true)
+    (fun () -> Eio.Time.sleep env#clock 2.0; false) in
+  Eio.Promise.resolve unblock ();
+  Eio.Promise.await settled;
+  Eio.Promise.await request_finished;
+  check bool "turn cancellation reaches the yielding tool callback" true reached_tool;
+  let snapshot = Runtime_official_client_mcp_http.For_testing.snapshot bridge in
+  check int "cancelled tool has no completed-call observation" 0 snapshot.tool_calls;
+  check bool "cancellation does not poison session observation" true
+    (snapshot.phase = Runtime_official_client_mcp.Ready)
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -597,7 +651,9 @@ let () =
             test_unsupported_media_is_a_delivery_error
         ] )
     ; ( "effect boundary"
-      , [ test_case
+      , [ test_case "turn cancellation reaches active callback without poisoning dispatch" `Quick
+            test_turn_cancel_reaches_active_tool_and_releases_dispatch
+        ; test_case
             "callback failures remain typed and do not poison lifecycle"
             `Quick
             test_callback_failures_do_not_poison_protocol_state

@@ -386,7 +386,29 @@ let test_unpublished_registry_is_an_explicit_error () =
       (String.concat ", " slots)
 ;;
 
+let with_configured_verifier_cli f =
+  let saved = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "verifier-cli-runtime-" ".toml" in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved; Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun out -> output_string out {|[providers.official]
+protocol = "claude-code"
+command = "fixture-not-executed"
+is-non-interactive = true
+[models.verifier]
+api-name = "verifier-fixture"
+max-context = 400000
+tools-support = true
+[official.verifier]
+[runtime]
+default = "official.verifier"
+|});
+    (match Runtime.init_default ~config_path:path with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    f ())
+;;
+
 let test_lane_resolution_preserves_frozen_order_and_drops_rejected_slots () =
+  with_configured_verifier_cli @@ fun () ->
   let snapshot = load_verifier_snapshot () in
   (match
      Runtime.publish_exact_output_registry

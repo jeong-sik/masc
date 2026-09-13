@@ -70,14 +70,14 @@ let test_commit_coalescing_and_restart () = with_base (fun base_path clock ->
      | Available descriptor -> Alcotest.(check string) "Keeper discovery points at latest captured input"
          (Inventory.fingerprint latest) descriptor.context_sha256
      | Missing | Unavailable _ -> Alcotest.fail "curator did not publish discovery");
-    Worker.request ~base_path;
+    ignore (Worker.request ~base_path);
     await_idle ~clock ~base_path;
     Alcotest.(check int) "unchanged wake does not call a model" 2 (List.length !contexts);
     let published_id = match Masc.Workspace_memory_publication.observe ~base_path with
       | Available descriptor -> descriptor.proposal_id
       | Missing | Unavailable _ -> Alcotest.fail "missing prior publication" in
     Sys.remove (Filename.concat base_path (Common.masc_dirname ^ "/workspace-memory/publication.json"));
-    Worker.request ~base_path;
+    ignore (Worker.request ~base_path);
     await_idle ~clock ~base_path;
     Alcotest.(check int) "missing descriptor repair does not call a model" 2 (List.length !contexts);
     (match Masc.Workspace_memory_publication.observe ~base_path with
@@ -144,20 +144,38 @@ let test_directory_alias () = with_base (fun base_path clock ->
 
 let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
   let key = Prompt_names.workspace_memory_curator in
+  let mutation = Server_prompt_override_mutation.apply ~base_path in
+  let applied request = match mutation request with
+    | Ok applied -> applied
+    | Error (Server_prompt_override_mutation.Validation detail | Persistence detail) -> Alcotest.fail detail in
+  let set value = Server_prompt_override_request.Set { key; value } in
+  let clear = Server_prompt_override_request.Clear { key } in
+  let path = Filename.concat (Filename.concat base_path Common.masc_dirname) "prompt_overrides.json" in
+  let persisted () = match Prompt_override_persistence.load ~path with
+    | Ok entries -> entries
+    | Error error -> Alcotest.fail (Prompt_override_persistence.error_to_string error) in
+  let first = "Initial override. {{workspace_memory_inventory}}" in
+  let second = "Changed curator instructions. Preserve attribution. {{workspace_memory_inventory}}" in
   commit base_path "Stable source observation";
+  let inventory = Inventory.collect ~base_path |> require |> Inventory.fingerprint in
   let prompts = ref [] in
   let execute ~rendered_prompt context =
+    Alcotest.(check string) "all executions retain identical memory" inventory (Inventory.fingerprint context);
     prompts := rendered_prompt :: !prompts;
     Ok (proposal context, "test.slot") in
   Fun.protect ~finally:(fun () -> Prompt_registry.clear_prompt_override key) (fun () ->
+    Alcotest.(check bool) "saved without an owner does not claim queued execution" true
+      ((applied (set first)).curator_refresh = Some Worker.No_owner);
     Eio.Switch.run (fun sw ->
       Worker.For_testing.start ~sw ~base_path ~execute;
       await_idle ~clock ~base_path;
-      ignore (Prompt_registry.set_override key
-        "Changed curator instructions. Preserve attribution. {{workspace_memory_inventory}}" |> require);
-      Worker.request ~base_path;
+      let result = applied (set second) in
+      Alcotest.(check bool) "successful persisted HTTP mutation queues existing owner" true
+        (result.curator_refresh = Some Worker.Queued);
+      Alcotest.(check bool) "new override persisted before caller sees success" true
+        (List.exists (fun (entry : Prompt_override_persistence.entry) -> entry.key = key && entry.value = second) (persisted ()));
       await_idle ~clock ~base_path;
-      Alcotest.(check int) "changed prompt with identical sources executes again" 2 (List.length !prompts);
+      Alcotest.(check int) "changed prompt with identical sources executes without explicit wake" 2 (List.length !prompts);
       Alcotest.(check bool) "delivered rendered prompt changed" true (List.hd !prompts <> List.nth !prompts 1);
       let canonical = Unix.realpath base_path in
       let latest = Runs.list_runs (Runs.global ()) |> List.find (fun (run : Runs.run) ->
@@ -166,6 +184,27 @@ let test_prompt_change_is_a_new_request () = with_base (fun base_path clock ->
       let Runs.Exact_input input = full.input in
       Alcotest.(check string) "registry preserved the exact delivered prompt" (List.hd !prompts)
         (input |> field "prompt" |> field "rendered" |> string);
+      (match mutation (set "{{unknown_curator_variable}}") with
+       | Error (Server_prompt_override_mutation.Validation _) -> ()
+       | _ -> Alcotest.fail "invalid template accepted");
+      Alcotest.(check bool) "rejected mutation does not wake owner" true (Worker.For_testing.is_idle ~base_path);
+      Alcotest.(check string) "rejected mutation preserves effective prompt" second (Prompt_registry.get_prompt key);
+      Sys.rename path (path ^ ".saved");
+      Unix.mkdir path 0o700;
+      Fun.protect ~finally:(fun () -> Unix.rmdir path; Sys.rename (path ^ ".saved") path) (fun () ->
+        List.iter (fun request ->
+          (match mutation request with
+           | Error (Server_prompt_override_mutation.Persistence _) -> ()
+           | _ -> Alcotest.fail "blocked persisted mutation unexpectedly succeeded");
+          Alcotest.(check bool) "failed persistence does not wake owner" true (Worker.For_testing.is_idle ~base_path);
+          Alcotest.(check string) "failed persistence preserves effective prompt" second (Prompt_registry.get_prompt key))
+          [set first; clear]);
+      Alcotest.(check bool) "persisted clear queues reevaluation" true
+        ((applied clear).curator_refresh = Some Worker.Queued);
+      Alcotest.(check bool) "clear removed persisted override before success" false
+        (List.exists (fun (entry : Prompt_override_persistence.entry) -> entry.key = key) (persisted ()));
+      await_idle ~clock ~base_path;
+      Alcotest.(check int) "clear executes restored file prompt with unchanged memory" 3 (List.length !prompts);
       Worker.For_testing.stop ~base_path)))
 
 let test_failed_publication_is_not_success () = with_base (fun base_path clock ->

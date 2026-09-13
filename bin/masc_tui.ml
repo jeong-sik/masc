@@ -10466,12 +10466,6 @@ let start_goal_transition state ~mailbox ~(goal_id : string)
    lifecycle already uses: the first press names the action, the same press
    again submits it, and any other key disarms. [Goal_phase.Public_action.t]
    rides along so no string name of an action exists in this file. *)
-let goal_public_action_key (action : Goal_phase.Public_action.t) =
-  match action with
-  | Goal_phase.Public_action.Request_complete -> "c"
-  | Goal_phase.Public_action.Drop -> "x"
-  | Goal_phase.Public_action.Reopen -> "o"
-
 let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
     =
   match state.planning_mode with
@@ -10487,7 +10481,7 @@ let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
           state.goal_action_error <- None;
           add_event state "system"
             (Printf.sprintf "press %s again to %s goal %s"
-               (goal_public_action_key action)
+               (planning_action_key action)
                (match action with
                 | Goal_phase.Public_action.Request_complete ->
                     "request completion of"

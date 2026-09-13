@@ -541,9 +541,12 @@ let test_lanes_run_list_footer_names_the_drill_down () =
    one scroll walks, so the two panes move together and the key's name says
    which of the two it does. *)
 let test_lanes_run_detail_footer_appends_the_scroll_position () =
-  check str "the run detail footer carries its live scroll position"
-    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  (3/40)"
-    (Masc_tui_keys.footer_hints_lanes_run_detail ~scroll:3 ~max_scroll:40)
+  check str "the stacked run detail footer carries the window it drew"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit  4-23/60"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:(Some "4-23/60"));
+  check str "the split panes name their own windows, so the footer does not"
+    "j/k:compare  PgUp/PgDn:page  Left / Esc:back  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints_lanes_run_detail ~position:None)
 
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
@@ -601,7 +604,7 @@ let test_every_detail_surface_steps_through_its_list () =
 
 let test_planning_footer_carries_filter_and_sort () =
   check str "planning names filter and sort"
-    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:complete  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
+    "j/k:move  v:next Planning tab  f:filter  s:sort  [ / ]:previous / next  PgUp/PgDn:page  Home/End:top/bottom  Right / Enter:detail  Left / Esc:back  c:request completion  x:drop  o:reopen  Y:copy link  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Planning)
 
 let test_board_footer_names_reversible_hearth_navigation () =
@@ -968,6 +971,35 @@ let test_config_footer_names_child_hops () =
            (String.split_on_char ' ' hints
             |> List.filter (fun piece -> not (String.equal piece "")))))
     [ "9:Runtime"; "s:resources"; "t:tools" ]
+
+(* Runtime's footer comes from the table. The renderer's own line named
+   neither [c], the only key to Clients, nor [Esc], the way back to Config, and
+   it offered [e] as if the key table did not know it. *)
+let test_runtime_footer_is_the_tables () =
+  let lanes = Masc_tui_keys.footer_hints_runtime ~mode:Runtime_lanes in
+  let all = Masc_tui_keys.footer_hints_runtime ~mode:Runtime_all in
+  let has hints piece =
+    let n = String.length piece and m = String.length hints in
+    let rec go i = i + n <= m && (String.sub hints i n = piece || go (i + 1)) in
+    go 0
+  in
+  List.iter
+    (fun piece ->
+      Alcotest.(check bool) ("keeper lanes name " ^ piece) true (has lanes piece))
+    [ "c:clients"; "Left / Esc:back"; "p:all runtimes"; "e:add failover"; "r:refresh" ];
+  Alcotest.(check bool) "all runtimes name where p goes" true (has all "p:service lanes");
+  Alcotest.(check bool) "and offer no failover to append" false (has all "e:add failover");
+  Alcotest.(check bool) "the refresh is not called live" false (has lanes "live refresh");
+  (* The sheet reads the same table and names the whole walk once, because it
+     is not drawn from either reading. *)
+  let labels key =
+    Masc_tui_keys.for_surface Runtime
+    |> List.filter (fun (b : Masc_tui_keys.binding) -> String.equal b.Masc_tui_keys.key key)
+    |> List.map (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.label)
+  in
+  Alcotest.(check (list string)) "the sheet names the p walk once"
+    [ "keeper lanes / all runtimes / service lanes" ] (labels "p");
+  Alcotest.(check (list string)) "and lists failover" [ "add failover" ] (labels "e")
 
 let test_system_logs_owns_only_its_real_filter_keys () =
   (* The newest/oldest ends and f still belong to Acting. Logs owns the server
@@ -2067,6 +2099,8 @@ let () =
             test_the_sheet_says_the_listing_tail_once
         ; Alcotest.test_case "Config names child hops" `Quick
             test_config_footer_names_child_hops
+        ; Alcotest.test_case "Runtime footer is the table's" `Quick
+            test_runtime_footer_is_the_tables
         ; Alcotest.test_case "Config footer follows active pane and width" `Quick
             test_config_pane_footer_actions
         ; Alcotest.test_case "Activity filter survives evidence hint" `Quick

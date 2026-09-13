@@ -429,6 +429,10 @@ val planning_row :
     one, so six cells of the title were spent on being different. They match
     now. *)
 
+val board_id_width : int
+(** Cells the ID column holds. The reader names a post by the same id and folds
+    it at the same width. *)
+
 type board_row_values = {
   brow_mark : string;
   brow_id : string;

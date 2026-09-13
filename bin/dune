@@ -20,7 +20,7 @@
 
 (executable
  (name main_eio)
- (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
+ (modules main_eio masc_cli_setup masc_cli_runtime_sample masc_cli_onboarding masc_cli_prerequisites masc_cli_inspect_file masc_cli_docker_session masc_cli_model_resume masc_cli_workspace_upgrade masc_cli_antigravity masc_cli_codex_models masc_cli_owner_upgrade masc_cli_runtime_setup)
  (public_name masc)
  (package masc)
  (libraries
@@ -49,6 +49,7 @@
   masc.server
   masc.config
   masc.runtime
+  masc.tool_types
   masc.config_dir_resolver
   masc.embedded_config
   masc.host_config
@@ -1189,6 +1190,7 @@
   masc_tui_chart
   masc_tui_context_inspector
   masc_tui_rows
+  masc_tui_scroll
   masc_tui_theme
   masc_tui_types
   masc_tui_message_layout
@@ -1256,6 +1258,7 @@
   masc_tui_composer_projection
   masc_tui_roster_pane
   masc_tui_rows
+  masc_tui_scroll
   masc_tui_code_lexer
   masc.masc_goal
   masc_tui_pr_ref

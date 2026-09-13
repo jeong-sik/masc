@@ -1,5 +1,7 @@
 open Lane_addon_types
 let ( let* ) = Result.bind
+type error = Invalid_manifest of string | Io_failure of string
+let error_to_string = function Invalid_manifest detail | Io_failure detail -> detail
 let output_ports world =
   let parse_port (id, value) =
     let* () = if String.trim id = "" then Error "world.outputs has a blank port name" else Ok () in
@@ -29,7 +31,7 @@ let output_ports world =
         |> Result.map (List.sort (fun (a, _) (b, _) -> String.compare a b))
   | Some _ -> Error "world.outputs must be a table"
 let load ~path =
-  try
+  let parse () =
     let path = Unix.realpath path in
     let document = Otoml.Parser.from_file path in
     let read key convert =
@@ -95,8 +97,12 @@ let load ~path =
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
       directory = Filename.dirname path; skills_directory; action_tool; outputs;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
-  with
-  | Sys_error message -> Error message
-  | Unix.Unix_error (error, call, arg) -> Error (call ^ " " ^ arg ^ ": " ^ Unix.error_message error)
-  | Otoml.Parse_error (_, message) -> Error message
-  | Otoml.Duplicate_key message -> Error message
+  in
+  try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with
+  | Sys_error message -> Error (Io_failure message)
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR) as error, call, arg) ->
+      Error (Invalid_manifest (call ^ " " ^ arg ^ ": " ^ Unix.error_message error))
+  | Unix.Unix_error (error, call, arg) ->
+      Error (Io_failure (call ^ " " ^ arg ^ ": " ^ Unix.error_message error))
+  | Otoml.Parse_error (_, message) -> Error (Invalid_manifest message)
+  | Otoml.Duplicate_key message -> Error (Invalid_manifest message)

@@ -33,6 +33,37 @@ answers with both steps and asks before running either:
 |---|---|
 | `brew install whisper-cpp` | 8.9MB bottle; its `whisper-cli` transcribes a file |
 | the model | `ggml-large-v3-turbo.bin`, 1,624,555,275 bytes |
+| `brew install sox` | 2.4MB installed, 14.4.2; its `rec` makes the file to transcribe |
+
+The third one is easy to leave out and was. Transcribing a file and making one
+are different halves: masc records a capture with sox's `rec` and marks the
+start and end of a recording with sox's `play`. Neither is in the base system.
+
+The tones say nothing when `play` is missing — they are swallowed at debug
+level. The recorder used to say a number. Measured 2026-09-13 by running the
+real capture with `PATH` pointed at an empty directory:
+
+| Build | What the capture answered |
+|---|---|
+| before | `rec exit 127` |
+| after | `rec is not installed; it comes with sox. `masc prerequisite-actions whisper` names the install.` |
+
+The number was not only unhelpful but ambiguous. The process runner the
+recorder used folds every failure before a process exists — not found, a
+denied permission, a working directory that would not open — into exit 127,
+so reading 127 as "not installed" would have given some of those the wrong
+cause. The recorder now uses the runner that returns the refusal as a value,
+names sox only for `Executable_not_found`, and keeps the runner's own sentence
+for everything else. Both runners spawn through the same drain, so the cancel
+grace that keeps the end of a recording is unchanged.
+
+`test/voice_capture_without_sox` is that measurement kept: it runs
+`record_and_transcribe` with an empty `PATH`, so no microphone is opened and
+the answer does not depend on whether the machine running it has sox. Putting
+the old recorder branch back turns it red with `rec exit 127`.
+
+A device that posts audio to `POST /api/v1/voice/transcribe` needs none of
+this; a person speaking into the TUI does.
 
 Neither starts a server. `say` and `whisper-cli` each run once and exit, so
 masc runs them the way it runs `curl` for the endpoints that are addresses:

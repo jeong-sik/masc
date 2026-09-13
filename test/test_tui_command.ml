@@ -28,6 +28,7 @@ let describe = function
   | Command.Open_metrics -> "open-metrics"
   | Command.Switch_keeper name -> "keeper:" ^ name
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
+  | Command.Run_next -> "run-next"
   | Command.Interrupt_turn -> "interrupt"
   | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
   | Command.Steer_turn message -> "steer:" ^ message
@@ -123,6 +124,7 @@ let test_pane_commands_parse_by_word () =
     ; "acting-pane-tab-unknown:code"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
+    ; "run-next"
     ; "interrupt"
     ; "interrupt:tester"
     ; "steer:answer the correction\nwith this context"
@@ -168,6 +170,7 @@ let test_pane_commands_parse_by_word () =
        ; "/activity code"
        ; "/keeper orbiter"
        ; "/keeper   "
+       ; "/run-next"
        ; "/interrupt"
        ; "/interrupt tester"
        ; "/steer answer the correction\nwith this context"

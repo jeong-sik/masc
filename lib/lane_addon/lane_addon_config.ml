@@ -107,7 +107,8 @@ let decode ~source_path ~id fields =
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
   let manifest_path = absolute_from ~directory manifest_path in
-  let* package = Lane_addon_manifest.load ~path:manifest_path in
+  let* package = Lane_addon_manifest.load ~path:manifest_path
+    |> Result.map_error Lane_addon_manifest.error_to_string in
   let* binding = match List.assoc_opt "binding" fields with
     | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as value) ->
         json_of_toml ~path:"binding" value

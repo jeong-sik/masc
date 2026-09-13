@@ -150,7 +150,66 @@ let test_unknown_keeper_is_a_failure_not_idle () =
      | Keeper_registry.Exact_turn_cancelled _ -> false)
 ;;
 
+let test_observed_identity_survives_turn_replacement () =
+  with_env @@ fun ~base ->
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  let name = "replace-keeper" in
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  Eio.Switch.run @@ fun old_switch ->
+  Keeper_registry.set_turn_switch ~base_path:base name (Some old_switch);
+  let old_token = Option.get (Keeper_registry.current_turn_interrupt_token ~base_path:base name) in
+  Eio.Switch.run @@ fun successor ->
+  Keeper_registry.set_turn_switch ~base_path:base name (Some successor);
+  let new_token = Keeper_registry.current_turn_interrupt_token ~base_path:base name in
+  check "every switch has a different identity" (new_token <> Some old_token);
+  check "stale screen cannot cancel successor"
+    (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token:old_token
+      = Keeper_registry.Observed_turn_changed);
+  Keeper_registry.clear_turn_switch_if_current ~base_path:base name old_switch;
+  check "old finalizer cannot clear successor"
+    (Keeper_registry.current_turn_interrupt_token ~base_path:base name = new_token);
+  Keeper_registry.clear_turn_switch_if_current ~base_path:base name successor;
+  check "current finalizer clears itself"
+    (Keeper_registry.current_turn_interrupt_token ~base_path:base name = None);
+  Keeper_registry.For_testing.clear ();
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  Keeper_registry.set_turn_switch ~base_path:base name (Some successor);
+  check "same-name registration rejects the old lane token"
+    (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token:old_token
+      = Keeper_registry.Observed_turn_changed);
+  Keeper_registry.clear_turn_switch_if_current ~base_path:base name successor
+;;
+
+let test_observed_interrupt_is_idempotent () =
+  with_env @@ fun ~base ->
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  let name = "exact-keeper" in
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
+  Eio.Switch.run @@ fun outer ->
+  let ready, publish = Eio.Promise.create () in
+  let ended, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw:outer (fun () ->
+    (try Eio.Switch.run (fun turn ->
+      Keeper_registry.set_turn_switch ~base_path:base name (Some turn);
+      Eio.Promise.resolve publish (Option.get (Keeper_registry.current_turn_interrupt_token ~base_path:base name));
+      Eio.Fiber.await_cancel ())
+     with exn when Keeper_registry_types.is_operator_interrupt exn -> ());
+    Eio.Promise.resolve finish ());
+  let interrupt_token = Eio.Promise.await ready in
+  check "matching target receives signal"
+    (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token
+      = Keeper_registry.Observed_turn_signalled);
+  check "duplicate target cannot signal another turn"
+    (Keeper_registry.interrupt_observed_turn ~base_path:base name ~interrupt_token
+      = Keeper_registry.Observed_turn_changed);
+  Eio.Promise.await ended
+;;
+
 let () =
+  test_observed_identity_survives_turn_replacement ();
+  test_observed_interrupt_is_idempotent ();
   test_interrupt_cancels_turn ();
   test_interrupt_no_turn_is_noop ();
   test_unknown_keeper_is_a_failure_not_idle ();

@@ -63,7 +63,7 @@ RUN pnpm run build
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl bash \
+    ca-certificates curl bash ffmpeg \
     libffi8 libgmp10 libpq5 libsqlite3-0 libssl3t64 libzstd1 tini zlib1g \
     && rm -rf /var/lib/apt/lists/*
 

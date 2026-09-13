@@ -169,6 +169,14 @@ open Alcotest
    added headroom. These tools connect optional package environments through
    one domain-independent path; package installation adds no per-domain tool.
    CI verifies the production renderer; this is not a Keeper behavior gate. *)
+(* 2026-09-13: 109,398 across 126 tools (CI 34705880512 at 09c8510e). The
+   whole +162 is masc_fusion's task_id parameter description; no tool is
+   added. What it bought: the parameter now says what happens when neither
+   task_id nor goal_id is given -- the runtime picks the caller's active Task
+   from authoritative ownership -- and that the captured contract and Goal
+   criteria are separate from the caller's own summary. Without that a Keeper
+   omits the argument expecting no Task, or restates the contract into the
+   summary. Set to the measurement with no added headroom. *)
 (* 2026-09-13: the DOS lane adds seven deferred tools -- masc_dos_load, _eject,
    _screen, _step, _press, _type, _peek. CI 34705960512 measured 114,705 bytes
    / 133 tools before trimming; the declarations then lost 883 rendered bytes
@@ -204,7 +212,10 @@ open Alcotest
    1,663-byte declaration editor addition preserves main's existing headroom.
    The combined production renderer is checked by the following native CI;
    this arithmetic is not a claim that the combined source has run yet. *)
-let ceiling_bytes = 116_163
+(* Merge the main ceiling with Fusion's independently measured +162 JSON
+   bytes. This preserves main's existing headroom; it adds none for the merge.
+   The combined production surface is measured by CI, not inferred as passing. *)
+let ceiling_bytes = 116_163 + 162
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc

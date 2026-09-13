@@ -1,0 +1,6 @@
+{
+  "scope": "Initial disposable replay harness failure, not a language-server verdict",
+  "error": "Content-Length decoder tried to parse the whole header including Content-Type as an integer; finally receipt construction also referenced unset observed",
+  "correction": "Parse Content-Length independently from other headers and initialize observed before observation",
+  "rerun": "default-environment"
+}

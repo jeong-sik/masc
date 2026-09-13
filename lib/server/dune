@@ -112,10 +112,10 @@
   masc.keeper_chat_delivery_identity
   masc.keeper_failure_taxonomy
   masc.keeper_toml
+  masc.config_journal
   masc.voice_setup
   masc.voice_config
   masc.voice_runtime_overlay
-
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics

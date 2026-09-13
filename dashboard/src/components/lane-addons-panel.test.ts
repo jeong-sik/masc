@@ -128,7 +128,37 @@ describe('optional Lane Add-on surface', () => {
     expect(screen.getByRole('alert').textContent).toContain('/workspace/.masc/config/lane-addons/site.toml — Invalid TOML string')
     expect(screen.getByText('observing')).toBeTruthy()
     expect(within(screen.getByLabelText('Configuration for instance-1')).getByText('Installed configuration: configuration-1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeTruthy()
     expect(api.detachLaneAddon).not.toHaveBeenCalled()
+  })
+  it('keeps detached history without offering edits to absent or differently owned files', async () => {
+    const directory = '/workspace/.masc/config/lane-addons'
+    const sourcePath = `${directory}/site.toml`
+    const historical = { ...snapshot.instances[0], phase: { kind: 'detached' },
+      configuration: { id: 'website', source_path: sourcePath, revision: 'configuration-1' } }
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory, complete: true, declarations: [], issues: [] }, instances: [historical],
+    }))
+    const screen = render(html`<${LaneAddonsPanel} />`)
+    await screen.findByText('No readable TOML declarations.')
+    expect(screen.getByLabelText('Configuration for instance-1').textContent).toContain('configuration-1')
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory, complete: true, issues: [], declarations: [{ id: 'replacement-owner', source_path: sourcePath,
+        desired_revision: 'configuration-2', applied_revision: null, instance_id: null }] }, instances: [historical],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    await screen.findByText('replacement-owner')
+    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
+    api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...snapshot,
+      configuration: { directory, complete: true, declarations: [], issues: [{ source_path: sourcePath, id: null,
+        message: 'Current file needs repair' }] }, instances: [historical],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+    await screen.findByText('No readable TOML declarations.')
+    expect(screen.getByRole('button', { name: `Edit TOML ${sourcePath}`, exact: true })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit TOML for instance-1', exact: true })).toBeNull()
   })
   it('allows detaching while observation is in progress without waiting for observe', async () => {
     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot(snapshot))

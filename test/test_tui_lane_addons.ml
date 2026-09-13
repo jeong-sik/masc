@@ -199,7 +199,7 @@ let guided_actions () =
   let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
     observation_seq=1;rows_count=0;source_path=None;binding=`Assoc [];outputs=[];
-    skills_directory=None;action_schema=Some schema} in
+    skills_directory=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some snapshot} |> ok in
@@ -215,7 +215,7 @@ let guided_actions () =
     (Result.is_error (UI.submit_action {view with snapshot=Some replaced}));
   check bool "observation-only package has no invented action" true
     (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some
-      {snapshot with instances=[{instance with action_schema=None}]}}));
+      {snapshot with instances=[{instance with action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty}]}}));
   let technical = UI.open_actions ~request_id:first.request_id
     {UI.initial with presentation=UI.Technical;snapshot=Some snapshot} |> ok in
   check bool "opening actions exposes the choice even from technical mode" true (technical.presentation=UI.Summary);
@@ -256,7 +256,7 @@ let context_flow_uses_declared_connections () =
   let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
     observation_seq=1;rows_count=0;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None} in
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
       "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in

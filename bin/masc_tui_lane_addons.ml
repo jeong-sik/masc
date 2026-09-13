@@ -5,7 +5,7 @@ type instance = {
   id : string; run_id : string; addon_id : string; title : string;
   revision : string; phase : Row.phase; observation_seq : int; rows_count : int;
   source_path : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
-  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option;
+  skills_directory : string option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
 }
 type declaration = {
   source_path : string; installation_id : string option; desired : string option;
@@ -104,8 +104,16 @@ let instance json =
   let* skills_directory = optional "skills_directory" text package in
   let* incarnation = get text "incarnation" json in
   let* action_schema = optional "action_schema" (function `Assoc _ as schema -> Ok schema | _ -> Error "expected action schema") json in
+  let* package_fields = match package with `Assoc fields -> Ok fields | _ -> Error "expected package object" in
+  let* binding_schema = match List.assoc_opt "binding_schema" package_fields with
+    | None | Some `Null -> Ok None
+    | Some (`Assoc _ as schema) -> Ok (Some schema)
+    | _ -> Error "expected binding schema object" in
+  let* display = match List.assoc_opt "presentation" package_fields with
+    | None -> Ok Masc.Lane_addon_presentation.empty
+    | Some value -> Masc.Lane_addon_presentation.of_json value in
   Ok { id; run_id; addon_id; title; revision; phase; observation_seq; rows_count;
-    source_path;binding;outputs;skills_directory;incarnation;action_schema }
+    source_path;binding;outputs;skills_directory;incarnation;action_schema;binding_schema;display }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in

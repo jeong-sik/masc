@@ -514,12 +514,10 @@ let test_the_observation_names_a_command_override () =
       output_string
         out
         (before
-         ^ "\n[[voice.tts.endpoints]]\nid = \"say\"\nkind = \"macos_say\"\ncommand = \
+         ^ "\n[voice.tts]\ndefault_model = \"fixture-model\"\ndefault_voice = \"Fixture Voice\"\n\n[[voice.tts.endpoints]]\nid = \"say\"\nkind = \"macos_say\"\ncommand = \
             \"/opt/bin/say\"\n"));
-    (* The tts section the appended endpoint belongs to still needs its required
-       fields, so this only asserts the field survives when the file parses. *)
     match Actions.observe ~base_path with
-    | Error _ -> ()
+    | Error error -> Alcotest.fail (Actions.error_message error)
     | Ok json ->
       let commands =
         match member "endpoints" (member "tts" json) with
@@ -532,9 +530,8 @@ let test_the_observation_names_a_command_override () =
             endpoints
         | _ -> []
       in
-      if commands <> []
-      then
-        Alcotest.(check bool) "the override is named" true (List.mem "/opt/bin/say" commands))
+      Alcotest.(check (list string)) "the configured override is observed"
+        [ "/opt/bin/say" ] commands)
 
 let endpoint_change extra =
   `Assoc
@@ -684,6 +681,42 @@ let test_the_observation_names_every_settings_section () =
         ; "gate", [ "always_allow"; "exempt_agents" ]
         ])
 
+
+(* The revision the route answers with has to be the one this write produced,
+   not whatever a read after the commit happens to see. Taken from a second,
+   unlocked read, it answered a failure for a write that landed, and under a
+   concurrent writer it answered that writer's revision -- which the client
+   would then send back as [expected_revision] without ever having observed
+   what it described. The check a caller can make is the one that matters:
+   editing again with it works. *)
+let test_the_answered_revision_is_the_one_this_write_made () =
+  with_workspace (fun ~base_path ~path ->
+    let endpoint id =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint",
+          `Assoc
+            [ "id", `String id
+            ; "kind", `String "elevenlabs_direct"
+            ; "api_key_env", `String "ELEVENLABS_API_KEY"
+            ]
+        ]
+    in
+    let answered =
+      match Actions.apply ~base_path (request (revision ~base_path) [ endpoint "first" ]) with
+      | Error error -> Alcotest.fail (Actions.error_message error)
+      | Ok answer -> string_member "revision" answer
+    in
+    Alcotest.(check string) "and it is what the file now carries" (revision ~base_path)
+      answered;
+    (* The wizard stays open and saves again with what it was handed. *)
+    match Actions.apply ~base_path (request answered [ endpoint "second" ]) with
+    | Error error ->
+      Alcotest.failf "editing again with the answered revision was refused: %s"
+        (Actions.error_message error)
+    | Ok _ -> ignore (read path))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -701,6 +734,8 @@ let () =
             test_apply_writes_and_answers_with_the_new_revision
         ; Alcotest.test_case "a stale revision is a conflict" `Quick
             test_a_stale_revision_is_a_conflict
+        ; Alcotest.test_case "the answered revision is the one this write made" `Quick
+            test_the_answered_revision_is_the_one_this_write_made
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
         ] )
     ; ( "a kind is taken or refused for what it can do"

@@ -2033,7 +2033,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
       | changes ->
           match Voice_setup.apply ~runtime_config_path ~expected_revision:revision changes with
           | Error error -> refuse (Voice_setup.error_message error)
-          | Ok () ->
+          | Ok _revision ->
               print_endline "voice is configured";
               0
 

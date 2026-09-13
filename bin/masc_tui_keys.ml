@@ -40,8 +40,8 @@ let config_bindings =
   ; b Navigate "t" "tools"
       ~help:"the tool catalog, receipts, and usage, off the ring under Config", None
   ; b Act "e" "edit"
-      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override",
-      Some [ Config_runtime; Config_models; Config_params; Config_prompts ]
+      ~help:"params use a type-aware field; runtime.toml previews; models open source; prompts save an override; voice opens the setup wizard",
+      Some [ Config_runtime; Config_models; Config_params; Config_prompts; Config_voice ]
   ; b Act "E" "advanced JSON"
       ~help:"on params only: edit the exact JSON value", Some [ Config_params ]
   ; b Act "Enter" "edit / use"
@@ -52,6 +52,28 @@ let config_bindings =
       Some [ Config_params; Config_prompts; Config_themes ]
   ; b Act "f" "filter"
       ~help:"on themes, cycle All / Dark / Light schemes", Some [ Config_themes ]
+    (* Pane-scoped writes. Each of these is the only key that does what it
+       does, and none of them were listed: presets could be made and put
+       back, and the prompt list could be switched between three readings,
+       with nothing on screen saying so. Short labels: the pane each belongs
+       to and what it does are in the help, which the ? overlay draws in
+       full. *)
+  ; b Act "n" "new"
+      ~help:"on presets, name a preset holding the configuration as it stands",
+      Some [ Config_presets ]
+  ; b Act "u" "restore"
+      ~help:"on presets, put the selected one back; press twice to confirm",
+      Some [ Config_presets ]
+  ; b Act "i" "input"
+      ~help:"on prompts, the input this prompt was last given", Some [ Config_prompts ]
+  ; b Act "a" "fragments"
+      ~help:"on prompts, show or hide the internal pieces the main prompts \
+             are built from; not on the runtime assets reading",
+      Some [ Config_prompts ]
+  ; b Act "o" "assets"
+      ~help:"on prompts, switch between the read-only runtime assets and \
+             the registry you can override",
+      Some [ Config_prompts ]
   ; b Act "Esc" "overview", None
   ; b Meta "r" "reload", None
   ; b Meta "Tab" "next", None

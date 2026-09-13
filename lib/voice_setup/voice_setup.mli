@@ -107,8 +107,11 @@ val apply
   :  runtime_config_path:string
   -> expected_revision:string
   -> change list
-  -> (unit, error) result
+  -> (string, error) result
 (** Apply every change in order, in one commit under the config write lock.
+    [Ok] carries the source revision this commit produced, taken from the
+    commit itself so a caller can keep editing against a revision it has
+    actually observed.
 
     All of them or none. Changes are taken as a list rather than one call each
     because they depend on one another: a first endpoint and the

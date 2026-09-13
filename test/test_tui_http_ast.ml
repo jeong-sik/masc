@@ -2591,6 +2591,20 @@ let test_the_pane_surfaces_open_on_a_title_row () =
     (calls "render_resources" "pane_surface_content_height" >= 1)
 ;;
 
+(* The runtime picker is the contract's too: the frame counts its rows, the
+   failure row is the shared one, and the footer is the key table's. *)
+let test_the_runtime_picker_is_the_shared_contract () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_runtime_pick" ~callee
+  in
+  check int "the frame is drawn by the contract" 1 (calls "surface_chrome");
+  check int "nothing finishes the frame by hand" 0 (calls "finish_surface");
+  check int "the failure row is the shared one" 1 (calls "data_unreliable_row");
+  check int "the footer is the key table's" 1
+    (calls "Masc_tui_keys.footer_hints")
+;;
+
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
    straight to the frame. A long scalar then ended at the right edge and no
    token carried syntax colour. Pin the shared document renderer at the
@@ -2735,6 +2749,10 @@ let () =
           "the pane surfaces open on a title row"
           `Quick
           test_the_pane_surfaces_open_on_a_title_row;
+        test_case
+          "the runtime picker is the shared contract"
+          `Quick
+          test_the_runtime_picker_is_the_shared_contract;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

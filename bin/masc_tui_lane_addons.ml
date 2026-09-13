@@ -26,6 +26,7 @@ type action_menu = {
 type focus = Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
 type t = {
+  subscription_panel : Masc_tui_lane_subscriptions.t option;
   presentation : presentation; action_menu : action_menu option;
   snapshot : snapshot option; loading : bool; error : string option;
   receipt : Yojson.Safe.t option; generation : int; instance_cursor : int;
@@ -33,7 +34,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
+let initial = { subscription_panel=None; presentation=Summary; action_menu=None; snapshot = None; loading = false; error = None; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -192,6 +193,21 @@ let selected_source_path view =
       Option.bind path (fun path ->
         if Document.editable_source_path ~directory:config.directory path then Some path else None)))
 let selected_row view = Option.bind view.snapshot (fun snapshot -> List.nth_opt snapshot.output.rows view.row_cursor)
+let subscription_targets view =
+  match view.snapshot with
+  | Some {configuration=Some config;instances;_} when config.complete ->
+      List.concat_map (fun (declaration:declaration) ->
+        match declaration.installation_id,declaration.instance_id with
+        | Some installation_id,Some id when declaration.issues=[] ->
+            (match List.find_opt (fun (instance:instance) -> instance.id=id
+                && instance.source_path=Some declaration.source_path
+                && (match instance.phase with Row.Attached | Row.Observing -> true | _ -> false)) instances with
+             | None -> []
+             | Some instance -> List.map (fun (output_id,_) ->
+                 ({installation_id;run_id=instance.run_id;output_id;instance_id=instance.id;title=instance.title}
+                  : Masc_tui_lane_subscriptions.target)) instance.outputs)
+        | _ -> []) config.declarations
+  | _ -> []
 let phase_label = function
   | Row.Attached -> "attached" | Row.Observing -> "observing" | Row.Detaching -> "detaching"
   | Row.Detached -> "detached" | Row.Failed detail -> "failed: " ^ detail
@@ -453,7 +469,7 @@ let compact_lines ~width view =
         installations @ instances @ configurations @ observations @ gaps
         @ (match snapshot.complete with Some false -> ["Slice coverage is incomplete"] | Some true | None -> []) in
   ["Select an Add-on, observe its output, or choose an advertised action.";
-   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  f:flow  D:details  Esc:back"]
+   "j/k:select  Tab:instances/rows/installations  o:observe  a:actions  S:subscriptions  f:flow  D:details  Esc:back"]
   @ [Masc_tui_message_layout.fit_width
        (if view.loading then "Refreshing…" else "Observations") (max 1 width)]
   @ Option.to_list (Option.map (fun error -> "Error: " ^ error) view.error)
@@ -509,8 +525,13 @@ let flow_lines view =
      "f:back to observations  D:technical details  J/K:scroll"]
 
 let lines ~width view =
-  match view.action_menu with
-  | Some menu ->
+  match view.subscription_panel,view.action_menu with
+  | Some panel,_ ->
+      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
+       :: Masc_tui_lane_subscriptions.lines panel)
+      |> List.concat_map (fun line -> Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
+           (Masc.Tui_decode.sanitize_terminal_text line))
+  | None,Some menu ->
       (["Run action on " ^ menu.target_title;
         Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
           (menu.cursor+1) (List.length menu.choices);
@@ -521,7 +542,7 @@ let lines ~width view =
       |> List.concat_map (fun line ->
         Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
           (Masc.Tui_decode.sanitize_terminal_text line))
-  | None ->
+  | None,None ->
       if view.presentation=Technical || Option.is_some view.document_key || Option.is_some view.draft
       then technical_lines ~width view
       else (match view.presentation with Flow -> flow_lines view | Summary | Technical -> compact_lines ~width view)

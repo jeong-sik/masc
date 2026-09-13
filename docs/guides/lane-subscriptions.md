@@ -34,7 +34,29 @@ instance remains visible; it is not a successful empty observation.
   remains in the retained record and must not be described as complete input.
 
 The HTTP endpoint is `POST /api/v1/lane-addons/subscriptions` with the same body.
-In TUI Add-ons, `:subscriptions` inspects it and `:subscriptions {JSON}` sends an
+In TUI Add-ons, press `S` to manage subscriptions without entering JSON:
+
+1. `a` chooses a Keeper from the workspace roster, then a named output from an
+   actual declared installation. The output choice displays its installation,
+   run and observed instance together. `j/k` moves and Enter advances.
+2. The final screen names the Keeper, installation, run and output. Enter saves
+   only after this review, using the configuration revision loaded on entry.
+3. `d` previews removal of the selected subscription; Enter saves that change.
+   It preserves the durable reading position. `r` rereads configuration after a
+   revision conflict; `Esc` returns without saving.
+
+The list distinguishes acknowledged sequence, latest sequence, unread count,
+replacement and unavailable reader state. These are positions in retained
+output, not source completeness or semantic use. Reading without acknowledgment
+is not persisted, so the manager cannot claim to know whether an unacknowledged
+record was read. Opening this panel neither consumes output nor impersonates
+the selected Keeper. Keepers still read and acknowledge with their own identity.
+Choices come from the last received Add-on inventory and workspace roster. To
+update choices, leave the panel, refresh Add-ons, and reopen `S`. A subscription
+names the installation/run/output and continues to apply after worker replacement;
+the displayed instance is an observation, not a server-side save precondition.
+
+The advanced `:subscriptions` command inspects it and `:subscriptions {JSON}` sends an
 explicit operation. Reading and acknowledgement use the authenticated actor;
 operator configuration changes do not consume a Keeper's output.
 

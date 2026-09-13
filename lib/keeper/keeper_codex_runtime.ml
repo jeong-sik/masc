@@ -642,22 +642,39 @@ let run_without_lifecycle ~runtime_id ~keeper_name
          |> String.concat "\n\n"
          |> String.trim)
     in
-    (* A resumed vendor thread retains its original developer messages.
-       Updating thread/resume configuration alone did not add the current
-       World State or changed Keeper instructions to the observed native
-       history. Explicit developer items are acknowledged before turn/start
-       and persist in the same thread without replaying conversation history. *)
+    (* Only a new thread receives developer items. A resumed vendor thread
+       retains its original ones, and updating thread/resume configuration
+       does not replace them -- which is the gap this adapter still has: a
+       Keeper whose instructions changed mid-thread is read by the model
+       under the instructions the thread started with.
+
+       Injecting them on a resume does not close it. thread/inject_items
+       persists what it is given and includes it in every later request
+       (OpenAI's app-server documentation says so), and [developer_messages]
+       carries the observation frame rebuilt every turn. Per-turn world state
+       in a persisted history is the feedback loop Keeper_unified_prompt
+       forbids by name: 943 of 945 user messages in one keeper's checkpoint
+       were byte-identical world-state frames, 59% of the payload (#25193,
+       operator decision 2026-07-20). The instructions alone would accumulate
+       the same way, one copy per turn, and the API has no receipt or
+       idempotency key, so a Retry_previous after a lost turn/start appends
+       what the previous attempt already wrote.
+
+       The durable form this needs is the one the session store already uses
+       for the tool surface: a digest whose change drops the settlement and
+       starts a fresh thread ([reconcile_tool_surface]). That wants the turn
+       intent separated from the identity half of [prepared.system_prompt]
+       first, or every turn would restart the thread. Tracked separately. *)
     let developer_context =
       match thread_mode with
       | Runtime_codex_app_server.Start -> developer_messages
-      | Runtime_codex_app_server.Resume _ ->
-        Option.to_list developer_instructions @ developer_messages
+      | Runtime_codex_app_server.Resume _ -> []
     in
     (* Reported from [prepared.messages], the post-window list, gated on the
        same [thread_mode] that decides whether [thread/inject_items] runs at
        all. Only a [Start] injects the history into the new thread; a [Resume]
-       injects current developer context and sends the prompt, while prior
-       conversation remains in the app-server. Its full size is not measured.
+       sends the prompt and leaves the conversation in the thread the
+       app-server owns, so on that branch there is nothing here to attribute.
        The composition line further down states the same split. The callback
        below reports it only after the complete turn/start write, not when
        this prepared composition becomes available. *)

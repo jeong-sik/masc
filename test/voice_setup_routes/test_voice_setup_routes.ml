@@ -380,7 +380,7 @@ let test_a_field_the_change_does_not_read_is_refused () =
     (`Assoc
        [ "change", `String "set_agent_voice"
        ; "section", `String "stt"
-       ; "agent", `String "vesta"
+       ; "agent", `String "voice-route-fixture"
        ; "voice", `String "aria"
        ])
 
@@ -388,7 +388,7 @@ let test_a_field_the_change_does_not_read_is_refused () =
    them together turned a malformed payload into a deletion. *)
 let test_set_agent_voice_without_a_voice_is_refused () =
   refused ~what:"set_agent_voice with no voice field"
-    (`Assoc [ "change", `String "set_agent_voice"; "agent", `String "vesta" ])
+    (`Assoc [ "change", `String "set_agent_voice"; "agent", `String "voice-route-fixture" ])
 
 let test_an_explicit_null_voice_clears_the_mapping () =
   with_workspace (fun ~base_path ~path ->
@@ -396,7 +396,7 @@ let test_an_explicit_null_voice_clears_the_mapping () =
       tts_section_changes
         [ `Assoc
             [ "change", `String "set_agent_voice"
-            ; "agent", `String "vesta"
+            ; "agent", `String "voice-route-fixture"
             ; "voice", `String "aria"
             ]
         ]
@@ -409,7 +409,7 @@ let test_an_explicit_null_voice_clears_the_mapping () =
       let clear =
         `Assoc
           [ "change", `String "set_agent_voice"
-          ; "agent", `String "vesta"
+          ; "agent", `String "voice-route-fixture"
           ; "voice", `Null
           ]
       in

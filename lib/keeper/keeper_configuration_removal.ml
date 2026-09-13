@@ -228,6 +228,12 @@ let advance config receipt state =
   save config {receipt with state; last_error=None; updated_at=Masc_domain.now_iso ()}
 
 let finish config receipt ~cleanup =
+  let runtime_config_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.Workspace.base_path in
+  (* The manifest lock is already held. Do not hold the runtime lock across
+     cleanup: its runtime-assignment removal acquires that lock itself. *)
+  let* () = Runtime.with_config_lock ~runtime_config_path (fun () -> Ok ())
+    |> Result.map_error (fun detail -> Storage_error detail) in
   let* () = require_configuration_only config receipt.keeper_name in
   let* source = read_regular receipt.source_path in
   let* () = match source, receipt.state with
@@ -243,11 +249,13 @@ let finish config receipt ~cleanup =
   match receipt.state with
   | Prepared | Cleanup_required _ | Removed -> Ok receipt
   | Artifacts_removed ->
-    (match Keeper_fs.remove_file_durable
-       ~ownership_root:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
-       receipt.source_path with
-     | Error error -> save config {receipt with updated_at=Masc_domain.now_iso ();
-         last_error=Some (Keeper_fs.durable_remove_error_to_string error)}
+    (match Runtime.with_config_lock ~runtime_config_path (fun () ->
+       Keeper_fs.remove_file_durable
+         ~ownership_root:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+         receipt.source_path
+       |> Result.map_error Keeper_fs.durable_remove_error_to_string) with
+     | Error detail -> save config {receipt with updated_at=Masc_domain.now_iso ();
+         last_error=Some detail}
      | Ok () ->
        Keeper_types_profile.invalidate_keeper_profile_defaults_cache receipt.keeper_name;
        advance config receipt Removed)

@@ -219,8 +219,8 @@ val data_unreliable_row : cols:int -> string -> string
 
 val overview_pulse_text : Masc_tui_types.state -> now:float -> string
 (** The Overview's Pulse: a sparkline of Keeper turns finished in the last eight
-    fifteen-second windows, or [(not loaded)] / [(load failed)] before any
-    keeper-turn reading has come back. *)
+    fifteen-second windows, or {!Masc_tui_types.title_missing_reading} before
+    any keeper-turn reading has come back. *)
 
 val burn_hud_text : Masc_tui_types.state -> string option
 (** The tab row's [/burn] reading without styling: the fleet's cost, and each

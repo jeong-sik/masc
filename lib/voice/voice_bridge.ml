@@ -96,10 +96,7 @@ let say_catalogue_of_output output =
           | [ _ ] | [] -> None))
 ;;
 
-(* Which voices an endpoint has. Only the kinds that publish a catalogue
-   answer; the rest say why there is nothing to ask, because the reader is
-   about to type the name instead. *)
-let list_voices endpoint =
+let list_voices_via_command_endpoint endpoint =
   match Voice_bridge_transport.list_voices_via_command endpoint with
   | Error message -> Error message
   | Ok output -> Ok (say_catalogue_of_output output)
@@ -352,6 +349,86 @@ let probe_attempt_json attempt =
     ]
 
 let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
+
+let string_member key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+(* The shape ElevenLabs answers with, measured 2026-09-12 against
+   /v2/voices: an object carrying [voices], each with [voice_id], [name] and a
+   [labels] object whose [language] is the only field worth showing beside the
+   name. A row without an id is dropped rather than shown: it cannot be chosen,
+   and a list that offers unchoosable rows is worse than a shorter one. *)
+let catalogue_voices_of_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "voices" fields with
+     | Some (`List items) ->
+       Ok
+         (List.filter_map
+            (fun item ->
+              match string_member "voice_id" item with
+              | None -> None
+              | Some id ->
+                let language =
+                  match item with
+                  | `Assoc entry ->
+                    (match List.assoc_opt "labels" entry with
+                     | Some labels -> string_member "language" labels
+                     | None -> None)
+                  | _ -> None
+                in
+                Some
+                  { voice_id = id
+                  ; voice_name = string_member "name" item
+                  ; voice_language = language
+                  })
+            items)
+     | Some _ | None -> Error "the endpoint answered without a voices list")
+  | _ -> Error "the endpoint answered with something other than an object"
+;;
+
+let list_voices_via_http_endpoint endpoint =
+  match Voice_bridge_transport.list_voices_via_http endpoint with
+  | Error message -> Error message
+  | Ok json -> catalogue_voices_of_json json
+;;
+
+(* Which voices an endpoint has. Two kinds publish a catalogue and they publish
+   it differently -- ElevenLabs answers a URL, say answers a command -- so the
+   resolved endpoint adapter picks which is asked rather than trying the other
+   when one fails. A kind with no catalogue says so in words, because the
+   reader is about to type the name instead.
+
+   Saying it matters most for say, which does not fail on a voice it does not
+   have: it speaks in the system voice instead, so a name typed from memory is
+   wrong silently. *)
+let list_voices (endpoint : Voice_config.endpoint) =
+  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Voice_runtime_overlay.Elevenlabs_direct -> list_voices_via_http_endpoint endpoint
+  | Voice_runtime_overlay.Macos_say -> list_voices_via_command_endpoint endpoint
+  | Voice_runtime_overlay.Openai_compat ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s speaks the OpenAI shape, which has no voice list to \
+          ask for: type the voice name the server expects"
+         endpoint.Voice_config.id)
+  | Voice_runtime_overlay.Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached through a tool, which is asked to speak \
+          rather than asked what it can speak with"
+         endpoint.Voice_config.id)
+  | Voice_runtime_overlay.Whisper_cli ->
+    Error
+      (Printf.sprintf "voice config endpoint %s transcribes and has no voices"
+         endpoint.Voice_config.id)
+;;
 
 let probe_tts ?(agent_id = "probe") ~message () =
   match Voice_config.load_detailed () with

@@ -28,6 +28,11 @@ type http_request =
   ; body_json : Yojson.Safe.t
   }
 
+type voice_listing_request =
+  { listing_url : string
+  ; listing_headers : (string * string) list
+  }
+
 (* A command to run, argv already split. No shell: a message to speak is
    arbitrary text, and handing it to a shell would make quoting the thing that
    decides what runs. *)
@@ -406,6 +411,56 @@ let http_request_for_tts
          { url = Printf.sprintf "%s/text-to-speech/%s" base_url voice_id
          ; headers
          ; body_json
+         })
+;;
+
+(* The voices an endpoint will admit to having.
+
+   Only ElevenLabs answers this. Its list lives on a different API version than
+   everything else masc sends it -- /v1 carries speech, /v2 carries the
+   catalogue -- so the version is swapped rather than the path appended, and a
+   base_url that does not end in a version is left alone and asked as it is.
+
+   An OpenAI-compatible server has no such route: /v1/audio/speech takes a
+   voice name and there is no listing beside it in the spec, and the two local
+   servers this runbook names answer 404. Saying that is the honest answer, not
+   a gap to fill with a guess at a vendor path. *)
+let elevenlabs_catalogue_url base_url =
+  let version = "/v1" in
+  let length = String.length base_url and version_length = String.length version in
+  if length >= version_length
+     && String.equal (String.sub base_url (length - version_length) version_length) version
+  then String.sub base_url 0 (length - version_length) ^ "/v2/voices"
+  else base_url ^ "/voices"
+;;
+
+let voice_listing_request_for_endpoint (endpoint : Voice_config.endpoint) ~api_key =
+  let adapter = adapter_for_endpoint endpoint in
+  match adapter.transport with
+  | Macos_say | Whisper_cli ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s runs a command and has no HTTP voice catalogue"
+         endpoint.id)
+  | Openai_compat ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s speaks the OpenAI shape, which has no voice list \
+          to ask for: type the voice name the server expects"
+         endpoint.id)
+  | Voice_mcp ->
+    Error
+      (Printf.sprintf
+         "voice config endpoint %s is reached through a tool, which is asked to \
+          speak rather than asked what it can speak with"
+         endpoint.id)
+  | Elevenlabs_direct ->
+    (match endpoint_base_url endpoint with
+     | None -> Error (Printf.sprintf "voice config endpoint %s missing base_url" endpoint.id)
+     | Some base_url ->
+       Ok
+         { listing_url = elevenlabs_catalogue_url base_url
+         ; listing_headers = [ "xi-api-key", api_key ]
          })
 ;;
 

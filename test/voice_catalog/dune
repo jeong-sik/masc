@@ -1,0 +1,7 @@
+; Parsing what an endpoint answers when asked which voices it has, and which
+; endpoints there is anything to ask. Voice_bridge belongs to the masc library.
+
+(test
+ (name test_voice_catalog)
+ (libraries alcotest yojson masc masc.server masc.config masc.voice_config
+  masc.voice_runtime_overlay masc.voice_bridge_core eio_main unix uri))

@@ -330,6 +330,124 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
     Error (Printf.sprintf "STT curl stopped by signal %d" sig_num)
 ;;
 
+(* Catalogue credentials go through stdin so process arguments do not expose
+   them. Curl and the process runner use the same configured HTTP deadline. *)
+let run_voice_listing_request ~timeout_sec (req : Voice_runtime_overlay.voice_listing_request) =
+  let stdin_content =
+    String.concat ""
+      (List.map
+         (fun (key, value) -> Printf.sprintf "%s: %s\n" key value)
+         req.listing_headers)
+  in
+  let argv =
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; string_of_float timeout_sec
+    ; "--header"; "@-"; req.listing_url
+    ]
+  in
+  let status, body =
+    run_voice_status ~timeout_sec ~stdin_content argv
+  in
+  match status with
+  | Unix.WEXITED 0 ->
+    (match Yojson.Safe.from_string body with
+     | json -> Ok json
+     | exception Yojson.Json_error msg ->
+       Error (Printf.sprintf "voice listing parse error: %s" msg))
+  | Unix.WEXITED 22 ->
+    Error
+      (Printf.sprintf
+         "voice listing HTTP error: %s"
+         (if String.length body > 200 then String.sub body 0 200 else body))
+  | Unix.WEXITED 28 -> Error "voice listing request timed out"
+  | Unix.WEXITED code -> Error (Printf.sprintf "voice listing curl exit %d" code)
+  (* Named for the same reason the two dispatches above are: a wildcard here
+     discards which signal ended it. *)
+  | Unix.WSIGNALED sig_num ->
+    Error (Printf.sprintf "voice listing curl killed by signal %d" sig_num)
+  | Unix.WSTOPPED sig_num ->
+    Error (Printf.sprintf "voice listing curl stopped by signal %d" sig_num)
+;;
+
+type catalogue_continuation = Complete | Next_page of string
+
+type catalogue_page =
+  { voices : Yojson.Safe.t list
+  ; continuation : catalogue_continuation
+  }
+
+(* ElevenLabs GET /v2/voices, verified against its official contract 2026-09-13:
+   https://elevenlabs.io/docs/api-reference/voices/search
+   total_count is a changing snapshot, not a pagination boundary. *)
+let catalogue_page_of_json = function
+  | `Assoc fields ->
+    let field name = List.filter_map (fun (key, value) ->
+      if String.equal key name then Some value else None) fields in
+    let* voices =
+      match field "voices" with
+      | [ `List voices ] -> Ok voices
+      | _ -> Error "voice catalogue page needs one voices list"
+    in
+    let* has_more =
+      match field "has_more" with
+      | [ `Bool value ] -> Ok value
+      | _ -> Error "voice catalogue page needs one boolean has_more"
+    in
+    let* next_page =
+      match field "next_page_token" with
+      | [] | [ `Null ] -> Ok None
+      | [ `String token ] when String.trim token <> "" -> Ok (Some token)
+      | _ -> Error "voice catalogue page has an invalid next_page_token"
+    in
+    let* continuation =
+      match has_more, next_page with
+      | false, _ -> Ok Complete
+      | true, Some token -> Ok (Next_page token)
+      | true, None -> Error "voice catalogue has_more requires a next_page_token"
+    in
+    Ok { voices; continuation }
+  | _ -> Error "voice catalogue page is not an object"
+;;
+
+module Catalogue_cursors = Set.Make (String)
+
+let collect_voice_catalogue ~remaining_seconds ~fetch_page
+    (request : Voice_runtime_overlay.voice_listing_request) =
+  let rec collect visited reversed page_request =
+    let timeout_sec = remaining_seconds () in
+    if timeout_sec <= 0. then Error "voice catalogue scan timed out"
+    else
+      let* json = fetch_page ~timeout_sec page_request in
+      let* page = catalogue_page_of_json json in
+      if remaining_seconds () <= 0. then Error "voice catalogue scan timed out"
+      else
+        let reversed = List.rev_append page.voices reversed in
+        match page.continuation with
+        | Complete -> Ok (`Assoc [ "voices", `List (List.rev reversed) ])
+        | Next_page token ->
+          if Catalogue_cursors.mem token visited then
+            Error "voice catalogue repeated a pagination cursor"
+          else
+            let uri = Uri.of_string request.listing_url in
+            let listing_url =
+              Uri.to_string (Uri.add_query_param' uri ("next_page_token", token))
+            in
+            collect (Catalogue_cursors.add token visited) reversed
+              { request with listing_url }
+  in
+  collect Catalogue_cursors.empty [] request
+;;
+
+let list_voices_via_http endpoint =
+  let deadline =
+    Monotonic_deadline.after ~seconds:Env_config_runtime.Voice.http_request_timeout_sec
+  in
+  let* api_key = resolve_api_key endpoint in
+  let* request = Voice_runtime_overlay.voice_listing_request_for_endpoint endpoint ~api_key in
+  collect_voice_catalogue
+    ~remaining_seconds:(fun () -> Monotonic_deadline.remaining_seconds deadline)
+    ~fetch_page:run_voice_listing_request request
+;;
+
 let transcribe_via_http_stt endpoint ~audio_file ~model =
   let* api_key = resolve_api_key endpoint in
   let* request =

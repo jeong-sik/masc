@@ -505,18 +505,17 @@ let apply ~base_path json =
    what asking needs -- the kind, and the name of the variable holding that
    provider's key.
 
-   The request chooses neither an address nor a command path. A catalogue read
-   uses the kind's own default destination, because a path this route cannot
-   check is not one to take from a caller. *)
+   The request chooses neither an address nor a command path. Catalogue reads
+   use the endpoint kind's default transport destination. *)
 let catalogue_endpoint_of_json json =
   let* fields = fields json in
+  let* () =
+    no_unknown_fields ~what:"a listing" ~allowed:[ "kind"; "api_key_env" ] fields
+  in
   let* kind_text = string_field ~what:"a listing" fields "kind" in
   let* kind = kind_of_string kind_text in
-  let api_key_env =
-    match List.assoc_opt "api_key_env" fields with
-    | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-    | Some _ | None -> None
-  in
+  let* api_key_env = optional_string ~what:"a listing" fields "api_key_env" in
+  let api_key_env = Option.map String.trim api_key_env in
   Ok
     { Voice_config.id = "voice-catalogue-read"
     ; kind

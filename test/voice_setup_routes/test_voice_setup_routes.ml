@@ -259,6 +259,49 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
                Alcotest.(check (option string)) "and no credential it was not given"
                  None endpoint.Voice_config.api_key_env))))
 
+(* A catalogue read is taken against an endpoint built for the request and
+   thrown away. What it must not carry is an address: accepting one would make
+   an admin route a way to point the server at any host, and the only kind with
+   a catalogue carries its own address anyway. *)
+let test_a_catalogue_read_carries_no_address_and_no_key () =
+  match
+    Actions.catalogue_endpoint_of_json
+      (`Assoc
+        [ "kind", `String "elevenlabs_direct"
+        ; "api_key_env", `String "ELEVENLABS_API_KEY"
+        (* Offered and ignored. A caller cannot choose where this goes. *)
+        ; "base_url", `String "http://somewhere.else/v1"
+        ])
+  with
+  | Error error -> Alcotest.fail (Actions.error_message error)
+  | Ok endpoint ->
+    Alcotest.(check bool) "no address was taken from the request" true
+      (Option.is_none endpoint.Voice_config.base_url);
+    Alcotest.(check (option string)) "the variable name, not a key"
+      (Some "ELEVENLABS_API_KEY") endpoint.Voice_config.api_key_env;
+    Alcotest.(check bool) "and the kind asked for" true
+      (endpoint.Voice_config.kind = Voice_config.Elevenlabs_direct)
+
+let test_a_catalogue_read_with_an_unknown_kind_is_refused () =
+  match
+    Actions.catalogue_endpoint_of_json (`Assoc [ "kind", `String "whatever_direct" ])
+  with
+  | Ok _ -> Alcotest.fail "an unknown kind should be refused rather than defaulted"
+  | Error error ->
+    let message = Actions.error_message error in
+    Alcotest.(check bool) "the refusal names what was sent" true
+      (Astring.String.is_infix ~affix:"whatever_direct" message)
+
+(* A local server that wants no key is configured without a variable, and
+   asking it for a catalogue fails later for having no catalogue -- not here,
+   for having no credential. The two are different answers. *)
+let test_a_catalogue_read_without_a_variable_is_allowed () =
+  match Actions.catalogue_endpoint_of_json (`Assoc [ "kind", `String "openai_compat" ]) with
+  | Error error -> Alcotest.fail (Actions.error_message error)
+  | Ok endpoint ->
+    Alcotest.(check bool) "no variable, and that is not an error" true
+      (Option.is_none endpoint.Voice_config.api_key_env)
+
 (* [voice.tts] cannot be created a field at a time -- the section validates on
    commit and wants its model and default voice -- so every case that needs one
    sends them with whatever else it is testing, in a single transaction. *)
@@ -667,7 +710,6 @@ let test_the_answered_revision_is_the_one_this_write_made () =
       Alcotest.failf "editing again with the answered revision was refused: %s"
         (Actions.error_message error)
     | Ok _ -> ignore (read path))
-
 let () =
   Alcotest.run
     "voice_setup_routes"
@@ -688,6 +730,14 @@ let () =
         ; Alcotest.test_case "the answered revision is the one this write made" `Quick
             test_the_answered_revision_is_the_one_this_write_made
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
+        ] )
+    ; ( "asking for a catalogue"
+      , [ Alcotest.test_case "the read carries no address and no key" `Quick
+            test_a_catalogue_read_carries_no_address_and_no_key
+        ; Alcotest.test_case "an unknown kind is refused by name" `Quick
+            test_a_catalogue_read_with_an_unknown_kind_is_refused
+        ; Alcotest.test_case "no variable is not a refusal" `Quick
+            test_a_catalogue_read_without_a_variable_is_allowed
         ] )
     ; ( "a kind is taken or refused for what it can do"
       , [ Alcotest.test_case "a command kind round-trips" `Quick

@@ -27,8 +27,9 @@ val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
     can be replayed on a machine that has no say. *)
 val say_catalogue_of_output : string -> catalogue_voice list
 
-(** Ask one endpoint which voices it has. [Error] carries why there is nothing
-    to show, in words meant for a reader who will type the name instead. *)
+(** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
+    [say] answers a command; the resolved endpoint adapter selects its transport.
+    [Error] explains why an endpoint has no catalogue or could not answer. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
 
 val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
@@ -88,6 +89,10 @@ type probe_attempt =
 
 val probe_outcome_to_string : probe_outcome -> string
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
+
+(** Parse what an ElevenLabs endpoint answers. Separate from the asking so a
+    recorded answer can be replayed without a network. *)
+val catalogue_voices_of_json : Yojson.Safe.t -> (catalogue_voice list, string) result
 
 val probe_tts
   :  ?agent_id:string

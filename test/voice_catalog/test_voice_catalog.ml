@@ -641,7 +641,7 @@ let test_http_transports_use_each_endpoint_timeout () =
     List.iter (fun seconds ->
       let configured = { remote with timeout_seconds = Some seconds } in
       (match Voice_bridge_transport.speak_via_http_tts_to_file configured
-          ~agent_id:"fixture" ~message:"hello" ~voice:"provider-voice" ~model:"provider-model"
+          ~agent_id:"fixture" ~message:"hello" ~voice:"QQ00AAbbCCddEEffGGhh" ~model:"provider-model"
           ~output_file:(Filename.concat root "audio.mp3") with
        | Ok size -> Alcotest.(check int) "fake HTTP audio was received" 128 size
        | Error message -> Alcotest.fail message);

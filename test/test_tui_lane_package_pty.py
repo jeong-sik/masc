@@ -150,7 +150,7 @@ def main(executable: str) -> None:
             # its completion, then inspect B in a freshly opened pane below.
             refreshed = terminal.GatedHttpResponse(inspect())
             fixtures["/api/v1/lane-addons"] = refreshed
-            key(b"r", b"Refreshing")
+            key(b"r", b"Recorded observations")
             if not terminal.wait_for_fixture_event(process, master_fd, output, refreshed.requested, timeout=5):
                 raise AssertionError("refresh request did not reach fixture")
             terminal.release_and_wait_for_frame(process, master_fd, output, refreshed,

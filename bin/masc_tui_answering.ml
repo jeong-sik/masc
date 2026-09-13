@@ -191,7 +191,8 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
 ;;
 
 let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
-    ~(error : string option) ~(finishes : (string * float) list)
+    ~(error : string option) ~(observed_at : float option)
+    ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
   let running, unavailable, idle_count =
     List.fold_left
@@ -234,23 +235,35 @@ let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
       (fun widest (name, _) -> max widest (String.length name))
       widest live_finishes
   in
+  (* What the rows below are a reading of. [observed_at] is when a poll last
+     answered; without one there are no rows at all, so "showing the last rows
+     that arrived" and "nobody is answering right now" were both said about a
+     list no poll had brought back. *)
   let error_lines =
-    match error with
-    | None -> []
-    | Some detail ->
+    match error, observed_at with
+    | None, _ -> []
+    | Some detail, None ->
         [ { text = Printf.sprintf "poll failed: %s" detail
           ; tone = Unknown
           ; target = None
           }
-        ; { text = "showing the last rows that arrived"
+        ]
+    | Some detail, Some read_at ->
+        [ { text = Printf.sprintf "poll failed: %s" detail
+          ; tone = Unknown
+          ; target = None
+          }
+        ; { text =
+              Printf.sprintf "showing the rows read %s ago"
+                (elapsed_text ~now read_at)
           ; tone = Quiet
           ; target = None
           }
         ]
   in
   let running_lines =
-    match running with
-    | [] ->
+    match running, observed_at, error with
+    | [], Some _, _ ->
         if live_finishes = [] then
           [ { text = "nobody is answering right now"
             ; tone = Quiet
@@ -258,7 +271,12 @@ let overlay ?(frame = -1) ~(now : float) ~(chat_target : string option)
             }
           ]
         else []
-    | _ ->
+    | [], None, None ->
+        [ { text = "not loaded yet"; tone = Quiet; target = None } ]
+    (* The failed poll above is the whole answer; there is no list to
+       describe. *)
+    | [], None, Some _ -> []
+    | _ :: _, _, _ ->
         List.map
           (fun (name, lane, started_at) ->
             { text =

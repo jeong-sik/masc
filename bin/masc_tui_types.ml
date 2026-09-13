@@ -3571,6 +3571,14 @@ type observed_interrupt =
   ; oi_sent_ns : int64
   ; oi_status : observed_interrupt_status }
 
+(* Whether a Board list request has answered. The posts are a plain list, and
+   an empty one is both "nothing asked yet" and "asked, and the board holds
+   nothing" -- the title said "(0)" for either, and for a failed first read
+   too. *)
+type board_list_reading =
+  | Board_list_unread
+  | Board_list_read
+
 type state = {
   mutable metrics_scroll: int;
   mutable metrics_section: metrics_section;
@@ -4091,6 +4099,7 @@ type state = {
   mutable board_detail:
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
+  mutable board_list_reading: board_list_reading;
   mutable board_cursor: int;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
@@ -5623,6 +5632,7 @@ let create_state
   board_posts = [];
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
+  board_list_reading = Board_list_unread;
   board_cursor = 0;
   msg_find = "";
   msg_find_at = None;
@@ -5984,6 +5994,15 @@ let empty_page_of ~snapshot ~error =
   | None, None -> Page_unread
   | Some _, None -> Page_empty
 
+(* The page for the Board list, whose posts are a plain list: it is empty both
+   before a list request has answered and after one that found nothing. *)
+let board_list_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.board_list_reading with
+       | Board_list_unread -> None
+       | Board_list_read -> Some ())
+
 (* The page for a list kept from this workspace's directory, which carries no
    snapshot of its own: the list is empty both before the read and after it. *)
 let local_rows_page (state : state) ~error =
@@ -6320,32 +6339,43 @@ let changes_budget_note_rows (state : state) =
    time for. *)
 let agenda (state : state) : Masc_tui_agenda.t =
   let scheduled =
-    match state.schedules with
-    | None -> []
-    | Some snapshot ->
-      List.filter_map
-        (fun (row : schedule_row) ->
-           match row.sch_due_at_iso with
-           | None -> None
-           | Some at_iso ->
-             Some
-               { Masc_tui_agenda.at_iso
-               ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
-               ; who = Option.value row.sch_payload_target ~default:""
-               ; what = Option.value row.sch_payload_summary ~default:""
-               ; recurrence = row.sch_recurrence_summary
-               })
-        snapshot.scs_rows
+    match state.schedules, state.schedules_error with
+    (* A store the server could not read answers with a status other than
+       "ok" and no rows; that is a failed read, not an empty schedule. *)
+    | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
+      Masc_tui_agenda.Read_failed
+    | None, Some _ -> Masc_tui_agenda.Read_failed
+    | None, None -> Masc_tui_agenda.Not_read
+    | Some snapshot, _ ->
+      Masc_tui_agenda.Read
+        (List.filter_map
+           (fun (row : schedule_row) ->
+              match row.sch_due_at_iso with
+              | None -> None
+              | Some at_iso ->
+                Some
+                  { Masc_tui_agenda.at_iso
+                  ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
+                  ; who = Option.value row.sch_payload_target ~default:""
+                  ; what = Option.value row.sch_payload_summary ~default:""
+                  ; recurrence = row.sch_recurrence_summary
+                  })
+           snapshot.scs_rows)
   in
   let awaiting =
-    List.map
-      (fun (held : Tui_decode.keeper_tool_approval) ->
-         { Masc_tui_agenda.asked_by = held.kta_keeper
-         ; question = held.kta_tool
-         ; asked_at = held.kta_asked_at
-         ; timeout_sec = held.kta_timeout_sec
-         })
-      state.keeper_tool_approvals
+    match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
+    | false, Some _ -> Masc_tui_agenda.Read_failed
+    | false, None -> Masc_tui_agenda.Not_read
+    | true, _ ->
+      Masc_tui_agenda.Read
+        (List.map
+           (fun (held : Tui_decode.keeper_tool_approval) ->
+              { Masc_tui_agenda.asked_by = held.kta_keeper
+              ; question = held.kta_tool
+              ; asked_at = held.kta_asked_at
+              ; timeout_sec = held.kta_timeout_sec
+              })
+           state.keeper_tool_approvals)
   in
   Masc_tui_agenda.project ~scheduled ~awaiting
 ;;

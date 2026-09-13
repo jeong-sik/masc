@@ -1059,6 +1059,7 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries
+  masc_tui_answering
   masc.masc_tool_blob_store
   masc_tui_lane_addons
   masc_tui_lane_declaration

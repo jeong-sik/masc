@@ -7341,6 +7341,52 @@ let keeper_message_folded_status_count (state : state) live ~now =
     List.length (Masc_tui_keeper_chat_transcript.status_rows ~now live)
     - List.length (keeper_message_visible_status_rows state live ~now)
 
+let keeper_message_activity_rows (state : state) =
+  match state.msg_target_keeper_name with
+  | None -> []
+  | Some keeper_name ->
+    let own_live_turn = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        Masc_tui_keeper_chat_transcript.phase live.tl_transcript = Masc_tui_keeper_chat_transcript.Working
+      | Some _ | None -> false in
+    let activity = if own_live_turn then [] else Masc_tui_answering.chat_activity
+      ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error
+      state.keeper_turns in
+    let submitted = match state.msg_live with
+      | Some live when String.equal (turn_log_keeper_name live) keeper_name ->
+        let transcript = live.tl_transcript in
+        (match Masc_tui_keeper_chat_transcript.phase transcript,
+               Masc_tui_keeper_chat_transcript.admission transcript with
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Queued, _) ->
+           let other_turn_observed = state.keeper_turns_error = None
+             && List.exists (fun (row : Tui_decode.keeper_turn_row) ->
+               String.equal row.ktr_keeper_name keeper_name
+               && match row.ktr_state with
+                 | Tui_decode.Keeper_turn_running
+                     { lane = Turn_lane_autonomous | Turn_lane_maintenance; _ } -> true
+                 | Keeper_turn_running { lane = Turn_lane_chat_operation; _ }
+                 | Keeper_turn_idle | Keeper_turn_unavailable _ -> false)
+               state.keeper_turns in
+           [if other_turn_observed then
+              "Your message is queued behind this Keeper's current turn; start time unknown"
+            else "Your message is queued at the server; start time unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, None ->
+           ["Your request is awaiting server acceptance; queue position unknown"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Running, _) ->
+           ["Your request was accepted; waiting for its first event"]
+         | Masc_tui_keeper_chat_transcript.Waiting, Some (Masc_tui_keeper_chat_live.Settled, _) ->
+           ["Your request already settled; replaying its result"]
+         | _ -> [])
+      | Some _ | None -> []
+    in
+    let local_count = Masc_tui_keeper_chat_queue.length_for_keeper
+      state.msg_queued ~keeper_name in
+    activity @ submitted @ (if local_count > 0 then
+      [Printf.sprintf "%d %s waiting in this TUI; not sent to the server yet"
+        local_count (if local_count = 1 then "message" else "messages")]
+      else [])
+;;
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -7349,6 +7395,7 @@ let keeper_message_status_rows (state : state) =
     | Some _ | None -> 1
   in
   List.length state.msg_inflight
+  + List.length (keeper_message_activity_rows state)
   + unavailable_target
   + (match state.msg_live with
      | None -> 0

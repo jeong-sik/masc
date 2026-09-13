@@ -348,6 +348,25 @@ let toggle_tool_visibility = function
   | Tools_full -> Tools_compact
 ;;
 
+(* The three Gate stances in the words the [w] chooser's help already uses
+   ("manual, Auto Judge or allow-all"), for the rows with no space for the
+   chooser's sentence. The chat header and the Keeper detail printed the wire
+   token instead -- "auto_judge" is the one spelling no other part of the
+   screen uses, and the row it sits on is where an operator decides whether to
+   send work. *)
+let gate_mode_word = function
+  | Masc.Keeper_gate_mode.Manual -> "manual"
+  | Masc.Keeper_gate_mode.Auto_judge -> "Auto Judge"
+  | Masc.Keeper_gate_mode.Always_allow -> "allow-all"
+
+(* A stance as it arrives on the wire. A value this build does not know keeps
+   the server's own spelling rather than collapsing to one word: the reader is
+   deciding on it, and "unknown" would hide which unknown it is. *)
+let gate_mode_word_of_wire raw =
+  match Masc.Keeper_gate_mode.of_string raw with
+  | Some mode -> gate_mode_word mode
+  | None -> raw
+
 (* The chat header shows the effective stances, including their defaults. A
    blank label here is worse than repetition: this is the surface where the
    operator decides whether to send work, and AUTO/YOLO plus the Gate mode
@@ -358,10 +377,10 @@ let keeper_chat_mode_labels ~yolo ~keeper_gate_mode ~workspace_gate_mode =
   let chat_mode = if yolo then "YOLO" else "AUTO" in
   let gate_mode =
     match keeper_gate_mode with
-    | Some mode when not (String.equal mode "workspace") -> mode
-    | Some _ | None -> Option.value ~default:"?" workspace_gate_mode
+    | Some mode when not (String.equal mode "workspace") -> Some mode
+    | Some _ | None -> workspace_gate_mode
   in
-  chat_mode, gate_mode
+  chat_mode, Option.map gate_mode_word_of_wire gate_mode
 ;;
 
 (* Usage coverage can be warming independently of the catalog. Missing time
@@ -6719,7 +6738,11 @@ let agenda (state : state) : Masc_tui_agenda.t =
        "ok" and no rows; that is a failed read, not an empty schedule. *)
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
       Masc_tui_agenda.Read_failed
-    | None, Some _ -> Masc_tui_agenda.Read_failed
+        (match snapshot.scs_read_error with
+         | Some reason -> Tui_decode.sanitize_terminal_text reason
+         | None -> "schedule store unreadable")
+    | None, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
@@ -6739,7 +6762,8 @@ let agenda (state : state) : Masc_tui_agenda.t =
   in
   let awaiting =
     match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
-    | false, Some _ -> Masc_tui_agenda.Read_failed
+    | false, Some error ->
+      Masc_tui_agenda.Read_failed (Tui_decode.sanitize_terminal_text error)
     | false, None -> Masc_tui_agenda.Not_read
     | true, _ ->
       Masc_tui_agenda.Read

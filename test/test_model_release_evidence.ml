@@ -29,6 +29,9 @@ let test_calendar_window () =
     ; "2024-05-31", "2024-02-29"
     ; "2026-01-31", "2025-10-31"
     ];
+  (* The wire label spells the window in words; the number is named once and
+     the two must move together. *)
+  check int "one named recommendation window" 3 R.recency_window_months;
   let as_of = date "2026-09-10" in
   List.iter
     (fun (release, expected) ->
@@ -45,11 +48,10 @@ let test_calendar_window () =
 ;;
 
 let test_embedded_exact_identity () =
-  let catalog =
-    match R.load_default () with
-    | Ok value -> value
-    | Error error -> fail error
-  in
+  let catalog = R.load_default () in
+  (match catalog with
+   | Ok _ -> ()
+   | Error error -> fail error);
   let known = R.lookup catalog ~publisher:"anthropic" ~model_id:"claude-sonnet-5" in
   (match known with
    | R.Official value ->
@@ -69,13 +71,43 @@ let test_embedded_exact_identity () =
     [ "anthropic", "claude-sonnet-5-custom"
     ; "different-provider", "claude-sonnet-5"
     ; "zai", "glm-5.3"
-    ];
-  let json = R.to_json ~as_of:(date "2026-09-10") known in
+    ]
+;;
+
+(* Proves an unreadable default evidence file is projected as
+   [status: unavailable] carrying the decode reason, on both the per-model and
+   the catalog projection, while [status: unknown] stays reserved for an
+   identity that is not in a readable file. On origin/main the decode error was
+   swallowed into [Unknown] and the catalog dropped the reason. *)
+let test_unreadable_default_file () =
+  let open Yojson.Safe.Util in
+  let as_of = date "2026-09-10" in
+  let unreadable = R.of_string "{ \"schema\": \"masc.model_release_evidence.v1\", " in
+  let reason =
+    match unreadable with
+    | Error reason -> reason
+    | Ok _ -> fail "truncated evidence file decoded as a catalog"
+  in
+  let release = R.lookup unreadable ~publisher:"anthropic" ~model_id:"claude-sonnet-5" in
   check
-    string
-    "release date does not prove account access"
-    "not_checked"
-    Yojson.Safe.Util.(json |> member "account_availability" |> to_string)
+    bool
+    "unreadable file is not an unknown identity"
+    true
+    (release = R.Evidence_unavailable reason);
+  let json = R.to_json ~as_of release in
+  check string "per-model status" "unavailable" (json |> member "status" |> to_string);
+  check string "per-model reason" reason (json |> member "reason" |> to_string);
+  check string "no release date to judge" "unknown" (json |> member "recency" |> to_string);
+  let catalog = R.catalog_to_json ~as_of unreadable in
+  check string "catalog status" "unavailable" (catalog |> member "status" |> to_string);
+  check string "catalog reason" reason (catalog |> member "reason" |> to_string);
+  check int "catalog carries no models" 0 (catalog |> member "models" |> to_list |> List.length);
+  let readable = R.of_string "{ \"schema\": \"masc.model_release_evidence.v1\", \"models\": [] }" in
+  check
+    bool
+    "identity missing from a readable file stays unknown"
+    true
+    (R.lookup readable ~publisher:"anthropic" ~model_id:"claude-sonnet-5" = R.Unknown)
 ;;
 
 let test_listing_date_cannot_be_release () =
@@ -101,8 +133,7 @@ let test_listing_date_cannot_be_release () =
 ;;
 
 let test_picker_projection () =
-  let catalog = R.load_default () |> Result.get_ok in
-  let json = R.catalog_to_json ~as_of:(date "2026-09-30") catalog in
+  let json = R.catalog_to_json ~as_of:(date "2026-09-30") (R.load_default ()) in
   let open Yojson.Safe.Util in
   let rows = json |> member "models" |> to_list in
   let sonnet = List.find (fun row -> row |> member "publisher" |> to_string = "anthropic"
@@ -114,8 +145,8 @@ let test_picker_projection () =
     (release |> member "released_on" |> to_string);
   check string "source retained" "https://www.anthropic.com/news/claude-sonnet-5"
     (release |> member "source_url" |> to_string);
-  check string "account remains unverified" "not_checked"
-    (release |> member "account_availability" |> to_string)
+  check bool "account availability is the envelope's fact, not the release's" true
+    (release |> member "account_availability" = `Null)
 
 let () =
   run
@@ -131,6 +162,10 @@ let () =
             "provider listing date is not release evidence"
             `Quick
             test_listing_date_cannot_be_release
+        ; test_case
+            "unreadable default file projects unavailable with its reason"
+            `Quick
+            test_unreadable_default_file
         ] )
     ]
 ;;

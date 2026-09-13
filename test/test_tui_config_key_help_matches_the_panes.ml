@@ -8,7 +8,7 @@
    separated by "/". A new pane moves the first number and this fails until the
    help row moves too. *)
 
-let render = "bin/masc_tui_render.ml"
+let render = "bin/masc_tui_render_prim.ml"
 
 let panes_the_strip_draws () =
   Ast_grep.count_calls_in_value_binding ~module_path:render

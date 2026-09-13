@@ -1026,8 +1026,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 (* ── the A-family surface chrome contract ─────────────────────────────
-   One owner for a borderless surface's fixed rows: top gap, title row,
-   divider, height fill, bottom gap, and the status-tail footer. The body
+   One owner for the fixed rows of a surface, or of an overlay drawn over
+   one: top, title row, divider, height fill, bottom, and the status-tail
+   footer. The body
    pushes its rows through the record and the contract counts them, so the
    hand-tallied chrome_rows constants (the fixed-chrome-row trap: add a row,
    forget the count, lose a body line) cannot drift — there is nothing left
@@ -1043,8 +1044,11 @@ type chrome_body = {
 }
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
-   itself. Everything else is the body's budget. *)
-let surface_chrome_rows = 5
+   itself. Everything else is the body's budget. The framed panels count the
+   same five rows, and a key handler bounding an overlay's scroll with
+   [framed_content_height] must agree with what this draws, so the number has
+   one owner. *)
+let surface_chrome_rows = Masc_tui_frame.chrome_rows
 
 (* Which frame the contract draws. A surface is the terminal's whole screen and
    its edge is already the frame, so it draws rules and no box. An overlay is

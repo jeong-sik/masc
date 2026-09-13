@@ -2584,7 +2584,15 @@ let test_the_overlays_are_the_shared_contract () =
             (calls by_hand))
         [ "framed_top"; "framed_bottom" ])
     [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions"
-    ; "render_palette" ]
+    ; "render_palette" ];
+  (* [keeper_deletions_viewport] bounds the record's scroll with
+     [framed_content_height], and the body is drawn against the contract's
+     budget. They agree only while the five rows have one owner. *)
+  check int "the contract's rows are the frame's rows" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"surface_chrome_rows" ~callees:[]
+       ~identifiers:[ "Masc_tui_frame.chrome_rows" ])
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines

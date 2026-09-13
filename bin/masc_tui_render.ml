@@ -1001,9 +1001,17 @@ let approval_detail_pane (state : state) ~clamped ~rows ~cols (row : approval_ro
     (fun (line : Approval_detail.line) ->
       let text = line.Approval_detail.text in
       match line.Approval_detail.label with
-      | Some _ ->
+      | Some label ->
+        (* The name is bold, what sits beside it is not: the row carries both
+           now, and bolding the whole of it would weight the value too. *)
+        let drawn = fit_width text (cols - 6) in
+        let name = String.length label in
         box_line buf cols
-          (Printf.sprintf "  %s%s%s" Ansi.bold (fit_width text (cols - 6)) Ansi.reset)
+          (if String.length drawn >= name then
+             Printf.sprintf "  %s%s%s%s" Ansi.bold (String.sub drawn 0 name)
+               Ansi.reset
+               (String.sub drawn name (String.length drawn - name))
+           else Printf.sprintf "  %s%s%s" Ansi.bold drawn Ansi.reset)
       | None ->
         box_line buf cols (Printf.sprintf "  %s" (fit_width text (cols - 6))))
     drawn;

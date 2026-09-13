@@ -16,7 +16,9 @@
     @since 2.96.0 *)
 type tool_failure_class =
   | Dependency_unavailable (** A required external dependency was unavailable. *)
-  | Policy_rejection (** Auth/permission/boundary — permanent *)
+  | Policy_rejection
+      (** Auth/permission/boundary or caller-argument validation. The same
+          rejected request remains invalid; corrected arguments may succeed. *)
   | Runtime_failure (** Internal error/bug. *)
   | Workflow_rejection (** Business rule violation. *)
   | Operator_cancelled

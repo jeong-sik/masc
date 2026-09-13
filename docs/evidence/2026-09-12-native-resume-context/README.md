@@ -12,22 +12,33 @@ capture of the provider's HTTP model request. The raw MASC trace's `prompt`
 field alone never described the developer-instruction channel.
 
 The Keeper adapter assembled changing context into `developerInstructions`
-on `thread/resume` but did not use the transport's existing
-`developer_context` input. The repair injects current developer context on
-every turn. A resumed thread also receives the freshly composed Keeper
-instructions, so changed instructions become explicit history items.
-The existing conversation stays in the same native thread and is not
-injected again. The user cue remains user input.
+on `thread/resume`, which the vendor does not apply to a thread that already
+has developer items. So a Keeper whose instructions changed mid-thread is
+read under the instructions the thread opened with. That gap is open.
 
+The first repair injected the current developer context on every turn through
+`thread/inject_items`. It was withdrawn before merge.
 [OpenAI's app-server documentation](https://learn.chatgpt.com/docs/app-server#inject-items-into-a-thread)
-states that `thread/inject_items` persists supplied items and includes them
-in subsequent model requests. The transport waits for that request's
-acknowledgment before submitting `turn/start`.
+states that `thread/inject_items` persists supplied items and includes them in
+subsequent model requests, and the injected context carried the observation
+frame, which is rebuilt every turn. `Keeper_unified_prompt.mli` forbids exactly
+that: 943 of 945 user messages in one keeper's checkpoint were byte-identical
+world-state frames, 59% of the payload (#25193, operator decision 2026-07-20).
+The instructions alone would accumulate the same way, one copy per turn, and
+the API carries no receipt or idempotency key, so a `Retry_previous` after a
+lost `turn/start` writes what the previous attempt already wrote.
+
+The durable form this needs is the one the session store already uses for the
+tool surface: a digest whose change drops the settlement so the next turn opens
+a fresh thread (`reconcile_tool_surface`). That wants the turn intent separated
+from the identity half of the composed system prompt first, or every turn would
+restart the thread.
 
 `test_keeper_codex_current_context` drives the production Keeper adapter
-through actual fixture processes. It checks fresh and resumed requests,
-changed Keeper instructions, current Task/Goal context, retained thread
-identity, omission of repeated history, and refusal to submit a model turn
-after context injection fails. This checks transport, not model understanding.
+through actual fixture processes. It checks that a fresh thread carries the
+instructions and context of the turn that opened it, that a resume writes no
+thread items and does not carry that turn's world state, that the thread
+identity is retained, and that a failed injection does not submit a model
+turn. This checks transport, not model understanding.
 Local validation is parse-only plus `git diff --check`; native execution
 belongs to CI. No live Keeper was changed or restarted by this repair.

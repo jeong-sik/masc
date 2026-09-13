@@ -8,8 +8,12 @@
     sent to the keeper as text - a mistyped command should not become an
     instruction the keeper acts on.
 
-    The grammar is closed: one leading slash, one word, the rest of the
-    first line, then any further lines. No prefix matching, no aliases. *)
+    The grammar is closed: one leading slash, one whole word, the rest of the
+    first line, then any further lines. {!parse} matches the word exactly and
+    never by prefix; the prefix work belongs to {!hint} and {!autocomplete},
+    which suggest rather than decide. A command may answer to more than one
+    word - four do - and {!catalog} carries the other spellings in
+    {!command_help.aliases} so the pair is one command everywhere it is read. *)
 
 type t =
   | Say of string  (** Plain text for the keeper, unchanged. *)
@@ -52,6 +56,7 @@ type t =
   | Switch_keeper of string
       (** [/keeper <name>] — point this pane at another keeper. *)
   | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
+  | Run_next
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)
@@ -126,17 +131,33 @@ type t =
 
 type command_help = {
   word : string;  (** The slash word itself, without the slash. *)
+  aliases : string list;
+      (** The other spellings the parser answers to with the same command, as
+          {!parse} folds them into one arm. [[]] for a command with one name. *)
   args : string;  (** How the rest of the line reads, or [""] for none. *)
   summary : string;  (** One line on what it does. *)
 }
 
 val catalog : command_help list
-(** Every command this build knows. {!help_lines} and {!hint} are both drawn
+(** Every command this build knows, said once: an alias rides in its command's
+    {!aliases} rather than taking an entry of its own. {!help_lines} is drawn
     from it, so a command cannot be described one way in the help and another
     in the composer. *)
 
+val spellings : string list
+(** Every slash word the composer accepts: each {!catalog} word followed by its
+    aliases, in that order. {!hint} and {!autocomplete} answer to all of them. *)
+
 val usage : command_help -> string
 (** [/word args], or [/word] where there are none. *)
+
+val help_usage : command_help -> string
+(** {!usage} plus the command's other spellings in parentheses. The column both
+    the [/help] list and the cheat sheet draw. *)
+
+val help_summary_padding : string -> string
+(** The spaces between a {!help_usage} column and its summary, so the two
+    readers of that row do not each carry the column width. *)
 
 type hint =
   | No_command  (** The composer holds a message, not a command. *)
@@ -175,7 +196,8 @@ val hint_line : hint -> string option
 
 val help_lines : string list
 (** One line per command, the list [/help] draws. Kept beside the parser so a
-    new command cannot ship without its line. *)
+    new command cannot ship without its line. An alias shares its command's
+    line rather than repeating the summary below it. *)
 
 (** How [/keeper <name>] resolved against the roster. *)
 type keeper_match =

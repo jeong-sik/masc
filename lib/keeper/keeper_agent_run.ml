@@ -832,7 +832,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Keeper_registry.set_turn_switch ~base_path:config.base_path meta.name (Some turn_sw);
   Eio.Switch.on_release turn_sw (fun () ->
-    Keeper_registry.clear_turn_switch ~base_path:config.base_path meta.name);
+    Keeper_registry.clear_turn_switch_if_current ~base_path:config.base_path meta.name turn_sw);
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
   (* The spawn registry is bound for the same span as the turn switch, and on
@@ -1454,6 +1454,8 @@ let run_turn
                       ?trace_link
                       ~on_runtime_attempt:
                         (fun attempt ->
+                           Keeper_turn_preview.note_attempt ~keeper_name:meta.name
+                             ~now:(Time_compat.now ()) ~runtime_id:attempt.runtime_id;
                            (* Each lane attempt assembles its own request.
                               Without this clear, a failed attempt's evidence
                               survives into the record of the runtime that
@@ -1476,6 +1478,9 @@ let run_turn
                            s.Keeper_run_tools.on_runtime_attempt attempt)
                       ~on_runtime_attempt_error:
                         (fun ~runtime_id ~attempt ~dispatch error ->
+                           Keeper_turn_preview.note_failure ~keeper_name:meta.name
+                             ~now:(Time_compat.now ()) ~runtime_id
+                             (Agent_core.Error.to_string error);
                            (* The candidate this error belongs to, and whether
                               the walk invoked it. The caller's decision
                               record has no other source for it: a failure

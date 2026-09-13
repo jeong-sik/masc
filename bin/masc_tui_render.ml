@@ -10657,11 +10657,12 @@ let render_metrics (state : state) =
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
   in
-  let sec_label = Masc_tui_types.metrics_section_label state.metrics_section in
+  (* The section being read is marked on the strip under this row, so the
+     title does not name it a second time. *)
   let title =
-    Printf.sprintf "%s  [%s]  %s  %s"
-      (screen_title " MASC Metrics & Performance Telemetry")
-      sec_label timestamp (connection_badge state)
+    Printf.sprintf "%s  %s  %s"
+      (screen_title " MASC Metrics")
+      timestamp (connection_badge state)
   in
   (* The section's lines are formatted by the drawing, so the row it could
      start at is known only once it has. The body writes it here and the

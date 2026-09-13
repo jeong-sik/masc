@@ -762,7 +762,7 @@ def assert_message_input_frame(
         raise AssertionError(f"message row lost {input_text!r}: {rendered_row!r}")
     # The outer frame is gone (clutter audit); the row boundary is the
     # positioning escape the regex above already found, not a border glyph.
-    if "~" in rendered_row and "~" not in input_text:
+    if "…" in rendered_row and "…" not in input_text:
         raise AssertionError(f"message row truncated fitting input: {rendered_row!r}")
     actual_width = fixture_cell_width(rendered_row)
     if actual_width != columns:
@@ -3672,7 +3672,7 @@ def blocked_gate_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"blocked Gate detail omitted {needle!r}: {frame!r}"
                 )
-        if BLOCKED_GATE_REASON_PREFIX + b"~" in plain:
+        if BLOCKED_GATE_REASON_PREFIX + b"\xe2\x80\xa6" in plain:
             raise AssertionError(f"blocked Gate reason was cell-truncated: {frame!r}")
         os.write(master_fd, b"q")
 
@@ -4931,7 +4931,10 @@ def image_view_interaction() -> Interaction:
         # The 100-column fixture leaves 92 cells for the draft. Long Dune
         # sandbox paths therefore draw the composer's omission marker and
         # newest tail, while Enter still submits the complete buffer.
-        visible_command = command if len(command) <= 92 else b"~" + command[-91:]
+        # One cell for the marker, 91 for the tail -- three bytes, one cell.
+        visible_command = (
+            command if len(command) <= 92 else b"\xe2\x80\xa6" + command[-91:]
+        )
         send_and_wait(
             process,
             master_fd,
@@ -5324,7 +5327,7 @@ def keeper_chat_error_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"wrapped Keeper error omitted {needle!r}: {frame!r}"
                 )
-        if ERROR_DETAIL_PREFIX + b"~" in plain:
+        if ERROR_DETAIL_PREFIX + b"\xe2\x80\xa6" in plain:
             raise AssertionError(f"Keeper error was cell-truncated: {frame!r}")
         send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
         os.write(master_fd, b"q")
@@ -6781,7 +6784,7 @@ def memory_journal_timeline_interaction(
             output,
             rows=31,
             columns=12,
-            needle=b"Keeper ch~",
+            needle=b"Keeper ch\xe2\x80\xa6",
             controls=(FULL_REDRAW,),
             final_cursor=b"\x1b[?25l",
         )
@@ -12105,7 +12108,7 @@ def fusion_run(
 
 
 # The Registry list fits a run id into a 14-cell column, so what it draws is
-# the truncated head with the pane's "~" marker after it. The full id is what
+# the truncated head with the pane's "…" marker after it. The full id is what
 # the detail pane and the copy links carry, and those assertions keep it.
 FUSION_TARGET_LISTED = b"fusion-target"
 

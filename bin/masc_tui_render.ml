@@ -1467,7 +1467,7 @@ let render_approvals (state : state) =
 
        The cells come out of the last one, which carries the server's input
        preview. That preview is a JSON envelope, so at this width it shows
-       "{\"schema\":\"ma~" and nothing a reader can act on; ten fewer of those
+       "{\"schema\":\"ma…" and nothing a reader can act on; ten fewer of those
        characters costs nothing and buys the identifier back. The cap keeps
        one long name from taking the row. *)
     (* Sanitised here, not at the call below. These are external names and

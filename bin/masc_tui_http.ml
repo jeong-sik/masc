@@ -198,7 +198,7 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
       ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "GET failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
 
 (** Fetch an arbitrary external URL's body for web link previews. Unlike the
     dashboard helpers above this sends NO masc auth header -- the URL is a
@@ -233,7 +233,7 @@ let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
       ~timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "POST failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e)
 
 let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (int * string, string) result =

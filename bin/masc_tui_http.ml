@@ -49,6 +49,16 @@ let keeper_chat_timeout_sec = 180.0
    lose the only report that says what landed. *)
 let preset_restore_timeout_sec = 120.0
 
+(* The server asks every declared endpoint in turn, and a provider that is
+   simply slow can hold one of them for tens of seconds. The ordinary 10s
+   deadline gave up while the scan was still running and the pane reported a
+   probe failure for endpoints that were about to answer. This is patience for
+   the whole scan, not a bound on it: the scan is bounded by the server's
+   per-endpoint budget times however many endpoints are declared, and a scan
+   that outlasts this is reported as the probe failing rather than as an
+   endpoint refusing. *)
+let voice_probe_timeout_sec = 120.0
+
 (* One name for the send target. The buffered send and the streaming send are
    two ways of reading the same turn, not two endpoints, and a contract test
    pins that this literal appears once so they cannot drift apart. *)

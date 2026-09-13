@@ -2595,7 +2595,9 @@ let launch_voice_wizard_probe state ~mailbox message =
   let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
   let run () =
     let result =
-      Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
+      Masc_tui_http.post_json_with_timeout
+        ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
+        ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
     in
     enqueue_async mailbox (Voice_wizard_probed result)
   in

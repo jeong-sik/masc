@@ -1289,7 +1289,7 @@ let reasoning_args = function
     Ok [ "--effort"; Llm_provider.Reasoning_effort.to_string effort ]
 ;;
 
-let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
+let command ?system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
   let* reasoning_args = reasoning_args reasoning_effort in
   let args =
     [ config.cli_path; "--output-format"; "stream-json"; "--verbose" ]
@@ -1306,9 +1306,10 @@ let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
        present. Docs: https://code.claude.com/docs/en/cli-reference —
        "--system-prompt: Replace the entire system prompt with custom text".
        [None] therefore drops the flag instead of sending "". *)
-    @ (match config.system_prompt with
-       | None -> []
-       | Some prompt -> [ "--system-prompt"; prompt ])
+    @ (match system_prompt_file, config.system_prompt with
+       | Some path, Some _ -> [ "--system-prompt-file"; path ]
+       | Some _, None | None, None -> []
+       | None, Some prompt -> [ "--system-prompt"; prompt ])
     @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
     @ ((* [Native_read] pre-approves its built-in read tools alongside the
           MCP tools so [dontAsk] never has a prompt to suppress.
@@ -1475,14 +1476,33 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~ignored:0
 ;;
 
+(* The replacement System channel supports files in print mode. Keep complete
+   projected context off argv (Linux limits each argument independently), and
+   keep the private file alive until the child and its scoped fibers exit. *)
+let with_system_prompt_file prompt use = match prompt with
+  | None -> use None
+  | Some contents ->
+    let path, output = Filename.open_temp_file ~perms:0o600 ~mode:[Open_binary]
+      "masc-claude-system-" ".txt" in
+    Fun.protect
+      ~finally:(fun () ->
+        close_out_noerr output;
+        try Sys.remove path with Sys_error detail ->
+          Log.Runtime_agent.warn "Claude system context file cleanup failed: %s" detail)
+      (fun () ->
+        output_string output contents;
+        close_out output;
+        let absolute_path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
+        use (Some absolute_path))
+;;
+
 let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
     ~on_session_ready ~on_turn_starting ~on_turn_started ~on_prompt_sent ~on_stream_event =
-  let* argv =
-    command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
-  in
   let turn_admitted = ref false in
   try
+    with_system_prompt_file config.system_prompt (fun system_prompt_file ->
+    let* argv = command ?system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
     Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -1572,7 +1592,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_prompt_sent
           ~on_stream_event
-          ~turn_admitted))
+          ~turn_admitted)))
   with
   | Idle_timeout seconds -> Error (Timeout seconds)
   | Eio.Time.Timeout as exn -> raise exn

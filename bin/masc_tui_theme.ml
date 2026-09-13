@@ -451,13 +451,9 @@ module Glyph = struct
   let task_todo = "\xe2\x97\x8b"
   let task_cancelled = "\xc3\x97"
 
-  let breadcrumb_sep = "\xe2\x96\xb8"
-
-  (* Where you are, on a strip of places you could be. The same shape as
-     [breadcrumb_sep] and for a related reason -- both point at what follows --
-     but a separate name because a strip can change its mark without moving
-     every breadcrumb with it. Read by the surface strip and the keeper detail
-     tabs, which are the two strips a reader walks. *)
+  (* Where you are, on a strip of places you could be. Read by the surface
+     strip and the keeper detail tabs, which are the two strips a reader
+     walks. *)
   let current_entry = "\xe2\x96\xb8"
 
   (* Only the top priority speaks. The !!!/!!/! ladder made every task list

@@ -269,6 +269,10 @@ val planning_phase_column : int
 
 val planning_phase_color : Goal_phase.t -> string
 
+val planning_rollup_row : cols:int -> Masc_tui_types.planning_rollup -> string
+(** The goal count; with any goals, also the completed share and a counter per
+    phase. *)
+
 val planning_workspace_title :
   Masc_tui_types.state -> tab:planning_tab -> window:string -> string
 

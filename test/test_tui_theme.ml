@@ -304,7 +304,6 @@ let test_glyphs_hold_their_bytes () =
   check str "active" "\xe2\x97\x90" task_active;
   check str "todo" "\xe2\x97\x8b" task_todo;
   check str "cancelled" "\xc3\x97" task_cancelled;
-  check str "breadcrumb" "\xe2\x96\xb8" breadcrumb_sep;
   (* Only the top priority speaks; the !!!/!!/! ladder put a mark on most
      rows, which distinguishes nothing. *)
   check str "priority 1 speaks once" "!" (priority 1);

@@ -10839,10 +10839,15 @@ def keeper_gate_mode_footer_interaction(
         output,
         rows=30,
         columns=200,
-        needle=re.compile(rb"g\x1b\[0m auto"),
+        # The footer writes key and label as "<key>:<label>" -- t:calls,
+        # g:auto -- with the reset between them. This waited for a space
+        # there, which no entry has drawn since the separator became a colon.
+        needle=re.compile(rb"g\x1b\[0m:auto"),
         final_cursor=b"\x1b[?25l",
     )
-    if b"g yolo" in CSI_RE.sub(b"", footer):
+    # Same separator: with escapes stripped the entry reads "g:yolo", so the
+    # spaced form could not match and this check could never fire.
+    if b"g:yolo" in CSI_RE.sub(b"", footer):
         raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
     os.write(master_fd, b"q")
 

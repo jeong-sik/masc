@@ -7652,7 +7652,9 @@ def chat_visibility_modes_interaction(
         # word boundaries must tolerate SGR runs and padding inside them.
         settled_at = pane_start
         for needle in (
-            b"gate:auto_judge",
+            # The header names the stance in the [w] chooser's words now,
+            # not the wire token (#35974).
+            b"gate:Auto Judge",
             "\u25c6".encode(),
             re.compile(
                 rb"AUTO[\x1b\x20-\x7e]*?\xc2\xb7[\x1b\x20-\x7e]*?gate"
@@ -7690,7 +7692,7 @@ def chat_visibility_modes_interaction(
         title_row = screen_row_of(
             observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
-        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        identity_row = screen_row_of(observed_rows, b"gate:Auto Judge")
         if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "

@@ -4571,7 +4571,8 @@ let launch_lane_addons state ~mailbox request =
     | Addons.Act action -> Some action, None
     | Addons.Action_status action -> Some action, view.action_receipt
     | _ -> view.last_action, view.action_receipt in
-  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt };
+  let presentation = match request with Addons.Subscriptions _ -> Addons.Technical | _ -> view.presentation in
+  state.lane_addons <- Some { view with generation; loading = true; error = None; draft = None;action_menu=None;last_action;action_receipt;presentation };
   let host = server_peer_host and port = state.port in
   let perform () =
     let ( let* ) = Result.bind in
@@ -4580,6 +4581,10 @@ let launch_lane_addons state ~mailbox request =
       Addons.decode json in
     match request with
     | Addons.Inspect -> let* snapshot = inspect () in Ok (Some snapshot, None, None)
+    | Addons.Subscriptions args ->
+        let* json=Masc_tui_http.post_json ~host ~port ~path:"/api/v1/lane-addons/subscriptions"
+          ~body:(Yojson.Safe.to_string args) in
+        Ok (view.snapshot,Some json,None)
     | Addons.Slice query ->
         let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
         let* json = Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/slice?" ^ query) in
@@ -4600,7 +4605,7 @@ let launch_lane_addons state ~mailbox request =
           | Addons.Observe id -> "observe", `Assoc ["instance_id", `String id]
           | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
           | Addons.Evidence json -> "evidence", json
-          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ -> assert false in
+          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
         let* receipt = Masc_tui_http.post_json ~host ~port ~path:("/api/v1/lane-addons/" ^ suffix)
           ~body:(Yojson.Safe.to_string body) in
         (match inspect () with

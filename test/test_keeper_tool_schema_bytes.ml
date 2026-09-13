@@ -230,7 +230,13 @@ open Alcotest
    contains the other, so the sum is the combined surface rather than one
    change counted twice. main's existing headroom is preserved and the merge
    adds none; CI measures the result. *)
-let ceiling_bytes = 116_163 + 162 + 336
+(* 2026-09-13: native CI at 31030b8e16 measured 118,048 bytes / 136 tools,
+   1,387 bytes above the previous ceiling. masc_lane_updates adds subscription
+   configuration plus caller-bound observation reads and explicit durable
+   acknowledgements, so Keepers can consume Lane output on their next turn.
+   Official-client CLI turns carry the full schema; agent_core can defer it.
+   Pin to the measured inventory with no added headroom. *)
+let ceiling_bytes = 118_048
 
 let schema_json (schema : Masc_domain.tool_schema) =
   `Assoc
@@ -405,6 +411,8 @@ let all_surface_golden_names =
   ; "masc_lane_inspect"
   ; "masc_lane_observe"
   ; "masc_lane_slice"
+  (* Subscription management and caller-bound output read/ack. *)
+  ; "masc_lane_updates"
   ; "masc_msx_change_disk"
   ; "masc_msx_eject"
   ; "masc_msx_load"

@@ -767,6 +767,8 @@ let run_keeper_cycle
                    ~config
                    ~current_task
                in
+               let lane_updates = Domain_pool_ref.submit_io_or_inline (fun () ->
+                 Lane_addon_subscription.observe ~config ~keeper_name:meta.name) in
                let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
                  Workspace_memory_publication.observe ~base_path:config.base_path) in
                (match workspace_memory with
@@ -823,6 +825,7 @@ let run_keeper_cycle
                      ~task_skill_surfaces
                      ~active_goal_summaries
                      ~workspace_memory
+                     ~lane_updates
                      ~repository_freshness
                      ?context_budget_bytes
                      ~observation

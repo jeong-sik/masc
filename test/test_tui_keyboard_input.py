@@ -11753,8 +11753,10 @@ def schedule_detail_interaction() -> Interaction:
             # seconds later, so the list said nothing about delivery until
             # the cursor was moved onto the row. The separator is part of the
             # needle because the word alone also appears in the reaction line
-            # below the list, which is the surface this is not testing.
-            "\u00b7consumed_ack".encode(),
+            # below the list, which is the surface this is not testing. The
+            # dot is spaced like every other dot on the screen; it used to be
+            # glued to the second word.
+            "succeeded \u00b7 consumed_ack".encode(),
             # The list used to carry a dispatch chip beside these. #31562
             # dropped it because it only ever repeated the row's own status,
             # which the identity line above the delivery row already names.
@@ -11802,6 +11804,26 @@ def schedule_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"Schedule wake/delivery page omitted {needle!r}: {evidence_plain!r}"
                 )
+        # A retained wake is a row of the same table as the fields around
+        # it: its status is the label and its times start in the value
+        # column. It used to be padded with its own literal width, which
+        # put the times two cells left of the Reaction time below. The
+        # frame positions rows with cursor moves rather than newlines, so
+        # the column is read as the width of the label plus its gap.
+        def label_span(label: bytes) -> int:
+            at = evidence_plain.find(label + b" ")
+            if at < 0:
+                raise AssertionError(
+                    f"Schedule wake/delivery page has no {label!r} row: {evidence_plain!r}"
+                )
+            rest = evidence_plain[at + len(label):]
+            return len(label) + len(rest) - len(rest.lstrip(b" "))
+
+        if label_span(b"succeeded") != label_span(b"Reaction"):
+            raise AssertionError(
+                "the retained wake's time does not start in the value column: "
+                f"{label_span(b'succeeded')} vs {label_span(b'Reaction')}"
+            )
         # Delivery identity and the work-result boundary follow the queue
         # summary. Read their page rather than treating one viewport as all
         # retained evidence; the operator can reach both with PgDn.

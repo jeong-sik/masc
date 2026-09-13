@@ -1067,6 +1067,8 @@
  (wrapped false)
  (modules masc_tui_types)
  (libraries mtime.clock.os masc_tui_esc_interrupt
+  ;; [sch_last_wake_status] is the schedule contract's wake_status.
+  masc.masc_schedule
   masc_tui_answering
   masc.voice_wizard
   masc.voice_setup

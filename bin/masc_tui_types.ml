@@ -1237,7 +1237,7 @@ type schedule_row = {
   sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
   sch_payload_summary: string option;
-  sch_last_wake_status: string option;
+  sch_last_wake_status: Schedule_contract_values.wake_status option;
   sch_last_wake_started_at_iso: string option;
   sch_last_wake_error: string option;
   sch_queue_projection_status: string option;
@@ -1374,7 +1374,7 @@ type schedule_snapshot = {
     only the newest of these on its row; the whole list arrives from the exact
     schedule lookup. *)
 type schedule_wake = {
-  swk_status: string;
+  swk_status: Schedule_contract_values.wake_status;
   swk_started_at_iso: string option;
   swk_finished_at_iso: string option;
   swk_error: string option;

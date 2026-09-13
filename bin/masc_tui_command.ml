@@ -107,6 +107,7 @@ let catalog =
     ; summary = "open recorded file changes for this keeper"
     }
   ; { word = "run-next"
+    ; aliases = []
     ; args = ""
     ; summary = "put my submitted message first, then stop the observed turn"
     }

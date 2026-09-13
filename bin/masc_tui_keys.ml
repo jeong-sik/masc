@@ -419,7 +419,10 @@ let for_surface = function
           ~help:"browse and search consolidated memory across the entire fleet"
       ; b Act "s" "sort"
           ~help:"cycle sort keepers (facts, size, delta, state, name)"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching keeper"
+      ; b Act "Esc" "clear / back"
+          ~help:"clear the filter, or return to Overview"
+      ; b Search "/" "filter"
+          ~help:"show only keepers whose id or state matches"
       ; b Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta

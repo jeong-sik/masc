@@ -325,7 +325,7 @@ let visual_lines ~height ~width view =
       | None ->
           [line ~tone:(if Option.is_some view.error then Attention else Dim)
              (if Option.is_some view.error then
-                "(load failed; nothing here is a reading)"
+                Masc_tui_types.page_failed_note
               else "No reading yet · r:refresh")]
       | Some snapshot ->
         match view.focus with
@@ -502,7 +502,7 @@ let lines ?(height=24) ~width view =
            (Masc.Tui_decode.sanitize_terminal_text ((if index=cursor then "> " else "  ") ^ render item)) (max 1 width)))) in
   let content = match view.snapshot with
     | None -> [if view.loading then "Refreshing…" else
-        if Option.is_some view.error then "(load failed; nothing here is a reading)"
+        if Option.is_some view.error then Masc_tui_types.page_failed_note
         else "No reading yet · r:refresh"]
     | Some snapshot ->
         let summary = [Printf.sprintf "%d instances · %d lanes · %d observations · %d evidence selected"

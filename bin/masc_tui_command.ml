@@ -702,7 +702,13 @@ let is_slash_navigable ?(keeper_names = []) text =
         let rest = String.trim after_space in
         List.exists (fun opt -> String.starts_with ~prefix:rest opt) options
 
-let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
+let about_banner ?(theme_name = "default") ?active_keepers () =
+  let keepers =
+    match active_keepers with
+    | Some (Ok count) -> string_of_int count
+    | Some (Error _) -> "unavailable"
+    | None -> "not loaded"
+  in
   String.concat "\n"
     [ "   ___  ___  ___  _____ _____ "
     ; "  |   \\/   |/ _ \\/  ___/  __ \\"
@@ -712,7 +718,7 @@ let about_banner ?(theme_name = "default") ?(active_keepers = 0) () =
     ; "  \\_|   |_|_| |_\\____/ \\____/"
     ; " ╭────────────────────────────────────────────────────────╮"
     ; " │  HORNED REAPER CORE · Multi-Agent Shared Context       │"
-    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13d │" theme_name active_keepers
+    ; Printf.sprintf " │  Theme: %-22s  Keepers: %-13s │" theme_name keepers
     ; " │  Treasury: 24K Gold Dungeon · Gates: All Secure        │"
     ; " ╰────────────────────────────────────────────────────────╯"
     ]

@@ -918,12 +918,11 @@ let prepare_agent_setup
   in
   Keeper_run_tools_hooks.assemble_hooks
     ?repetition_execution
-    ~ctx ~session ~turn_system_prompt ~user_message ~dynamic_context
+    ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count
     ~runtime_id_string ~is_retry
     ~config_root ~runtime_config_path
     ~trajectory_acc
     ~skill_projection_diagnostics
-    ?gate_replay_evidence:model_message.replay_evidence
     ?runtime_manifest_context ?runtime_manifest_append ()

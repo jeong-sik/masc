@@ -39,6 +39,9 @@ val preflight_keeper_delegate :
 (** Validate one typed delegated invocation before durable submission. *)
 
 module For_testing : sig
+  val resolve_direct_turn_runtime_id : meta:Keeper_meta_contract.keeper_meta ->
+    resume_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    gate_resume:Keeper_direct_gate_continuation.admission option -> (string, string) result
   val direct_owner_conversation_context :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->

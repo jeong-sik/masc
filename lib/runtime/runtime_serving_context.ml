@@ -105,8 +105,7 @@ let to_json observation =
     "context_source", `String (match observation.source with Running_model -> "running_model"
       | Configured_model -> "configured_model" | Serving_endpoint -> "serving_endpoint" | Not_reported -> "not_reported")]
 let observe ~sw ~net connection ~model ~load =
-  let* key = Runtime_adapter.resolve_api_key ~provider_id:connection.Discovery.provider_id
-    ~credential:connection.credential |> Result.map_error (fun _ -> Discovery.Credential_unavailable) in
+  let* key = Discovery.resolve_credential connection in
   let* kind = match connection.protocol with
     | Discovery.Ollama -> Ok Llm_provider.Provider_config.Ollama
     | Openai -> Ok Llm_provider.Provider_config.OpenAI_compat

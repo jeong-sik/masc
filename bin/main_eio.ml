@@ -1788,7 +1788,21 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio agent as_json =
+let voice_verify_cmd_exit requested_base_path message audio agent as_json =
+  (* The workspace whose configuration is probed, when one is named. The voice
+     loader finds runtime.toml through the environment, so a workspace set up
+     with `voice-local-setup --base-path` and never recorded as the default had
+     no way to be checked from this command: measured 2026-09-13 with only
+     HOME and PATH set, run inside that workspace, it answered "voice config
+     missing" while the section was there. Exported the way the server boot
+     exports it, and the resolver's cache is cleared because the tool registry
+     has already resolved once by the time a subcommand runs. *)
+  Option.iter
+    (fun raw ->
+      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
+      Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
+      Config_dir_resolver.reset ())
+    requested_base_path;
   (* The keeper whose voice is being checked, when one is named. A voice is
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
@@ -1894,7 +1908,7 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
+    Term.(const voice_verify_cmd_exit $ run_base_path $ message $ audio $ agent $ as_json)
 (* Turning voice on without a server running.
 
    The setup journey runs before there is anything to talk to over HTTP, and
@@ -1936,6 +1950,22 @@ let voice_local_setup_exit base_path speak_voice hear_model =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   let refuse message = prerr_endline message; 1 in
+  (* Voice is a section of the configuration [masc init] writes, so a directory
+     that was never initialized has nowhere to put one. Checked here, by the
+     file's existence, rather than read out of the writer's error: that error
+     carries the exception as text, and telling "absent" from "unreadable" in it
+     would mean matching a string. A file that exists and cannot be read still
+     falls through to the writer's own sentence.
+
+     Measured 2026-09-13 on an empty directory before this: exit 1 and
+     [Sys_error("<path>: No such file or directory")], with nothing created. *)
+  if not (Sys.file_exists runtime_config_path) then
+    refuse
+      (Printf.sprintf
+         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
+          first, then this again."
+         base_path runtime_config_path (Filename.quote base_path))
+  else
   match Voice_setup.observe ~runtime_config_path with
   | Error error -> refuse (Voice_setup.error_message error)
   | Ok (revision, existing) ->
@@ -1974,7 +2004,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
           let endpoint_voice, section =
-            match Voice_setup.voice_placement ~section_exists:(Option.is_some tts) with
+            match Voice_setup.voice_placement tts with
             | Voice_setup.On_the_endpoint -> Some voice, []
             | Voice_setup.On_the_section ->
               None, [ Voice_setup.Set_tts_default_voice voice ]

@@ -291,6 +291,29 @@ let post_json_with_timeout ~timeout_sec ~(host : string) ~(port : int)
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
 
+(* A POST whose effect matters, told apart by what is known about that effect.
+   [post_json] folds a dropped connection and a server's refusal into one
+   string, and a caller that cannot tell them apart treats a write that may have
+   landed as one that did not. A 4xx is the server declining in its own words.
+   Everything else -- no response, a deadline, a 5xx, a success whose body does
+   not read -- leaves the effect unknown. *)
+type post_outcome =
+  | Post_answered of Yojson.Safe.t
+  | Post_refused of string
+  | Post_unanswered of string
+
+let post_json_outcome ~(host : string) ~(port : int) ~(path : string) ~(body : string) =
+  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error detail -> Post_unanswered detail
+  | Ok (status_code, response) when status_code >= 400 && status_code < 500 ->
+    (match decode_json ~allow_empty:true ~status_code ~body:response with
+     | Error message -> Post_refused message
+     | Ok _ -> Post_refused (Printf.sprintf "HTTP %d" status_code))
+  | Ok (status_code, response) ->
+    (match decode_json ~allow_empty:false ~status_code ~body:response with
+     | Ok json -> Post_answered json
+     | Error message -> Post_unanswered message)
+
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e

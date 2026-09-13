@@ -2686,6 +2686,28 @@ let runtime_param_edit_clear edit =
    asks the same questions next. What lives here is only what a terminal needs:
    the text being typed, the revision the session was opened against, and the
    last thing the server said. *)
+(* Where the session's last save stands. Every save is numbered, and a reply is
+   applied only while the session is waiting on that number. The replies used
+   to carry nothing but their result and landed on whatever session was open
+   when they arrived: after esc and a reopen, the new draft was marked saved,
+   and a second save showed the first save's probe under it. *)
+type voice_wizard_save =
+  | Save_not_sent
+  | Save_sending of int
+  | Save_probing of int
+      (** Written. The endpoints are being asked, and their answer carries this
+          number. *)
+  | Save_settled
+  | Save_unanswered of { request : int; revision : string }
+      (** Sent against [revision], and nothing came back that says whether it
+          was written: the connection dropped or the deadline passed. The
+          session reads runtime.toml again before it lets the draft be sent
+          twice. *)
+  | Save_needs_reopen of string
+      (** The read after an unanswered save could not rule the write out. A
+          retry would carry a revision this session no longer knows is
+          current, so it waits for esc and a fresh read. The string says why. *)
+
 type voice_wizard_session =
   { vws_draft : Voice_wizard.draft
   ; vws_step : Voice_wizard.step
@@ -2699,7 +2721,7 @@ type voice_wizard_session =
             carries it, so a session left open while something else wrote is
             told rather than overwriting it. *)
   ; vws_status : string option
-  ; vws_saving : bool
+  ; vws_save : voice_wizard_save
   ; vws_probe : string list
         (** What each endpoint answered after the save, one line each. The
             wizard writes a configuration; whether anything on the other end
@@ -2739,28 +2761,153 @@ let voice_wizard_open ~section ~provider ~revision =
   ; vws_replace_on_type = true
   ; vws_revision = revision
   ; vws_status = None
-  ; vws_saving = false
+  ; vws_save = Save_not_sent
   ; vws_probe = []
   }
 
-let voice_wizard_append session text =
+let voice_wizard_is_sending session =
+  match session.vws_save with
+  | Save_sending _ -> true
+  | Save_not_sent | Save_probing _ | Save_settled | Save_unanswered _ | Save_needs_reopen _ ->
+    false
+
+(* Changing the draft. The rows under it answered the save that was sent, and
+   left there they read as answers about the draft now on screen -- a TTS probe
+   stayed under a draft switched to STT. A probe still on its way is about that
+   earlier draft too, so it is let go. A save whose outcome is unknown is not:
+   editing does not tell the session whether runtime.toml was written. *)
+let voice_wizard_edited session =
   { session with
-    vws_input = (if session.vws_replace_on_type then text else session.vws_input ^ text)
-  ; vws_replace_on_type = false
-  ; vws_status = None
+    vws_probe = []
+  ; vws_save =
+      (match session.vws_save with
+       | Save_probing _ | Save_settled -> Save_not_sent
+       | (Save_not_sent | Save_sending _ | Save_unanswered _ | Save_needs_reopen _) as held ->
+         held)
   }
+
+let voice_wizard_append session text =
+  voice_wizard_edited
+    { session with
+      vws_input = (if session.vws_replace_on_type then text else session.vws_input ^ text)
+    ; vws_replace_on_type = false
+    ; vws_status = None
+    }
 
 let voice_wizard_backspace session =
-  { session with
-    vws_input =
-      (if session.vws_replace_on_type then ""
-       else Masc_tui_message_layout.drop_last_utf8_scalar session.vws_input)
-  ; vws_replace_on_type = false
-  ; vws_status = None
-  }
+  voice_wizard_edited
+    { session with
+      vws_input =
+        (if session.vws_replace_on_type then ""
+         else Masc_tui_message_layout.drop_last_utf8_scalar session.vws_input)
+    ; vws_replace_on_type = false
+    ; vws_status = None
+    }
 
 let voice_wizard_clear session =
-  { session with vws_input = ""; vws_replace_on_type = false; vws_status = None }
+  voice_wizard_edited
+    { session with vws_input = ""; vws_replace_on_type = false; vws_status = None }
+
+(* Whether Enter on Review may send the draft, and what to say when not. *)
+let voice_wizard_save_held session =
+  match session.vws_save with
+  | Save_not_sent | Save_probing _ | Save_settled -> None
+  | Save_sending _ -> Some "saving…"
+  | Save_unanswered _ ->
+    Some "reading runtime.toml again to see whether the last save was written…"
+  | Save_needs_reopen reason -> Some reason
+
+let voice_wizard_sending session ~request =
+  { session with vws_save = Save_sending request; vws_status = Some "saving…"; vws_probe = [] }
+
+(* What came back for a save, already told apart: an answer that carries the
+   revision the write produced, a refusal the server gave in words, and no
+   answer at all. *)
+type voice_wizard_save_reply =
+  | Save_written of string
+  | Save_refused of string
+  | Save_unanswered_reply of string
+
+(* [None] when the reply is not for the save this session is waiting on. *)
+let voice_wizard_after_save session ~request reply =
+  match session.vws_save with
+  | Save_sending sent when sent = request ->
+    Some
+      (match reply with
+       | Save_written revision ->
+         (* The revision this save produced. The wizard stays open, and a second
+            save from it has to carry this one, not the one read before. *)
+         let session = { session with vws_revision = revision; vws_probe = [] } in
+         (match session.vws_draft.Voice_wizard.section with
+          | Voice_setup.Tts ->
+            { session with
+              vws_save = Save_probing request
+            ; vws_status = Some "saved. asking the endpoints to answer…"
+            }
+          | Voice_setup.Stt ->
+            (* Transcription needs audio this pane does not have. The CLI takes
+               a file, and the runbook says how to make one. *)
+            { session with
+              vws_save = Save_settled
+            ; vws_status = Some "saved. run  masc voice-verify --audio FILE  to hear it back"
+            })
+       | Save_refused message ->
+         { session with vws_save = Save_not_sent; vws_status = Some message }
+       | Save_unanswered_reply detail ->
+         { session with
+           vws_save = Save_unanswered { request; revision = session.vws_revision }
+         ; vws_status =
+             Some
+               (Printf.sprintf
+                  "the save got no answer (%s), so it may have been written. reading \
+                   runtime.toml again…"
+                  detail)
+         })
+  | Save_sending _ | Save_not_sent | Save_probing _ | Save_settled | Save_unanswered _
+  | Save_needs_reopen _ ->
+    None
+
+let voice_wizard_after_probe session ~request result =
+  match session.vws_save with
+  | Save_probing sent when sent = request ->
+    Some
+      (match result with
+       | Ok lines -> { session with vws_save = Save_settled; vws_status = Some "saved."; vws_probe = lines }
+       | Error message -> { session with vws_save = Save_settled; vws_status = Some message })
+  | Save_probing _ | Save_not_sent | Save_sending _ | Save_settled | Save_unanswered _
+  | Save_needs_reopen _ ->
+    None
+
+(* The read taken after a save that got no answer. The same revision means
+   nothing was written, so the draft can go again against it. A different one
+   means runtime.toml moved -- by that save or by someone else -- and adopting
+   it would let a retry overwrite a write this session never saw. *)
+let voice_wizard_after_reread session ~request result =
+  match session.vws_save with
+  | Save_unanswered { request = sent; revision } when sent = request ->
+    Some
+      (match result with
+       | Ok current when String.equal current revision ->
+         { session with
+           vws_save = Save_not_sent
+         ; vws_status = Some "nothing was written. enter saves again"
+         }
+       | Ok _ ->
+         let reason =
+           "runtime.toml changed after the save that got no answer. esc, check the \
+            endpoints, and open the wizard again"
+         in
+         { session with vws_save = Save_needs_reopen reason; vws_status = Some reason }
+       | Error message ->
+         let reason =
+           Printf.sprintf
+             "runtime.toml could not be read again (%s). esc and open the wizard again"
+             message
+         in
+         { session with vws_save = Save_needs_reopen reason; vws_status = Some reason })
+  | Save_unanswered _ | Save_not_sent | Save_sending _ | Save_probing _ | Save_settled
+  | Save_needs_reopen _ ->
+    None
 
 (* Typing is kept out of the draft until the step is left, so backing out of a
    step does not carry a half-typed value with it. *)
@@ -2828,12 +2975,13 @@ let voice_wizard_cycle_provider session =
         Voice_wizard.endpoint_id = session.vws_draft.Voice_wizard.endpoint_id
       }
     in
-    { session with
-      vws_draft = draft
-    ; vws_input = voice_wizard_value draft session.vws_step
-    ; vws_replace_on_type = true
-    ; vws_status = None
-    }
+    voice_wizard_edited
+      { session with
+        vws_draft = draft
+      ; vws_input = voice_wizard_value draft session.vws_step
+      ; vws_replace_on_type = true
+      ; vws_status = None
+      }
 
 let runtime_param_edit_toggle_bool edit =
   let next =
@@ -3922,6 +4070,10 @@ type state = {
   mutable voice_setup: Yojson.Safe.t option;
   mutable voice_setup_error: string option;
   mutable voice_wizard: voice_wizard_session option;
+  (* The number the next wizard save is sent under. Never reused, so a reply
+     for a save made by a session that has since closed cannot match the one
+     open now. *)
+  mutable voice_wizard_requests: int;
   mutable resources_list: Masc_tui_mcp.resource list option;
   mutable resources_error: string option;
   mutable resources_cursor: int;
@@ -5645,6 +5797,7 @@ let create_state
   voice_setup = None;
   voice_setup_error = None;
   voice_wizard = None;
+  voice_wizard_requests = 0;
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -6421,6 +6574,12 @@ type clamped_scroll =
      the drawing instead, which is the one thing the renderer must not do. *)
   | Patch_modal_scroll of int
   | Link_modal_scroll of int
+  (* The voice pane and its wizard lay out lines out of two HTTP reads and the
+     probe's answers, so their count exists only once the frame is drawn. Both
+     drew every line into a fixed budget with no offset, and whatever fell past
+     it -- later endpoints, the probe's last rows, the footer -- could not be
+     reached. *)
+  | Voice_scroll of int
 
 (* What End names on a surface whose rows the drawing counts: a row past any
    real end, so the frame's own clamp reports the last one back. The keypress
@@ -6475,6 +6634,7 @@ let apply_clamped_scroll (state : state) = function
   | Approval_detail_scroll value -> state.approval_detail_scroll <- value
   | Patch_modal_scroll value -> state.patch_modal_scroll <- value
   | Link_modal_scroll value -> state.link_modal_scroll <- value
+  | Voice_scroll value -> state.config_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives
@@ -7157,20 +7317,24 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          lengths: the source pane draws every line, the models pane draws one
          row per binding plus a header. One count for both let the keys run
          off the end of the shorter one. *)
-      listing ~error:state.runtime_config_view_error
-        (match state.config_pane with
-         | Config_models ->
+      let file_rows () =
+        match state.runtime_config_view with
+        | None -> 0
+        | Some reading -> List.length reading.rcv_rows
+      in
+      (match state.config_pane with
+       | Config_models ->
+         listing ~error:state.runtime_config_view_error
            (match state.runtime_config_view with
             | None -> 0
             | Some _ -> List.length state.config_models_rows + 1)
-         (* The voice pane draws its own short block rather than the config
-            file, so it scrolls with the same rule as the rest: whatever the
-            renderer laid out. *)
-         | Config_runtime | Config_params | Config_prompts | Config_presets
-         | Config_themes | Config_voice ->
-           (match state.runtime_config_view with
-            | None -> 0
-            | Some reading -> List.length reading.rcv_rows))
+       (* The voice pane draws neither the file nor a list the state holds.
+          It was counted as the file's rows, a bound that has nothing to do
+          with what it draws; the frame reports [Voice_scroll] instead. *)
+       | Config_voice -> None
+       | Config_runtime | Config_params | Config_prompts | Config_presets
+       | Config_themes ->
+         listing ~error:state.runtime_config_view_error (file_rows ()))
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,
@@ -8113,9 +8277,10 @@ let voice_wizard_cycle_section session =
     | Voice_setup.Stt -> Voice_setup.Tts
   in
   let draft = Voice_wizard.with_section session.vws_draft other in
-  { session with
-    vws_draft = draft
-  ; vws_input = voice_wizard_value draft session.vws_step
-  ; vws_replace_on_type = true
-  ; vws_status = None
-  }
+  voice_wizard_edited
+    { session with
+      vws_draft = draft
+    ; vws_input = voice_wizard_value draft session.vws_step
+    ; vws_replace_on_type = true
+    ; vws_status = None
+    }

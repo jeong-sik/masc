@@ -12640,8 +12640,41 @@ let render_runtime_config_status state =
    empty is more often the wrong microphone than a threshold. *)
 (* The wizard screen. The questions, their order and the completeness rule are
    Voice_wizard's; what is drawn here is only how a terminal shows them. *)
+(* The voice pane and its wizard: a fixed head and footer around lines read
+   through [state.config_scroll]. Both drew every line into the surface budget,
+   and [finish_surface] keeps the leading rows of a frame that runs over, so a
+   long endpoint list or probe report lost its tail and then its footer with no
+   key that could bring them back. The offset is clamped here, against the
+   lines actually laid out, and reported back as [Voice_scroll]. *)
+let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints =
+  let lines = frame_lines body in
+  let height =
+    (* The rows under the head, less the box bottom and the footer. *)
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - List.length (frame_lines head) - 2)
+  in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.config_scroll
+  in
+  let buf = Buffer.create (Buffer.length head + Buffer.length body + 256) in
+  Buffer.add_buffer buf head;
+  List.iteri
+    (fun index line ->
+      if index >= scroll && index < scroll + height then begin
+        Buffer.add_string buf line;
+        Buffer.add_char buf '\n'
+      end)
+    lines;
+  box_bottom buf cols;
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
+  finish_surface state ~clamped:(Voice_scroll scroll) ~surface_key:"voice"
+    ~rows:terminal_rows ~cols buf
+;;
+
 let render_voice_wizard (state : state) (session : voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
@@ -12664,8 +12697,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
     | Some n -> Printf.sprintf "%d/%d" n (List.length steps)
     | None -> "?"
   in
-  box_top buf cols;
-  box_line buf cols
+  box_top head cols;
+  box_line head cols
     (Printf.sprintf "%s  %s  %s"
        (screen_title " MASC Voice · setup")
        (config_pane_strip state)
@@ -12706,7 +12739,7 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
    | Voice_wizard.Voice ->
      box_line buf cols
        (Printf.sprintf "    %s%s%s%s" Ansi.bold session.vws_input Ansi.reset
-          (if session.vws_saving then "" else "▏")));
+          (if Masc_tui_types.voice_wizard_is_sending session then "" else "▏")));
   (* A local server that never asked for a key answers 200 only while nothing
      sends it one, so the blank is worth saying out loud rather than leaving as
      an empty line. *)
@@ -12746,11 +12779,8 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
      box_line buf cols "";
      box_line buf cols (Printf.sprintf "  %swhat answered%s" Ansi.bold Ansi.reset);
      List.iter (fun line -> box_line buf cols (Printf.sprintf "    %s" line)) lines);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:"Enter:next  Up:back  Esc:cancel");
-  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:"Enter:next  Up:back  PgUp/PgDn:scroll  Esc:cancel"
 ;;
 
 let render_voice (state : state) =
@@ -12758,6 +12788,7 @@ let render_voice (state : state) =
   | Some session -> render_voice_wizard state session
   | None ->
   let terminal_rows, cols = get_terminal_size () in
+  let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
     box_line buf cols
@@ -12823,8 +12854,8 @@ let render_voice (state : state) =
     | [] -> ()
     | lines -> List.iter (fun line -> box_line buf cols line) lines
   in
-  box_top buf cols;
-  box_line buf cols
+  box_top head cols;
+  box_line head cols
     (Printf.sprintf "%s  %s  %s"
        (screen_title " MASC Voice")
        (config_pane_strip state)
@@ -12901,10 +12932,8 @@ let render_voice (state : state) =
   box_line buf cols
     (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
        Ansi.dim declared_by Ansi.reset);
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"p:next pane  r:refresh  e:set up");
-  finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
+  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+    ~hints:"j/k:scroll  p:next pane  r:refresh  e:set up"
 ;;
 
 let render_config (state : state) =

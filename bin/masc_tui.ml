@@ -1778,8 +1778,12 @@ type async_msg =
      roster cursor moves under a refresh, and a transcript that took several
      seconds would otherwise land on whoever happens to be selected when it
      arrives. *)
-  | Voice_wizard_saved of (Yojson.Safe.t, string) result
-  | Voice_wizard_probed of (Yojson.Safe.t, string) result
+  (* The wizard's replies carry the save they answer, and
+     [Masc_tui_types.voice_wizard_after_save] and its two siblings drop one the
+     open session is not waiting on. *)
+  | Voice_wizard_saved of int * Masc_tui_types.voice_wizard_save_reply
+  | Voice_wizard_probed of int * (Yojson.Safe.t, string) result
+  | Voice_wizard_reread of int * (string, string) result
   | Voice_config_loaded of
       (Yojson.Safe.t, string) result
       * (Yojson.Safe.t, string) result
@@ -2594,7 +2598,7 @@ let launch_keeper_tool_approvals_load ?(intent = Snapshot_read.Poll) state ~mail
    configured endpoint is asked to say one sentence, and each answer is shown --
    including the ones that refused, which is the part a chain hides by stopping
    at the first endpoint that answers. *)
-let launch_voice_wizard_probe state ~mailbox message =
+let launch_voice_wizard_probe state ~mailbox ~request message =
   let host = server_peer_host in
   let port = state.port in
   let payload = Yojson.Safe.to_string (`Assoc [ "message", `String message ]) in
@@ -2604,12 +2608,60 @@ let launch_voice_wizard_probe state ~mailbox message =
         ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
         ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload
     in
-    enqueue_async mailbox (Voice_wizard_probed result)
+    enqueue_async mailbox (Voice_wizard_probed (request, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
-    enqueue_async mailbox (Voice_wizard_probed (Error "Eio switch is unavailable"))
+    enqueue_async mailbox
+      (Voice_wizard_probed (request, Error "Eio switch is unavailable"))
+;;
+
+(* The admin setup read, which names each endpoint and the runtime.toml
+   revision. Shared by the pane's load and the wizard's read after a save that
+   got no answer. *)
+let read_voice_setup ~host ~port =
+  match Masc_tui_http.http_get ~host ~port ~path:"/api/v1/voice/setup" with
+  | Ok (200, body) ->
+    (match Yojson.Safe.from_string body with
+     | json -> Ok json
+     | exception Yojson.Json_error _ -> Error "voice setup did not parse as JSON")
+  | Ok (code, body) ->
+    Error (Printf.sprintf "voice setup HTTP %d: %s" code (String.trim body))
+  | Error message -> Error message
+;;
+
+let voice_setup_revision = function
+  | `Assoc fields ->
+    (match List.assoc_opt "revision" fields with
+     | Some (`String revision) when String.trim revision <> "" -> Some revision
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+(* Read runtime.toml's revision again for the save numbered [request]. Its own
+   message rather than the pane's load: a load already in flight when the save
+   went out answers the revision from before it, and taken as this read it
+   would say nothing was written when something was. *)
+let launch_voice_wizard_reread state ~mailbox ~request =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      match read_voice_setup ~host ~port with
+      | Error message -> Error message
+      | Ok json ->
+        (match voice_setup_revision json with
+         | Some revision -> Ok revision
+         | None -> Error "the setup read named no revision")
+    in
+    enqueue_async mailbox (Voice_wizard_reread (request, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Voice_wizard_reread (request, Error "Eio switch is unavailable"))
 ;;
 
 (* The sentence the endpoints are asked to say. In Korean because that is what
@@ -2658,9 +2710,11 @@ let voice_wizard_probe_lines json =
 let launch_voice_wizard_save state ~mailbox
     (session : Masc_tui_types.voice_wizard_session) =
   match
-    Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision
+    ( Masc_tui_types.voice_wizard_save_held session
+    , Voice_wizard.save_request session.vws_draft ~revision:session.vws_revision )
   with
-  | Error gaps ->
+  | Some reason, _ -> state.voice_wizard <- Some { session with vws_status = Some reason }
+  | None, Error gaps ->
     (* The wizard would not have offered Review with gaps left, but the draft
        can be edited backwards, so the refusal is said rather than assumed
        impossible. *)
@@ -2670,22 +2724,40 @@ let launch_voice_wizard_save state ~mailbox
              vws_status =
                Some (String.concat "; " (List.map Voice_wizard.gap_message gaps))
            }
-  | Ok body ->
-    state.voice_wizard
-      <- Some { session with vws_saving = true; vws_status = Some "saving…" };
+  | None, Ok body ->
+    state.voice_wizard_requests <- state.voice_wizard_requests + 1;
+    let request = state.voice_wizard_requests in
+    state.voice_wizard <- Some (Masc_tui_types.voice_wizard_sending session ~request);
     let host = server_peer_host in
     let port = state.port in
     let payload = Yojson.Safe.to_string body in
     let run () =
-      let result =
-        Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/setup" ~body:payload
+      let reply =
+        match
+          Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/voice/setup"
+            ~body:payload
+        with
+        | Masc_tui_http.Post_answered json ->
+          (match voice_setup_revision json with
+           | Some revision -> Masc_tui_types.Save_written revision
+           (* Written, by the status, but with no revision to keep editing
+              against: what the session holds is now stale, and whether it is
+              this write's is exactly what the reread decides. *)
+           | None ->
+             Masc_tui_types.Save_unanswered_reply "the answer named no revision")
+        | Masc_tui_http.Post_refused message -> Masc_tui_types.Save_refused message
+        | Masc_tui_http.Post_unanswered detail ->
+          Masc_tui_types.Save_unanswered_reply detail
       in
-      enqueue_async mailbox (Voice_wizard_saved result)
+      enqueue_async mailbox (Voice_wizard_saved (request, reply))
     in
     (match Eio_context.get_switch_opt () with
-     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     (* Nothing was sent, so this is a refusal and not an unknown outcome. *)
      | None ->
-       enqueue_async mailbox (Voice_wizard_saved (Error "Eio switch is unavailable")))
+       enqueue_async mailbox
+         (Voice_wizard_saved
+            (request, Masc_tui_types.Save_refused "Eio switch is unavailable"))
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon))
 ;;
 
 let launch_voice_config_load state ~mailbox =
@@ -2724,16 +2796,7 @@ let launch_voice_config_load state ~mailbox =
     (* The admin read, which names each endpoint. The public config route above
        answers three booleans and no identity, so a panel built only on it can
        say that a fallback exists and not which one. *)
-    let setup =
-      match Masc_tui_http.http_get ~host ~port ~path:"/api/v1/voice/setup" with
-      | Ok (200, body) ->
-        (match Yojson.Safe.from_string body with
-         | json -> Ok json
-         | exception _ -> Error "voice setup did not parse as JSON")
-      | Ok (code, body) ->
-        Error (Printf.sprintf "voice setup HTTP %d: %s" code (String.trim body))
-      | Error message -> Error message
-    in
+    let setup = read_voice_setup ~host ~port in
     enqueue_async mailbox (Voice_config_loaded (config, setup, device))
   in
   match Eio_context.get_switch_opt () with
@@ -5962,6 +6025,9 @@ let reading_pane (state : state) : (int -> Masc_tui_types.clamped_scroll) option
      [surface_chrome]'s [clamped] callback, so the generic End sentinel is
      corrected after drawing exactly as the other reading panes are. *)
   | Metrics -> pane (fun v -> Metrics_scroll v)
+  (* The voice pane is lines the frame lays out; its wizard takes its own keys
+     while open. *)
+  | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -11355,73 +11421,48 @@ let apply_async_message state ~base_path ~http_refresh_inflight
             match response with
             | Document.Rejected failure -> {view with error=Some failure.message}
             | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))})
-  (* Every voice message carries the keeper the capture was started for, and
-     each is dropped unless that capture is still the one in flight. An
-     operator who moved the cursor, or pressed the key again, has said the
-     first capture no longer belongs to this draft. *)
-  | Voice_wizard_saved result ->
-      (match (state.voice_wizard, result) with
-       | None, _ -> ()
-       | Some session, Ok response ->
-           (* The revision this save produced. The wizard stays open, so a
-              reader who goes back to change a field and saves again sends a
-              revision -- and the one from before the save is now stale
-              against this session's own write, which came back as a
-              configuration-changed conflict every time. *)
-           let session =
-             match response with
-             | `Assoc fields ->
-                 (match List.assoc_opt "revision" fields with
-                  | Some (`String revision) when String.trim revision <> "" ->
-                      { session with vws_revision = revision }
-                  | Some _ | None -> session)
-             | _ -> session
-           in
-           (* The pane is reloaded: what it was showing is now one revision
-              behind. The session stays open to report what answers. *)
-           launch_voice_config_load state ~mailbox;
-           (* The rows on screen answered the previous save. Clearing them at the
-              save, rather than when the next reply lands, keeps an earlier
-              section's answers from sitting under a status that is no longer
-              about them -- the STT arm never asks again, so without this they
-              stayed until the pane closed. *)
-           (match session.vws_draft.Voice_wizard.section with
-            | Voice_setup.Tts ->
-                state.voice_wizard
-                  <- Some
-                       { session with
-                         vws_saving = false
-                       ; vws_probe = []
-                       ; vws_status = Some "saved. asking the endpoints to answer…"
-                       };
-                launch_voice_wizard_probe state ~mailbox voice_wizard_probe_sentence
-            | Voice_setup.Stt ->
-                (* Transcription needs audio this pane does not have. The CLI
-                   takes a file, and the runbook says how to make one. *)
-                state.voice_wizard
-                  <- Some
-                       { session with
-                         vws_saving = false
-                       ; vws_probe = []
-                       ; vws_status =
-                           Some
-                             "saved. run  masc voice-verify --audio FILE  to hear it back"
-                       })
-       | Some session, Error message ->
-           state.voice_wizard
-             <- Some { session with vws_saving = false; vws_status = Some message })
-  | Voice_wizard_probed result ->
-      (match (state.voice_wizard, result) with
-       | None, _ -> ()
-       | Some session, Error message ->
-           state.voice_wizard <- Some { session with vws_status = Some message }
-       | Some session, Ok json ->
-           state.voice_wizard
-             <- Some
-                  { session with
-                    vws_status = Some "saved."
-                  ; vws_probe = voice_wizard_probe_lines json
-                  })
+  (* The capture messages carry the keeper the capture was started for, and
+     each is dropped unless that capture is still the one in flight. The
+     wizard's carry the number of the save they answer, dropped the same way
+     once the session has closed, saved again, or changed the draft. *)
+  | Voice_wizard_saved (request, reply) ->
+      Option.iter
+        (fun session ->
+          Option.iter
+            (fun (updated : Masc_tui_types.voice_wizard_session) ->
+              state.voice_wizard <- Some updated;
+              (match reply with
+               (* The pane is one revision behind a write, and possibly behind
+                  one that got no answer. *)
+               | Masc_tui_types.Save_written _ | Masc_tui_types.Save_unanswered_reply _ ->
+                   launch_voice_config_load state ~mailbox
+               | Masc_tui_types.Save_refused _ -> ());
+              match updated.vws_save with
+              | Masc_tui_types.Save_probing request ->
+                  launch_voice_wizard_probe state ~mailbox ~request
+                    voice_wizard_probe_sentence
+              | Masc_tui_types.Save_unanswered { request; _ } ->
+                  launch_voice_wizard_reread state ~mailbox ~request
+              | Masc_tui_types.Save_not_sent | Masc_tui_types.Save_sending _
+              | Masc_tui_types.Save_settled | Masc_tui_types.Save_needs_reopen _ ->
+                  ())
+            (Masc_tui_types.voice_wizard_after_save session ~request reply))
+        state.voice_wizard
+  | Voice_wizard_probed (request, result) ->
+      Option.iter
+        (fun session ->
+          Option.iter
+            (fun updated -> state.voice_wizard <- Some updated)
+            (Masc_tui_types.voice_wizard_after_probe session ~request
+               (Result.map voice_wizard_probe_lines result)))
+        state.voice_wizard
+  | Voice_wizard_reread (request, result) ->
+      Option.iter
+        (fun session ->
+          Option.iter
+            (fun updated -> state.voice_wizard <- Some updated)
+            (Masc_tui_types.voice_wizard_after_reread session ~request result))
+        state.voice_wizard
   | Voice_config_loaded (result, setup, device) ->
       state.voice_input_device <- device;
       (match result with
@@ -16538,11 +16579,24 @@ and is loaded on demand through keeper_skill.
               let set value = state.voice_wizard <- Some value in
               (* A save in flight ignores everything but the key that leaves:
                  the draft it is writing is already on its way. *)
-              if session.vws_saving && not (String.equal k "esc")
+              if Masc_tui_types.voice_wizard_is_sending session && not (String.equal k "esc")
               then ()
               else (
                 match k with
-                | "esc" -> state.voice_wizard <- None
+                | "esc" ->
+                  state.voice_wizard <- None;
+                  state.config_scroll <- 0
+                (* Up and down are the steps, so reading a probe report that
+                   runs past the frame takes the page keys. The frame clamps
+                   and reports the offset back. *)
+                | "pageup" ->
+                  state.config_scroll <- max 0 (state.config_scroll - surface_page_rows state)
+                | "pagedown" ->
+                  state.config_scroll <-
+                    Masc_tui_types.scroll_down_from state.config_scroll
+                      ~by:(surface_page_rows state)
+                | "home" -> state.config_scroll <- 0
+                | "end" -> state.config_scroll <- Masc_tui_types.clamped_scroll_end
                 | "\r" | "\n" | "enter" ->
                   (match session.vws_step with
                    | Voice_wizard.Review ->
@@ -19276,6 +19330,11 @@ and is loaded on demand through keeper_skill.
             | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
+            | Config when state.config_pane = Config_voice ->
+                state.config_scroll <-
+                  (if direction > 0 then
+                     Masc_tui_types.scroll_down_from state.config_scroll ~by:page
+                   else max 0 (state.config_scroll + (direction * page)))
             | Config when state.config_pane = Config_runtime ->
                 set_runtime_config_cursor_near state ~direction
                   ~target:(state.runtime_config_cursor + (direction * page))
@@ -20288,6 +20347,10 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Config when state.config_pane = Config_runtime ->
                 move_runtime_config_cursor state ~delta:1
+            (* The frame counts the voice lines and reports the offset back. *)
+            | Config when state.config_pane = Config_voice ->
+                state.config_scroll <-
+                  Masc_tui_types.scroll_down_from state.config_scroll ~by:1
             | Config -> state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows state) ~delta:1
                     ~current:state.config_scroll
@@ -20649,6 +20712,8 @@ and is loaded on demand through keeper_skill.
                     ~current:state.config_scroll
             | Config when state.config_pane = Config_runtime ->
                 move_runtime_config_cursor state ~delta:(-1)
+            | Config when state.config_pane = Config_voice ->
+                state.config_scroll <- max 0 (state.config_scroll - 1)
             | Config ->
                 if state.config_scroll > 0 then
                   state.config_scroll <-
@@ -22014,6 +22079,7 @@ and is loaded on demand through keeper_skill.
                                move it into runtime.toml first"
                               (Terminal_text.single_line path))
                        | Some (`String revision), None ->
+                         state.config_scroll <- 0;
                          state.voice_wizard
                            <- Some
                                 (Masc_tui_types.voice_wizard_open

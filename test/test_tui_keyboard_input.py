@@ -14650,7 +14650,18 @@ VOICE_SETUP_FIXTURE = {
                 "kind": "elevenlabs_direct",
                 "enabled": True,
                 "api_key_env": "ELEVENLABS_API_KEY",
-            }
+                "address": "https://api.elevenlabs.io/v1",
+            },
+            # Both addresses, the way a voice_mcp entry may carry them. The
+            # transport calls mcp_url; the server says so in "address".
+            {
+                "id": "fixture-mcp",
+                "kind": "voice_mcp",
+                "enabled": True,
+                "base_url": "http://127.0.0.1:9100",
+                "mcp_url": "http://127.0.0.1:9200/mcp",
+                "address": "http://127.0.0.1:9200/mcp",
+            },
         ],
     },
     "stt": {
@@ -14661,6 +14672,7 @@ VOICE_SETUP_FIXTURE = {
                 "kind": "openai_compat",
                 "enabled": True,
                 "base_url": "http://127.0.0.1:2022/v1",
+                "address": "http://127.0.0.1:2022/v1",
             }
         ],
     },
@@ -14774,6 +14786,13 @@ def voice_wizard_interaction(requests: HttpRequests) -> Interaction:
         for needle in (b"fixture-elevenlabs", b"fixture-whisper", b"elevenlabs_direct"):
             if needle not in listing:
                 raise AssertionError(f"the voice pane omitted {needle!r}")
+        # The address drawn is the one the server resolved. The pane used to
+        # prefer base_url and showed an address a voice_mcp endpoint is never
+        # called at.
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        if b"127.0.0.1:9200/mcp" not in screen or b"127.0.0.1:9100" in screen:
+            raise AssertionError(f"the voice_mcp row did not show its mcp_url: {screen!r}")
 
         def expect(frame: bytes, needle: bytes, what: str) -> None:
             if needle not in frame:
@@ -14916,6 +14935,144 @@ def run_voice_wizard_regression(executable: str) -> None:
         interact=voice_wizard_interaction(requests),
         http_fixtures=voice_wizard_http_fixtures(),
         http_requests=requests,
+    )
+
+
+VOICE_SCROLL_ROWS = 24
+
+
+def voice_scroll_http_fixtures() -> HttpFixtures:
+    """More endpoints and probe rows than a 30-row terminal holds."""
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/voice/config"] = (200, VOICE_CONFIG_FIXTURE)
+    endpoints = [
+        {
+            "id": f"tts-endpoint-{index:02d}",
+            "kind": "elevenlabs_direct",
+            "enabled": True,
+            "api_key_env": "ELEVENLABS_API_KEY",
+            "address": "https://api.elevenlabs.io/v1",
+        }
+        for index in range(1, VOICE_SCROLL_ROWS + 1)
+    ]
+    setup = {**VOICE_SETUP_FIXTURE, "tts": {**VOICE_SETUP_FIXTURE["tts"], "endpoints": endpoints}}
+    fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (200, {"revision": "fixture-voice-revision-2"})
+        if body
+        else (200, setup)
+    )
+    fixtures["/api/v1/voice/probe/tts"] = (
+        200,
+        {
+            "endpoints": [
+                {
+                    "endpoint_id": f"probe-row-{index:02d}",
+                    "kind": "elevenlabs_direct",
+                    "state": "answered",
+                    "detail": "24285 bytes of audio",
+                }
+                for index in range(1, VOICE_SCROLL_ROWS + 1)
+            ]
+        },
+    )
+    return fixtures
+
+
+def voice_scroll_interaction() -> Interaction:
+    """The endpoint list and the probe report can be read to their last row.
+
+    Both used to be laid out into the frame with no offset, and the frame keeps
+    its leading rows: the tail -- and past a point the footer -- was drawn and
+    cut, with no key that brought it back.
+    """
+
+    def interact(
+        process: "subprocess.Popen[bytes]",
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        def expect(frame: bytes, needle: bytes, what: str) -> None:
+            if needle not in frame:
+                raise AssertionError(f"{what}: {needle!r} missing from {frame!r}")
+
+        def refuse(frame: bytes, needle: bytes, what: str) -> None:
+            if needle in frame:
+                raise AssertionError(f"{what}: {needle!r} present in {frame!r}")
+
+        first = b"tts-endpoint-01"
+        last = f"tts-endpoint-{VOICE_SCROLL_ROWS:02d}".encode()
+        open_the_voice_pane(process, master_fd, output)
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        expect(screen, first, "the pane did not list the endpoints")
+        refuse(screen, last, "the fixture no longer overflows the terminal")
+        expect(screen, b"j/k:scroll", "the pane footer did not say how to scroll")
+
+        press_and_settle(process, master_fd, output, b"\x1b[F")
+        screen = screen_text(bytes(output))
+        expect(screen, last, "End did not reach the last endpoint")
+        expect(screen, b"e:set up", "the footer was cut at the end of the list")
+
+        press_and_settle(process, master_fd, output, b"\x1b[H")
+        screen = screen_text(bytes(output))
+        expect(screen, first, "Home did not return to the first endpoint")
+        refuse(screen, last, "Home left the list at its end")
+
+        press_and_settle(process, master_fd, output, b"e")
+        for step in (b"\r", b"\r"):
+            press_and_settle(process, master_fd, output, step)
+        press_and_settle(process, master_fd, output, b"scroll-endpoint", cap=15.0)
+        for step in (b"\r", b"\r"):
+            press_and_settle(process, master_fd, output, step)
+        press_and_settle(process, master_fd, output, b"eleven_multilingual_v2", cap=15.0)
+        press_and_settle(process, master_fd, output, b"\r")
+        press_and_settle(process, master_fd, output, b"scroll-voice", cap=15.0)
+        expect(
+            press_and_settle(process, master_fd, output, b"\r"),
+            b"enter saves this",
+            "the wizard did not reach a review it could save",
+        )
+
+        probe_last = f"probe-row-{VOICE_SCROLL_ROWS:02d}".encode()
+        read_available(master_fd, output)
+        start = len(output)
+        os.write(master_fd, b"\r")
+        wait_for_output(
+            process, master_fd, output, b"probe-row-01", start=start, timeout=10.0
+        )
+        drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        expect(screen, b"what answered", "the probe report did not draw")
+        refuse(screen, probe_last, "the probe fixture no longer overflows the terminal")
+        expect(screen, b"PgUp/PgDn:scroll", "the wizard footer did not say how to scroll")
+
+        # A press at the end draws nothing new, so each one is judged by the
+        # screen after the output stops rather than by a frame arriving.
+        for _ in range(4):
+            if probe_last in screen_text(bytes(output)):
+                break
+            write_all(master_fd, output, b"\x1b[6~")
+            drain_until_quiet(process, master_fd, output)
+        screen = screen_text(bytes(output))
+        expect(screen, probe_last, "PgDn did not reach the last probe row")
+        expect(screen, b"Esc:cancel", "the wizard footer was cut at the end of the report")
+
+        closed = press_and_settle(process, master_fd, output, b"\x1b")
+        refuse(closed, b"step ", "Esc did not close the wizard")
+        read_available(master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def run_voice_scroll_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="The voice endpoint list and the probe report scroll to their ends",
+        interact=voice_scroll_interaction(),
+        http_fixtures=voice_scroll_http_fixtures(),
     )
 
 
@@ -16423,6 +16580,7 @@ def main() -> None:
         return
     if len(sys.argv) == 3 and sys.argv[2] == "voice-wizard":
         run_voice_wizard_regression(os.path.abspath(sys.argv[1]))
+        run_voice_scroll_regression(os.path.abspath(sys.argv[1]))
         print("tui Voice wizard regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "held-back-override":

@@ -2999,6 +2999,45 @@ let test_keeper_stream_bridge_timeout_quarantines_the_open_tool_once () =
     (stream_protocol_error_kinds
        after_terminal.Keeper_chat_agent_core_stream_bridge.chat_events)
 
+(* An incomplete or repeating stream is the attempt's own failure report. When
+   that attempt was the last one, the Completion path's [fail_stream] finds the
+   scope already cut and adds nothing: one kind on the wire, not that kind plus
+   a second [sse_stream_incomplete]. An open tool block is quarantined once,
+   under the failure's own kind. *)
+let test_keeper_stream_bridge_cut_stream_is_diagnosed_once () =
+  let open Agent_core.Types in
+  List.iter
+    (fun (label, failure) ->
+       let open_tool =
+         [ ContentBlockStart
+             { index = 0
+             ; content_type = "tool_use"
+             ; tool_id = Some ("tc-" ^ label)
+             ; tool_name = Some "keeper_memory_search"
+             }
+         ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"q\":" }
+         ]
+       in
+       List.iter
+         (fun (shape, prefix) ->
+            let events, state = translate_agent_core_stream (prefix @ [ failure ]) in
+            let kinds = stream_protocol_error_kinds events in
+            check bool (label ^ " " ^ shape ^ " reports its own kind only") true
+              (kinds <> [] && List.for_all (String.equal label) kinds);
+            let after_terminal =
+              Keeper_chat_agent_core_stream_bridge.fail_stream state
+                ~reason:"stream ended before completion"
+            in
+            check (list string)
+              (label ^ " " ^ shape ^ ": fail_stream adds nothing after the cut") []
+              (stream_protocol_error_kinds
+                 after_terminal.Keeper_chat_agent_core_stream_bridge.chat_events))
+         [ "without a tool", []; "with an open tool", open_tool ])
+    [ "sse_stream_incomplete", StreamIncomplete { reason = "max_output_tokens" }
+    ; ( "sse_stream_repeating"
+      , StreamRepeating { paragraph = "again"; occurrences = 4; bytes_seen = 400 } )
+    ]
+
 let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
   let open Agent_core.Types in
   let provider_kind = Agent_core.Llm_provider.Provider_kind.Gemini in
@@ -3989,6 +4028,8 @@ let () =
             test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals;
           test_case "stream bridge timeout quarantines the open tool once" `Quick
             test_keeper_stream_bridge_timeout_quarantines_the_open_tool_once;
+          test_case "cut stream is diagnosed once" `Quick
+            test_keeper_stream_bridge_cut_stream_is_diagnosed_once;
           test_case "stream bridge surfaces unsupported provider shapes" `Quick
             test_keeper_stream_bridge_surfaces_unsupported_provider_shapes;
           test_case "stream bridge preserves NDJSON parse failure" `Quick

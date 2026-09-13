@@ -36,12 +36,22 @@ type tool_quarantine =
   ; kind : Keeper_chat_events.stream_protocol_error_kind
   }
 
+(* What the current stream scope may still do after a provider failure. *)
+type scope_disposition =
+  | Scope_live
+  | Scope_cut of Keeper_chat_events.stream_protocol_error_kind * string
+      (* The attempt reported its own failure and ended. The text and media it
+         streamed stay deliverable, so later events of the scope are not
+         dropped, and [fail_stream] has nothing left to add. *)
+  | Scope_poisoned of Keeper_chat_events.stream_protocol_error_kind * string
+      (* The failure invalidates the scope: every later event of it is
+         dropped. *)
+
 type state =
   { blocks_by_index : (int * block_state) list
   ; current_stream_scope : int option
   ; stream_phase : stream_phase
-  ; scope_failure :
-      (Keeper_chat_events.stream_protocol_error_kind * string) option
+  ; scope_disposition : scope_disposition
   ; current_message_has_text : bool
   ; last_completed_message_has_text : bool
   ; message_open : bool
@@ -71,7 +81,7 @@ let empty_state () =
   { blocks_by_index = []
   ; current_stream_scope = None
   ; stream_phase = Accepting_content
-  ; scope_failure = None
+  ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
   ; message_open = false
@@ -87,7 +97,7 @@ let reset_runtime_attempt_state state =
     blocks_by_index = []
   ; current_stream_scope = None
   ; stream_phase = Accepting_content
-  ; scope_failure = None
+  ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
   ; message_open = false
@@ -105,7 +115,7 @@ let enter_stream_scope state stream_scope =
       blocks_by_index = []
     ; current_stream_scope = Some stream_scope
     ; stream_phase = Accepting_content
-    ; scope_failure = None
+    ; scope_disposition = Scope_live
     ; current_message_has_text = false
     ; message_open = false
     ; current_provider_message_id = None
@@ -337,7 +347,7 @@ let poison_scope state ~kind ~reason =
   { bridge_state =
       { state with
         blocks_by_index
-      ; scope_failure = Some (kind, reason)
+      ; scope_disposition = Scope_poisoned (kind, reason)
       ; message_open = false
       }
   ; chat_events
@@ -375,10 +385,14 @@ let start_runtime_attempt ?runtime_id ?attempt_index ~previous_scope state =
   }
 ;;
 
+(* The Completion path calls this when the last attempt ended in error. An
+   attempt that already reported its own failure, cut or poisoned, has been
+   diagnosed once; only a scope that ended without a provider failure event
+   is reported here. *)
 let fail_stream state ~reason =
-  match state.scope_failure with
-  | Some _ -> { bridge_state = state; chat_events = [] }
-  | None ->
+  match state.scope_disposition with
+  | Scope_cut _ | Scope_poisoned _ -> { bridge_state = state; chat_events = [] }
+  | Scope_live ->
     poison_scope state ~kind:Keeper_chat_events.Sse_stream_incomplete ~reason
 ;;
 
@@ -696,17 +710,18 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   let quarantined_content_rejection =
     reject_quarantined_content_event ~stream_scope bridge_state evt
   in
-  match bridge_state.scope_failure, quarantined_content_rejection with
-  | Some _, _ -> { bridge_state; chat_events = [] }
-  | None, Some rejected when tools_in_current_scope bridge_state = [] -> rejected
-  | None, _ when not (content_event_allowed bridge_state evt) ->
+  match bridge_state.scope_disposition, quarantined_content_rejection with
+  | Scope_poisoned _, _ -> { bridge_state; chat_events = [] }
+  | (Scope_live | Scope_cut _), Some rejected
+    when tools_in_current_scope bridge_state = [] -> rejected
+  | (Scope_live | Scope_cut _), _ when not (content_event_allowed bridge_state evt) ->
     poison_scope bridge_state ~kind:Keeper_chat_events.Stream_event_after_terminal
       ~reason:"content event arrived after the provider content became terminal"
-  | None, Some rejected -> rejected
-  | None, None when event_channel_conflicts bridge_state evt ->
+  | (Scope_live | Scope_cut _), Some rejected -> rejected
+  | (Scope_live | Scope_cut _), None when event_channel_conflicts bridge_state evt ->
       poison_scope bridge_state ~kind:Keeper_chat_events.Sse_parse_failed
         ~reason:"content delta or header conflicts with the declared block channel"
-  | None, None ->
+  | (Scope_live | Scope_cut _), None ->
   match evt with
   | Connected ->
       { bridge_state; chat_events = [ Agent_core_stream_connected ] }
@@ -1305,7 +1320,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       { bridge_state =
           { quarantined.bridge_state with
-            scope_failure = bridge_state.scope_failure
+            scope_disposition = Scope_cut (Sse_stream_incomplete, redacted_reason)
           ; message_open = bridge_state.message_open
           }
       ; chat_events =
@@ -1315,7 +1330,8 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           @ [ protocol_error ~reason:redacted_reason Sse_stream_incomplete ]
       }
   | StreamRepeating { paragraph; occurrences; bytes_seen } ->
-      (* Same shape as an incomplete stream: the scope is poisoned and the
+      (* Same shape as an incomplete stream: the open tool blocks are
+         quarantined, the text already streamed stays deliverable, and the
          operator is told why. The reason names the repeat rather than a
          truncation, because the bytes arrived fine and the answer did not. *)
       let reason =
@@ -1333,7 +1349,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       { bridge_state =
           { quarantined.bridge_state with
-            scope_failure = bridge_state.scope_failure
+            scope_disposition = Scope_cut (Sse_stream_repeating, reason)
           ; message_open = bridge_state.message_open
           }
       ; chat_events =

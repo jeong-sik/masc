@@ -21,6 +21,8 @@ type package = {
   image : string; command : string list; directory : string;
   action_tool : string option;
   outputs : output_ports;
+  binding_schema : Yojson.Safe.t option;
+  presentation : Lane_addon_presentation.t;
   skills_directory : Skill_resource_path.t option; resources : resources;
 }
 type phase = Attached | Observing | Failed of string | Detaching | Detached
@@ -150,6 +152,8 @@ let package_to_json (p : package) =
     "image", string p.image; "command", strings p.command; "directory", string p.directory;
     "action_tool", optional string p.action_tool;
     "outputs", output_ports_to_json p.outputs;
+    "binding_schema", Option.value ~default:`Null p.binding_schema;
+    "presentation", Lane_addon_presentation.to_json p.presentation;
     "skills_directory", (match p.skills_directory with None -> `Null
       | Some path -> string (Skill_resource_path.to_string path));
     "resources", `Assoc ["cpus", `Float p.resources.cpus;

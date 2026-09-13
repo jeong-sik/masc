@@ -66,6 +66,26 @@ let load ~path =
           |> Result.map_error (fun error -> "world.skills.directory: " ^ Skill_resource_path.error_to_string error) in
     let* action_tool = nested_text "actions" "tool" in
     let* outputs = output_ports world in
+    let* interface = match Otoml.find_opt document Fun.id ["interface"] with
+      | None -> Ok []
+      | Some (Otoml.TomlTable fields | Otoml.TomlInlineTable fields)
+        when List.for_all (fun (key,_) -> List.mem key ["binding_schema";"presentation"]) fields -> Ok fields
+      | Some _ -> Error "interface accepts binding_schema and presentation JSON strings" in
+    let json name = match List.assoc_opt name interface with
+      | None -> Ok None
+      | Some (Otoml.TomlString bytes) ->
+          (try Ok (Some (Yojson.Safe.from_string bytes)) with Yojson.Json_error error -> Error error)
+      | Some _ -> Error ("interface." ^ name ^ " must contain JSON text") in
+    let* binding_schema = json "binding_schema" in
+    let* () = match binding_schema with
+      | None -> Ok ()
+      | Some schema ->
+          let* () = Lane_addon_action.validate_value_schema schema in
+          (match schema with `Assoc fields when List.assoc_opt "type" fields=Some (`String "object") -> Ok ()
+           | _ -> Error "binding_schema must describe an object") in
+    let* presentation = json "presentation" in
+    let* presentation = match presentation with None -> Ok Lane_addon_presentation.empty
+      | Some value -> Lane_addon_presentation.of_json value in
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in
@@ -95,7 +115,7 @@ let load ~path =
          || memory <= 0 || pids <= 0 || max_reply_bytes <= 0
     then Error "resources require finite positive CPU, memory, pids and reply bytes"
     else Ok { id; revision; title; contributions = List.rev contributions; image; command;
-      directory = Filename.dirname path; skills_directory; action_tool; outputs;
+      directory = Filename.dirname path; skills_directory; action_tool; outputs; binding_schema; presentation;
       resources = { cpus; memory_bytes = Int64.of_int memory; pids; max_reply_bytes } }
   in
   try Result.map_error (fun detail -> Invalid_manifest detail) (parse ()) with

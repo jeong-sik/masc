@@ -788,6 +788,9 @@ let dispatch ?caller ~config ~operation json = Eio_context.run_on_owner_domain (
           | Lane_addon_manifest.Invalid_manifest detail -> Request_rejected detail
           | Io_failure detail -> Runtime_failed detail) in
       let* () = request_result (Lane_addon_sources.validate binding) in
+      let* () = request_result (match package.binding_schema with
+        | None -> Ok ()
+        | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ())) in
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
       runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None)

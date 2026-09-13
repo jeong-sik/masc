@@ -115,6 +115,9 @@ let decode ~source_path ~id fields =
     | _ -> Error "binding requires a table" in
   let binding = resolve_snapshot_paths ~directory binding in
   let* () = Lane_addon_sources.validate binding in
+  let* () = match package.binding_schema with
+    | None -> Ok ()
+    | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ()) in
   let manifest_path = Unix.realpath manifest_path in
   let canonical =
     `Assoc ["id", `String id; "run_id", `String run_id;

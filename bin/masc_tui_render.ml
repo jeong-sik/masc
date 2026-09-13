@@ -9471,7 +9471,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                             (max 8 (cols - 32))
                     | None | Some _ -> "Selected region")
                | Content, None -> "Page content" in
-             "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
+             let viewport = Printf.sprintf "page scroll x=%.0f y=%.0f"
+                 scene.content.scroll_x scene.content.scroll_y in
+             "  " ^ scope ^ " · " ^ viewport ^ " · " ^
+             Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
          | None, Some page -> Printf.sprintf "  %s • %s%s%s"
              (Terminal_text.single_line page.url) (Masc_tui_message_layout.count_noun page.chars "char")

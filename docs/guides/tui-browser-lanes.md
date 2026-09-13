@@ -113,6 +113,9 @@ then read the same scene again. The result must retain the observed URL and
 document identity; a viewport resize is reported by the fresh scene rather than
 treated as a pre-action lock. Nested panes still require screenshot pointer
 scroll because their scroll container is selected by the observed hit point.
+The scene context row shows the observed page scroll as `x=… y=…`, so a refresh
+makes the page position explicit without confusing it with pointer coordinates
+or claiming that the scene is a complete document.
 In a regions scene, `N`/`P` move between exact observed `article` regions;
 they leave the selection unchanged on content scenes without article roles.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the

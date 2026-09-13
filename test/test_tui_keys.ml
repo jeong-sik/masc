@@ -1015,7 +1015,9 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("pane availability of " ^ key) expected
         (footer_has_key key hints)
     in
-    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts; Config_presets ]);
+    enabled "PgUp/PgDn"
+      (List.mem pane
+         [ Config_runtime; Config_models; Config_prompts; Config_presets; Config_themes ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
@@ -1052,6 +1054,12 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
         (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
     [ "Enter"; "E"; "x" ];
+  (* The themes list pages now, and its own keys still fit the row. *)
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("themes keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_themes))))
+    [ "PgUp/PgDn"; "Enter"; "x"; "f" ];
   List.iter (fun pane ->
     List.iter (fun cols ->
       let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in
@@ -1065,7 +1073,7 @@ let test_config_pane_footer_actions () =
           (footer_has_key key row))
         (match pane with
          | Config_runtime -> [ "E"; "Enter"; "x"; "f" ]
-         | Config_themes -> [ "PgUp/PgDn"; "v"; "e"; "E" ]
+         | Config_themes -> [ "v"; "e"; "E" ]
          | Config_models | Config_params | Config_prompts | Config_presets
          | Config_voice -> []))
       [ 80; 120; 150; 300 ]) [ Config_runtime; Config_themes ]

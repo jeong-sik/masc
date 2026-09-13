@@ -5243,6 +5243,19 @@ let selected_keeper_run (state : state) =
   let cursor = max 0 (min state.keeper_run_cursor (List.length runs - 1)) in
   Option.map (fun run -> cursor, run) (List.nth_opt runs cursor)
 
+(* What the Keeper Runs tab knows about the retained runs. The tab matched on
+   the snapshot alone and drew "Loading Fusion runs..." for [None], so a read
+   that failed left it there for good: the failure went to [fusion_error],
+   which only the Fusion surface drew. Rows already held stay on a failed
+   refresh, as they do on the Fusion surface, and the failure comes with them
+   so they read as stale. A retry in flight is loading, not the old failure. *)
+let keeper_runs_view (state : state) =
+  match state.fusion_runs, state.fusion_error, state.fusion_runs_inflight with
+  | Some _, stale, _ -> Masc_tui_fetched.Ready (selected_keeper_runs state, stale)
+  | None, _, Some _ -> Masc_tui_fetched.Loading
+  | None, Some detail, None -> Masc_tui_fetched.Failed detail
+  | None, None, None -> Masc_tui_fetched.Absent
+
 (** The standalone lane row under the cursor, when the cursor is in the
     standalone section. *)
 let workspace_activity_rows (state : state) =

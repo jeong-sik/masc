@@ -5189,6 +5189,8 @@
 
 (include stanzas/test_tui_resources_empty_note.inc)
 
+(include stanzas/test_tui_keeper_runs_view.inc)
+
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test

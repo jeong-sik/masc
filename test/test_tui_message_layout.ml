@@ -1389,9 +1389,10 @@ let test_age_reads_as_seconds_then_minutes () =
    its 28 rows through it: [12045m~], five figures cut by a seven-cell column,
    so a day-old run and a nine-day-old run were the same shape.
 
-   The widest reading is what a column has to hold, so it is pinned: a span
-   just under a year is seven cells, which is what the Fusion column already
-   was. *)
+   The widest reading is what a column has to hold, so it is pinned: six
+   cells, "99d23h", and from a hundred days the days alone. A span just under
+   a year was seven, which the seven-cell Fusion column held and the six-cell
+   Board and Keeper columns did not. *)
 let test_an_age_climbs_to_hours_and_days () =
   List.iter
     (fun (seconds, expected) ->
@@ -1405,7 +1406,8 @@ let test_an_age_climbs_to_hours_and_days () =
     ; (86399., "23h59m")
     ; (86400., "1d00h")
     ; (722_730., "8d08h")
-    ; (31_535_999., "364d23h")
+    ; (8_639_999., "99d23h")
+    ; (31_535_999., "364d")
     ];
   check bool "the widest reading fits the column it is drawn in" true
     (match Layout.age_text ~now:31_535_999. ~since:0. with

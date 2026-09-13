@@ -252,7 +252,10 @@ let make_v1 path =
     let sequence = scalar db "SELECT next_sequence FROM metadata WHERE singleton=1" in
     sql db "BEGIN IMMEDIATE";
     List.iter (sql db)
-      [ "DROP TRIGGER semantic_terminal_update_immutable";
+      [ "DROP TRIGGER batch_members_update_immutable";
+        "DROP TRIGGER batch_members_delete_immutable";
+        "DROP TABLE operation_batch_members";
+        "DROP TRIGGER semantic_terminal_update_immutable";
         "DROP TRIGGER semantic_terminal_delete_immutable";
         "DROP INDEX semantic_single_running";
         "DROP TABLE semantic_executions";
@@ -260,7 +263,11 @@ let make_v1 path =
         "CREATE TABLE metadata (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema TEXT NOT NULL CHECK (schema = 'masc.keeper_chat_operations.v1'), next_sequence INTEGER NOT NULL CHECK (next_sequence >= 0)) STRICT" ];
     sql db ("INSERT INTO metadata VALUES (1, 'masc.keeper_chat_operations.v1', " ^ sequence ^ ")");
     sql db "PRAGMA user_version=1";
-    sql db "COMMIT");
+    sql db "COMMIT";
+    check string "v1 fixture contains only its six declared schema objects" "6"
+      (scalar db "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'");
+    check string "v1 fixture has no later batch membership table" "0"
+      (scalar db "SELECT count(*) FROM sqlite_master WHERE name='operation_batch_members'"));
   first_id, second_id
 let chat_snapshot path = with_db path (fun db -> rows db "SELECT * FROM operations ORDER BY sequence")
 let version path = with_db path (fun db -> scalar db "PRAGMA user_version")

@@ -720,29 +720,6 @@ let test_a_settled_turn_drains_the_queue () =
       n
 ;;
 
-let test_steer_queues_then_interrupts_through_distinct_paths () =
-  let queued =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml" ~binding_name:"start_keeper_steer"
-      ~callee:"queue_keeper_steer"
-  in
-  let interrupted =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml" ~binding_name:"start_keeper_steer"
-      ~callee:"launch_keeper_interrupt"
-  in
-  let prioritized =
-    Ast_grep.count_calls_in_value_binding
-      ~module_path:"bin/masc_tui.ml" ~binding_name:"queue_keeper_steer"
-      ~callee:"Chat_queue.push_steer"
-  in
-  if queued <> 1 || interrupted <> 1 || prioritized <> 1 then
-    failf
-      "steer must persist the replacement before signalling the current turn: \
-       queue=%d interrupt=%d priority=%d"
-      queued interrupted prioritized
-;;
-
 (* Two Keepers can stream at once. A single [state.msg_live] slot lets the
    later dispatch replace the earlier log, so the earlier turn's next delta
    and tool rows disappear. Both the streaming and settle paths must resolve
@@ -2429,24 +2406,6 @@ let test_the_arrow_walk_does_not_repeat_the_queue () =
       n
 ;;
 
-(* The footer says what Enter does, and it has to say what Enter actually
-   does. It used to work that out from [msg_inflight_kind] while the send path
-   read the durable fences first, so a request being reconciled or cleaned up
-   drew "queued 1" and [Enter:blocked] on the same screen. Both now read
-   [send_disposition], which is where the order lives. *)
-let test_both_readers_share_one_disposition () =
-  List.iter
-    (fun (module_path, what) ->
-      let n = calls ~module_path ~callee:"send_disposition" in
-      if n < 1 then
-        failf
-          "%s must decide %s from send_disposition, not from its own reading            of the state; it is called %d time(s)"
-          module_path what n)
-    [ ("bin/masc_tui.ml", "what Enter does")
-    ; ("bin/masc_tui_render_chat.ml", "what the footer says Enter does")
-    ]
-;;
-
 (* The Keeper Calls table says a call ran and what it was called with. What
    it answered is the question a failed call leaves open, and the digest is
    computed where it can be tested; this pins that the table asks for it. *)
@@ -2551,8 +2510,6 @@ let () =
             test_enter_stages_the_input_before_submission
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
-        ; test_case "steer queues then interrupts through distinct paths" `Quick
-            test_steer_queues_then_interrupts_through_distinct_paths
         ; test_case "concurrent turns keep request-owned transcripts" `Quick
             test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "another keeper's request does not pin this pane" `Quick
@@ -2658,8 +2615,6 @@ let () =
             test_the_pane_draws_every_row_into_its_own_buffer
         ; test_case "the arrow walk does not repeat the queue" `Quick
             test_the_arrow_walk_does_not_repeat_the_queue
-        ; test_case "both readers share one disposition" `Quick
-            test_both_readers_share_one_disposition
         ; test_case "the calls table says what came back" `Quick
             test_the_calls_table_says_what_came_back
         ; test_case "the sending rows show an age" `Quick

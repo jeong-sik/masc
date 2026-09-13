@@ -435,6 +435,8 @@ let test_current_nonterminal_event_set () =
           ; "toolCallId", `String "tool-1"
           ; "executionId", `String "exec-1"
           ]
+      else if String.equal name "KEEPER_CHAT_BATCH_BOUND" then
+        `Assoc ["operation_id", `String request.request_id; "execution_id", `String "shared-execution"]
       else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then
         `Assoc [ "kind", `String "sse_error" ]
       else if String.equal name "KEEPER_TOOL_APPROVAL_REQUESTED" then

@@ -1,13 +1,30 @@
-type error = Invalid_request | Configuration_unavailable | Unsupported_connection
+type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
 let error_message = function
   | Invalid_request -> "Choose a connection and models with reported context metadata."
   | Configuration_unavailable -> "The workspace configuration could not be read."
+  | Network_unavailable -> "The server has no network capability for discovery."
   | Unsupported_connection -> "This connection needs its native account setup before web discovery."
   | Credential_unavailable -> "The selected connection's credential could not be prepared."
   | Discovery_failed error -> Runtime_model_discovery.error_message error
   | Save_failed error -> Runtime_setup_batch.error_message error
+(* 400: the request or the selected connection is wrong. 409: the workspace
+   moved under the request. 502: the runtime or server behind the connection
+   answered badly. 503: this server cannot serve the request right now. *)
+let status_of_error : error -> Httpun.Status.t = function
+  | Invalid_request | Unsupported_connection | Credential_unavailable -> `Bad_request
+  | Configuration_unavailable | Network_unavailable -> `Service_unavailable
+  | Discovery_failed (Runtime_model_discovery.Invalid_connection
+      | Runtime_model_discovery.Credential_unavailable) -> `Bad_request
+  | Discovery_failed (Runtime_model_discovery.Request_failed | Runtime_model_discovery.Http_error _
+      | Runtime_model_discovery.Invalid_response | Runtime_model_discovery.Repeated_page) -> `Bad_gateway
+  | Save_failed (Runtime_setup_batch.Invalid_selection | Runtime_setup_batch.Invalid_configuration
+      | Runtime_setup_batch.Validation_failed _) -> `Bad_request
+  | Save_failed (Runtime_setup_batch.Changed_configuration | Runtime_setup_batch.Lock_unavailable) -> `Conflict
+  | Save_failed (Runtime_setup_batch.Configuration_unavailable | Runtime_setup_batch.Child_not_started _
+      | Runtime_setup_batch.Write_failed | Runtime_setup_batch.Rollback_failed) -> `Service_unavailable
+  | Save_failed (Runtime_setup_batch.Verification_failed _ | Runtime_setup_batch.Verification_unreadable _) -> `Bad_gateway
 let ( let* ) = Result.bind
 let fields allowed required = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
@@ -26,11 +43,31 @@ let config ~base_path =
   | Error _ -> Error Configuration_unavailable
   | Ok observation -> (match Runtime_toml.parse_string observation.source_text with
     | Ok parsed -> Ok parsed | Error _ -> Error Configuration_unavailable)
-let choice = function
-  | "openai-compatible-http" -> Ok "openai_compatible"
-  | "messages-http" -> Ok "messages" | "ollama-http" -> Ok "ollama"
-  | "codex-app-server" -> Ok "codex" | "claude-code" -> Ok "claude_code"
-  | "antigravity-cli" -> Ok "antigravity" | _ -> Error Unsupported_connection
+let declared_provider (config:Runtime_schema.config) id =
+  List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers
+(* Web setup drives the connection kinds Runtime_setup_spec renders; Gemini
+   needs its own setup path. Adding an api_format makes this a compile error. *)
+let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choice,error) result = function
+  | Runtime_schema.Chat_completions_api -> Ok Runtime_setup_spec.Openai_compatible
+  | Runtime_schema.Messages_api -> Ok Runtime_setup_spec.Messages
+  | Runtime_schema.Ollama_api -> Ok Runtime_setup_spec.Ollama
+  | Runtime_schema.Codex_app_server_runtime -> Ok Runtime_setup_spec.Codex
+  | Runtime_schema.Claude_code_runtime -> Ok Runtime_setup_spec.Claude_code
+  | Runtime_schema.Antigravity_cli_runtime -> Ok Runtime_setup_spec.Antigravity
+  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api -> Error Unsupported_connection
+let choice config ~id ~protocol =
+  match declared_provider config id with
+  | Some provider ->
+    let* choice = choice_of_api_format provider.api_format in
+    (match (provider.transport : Runtime_schema.transport), Runtime_setup_spec.http choice with
+     | Runtime_schema.Http _,true | Runtime_schema.Cli _,false -> Ok choice
+     | Runtime_schema.Http _,false | Runtime_schema.Cli _,true -> Error Unsupported_connection)
+  | None ->
+    (* Catalog prototypes and product client identities carry no declared
+       provider; their protocol label is read by the runtime.toml parser. *)
+    (match Runtime_toml.api_format_of_protocol protocol with
+     | Ok api_format -> choice_of_api_format api_format
+     | Error _ -> Error Unsupported_connection)
 let private_key ~sw pending secret =
   match Runtime_setup_credentials.save ~secret () with
   | Error _ -> Error Credential_unavailable
@@ -41,15 +78,15 @@ let private_key ~sw pending secret =
 let source_template ~sw ~pending ~workspace config request =
   let* request = fields ["integration_id";"endpoint";"api_key";"account_ref"] ["integration_id"] request in
   let* id = text (value "integration_id" request) in
-  let inventory = Runtime_wizard_inventory.to_json ~include_credential_references:true config in
+  let inventory = Runtime_wizard_inventory.to_json config in
   let rows = match inventory with `Assoc fields -> (match value "integrations" fields with `List rows -> rows | _ -> []) | _ -> [] in
   let matches = List.filter_map (function `Assoc fields when value "id" fields = `String id -> Some fields | _ -> None) rows in
   let* selected = match matches with [row] -> Ok row | _ -> Error Invalid_request in
   let* () = if value "setup_support" selected=`String "unsupported" then Error Unsupported_connection else Ok () in
   let* () = if value "endpoint_redacted" selected=`Bool true then Error Unsupported_connection else Ok () in
   let* protocol = text (value "protocol" selected) in
-  let* choice = choice protocol in
-  let http = List.mem choice ["openai_compatible";"messages";"ollama"] in
+  let* choice = choice config ~id ~protocol in
+  let http = Runtime_setup_spec.http choice in
   let* () = if not http && List.mem_assoc "endpoint" request then Error Invalid_request else Ok () in
   let* endpoint = match List.assoc_opt "endpoint" request,List.assoc_opt "endpoint" selected with
     | None,existing -> Ok existing
@@ -62,7 +99,7 @@ let source_template ~sw ~pending ~workspace config request =
   let metadata = if http then List.filter (fun (key,_) -> List.mem key ["provider_kind";"request_path"]) selected else [] in
   let* account = match List.assoc_opt "account_ref" request with
     | None -> Ok None
-    | Some (`String reference) when choice="antigravity" && not (List.mem_assoc "api_key" request) ->
+    | Some (`String reference) when choice=Runtime_setup_spec.Antigravity && not (List.mem_assoc "api_key" request) ->
       let* reference=Runtime_setup_accounts.reference_of_string reference |> Result.map_error (fun _ -> Credential_unavailable) in
       let* command=text (value "command" selected) in
       Runtime_setup_accounts.resolve ~workspace ~integration_id:id ~cli_path:command reference
@@ -75,23 +112,28 @@ let source_template ~sw ~pending ~workspace config request =
     | None,Some (`String secret) when http -> private_key ~sw pending secret
     | None,Some _ -> Error Invalid_request
     | None,None ->
-      (match value "credential_kind" selected with
-       | `String "inline" ->
-         (match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.Runtime_schema.providers with
-          | Some {credentials=Some (Runtime_schema.Inline secret);_} when http -> private_key ~sw pending secret
-          | _ -> Error Credential_unavailable)
-       | `String "file" ->
-         (match value "credential_file" selected with
-          | `String path -> Ok ["credential_file",`String path] | _ -> Error Credential_unavailable)
-       | _ -> (match value "api_key_env" selected with
+      (match declared_provider config id with
+       | Some provider ->
+         (match (provider.credentials : Runtime_schema.credential option),http with
+          | Some (Runtime_schema.Inline secret),true -> private_key ~sw pending secret
+          | Some (Runtime_schema.Inline _),false -> Error Credential_unavailable
+          | Some (Runtime_schema.File path),_ -> Ok ["credential_file",`String path]
+          | Some (Runtime_schema.Env name),_ -> Ok ["api_key_env",`String name]
+          | None,_ -> Ok [])
+       | None ->
+         (match value "api_key_env" selected with
           | `String name when name<>"" -> Ok ["api_key_env",`String name] | _ -> Ok [])) in
-  let* timeout = if choice<>"antigravity" then Ok [] else match account with
-    | Some account -> Ok ["timeout_s",`Float account.Runtime_setup_accounts.timeout_s]
-    | None -> match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers with
-    | Some provider -> (match provider.antigravity_cli with
-      | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
-    | None -> Error Unsupported_connection in
-  Ok (("choice",`String choice)::transport @ metadata @ credentials @ timeout,id)
+  let* timeout = match choice with
+    | Runtime_setup_spec.Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Claude_code | Codex -> Ok []
+    | Antigravity ->
+      (match account with
+       | Some account -> Ok ["timeout_s",`Float account.Runtime_setup_accounts.timeout_s]
+       | None ->
+         (match declared_provider config id with
+          | Some provider -> (match provider.antigravity_cli with
+            | Some options -> Ok ["timeout_s",`Float options.timeout_s] | None -> Error Unsupported_connection)
+          | None -> Error Unsupported_connection)) in
+  Ok (("choice",`String (Runtime_setup_spec.choice_name choice))::transport @ metadata @ credentials @ timeout,id,choice)
 let native_json ~binary args =
   match Process_eio.run_argv_with_status_split_or_refusal (binary::args) with
   | Ok (Unix.WEXITED 0,body,_) ->
@@ -145,21 +187,21 @@ let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id=source_template ~sw ~pending ~workspace:base_path config request in
-    match value "choice" template with
-    | `String "codex" ->
+    let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config request in
+    match choice with
+    | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
       let* json=native_json ~binary ["runtime-codex-models";"--cli-path";command] in
       project_client_models ~source:"codex_isolated_account_model_list" ~catalog:false json
-    | `String "claude_code" ->
+    | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
       project_client_models ~source:"installed_claude_catalog_not_account_verification" ~catalog:true json
-    | `String "antigravity" ->
+    | Antigravity ->
       let* command=text (value "command" template) in
       let* credential=text (value "credential_file" template) in
       let* json=native_json ~binary ["runtime-antigravity-models";"--cli-path";command;"--credential-file";credential] in
       project_client_models ~source:"antigravity_selected_account_models" ~catalog:false json
-    | _ ->
+    | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
       let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
         |> Result.map_error (fun _ -> Unsupported_connection) in
       Runtime_model_discovery.discover ~sw ~net connection |> Result.map_error (fun error -> Discovery_failed error))
@@ -170,14 +212,14 @@ let context ~binary ~net ~base_path request =
     let* load=match value "load" request with `Bool value -> Ok value | _ -> Error Invalid_request in
     let* config=config ~base_path in
     let pending=ref [] in
-    let* template,id=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
-    let observed = match value "choice" template with
-      | `String "antigravity" ->
+    let* template,id,choice=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
+    let observed = match choice with
+      | Runtime_setup_spec.Antigravity ->
         let* command=text (value "command" template) in
         let* credential=text (value "credential_file" template) in
         native_json ~binary ["runtime-antigravity-context";"--cli-path";command;"--credential-file";credential;"--model";model]
-      | `String ("codex"|"claude_code") -> Error Unsupported_connection
-      | _ ->
+      | Codex | Claude_code -> Error Unsupported_connection
+      | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
         let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))
           |> Result.map_error (fun _ -> Unsupported_connection) in
         Runtime_serving_context.observe ~sw ~net connection ~model ~load
@@ -190,13 +232,13 @@ let context ~binary ~net ~base_path request =
        | _ ->
          (* API catalog metadata is provider-scoped. Local transports and CLI
             windows must be observed; they never inherit model architecture. *)
-         let declared = match value "choice" template with
-           | `String ("openai_compatible"|"messages") ->
+         let declared = match choice with
+           | Runtime_setup_spec.Openai_compatible | Messages ->
              (match Llm_provider.Model_catalog.load_default () with
               | Error _ -> None
               | Ok catalog -> Runtime_model_context_metadata.find ~provider_id:id ~model
                   (Llm_provider.Model_catalog.model_entries catalog))
-           | _ -> None in
+           | Ollama | Llama_cpp | Vllm | Claude_code | Codex | Antigravity -> None in
          match declared with
          | Some context -> Ok (`Assoc ["model",`String model;"context",`Int context;
              "context_source",`String "installed_provider_catalog";"tools",`Null])
@@ -221,7 +263,7 @@ let save ~binary ~base_path request =
       | [] -> Ok []
       | connection::tail ->
         let* row=fields ["source";"models"] ["source";"models"] connection in
-        let* template,_=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
+        let* template,_,_=source_template ~sw ~pending ~workspace:base_path config (value "source" row) in
         let* models=list (value "models" row) in
         let* ()=if models=[] then Error Invalid_request else Ok () in
         let rec specs = function [] -> Ok [] | model::tail ->

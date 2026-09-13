@@ -95,8 +95,42 @@ let test_account_reference () = fixture (fun base _runtime binary _net ->
   Alcotest.check Alcotest.bool "browser cannot replace account source path" true
     (Actions.import_account ~binary ~base_path:base (`Assoc ["integration_id",`String "antigravity";"credential_file",`String "/private/source"])
       = Error Actions.Invalid_request))
+(* Proves the connection kind comes from the declared provider's typed
+   api_format and transport, not from a protocol string table: a Gemini
+   provider is refused by the exhaustive api_format arm and a Messages
+   provider over a CLI transport by the transport arm, before any child
+   process or network request. A new api_format constructor breaks the
+   compile of [choice_of_api_format] instead of falling into a wildcard. *)
+let test_declared_provider_variants () = fixture (fun base runtime binary net ->
+  let append text = Out_channel.with_open_gen [Open_append;Open_binary] 0o600 runtime
+    (fun channel -> output_string channel text) in
+  append "\n[providers.gemini]\ndisplay-name = \"Gemini\"\nprotocol = \"gemini-http\"\nendpoint = \"http://127.0.0.1:19002\"\n";
+  append "\n[providers.messages-cli]\ndisplay-name = \"Messages CLI\"\nprotocol = \"messages-cli\"\ncommand = \"messages\"\n";
+  Eio.Switch.run (fun sw ->
+    List.iter (fun id ->
+      Alcotest.check Alcotest.bool (id ^ " is refused by its typed variant") true
+        (Actions.discover ~binary ~sw ~net ~base_path:base (`Assoc ["integration_id",`String id])
+         = Error Actions.Unsupported_connection)) ["gemini";"messages-cli"]))
+(* Proves the route status is a function of the error sum rather than a
+   blanket 400: a server whose Eio context has no net answers 503 through
+   [Network_unavailable], a moved setup revision 409, an upstream discovery
+   failure 502, and a wrong body 400. On origin/main [Network_unavailable]
+   and [status_of_error] do not exist, so this suite does not compile there. *)
+let test_status_of_error () =
+  let check name expected error =
+    Alcotest.check Alcotest.bool name true (Actions.status_of_error error = expected) in
+  check "missing net is 503" `Service_unavailable Actions.Network_unavailable;
+  check "unreadable configuration is 503" `Service_unavailable Actions.Configuration_unavailable;
+  check "wrong body is 400" `Bad_request Actions.Invalid_request;
+  check "moved revision is 409" `Conflict (Actions.Save_failed Runtime_setup_batch.Changed_configuration);
+  check "upstream discovery failure is 502" `Bad_gateway
+    (Actions.Discovery_failed Runtime_model_discovery.Request_failed);
+  check "wrong discovery connection is 400" `Bad_request
+    (Actions.Discovery_failed Runtime_model_discovery.Invalid_connection)
 let () = Alcotest.run "web setup actions" ["request boundary",[
   Alcotest.test_case "private key joins verified native save" `Quick test_private_key;
   Alcotest.test_case "no browser credential paths or executable override" `Quick test_forbidden_reference;
   Alcotest.test_case "native client metadata without private fields" `Quick test_native_client_metadata;
-  Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference]]
+  Alcotest.test_case "imported opaque account joins native save" `Quick test_account_reference;
+  Alcotest.test_case "declared provider variants refuse before discovery" `Quick test_declared_provider_variants;
+  Alcotest.test_case "route status follows the error sum" `Quick test_status_of_error]]

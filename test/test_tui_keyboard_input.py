@@ -7277,6 +7277,7 @@ def chat_visibility_modes_interaction(
         )
         # Same TOOLS-lane token colouring: cross-check needles that span
         # word boundaries must tolerate SGR runs and padding inside them.
+        settled_at = pane_start
         for needle in (
             b"gate:auto_judge",
             "\u25c6".encode(),
@@ -7301,9 +7302,10 @@ def chat_visibility_modes_interaction(
                 start=pane_start,
                 timeout=5.0,
             )
+            settled_at = max(settled_at, end_of_needle(output, needle, pane_start))
         wait_for_output(
             process, master_fd, output, FRAME_END,
-            start=end_of_needle(output, b"gate:auto_judge", pane_start),
+            start=settled_at,
             timeout=5.0,
         )
         initial += bytes(output[pane_start:])

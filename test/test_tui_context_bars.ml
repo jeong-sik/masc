@@ -117,8 +117,13 @@ let test_apportion_lets_a_tiny_segment_plot_as_nothing () =
   check ints "a millionth of the row" [ 10; 0 ]
     (Bars.apportion ~width:10 ~weights:[ 1_000_000; 1 ])
 
+(* Style and shade come from the caller now: the pane groups its rows by the
+   producer the bytes entered through, and each group carries its own shade. *)
 let sample_segments =
-  List.map (fun bytes -> ("", bytes)) composition
+  List.mapi
+    (fun index bytes ->
+      ("", (if index mod 2 = 0 then "\xe2\x96\x88" else "\xe2\x96\x92"), bytes))
+    composition
 
 let test_every_row_is_exactly_the_width () =
   (* A row wider than the frame's inner width is truncated by the frame, and a
@@ -231,18 +236,17 @@ let test_the_pointer_ends_on_the_cut () =
           ~total:history_total)
     > 0)
 
-let test_segment_shades_cycle () =
-  check string "first segment is solid" (Bars.segment_glyph 0)
-    (Bars.segment_glyph 4);
-  check bool "the four shades differ" true
-    (List.length
-       (List.sort_uniq compare
-          [ Bars.segment_glyph 0
-          ; Bars.segment_glyph 1
-          ; Bars.segment_glyph 2
-          ; Bars.segment_glyph 3
-          ])
-    = 4)
+(* The row is drawn with the shades the caller named, in the order it named
+   them: the groups on screen keep their shade whatever the sizes do. *)
+let test_a_segment_keeps_the_shade_it_was_given () =
+  let bar =
+    Bars.stacked_bar ~width:8
+      ~segments:
+        [ ("", "\xe2\x96\x88", 1); ("", "\xe2\x96\x92", 1); ("", "\xe2\x96\x88", 2) ]
+  in
+  check bool "the first shade is drawn" true (contains bar "\xe2\x96\x88");
+  check bool "the second shade is drawn" true (contains bar "\xe2\x96\x92");
+  check int "the row is still the width it was asked for" 8 (cells bar)
 
 (* Printed so the rows can be read rather than only counted; Alcotest keeps it
    under _build/_tests/. *)
@@ -307,7 +311,7 @@ let () =
         ; Alcotest.test_case "the pointer ends on the cut" `Quick
             test_the_pointer_ends_on_the_cut
         ; Alcotest.test_case "segment shades cycle" `Quick
-            test_segment_shades_cycle
+            test_a_segment_keeps_the_shade_it_was_given
         ; Alcotest.test_case "preview" `Quick test_preview
         ] )
     ]

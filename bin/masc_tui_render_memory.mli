@@ -56,6 +56,10 @@ val render_memory_body :
   push_empty:(unit -> unit) ->
   unit
 
+val memory_facts_content_height : cols:int -> budget:int -> cursor:int -> state -> int
+(** The fact list's height after reserving the selected detail, filters and
+    errors. [budget] excludes the surrounding surface chrome. *)
+
 val render_memory_facts_body :
   cols:int ->
   budget:int ->

@@ -4500,11 +4500,11 @@ let render_lanes_overview (state : state) =
   box_divider buf cols;
   let standalone_heading =
     match state.standalone_lanes with
-    | None -> "  Standalone LLM lanes · a appends a failover slot"
+    | None -> "  Standalone LLM lanes · o:Lane Add-ons · a:append slot"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.sls_observed_at_unix in
         Printf.sprintf
-          "  Standalone LLM lanes · a appends a failover slot · observed %02d:%02d:%02d"
+          "  Standalone LLM lanes · o:Lane Add-ons · a:append slot · observed %02d:%02d:%02d"
           observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
   in
   box_line_styled buf cols ~style:(Ansi.bold ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)) standalone_heading;
@@ -12105,7 +12105,10 @@ let render_prompt_registry (state : state) =
        in
        let actual_input_lines =
          if not (String.equal row.pr_category "librarian") then []
-         else if state.prompts_librarian_input_loading then
+         else if state.prompts_librarian_input_loading
+                 && not (Option.exists
+                      (fun (key, _) -> String.equal key row.pr_key)
+                      state.prompts_librarian_input) then
            [ "최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"; "" ]
          else
            match state.prompts_librarian_input_error with

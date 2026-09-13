@@ -333,6 +333,8 @@ let for_surface = function
       ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      ; b Navigate "o" "Lane Add-ons"
+          ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"

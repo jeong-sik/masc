@@ -610,12 +610,34 @@ let test_board_and_planning_explain_their_order () =
     (planning_sort_explanation Planning_sort_due)
 ;;
 
+(* Where the strip puts the highlight for a view, read through the index the
+   strip draws with. These tests used to read a second copy of the mapping
+   that nothing on screen called. The Browser Lane arm lived only in the drawn
+   one, so the two could disagree and the tests would not see it. *)
+let ring_stop surface =
+  visible_surface_ring_index
+    (create_state ~workspace:"" ~port:0 ~refresh_interval:0. ())
+    surface
+
+(* Every view lands on a stop the ring holds. The index cannot say this: a
+   family missing from the ring comes back as 0, Overview's position, and a
+   comparison against Overview would pass. *)
+let test_every_view_has_a_ring_stop () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  List.iter
+    (fun surface ->
+      Alcotest.(check bool) "the view's family is a ring stop" true
+        (List.exists
+           (fun (stop, _) -> stop = surface_ring_family state surface)
+           surface_ring))
+    every_surface
+
 let test_task_review_is_a_planning_child () =
   Alcotest.(check bool) "Task Review is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Verification) surface_ring);
   Alcotest.(check int) "Task Review highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Verification)
+    (ring_stop Planning)
+    (ring_stop Verification)
 
 (* Verdicts is the far half of Task Review -- one lists what is waiting for a
    ruling, the other what was ruled -- and it stood on the top-level ring under
@@ -625,8 +647,8 @@ let test_verdicts_is_a_planning_child () =
   Alcotest.(check bool) "Verdicts is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Harness) surface_ring);
   Alcotest.(check int) "Verdicts highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Harness);
+    (ring_stop Planning)
+    (ring_stop Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
        (fun (label, _) -> String.equal label "Planning / Task Verdicts")
@@ -639,8 +661,8 @@ let test_changes_is_a_keeper_child () =
   Alcotest.(check bool) "Changes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Changes) surface_ring);
   Alcotest.(check int) "Changes highlights Keepers"
-    (surface_ring_index (Keepers Keeper_list))
-    (surface_ring_index Changes)
+    (ring_stop (Keepers Keeper_list))
+    (ring_stop Changes)
 
 let test_keeper_operations_are_not_top_level_tabs () =
   List.iter
@@ -648,8 +670,8 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check bool) (label ^ " is not a top-level ring entry") false
          (List.exists (fun (entry, _) -> entry = surface) surface_ring);
        Alcotest.(check int) (label ^ " highlights Keepers")
-         (surface_ring_index (Keepers Keeper_list))
-         (surface_ring_index surface))
+         (ring_stop (Keepers Keeper_list))
+         (ring_stop surface))
     [ Connectors, "Channels"; Schedules, "Automation" ];
   Alcotest.(check (list string)) "Keeper operation tab labels"
     [ "Channels"; "Automation"; "Runs" ]
@@ -669,8 +691,8 @@ let test_lanes_is_a_runtime_child () =
   Alcotest.(check bool) "Lanes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
   (* No ring assertion here on purpose. Runtime left the ring when it moved
-     under Config, so [surface_ring_index Runtime] and [surface_ring_index
-     Lanes] are now the same match arm resolving to Config -- comparing them
+     under Config, so [ring_stop Runtime] and [ring_stop Lanes] are now the
+     same match arm resolving to Config -- comparing them
      cannot fail, and would keep passing if Lanes were moved to hang off
      Resources instead. What Lanes highlights is claimed with teeth in
      [test_logs_is_an_activity_child], against Config's own index. The label
@@ -695,8 +717,8 @@ let test_code_is_a_workspace_child () =
   Alcotest.(check bool) "Code is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Code) surface_ring);
   Alcotest.(check int) "Code highlights Workspace"
-    (surface_ring_index Repositories)
-    (surface_ring_index Code);
+    (ring_stop Repositories)
+    (ring_stop Code);
   Alcotest.(check bool) "and the help sheet files it under Workspace" true
     (List.exists
        (fun (label, _) -> String.equal label "Workspace / Code")
@@ -714,8 +736,8 @@ let test_resources_is_a_config_child () =
   Alcotest.(check bool) "Resources is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Resources) surface_ring);
   Alcotest.(check int) "Resources highlights Config"
-    (surface_ring_index Config)
-    (surface_ring_index Resources);
+    (ring_stop Config)
+    (ring_stop Resources);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Resources")
@@ -732,8 +754,8 @@ let test_tools_is_a_config_child () =
   Alcotest.(check bool) "Tools is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Tools) surface_ring);
   Alcotest.(check int) "Tools highlights Config"
-    (surface_ring_index Config)
-    (surface_ring_index Tools);
+    (ring_stop Config)
+    (ring_stop Tools);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Tools")
@@ -754,13 +776,13 @@ let test_logs_is_an_activity_child () =
     (List.exists (fun (surface, _) -> surface = Runtime) surface_ring);
   List.iter (fun surface ->
       Alcotest.(check int) "runtime children highlight Config"
-        (surface_ring_index Config) (surface_ring_index surface))
+        (ring_stop Config) (ring_stop surface))
     [Runtime; Lanes; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"
-    (surface_ring_index Acting)
-    (surface_ring_index System_logs);
+    (ring_stop Acting)
+    (ring_stop System_logs);
   Alcotest.(check bool) "and the help sheet files it under Activity" true
     (List.exists
        (fun (label, _) -> String.equal label "Activity / Logs")
@@ -784,8 +806,8 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Metrics is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
   Alcotest.(check int) "Metrics highlights Overview"
-    (surface_ring_index Overview)
-    (surface_ring_index Metrics);
+    (ring_stop Overview)
+    (ring_stop Metrics);
   let overview_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -1927,6 +1949,8 @@ let () =
             `Quick test_board_footer_names_reversible_hearth_navigation
         ; Alcotest.test_case "Board and Planning explain order" `Quick
             test_board_and_planning_explain_their_order
+        ; Alcotest.test_case "every view has a ring stop" `Quick
+            test_every_view_has_a_ring_stop
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
         ; Alcotest.test_case "Verdicts is a Planning child" `Quick

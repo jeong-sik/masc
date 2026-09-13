@@ -31,7 +31,7 @@ type awaiting =
 
 type 'row reading =
   | Not_read
-  | Read_failed
+  | Read_failed of string
   | Read of 'row list
 
 type t =
@@ -41,7 +41,7 @@ type t =
 
 let rows_of = function
   | Read rows -> rows
-  | Not_read | Read_failed -> []
+  | Not_read | Read_failed _ -> []
 
 (* [payload_target] arrives as ["keeper:edgar.a.poe"]. The kind is the same on
    every row the strip can draw, so it is a prefix that says nothing and costs
@@ -71,7 +71,7 @@ let project ~scheduled ~awaiting =
   { coming =
       (match scheduled with
        | Read rows -> Read (rows |> List.filter is_coming |> List.sort by_time)
-       | (Not_read | Read_failed) as unread -> unread)
+       | (Not_read | Read_failed _) as unread -> unread)
   ; blocked = awaiting
   }
 ;;
@@ -159,6 +159,7 @@ type tone =
   | Wake
   | Question
   | Quiet
+  | Failed
 
 type line =
   { tone : tone
@@ -216,13 +217,23 @@ let time_left ~now (held : awaiting) =
 
 let overlay ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text } in
+  (* Why it failed, not only that it did. The reason is beside the flag in the
+     state -- "schedule load failed: HTTP 503" -- and this panel dropped it,
+     leaving two words that name neither the source nor the fault. Fitted like
+     any other row here, so a long transport error cannot push the frame. *)
+  let failure ~cols reason =
+    (* No "load failed:" in front: the loader's own message already opens with
+       the read that failed ("schedule load failed: HTTP 503"), and a prefix
+       made the row stutter the way the Gate row did before #35436. *)
+    { tone = Failed; text = two_column ~cols reason "" }
+  in
   (* An empty section is an answer only once its list was read. Before that,
      or when the read failed, "nothing is scheduled" and "nobody is waiting on
      you" were said about lists no one had seen. *)
   let wakes =
     match t.coming with
     | Not_read -> [ quiet "not loaded yet" ]
-    | Read_failed -> [ quiet "load failed" ]
+    | Read_failed reason -> [ failure ~cols reason ]
     | Read [] -> [ quiet "nothing is scheduled" ]
     | Read rows ->
       List.map
@@ -242,7 +253,7 @@ let overlay ~now ~localtime ~cols t =
   let questions =
     match t.blocked with
     | Not_read -> [ quiet "not loaded yet" ]
-    | Read_failed -> [ quiet "load failed" ]
+    | Read_failed reason -> [ failure ~cols reason ]
     | Read [] -> [ quiet "nobody is waiting on you" ]
     | Read rows ->
       List.map

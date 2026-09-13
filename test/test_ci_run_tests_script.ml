@@ -174,14 +174,39 @@ let test_deadline_kills_reparented_term_ignoring_child () =
       let child_heartbeat_file = Filename.concat dir "child-heartbeat.log" in
       let command =
         Printf.sprintf
-          "trap 'exit 0' TERM; (trap '' TERM; while :; do printf x >> %s; sleep 1; \
+          "sleep 2; trap 'exit 0' TERM; (trap '' TERM; while :; do printf x >> %s; sleep 1; \
            done) & child=$!; printf '%%s' \"$child\" > %s; while :; do sleep 1; done"
           (Filename.quote child_heartbeat_file)
           (Filename.quote child_pid_file)
       in
-      let env = ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log in
-      let code, _, _ = run_ci ~cwd:dir ~env command in
+      (* This case tests descendant cleanup, not login-shell startup speed.
+         Keep the deadline clock frozen until both parent and child are ready;
+         the deliberate two-second startup delay exceeds the one-second
+         command deadline. Once released, the real clock drives TERM/KILL grace.
+         Bound fixture startup separately so a broken fixture still fails. *)
+      let fixture_startup_bound_s = 10.0 in
+      let fixture_deadline = Unix.gettimeofday () +. fixture_startup_bound_s in
+      let clock_released = Filename.concat dir "clock-released" in
+      let clock =
+        Printf.sprintf
+          "fixture_now=$(date +%%s); if [[ -f %s ]] || \
+           { [[ -s %s ]] && [[ -s %s ]]; } || \
+           [[ $fixture_now -ge %.0f ]]; then touch %s; \
+           printf '%%s\\n' \"$fixture_now\"; else printf '0\\n'; fi"
+          (Filename.quote clock_released)
+          (Filename.quote child_pid_file)
+          (Filename.quote child_heartbeat_file)
+          fixture_deadline
+          (Filename.quote clock_released)
+      in
+      let env =
+        ("CI_TEST_NOW_CMD", clock) :: ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log
+      in
+      let code, stdout, stderr = run_ci ~cwd:dir ~env command in
       check int "timeout exit code" 124 code;
+      if not (Sys.file_exists child_pid_file && Sys.file_exists child_heartbeat_file) then
+        failf "descendant fixture did not become ready\n%s\n%s\n%s"
+          (read_file ci_log) stdout stderr;
       let child_pid = read_file child_pid_file |> String.trim |> int_of_string in
       let heartbeat_bytes () = (Unix.stat child_heartbeat_file).Unix.st_size in
       (* The script must kill the reparented TERM-ignoring child. run_ci can

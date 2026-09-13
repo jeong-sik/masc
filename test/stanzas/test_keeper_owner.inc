@@ -12,4 +12,4 @@
  (modules test_keeper_owner)
  (action
   (setenv MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false (run %{test})))
- (libraries masc_test_deps masc.keeper_checkpoint_ref))
+ (libraries masc_test_deps masc.keeper_checkpoint_ref masc.agent_core.llm_provider))

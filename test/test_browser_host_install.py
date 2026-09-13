@@ -61,6 +61,39 @@ class Installation(unittest.TestCase):
             self.assertIn("does not match", mismatched.stderr)
             self.assertEqual(canonical.read_text(), "provisioned-browser-lane-test-token\n")
 
+    def test_isolated_host_name_has_exact_manifest_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "scratch-host"
+            source.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+            source.chmod(0o755)
+            base = root / "workspace"
+            manifests = root / "manifests"
+            host_name = "masc_public_reddit_" + "a1"
+            subprocess.run(
+                ["bash", str(INSTALLER), "--binary", str(source),
+                 "--base-path", str(base), "--manifest-dir", str(manifests),
+                 "--host-name", host_name],
+                check=True, capture_output=True)
+            manifest_path = manifests / (host_name + ".json")
+            self.assertTrue(manifest_path.is_file())
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(manifest["name"], host_name)
+            self.assertEqual(Path(manifest["path"]).name, "launch")
+
+    def test_isolated_host_name_rejects_shell_or_path_data(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for host_name in ("../owned", "a-b", ".a", "a.", "a..b"):
+                result = subprocess.run(
+                    ["bash", str(INSTALLER), "--binary", shutil.which("true"),
+                     "--base-path", str(root / "workspace"),
+                     "--manifest-dir", str(root / "manifests"),
+                     "--host-name", host_name],
+                    capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0, host_name)
+                self.assertIn("--host-name must contain nonempty", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

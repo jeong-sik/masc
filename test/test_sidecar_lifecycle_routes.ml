@@ -305,12 +305,14 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
 
 let test_runtime_base_path_uses_resolver_precedence () =
   with_temp_dir "sidecar-runtime-base-ssot" (fun dir ->
-    let requested = Filename.concat dir "requested" in
-    let stale = Filename.concat dir "stale/.masc" in
-    with_env "MASC_BASE_PATH" (Some stale) (fun () ->
+    let admitted = Filename.concat dir "admitted" in
+    let input = Filename.concat dir "input" in
+    (* Startup publishes the admitted owner separately from the operator's
+       input spelling. Sidecar IO must follow that same owner as config IO. *)
+    with_env "MASC_BASE_PATH" (Some (Filename.concat admitted ".masc")) (fun () ->
       with_env
         "MASC_BASE_PATH_INPUT"
-        (Some (Filename.concat requested ".masc"))
+        (Some (Filename.concat input ".masc"))
         (fun () ->
            Config_dir_resolver.reset ();
            Fun.protect
@@ -318,9 +320,16 @@ let test_runtime_base_path_uses_resolver_precedence () =
              (fun () ->
                 check
                   string
-                  "input env wins and .masc collapses"
-                  requested
-                  (Routes.runtime_base_path ())))));
+                  "admitted owner wins and .masc collapses"
+                  admitted
+                  (Routes.runtime_base_path ());
+                check (option string) "input remains available for diagnostics"
+                  (Some (Filename.concat input ".masc"))
+                  (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
+                with_env "MASC_BASE_PATH" None (fun () ->
+                  Config_dir_resolver.reset ();
+                  check string "input is used when no admitted owner is published"
+                    input (Routes.runtime_base_path ()))))));
   check
     string
     "explicit base_path still wins"

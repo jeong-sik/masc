@@ -875,29 +875,31 @@ let recent_chunk_projection (state : state) =
 
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
+  let pane_keeper (keeper : keeper) : Pane.keeper =
+    let reading = keeper_reading state keeper in
+    let health = Keeper_control.health reading in
+    let paused = reading.Keeper_control.paused in
+    let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
+    let mark_tone =
+      if paused then Pane.Dim
+      else
+        match reading_of_health with
+        | Some Tui_decode.Health_running -> Pane.Ok
+        | Some Tui_decode.Health_idle -> Pane.Dim
+        | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
+        | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+        | None -> Pane.Dim
+    in
+    { Pane.name = keeper.k_name
+    ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
+    ; mark_tone
+    ; health = reading_of_health
+    }
+  in
   let keepers =
-    List.map
-      (fun (keeper : keeper) ->
-        let reading = keeper_reading state keeper in
-        let health = Keeper_control.health reading in
-        let paused = reading.Keeper_control.paused in
-        let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
-        let mark_tone =
-          if paused then Pane.Dim
-          else
-            match reading_of_health with
-            | Some Tui_decode.Health_running -> Pane.Ok
-            | Some Tui_decode.Health_idle -> Pane.Dim
-            | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
-            | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
-            | None -> Pane.Dim
-        in
-        { Pane.name = keeper.k_name
-        ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
-        ; mark_tone
-        ; health = reading_of_health
-        })
-      state.keepers
+    match state.local_workspace with
+    | Local_workspace_unread -> None
+    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
   in
   let feed =
     match state.observer with
@@ -928,6 +930,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
   ; approvals =

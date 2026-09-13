@@ -103,3 +103,46 @@ including the propagated command deadline. The executable artifact is identified
 by ID `10310365824`; the binaries are not copied into this documentation archive.
 This host-only result does not substitute for the complete server/TUI candidate
 and its multi-channel Keeper composition run.
+
+
+## Controlled native browser-bridge comparison
+
+The controlled run keeps the verified `5334be62…` server, TUI, exported browser
+Skills, synthetic pages, and user-request source. Only the live browser host and
+extension change to `c082d495…`. The actual host SHA is recorded separately from
+the baseline bundle's host SHA; this is explicitly a component comparison.
+
+| Measurement | Before: 5334 bridge | After: c082 bridge |
+| --- | ---: | ---: |
+| Outer tool calls | 9 | 6 |
+| Outer errors | 3 | 0 |
+| Successful follow/read compositions | 0 of 3 | 3 of 3 |
+| Raw outer-result UTF-8 bytes | 35,711 | 31,597 |
+| Observed elapsed seconds | 50.179 | 65.452 |
+
+The new run follows three observed anchors and reads each destination in its
+composition without replay or a separate recovery read. Four exact delivered
+scene slices match durable blobs. A persistent native TUI follows all three
+channels across 76 complete frames, with no operator input during the Keeper
+turn. The clipboard bytes copied from that TUI are the context sent to the
+Keeper. Server, driver and TUI all exit successfully. Retained images include
+actual Firefox screenshots and terminal images rendered from the captured PTY.
+
+The fixture, user-request prefix, runtime/model selection and browser packages
+match. The `keeper_instructions` and `temporal_summary` block digests differ;
+these are distinct runs and their whole prompts are not byte-identical.
+The measured route uses fewer calls, but this sample is slower in wall-clock
+terms. No provider-token, causal latency or fastest-browser claim is made.
+
+The original answer is retained unchanged. Independent review found an
+unsupported ordering claim in its final paragraph: migration and accessibility
+approval both have Monday targets, with no stated order between them. The Beta
+item also needs to remain a planned completion, not a confirmed completed fact.
+Owners, mention requests and superseded-plan handling otherwise match the
+fixture. Consequently this is a successful tool-route/TUI observation trial,
+not an entirely correct answer qualification. The general Skill clarification
+in PR #35789 addresses this distinction and was not loaded in this run.
+
+The complete `fd441e234f58f34e2889d8fde0fc20d3ea2be4d1` integration candidate
+passed native build/qualification in run 34733001958. Its own multi-channel run
+remains separate from this controlled comparison.

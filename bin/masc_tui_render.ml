@@ -6896,12 +6896,21 @@ let render_verification_list (state : state) =
           (title_missing_reading ~error:state.verification_error) timestamp (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
-           beside a list of 12 would read as "that is all of them". *)
+           beside a list of 12 would read as "that is all of them".
+
+           Except when the tab's own badge already carries the total: it
+           wears the count once the queue is above zero, and a page holding
+           the whole queue then read "Task Review·2 (2 of 2)". The window
+           stays for a cut page, where it says how much of the badge's number
+           is on screen, and for an empty read, which has no badge to say
+           the read happened at all. *)
+        let total = snapshot.Masc.Tui_decode.vs_total in
+        let window =
+          if total > 0 && shown >= total then ""
+          else Printf.sprintf " (%d of %d)" shown total
+        in
         Printf.sprintf "%s  %s  %s"
-          (planning_workspace_title state ~cols ~tab:Planning_task_review
-             ~window:
-               (Printf.sprintf " (%d of %d)" shown
-                  snapshot.Masc.Tui_decode.vs_total))
+          (planning_workspace_title state ~cols ~tab:Planning_task_review ~window)
           timestamp (connection_badge state)
   in
   box_top buf cols;

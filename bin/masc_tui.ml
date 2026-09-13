@@ -1791,6 +1791,7 @@ let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
+  | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
   | Keeper_deletions_loaded of int * (Keeper_control.deletion_inventory, string) result
@@ -1932,6 +1933,9 @@ type async_msg =
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
   | Browser_lane_scene_loaded of int * (Browser_lane_view.scene, string) result
+  | Browser_lane_follow_loaded of int *
+      ((Masc_tui_http.browser_follow_receipt *
+        (Browser_lane_view.scene, string) result), string) result
   | Browser_lane_screenshot_ready of {
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
@@ -4559,6 +4563,28 @@ let launch_lane_declaration state ~mailbox ~edit request =
           | exn -> Error (Printexc.to_string exn) in
         enqueue_async mailbox (Lane_declaration_loaded (generation, request, edit, result)); `Stop_daemon))
 
+let launch_lane_subscriptions state ~mailbox request =
+  let module Subs = Masc_tui_lane_subscriptions in
+  match state.lane_addons with
+  | None -> ()
+  | Some view when view.loading -> ()
+  | Some view ->
+      state.lane_addons_generation <- state.lane_addons_generation + 1;
+      let generation=state.lane_addons_generation in
+      state.lane_addons <- Some {view with generation;loading=true;error=None};
+      let host=server_peer_host and port=state.port in
+      let run () =
+        let result = try
+          Result.bind (Masc_tui_http.post_json ~host ~port
+            ~path:"/api/v1/lane-addons/subscriptions"
+            ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn) in
+        enqueue_async mailbox (Lane_subscriptions_loaded (generation,result)) in
+      (match Eio_context.get_switch_opt () with
+       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+       | None -> enqueue_async mailbox (Lane_subscriptions_loaded (generation,Error "Eio switch unavailable")))
+
 let launch_lane_addons state ~mailbox request =
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
@@ -4653,7 +4679,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-       | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4662,16 +4688,20 @@ let launch_browser_lane state ~mailbox operation =
       (* Scene geometry belongs to its observation. Browser effects and explicit
          reads withdraw it before dispatch; a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
-         Scene_click retains its exact reference in [operation], and the
-         matching completion can install the newly observed scene. A cadence
+         Scene_click and Scene_follow retain their exact reference in
+         [operation], and the matching completion can install the newly
+         observed scene. A follow additionally pins the navigation receipt so
+         a same-URL reload cannot be mistaken for a completed transition; a
+         failed destination read keeps that guard for [Scene_follow_refresh]
+         and never carries the old region scope into the destination. A cadence
          refresh keeps its frame visible so periodic observations do not erase
          the operator's reading position. Operator input supersedes a cadence
          result; effects still use the observed document/URL checks. Failed
          refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ | Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4680,7 +4710,7 @@ let launch_browser_lane state ~mailbox operation =
       state.browser_lane <- Some { view with load = Loading (generation, operation);
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> None | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4701,6 +4731,13 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Result.bind
+              (Masc_tui_http.scroll_browser_scene ~host ~port ~view ~tab_id
+                 ~expected_url ~delta_y)
+              (fun () -> Masc_tui_http.fetch_browser_scene
+                 ?scope ~expected_url ~scene_view
+                 ~host ~port ~view ~tab_id ())))
         | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
               ~host ~port ~view ~tab_id ~scene_view ~scope))
@@ -4711,14 +4748,27 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_lane_scene_loaded
+        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_lane_follow_loaded
             (generation, call (fun () ->
-              let* _ = Masc_tui_http.follow_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url in
-              Masc_tui_http.fetch_browser_scene ~expected_url ~host ~port ~view ~tab_id ()))
+              match Masc_tui_http.follow_browser_scene
+                  ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url with
+              | Error detail -> Error detail
+              | Ok receipt ->
+                  let expected_source : Masc.Browser_scene.navigation_source =
+                    {url=expected_url; document_id=document_id} in
+                  if receipt.navigation_source <> expected_source then
+                    Error "follow receipt navigation source mismatch"
+                  else
+                    Ok (receipt, Masc_tui_http.fetch_browser_scene
+                      ?expected_url:(Some receipt.destination_url)
+                      ?navigation_source:(Some receipt.navigation_source)
+                      ~host ~port ~view ~tab_id ())))
         | Scene_follow_refresh {tab_id;guard;scene_view} -> Browser_lane_scene_loaded
-            (generation, call (fun () ->
-              Masc_tui_http.fetch_browser_scene ~scene_view ~expected_url:guard.expected_url
-                ~navigation_source:guard.navigation_source ~host ~port ~view ~tab_id ()))
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
+              ~scene_view
+              ~expected_url:guard.expected_url
+              ~navigation_source:guard.navigation_source
+              ~host ~port ~view ~tab_id ()))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -9465,55 +9515,68 @@ let load_keeper_logs_if_safe state base_path limit keeper =
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
 
+(* What a detail tab reads on the way in, for the Keeper it is opened on.
+   Three entry paths -- Enter from the roster, a cursor move with a tab held
+   open, and [ / ] between tabs -- each carried a copy of this table, and the
+   copies drifted: Automation's copy fetched the fleet list instead of the
+   Keeper's schedules until a comment said to mirror the other, and Secrets
+   fetched nothing in all three. One table, called from all three. *)
+let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
+  match state.detail_tab with
+  | Detail_info -> ()
+  | Detail_sandbox ->
+      state.keeper_sandbox_view <- None;
+      state.keeper_sandbox_view_error <- None;
+      launch_keeper_sandbox_view state ~mailbox keeper.k_name;
+      (* Container logs that were open for this Keeper come back with the
+         status they hang under. *)
+      let logs_were_open =
+        match state.keeper_sandbox_logs, state.keeper_sandbox_logs_error with
+        | Some (stamp, _), _ | _, Some (stamp, _) ->
+            String.equal stamp keeper.k_name
+        | None, None -> false
+      in
+      if logs_were_open then launch_keeper_sandbox_logs state ~mailbox keeper.k_name
+  | Detail_instructions ->
+      state.keeper_config_view <- None;
+      state.keeper_config_view_error <- None;
+      launch_keeper_config_view state ~mailbox keeper.k_name
+  | Detail_secrets ->
+      (* The projection arrives with the composite body the Keeper lanes read
+         carries. Ask for it when none has answered: the roster opens with
+         that read, but a read that failed leaves nothing behind, and the tab
+         drew that as "no projection reported". *)
+      if Option.is_none state.lanes then launch_keeper_lanes_load state ~mailbox
+  | Detail_github ->
+      state.github_identity_view <- None;
+      state.github_identity_view_error <- None;
+      launch_github_identity_view state ~mailbox keeper.k_name
+  | Detail_identity ->
+      state.identity_view <- None;
+      state.identity_view_error <- None;
+      (* The tab opens at the top of its own list rather than at whichever
+         row the last Keeper's was left on. *)
+      state.identity_cursor <- 0;
+      state.identity_attempt_error <- None;
+      state.identity_filter <- None;
+      launch_identity_view state ~mailbox keeper.k_name
+  | Detail_channels -> launch_connectors_load state ~mailbox
+  | Detail_automation ->
+      (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
+         not the fleet list. *)
+      state.keeper_schedules <- None;
+      state.keeper_schedules_error <- None;
+      launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
+  | Detail_runs -> launch_fusion_runs_load state ~mailbox
+;;
+
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
   state.keeper_run_cursor <- 0;
   match selected_keeper state with
   | None -> ()
   | Some keeper ->
       load_live_context_if_safe state base_path keeper;
-      (match state.detail_tab with
-       | Detail_info -> ()
-       | Detail_sandbox ->
-           state.keeper_sandbox_view <- None;
-           state.keeper_sandbox_view_error <- None;
-           launch_keeper_sandbox_view state ~mailbox keeper.k_name;
-           let logs_were_open =
-             match
-               state.keeper_sandbox_logs, state.keeper_sandbox_logs_error
-             with
-             | Some (stamp, _), _ | _, Some (stamp, _) ->
-               String.equal stamp keeper.k_name
-             | None, None -> false
-           in
-           if logs_were_open then
-             launch_keeper_sandbox_logs state ~mailbox keeper.k_name
-       | Detail_instructions ->
-           state.keeper_config_view <- None;
-           state.keeper_config_view_error <- None;
-           launch_keeper_config_view state ~mailbox keeper.k_name
-       | Detail_secrets ->
-           (* Nothing to fetch: the projection arrives with the composite
-              body the Lanes refresh already reads. *)
-           ()
-       | Detail_github ->
-           state.github_identity_view <- None;
-           state.github_identity_view_error <- None;
-           launch_github_identity_view state ~mailbox keeper.k_name
-       | Detail_identity ->
-           state.identity_view <- None;
-           state.identity_view_error <- None;
-           (* Another keeper's tab opens at the top of its own list rather
-              than at whichever row the last one was left on. *)
-           state.identity_cursor <- 0;
-           state.identity_attempt_error <- None;
-           state.identity_filter <- None;
-           launch_identity_view state ~mailbox keeper.k_name
-       | Detail_channels -> launch_connectors_load state ~mailbox
-       | Detail_automation ->
-           state.keeper_schedules <- None;
-           state.keeper_schedules_error <- None;
-           launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
-       | Detail_runs -> launch_fusion_runs_load state ~mailbox)
+      launch_detail_tab_reading state ~mailbox keeper
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
@@ -9526,34 +9589,7 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
   (* A sticky non-Info tab re-reads for the keeper the cursor now names;
      without this the pane shows "(loading)" forever after a cursor move,
      because the stamped answer names the previous keeper. *)
-  match state.detail_tab with
-  | Detail_info -> ()
-  | Detail_sandbox ->
-      state.keeper_sandbox_view <- None;
-      state.keeper_sandbox_view_error <- None;
-      launch_keeper_sandbox_view state ~mailbox keeper.k_name
-  | Detail_instructions ->
-      state.keeper_config_view <- None;
-      state.keeper_config_view_error <- None;
-      launch_keeper_config_view state ~mailbox keeper.k_name
-  | Detail_secrets ->
-      (* Arrives with the composite body; nothing to fetch on entering the
-         tab. *)
-      ()
-  | Detail_github ->
-      state.github_identity_view <- None;
-      state.github_identity_view_error <- None;
-      launch_github_identity_view state ~mailbox keeper.k_name
-  | Detail_identity ->
-      state.identity_view <- None;
-      state.identity_view_error <- None;
-      launch_identity_view state ~mailbox keeper.k_name
-  | Detail_channels -> launch_connectors_load state ~mailbox
-  | Detail_automation ->
-      state.keeper_schedules <- None;
-      state.keeper_schedules_error <- None;
-      launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
-  | Detail_runs -> launch_fusion_runs_load state ~mailbox
+  launch_detail_tab_reading state ~mailbox keeper
 ;;
 
 (* Enter on a Lanes overview row, shared with the mouse: a press on the row
@@ -11469,6 +11505,11 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
+  | Lane_subscriptions_loaded (generation,result) ->
+      map_lane_addons state (fun view ->
+        if view.generation<>generation then view else
+        {view with loading=false;subscription_panel=Option.map
+          (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_addons_loaded (generation, result) ->
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
@@ -11482,7 +11523,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            (Confirmed | Failed_before_effect | Outcome_unknown);_}), Some view
          when view.generation=generation && not view.loading
               && Option.is_none view.draft && Option.is_none view.document_key
-              && Option.is_none view.action_menu ->
+              && Option.is_none view.action_menu && Option.is_none view.subscription_panel ->
            launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | _ -> ())
   | Lane_declaration_loaded (generation, request, edit, result) ->
@@ -13510,6 +13551,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Browser_lane_scene_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept_scene ~generation result) state.browser_lane
+  | Browser_lane_follow_loaded (generation, result) ->
+      state.browser_lane <- Option.map
+        (fun view ->
+           match result with
+           | Error detail ->
+               Browser_lane_view.accept_scene ~generation (Error detail) view
+           | Ok (receipt, scene_result) ->
+               let guard : Browser_lane_view.navigation_guard = {
+                 expected_url = receipt.destination_url;
+                 navigation_source = receipt.navigation_source;
+               } in
+               Browser_lane_view.accept_follow ~generation ~guard scene_result view)
+        state.browser_lane
   | Browser_lane_screenshot_ready { generation; image_generation; result } ->
       (match state.browser_lane with
        | None -> ()
@@ -16496,8 +16550,29 @@ and is loaded on demand through keeper_skill.
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = Some "Choose an attached instance first" }
                   | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
-                (match view.action_menu, view.draft with
-                 | Some _, _ ->
+                (match view.subscription_panel,view.action_menu, view.draft with
+                 | Some panel,_,_ ->
+                     let module Subs = Masc_tui_lane_subscriptions in
+                     let set panel = update {view with subscription_panel=Some panel;scroll=0} in
+                     (match key with
+                      | "esc" | "q" -> update {view with subscription_panel=Subs.back panel;scroll=0}
+                      | "J" | "K" ->
+                          let _,cols=get_terminal_size () in
+                          let last=List.length (Addons.lines ~width:(framed_inner_width cols) view)-1 in
+                          update {view with scroll=max 0 (min last (view.scroll + if key="J" then 1 else -1))}
+                      | _ when view.loading -> ()
+                      | "j" | "down" -> set (Subs.move panel 1)
+                      | "k" | "up" -> set (Subs.move panel (-1))
+                      | "a" -> set (Subs.add panel)
+                      | "d" -> set (Subs.remove panel)
+                      | "r" -> launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
+                      | "\r" | "\n" | "enter" ->
+                          let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
+                          let panel,request=Subs.enter ~keepers ~targets:(Addons.subscription_targets view) panel in
+                          set panel;
+                          Option.iter (launch_lane_subscriptions state ~mailbox:async_messages) request
+                      | _ -> ())
+                 | None,Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}
                       | "j" | "down" -> update (Addons.move_action view 1)
@@ -16511,7 +16586,7 @@ and is loaded on demand through keeper_skill.
                            | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=Some detail})
                       | _ -> ())
-                 | None, Some draft ->
+                 | None,None, Some draft ->
                      (match key with
                       | "esc" -> update { view with draft = None }
                       | "\r" | "\n" | "enter" ->
@@ -16530,7 +16605,7 @@ and is loaded on demand through keeper_skill.
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
                       | _ -> ())
-                 | None, None ->
+                 | None,None, None ->
                      match key with
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
@@ -16562,13 +16637,15 @@ and is loaded on demand through keeper_skill.
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
                                | Error detail -> update {view with error=Some detail}))
                      | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
-                     | "1" -> update {view with focus=Addons.Timeline;scroll=0}
-                     | "2" -> update {view with focus=Addons.Connections;scroll=0}
-                     | "3" -> update {view with focus=Addons.Configurations;scroll=0}
-                     | "4" -> update {view with focus=Addons.Instances;scroll=0}
-                     | "5" -> update {view with focus=Addons.Rows;scroll=0}
+                     | "S" ->
+                         if not view.loading then (
+                           let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
+                           let panel=Masc_tui_lane_subscriptions.initial ~keepers
+                             ~targets:(Addons.subscription_targets view) in
+                           update {view with subscription_panel=Some panel;document_key=None;scroll=0};
+                           launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
                      | "D" -> update {view with presentation=(if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical);scroll=0}
-                     | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);scroll=0}
+                     | "f" -> update {view with presentation=(if view.presentation=Addons.Flow then Addons.Summary else Addons.Flow);document_key=None;scroll=0}
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
                          then update {view with error=Some "An action or read is pending; t checks its status."}
@@ -16580,7 +16657,7 @@ and is loaded on demand through keeper_skill.
                           | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" -> selected (fun id -> Addons.Observe id)
                      | "d" -> selected (fun id -> Addons.Detach id)
-                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Timeline -> Addons.Connections | Addons.Connections -> Addons.Configurations | Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Timeline) }
+                     | "\t" | "tab" -> update { view with scroll=0;focus = (match view.focus with Addons.Configurations -> Addons.Instances | Addons.Instances -> Addons.Rows | Addons.Rows -> Addons.Configurations) }
                      | "J" | "K" ->
                          let _, cols = get_terminal_size () in
                          let width = framed_inner_width cols in
@@ -16594,7 +16671,6 @@ and is loaded on demand through keeper_skill.
                               update {view with configuration_cursor=max 0 (min (size - 1) (view.configuration_cursor + delta))}
                           | Some snapshot, Addons.Instances -> update { view with instance_cursor = max 0 (min (List.length snapshot.instances - 1) (view.instance_cursor + delta)) }
                           | Some snapshot, Addons.Rows -> update { view with row_cursor = max 0 (min (List.length snapshot.output.rows - 1) (view.row_cursor + delta)) }
-                          | Some snapshot, (Addons.Timeline | Addons.Connections) -> update (Addons.move_lane view delta)
                           | None, _ -> ())
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
@@ -17718,12 +17794,6 @@ and is loaded on demand through keeper_skill.
                      state.runtime_lane_pick_cursor <- 0;
                      state.runtime_lane_error <- None;
                      launch_runtime_catalog_load state ~mailbox:async_messages))
-       | Some "A"
-         when state.view = Lanes
-              && state.lanes_mode = Lanes_overview
-              && Option.is_none state.runtime_lane_pick ->
-           launch_lane_addons state ~mailbox:async_messages
-             Masc_tui_lane_addons.Inspect
        | Some "a"
          when state.view = Lanes
               && state.lanes_mode = Lanes_overview
@@ -17973,9 +18043,9 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
@@ -18018,23 +18088,68 @@ and is loaded on demand through keeper_skill.
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
                  | "v" when not (busy view) ->
-                     (match view.selected_tab with Some tab_id ->
-                       launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id)
+                     (match view.selected_tab with
+                      | Some tab_id ->
+                          (match view.scene_guard with
+                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                               (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
+                           | None -> launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id))
                       | None -> ())
+                 | "m" when not (busy view) ->
+                     (match Browser_lane_view.primary_region_action view with
+                      | Primary_regions {tab_id} ->
+                          (* First [m] observes the landmark map. A second
+                             [m] focuses the exact main/article reference;
+                             no label or URL heuristic is used. *)
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_regions tab_id)
+                      | Primary_guarded_regions {tab_id;guard} ->
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
+                      | Primary_focus {tab_id;index;target} ->
+                          state.browser_lane <- Some {view with scene_cursor = index};
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_focus {tab_id;target})
+                      | Primary_error Browser_lane_view.No_primary_region ->
+                          state.browser_lane <- Some {view with
+                            load = Failed "No unambiguous main/article region observed; use v:regions"}
+                      | Primary_error Browser_lane_view.Ambiguous_primary_region ->
+                          state.browser_lane <- Some {view with
+                            load = Failed "Multiple main/article regions observed; use v:regions"}
+                      | Primary_unavailable -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some _, _ -> read {view with scene = None; scroll = 0}
-                      | None, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
+                      | None, Some tab_id ->
+                          (match view.scene_guard with
+                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                               (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Content})
+                           | None -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id))
                       | None, None -> ())
                  | "r" ->
                      (match view.scene, view.selected_tab with
+                      | None, Some tab_id ->
+                          (match view.scene_guard with
+                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                               (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Content})
+                           | None -> refresh_browser_lane state ~mailbox:async_messages)
                       | Some scene, Some tab_id ->
                           let operation = match scene.content.scope, scene.content.view with
                             | Some target, _ -> Scene_focus {tab_id;target}
                             | None, Browser_lane.Regions -> Scene_regions tab_id
                             | None, Browser_lane.Content -> Scene_read tab_id in
                           launch_browser_lane state ~mailbox:async_messages operation
-                      | _ -> refresh_browser_lane state ~mailbox:async_messages)
+                      | None, None | Some _, None -> refresh_browser_lane state ~mailbox:async_messages)
+                 | "J" | "K" when Option.is_some view.scene && not (busy view) ->
+                     (match view.scene, view.selected_tab with
+                      | Some scene, Some tab_id ->
+                          let distance = int_of_float scene.content.height in
+                          let delta_y = if key = "J" then distance else -distance in
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_scroll {tab_id;document_id=scene.content.document_id;
+                              expected_url=scene.content.url;
+                              scene_view=scene.content.view;scope=scene.content.scope;delta_y})
+                      | _ -> ())
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =
@@ -18256,41 +18371,10 @@ and is loaded on demand through keeper_skill.
            let step = if bracket = "]" then 1 else count - 1 in
            state.detail_tab <- List.nth tabs ((index + step) mod count);
            state.detail_scroll <- 0;
-           (match selected_keeper state, state.detail_tab with
-            | Some keeper, Detail_sandbox ->
-                state.keeper_sandbox_view <- None;
-                state.keeper_sandbox_view_error <- None;
-                launch_keeper_sandbox_view state ~mailbox:async_messages
-                  keeper.k_name
-            | Some keeper, Detail_instructions ->
-                state.keeper_config_view <- None;
-                state.keeper_config_view_error <- None;
-                launch_keeper_config_view state ~mailbox:async_messages
-                  keeper.k_name
-            | Some keeper, Detail_github ->
-                state.github_identity_view <- None;
-                state.github_identity_view_error <- None;
-                launch_github_identity_view state ~mailbox:async_messages
-                  keeper.k_name
-            | Some keeper, Detail_identity ->
-                state.identity_view <- None;
-                state.identity_view_error <- None;
-                launch_identity_view state ~mailbox:async_messages keeper.k_name
-            | Some _, Detail_channels ->
-                launch_connectors_load state ~mailbox:async_messages
-            | Some keeper, Detail_automation ->
-                (* Bracket-switching into Automation must fetch THIS keeper's
-                   schedules (state.keeper_schedules, what automation_lines
-                   reads), not the fleet list. The old launch_schedules_load
-                   wrote state.schedules, which this tab never reads, so the
-                   panel stayed stuck on "(loading…)". Mirror open_keeper_detail. *)
-                state.keeper_schedules <- None;
-                state.keeper_schedules_error <- None;
-                launch_keeper_schedules_load state ~mailbox:async_messages
-                  ~keeper_name:keeper.k_name
-            | Some _, Detail_runs ->
-                launch_fusion_runs_load state ~mailbox:async_messages
-            | _, Detail_info | _, Detail_secrets | None, _ -> ())
+           (match selected_keeper state with
+            | Some keeper ->
+                launch_detail_tab_reading state ~mailbox:async_messages keeper
+            | None -> ())
        (* One step through the list a detail was opened from, on every surface
           that has one. Each reuses the same open the Enter arm uses, so a
           step cannot fetch less than an open does. Guarded on the detail
@@ -22409,7 +22493,8 @@ and is loaded on demand through keeper_skill.
            Status reads reuse the accepted request; they never submit it again. *)
         (match state.lane_addons with
          | Some view when not view.loading && Option.is_none view.draft
-              && Option.is_none view.document_key && Option.is_none view.action_menu ->
+              && Option.is_none view.document_key && Option.is_none view.action_menu
+              && Option.is_none view.subscription_panel ->
              let request = match Masc_tui_lane_addons.pending_action view with
                | Some action -> Masc_tui_lane_addons.Action_status action
                | None -> Masc_tui_lane_addons.Inspect in
@@ -22423,7 +22508,13 @@ and is loaded on demand through keeper_skill.
              launch_keeper_lanes_load state ~mailbox:async_messages
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_keeper_logs_if_safe state base_path 200
-               (List.nth_opt state.keepers state.keeper_cursor)
+               (List.nth_opt state.keepers state.keeper_cursor);
+             (* The Secrets tab reads through the Keeper lanes body, which
+                only the list refreshed; r on the tab had no way to retry a
+                failed read. *)
+             if state.view = Keepers Keeper_detail
+                && state.detail_tab = Detail_secrets
+             then launch_keeper_lanes_load state ~mailbox:async_messages
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->

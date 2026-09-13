@@ -1,9 +1,65 @@
 type navigation_source = { url : string; document_id : string }
 type rect = { x : float; y : float; width : float; height : float }
+type region_role =
+  | Main
+  | Navigation
+  | Complementary
+  | Named_region
+  | Section
+  | Article
+  | Header
+  | Footer
+  | Search
+  | Form
+  | Log
+  | Banner
+  | Content_info
+  | Scroll_area
+  | Unknown of string
+
+(* Role names arrive as strings from the browser. Classify them once at that
+   boundary so navigation decisions can match a closed semantic set. Unknown
+   roles remain visible for the operator and are never an implicit target. *)
+let region_role_of_string value =
+  let trimmed = String.trim value in
+  match String.lowercase_ascii trimmed with
+  | "main" -> Main
+  | "navigation" -> Navigation
+  | "complementary" -> Complementary
+  | "region" -> Named_region
+  | "section" -> Section
+  | "article" -> Article
+  | "header" -> Header
+  | "footer" -> Footer
+  | "search" -> Search
+  | "form" -> Form
+  | "log" -> Log
+  | "banner" -> Banner
+  | "contentinfo" -> Content_info
+  | "scroll-area" -> Scroll_area
+  | _ -> Unknown trimmed
+
+let region_role_to_string = function
+  | Main -> "main"
+  | Navigation -> "navigation"
+  | Complementary -> "complementary"
+  | Named_region -> "region"
+  | Section -> "section"
+  | Article -> "article"
+  | Header -> "header"
+  | Footer -> "footer"
+  | Search -> "search"
+  | Form -> "form"
+  | Log -> "log"
+  | Banner -> "banner"
+  | Content_info -> "contentinfo"
+  | Scroll_area -> "scroll-area"
+  | Unknown value -> value
+
 type kind =
   | Text
   | Raster
-  | Region of string
+  | Region of region_role
   | Control of {
       clickable : bool;
       editable : bool;
@@ -56,7 +112,8 @@ let node json =
   let* kind = get string "kind" json in
   let* kind = match kind with
     | "text" -> Ok Text | "raster" -> Ok Raster
-    | "region" -> let* role = get nonempty "role" json in Ok (Region role)
+    | "region" -> let* role = get nonempty "role" json in
+      Ok (Region (region_role_of_string role))
     | "control" -> let* clickable = get boolean "clickable" json in
       let* editable = get boolean "editable" json in let* disabled = get boolean "disabled" json in
       let* href = optional_href json in

@@ -18,6 +18,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `l` / `a` | Live / automation browser |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
+| `J` / `K` | Scroll the observed browser page by one viewport, then refresh the same scene |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
@@ -105,13 +106,20 @@ control and reads a fresh scene, or reads the selected region. The footer names
 the selected action. `v` lists page regions; the context row distinguishes page
 content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
 the same page or region again.
+`J`/`K` send a guarded top-level page scroll using the observed viewport height,
+then read the same scene again. The result must retain the observed URL and
+document identity; a viewport resize is reported by the fresh scene rather than
+treated as a pre-action lock. Nested panes still require screenshot pointer
+scroll because their scroll container is selected by the observed hit point.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the
 destination with its follow receipt; the old region scope is never reused for
 the destination. Other enabled controls use the ordinary observed click.
 `m` is the short semantic path for a page's primary reading surface: the first
 press observes `main`/`article` landmarks, and the second focuses the unique
-exact-role match. Multiple matches stay in the region picker instead of being
-chosen by text, URL, or CSS heuristics.
+exact-role match. Role names are classified at the observation boundary;
+unknown roles remain visible but cannot become an implicit primary target.
+Multiple matches stay in the region picker instead of being chosen by text, URL,
+or CSS heuristics.
 If the destination read is still pending or fails, the footer exposes `r`/`s`/`v`
 as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,

@@ -9223,9 +9223,12 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | None, None when Option.is_some view.scene ->
           let action = match Option.bind (selected_scene_target view) scene_target_action with
             | Some Read_region -> "Enter:read region  "
+            | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
           action ^ "Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+      | None, None when Option.is_some view.scene_guard ->
+          "r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -9242,6 +9245,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
+        | Loading (_, Scene_follow _) -> "Following observed browser link…", Theme.info ()
+        | Loading (_, Scene_follow_refresh _) -> "Rechecking followed browser destination…", Theme.info ()
         | Loading (_, Scene_click _) -> "Clicking observed browser control…", Theme.info ()
         | Loading (_, (Viewport_refresh _ | Viewport_cadence _)) -> "Refreshing selected browser viewport…", Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) -> "Scrolling selected browser viewport…", Theme.info ()
@@ -9250,7 +9255,11 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             (match browser_label view with
              | Some browser -> "Capturing selected " ^ browser ^ " tab… (any key cancels preview)"
              | None -> "Capturing selected tab… (any key cancels preview)"), Theme.info ()
-        | Failed detail -> "Read/action failed: " ^ Terminal_text.single_line detail, Theme.bad ()
+        | Failed detail ->
+            let retry = match view.scene_guard with
+              | Some _ -> " · followed destination pending · r:recheck"
+              | None -> "" in
+            "Read/action failed: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
         | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with

@@ -3189,6 +3189,10 @@ module Browser_lane_view = struct
   }
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
+  type navigation_guard = {
+    expected_url : string;
+    navigation_source : Masc.Browser_scene.navigation_source;
+  }
   type operation = Discover of discovery | Read | Open_session | Close_session | Goto of string | Screenshot of int
     | Read_refresh
     | Scene_read of int
@@ -3196,6 +3200,12 @@ module Browser_lane_view = struct
     | Scene_refresh of { tab_id : int; scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
+    | Scene_follow of { tab_id : int; document_id : string; node_id : string; expected_url : string }
+    | Scene_follow_refresh of {
+        tab_id : int;
+        guard : navigation_guard;
+        scene_view : Browser_lane.scene_view;
+      }
     | Viewport_refresh of { tab_id : int; expected_url : string }
     | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
@@ -3211,6 +3221,7 @@ module Browser_lane_view = struct
     source : source; selected_tab : int option; scroll : int;
     reading : reading option; load : load; url_draft : string option;
     scene : scene option; scene_cursor : int;
+    scene_guard : navigation_guard option;
     read_view : read_view;
     refresh_pending : int option;
     read_continuation : read_continuation;
@@ -3236,12 +3247,16 @@ module Browser_lane_view = struct
   let create () =
     { clients = None; selected_client = None; client_picker = None;
       source = Live; selected_tab = None; scroll = 0;
-      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0; read_view = Text_view; refresh_pending = None; read_continuation = No_read_continuation }
+      reading = None; load = Idle; url_draft = None; scene = None; scene_cursor = 0;
+      scene_guard = None; read_view = Text_view; refresh_pending = None;
+      read_continuation = No_read_continuation }
   let switch_source source _t = { (create ()) with source }
-  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0; read_view = Text_view }
+  let refresh t = { t with selected_tab = None; scroll = 0; scene = None; scene_cursor = 0;
+    scene_guard = None; read_view = Text_view }
   let after_action t =
     { t with reading = None; scene = None; scene_cursor = 0;
-      selected_tab = None; scroll = 0; load = Idle; read_continuation = No_read_continuation }
+      scene_guard = None; selected_tab = None; scroll = 0; load = Idle;
+      read_continuation = No_read_continuation }
   let defer_read t = { t with read_continuation = Deferred_read }
   let pending_read t = match t.read_continuation with
     | No_read_continuation -> None | Deferred_read -> Some Read
@@ -3260,8 +3275,8 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _ | Viewport_cadence _)), _ -> Reading
-    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)), _ -> Reading
+    | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Scene_follow _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   (* The badge in the Browser Lane title. Five of these six name the read the
      lane makes over HTTP, so the sixth -- the one for a browser that is not
@@ -3302,11 +3317,14 @@ module Browser_lane_view = struct
       | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
       | Some tab_id, Scene_view {scene_view;scope} ->
-          Some (Scene_refresh {tab_id;scene_view;scope})
+          (match t.scene_guard with
+           | Some guard when Option.is_none t.scene ->
+               Some (Scene_follow_refresh {tab_id;guard;scene_view})
+           | Some _ | None -> Some (Scene_refresh {tab_id;scene_view;scope}))
       | Some _, Text_view -> Some Read_refresh
   let yield_refresh_to_input t =
     match t.load with
-    | Loading (_, (Read_refresh | Scene_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
+    | Loading (_, (Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
     | Loading _ | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
@@ -3315,16 +3333,19 @@ module Browser_lane_view = struct
     | Scene_regions _ -> Scene_view {scene_view = Browser_lane.Regions; scope = None}
     | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
     | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
+    | Scene_follow _ -> Scene_view {scene_view = Browser_lane.Content; scope = None}
+    | Scene_follow_refresh {scene_view;_} -> Scene_view {scene_view; scope = None}
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
     | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
-      reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
+      reading = None; scene = None; scene_cursor = 0; scene_guard = None;
+      scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
   let accept_clients ~generation result t =
     match t.load with
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
-         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0;
+         | Error detail -> { t with clients = None; selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_guard = None;
              scroll = 0; client_picker = Some 0; load = Failed detail }, false
          | Ok clients ->
              let next = { t with clients = Some clients; load = Idle } in
@@ -3339,7 +3360,7 @@ module Browser_lane_view = struct
                    | Some _, _ -> Failed "Selected browser disconnected; b:choose browser"
                    | None, _ -> Idle
                  in
-                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scroll = 0;
+                 { next with selected_tab = None; reading = None; scene = None; scene_cursor = 0; scene_guard = None; scroll = 0;
                    client_picker = Some 0; load }, false)
     | Loading _ | Idle | No_browser | Failed _ -> t, false
   let ( let* ) = Result.bind
@@ -3502,7 +3523,7 @@ module Browser_lane_view = struct
           if tab.id = scene.tab_id then
             {tab with title = scene.content.title; url = scene.content.url}
           else tab) reading.tabs }) t.reading in
-    {t with scene = Some scene; reading; load = Idle;
+    {t with scene = Some scene; scene_guard = None; reading; load = Idle;
       read_view = Scene_view {scene_view = scene.content.view; scope = scene.content.scope};
       scene_cursor = Option.value ~default:0 selected_index;
       scroll = if Option.is_some selected_index then t.scroll else 0}
@@ -3523,27 +3544,54 @@ module Browser_lane_view = struct
              publish_scene scene t
          | Ok _ -> {t with scene = None; load = Failed "refreshed scene source, client, tab or scope mismatch"}
          | Error detail -> {t with scene = None; load = Failed detail})
-    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_}) as operation)) when current = generation ->
+    | Loading (current, ((Scene_read tab_id | Scene_regions tab_id | Scene_focus {tab_id;_} | Scene_click {tab_id;_} | Scene_follow {tab_id;_} | Scene_follow_refresh {tab_id;_}) as operation)) when current = generation ->
         let expected_view, expected_scope = match operation with
           | Scene_regions _ -> Browser_lane.Regions, None
           | Scene_focus {target;_} -> Browser_lane.Content, Some target
           | Scene_click {scope;_} -> Browser_lane.Content, scope
+          | Scene_follow _ -> Browser_lane.Content, None
+          | Scene_follow_refresh {scene_view;_} -> scene_view, None
           | _ -> Browser_lane.Content, None in
         (match result with
          | Ok scene when scene.source = t.source && scene.client_id = client_id t
                          && scene.tab_id = tab_id && t.selected_tab = Some tab_id
                          && scene.content.view = expected_view && scene.content.scope = expected_scope ->
              publish_scene scene t
-         | Ok _ -> {t with scene = None; load = Failed "scene source, client or tab mismatch"}
-         | Error detail -> {t with scene = None; load = Failed detail})
+         | Ok _ ->
+             let scene_guard = match operation with
+               | Scene_follow_refresh {guard;_} -> Some guard
+               | _ -> t.scene_guard in
+             {t with scene = None; scene_guard; load = Failed "scene source, client or tab mismatch"}
+         | Error detail ->
+             let scene_guard = match operation with
+               | Scene_follow_refresh {guard;_} -> Some guard
+               | _ -> t.scene_guard in
+             {t with scene = None; scene_guard; load = Failed detail})
+    | _ -> t
+
+  let accept_follow ~generation ~(guard : navigation_guard)
+      (result : (scene, string) result) t =
+    match t.load with
+    | Loading (current, Scene_follow {tab_id;_}) when current = generation ->
+        (match result with
+         | Ok scene when scene.source = t.source && scene.client_id = client_id t
+                         && scene.tab_id = tab_id && t.selected_tab = Some tab_id
+                         && scene.content.view = Browser_lane.Content
+                         && scene.content.scope = None ->
+             publish_scene scene t
+         | Ok _ -> {t with scene = None; scene_guard = Some guard;
+             load = Failed "follow destination source, client, tab or scope mismatch"}
+         | Error detail -> {t with scene = None; scene_guard = Some guard;
+             load = Failed detail})
     | _ -> t
 
 
-  type scene_action = Read_region | Click_control
+  type scene_action = Read_region | Follow_link | Click_control
 
   let scene_target_action (node : Masc.Browser_scene.node) =
     match node.kind with
     | Region _ -> Some Read_region
+    | Control { href = Some _; clickable = true; disabled = false; _ } -> Some Follow_link
     | Control { clickable = true; disabled = false; _ } -> Some Click_control
     | Text | Raster | Control _ -> None
 
@@ -3564,7 +3612,11 @@ module Browser_lane_view = struct
     match t.scene, selected_scene_target t with
     | Some scene, Some node ->
         let target_kind = match node.kind with
-          | Region _ -> "region" | Control _ -> "control" | Text -> "text" | Raster -> "raster" in
+          | Region _ -> "region"
+          | Control {href = Some _; _} -> "link"
+          | Control _ -> "control"
+          | Text -> "text"
+          | Raster -> "raster" in
         let pinned = ["lane",`String (source_name scene.source);"tabId",`Int scene.tab_id;
           "expectedUrl",`String scene.content.url] @
           (match scene.client_id with None -> [] | Some id -> ["clientId",`String id]) in
@@ -3575,6 +3627,8 @@ module Browser_lane_view = struct
           | None -> `Null
           | Some Read_region -> `Assoc ["kind",`String "read_region";"tool",`String "BrowserRead";
               "input",`Assoc (pinned @ ["mode",`String "scene";"scope",`Assoc target])]
+          | Some Follow_link -> `Assoc ["kind",`String "follow_link";"tool",`String "BrowserInteract";
+              "input",`Assoc (pinned @ ["action",`String "follow_link"] @ target)]
           | Some Click_control -> `Assoc ["kind",`String "click_control";"tool",`String "BrowserInteract";
               "input",`Assoc (pinned @ ["action",`String "click"] @ target)] in
         let source = match node.source_context with
@@ -3601,7 +3655,11 @@ module Browser_lane_view = struct
           "viewport",`Assoc ["width",`Float scene.content.width;"height",`Float scene.content.height;
             "scrollX",`Float scene.content.scroll_x;"scrollY",`Float scene.content.scroll_y];
           "truncated",`Bool scene.content.truncated;
-          "tag",`String node.tag;"text",`String node.text;"source",source]))
+          "tag",`String node.tag;"text",`String node.text;
+          "href",(match node.kind with
+            | Control {href = Some href; _} -> `String href
+            | Region _ | Control _ | Text | Raster -> `Null);
+          "source",source]))
     | _ -> None
 
   let viewport_request ~tab_id ~expected_url ~action t =
@@ -3647,7 +3705,7 @@ module Browser_lane_view = struct
                        | Some prior -> prior.tab_id = page.tab_id && prior.url = page.url
                        | None -> false)
                | _ -> false in
-             { t with reading = Some reading; load = Idle; read_view = Text_view;
+             { t with reading = Some reading; scene_guard = None; load = Idle; read_view = Text_view;
                scroll = (if same_page then t.scroll else 0);
                selected_tab = Option.map (fun (page : page) -> page.tab_id) reading.page }
          | Ok _ -> { t with load = Failed "browser response source or client mismatch" }
@@ -3669,7 +3727,8 @@ module Browser_lane_view = struct
         let index = (current + direction + count) mod count in
         match List.nth_opt reading.tabs index with
         | None -> t
-        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0; load = Idle; read_view = Text_view }
+        | Some tab -> { t with selected_tab = Some tab.id; scroll = 0; scene = None; scene_cursor = 0;
+            scene_guard = None; load = Idle; read_view = Text_view }
 end
 
 module Browser_history = struct
@@ -3777,6 +3836,7 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
         | Raster -> Some "image · Ctrl-O"
         | Region role -> Some ("region · " ^ role)
         | Control {disabled=true;_} -> Some "disabled"
+        | Control {href=Some _;_} -> Some "link"
         | Control {editable=true;_} -> Some "input"
         | Control _ -> Some "button/link" in
       let prefix = match label, index with

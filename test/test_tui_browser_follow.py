@@ -84,6 +84,10 @@ def run(binary):
             held.set()
             assert release.wait(timeout=10.0), "test did not release scene response"
         view, scope = request["view"], request.get("scope")
+        if "expectedUrl" in request:
+            assert request["expectedUrl"] == "https://example.org/alpha#thread"
+            assert request["navigationSource"] == {
+                "url": "https://example.org/alpha", "documentId": "alpha"}
         if scope:
             assert scope == {"documentId": channel, "nodeId": channel + "-messages"}, "stale scope reused"
             nodes = [node("message", "text", f"{channel.upper()} FOCUSED VERSION {version}")]
@@ -93,10 +97,14 @@ def run(binary):
         else:
             nodes = [node("intro", "text", "ALPHA ARTICLE " + "long wrapped content " * 180),
                      node("first", "control", "FIRST ACTION", clickable=True, disabled=False, editable=False),
-                     node("last", "control", f"LAST ACTION VERSION {version}", clickable=True, disabled=False, editable=False)]
+                     node("last", "control", f"LAST ACTION VERSION {version}", clickable=True, disabled=False, editable=False),
+                     node("thread", "control", "OBSERVED THREAD", tag="a",
+                          href=f"https://example.org/{channel}#thread",
+                          clickable=True, disabled=False, editable=False)]
+        observed_url = request.get("expectedUrl", f"https://example.org/{channel}")
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "tabId": 2, "elapsed_ms": 1, "schema": "masc.browser.scene.v1", "view": view,
-            "scope": scope, "documentId": channel, "url": f"https://example.org/{channel}",
+            "scope": scope, "documentId": channel, "url": observed_url,
             "title": channel.title(), "truncated": False, "nodes": nodes,
             "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}}}
 
@@ -104,6 +112,20 @@ def run(binary):
         "clients": [{"clientId": client, "browser": "zen"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = h.RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = h.RequestHttpResponse(scene)
+
+    def follow(body):
+        request = json.loads(body)
+        requests.append(dict(request))
+        assert request["action"] == "follow_link"
+        assert request["documentId"] == "alpha" and request["nodeId"] == "thread"
+        assert request["expectedUrl"] == "https://example.org/alpha"
+        return 200, {"ok": True, "data": {
+            "action": "follow_link", "urlBefore": request["expectedUrl"],
+            "url": request["expectedUrl"],
+            "destinationUrl": "https://example.org/alpha#thread",
+            "navigationSource": {"url": request["expectedUrl"], "documentId": "alpha"}}}
+
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = h.RequestHttpResponse(follow)
 
     def interact(process, fd, _slave, output, _base):
         h.palette_go(process, fd, output, b"go Browser Lane", b"ALPHA TEXT READY")
@@ -119,6 +141,10 @@ def run(binary):
             record("external-change-not-followed", output)
             raise
         record("same-page-selection-retained", output)
+
+        h.send_and_wait(process, fd, output, b"\t", b"[>4 link] OBSERVED THREAD")
+        h.send_and_wait(process, fd, output, b"\r", b"https://example.org/alpha#thread")
+        assert any(request.get("action") == "follow_link" for request in requests)
 
         with lock:
             state["hold_next"] = True

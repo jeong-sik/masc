@@ -1932,6 +1932,9 @@ type async_msg =
       int * (Browser_lane_view.reading, string) result
   | Browser_lane_action_done of int * (unit, string) result
   | Browser_lane_scene_loaded of int * (Browser_lane_view.scene, string) result
+  | Browser_lane_follow_loaded of int *
+      ((Masc_tui_http.browser_follow_receipt *
+        (Browser_lane_view.scene, string) result), string) result
   | Browser_lane_screenshot_ready of {
       generation : int; image_generation : int;
       result : (Browser_lane_view.screenshot * string, string) result;
@@ -4648,7 +4651,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4657,8 +4660,12 @@ let launch_browser_lane state ~mailbox operation =
       (* Scene geometry belongs to its observation. Browser effects and explicit
          reads withdraw it before dispatch; a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
-         Scene_click retains its exact reference in [operation], and the
-         matching completion can install the newly observed scene. A cadence
+         Scene_click and Scene_follow retain their exact reference in
+         [operation], and the matching completion can install the newly
+         observed scene. A follow additionally pins the navigation receipt so
+         a same-URL reload cannot be mistaken for a completed transition; a
+         failed destination read keeps that guard for [Scene_follow_refresh]
+         and never carries the old region scope into the destination. A cadence
          refresh keeps its frame visible so periodic observations do not erase
          the operator's reading position. Operator input supersedes a cadence
          result; effects still use the observed document/URL checks. Failed
@@ -4666,7 +4673,7 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
+        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
@@ -4675,7 +4682,7 @@ let launch_browser_lane state ~mailbox operation =
       state.browser_lane <- Some { view with load = Loading (generation, operation);
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Scene_follow_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> None | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4706,6 +4713,27 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
+        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_lane_follow_loaded
+            (generation, call (fun () ->
+              match Masc_tui_http.follow_browser_scene
+                  ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url with
+              | Error detail -> Error detail
+              | Ok receipt ->
+                  let expected_source : Masc.Browser_scene.navigation_source =
+                    {url=expected_url; document_id=document_id} in
+                  if receipt.navigation_source <> expected_source then
+                    Error "follow receipt navigation source mismatch"
+                  else
+                    Ok (receipt, Masc_tui_http.fetch_browser_scene
+                      ?expected_url:(Some receipt.destination_url)
+                      ?navigation_source:(Some receipt.navigation_source)
+                      ~host ~port ~view ~tab_id ())))
+        | Scene_follow_refresh {tab_id;guard;scene_view} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
+              ~scene_view
+              ~expected_url:guard.expected_url
+              ~navigation_source:guard.navigation_source
+              ~host ~port ~view ~tab_id ()))
         | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
@@ -13497,6 +13525,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight
   | Browser_lane_scene_loaded (generation, result) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept_scene ~generation result) state.browser_lane
+  | Browser_lane_follow_loaded (generation, result) ->
+      state.browser_lane <- Option.map
+        (fun view ->
+           match result with
+           | Error detail ->
+               Browser_lane_view.accept_scene ~generation (Error detail) view
+           | Ok (receipt, scene_result) ->
+               let guard : Browser_lane_view.navigation_guard = {
+                 expected_url = receipt.destination_url;
+                 navigation_source = receipt.navigation_source;
+               } in
+               Browser_lane_view.accept_follow ~generation ~guard scene_result view)
+        state.browser_lane
   | Browser_lane_screenshot_ready { generation; image_generation; result } ->
       (match state.browser_lane with
        | None -> ()
@@ -17993,23 +18034,36 @@ and is loaded on demand through keeper_skill.
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
                  | "v" when not (busy view) ->
-                     (match view.selected_tab with Some tab_id ->
-                       launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id)
+                     (match view.selected_tab with
+                      | Some tab_id ->
+                          (match view.scene_guard with
+                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                               (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
+                           | None -> launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id))
                       | None -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some _, _ -> read {view with scene = None; scroll = 0}
-                      | None, Some tab_id -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id)
+                      | None, Some tab_id ->
+                          (match view.scene_guard with
+                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                               (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Content})
+                           | None -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id))
                       | None, None -> ())
                  | "r" ->
                      (match view.scene, view.selected_tab with
+                      | None, Some tab_id ->
+                          (match view.scene_guard with
+                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                               (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Content})
+                           | None -> refresh_browser_lane state ~mailbox:async_messages)
                       | Some scene, Some tab_id ->
                           let operation = match scene.content.scope, scene.content.view with
                             | Some target, _ -> Scene_focus {tab_id;target}
                             | None, Browser_lane.Regions -> Scene_regions tab_id
                             | None, Browser_lane.Content -> Scene_read tab_id in
                           launch_browser_lane state ~mailbox:async_messages operation
-                      | _ -> refresh_browser_lane state ~mailbox:async_messages)
+                      | None, None | Some _, None -> refresh_browser_lane state ~mailbox:async_messages)
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =
@@ -18028,6 +18082,9 @@ and is loaded on demand through keeper_skill.
                            | Some Read_region ->
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
+                           | Some Follow_link -> launch_browser_lane state ~mailbox:async_messages
+                          (Scene_follow {tab_id=scene.tab_id;document_id=scene.content.document_id;
+                            node_id=node.node_id;expected_url=scene.content.url})
                            | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})

@@ -973,6 +973,10 @@ let run_turn
       | Some (Gate_continuation admission) -> Keeper_direct_gate_continuation.official_client admission
       | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client admission
       | Some (Runtime_continuation _) | None -> None in
+    let official_client_original_turn = match direct_resume with
+      | Some (Checkpoint_continuation admission) -> Keeper_direct_checkpoint_continuation.official_client_original_turn admission
+      | Some (Gate_continuation _) -> official_client_continuation
+      | Some (Runtime_continuation _) | None -> None in
     let native_scope = match official_client_continuation, repetition_execution with
       | Some checkpoint, Some execution -> Keeper_repetition_scope.Execution.resume execution checkpoint.frame
         |> Result.map_error Keeper_repetition_snapshot.error_to_string
@@ -1480,6 +1484,7 @@ let run_turn
                       ?enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
                       ?official_client_continuation
+                      ?official_client_original_turn
                       ~on_official_client_tool_boundary
                       ?agent_core_checkpoint:checkpoint
                       ?event_bus

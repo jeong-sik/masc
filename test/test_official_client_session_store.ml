@@ -1208,7 +1208,7 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
   let latest : t = { client_kind = Codex; runtime_id = observed.runtime_id;
     phase = Settled { session_id = observed.session_id; turn_id = "steering-turn" };
     turn_count = 2; tool_surface_sha256 = empty_surface; last_recovery_resolution = None;
-    last_transient_release = None; updated_at = 2. } in
+    last_transient_release = None; context_frontier = None; updated_at = 2. } in
   let resumed = match Cooperative.For_testing.prepare_official_resume ~observed ~expected:(Some latest) with
     | Ok resumed -> resumed | Error detail -> fail detail in
   check string "resume includes newer steering in the same thread" "steering-turn" resumed.turn_id;
@@ -1225,11 +1225,51 @@ let test_cooperative_resume_preserves_thread_after_newer_steering () =
        "original request with completed effects")
 ;;
 
+let test_context_frontier_is_acknowledged_only_by_settlement () =
+  with_workspace "masc-context-frontier-" (fun base_path ->
+    let keeper_name = "frontier" in
+    let frontier = {snapshot_sha256=String.make 64 'a'; message_count=3;
+      delivery=Replaced_configuration;
+      acknowledged_turn=Some {session_id="fabricated";turn_id="fabricated"}} in
+    let claimed = claim_with_context_frontier ~context_frontier:(Some frontier)
+      ~base_path ~keeper_name ~expected:None ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:1.
+      |> Result.get_ok in
+    let observed binding = match binding.context_frontier with
+      | Some value -> value | None -> fail "missing frontier" in
+    check bool "claim clears caller-supplied acknowledgement" true
+      ((observed claimed).acknowledged_turn = None);
+    check bool "intent survives reopen without acknowledgement" true
+      (load ~base_path ~keeper_name = Ok (Some claimed));
+    let active = mark_active ~base_path ~keeper_name ~expected:claimed
+      ~session_id:"session" ~updated_at:2. |> Result.get_ok in
+    let starting = mark_turn_starting ~base_path ~keeper_name ~expected:active
+      ~session_id:"session" ~updated_at:3. |> Result.get_ok in
+    let started = mark_turn_started ~base_path ~keeper_name ~expected:starting
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:4. |> Result.get_ok in
+    check bool "inflight does not claim acknowledged context" true
+      ((observed started).acknowledged_turn = None);
+    let settled = settle ~base_path ~keeper_name ~expected:started
+      ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
+    check bool "terminal settlement records exact vendor identity" true
+      ((observed settled).acknowledged_turn = Some {session_id="session";turn_id="turn"});
+    check bool "acknowledged frontier survives reopen" true
+      (load ~base_path ~keeper_name = Ok (Some settled));
+    let unbound_json = match to_yojson settled with
+      | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
+      | _ -> fail "binding encoding is not an object" in
+    match of_yojson unbound_json with
+    | Ok binding -> check bool "absent frontier never fabricates import proof" true
+        (binding.context_frontier = None)
+    | Error detail -> fail detail)
+;;
+
 let () =
   run
     "official client session store"
     [ ( "durable owner"
-      , [ test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
+      , [ test_case "context frontier acknowledgement" `Quick test_context_frontier_is_acknowledged_only_by_settlement
+        ; test_case "roundtrip and settlement" `Quick test_roundtrip_and_settlement
         ; test_case
             "duplicate claim and CAS fail closed"
             `Quick

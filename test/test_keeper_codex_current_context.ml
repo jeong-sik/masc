@@ -78,7 +78,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_client_continuation ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -86,7 +86,7 @@ default = "codex.context"
     Keeper_codex_runtime.run
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
-      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation
+      ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
       ~initial_messages:[Agent_core.Types.user_msg "Previous completed work"]
       ~model_input_projection:None ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
@@ -103,18 +103,8 @@ let successful attempt = match attempt.Keeper_codex_runtime.result with
   | Error error -> fail (Agent_core.Error.to_string error)
 
 let test_resume_persists_no_per_turn_context () =
-  (* What a resume may write into the vendor thread: nothing. The adapter once
-     injected the current Keeper instructions and the observation frame here,
-     which reads as the fix for a resumed thread being stuck on the
-     instructions it started with -- but thread/inject_items persists what it
-     is given and replays it in every later request, so each turn left another
-     copy of that turn's world state in the thread. That is the loop
-     Keeper_unified_prompt forbids by name (#25193: 943 of 945 user messages in
-     one keeper's checkpoint were byte-identical world-state frames), and with
-     no receipt on the API a retry after a lost turn/start writes the same
-     items twice. The instructions gap is real and stays open; it needs the
-     digest-and-restart shape the session store already uses for the tool
-     surface, not a per-turn write. *)
+  (* Current instructions and observation frames replace configuration; only
+     actual initial conversation rows are injected into persistent history. *)
   with_fixture @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation." ());
@@ -134,38 +124,26 @@ let test_resume_persists_no_per_turn_context () =
   check string "autonomous cue stays user input"
     "Continue from current World State."
     (params "turn/start" resumed |> member "input" |> items |> List.hd |> member "text" |> text);
-  (* The frame of the second turn must not be anywhere in the thread. The
-     methods check above says no item was written; this says the bytes did not
-     arrive by another route on the same turn. *)
-  let resumed_text = String.concat "\n" (List.map Yojson.Safe.to_string resumed) in
-  let carries needle haystack =
-    let n = String.length needle and h = String.length haystack in
-    let rec scan index =
-      index + n <= h
-      && (String.equal (String.sub haystack index n) needle || scan (index + 1))
-    in
-    scan 0
-  in
-  check bool "the turn's world state is not persisted anywhere in the resume" false
-    (carries "task-003 todo" resumed_text);
-  (* A fresh thread is where developer items belong: its own history and the
-     context it starts from. *)
+  let instructions rows method_ = params method_ rows |> member "developerInstructions" |> text in
+  let resumed_instructions = instructions resumed "thread/resume" in
+  check bool "resume carries current instructions" true
+    (String.starts_with ~prefix:"Keeper revision 2:" resumed_instructions);
+  check bool "resume carries current world frame" true
+    (String_util.contains_substring resumed_instructions "task-003 todo");
+  check bool "resume does not retain old world frame in configuration" false
+    (String_util.contains_substring resumed_instructions "task-001 done");
   let initial = params "thread/inject_items" first_requests |> member "items" |> items in
-  check (list string) "fresh session receives seed history and current context"
-    ["user";"developer"] (List.map (fun item -> member "role" item |> text) initial);
-  let content item = member "content" item |> items |> List.hd |> member "text" |> text in
-  let started = content (List.nth initial 1) |> Yojson.Safe.from_string in
-  check string "the starting context is the frame of the turn that opened the thread"
-    "World State: task-001 done; goal awaiting confirmation."
-    (started |> member "message" |> member "content_blocks" |> items |> List.hd |> member "text" |> text);
-  check string "a new thread carries the instructions of the turn that opened it"
-    (String.concat "\n\n" ("Keeper revision 1: publish the first artifact." ::
-       Keeper_codex_runtime.For_testing.native_posture_note Runtime_native_tools.codex_default))
-    (params "thread/start" first_requests |> member "developerInstructions" |> text);
+  check (list string) "persistent seed contains conversation only"
+    ["user"] (List.map (fun item -> member "role" item |> text) initial);
+  let started_instructions = instructions first_requests "thread/start" in
+  check bool "start carries original instructions" true
+    (String.starts_with ~prefix:"Keeper revision 1:" started_instructions);
+  check bool "start context is configuration" true
+    (String_util.contains_substring started_instructions "task-001 done");
   (match List.rev !reports with
    | [Keeper_official_client_host.Whole_input_transmitted _;
-      Keeper_official_client_host.Held_by_client_session] -> ()
-   | _ -> fail "fresh context does not imply transmission of the client-owned history")
+      Keeper_official_client_host.Whole_input_transmitted _] -> ()
+   | _ -> fail "both turns transmit current canonical context; vendor tool history stays external")
 
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
@@ -191,11 +169,14 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let observed : Keeper_semantic_execution.official_client_checkpoint =
     { client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
       tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame } in
+  let steering = run ~instructions:"Keeper instructions" ~world:"Newer steering" () in
+  successful steering;
   let checkpoint = Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
-    ~observed ~expected:(Some settled) |> require in
+    ~observed ~expected:steering.Keeper_codex_runtime.settled_session |> require in
+  check bool "steering advances admission turn" true (not (String.equal observed.turn_id checkpoint.turn_id));
   let before = List.length (read_requests capture) in
   let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
-  successful (run ~official_client_continuation:checkpoint ~goal
+  successful (run ~official_client_continuation:checkpoint ~official_client_original_turn:observed ~goal
     ~instructions:"Keeper instructions" ~world:"Newer steering" ());
   let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
   check bool "cooperative continuation resumes the original vendor thread" true
@@ -204,6 +185,16 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
     (List.exists (fun row -> let method_ = member "method" row in
       method_ = `String "thread/start" || method_ = `String "thread/inject_items") rows);
   let params = List.find (fun row -> member "method" row = `String "turn/start") rows |> member "params" in
+  let resume = List.find (fun row -> member "method" row = `String "thread/resume") rows |> member "params" in
+  let snapshot = resume |> member "developerInstructions" |> text
+    |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
+  check string "saved unfinished turn remains distinct from newer steering" observed.turn_id
+    (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text);
+  check string "admission references latest settled turn" checkpoint.turn_id
+    (snapshot |> member "admission_vendor_turn" |> member "turn_id" |> text);
+  check bool "original operation identity accompanies saved turn" true
+    (snapshot |> member "original_vendor_turn" |> member "execution_scope"
+      = Keeper_execution_scope_id.to_json (Keeper_execution_scope_id.direct_operation operation_id));
   let sent = params |> member "input" |> items |> List.hd |> member "text" |> text in
   check string "the model receives only continuation intent" goal sent
 

@@ -3,6 +3,8 @@
 type admission
 val checkpoint : admission -> Agent_core.Checkpoint.t option
 val official_client : admission -> Keeper_semantic_execution.official_client_checkpoint option
+val official_client_original_turn : admission -> Keeper_semantic_execution.official_client_checkpoint option
+(** Saved operation checkpoint before admission advances to the latest vendor turn. *)
 val official_resume_message : operation_id:Keeper_chat_operation.Operation_id.t -> string
 val load : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   session_dir:string -> session_id:string -> (admission option, string) result

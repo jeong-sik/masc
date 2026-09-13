@@ -1577,7 +1577,9 @@ let start_post_ready_owner_lanes
     ~resume:resume_model_configuration;
   let start_authority () =
     start_completion_authority ~sw ~clock state;
-    start_goal_verifier ~sw state
+    start_goal_verifier ~sw state;
+    Server_workspace_memory_curator.start ~sw
+      ~base_path:(Mcp_server.workspace_config state).base_path
   in
   if Runtime_startup_state.requires_setup () then
     Eio.Fiber.fork ~sw (fun () ->

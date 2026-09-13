@@ -23,13 +23,14 @@ let b ?help group key label = { key; label; help; group }
 let config_bindings =
   [ b Navigate "j/k" "select / scroll", Some
       [ Config_runtime; Config_models; Config_params; Config_prompts
-      ; Config_presets; Config_themes ]
+      ; Config_presets; Config_themes; Config_voice ]
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages runtime.toml, and the detail of prompts and presets; the \
-             other four panes take the key and do nothing with it",
-      Some [ Config_runtime; Config_prompts; Config_presets ]
+      ~help:"pages runtime.toml, the voice reading and the detail of prompts \
+             and presets, and moves the selection a page on models and themes",
+      Some [ Config_runtime; Config_models; Config_prompts; Config_presets
+           ; Config_themes; Config_voice ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -281,6 +282,8 @@ let for_surface = function
       ]
   | Lanes ->
       [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      ; b Navigate "o" "Lane Add-ons"
+          ~help:"inspect Lane Add-on declarations, instances and observations"
       ; b Act "Right / Enter" "runs"
           ~help:"open the standalone lane's exact runs"
       ; b Act "a" "append slot"
@@ -959,8 +962,26 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       ]
   | Detail_info | Detail_secrets | Detail_automation | Detail_runs -> []
 
-(* The compact strip beside the tab row. Same [key:label] spelling the
-   footer uses, and the tab switch leads because it is on every tab. *)
+(* The single keys a binding's key names, in this table's own notation:
+   alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice
+   apart with a space ("u u"), and a chord with "+" ("arrows+enter"). *)
+let key_atoms key =
+  String.split_on_char '/' key
+  |> List.concat_map (String.split_on_char ' ')
+  |> List.concat_map (String.split_on_char '+')
+  |> List.filter (fun atom -> not (String.equal atom ""))
+  |> List.sort_uniq String.compare
+
+(* The keys a detail tab's own arms answer before the Keeper controls do.
+   Sandbox takes [s] for the remote_ssh backend and [o] for its container
+   logs; Channels takes [j/k] and [e]; Settings takes [e]. *)
+let keeper_detail_tab_taken_keys tab =
+  List.concat_map
+    (fun binding -> key_atoms binding.key)
+    (keeper_detail_tab_bindings tab)
+
+(* The keys the detail footer leads with. Same [key:label] spelling as the
+   rest of the row, and the tab switch leads because it is on every tab. *)
 let keeper_detail_tab_hint tab =
   String.concat "  "
     ("[ ]:tab"

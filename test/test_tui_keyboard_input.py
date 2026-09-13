@@ -14776,12 +14776,12 @@ def voice_scroll_interaction() -> Interaction:
         screen = screen_text(bytes(output))
         expect(screen, first, "the pane did not list the endpoints")
         refuse(screen, last, "the fixture no longer overflows the terminal")
-        expect(screen, b"j/k:scroll", "the pane footer did not say how to scroll")
+        expect(screen, b"j/k:select / scroll", "the pane footer did not say how to scroll")
 
         press_and_settle(process, master_fd, output, b"\x1b[F")
         screen = screen_text(bytes(output))
         expect(screen, last, "End did not reach the last endpoint")
-        expect(screen, b"e:set up", "the footer was cut at the end of the list")
+        expect(screen, b"q:quit", "the footer was cut at the end of the list")
 
         press_and_settle(process, master_fd, output, b"\x1b[H")
         screen = screen_text(bytes(output))

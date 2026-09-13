@@ -259,6 +259,50 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
                Alcotest.(check (option string)) "and no credential it was not given"
                  None endpoint.Voice_config.api_key_env))))
 
+(* A catalogue read is taken against an endpoint built for the request and
+   thrown away. What it must not carry is an address: accepting one would make
+   an admin route a way to point the server at any host, and the only kind with
+   a catalogue carries its own address anyway. One sent anyway is refused by
+   name (test/voice_catalogue_request) rather than dropped: dropping a field
+   silently is how a misspelled credential field fell back to another account's
+   key. *)
+let test_a_catalogue_read_carries_no_address_and_no_key () =
+  match
+    Actions.catalogue_endpoint_of_json
+      (`Assoc
+        [ "kind", `String "elevenlabs_direct"
+        ; "api_key_env", `String "ELEVENLABS_API_KEY"
+        ])
+  with
+  | Error error -> Alcotest.fail (Actions.error_message error)
+  | Ok endpoint ->
+    Alcotest.(check bool) "no address was taken from the request" true
+      (Option.is_none endpoint.Voice_config.base_url);
+    Alcotest.(check (option string)) "the variable name, not a key"
+      (Some "ELEVENLABS_API_KEY") endpoint.Voice_config.api_key_env;
+    Alcotest.(check bool) "and the kind asked for" true
+      (endpoint.Voice_config.kind = Voice_config.Elevenlabs_direct)
+
+let test_a_catalogue_read_with_an_unknown_kind_is_refused () =
+  match
+    Actions.catalogue_endpoint_of_json (`Assoc [ "kind", `String "whatever_direct" ])
+  with
+  | Ok _ -> Alcotest.fail "an unknown kind should be refused rather than defaulted"
+  | Error error ->
+    let message = Actions.error_message error in
+    Alcotest.(check bool) "the refusal names what was sent" true
+      (Astring.String.is_infix ~affix:"whatever_direct" message)
+
+(* A local server that wants no key is configured without a variable, and
+   asking it for a catalogue fails later for having no catalogue -- not here,
+   for having no credential. The two are different answers. *)
+let test_a_catalogue_read_without_a_variable_is_allowed () =
+  match Actions.catalogue_endpoint_of_json (`Assoc [ "kind", `String "openai_compat" ]) with
+  | Error error -> Alcotest.fail (Actions.error_message error)
+  | Ok endpoint ->
+    Alcotest.(check bool) "no variable, and that is not an error" true
+      (Option.is_none endpoint.Voice_config.api_key_env)
+
 (* [voice.tts] cannot be created a field at a time -- the section validates on
    commit and wants its model and default voice -- so every case that needs one
    sends them with whatever else it is testing, in a single transaction. *)
@@ -459,17 +503,51 @@ let test_the_observation_names_the_tts_tuning () =
             Alcotest.failf "tts.agent_voice_settings must be an object, got %s"
               (Yojson.Safe.to_string other))))
 
-(* adapter_for_endpoint resolves the id before the kind, so an id that is an
-   alias for another adapter reaches that transport while the API reports the
-   declared one. *)
-let test_an_id_that_contradicts_the_kind_is_refused () =
-  refused ~what:"an id naming a different transport than the declared kind"
-    (`Assoc
-       [ "change", `String "put_endpoint"
-       ; "section", `String "stt"
-       ; "endpoint",
-         `Assoc [ "id", `String "elevenlabs"; "kind", `String "openai_compat" ]
-       ])
+(* Endpoint ids are names, not transport selectors. The declared kind survives
+   request -> committed config -> observation and selects the runtime adapter. *)
+let test_an_alias_shaped_id_preserves_the_declared_kind () =
+  with_workspace (fun ~base_path ~path ->
+    let change =
+      `Assoc
+        [ "change", `String "put_endpoint"
+        ; "section", `String "stt"
+        ; "endpoint", `Assoc
+            [ "id", `String "elevenlabs"
+            ; "kind", `String "openai_compat"
+            ; "base_url", `String "https://fixture.invalid/v1"
+            ]
+        ]
+    in
+    (match Actions.apply ~base_path (request (revision ~base_path) [ change ]) with
+     | Error error -> Alcotest.fail (Actions.error_message error)
+     | Ok _ -> ());
+    let endpoint =
+      match
+        Voice_setup.observe ~runtime_config_path:path
+          ~standalone_path:(Voice_config.voice_config_file_in base_path)
+      with
+      | Ok (_, Some (_, { Voice_config.stt = Some stt; _ })) ->
+        (match List.find_opt
+                 (fun (ep : Voice_config.endpoint) -> ep.id = "elevenlabs")
+                 stt.endpoints with
+         | Some endpoint -> endpoint
+         | None -> Alcotest.fail "the committed endpoint is absent")
+      | Ok _ -> Alcotest.fail "the committed STT section is absent"
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+    Alcotest.(check bool) "the runtime uses the declared transport" true
+      (adapter.transport = Voice_runtime_overlay.Openai_compat);
+    match Actions.observe ~base_path with
+    | Error error -> Alcotest.fail (Actions.error_message error)
+    | Ok json ->
+      match member "endpoints" (member "stt" json) with
+      | `List endpoints ->
+        let observed = List.find (fun ep -> string_member "id" ep = "elevenlabs") endpoints in
+        Alcotest.(check string) "the observation names the same kind"
+          "openai_compat" (string_member "kind" observed)
+      | _ -> Alcotest.fail "the observation must carry STT endpoints")
+
 
 (* The fixture's own endpoint carries a timeout on an openai_compat kind, so the
    round trip has to keep accepting that pair. *)
@@ -829,6 +907,14 @@ let () =
             test_the_answered_revision_is_the_one_this_write_made
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
         ] )
+    ; ( "asking for a catalogue"
+      , [ Alcotest.test_case "the read carries no address and no key" `Quick
+            test_a_catalogue_read_carries_no_address_and_no_key
+        ; Alcotest.test_case "an unknown kind is refused by name" `Quick
+            test_a_catalogue_read_with_an_unknown_kind_is_refused
+        ; Alcotest.test_case "no variable is not a refusal" `Quick
+            test_a_catalogue_read_without_a_variable_is_allowed
+        ] )
     ; ( "a kind is taken or refused for what it can do"
       , [ Alcotest.test_case "a command kind round-trips" `Quick
             test_a_command_kind_round_trips
@@ -856,8 +942,8 @@ let () =
             test_the_observation_names_the_tts_tuning
         ] )
     ; ( "the declared kind is what the runtime will use"
-      , [ Alcotest.test_case "an id contradicting the kind" `Quick
-            test_an_id_that_contradicts_the_kind_is_refused
+      , [ Alcotest.test_case "an alias-shaped id preserves the declared kind" `Quick
+            test_an_alias_shaped_id_preserves_the_declared_kind
         ; Alcotest.test_case "a timeout on an http endpoint stays accepted" `Quick
             test_a_timeout_on_an_http_endpoint_is_accepted
         ] )

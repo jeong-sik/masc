@@ -1712,7 +1712,7 @@ let render_question_reader (state : state) =
    scanning for, so those are the ones that get a mark. *)
 (* The widths now live beside their column names in [Render_schedule], which
    is the one place the header and the rows both read. The age column is sized
-   for the widest [span_text] draws, "1d00h": a board's oldest live threads are
+   for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
 (* Four cells of lead sit ahead of the mark on the header and on every row, so
@@ -6227,11 +6227,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
              else Ansi.dim ^ label ^ Ansi.reset)
       |> String.concat "  "
     in
-    let tab_hint = Masc_tui_keys.keeper_detail_tab_hint state.detail_tab in
     let title =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
+      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s" Ansi.bold
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tabs Ansi.dim tab_hint Ansi.reset
+        Ansi.reset tabs
     in
     box_line buf cols title;
 
@@ -6304,7 +6303,19 @@ let render_keeper_detail (state : state) =
        [fit_width] instead, which keeps the front and loses the back -- where
        [Left / Esc] and [q] sit -- so at 80 columns the row ended "t:c…" and
        named no way out. [key:label] for the roster pane's key too. *)
-    let hints = keeper_control_hints state (Some (keeper_reading state k)) in
+    (* The open tab's own keys lead, and a Keeper control on a key the tab
+       answers itself leaves the row. They were a strip at the end of the
+       title row, which the frame cut at 120 columns ("o:act…", "L:log…"),
+       while this row said "s:shutdown" and "o:container logs" on the
+       Sandbox tab, where [s] sets the remote_ssh backend and [o] reads the
+       container logs the strip called "actual logs". *)
+    let hints =
+      Masc_tui_keys.keeper_detail_tab_hint state.detail_tab
+      ^ "  "
+      ^ keeper_control_hints
+          ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
+          state (Some (keeper_reading state k))
+    in
     let hints =
       if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
       else hints
@@ -12097,7 +12108,10 @@ let render_prompt_registry (state : state) =
        in
        let actual_input_lines =
          if not (String.equal row.pr_category "librarian") then []
-         else if state.prompts_librarian_input_loading then
+         else if state.prompts_librarian_input_loading
+                 && not (Option.exists
+                      (fun (key, _) -> String.equal key row.pr_key)
+                      state.prompts_librarian_input) then
            [ "최근 실제 Librarian 입력"; "(Admin 실행 상세를 불러오는 중...)"; "" ]
          else
            match state.prompts_librarian_input_error with
@@ -12586,13 +12600,17 @@ let render_config_models (state : state) =
           see, and [e] would act on a row that is off screen. *)
        let cursor_line = state.config_models_cursor + 1 in
        let scroll = max 0 (min state.config_scroll max_scroll) in
-       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        let scroll =
          if cursor_line < scroll then cursor_line
          else if cursor_line >= scroll + table_height
          then min max_scroll (cursor_line - table_height + 1)
          else scroll
        in
+       (* The window is cut at the scroll the cursor settled, not the stored
+          one. Cut before, a cursor that moved further than a row -- a page
+          key, a list that shrank -- drew its rows outside the window, and
+          they came out blank. *)
+       let table_window = Rows.of_list ~first:scroll ~height:table_height table in
        (* Row 0 of [table] is the header, so a cursor over the data rows is
           one lower than the line it marks. *)
        for i = 0 to table_height - 1 do
@@ -12962,8 +12980,12 @@ let render_voice (state : state) =
   box_line buf cols
     (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
        Ansi.dim declared_by Ansi.reset);
+  (* The keys are the table's, as on every other Config pane. The row was
+     written here and left out Esc and q, which the fitter keeps only when
+     the hints name them, so the voice pane was the one Config pane that
+     named no way out. *)
   finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
-    ~hints:"j/k:scroll  p:next pane  r:refresh  e:set up"
+    ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_voice)
 ;;
 
 let render_config (state : state) =

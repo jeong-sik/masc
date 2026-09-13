@@ -278,12 +278,17 @@ let identity_pane_columns (state : state) =
    measured, and the step key and the jump keys were working that out
    differently -- the step recomputed, the landing did not. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
-  let scrolled =
-    if state.view = Memory && Option.is_none state.memory_facts_keeper then
-      memory_overview_scrolled ~cursor state
-    else scrolled
-  in
-  surface_body_height ~rows:(surface_rows state) scrolled
+  if state.view = Memory && Option.is_some state.memory_facts_keeper then
+    let _, cols = get_terminal_size () in
+    Masc_tui_render_memory.memory_facts_content_height ~cols
+      ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
+      ~cursor state
+  else
+    let scrolled =
+      if state.view = Memory then memory_overview_scrolled ~cursor state
+      else scrolled
+    in
+    surface_body_height ~rows:(surface_rows state) scrolled
 
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
@@ -3321,7 +3326,9 @@ let launch_keeper_calls_load ?(force = false) state ~mailbox keeper_name =
     state.keeper_calls_keeper <- Some keeper_name;
     state.keeper_calls_loading <- true;
     state.keeper_calls_refresh_pending <- false;
-    state.keeper_calls_error <- None;
+    (* A retry has not repaired the previous read failure yet. Keep that
+       observation until a successful response replaces it. *)
+    if not same_scope then state.keeper_calls_error <- None;
     let host = server_peer_host in
     let port = state.port in
     let run () =
@@ -3539,10 +3546,17 @@ let launch_resources_list state ~mailbox =
       enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
 
 let launch_resource_read state ~mailbox ~uri =
+  let same_resource =
+    match state.resource_content with
+    | Some (current, _) -> String.equal current uri
+    | None -> false
+  in
   state.resource_pending_uri <- Some uri;
-  state.resource_content <- None;
-  state.resource_content_error <- None;
-  state.resource_scroll <- 0;
+  if not same_resource then begin
+    state.resource_content <- None;
+    state.resource_content_error <- None;
+    state.resource_scroll <- 0
+  end;
   let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
@@ -4146,8 +4160,15 @@ let selected_prompt_for_state state =
 let launch_librarian_input_load state ~mailbox ~prompt_key =
   let host = server_peer_host in
   let port = state.port in
-  state.prompts_librarian_input <- None;
-  state.prompts_librarian_input_error <- None;
+  let same_prompt =
+    match state.prompts_librarian_input with
+    | Some (key, _) -> String.equal key prompt_key
+    | None -> false
+  in
+  if not same_prompt then begin
+    state.prompts_librarian_input <- None;
+    state.prompts_librarian_input_error <- None
+  end;
   state.prompts_librarian_input_loading <- true;
   let run () =
     let result =
@@ -5040,12 +5061,8 @@ let refresh_repository_changes state ~mailbox =
   | Some scope ->
       (match state.repository_changes_diff_path with
        | Some path ->
-           state.repository_changes_diff <- None;
-           state.repository_changes_diff_error <- None;
            launch_repository_changes_diff_load state ~mailbox ~scope ~path
        | None ->
-           state.repository_changes <- None;
-           state.repository_changes_error <- None;
            launch_repository_changes_load state ~mailbox ~scope)
 
 let open_repository_change_in_code state ~mailbox ~scope
@@ -5253,7 +5270,6 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
       let generation = state.msg_file_changes_generation in
       state.msg_file_changes_loading <- true;
       state.msg_file_changes_refresh_pending <- false;
-      state.msg_file_changes_error <- None;
       let host = server_peer_host in
       let port = state.port in
       let run () =
@@ -12201,7 +12217,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       in
       if still_selected then begin
         state.prompts_librarian_input_loading <- false;
-        state.config_scroll <- 0;
+        (match state.prompts_librarian_input with
+         | Some (key, _) when String.equal key prompt_key -> ()
+         | Some _ | None -> state.config_scroll <- 0);
         match result with
         | Ok lines ->
             state.prompts_librarian_input <- Some (prompt_key, lines);
@@ -12506,8 +12524,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    contents
                in
                state.resource_content <- Some (uri, contents);
-               state.resource_content_error <- None;
-               state.resource_scroll <- 0
+               state.resource_content_error <- None
            | Error detail ->
                state.resource_content_error <- Some (uri, detail))
       | Some _ | None -> ())
@@ -19293,11 +19310,24 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
-            (* Themes take no page key. Applying a scheme used to live here,
-               where the footer never said it was and where PageDown is a
-               scroll everywhere else. It answers to Enter now, which is what
-               the footer has been advertising. *)
-            | Config when state.config_pane = Config_themes -> ()
+            (* Applying a scheme used to live on the page keys, where the
+               footer never said it was and where PageDown is a scroll
+               everywhere else; it answers to Enter. Emptying the arm left the
+               53-row list with j/k alone, so the page keys move the selection
+               a page, previewing where they land as j/k do. *)
+            | Config when state.config_pane = Config_themes ->
+                state.theme_cursor <-
+                  Masc_tui_scroll.cursor_move
+                    ~count:(List.length (filtered_theme_entries ()))
+                    ~delta:(direction * page) state.theme_cursor;
+                preview_theme_under_cursor ()
+            (* The models table is read by a cursor [e] acts on, and the
+               drawing brings the window to the cursor. *)
+            | Config when state.config_pane = Config_models ->
+                state.config_models_cursor <-
+                  Masc_tui_scroll.cursor_move
+                    ~count:(List.length state.config_models_rows)
+                    ~delta:(direction * page) state.config_models_cursor
             | _ when state.repository_changes_open ->
                 (match state.repository_changes_diff_path with
                  | Some _ ->
@@ -21521,6 +21551,9 @@ and is loaded on demand through keeper_skill.
                           ~mailbox:async_messages;
                         launch_code_file_load state ~mailbox:async_messages
                           ~path)))
+       | Some "o" | Some "O" when state.view = Lanes ->
+           launch_lane_addons state ~mailbox:async_messages
+             Masc_tui_lane_addons.Inspect
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
               the one the list marks, which the arrow keys move. *)
@@ -21846,10 +21879,12 @@ and is loaded on demand through keeper_skill.
            (match state.runtime_mode with
             | Masc_tui_types.Runtime_lanes ->
                 state.runtime_mode <- Masc_tui_types.Runtime_all;
-                (* The scroll belonged to the other list's length. *)
+                (* Selection and scroll belong to the same list. *)
+                state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0
             | Masc_tui_types.Runtime_all ->
                 state.runtime_mode <- Masc_tui_types.Runtime_lanes;
+                state.runtime_cursor <- 0;
                 state.runtime_surface_scroll <- 0;
                 goto_surface state ~mailbox:async_messages Lanes)
        | Some "A" when state.view = Lanes ->

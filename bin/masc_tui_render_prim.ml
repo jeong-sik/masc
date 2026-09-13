@@ -502,6 +502,22 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~dim:Ansi.dim ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 
+(* The slash word being typed, painted: the run already pressed in the accent,
+   a word that is no command in the bad tone. [restore] is the colour the row
+   around it is drawn in, so a painted span hands that back rather than
+   resetting it. *)
+let slash_hint_text ~restore draft =
+  let paint (span : Masc_tui_command.hint_span) =
+    match span with
+    | Masc_tui_command.Typed text ->
+        Masc_tui_theme.tone Masc_tui_theme.Accent ^ text ^ restore
+    | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
+    | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
+  in
+  match Masc_tui_command.hint_spans (Masc_tui_command.hint draft) with
+  | [] -> None
+  | spans -> Some (String.concat "" (List.map paint spans))
+
 let composer_line state ~cols =
   match browser_lane_on_screen state with
   | Some view ->
@@ -533,8 +549,21 @@ let composer_line state ~cols =
         Printf.sprintf "  (%s to write)" Composer.focus_key
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) -> ""
   in
+  (* A slash command sent from this row runs as it does from the chat pane,
+     but only the chat pane's footer said what the word being typed was:
+     "/tsk" read here as a message until Enter, and the candidates for "/t"
+     showed nowhere. The hint follows the draft, so the cursor, which is
+     placed after the draft, does not move. *)
+  let slash_hint =
+    match composer.Composer.focus with
+    | Composer.Focused -> slash_hint_text ~restore:tone draft
+    | Composer.Unfocused -> None
+  in
   let body =
-    if String.equal draft "" then prompt ^ hint else prompt ^ draft
+    match String.equal draft "", slash_hint with
+    | true, _ -> prompt ^ hint
+    | false, None -> prompt ^ draft
+    | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
@@ -2010,7 +2039,8 @@ let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
     ]
   | None, None -> []
 
-let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [])
+    state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -2039,20 +2069,29 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state readi
         (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
+  let toggle_key =
+    match Option.bind reading Keeper_control.primary with
+    | Some action -> Keeper_control.action_key action
+    | None -> "p"
+  in
   (* [key:label] items, two spaces apart: the shape every other footer
      uses, so Masc_tui_footer can split the row, drop the lowest priority
      item when the row is tight, and keep the keys it never drops. Written
      "key label" and joined with a middle dot, the whole legend was one
      item nothing could split -- at 60 columns the row cut mid-word and
      "q quit", last in the list, went first. The two keys the footer pins
-     lead with a plain key so it can read them past the colour. *)
-      String.concat "  "
-          [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
-          ; toggle
-          ; hint Keeper_control.Wakeup "wake"
+     lead with a plain key so it can read them past the colour.
+
+     Each item carries its key, so a detail tab that answers one of these
+     keys itself can take it off the row. The Sandbox tab's [s] sets the
+     remote_ssh backend, and the row beside it still said "s:shutdown". *)
+  let items =
+          [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
+          ; toggle_key, toggle
+          ; Keeper_control.action_key Keeper_control.Wakeup, hint Keeper_control.Wakeup "wake"
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
-          ; (match state.connection_status with
+          ; "s", (match state.connection_status with
              | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
              | Connecting | Booting | Reconnecting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
@@ -2061,29 +2100,37 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state readi
                the toggle. Without its own hint the footer showed that keeper a
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
-          ; hint Keeper_control.Delete "delete"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
+          ; Keeper_control.action_key Keeper_control.Delete, hint Keeper_control.Delete "delete"
+          ; "e", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
+          ; "a", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
           ; (if state.view = Keepers Keeper_detail then
-               if state.detail_tab = Detail_sandbox then
-                 (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":container logs"
-               else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
-          ; gate_hint
-          ; (Masc_tui_theme.tone Masc_tui_theme.Accent)
+               "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
+             else "l", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
+          ; "t", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
+          ; "g", gate_hint
+          ; (if state.view = Keepers Keeper_detail then "U" else "u"),
+            (Masc_tui_theme.tone Masc_tui_theme.Accent)
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
             ^ Ansi.reset ^ ":runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
+          ; "c", (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
              else Ansi.dim ^ "c:chat" ^ Ansi.reset)
-          ; (if offers_back then "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
-             else (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
-          ; Ansi.dim ^ "r:refresh" ^ Ansi.reset
-          ; "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
+          ; (if offers_back then "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset
+             else "right/enter", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "right/enter" ^ Ansi.reset ^ ":detail")
+          ; "r", Ansi.dim ^ "r:refresh" ^ Ansi.reset
+          ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
           ]
+  in
+  items
+  |> List.filter (fun (key, _) ->
+         not
+           (List.exists
+              (fun atom -> List.mem atom taken)
+              (Masc_tui_keys.key_atoms key)))
+  |> List.map snd
+  |> String.concat "  "
 
 
 (* One colour per level so an operator scanning the column sees severity before

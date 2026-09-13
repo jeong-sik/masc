@@ -163,6 +163,35 @@ let test_state_projection_has_one_structural_owner () =
     ; ("bin/masc_tui_render_chat.ml", "composer_cursor")
     ]
 
+(* A slash command sent from the composer row runs as it does from the chat
+   pane, but only the chat pane's footer said what the word being typed was:
+   on every other surface "/tsk" read as a message until Enter. The row draws
+   the same hint the footer draws, from the one function. *)
+let test_the_composer_row_says_what_a_slash_word_is () =
+  let plain text = Masc_tui_theme.strip_sgr text in
+  let contains needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  (match Masc_tui_render_prim.slash_hint_text ~restore:"" "/tsk" with
+   | None -> fail "an unknown slash word draws a hint"
+   | Some line ->
+       check bool "and says it is no command" true (contains "is not a command" (plain line)));
+  (match Masc_tui_render_prim.slash_hint_text ~restore:"" "/ta" with
+   | None -> fail "a prefix draws its candidates"
+   | Some line -> check bool "naming /task" true (contains "task" (plain line)));
+  check (option string) "a message draws nothing" None
+    (Masc_tui_render_prim.slash_hint_text ~restore:"" "hello");
+  check int "the composer row draws the hint" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_prim.ml" ~binding_name:"composer_line"
+       ~callee:"slash_hint_text");
+  check int "and the chat footer draws the same one" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_chat.ml"
+       ~binding_name:"render_keeper_message" ~callee:"slash_hint_text")
+
 let () =
   run "tui-composer-projection"
     [ ( "state projection"
@@ -174,5 +203,7 @@ let () =
             test_focus_and_draft_are_projected_together
         ; test_case "one structural owner" `Quick
             test_state_projection_has_one_structural_owner
+        ; test_case "the composer row says what a slash word is" `Quick
+            test_the_composer_row_says_what_a_slash_word_is
         ] )
     ]

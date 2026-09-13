@@ -262,15 +262,16 @@ let test_what_the_wizard_sends_is_what_the_routes_read () =
 (* A catalogue read is taken against an endpoint built for the request and
    thrown away. What it must not carry is an address: accepting one would make
    an admin route a way to point the server at any host, and the only kind with
-   a catalogue carries its own address anyway. *)
+   a catalogue carries its own address anyway. One sent anyway is refused by
+   name (test/voice_catalogue_request) rather than dropped: dropping a field
+   silently is how a misspelled credential field fell back to another account's
+   key. *)
 let test_a_catalogue_read_carries_no_address_and_no_key () =
   match
     Actions.catalogue_endpoint_of_json
       (`Assoc
         [ "kind", `String "elevenlabs_direct"
         ; "api_key_env", `String "ELEVENLABS_API_KEY"
-        (* Offered and ignored. A caller cannot choose where this goes. *)
-        ; "base_url", `String "http://somewhere.else/v1"
         ])
   with
   | Error error -> Alcotest.fail (Actions.error_message error)

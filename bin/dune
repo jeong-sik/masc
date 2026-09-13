@@ -862,7 +862,7 @@
  (name masc_tui_footer)
  (wrapped false)
  (modules masc_tui_footer)
- (libraries masc_tui_message_layout))
+ (libraries masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_board_selection)

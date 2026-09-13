@@ -36,6 +36,29 @@ let test_the_masthead_names_the_product_and_nothing_else_twice () =
 let test_the_masthead_spends_two_rows () =
   Alcotest.(check int) "the name and a blank row" 2 (List.length (masthead ()))
 
+(* One heading style across the sheet. The section being read wears the filled
+   mark and every other section, the slash commands included, the hollow one,
+   each under the name the key table gives it. *)
+let test_sections_share_one_heading_style () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  let drawn =
+    List.map Masc_tui_theme.strip_sgr (Masc_tui_render_prim.help_lines state)
+  in
+  let starts prefix line = String.starts_with ~prefix line in
+  let filled = List.filter (starts "\xe2\x97\x86 ") drawn in
+  Alcotest.(check (list string)) "one filled heading, the surface being read"
+    [ "\xe2\x97\x86 Overview" ] filled;
+  Alcotest.(check bool) "Global keeps its own name" true
+    (List.mem "\xe2\x97\x87 Global" drawn);
+  Alcotest.(check bool) "the slash commands are a section like the rest" true
+    (List.mem "\xe2\x97\x87 Slash commands" drawn);
+  List.iter
+    (fun shout ->
+      Alcotest.(check bool) (Printf.sprintf "no %S heading" shout) false
+        (List.exists (fun line -> contains shout line) drawn))
+    [ "ACTIVE:"; "GLOBAL NAVIGATION"; "SLASH COMMANDS" ]
+
 let () =
   Alcotest.run "masc_tui_help_banner"
     [ ( "masthead"
@@ -43,5 +66,7 @@ let () =
             test_the_masthead_names_the_product_and_nothing_else_twice
         ; Alcotest.test_case "the masthead spends two rows" `Quick
             test_the_masthead_spends_two_rows
+        ; Alcotest.test_case "sections share one heading style" `Quick
+            test_sections_share_one_heading_style
         ] )
     ]

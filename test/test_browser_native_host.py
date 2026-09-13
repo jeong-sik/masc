@@ -146,6 +146,13 @@ class NativeHost(unittest.TestCase):
         self.thread.join()
         self.temporary.cleanup()
 
+    def assert_command(self, command):
+        received = read_frame(self.process.stdout)
+        deadline = received.pop("deadlineMs")
+        self.assertIsInstance(deadline, (int, float))
+        self.assertGreater(deadline, time.time() * 1000)
+        self.assertEqual(received, command)
+
     def test_firefox_metadata(self):
         self.assertTrue(self.server.poll_seen.wait(timeout=5))
         self.assertTrue(all(row[1:] == ("firefox", "155.0.1", "155.0.1") for row in self.server.identities))
@@ -164,7 +171,7 @@ class NativeHost(unittest.TestCase):
         for index, verb in enumerate(["tabs.list", "page.read", "page.capture", "page.interact", "page.scene"]):
             command = {"id": str(index), "verb": verb, "args": {"tabId": 42} if index else {}}
             self.server.commands.put(command)
-            self.assertEqual(read_frame(self.process.stdout), command)
+            self.assert_command(command)
             stale = {"id": "other-id", "ok": True, "data": "must not resolve"}
             self.process.stdin.write(encode_frame(stale))
             self.process.stdin.flush()
@@ -178,7 +185,7 @@ class NativeHost(unittest.TestCase):
     def test_interaction_pre_effect_metadata_roundtrip(self):
         command = {"id": "pre-effect", "verb": "page.interact", "args": {"tabId": 42}}
         self.server.commands.put(command)
-        self.assertEqual(read_frame(self.process.stdout), command)
+        self.assert_command(command)
         reply = {"id": "pre-effect", "ok": False, "error": "scene_node_detached", "effectPhase": "not_started"}
         self.process.stdin.write(encode_frame(reply))
         self.process.stdin.flush()
@@ -187,7 +194,7 @@ class NativeHost(unittest.TestCase):
     def test_screenshot_reply_larger_than_command_limit(self):
         command = {"id": "screenshot", "verb": "page.capture", "args": {"tabId": 73}}
         self.server.commands.put(command)
-        self.assertEqual(read_frame(self.process.stdout), command)
+        self.assert_command(command)
         reply = {"id": "screenshot", "ok": True, "data": {
             "tabId": 73, "data": "A" * (2 * 1024 * 1024),
             "url": "https://example.org", "title": "Screenshot"}}
@@ -212,7 +219,7 @@ class NativeHost(unittest.TestCase):
             with self.subTest(args=args):
                 command = {"id": f"elements-{index}", "verb": "page.elements", "args": args}
                 self.server.commands.put(command)
-                self.assertEqual(read_frame(self.process.stdout), command)
+                self.assert_command(command)
                 reply = {
                     "id": command["id"], "ok": True,
                     "data": {

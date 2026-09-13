@@ -8384,6 +8384,15 @@ def keeper_message_switch_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespon
 def assert_runtime_row(
     frame: bytes, *, health: bytes, runtime: bytes, description: str
 ) -> None:
+    """Both halves of the runtime identity on one screen row.
+
+    The runtime half is the text the chat header draws around the model
+    name, not the model name alone: #35458 folded the turn gauge into one
+    line and the header now says "<state> configured: <model>", where it
+    used to say "<state> <model>". The two callers below kept the old
+    spelling and stopped matching any row, which reads as "the header lost
+    the health" rather than "the header renamed the field".
+    """
     rows = screen_rows(frame)
     row = screen_row_of(rows, runtime)
     if row < 0 or health not in rows[row]:
@@ -10800,29 +10809,66 @@ def changes_keeper_and_arrow_detail_interaction(
 
 
 def keeper_gate_mode_footer_interaction(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    _slave_fd: int,
-    output: bytearray,
-    _base_path: str,
-) -> None:
-    tab_until(process, master_fd, output, b"MASC Keepers")
-    footer = resize_and_wait(
-        process,
-        master_fd,
-        output,
-        rows=30,
-        columns=200,
-        needle=re.compile(rb"g\x1b\[0m:auto"),
-        final_cursor=b"\x1b[?25l",
-    )
-    # The hint above it moved to key:label, and this guard did not: the footer
-    # spells the off state "g:yolo", so looking for "g yolo" matched nothing and
-    # the check passed whatever the footer said.
-    if b"g:yolo" in CSI_RE.sub(b"", footer):
-        raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
-    os.write(master_fd, b"q")
+    gate: GatedHttpResponse,
+) -> Interaction:
+    """The footer names the action `g` performs, so it must name only one.
 
+    The approval-mode override arrives over HTTP, and until it does the Keeper
+    is not known to be in YOLO, so the first footer legitimately offers
+    `g:yolo`. Holding the response makes that first frame certain instead of
+    timing-dependent: on a fast machine it was already gone by the time the
+    assertion looked, and on CI it was not.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        before = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=200,
+            needle=re.compile(rb"g\x1b\[0m:yolo"),
+            final_cursor=b"\x1b[?25l",
+        )
+        if not wait_for_fixture_event(
+            process, master_fd, output, gate.requested, timeout=10.0
+        ):
+            raise AssertionError("the approval-mode override never reached its fixture")
+        gate.release.set()
+        footer = wait_for_output(
+            process,
+            master_fd,
+            output,
+            re.compile(rb"g\x1b\[0m:auto"),
+            start=len(before),
+            timeout=10.0,
+        )
+        del footer
+        # Read the row, not the byte window. The window that carries the Auto
+        # footer also carries the YOLO one drawn before the override landed, so
+        # a substring check over it fails on a footer already replaced.
+        # screen_rows keys by cursor address, so the later write to a row wins.
+        drawn_rows = screen_rows(bytes(output))
+        footer_row = screen_row_of(drawn_rows, b"g:auto")
+        if footer_row < 0:
+            raise AssertionError(
+                f"no footer row offers Auto: {bytes(output[-2000:])!r}"
+            )
+        if b"g:yolo" in drawn_rows[footer_row]:
+            raise AssertionError(
+                "the footer offers Auto and YOLO on the same row: "
+                f"{drawn_rows[footer_row]!r}"
+            )
+        os.write(master_fd, b"q")
+
+    return interact
 
 def enter_outside_changes_interaction(
     process: subprocess.Popen[bytes],
@@ -11191,6 +11237,11 @@ def code_lane_interaction(
         process, master_fd, output, b"jj",
         re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
     )
+    # The palette footer is [key:label] items now, not a dotted row: #35585
+    # rewrote it so Masc_tui_footer could shed whole keys and keep Esc at
+    # narrow widths, and the action label came down to lower case with it
+    # ("[Enter] Ask" -> "Enter:ask", masc_tui_render.ml). The old needle
+    # matched no row, so this read as "D opened nothing".
     choices = send_and_wait(process, master_fd, output, b"D", b"Enter:ask")
     choices_plain = CSI_RE.sub(b"", choices).decode("utf-8")
     if ("definition" not in choices_plain or "2 names on line 3" not in choices_plain
@@ -12391,24 +12442,42 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
-        footer = (
+        # The default Activity pane reserves 56 columns: a 200-column
+        # terminal gives this footer 144 cells. Status yields before hints,
+        # then copy/search yield before pinned exits. A wider frame must still
+        # show those controls; check both states on the actual footer row.
+        footer_head = (
             b"j/k:move  PgUp/PgDn:page  [ / ]:previous / next  "
-            b"K:calling Keeper  B:Board evidence  Enter:open  "
-            b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
+            b"K:calling Keeper  B:Board evidence  Home/End:top/bottom  "
+            b"Enter:open"
         )
-        resize_and_wait(
-            process, master_fd, output, rows=30, columns=200,
-            needle=b"MASC Fusion", controls=(FULL_REDRAW,),
-        )
-        # The footer is one row and the resize repaints the list before it, so
-        # the frame that carries the title does not carry the hints. Wait for
-        # the frames to stop and read the screen.
-        drain_until_quiet(process, master_fd, output)
-        footer_frame = bytes(output)
-        if footer not in screen_text(footer_frame):
-            raise AssertionError(
-                f"Fusion list footer disagrees with its exercised keys: {footer_frame!r}"
+        exits = (b"Esc:back", b"q:quit")
+        secondary = (b"Y:copy", b"/:find", b"n / N:next / previous match")
+        for columns, required, omitted in (
+                (200, exits, secondary), (280, exits + secondary, ())):
+            resize_and_wait(
+                process, master_fd, output, rows=30, columns=columns,
+                needle=b"MASC Fusion", controls=(FULL_REDRAW,),
             )
+            # The title and footer can arrive in different frames.
+            drain_until_quiet(process, master_fd, output)
+            drawn_rows = screen_rows(bytes(output))
+            footer_row = screen_row_of(drawn_rows, footer_head)
+            if footer_row < 0:
+                raise AssertionError(
+                    f"Fusion footer at {columns} columns lost navigation: {drawn_rows!r}"
+                )
+            footer = drawn_rows[footer_row]
+            for control in required:
+                if control not in footer:
+                    raise AssertionError(
+                        f"Fusion footer at {columns} columns omitted {control!r}: {footer!r}"
+                    )
+            for control in omitted:
+                if control in footer:
+                    raise AssertionError(
+                        f"Fusion footer at {columns} columns retained dropped control {control!r}: {footer!r}"
+                    )
         resize_and_wait(
             process, master_fd, output, rows=30, columns=120,
             needle=b"MASC Fusion", controls=(FULL_REDRAW,),
@@ -13504,14 +13573,19 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=changes_navigation_fixtures,
     )
     gate_mode_fixtures = keeper_runtime_http_fixtures()
-    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = (
-        200,
-        {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+    gate_mode_gate = GatedHttpResponse(
+        (200, {"overrides": [{"keeper": "alpha", "mode": "yolo"}]}),
+        subsequent_response=(
+            200,
+            {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+        ),
+        hold_seconds=15.0,
     )
+    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = gate_mode_gate
     run_terminal_scenario(
         executable,
         description="Keeper gate footer offers Auto from YOLO",
-        interact=keeper_gate_mode_footer_interaction,
+        interact=keeper_gate_mode_footer_interaction(gate_mode_gate),
         http_fixtures=gate_mode_fixtures,
     )
     run_terminal_scenario(

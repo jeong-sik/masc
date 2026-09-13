@@ -1712,7 +1712,7 @@ let render_question_reader (state : state) =
    scanning for, so those are the ones that get a mark. *)
 (* The widths now live beside their column names in [Render_schedule], which
    is the one place the header and the rows both read. The age column is sized
-   for the widest [span_text] draws, "1d00h": a board's oldest live threads are
+   for the widest [span_text] draws, "99d23h": a board's oldest live threads are
    days old, so the day tier is the one it holds. *)
 
 (* Four cells of lead sit ahead of the mark on the header and on every row, so

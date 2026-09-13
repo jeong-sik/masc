@@ -2795,7 +2795,7 @@ def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> In
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"i", b"^Y to speak")
+        send_and_wait(process, master_fd, output, b"i", b"Ctrl-Y to speak")
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
         # A sent message brings the chat pane forward, as Enter on the row does.
@@ -2818,7 +2818,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
 
     The empty draft names the key first, as the composer row does: this pane
-    bound ^Y and ^A and nothing on it said so.
+    bound Ctrl-Y and Ctrl-A and nothing on it said so.
     """
 
     def interact(
@@ -2839,7 +2839,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
         wait_for_output(
-            process, master_fd, output, b"(^Y to speak, ^A to keep listening)",
+            process, master_fd, output, b"(Ctrl-Y to speak, Ctrl-A to keep listening)",
             start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")

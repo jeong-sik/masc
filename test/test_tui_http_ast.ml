@@ -2547,6 +2547,38 @@ let test_the_board_list_frame_is_the_shared_contract () =
   check int "and no row is filled by hand" 0 (in_board "box_empty")
 ;;
 
+(* The patch review, link preview, deletion record and command palette overlays
+   are the shared contract's as well: it draws their box and fills the rows
+   under a short body, so the footer stays on the composer's row. Drawn by
+   hand, a short body put the footer mid-screen. *)
+let test_the_overlays_are_the_shared_contract () =
+  List.iter
+    (fun binding_name ->
+      let calls callee =
+        Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+          ~binding_name ~callee
+      in
+      check bool (binding_name ^ " draws through the contract") true
+        (calls "surface_chrome" >= 1);
+      check int (binding_name ^ " finishes no frame by hand") 0
+        (calls "finish_surface");
+      List.iter
+        (fun by_hand ->
+          check int (Printf.sprintf "%s draws no %s" binding_name by_hand) 0
+            (calls by_hand))
+        [ "framed_top"; "framed_bottom" ])
+    [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions"
+    ; "render_palette" ];
+  (* [keeper_deletions_viewport] bounds the record's scroll with
+     [framed_content_height], and the body is drawn against the contract's
+     budget. They agree only while the five rows have one owner. *)
+  check int "the contract's rows are the frame's rows" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"surface_chrome_rows" ~callees:[]
+       ~identifiers:[ "framed_chrome_rows" ])
+;;
+
 (* The runtime.toml pane's frame is the shared contract's too. It subtracted
    a literal 7 for its fixed rows and drew six, so the footer stood a row above
    the composer, and the cursor bound read the same 7. Its height is now the
@@ -2717,6 +2749,10 @@ let () =
           "the board header and rows share one layout"
           `Quick
           test_the_board_header_and_rows_share_one_layout;
+        test_case
+          "the overlays are the shared contract"
+          `Quick
+          test_the_overlays_are_the_shared_contract;
         test_case
           "the board list frame is the shared contract"
           `Quick

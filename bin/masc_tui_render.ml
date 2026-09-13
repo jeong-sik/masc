@@ -13161,12 +13161,9 @@ let help_viewport (state : state) =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 2048 in
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  framed_shadow_top buf cols;
   (* A choice says which question, how many names and which line; the
      prompt is a filter over those names, not a jump query. *)
   let title, prompt, action =
@@ -13185,63 +13182,49 @@ let render_palette (state : state) =
      palette) and the prompt follows it. It was "Quick Jump & Navigation" with
      a lightning glyph between them: the glyph said nothing, and the entries
      are not all jumps -- settings, the gate modes, a task or a post run from
-     the same list, which is why Enter reads "run". *)
-  framed_shadow_line buf cols
-    (screen_title title ^ "  "
-     ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
-     ^ (Terminal_text.single_line state.palette_query)
-     ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset));
-  framed_shadow_divider buf cols;
-  let content_height = framed_content_height ~rows in
-  let first =
-    if cursor < content_height then 0
-    else cursor - content_height + 1
-  in
-  matches
-  |> List.filteri (fun i _ -> i >= first && i < first + content_height)
-  |> List.iteri (fun visible_index (label, _) ->
-       let selected = first + visible_index = cursor in
-       if selected then
-         framed_shadow_line_styled buf cols ~style:Theme.selection (" \xe2\x96\xb8 " ^ label)
-       else
-         framed_shadow_line buf cols ("   " ^ label));
-  if total = 0 then
-    framed_shadow_line buf cols (Ansi.dim ^ "   (no match)" ^ Ansi.reset);
-  framed_shadow_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       (* [key:label] items, two spaces apart, the way every other footer is
-          written. In the dotted form this row was one item with no colon, so
-          {!Masc_tui_footer} could shed no whole key and keep no door: it fell
-          through to the cell cut, where [Esc] survived only when the budget
-          happened to reach it. test_a_row_in_another_grammar_loses_its_door
-          measures that across widths. The count keeps no colon on purpose --
-          it is not a key, and it is the first thing a narrow row should give
-          up. *)
-       ~hints:
-         (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
-            (if total = 0 then 0 else cursor + 1)
-            total action));
-  finish_surface state ~surface_key:"palette" ~rows:terminal_rows ~cols buf
+     the same list, which is why Enter reads "run".
 
+     The overlay contract draws the box and fills the rows under a short list
+     of matches, so the footer stays on the composer's row. *)
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"palette"
+    ~frame:Chrome_overlay
+    ~title:
+      (screen_title title ^ "  "
+       ^ Ansi.bold ^ prompt ^ Ansi.reset ^ " "
+       ^ (Terminal_text.single_line state.palette_query)
+       ^ ((Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "\xe2\x96\x8c" ^ Ansi.reset))
+    (* [key:label] items, two spaces apart, the way every other footer is
+       written. In the dotted form this row was one item with no colon, so
+       {!Masc_tui_footer} could shed no whole key and keep no door: it fell
+       through to the cell cut, where [Esc] survived only when the budget
+       happened to reach it. test_a_row_in_another_grammar_loses_its_door
+       measures that across widths. The count keeps no colon on purpose --
+       it is not a key, and it is the first thing a narrow row should give
+       up. *)
+    ~hints:
+      (Printf.sprintf "%d/%d  Enter:%s  Up/Down:navigate  Esc:close"
+         (if total = 0 then 0 else cursor + 1)
+         total action)
+    ~body:(fun ~budget c ->
+      let first = if cursor < budget then 0 else cursor - budget + 1 in
+      matches
+      |> List.filteri (fun i _ -> i >= first && i < first + budget)
+      |> List.iteri (fun visible_index (label, _) ->
+           if first + visible_index = cursor then
+             c.push_selected (" \xe2\x96\xb8 " ^ label)
+           else c.push ("   " ^ label));
+      if total = 0 then c.push (Ansi.dim ^ "   (no match)" ^ Ansi.reset))
+
+(* The patch review overlay. [surface_chrome] owns the box, the fill and the
+   footer's row, so the rows are not counted here and the keys on screen are
+   the footer's alone. *)
 let render_patch_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let path_label =
     match state.patch_modal_path with
     | Some p -> p
     | None -> (match state.repository_changes_diff_path with Some p -> p | None -> "Active Working Tree")
   in
-  framed_shadow_top buf cols;
-  framed_shadow_line buf cols
-    (screen_title " Patch & Diff Review" ^ "  "
-     ^ (Theme.info ()) ^ "\xe2\x9a\xa1 " ^ Ansi.reset
-     ^ Ansi.bold ^ Terminal_text.single_line path_label ^ Ansi.reset);
-  framed_shadow_divider buf cols;
-  framed_shadow_line_styled buf cols ~style:(Theme.recede ())
-    "  old   new     diff preview (syntax colored)";
-  framed_shadow_divider buf cols;
   let diff_opt =
     match state.patch_modal_diff with
     | Some (_, d) -> Some d
@@ -13253,56 +13236,51 @@ let render_patch_modal (state : state) =
     | None -> []
   in
   let total = List.length diff_rows in
-  let fixed_chrome = 9 in
-  let content_height = max 1 (rows - fixed_chrome) in
+  (* The column heading and the divider under it open the body. *)
+  let heading_rows = 2 in
+  let content_height =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+       - surface_chrome_rows - heading_rows)
+  in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.patch_modal_scroll max_scroll) in
-  if total = 0 then begin
-    let msg =
-      match state.patch_modal_error with
-      | Some e -> Printf.sprintf "(diff load error: %s — Esc to close)" e
-      | None ->
-          (match state.repository_changes_diff_error with
-           | Some e -> Printf.sprintf "(diff load error: %s — Esc to close)" e
-           | None -> "(no pending patch diff loaded — Esc to close)")
-    in
-    framed_shadow_line buf cols (Ansi.dim ^ "   " ^ msg ^ Ansi.reset);
-    for _ = 1 to content_height - 1 do
-      framed_shadow_empty buf cols
-    done
-  end else begin
-    let diff_array = Array.of_list diff_rows in
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      if idx >= total then
-        framed_shadow_empty buf cols
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"patch-modal"
+    ~frame:Chrome_overlay
+    ~clamped:(fun () -> Some (Patch_modal_scroll scroll))
+    ~title:
+      (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
+       ^ Terminal_text.single_line path_label ^ Ansi.reset)
+    ~hints:
+      (Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close"
+         total scroll)
+    ~body:(fun ~budget:_ c ->
+      c.push_styled ~style:(Theme.recede ())
+        "  old   new     diff preview (syntax colored)";
+      c.push_divider ();
+      if total = 0 then
+        c.push
+          (Ansi.dim
+           ^ (match state.patch_modal_error, state.repository_changes_diff_error with
+              | Some e, _ | None, Some e ->
+                  Printf.sprintf "   (diff load error: %s)" (Terminal_text.single_line e)
+              | None, None -> "   (no pending patch diff loaded)")
+           ^ Ansi.reset)
       else
-        let row = diff_array.(idx) in
-        let inner = framed_inner_width (cols - 1) in
-        let span = tree_diff_row_span ~width:inner row in
-        let rendered_line = Masc_tui_span.render span in
-        framed_shadow_line buf cols (fit_width rendered_line inner)
-    done
-  end;
-  framed_shadow_divider buf cols;
-  framed_shadow_line buf cols
-    (Printf.sprintf "  %s[e]%s Edit ($EDITOR)   %s[j/k]%s Scroll   %s[g/G]%s Top/Bottom   %s[Esc/q]%s Close"
-       (Theme.info ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.info ()) Ansi.reset
-       (Theme.recede ()) Ansi.reset);
-  framed_shadow_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:(Printf.sprintf "[%d lines, scroll %d]  e:edit  j/k:scroll  g/G:top/bottom  Esc/q:close" total scroll));
-  finish_surface state ~clamped:(Patch_modal_scroll scroll)
-    ~surface_key:"patch-modal" ~rows:terminal_rows ~cols buf
-;;
+        let width = framed_inner_width cols in
+        List.iteri
+          (fun index row ->
+            if index >= scroll && index < scroll + content_height then
+              c.push
+                (fit_width
+                   (Masc_tui_span.render (tree_diff_row_span ~width row))
+                   width))
+          diff_rows)
 
+(* The link preview overlay, through the same contract. The title names the
+   site, so the footer carries only keys. *)
 let render_link_preview_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let url_opt =
     match state.link_modal_url with
     | Some u -> Some u
@@ -13313,101 +13291,79 @@ let render_link_preview_modal (state : state) =
   in
   match url_opt with
   | None ->
-      framed_shadow_top buf cols;
-      framed_shadow_line buf cols
-        (screen_title " Web Link Preview & Embed" ^ "  "
-         ^ (Theme.info ()) ^ "\xf0\x9f\x8c\x90 " ^ Ansi.reset
-         ^ Ansi.dim ^ "(no links)" ^ Ansi.reset);
-      framed_shadow_divider buf cols;
-      let fixed_chrome = 7 in
-      let content_height = max 1 (rows - fixed_chrome) in
-      framed_shadow_line buf cols "  (no web links found in this conversation to preview — Esc to close)";
-      for _ = 2 to content_height do
-        framed_shadow_empty buf cols
-      done;
-      framed_shadow_divider buf cols;
-      framed_shadow_line buf cols
-        (Printf.sprintf "  %s[Esc/q]%s Close" (Theme.recede ()) Ansi.reset);
-      framed_shadow_bottom buf cols;
-      Buffer.add_string buf
-        (footer_line state ~max_cells:cols ~hints:"Esc:close");
-      finish_surface state ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~frame:Chrome_overlay
+        ~title:
+          (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
+           ^ Ansi.reset)
+        ~hints:"Esc:close"
+        ~body:(fun ~budget:_ c ->
+          c.push "  (no web links found in this conversation to preview)")
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
-      framed_shadow_top buf cols;
-      framed_shadow_line buf cols
-        (screen_title " Web Link Preview & Embed" ^ "  "
-         ^ (Theme.info ()) ^ "\xf0\x9f\x8c\x90 " ^ Ansi.reset
-         ^ Ansi.bold ^ Terminal_text.single_line (Masc_tui_link_preview.site_label preview) ^ Ansi.reset);
-      framed_shadow_divider buf cols;
+      let site = Masc_tui_link_preview.site_label preview in
       let total_links = List.length state.link_modal_links in
-      let nav_line_count =
-        if total_links > 1 then begin
-          let nav =
-            Printf.sprintf "  %s[Link %d of %d]%s  [n] Next link   [p] Previous link   [o] Open in browser"
-              (Theme.warn ()) (state.link_modal_cursor + 1) total_links Ansi.reset
-          in
-          framed_shadow_line buf cols nav;
-          framed_shadow_divider buf cols;
-          2
-        end else 0
+      (* Which link of several, and the divider under it. *)
+      let nav_rows = if total_links > 1 then 2 else 0 in
+      let content_height =
+        max 1
+          (Masc_tui_types.surface_body_rows state ~terminal_rows
+           - surface_chrome_rows - nav_rows)
       in
-      let fixed_chrome = 7 + nav_line_count in
-      let content_height = max 1 (rows - fixed_chrome) in
       let content_lines =
         Masc_tui_link_preview.render_modal_card
-          ~width:(framed_inner_width (cols - 1)) ~height:content_height preview
+          ~width:(framed_inner_width cols) ~height:content_height preview
       in
       let total = List.length content_lines in
       let max_scroll = max 0 (total - content_height) in
       let scroll = max 0 (min state.link_modal_scroll max_scroll) in
-      let lines_array = Array.of_list content_lines in
-      for i = 0 to content_height - 1 do
-        let idx = i + scroll in
-        if idx >= total then
-          framed_shadow_empty buf cols
-        else
-          let line = lines_array.(idx) in
-          framed_shadow_line buf cols line
-      done;
-      framed_shadow_divider buf cols;
-      framed_shadow_line buf cols
-        (Printf.sprintf "  %s[o]%s Browser   %s[y]%s Copy URL   %s[v]%s View Image   %s[j/k]%s Scroll   %s[Esc/q]%s Close"
-           (Theme.ok ()) Ansi.reset
-           (Theme.info ()) Ansi.reset
-           (Theme.info ()) Ansi.reset
-           (Theme.recede ()) Ansi.reset
-           (Theme.recede ()) Ansi.reset);
-      framed_shadow_bottom buf cols;
-      Buffer.add_string buf
-        (footer_line state ~max_cells:cols
-           ~hints:(Printf.sprintf "[%s] o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
-                     (Masc_tui_link_preview.site_label preview)));
-      finish_surface state ~clamped:(Link_modal_scroll scroll)
-        ~surface_key:"link-modal" ~rows:terminal_rows ~cols buf
+      surface_chrome state ~terminal_rows ~cols ~surface_key:"link-modal"
+        ~frame:Chrome_overlay
+        ~clamped:(fun () -> Some (Link_modal_scroll scroll))
+        ~title:
+          (screen_title " MASC Link preview" ^ "  " ^ Ansi.bold
+           ^ Terminal_text.single_line site ^ Ansi.reset)
+        ~hints:"o:browser  y:copy  v:image  n/p:cycle  j/k:scroll  Esc:close"
+        ~body:(fun ~budget:_ c ->
+          if total_links > 1 then begin
+            c.push_styled ~style:(Theme.warn ())
+              (Printf.sprintf "  link %d of %d" (state.link_modal_cursor + 1)
+                 total_links);
+            c.push_divider ()
+          end;
+          List.iteri
+            (fun index line ->
+              if index >= scroll && index < scroll + content_height then
+                c.push line)
+            content_lines)
 
 let keeper_deletions_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   List.length (keeper_deletions_lines state ~cols), framed_content_height ~rows
 
+(* The deletion record overlay drew its rows and closed the box under them,
+   with nothing filling the rows between: on a short record the footer stood in
+   the middle of the screen with the composer alone at the bottom (150x44, a
+   failed read, footer on row 9). The contract fills to the bottom. *)
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-  framed_top buf cols;
-  framed_line buf cols (screen_title " 키퍼 삭제 기록"
-    ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""));
-  framed_divider buf cols;
   let lines = keeper_deletions_lines state ~cols in
-  let height = framed_content_height ~rows in
-  let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.keeper_deletions_scroll in
-  lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + height)
-    |> List.iter (framed_line buf cols);
-  framed_bottom buf cols;
-  Buffer.add_string buf (footer_line state ~max_cells:cols
-    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기");
-  finish_surface state ~surface_key:"keeper-deletions" ~rows:terminal_rows ~cols buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
+    ~frame:Chrome_overlay
+    ~title:
+      (screen_title " 키퍼 삭제 기록"
+       ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
+    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기"
+    ~body:(fun ~budget c ->
+      let scroll =
+        Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget
+          state.keeper_deletions_scroll
+      in
+      List.iteri
+        (fun index text ->
+          if index >= scroll && index < scroll + budget then c.push text)
+        lines)
 
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in

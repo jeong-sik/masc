@@ -3561,9 +3561,11 @@
  (libraries
   alcotest
   ast_grep
+  masc
   masc_tui_agenda
   masc_tui_markdown_render_cache
   masc_tui_message_layout
+  masc_tui_types
   unix))
 
 (test

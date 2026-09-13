@@ -363,7 +363,7 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           let at = max 0 (min row.gutter_label_at width) in
           let rail_cells = max 0 (min row.gutter_rail_cells at) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
-             trailing "~", which here would land in the middle of the gutter.
+             trailing "…", which here would land in the middle of the gutter.
              Not [split_cells] either -- it wraps, so it hands back one piece
              even at zero cells, and a row that continues the speaker above it
              carries no mark and asks for exactly zero. That drew the clock's
@@ -2531,6 +2531,8 @@ let render_keeper_message (state : state) =
       (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
         ("  " ^ text))
       (Masc_tui_types.keeper_message_activity_rows state);
+    List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
+      (Masc_tui_types.keeper_observed_interrupt_rows state);
     (match state.msg_loaded_error with
      | Some detail ->
          (* Cause first. The consequence -- this session only -- is the same
@@ -2877,16 +2879,19 @@ let render_keeper_message (state : state) =
        interrupt Esc will not spend itself on, nor say "interrupt sent" after
        the grace window when Esc would leave. *)
     let escape_hint =
-      match state.msg_live with
-      | Some live ->
-          (match
-             Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
-               (Keeper_chat_transcript.interrupt live.tl_transcript)
-           with
-           | Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:interrupt turn"
-           | Masc_tui_esc_interrupt.Swallow -> "Esc:interrupt sent"
-           | Masc_tui_esc_interrupt.Leave -> return_hint ())
-      | None -> return_hint ()
+      match Option.bind state.msg_target_keeper_name (Masc_tui_types.keeper_observed_interrupt_action state) with
+      | Some Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:stop current turn"
+      | Some Swallow -> "Esc:interrupt requested"
+      | Some Leave -> return_hint ()
+      | None ->
+        match state.msg_live with
+        | Some live ->
+          (match Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
+            (Keeper_chat_transcript.interrupt live.tl_transcript) with
+           | Launch_interrupt -> "Esc:interrupt turn"
+           | Swallow -> "Esc:interrupt sent"
+           | Leave -> return_hint ())
+        | None -> return_hint ()
     in
     (* Named beside the empty-draft Q arm in the dispatch, and reading the
        same condition it does, chat focus included: the hint exists exactly

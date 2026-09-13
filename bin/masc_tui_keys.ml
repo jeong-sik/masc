@@ -27,7 +27,9 @@ let config_bindings =
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"page runtime.toml or prompts", Some [ Config_runtime; Config_prompts ]
+      ~help:"pages the runtime.toml and prompts panes; the other five \
+             panes take the key and do nothing with it",
+      Some [ Config_runtime; Config_prompts ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -146,7 +148,7 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
-      ; b Navigate "j/k" "select / scroll"
+      ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
@@ -941,6 +943,11 @@ let help_sections ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ [ ("Keeper marks", Masc_tui_keeper_mark.legend)
+          (* The Keepers header words and the Mode S letters. They were two
+             rows above every roster: an empty roster spent them on columns
+             it had nothing in, a narrow one on columns it did not draw, and
+             beside the Activity pane both rows were cut. *)
+          ; ("Keeper columns", Masc_tui_keeper_mark.column_legend)
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)

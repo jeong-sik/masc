@@ -408,13 +408,13 @@ check_rule "R14-tui-row-walk" 0 \
 # hand it says "not loaded" after a failure and sends the operator to [r] while
 # the server's reason sits in red two rows below. The Memory header was taught
 # the difference in #35457; twelve other surfaces still said "not loaded" for
-# both until the words moved into Masc_tui_render_prim.
+# both until the words moved into one place, now Masc_tui_types beside empty_page.
 #
 # title_missing_reading ~error:<the surface's error> chooses between them.
 check_rule "R15-tui-title-not-loaded-literal" 0 \
   "title_missing_reading ~error:state.<surface>_error" \
   '\(not loaded' \
-  'bin/masc_tui_render_prim\.mli?:' \
+  'bin/masc_tui_types\.ml:' \
   bin
 
 # The failure note the body draws under an empty page. Thirteen sites draw it,
@@ -435,7 +435,7 @@ for fixture in \
   fi
 done
 if printf '%s\n' \
-  'Masc_tui_render_prim.page_failed_note' \
+  'Masc_tui_types.page_failed_note' \
   '| Page_failed -> page_failed_note' \
   'page_unread_note' \
   '  (no entries)' \
@@ -450,9 +450,9 @@ else
   fail=1
 fi
 check_rule "R16-tui-page-failed-note-literal" 0 \
-  "Masc_tui_render_prim.page_failed_note" \
+  "Masc_tui_types.page_failed_note" \
   "$r16_pattern" \
-  'bin/masc_tui_render_prim\.mli?:' \
+  'bin/masc_tui_types\.ml:' \
   bin
 
 # The Board sort token. It is the value the board list is asked for
@@ -474,6 +474,56 @@ check_rule "R17-tui-board-sort-token-on-screen" 2 \
 check_rule "R18-tui-pane-focus-key-marker" 0 \
   "the marker the Code tree uses" \
   '"  \[j/k\]"' \
+  '' \
+  bin
+
+# Key spelling in a hint row. masc_tui_keys.mli states the convention the
+# projections enforce -- keys spell as typed, the way Enter, Esc and Tab are
+# pressed -- and the 28-surface table spells every direction key that way. Six
+# hint rows spelled them in lower case instead, and three of those broke the
+# convention inside one token: [left/Esc] lower-cases the first half and
+# capitalises the second, so the same key reached the screen two ways on
+# surfaces whose footer draws the table's spelling beside it.
+#
+# The pattern reads inside a string literal, the way R13 does: a hint is drawn
+# from a literal, while a labelled argument of the same name is code. Without
+# the opening quote the rule caught three signatures in .mli files
+# (left:Buffer.t, tab:planning_tab) that have nothing to do with a screen.
+# The label also follows its colon with no space, which separates a hint from
+# prose that happens to end a clause with "an end: %d".
+r19_pattern='"([^"\n]* )?(esc|left|right|up|down|enter|tab|pgup|pgdn|home|end)(/[A-Za-z]+)?:[^ ]'
+r19_self_test_failed=0
+for fixture in \
+  '"  d:discard  esc:keep writing"' \
+  '"  Y:copy link  left/Esc:back"' \
+  '"  j/k:move  right/Enter:diff"' \
+  '"esc:menu"'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r19_pattern"; then
+    echo "ERROR[R19-pattern-self-test]: did not match $fixture" >&2
+    r19_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  '"  Y:copy link  Left/Esc:back"' \
+  '"  Esc:keep writing"' \
+  '"  Right / Enter:diff"' \
+  'Buffer.t -> left_cols:int -> left:Buffer.t -> right:Buffer.t -> unit' \
+  '  tab:planning_tab ->' \
+  'write_two_panes buf ~left_cols ~left:left_buf' \
+  '"   No longer listed: %d reached an end: %d"' \
+  '"on the %s tab: %s"' \
+  | rg -q "$r19_pattern"; then
+  echo "ERROR[R19-pattern-self-test]: matched a corrected hint, a signature, or prose" >&2
+  r19_self_test_failed=1
+fi
+if [ "$r19_self_test_failed" -eq 0 ]; then
+  echo "OK[R19-pattern-self-test]: lower-case hint keys match; corrected hints, signatures and prose do not."
+else
+  fail=1
+fi
+check_rule "R19-tui-lowercase-hint-key" 0 \
+  "the spelling masc_tui_keys declares" \
+  "$r19_pattern" \
   '' \
   bin
 

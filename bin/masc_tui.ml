@@ -1818,6 +1818,9 @@ type async_msg =
   | Keeper_chat_stream_deltas of
       Keeper_chat.request * (int option * Keeper_chat_live.delta) list
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
+  | Keeper_run_next_done of Keeper_chat.request * (string, string) result
+  | Keeper_observed_interrupt_done of
+      string * string * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
@@ -4392,7 +4395,7 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> true | _ -> false)
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
                    && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
         scene = None; scene_cursor = 0;
@@ -4408,7 +4411,7 @@ let launch_browser_lane state ~mailbox operation =
          result; effects still use the observed document/URL checks. Failed
          refreshes withdraw that scene. *)
       let view = match operation with
-        | Discover _ | Read_refresh | Scene_refresh _ -> view
+        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
         | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ ->
             { view with scene = None; scene_cursor = 0 }
@@ -4419,7 +4422,7 @@ let launch_browser_lane state ~mailbox operation =
       state.browser_lane <- Some { view with load = Loading (generation, operation);
         read_continuation = (match operation with Read -> No_read_continuation | _ -> view.read_continuation);
         read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending = (match operation with Read_refresh | Scene_refresh _ -> Some generation | _ -> view.refresh_pending);
+        refresh_pending = (match operation with Read_refresh | Scene_refresh _ | Viewport_cadence _ -> Some generation | _ -> view.refresh_pending);
         clients = (match operation with Discover Choose_client -> [] | _ -> view.clients) };
       let host = server_peer_host and port = state.port in
       let perform () =
@@ -4450,7 +4453,7 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} -> Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence {tab_id;_} -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
@@ -5478,6 +5481,23 @@ let row_list (state : state) : row_list option =
       }
   in
   let of_counted f = Option.bind (counted ()) f in
+  (* The Git changes overlay before the surface it is drawn over, the way
+     [surface_row_texts] answers it: it draws over Keepers as well as
+     Repositories and Code, and an arm per surface left the Keepers host
+     naming the roster cursor while the overlay was the list on screen. A key
+     that landed there moved a cursor nobody could see. The diff replaces the
+     list, and what it draws follows [repository_changes_diff_scroll] rather
+     than a row. *)
+  if state.repository_changes_open then
+    (match state.repository_changes_diff_path with
+     | Some _ -> None
+     | None ->
+         of_counted (fun count ->
+             scrolling ~count ~cursor:state.repository_changes_cursor
+               ~scroll:state.repository_changes_scroll
+               ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
+               ~set_scroll:(fun s -> state.repository_changes_scroll <- s)))
+  else
   match state.view with
   | Keepers Keeper_list ->
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
@@ -5541,16 +5561,10 @@ let row_list (state : state) : row_list option =
               ~set_scroll:(fun s -> state.memory_health_scroll <- s))
   | Repositories ->
       of_counted (fun count ->
-          if state.repository_changes_open then
-            scrolling ~count ~cursor:state.repository_changes_cursor
-              ~scroll:state.repository_changes_scroll
-              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
-              ~set_scroll:(fun s -> state.repository_changes_scroll <- s)
-          else
-            scrolling ~count ~cursor:state.repositories_cursor
-              ~scroll:state.repositories_scroll
-              ~set_cursor:(fun i -> state.repositories_cursor <- i)
-              ~set_scroll:(fun s -> state.repositories_scroll <- s))
+          scrolling ~count ~cursor:state.repositories_cursor
+            ~scroll:state.repositories_scroll
+            ~set_cursor:(fun i -> state.repositories_cursor <- i)
+            ~set_scroll:(fun s -> state.repositories_scroll <- s))
   | Connectors ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.connectors_cursor
@@ -5576,17 +5590,10 @@ let row_list (state : state) : row_list option =
             ~set_cursor:(fun i -> state.changes_cursor <- i)
             ~set_scroll:(fun s -> state.changes_scroll <- s))
   | Code ->
-      (* Three panes under one surface: the Git changes overlay, the open
-         file, and the tree everything else hangs off. The overlay is the
-         counted one; the file carries its own pane height, and the tree
-         windows itself around the cursor. *)
-      if state.repository_changes_open then
-        of_counted (fun count ->
-            scrolling ~count ~cursor:state.repository_changes_cursor
-              ~scroll:state.repository_changes_scroll
-              ~set_cursor:(fun i -> state.repository_changes_cursor <- i)
-              ~set_scroll:(fun s -> state.repository_changes_scroll <- s))
-      else if
+      (* Two panes left once the overlay is answered above: the open file,
+         which carries its own pane height, and the tree everything else hangs
+         off, which windows itself around the cursor. *)
+      if
         state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then
@@ -5874,6 +5881,7 @@ let show_lanes_action_error state detail =
   state.lanes_action_error <- Some detail
 
 let search_jump ?(backwards = false) state ~query ~after =
+  let query = surface_search_query state.view query in
   match surface_row_texts state state.view with
   | None -> ()
   | Some texts ->
@@ -6531,6 +6539,68 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
+
+let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token =
+  match keeper_observed_interrupt state keeper_name started_at with
+  | Some _ -> false
+  | None ->
+    let item = { oi_keeper = keeper_name; oi_token = interrupt_token; oi_started_at = started_at
+      ; oi_sent_ns = Mtime_clock.elapsed_ns (); oi_status = Interrupt_sending } in
+    state.keeper_observed_interrupts <- item ::
+      List.filter (fun old -> old.oi_keeper <> keeper_name) state.keeper_observed_interrupts;
+    let run () =
+      let result =
+        try Masc_tui_http.post_keeper_observed_turn_interrupt ~host:server_peer_host
+          ~port:state.port ~keeper_name ~interrupt_token
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)
+      in
+      enqueue_async mailbox (Keeper_observed_interrupt_done (keeper_name, interrupt_token, result))
+    in
+    (match Eio_context.get_switch_opt () with
+     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+     | None -> enqueue_async mailbox
+         (Keeper_observed_interrupt_done (keeper_name, interrupt_token, Error "Eio switch is unavailable")));
+    true
+;;
+
+let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
+  if explicit then
+    state.keeper_observed_interrupts <- List.filter (fun item ->
+      item.oi_keeper <> keeper_name || match item.oi_status with
+        | Interrupt_failed _ | Interrupt_declined _ -> false
+        | Interrupt_sending | Interrupt_signalled -> true) state.keeper_observed_interrupts;
+  match keeper_observed_interrupt_action state keeper_name with
+  | None -> None
+  | Some Masc_tui_esc_interrupt.Swallow -> Some true
+  | Some Leave -> Some false
+  | Some Launch_interrupt ->
+    match keeper_observed_turn state keeper_name with
+    | None -> Some false
+    | Some (started_at, interrupt_token) ->
+      Some (launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
+;;
+
+let launch_keeper_run_next state ~mailbox request =
+  if Option.is_some state.keeper_run_next_inflight then ()
+  else begin
+    let keeper_name = request.Keeper_chat.keeper_name in
+    let request_id = request.Keeper_chat.request_id in
+    let interrupt_token = Option.map snd (keeper_observed_turn state keeper_name) in
+    state.keeper_run_next_inflight <- Some request_id;
+    append_chat_history state request Message_status "Requesting first place for this message; waiting for server confirmation";
+    let run () =
+      let result = try Masc_tui_http.post_keeper_run_next ~host:server_peer_host
+        ~port:state.port ~keeper_name ~request_id ~interrupt_token
+        with Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn) in
+      enqueue_async mailbox (Keeper_run_next_done (request, result)) in
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> enqueue_async mailbox (Keeper_run_next_done (request, Error "Eio switch is unavailable"))
+  end
+;;
 
 (* Fetch the runtime catalogue and assignments for the picker. *)
 (* Append one runtime to a lane's candidate order. Appending rather than
@@ -8169,14 +8239,19 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (String.concat "\n" Masc_tui_command.help_lines)
   | Masc_tui_command.About ->
       Buffer.clear state.msg_input;
-      let active_keepers = List.length state.keepers in
+      let active_keepers =
+        match state.keepers_error, state.local_workspace with
+        | Some error, _ -> Some (Error error)
+        | None, Local_workspace_unread -> None
+        | None, Local_workspace_read -> Some (Ok (List.length state.keepers))
+      in
       let theme_name =
         match state.theme_choice with
         | Some name -> name
         | None -> "default"
       in
       let banner =
-        Masc_tui_command.about_banner ~theme_name ~active_keepers ()
+        Masc_tui_command.about_banner ~theme_name ?active_keepers ()
       in
       notice ~role:Message_local banner
   | Masc_tui_command.Open_diff ->
@@ -8320,9 +8395,26 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       | Masc_tui_command.Keeper_unknown ->
           notice ~role:Message_error
             (Printf.sprintf "no keeper named %S on the roster" name))
+  | Masc_tui_command.Run_next ->
+      Buffer.clear state.msg_input;
+      (match state.msg_target_keeper_name with
+       | None -> notice ~role:Message_error "Select a Keeper first"
+       | Some name ->
+         match inflight_for state name, live_for_keeper state name with
+         | Some _, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
+           notice ~role:Message_local "Your message has already started; no new run was created"
+         | Some request, Some live ->
+           (match Keeper_chat_transcript.admission live.tl_transcript with
+            | Some (Keeper_chat_live.Queued, _) -> launch_keeper_run_next state ~mailbox request
+            | Some (Running, _) -> notice ~role:Message_local "Your message has already started; no new run was created"
+            | Some (Settled, _) -> notice ~role:Message_local "Your message already finished; its result is being replayed"
+            | None -> notice ~role:Message_local "Waiting for server admission; /run-next is available once this message is queued")
+         | _ -> notice ~role:Message_local "No submitted message is waiting; send your message with Enter first")
   | Masc_tui_command.Interrupt_turn -> (
       Buffer.clear state.msg_input;
-      match state.msg_live with
+      match Option.bind state.msg_target_keeper_name (interrupt_observed_keeper ~explicit:true state ~mailbox) with
+      | Some _ -> ()
+      | None -> match state.msg_live with
       | Some live
         when Keeper_chat_transcript.interrupt live.tl_transcript
              = Keeper_chat_transcript.Not_requested -> (
@@ -8346,7 +8438,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
 
          Matched by the name the row prints, so what the operator types is
          what they just read. *)
-      match Masc_tui_types.inflight_for_keeper state name with
+      match interrupt_observed_keeper ~explicit:true state ~mailbox name with
+      | Some _ -> ()
+      | None -> match Masc_tui_types.inflight_for_keeper state name with
       | Some entry -> launch_keeper_interrupt state ~mailbox entry.sent_request
       | None ->
           notice ~role:Message_local
@@ -8697,6 +8791,7 @@ let apply_board_hearths_load state = function
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
+      state.board_list_reading <- Board_list_read;
       (* A sorted/filtered page cannot establish that an exact-ID target
          disappeared. Its own detail request owns loading and failure, even
          when the recent page is empty or excludes this historical post. *)
@@ -10888,6 +10983,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          | Masc_tui_command.Set_embeds _
         | Masc_tui_command.Interrupt_turn
         | Masc_tui_command.Interrupt_keeper_turn _
+        | Masc_tui_command.Run_next
         | Masc_tui_command.Steer_turn _
        | Masc_tui_command.Steer_missing_message
        | Masc_tui_command.Set_thinking _
@@ -12731,6 +12827,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Keeper_chat.compact_request_id tool_call_id)
          | Error detail -> "could not answer the held call: " ^ detail);
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox
+  | Keeper_run_next_done (request, result) ->
+      if state.keeper_run_next_inflight = Some request.Keeper_chat.request_id then begin
+        state.keeper_run_next_inflight <- None;
+        append_chat_history state request Message_status
+          (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail)
+      end
+  | Keeper_observed_interrupt_done (keeper_name, interrupt_token, result) ->
+      state.keeper_observed_interrupts <- List.map (fun item ->
+        if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item
+        else { item with oi_status = match result with
+          | Ok (Masc_tui_interrupt_signal.Signalled _) -> Interrupt_signalled
+          | Ok (Not_signalled { reason; detail }) ->
+            Interrupt_declined (Option.value ~default:reason detail)
+          | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
   | Keeper_chat_interrupt_done (request, result) ->
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
@@ -15531,6 +15641,14 @@ and is loaded on demand through keeper_skill.
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         if Option.is_none state.browser_viewport then
           state.image_request_generation <- state.image_request_generation + 1
+        else match state.browser_lane with
+          | Some ({load = Browser_lane_view.Loading (_, Viewport_cadence _);_} as view) ->
+              (* A background image read yields to the gesture on the image
+                 already displayed. Its late response cannot redraw between
+                 press and release or reopen a dismissed viewport. *)
+              state.image_request_generation <- state.image_request_generation + 1;
+              state.browser_lane <- Some (Browser_lane_view.yield_refresh_to_input view)
+          | _ -> ()
       end;
       (* The key channel stays exactly what it was: every surface below reads
          [key] the way it always has, and a paste is simply not one. Splitting
@@ -18219,7 +18337,10 @@ and is loaded on demand through keeper_skill.
                         parked in an uncancellable section keeps streaming
                         after its signal (masc #29229), so holding Esc until
                         the stream settles could hold it forever. *)
-                     match state.msg_live with
+                     match Option.bind state.msg_target_keeper_name
+                       (interrupt_observed_keeper state ~mailbox:async_messages) with
+                     | Some handled -> handled
+                     | None -> match state.msg_live with
                      | Some live
                        when state.msg_target_keeper_name
                             = Some (turn_log_keeper_name live) ->
@@ -21870,7 +21991,12 @@ and is loaded on demand through keeper_skill.
               | Some view when not state.image_open ->
                   Option.iter (launch_browser_lane state ~mailbox:async_messages)
                     (Browser_lane_view.cadence_operation view)
-              | Some _ -> ())
+              | Some view ->
+                  (match state.browser_viewport with
+                   | Some (shot, _) when Option.is_none !browser_pointer_press ->
+                       Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                         (Browser_lane_view.cadence_operation ~viewport:shot view)
+                   | _ -> ()))
          | Runtime ->
              (* Both authorities can move independently. Single-flight keeps
                 a slow authenticated read from stacking across ticks. *)

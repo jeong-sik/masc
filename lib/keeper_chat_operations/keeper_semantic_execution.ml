@@ -454,6 +454,10 @@ let runtime_suffix_json (suffix : runtime_suffix) = `Assoc [
   "assignment_id", `String suffix.assignment_id; "failed_runtime_id", `String suffix.failed_runtime_id;
   "next_runtime_id", `String suffix.next_runtime_id;
   "later_runtime_ids", `List (List.map (fun id -> `String id) suffix.later_runtime_ids)]
+let gate_binding_json binding = `Assoc [
+  "approval_ids", `List (List.map (fun id -> `String id) binding.approval_ids);
+  "obligations", `List (List.map gate_obligation_json binding.obligations);
+  "runtime_suffix", Option.fold ~none:`Null ~some:runtime_suffix_json binding.runtime_suffix]
 let official_client_checkpoint_json value = `Assoc [
   "client_kind", `String (match value.client_kind with Codex -> "codex" | Claude_code -> "claude_code" | Antigravity -> "antigravity");
   "runtime_id", `String value.runtime_id; "session_id", `String value.session_id;

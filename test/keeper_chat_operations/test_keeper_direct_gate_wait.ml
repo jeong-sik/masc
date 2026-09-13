@@ -42,6 +42,11 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     let operation = admit store in
     Store.For_testing.fail_next_commit Store.For_testing.Fail_after_commit;
     suspend store operation |> ignore;
+    let before_priority = get store in
+    (match Store.move_queued_to_front store ~now:4. ~operation_id:original with
+     | Error (Store.Invalid_input _) -> ()
+     | _ -> fail "priority bypassed an unresolved approval");
+    check bool "priority refusal preserves the original approval and input" true (get store = before_priority);
     check bool "unresolved wait is not claimable" false (Store.has_claimable_queued store ~now:4. |> ok);
     check bool "no repeated waiting child" true (claim store = None);
     Store.submit store ~now:4. ~operation_id:other ~source ~input:(`String "independent work") |> ok |> ignore;
@@ -212,7 +217,7 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
    input: [Integrity_error] is how this store says its own record is broken, and
    an owner that sees it stops trusting the database rather than the request. *)
 let test_refused_binding_reads_as_input_not_corruption () = with_path (fun path ->
-  let binding = Semantic.gate_binding ~approval_ids:["producer-created-approval"]
+  let binding = Semantic.gate_binding ~approval_ids:[obligation.approval_id]
     ~obligations:[obligation] ~runtime_suffix:None |> require in
   with_store path (fun store ->
     let operation = admit store in

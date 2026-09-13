@@ -119,79 +119,6 @@ let capture_native ~base_path ~keeper_name ~operation_id ~runtime_id ~frame =
      | Some _ | None -> Error "official-client Gate yield belongs to another operation")
   | Some _ | None -> Error "official-client Gate yield has no settled native session authority"
 
-let confirm_retention ~session_dir snapshot =
-  match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
-  | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
-  | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed"
-
-let suspend ?official_client ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids () =
-  let base_path = config.Workspace.base_path in
-  let* existing = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
-  let approval_ids = List.sort_uniq String.compare
-    (approval_ids @ List.map (fun (obligation : Semantic.gate_obligation) -> obligation.approval_id) existing) in
-  match approval_ids with
-  | [] -> Ok false
-  | _ ->
-    let* runtime_suffix = match runtime_lane with
-      | None -> Ok None
-      | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
-        Semantic.runtime_suffix ~assignment_id:lane.assignment_id ~failed_runtime_id:lane.failed_runtime_id
-          ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids |> Result.map Option.some in
-    let* binding = Semantic.gate_binding ~approval_ids ~obligations:existing ~runtime_suffix in
-    let prepare () =
-      let* obligations = List.fold_left (fun result approval_id ->
-        let* obligations = result in
-        let* obligation = bind ~base_path ~keeper_name approval_id in
-        if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation])) (Ok existing) approval_ids in
-      let* session_scope = session_scope ~config ~session_dir ~session_id in
-      match official_client with
-      | Some (runtime_id, frame) ->
-        let* () = match runtime_lane with None -> Ok () | Some _ -> Error "native Gate cannot own an Agent Core runtime checkpoint" in
-        let* checkpoint = capture_native ~base_path ~keeper_name ~operation_id ~runtime_id ~frame in
-        let* waiting = Semantic.official_client_gate_wait ~checkpoint ~session_scope ~obligations in
-        Ok (waiting, None)
-      | None ->
-        let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
-          |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
-        let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
-        let* frame = Keeper_repetition_scope.load checkpoint.context |> Result.map_error Snapshot.error_to_string in
-        let* () = match Snapshot.active frame with
-          | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
-          | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
-        let reference = Checkpoint.exact_snapshot_reference snapshot in
-        let* waiting = match runtime_lane with
-          | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
-          | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
-            let* runtime_retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:lane.assignment_id
-              ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
-            Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry in
-        Ok (waiting, Some snapshot) in
-    let retain_for_reconciliation binding diagnostic =
-      let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
-      match operation with
-      | None -> Error "original Gate operation disappeared during checkpoint reconciliation"
-      | Some operation ->
-        let* _ = Owner.defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id
-          ~execution_digest:operation.execution_digest ~binding ~diagnostic |> owner in
-        Log.Keeper.warn "Gate operation retained for checkpoint reconciliation: %s" diagnostic;
-        Ok true in
-    match prepare () with
-    | Error diagnostic -> retain_for_reconciliation binding diagnostic
-    | Ok (waiting, snapshot) ->
-      let* binding = Semantic.gate_binding_with_wait ~binding ~waiting in
-      let commit () =
-        let* () = match snapshot with None -> Ok () | Some snapshot -> confirm_retention ~session_dir snapshot in
-        let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
-        match operation with
-        | None -> Error "original Gate operation disappeared"
-        | Some operation ->
-          let* _ = Owner.defer_direct_gate ~base_path ~keeper_name ~operation_id
-            ~execution_digest:operation.execution_digest ~waiting |> owner in
-          Ok true in
-      (match commit () with
-       | Ok _ as confirmed -> confirmed
-       | Error diagnostic -> retain_for_reconciliation binding diagnostic)
-
 let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   let base_path = config.Workspace.base_path and keeper_name = meta.name in
   let* bindings = Owner.direct_gate_bindings ~base_path ~keeper_name |> owner in
@@ -241,6 +168,68 @@ let reconcile ~config ~(meta : Keeper_meta_contract.keeper_meta) =
             Owner.resolve_direct_gate ~base_path ~keeper_name ~operation_id
               ~resolution:(resolution_of_observation obligation decision) |> owner |> Result.map (fun _ -> ()) in
       first_resolved state.waiting.obligations) (Ok ()) waits
+
+let suspend ?official_client ?runtime_lane ~config ~keeper_name ~operation_id ~session_dir ~session_id ~approval_ids () =
+  let base_path = config.Workspace.base_path in
+  let* existing = Owner.direct_gate_obligations ~base_path ~keeper_name ~operation_id |> owner in
+  let approval_ids = List.sort_uniq String.compare
+    (approval_ids @ List.map (fun (obligation : Semantic.gate_obligation) -> obligation.approval_id) existing) in
+  match approval_ids with
+  | [] -> Ok false
+  | _ ->
+    let* runtime_suffix = match runtime_lane with
+      | None -> Ok None
+      | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
+        Semantic.runtime_suffix ~assignment_id:lane.assignment_id ~failed_runtime_id:lane.failed_runtime_id
+          ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids |> Result.map Option.some in
+    let* binding = Semantic.gate_binding ~approval_ids ~obligations:existing ~runtime_suffix in
+    let prepare () =
+    let* obligations = List.fold_left (fun result approval_id ->
+      let* obligations = result in
+      let* obligation = bind ~base_path ~keeper_name approval_id in
+      if List.mem obligation obligations then Ok obligations else Ok (obligations @ [obligation])) (Ok existing) approval_ids in
+    let* session_scope = session_scope ~config ~session_dir ~session_id in
+    let* waiting = match official_client with
+    | Some (runtime_id, frame) ->
+      let* () = match runtime_lane with None -> Ok () | Some _ -> Error "native Gate cannot own an Agent Core runtime checkpoint" in
+      let* checkpoint = capture_native ~base_path ~keeper_name ~operation_id ~runtime_id ~frame in
+      Semantic.official_client_gate_wait ~checkpoint ~session_scope ~obligations
+    | None ->
+    let* snapshot = Checkpoint.load_agent_core_exact_snapshot ~session_dir ~session_id
+      |> Result.map_error (fun _ -> "Gate yield checkpoint is unavailable") in
+    let checkpoint = Checkpoint.exact_snapshot_checkpoint snapshot in
+    let* frame = Keeper_repetition_scope.load checkpoint.context |> Result.map_error Snapshot.error_to_string in
+    let* () = match Snapshot.active frame with
+      | Some scope when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) -> Ok ()
+      | Some _ | None -> Error "Gate yield checkpoint belongs to another operation" in
+    let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
+      | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
+      | Checkpoint.Installed _ | Checkpoint.Not_installed _ -> Error "Gate checkpoint retention is not durably confirmed" in
+    let reference = Checkpoint.exact_snapshot_reference snapshot in
+    (match runtime_lane with
+      | None -> Semantic.gate_wait ~checkpoint:reference ~session_scope ~obligations
+      | Some (lane : Keeper_turn_driver.deferred_runtime_lane) ->
+        let* runtime_retry = Semantic.runtime_retry ~not_before:None ~checkpoint:reference ~assignment_id:lane.assignment_id
+          ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id ~later_runtime_ids:lane.later_runtime_ids in
+        Semantic.gate_wait_with_runtime_retry ~checkpoint:reference ~session_scope ~obligations ~runtime_retry) in
+    let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
+    match operation with
+    | None -> Error "original Gate operation disappeared"
+    | Some operation ->
+      let* _ = Owner.defer_direct_gate ~base_path ~keeper_name ~operation_id
+        ~execution_digest:operation.execution_digest ~waiting |> owner in
+      Ok true in
+    match prepare () with
+    | Ok _ as confirmed -> confirmed
+    | Error diagnostic ->
+      let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
+      (match operation with
+       | None -> Error "original Gate operation disappeared during checkpoint reconciliation"
+       | Some operation ->
+         let* _ = Owner.defer_direct_gate_reconciliation ~base_path ~keeper_name ~operation_id
+           ~execution_digest:operation.execution_digest ~binding ~diagnostic |> owner in
+         Log.Keeper.warn "Gate operation retained for checkpoint reconciliation: %s" diagnostic;
+         Ok true)
 
 let denial_input (selected : Semantic.gate_resolution) =
   match selected.decision with
@@ -327,10 +316,11 @@ let observe_native_input ?blocks ~(prepared : Keeper_gate_replay.model_message) 
         let* durable_identity = input_identity durable in
         if prepared_identity <> durable_identity then Error "native Gate input does not identify the durable replay receipt"
         else Ok ()
-      | Semantic.Gate_denied _, None, None ->
-        if prepared.denied_resolution = Some admission.resolution then Ok ()
-        else Error "native Gate input does not identify the admitted denial"
-      | Semantic.Gate_approved, None, (None | Some _)
+      | (Semantic.Gate_denied _ | Semantic.Gate_approved), None, None ->
+        if prepared.instruction_resolution = Some admission.resolution
+           && expected.instruction_resolution = Some admission.resolution then Ok ()
+        else Error "native Gate input does not identify the admitted resolution instruction"
+      | Semantic.Gate_approved, None, Some _
       | Semantic.Gate_approved, Some _, None
       | Semantic.Gate_denied _, Some _, (None | Some _)
       | Semantic.Gate_denied _, None, Some _ ->
@@ -345,13 +335,13 @@ let complete_native ~config ~keeper_name ~operation_id admission =
   match admission.authority with
   | Agent_core _ -> Ok ()
   | Official_client checkpoint ->
-    let* () = validate_native ~base_path:config.Workspace.base_path ~keeper_name checkpoint in
-    let* stored = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
-    (match admission.transmitted_input, stored with
-     | Some _, Some {Native.phase=Native.Settled {turn_id; _}; _} when turn_id <> checkpoint.turn_id ->
-       Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
-         ~obligation:admission.selected.obligation |> owner
-     | _ -> Error "native Gate continuation has no settled transmitted-input receipt")
+    let* () = match admission.transmitted_input with
+      | Some _ -> Ok ()
+      | None -> Error "native Gate continuation has no transmitted-input receipt" in
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* () = Native.validate_completed_continuation ~checkpoint ~expected in
+    Owner.discharge_direct_gate ~base_path:config.Workspace.base_path ~keeper_name ~operation_id
+      ~obligation:admission.selected.obligation |> owner
 
 let load ~config ~meta ~operation_id ~session_dir =
   match load_ready ~config ~meta ~operation_id ~session_dir with
@@ -394,5 +384,33 @@ let pending ~base_path ~keeper_name ~operation_id =
         | None -> Ok None
 
 let record_completed ~config ~keeper_name admission =
-  Keeper_approval_queue.ensure_settled_continuation_chat_projection
-    ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
+  match admission.authority, admission.transmitted_input with
+  | Official_client checkpoint, Some _ ->
+    let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name in
+    let* () = Native.validate_completed_continuation ~checkpoint ~expected in
+    Keeper_approval_queue.record_native_continuation_delivery
+      ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
+  | Official_client _, None -> Ok Keeper_approval_queue.Continuation_projection_not_ready
+  | Agent_core _, _ ->
+    Keeper_approval_queue.ensure_settled_continuation_chat_projection
+      ~base_path:config.Workspace.base_path ~keeper_name ~resolution:admission.resolution
+
+let finish_run ~config ~keeper_name ~operation_id admission run_result =
+  match admission.authority, run_result with
+  | Agent_core _, Error _ -> run_result
+  | (Agent_core _ | Official_client _), _ ->
+    match complete_native ~config ~keeper_name ~operation_id admission with
+    | Error detail ->
+      (match run_result with
+       | Ok _ -> Error (Agent_core.Error.Internal detail)
+       | Error _ ->
+         Log.Keeper.warn "direct Gate input remains unsettled after runtime failure: %s" detail;
+         run_result)
+    | Ok () ->
+      (match record_completed ~config ~keeper_name admission with
+       | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
+       | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
+         Log.Keeper.warn "settled direct Gate input has no completed resolution projection"
+       | Error detail ->
+         Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail);
+      run_result

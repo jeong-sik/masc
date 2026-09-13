@@ -71,6 +71,7 @@ let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
+      ~(workspace_memory : Workspace_memory_publication.observation)
       ~(approval_authority_text : string)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
@@ -78,13 +79,15 @@ let direct_turn_dynamic_context
       ~(turn_instructions_text : string)
   : string
   =
-  [ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces
-  ; approval_authority_text
+  ([ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces ]
+   @ Option.to_list
+       (Keeper_unified_prompt.format_workspace_memory_observation workspace_memory)
+   @ [ approval_authority_text
   ; recent_direct_conversation_text
   ; worktree_text
   ; telemetry_feedback_text
   ; turn_instructions_text
-  ]
+  ])
   |> List.filter (fun text -> String.trim text <> "")
   |> String.concat "\n\n"
 
@@ -608,6 +611,12 @@ let run_keeper_invocation_turn_admitted_inner
             let world_observation =
               direct_turn_observation ~config:ctx.config meta
             in
+            let workspace_memory = Domain_pool_ref.submit_io_or_inline (fun () ->
+              Workspace_memory_publication.observe ~base_path:ctx.config.base_path) in
+            (match workspace_memory with
+             | Workspace_memory_publication.Unavailable detail ->
+               Log.Keeper.warn "workspace memory discovery unavailable keeper=%s: %s" meta.name detail
+             | Missing | Available _ -> ());
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -666,6 +675,7 @@ let run_keeper_invocation_turn_admitted_inner
                   ~current_task
                   ~held_task_skills
                   ~task_skill_surfaces
+                  ~workspace_memory
                   ~approval_authority_text:
                     (Keeper_unified_prompt.format_approval_authority_observation
                        world_observation.approval_authority)
@@ -855,21 +865,11 @@ let run_keeper_invocation_turn_admitted_inner
                                 ())
 		                         ()))
 		            in
-                let run_result = match run_result, gate_resume with
-                  | Ok _, Some admission ->
-                    (match Keeper_direct_gate_continuation.complete_native ~config:ctx.config
-                       ~keeper_name:meta.name ~operation_id admission with
-                     | Ok () -> run_result
-                     | Error detail -> Error (Agent_core.Error.Internal detail))
-                  | Error _, _ | Ok _, None -> run_result in
-                let () = match run_result, gate_resume with
-                  | Ok _, Some admission ->
-                    (match Keeper_direct_gate_continuation.record_completed ~config:ctx.config ~keeper_name:meta.name admission with
-                     | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
-                     | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
-                       Log.Keeper.warn "completed direct Gate continuation has no settled replay authority"
-                     | Error detail -> Log.Keeper.warn "direct Gate continuation settlement remains pending: %s" detail)
-                  | Error _, _ | Ok _, None -> () in
+                let run_result = match gate_resume with
+                  | None -> run_result
+                  | Some admission ->
+                    Keeper_direct_gate_continuation.finish_run ~config:ctx.config
+                      ~keeper_name:meta.name ~operation_id admission run_result in
                 let official_client = match run_result with
                   | Ok ({Keeper_agent_run.checkpoint=None; runtime_id; _}, _) ->
                     (match Keeper_repetition_scope.Execution.snapshot repetition_execution with

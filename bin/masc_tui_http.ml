@@ -198,7 +198,7 @@ let http_get ~(host : string) ~(port : int) ~(path : string) :
       ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "GET failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"GET" ~url ~detail:e)
 
 (** Fetch an arbitrary external URL's body for web link previews. Unlike the
     dashboard helpers above this sends NO masc auth header -- the URL is a
@@ -233,7 +233,7 @@ let http_post_with_timeout ~timeout_sec ~headers ~(host : string) ~(port : int)
       ~timeout_sec ~url ~headers:(json_headers headers) ~body ()
   with
   | Ok (status, body) -> Ok (status, body)
-  | Error e -> Error (report_err "POST failed" e)
+  | Error e -> Error (Masc.Tui_decode.http_transport_error ~verb:"POST" ~url ~detail:e)
 
 let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
     ~(body : string) : (int * string, string) result =
@@ -1200,6 +1200,29 @@ let post_keeper_turn_interrupt ~(host : string) ~(port : int)
   | Ok json ->
     Masc_tui_interrupt_signal.decode_interrupt_signal
       ~expected_request_id:request_id json
+
+let post_keeper_run_next ~host ~port ~keeper_name ~request_id ~interrupt_token =
+  let body = Yojson.Safe.to_string (`Assoc
+    ["name", `String keeper_name; "request_id", `String request_id;
+     "interrupt_token", Option.fold ~none:`Null ~some:(fun value -> `String value) interrupt_token]) in
+  match post_json ~host ~port ~path:"/api/v1/keepers/turn/run-next" ~body with
+  | Error detail -> Error detail
+  | Ok (`Assoc fields) ->
+    (match List.assoc_opt "request_id" fields, List.assoc_opt "prioritized" fields,
+      List.assoc_opt "detail" fields with
+     | Some (`String echoed), Some (`Bool true), Some (`String detail) when echoed = request_id -> Ok detail
+     | _ -> Error "run-next response does not confirm this message's queue position")
+  | Ok _ -> Error "run-next response must be an object"
+;;
+
+let post_keeper_observed_turn_interrupt ~host ~port ~keeper_name ~interrupt_token =
+  let body = Yojson.Safe.to_string (`Assoc
+    ["name", `String keeper_name; "interrupt_token", `String interrupt_token]) in
+  match post_json ~host ~port ~path:keeper_turn_interrupt_path ~body with
+  | Error detail -> Error detail
+  | Ok json -> Masc_tui_interrupt_signal.decode_observed_interrupt_signal
+      ~expected_token:interrupt_token json
+;;
 
 let fetch_keeper_chat_operation ~(host : string) ~(port : int)
     (request : Masc_tui_keeper_chat_projection.request) :
@@ -2657,7 +2680,7 @@ let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

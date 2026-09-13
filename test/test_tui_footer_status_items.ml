@@ -26,6 +26,20 @@ let check_one_line label text =
   in
   Alcotest.(check int) label 1 newlines
 
+let test_literal_search_status_survives_hint_fitting () =
+  let prefix = "/  deploy note   (2) n/N" in
+  let hints = "j/k:move  Home/End:top/bottom  c / C:category  s:sort  a / A:all fleet  Esc:close  q:quit" in
+  List.iter (fun width ->
+    let rendered = Masc_tui_footer.line ~literal_prefix:prefix
+      ~dim:"" ~reset:"" ~max_cells:width ~port:8935 ~hints () in
+    check_bool "literal query and count are never split as hint items" true
+      (contains ~needle:prefix rendered);
+    check_bool "quit remains available" true (contains ~needle:"q:quit" rendered);
+    check_at_most_cells "footer remains bounded" width (String.trim rendered)) [60;100;200];
+  let rendered = Masc_tui_footer.line ~literal_prefix:prefix
+    ~dim:"" ~reset:"" ~max_cells:10 ~port:8935 ~hints () in
+  check_at_most_cells "even the literal prefix can be cell-truncated" 10 (String.trim rendered)
+
 let test_port_closes_every_footer () =
   check_string "port closes a plain footer"
     "<dim>  j/k:move  Tab:next  | Port: 8935<reset>\n"
@@ -271,7 +285,8 @@ let test_ansi_korean_hint_truncates_by_cells () =
       ~hints:"가나다라마바" ()
   in
   check_at_most_cells "four cells hold" 4 hopeless;
-  check_bool "and the cut is explicit" true (contains ~needle:"~" hopeless)
+  check_bool "and the cut is explicit" true
+    (contains ~needle:"\xe2\x80\xa6" hopeless)
 
 (* A workspace disagreement used to replace the whole screen and swallow every
    key but r. The reads it protects are refused where they happen, so the
@@ -498,7 +513,7 @@ let contains ~needle haystack =
 ;;
 
 (* When even the hints do not fit, the footer says where the rest of them
-   are. [~] alone reports a cut and stops; a reader cannot tell whether one
+   are. […] alone reports a cut and stops; a reader cannot tell whether one
    key is hidden or six, and the keys past the cut have no other way of being
    found on that surface.
 
@@ -680,6 +695,29 @@ let test_conflict_paths_remain_atomic () =
         (contains ~needle:notice row)
   done
 
+let test_literal_search_and_conflict_fit_together () =
+  let prefix = "/  deploy note   (2) n/N" in
+  let notice = "MISMATCH local /work/my  repo (r:retry)" in
+  for max_cells = 60 to 160 do
+    let row = Masc_tui_footer.line ~literal_prefix:prefix
+      ~status:[ Masc_tui_footer.Workspace_mismatch "/work/my  repo" ]
+      ~dim:"" ~reset:"" ~max_cells ~port:8935
+      ~hints:"j/k:move  Home/End:top/bottom  s:sort  q:quit" () in
+    check_at_most_cells "combined search and conflict stay bounded" max_cells row;
+    check_bool "search whitespace survives conflict fitting" true
+      (contains ~needle:prefix row);
+    check_bool "exit remains with literal status" true (contains ~needle:"q:quit" row);
+    check_bool "conflict remains whole or is omitted" true
+      (not (contains ~needle:"MISMATCH" row) || contains ~needle:notice row);
+    if max_cells >= 110 then begin
+      check_bool "conflict retained alongside search when it fits" true
+        (contains ~needle:notice row);
+      check_bool "conflict still precedes literal search" true
+        (Str.search_forward (Str.regexp_string notice) row 0
+         < Str.search_forward (Str.regexp_string prefix) row 0)
+    end
+  done
+
 let test_actionable_conflicts_outrank_worktree_provenance () =
   let build = Masc_tui_footer.Tui_build_mismatch
     { tui = "aaaaaaa"; server = "bbbbbbb"; older = `Server } in
@@ -731,10 +769,14 @@ let test_ansi_keeper_keys_remain_individually_droppable () =
 
 let tests =
   [ ( "tui-footer-status-items"
-    , [ Alcotest.test_case "port closes every footer" `Quick
+    , [ Alcotest.test_case "literal search status survives hint fitting" `Quick
+          test_literal_search_status_survives_hint_fitting
+      ; Alcotest.test_case "port closes every footer" `Quick
           test_port_closes_every_footer
       ; Alcotest.test_case "conflict paths stay atomic through fitting" `Quick
           test_conflict_paths_remain_atomic
+      ; Alcotest.test_case "literal search and conflict fit together" `Quick
+          test_literal_search_and_conflict_fit_together
       ; Alcotest.test_case "actionable conflicts outrank provenance" `Quick
           test_actionable_conflicts_outrank_worktree_provenance
       ; Alcotest.test_case "ANSI Keeper controls drop individually and keep q" `Quick

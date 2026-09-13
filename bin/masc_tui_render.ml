@@ -13047,7 +13047,7 @@ let render_context_inspector state =
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let header = help_ascii_banner ~cols state in
+  let header = help_masthead state in
   ( List.length (Masc_tui_help.sheet ~header ~cols (help_lines state))
   , framed_content_height ~rows )
 
@@ -13314,7 +13314,7 @@ let render_help (state : state) =
     ^ (if state.hints_visible then "on" else "off")
     ^ Ansi.reset);
   framed_divider buf cols;
-  let header = help_ascii_banner ~cols state in
+  let header = help_masthead state in
   let lines = help_lines state in
   let rendered_rows = Masc_tui_help.sheet ~header ~cols lines in
   let content_height = framed_content_height ~rows in

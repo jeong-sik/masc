@@ -464,6 +464,7 @@ let test_child_boundary_acknowledgements () =
     check bool ("child acknowledgement " ^ String.escaped ack) true
       (Exec_shim.child_boundary_of_ack ack = expected))
     ["A", Sandbox_applied; "AE", Exec_failed; "S", Setup_failed;
+     "N", Refused_socket; "W", Refused_write;
      "", Child_ack_unavailable; "E", Child_ack_unavailable;
      "AA", Child_ack_unavailable; "AEX", Child_ack_unavailable]
 

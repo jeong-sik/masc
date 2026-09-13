@@ -238,8 +238,10 @@ val plan_for_mode : supported:bool -> Exec_ssh_protocol.mode -> execution_plan
 
 val child_boundary_of_ack : string -> Exec_ssh_protocol.execution_boundary
 (** Decode the fixed child-owned status-pipe protocol: setup acknowledgement,
-    exec failure after setup, or setup failure. Empty/invalid/incomplete bytes
-    mean unavailable evidence, never applied restrictions. *)
+    exec failure after setup, setup failure, or a setup refusal attributed
+    by the child to one of its own rules ("N" socket filter, "W" Landlock
+    write ruleset). Empty/invalid/incomplete bytes mean unavailable
+    evidence, never applied restrictions. *)
 
 val scratch_env : scratch:string -> (string * string) list -> (string * string) list
 (** The payload environment with HOME and TMPDIR pointing at the scratch. *)

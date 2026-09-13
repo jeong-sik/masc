@@ -93,27 +93,12 @@ let refusal_kind_tag = function
   | Unspecified -> "unspecified"
 ;;
 
-(* The closed reading of the shim's refusal record. The wire does not type
-   the refused rule yet, so this is a reading of what the refusal logged:
-   the sandbox's socket rule names the domain, the Landlock rule names the
-   filesystem. An empty or unrecognized stderr refuses towards the judge —
-   misclassification can only cost a judge visit, never an allow. *)
-let mentions ~(needle : string) (haystack : string) =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec at i =
-    if i + needle_len > haystack_len then false
-    else String.sub haystack i needle_len = needle || at (i + 1)
-  in
-  needle_len = 0 || at 0
-;;
-
-let classify_refusal stderr =
-  if mentions ~needle:"socket" stderr || mentions ~needle:"connect" stderr
-  then Socket_denied
-  else if mentions ~needle:"landlock" stderr then Write_denied
-  else Unspecified
-;;
+(* The closed reading of the shim's refusal record. The refusal's rule name
+   crosses the boundary pipe typed by the child itself, so nothing is read
+   back out of stderr here. An unattributed refusal (older shims, or a rule
+   the child could not name) arrives as [Unspecified], which refuses
+   towards the judge -- misclassification can only cost a judge visit,
+   never an allow. *)
 
 type observation =
   | Observed_result of boxed_execution

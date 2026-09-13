@@ -222,13 +222,6 @@ type refusal_kind =
   | Write_denied
   | Unspecified
 
-val classify_refusal : string -> refusal_kind
-(** The closed reading of a refusal's stderr record: the sandbox's socket
-    rule names the domain, the Landlock rule names the filesystem, and
-    everything else — including an empty record — refuses towards the
-    judge via {!Unspecified}. Misclassification can only cost a judge
-    visit, never an allow. *)
-
 (** What one run of the request inside the executor's box came back as
     (RFC-0422). The caller that owns the sandbox runs it; the Gate only
     decides when to ask, and what each answer means. *)

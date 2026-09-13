@@ -148,6 +148,7 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
+          ~help:"Events, or the server's own log lines; l opens Logs as well"
       ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
@@ -156,13 +157,14 @@ let for_surface = function
          leaves the surface, so two rows read as two bindings. *)
       ; b Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Overview"
-      ; b Navigate "g / G" "newest / oldest"
+      (* One row per action. g and G reach the ends Home and End reach, and
+         l the tab 2 opens; a row for each spent two of the footer's places
+         on actions it already showed, and at 120 columns the fitter dropped
+         Enter -- the key that opens an event -- to keep them. The rows are
+         the spellings every other reader shares; the extras are in help. *)
       ; b Navigate "Home/End" "newest / oldest"
-          ~help:"the same two ends as g and G, under the keys every other \
-                 reader uses; the ring counts back from the newest, so its \
-                 top is now"
-      ; b Navigate "l" "logs"
-          ~help:"the server's own log lines, off the ring under Activity"
+          ~help:"g and G as well; the ring counts back from the newest, so \
+                 its top is now"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]

@@ -770,7 +770,7 @@ let test_tools_is_a_config_child () =
 
 (* Tool calls settling and the server's own log lines are two readings of
    one fleet timeline, so Logs hangs off Activity (the Acting surface)
-   under [l] instead of holding a Tab stop of its own. *)
+   under its [1 / 2] tabs instead of holding a Tab stop of its own. *)
 let test_logs_is_an_activity_child () =
   Alcotest.(check bool) "Runtime is inside Config" false
     (List.exists (fun (surface, _) -> surface = Runtime) surface_ring);
@@ -797,8 +797,8 @@ let test_logs_is_an_activity_child () =
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Acting)
   in
-  Alcotest.(check bool) "Activity documents the [l] hop" true
-    (List.mem "l" acting_keys)
+  Alcotest.(check bool) "Activity documents the way to Logs" true
+    (List.mem "1 / 2" acting_keys)
 
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
@@ -956,8 +956,8 @@ let test_config_footer_names_child_hops () =
     [ "9:Runtime"; "s:resources"; "t:tools" ]
 
 let test_system_logs_owns_only_its_real_filter_keys () =
-  (* g/G/f still belong to Acting. Logs owns the server level floor, direct
-     verbose toggle, and category cycle under l/v/c. *)
+  (* The newest/oldest ends and f still belong to Acting. Logs owns the server
+     level floor, direct verbose toggle, and category cycle under l/v/c. *)
   let keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -973,7 +973,7 @@ let test_system_logs_owns_only_its_real_filter_keys () =
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Acting)
   in
-  Alcotest.(check bool) "g/G stays on Acting" true (List.mem "g / G" acting);
+  Alcotest.(check bool) "the ends stay on Acting" true (List.mem "Home/End" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
 
 let footer_has_key key row =
@@ -1030,10 +1030,22 @@ let test_activity_footer_keeps_filter_before_evidence () =
       (Masc_tui_message_layout.display_width row <= cols);
     Alcotest.(check bool) "evidence never outlives its filter prerequisite" true
       (not (footer_has_key "Enter" row) || footer_has_key "f" row);
-    if cols >= 120 then
+    if cols >= 120 then begin
       Alcotest.(check bool) "filter remains visible at affected widths" true
-        (footer_has_key "f" row)
-  done
+        (footer_has_key "f" row);
+      Alcotest.(check bool) "the key that opens an event is visible" true
+        (footer_has_key "Enter" row)
+    end
+  done;
+  (* One row per action: a second spelling of an action already on the row
+     takes a place the fitter then takes from a key that does something else. *)
+  let labels =
+    List.map (fun (binding : Masc_tui_keys.binding) -> binding.label)
+      (Masc_tui_keys.for_surface Acting)
+  in
+  Alcotest.(check int) "no two Activity rows name the same action"
+    (List.length labels)
+    (List.length (List.sort_uniq String.compare labels))
 
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with

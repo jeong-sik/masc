@@ -118,8 +118,30 @@ let safe_reqd_respond reqd response body =
 
     Enforces two complementary rate limits:
     1. Per-client IP (via [client_addr]) — protects against volumetric abuse.
-    2. Per-agent bearer token (via Authorization header) — enforces per-agent
-       quotas regardless of source IP, complementing the IP-level check. *)
+    2. MCP transport requests consume the per-agent operation bucket here.
+       Authenticated API operation wrappers own that charge for their routes;
+       charging them here too would double-debit one request. Dashboard assets
+       and read observations remain under the same per-IP resource boundary. *)
+(* Which requests this ingress charges to the per-agent bucket. The exemption
+   this lane introduces is for observation reads, and "not MCP transport" was a
+   wider net than that:
+
+   - A WebSocket upgrade is a GET, but it opens a persistent session rather than
+     answering a read, and no route wrapper charges it. Left exempt, one token
+     could hold open as many sessions as it liked while the per-IP bucket
+     refilled -- the session count is what is unbounded, not the message rate.
+   - Any other method is not a read. [with_public_read] reaches
+     [with_read_auth] only under MASC_HTTP_AUTH_STRICT, so outside strict mode a
+     bearer-authenticated POST through that wrapper -- nav-event is one -- had no
+     charge here and none there either.
+
+   GET and HEAD on everything else stay exempt, which is the read boundary this
+   lane set out to draw. *)
+let charges_agent_bucket (request : Httpun.Request.t) =
+  is_mcp_transport_request request
+  || String.equal (Http.Request.path request) "/ws"
+  || match request.Httpun.Request.meth with `GET | `HEAD -> false | _ -> true
+
 let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
@@ -141,7 +163,8 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         ~protocol:Transport_metrics.H1
         ~scope:Transport_metrics.Client_ip;
       true
-    end else
+    end else if not (charges_agent_bucket request) then false
+    else
       match auth_token_from_request request with
       | None -> false
       | Some token ->

@@ -35,6 +35,9 @@ type stream_protocol_error_kind =
   | Sse_unsupported_response
   | Sse_stream_incomplete
   | Sse_stream_repeating
+  | Sse_timeout
+      (** The transport's stream liveness bound expired (first event or idle
+          gap) before the provider finished. Ends the attempt, not the turn. *)
 
 type runtime_attempt_scope_disposition =
   | Preserve_previous_scope

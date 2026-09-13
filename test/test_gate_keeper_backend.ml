@@ -2908,13 +2908,44 @@ let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
   in
   match incomplete with
   | [ Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = incomplete_kind; _ };
-      Keeper_chat_events.Event_error { message } ] ->
+        { kind = incomplete_kind; reason = Some reason; _ } ] ->
       check string "incomplete kind" "sse_stream_incomplete"
         (Keeper_chat_events.stream_protocol_error_kind_to_string incomplete_kind);
-      check string "incomplete is visible error"
-        "Provider stream incomplete: max_output_tokens" message
-  | _ -> fail "expected visible events for unknown/incomplete provider stream"
+      check string "incomplete reason stays visible" "max_output_tokens" reason
+  | _ -> fail "expected one typed protocol error for an incomplete provider stream"
+
+let test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals () =
+  let open Agent_core.Types in
+  let provider_kind = Agent_core.Llm_provider.Provider_kind.Gemini in
+  let failures =
+    [ "sse_error", SSEError { message = "no credits"; error_type = Some "insufficient_quota"; raw = "{}" }
+    ; "ndjson_error", NDJSONError { message = "rejected"; error_type = None; raw = "{}" }
+    ; "sse_parse_failed", SSEParseFailed { raw = "garbage"; reason = "not json" }
+    ; "ndjson_parse_failed", NDJSONParseFailed { raw = "garbage"; reason = "not json" }
+    ; "sse_unknown_event_type", SSEUnknownEventType { event_type = "response.future"; raw = "{}" }
+    ; "sse_unsupported_part", SSEUnsupportedPart { provider_kind; part = "inline_data"; raw = "{}" }
+    ; "sse_unsupported_response", SSEUnsupportedResponse { provider_kind; response = "prompt_feedback"; raw = "{}" }
+    ; "sse_stream_incomplete", StreamIncomplete { reason = "max_output_tokens" }
+    ; "sse_stream_repeating", StreamRepeating { paragraph = "again"; occurrences = 4; bytes_seen = 400 }
+    ; "sse_timeout", Timeout "idle timeout after 120.0s"
+    ]
+  in
+  List.iter
+    (fun (label, failure) ->
+       let events = translate_agent_core_stream_events [ failure ] in
+       (* The turn driver may move to the next lane candidate after any of
+          these; only the turn's Completion path may end the turn. A terminal
+          here ended the Dashboard adapter mid-turn and, 512 events later,
+          wedged the publisher (msx-retro-mania, 2026-09-13). *)
+       check bool (label ^ " publishes no turn terminal") false
+         (List.exists
+            (function
+              | Keeper_chat_events.Event_error _ | Keeper_chat_events.Run_finished _ -> true
+              | _ -> false)
+            events);
+       check bool (label ^ " stays visible as a typed protocol error") true
+         (has_stream_protocol_error events))
+    failures
 
 let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
   let open Agent_core.Types in
@@ -2935,15 +2966,11 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
         ; raw_bytes = Some part_bytes
         ; _
         }
-    ; Keeper_chat_events.Event_error { message = part_message }
     ] ->
       check string "unsupported part kind" "sse_unsupported_part"
         (Keeper_chat_events.stream_protocol_error_kind_to_string part_kind);
-      check int "unsupported part raw bytes" (String.length part_raw) part_bytes;
-      check string "unsupported part is visible"
-        "Provider stream capability unsupported: gemini.part.inline_data"
-        part_message
-  | _ -> fail "expected a typed visible unsupported provider part");
+      check int "unsupported part raw bytes" (String.length part_raw) part_bytes
+  | _ -> fail "expected one typed unsupported provider part");
   let response_events =
     translate_agent_core_stream_events
       [ SSEUnsupportedResponse
@@ -2958,16 +2985,12 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
         ; raw_bytes = Some response_bytes
         ; _
         }
-    ; Keeper_chat_events.Event_error { message = response_message }
     ] ->
       check string "unsupported response kind" "sse_unsupported_response"
         (Keeper_chat_events.stream_protocol_error_kind_to_string response_kind);
       check int "unsupported response raw bytes" (String.length response_raw)
-        response_bytes;
-      check string "unsupported response is visible"
-        "Provider stream capability unsupported: gemini.response.prompt_feedback"
-        response_message
-  | _ -> fail "expected a typed visible unsupported provider response"
+        response_bytes
+  | _ -> fail "expected one typed unsupported provider response"
 
 let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
   let open Agent_core.Types in
@@ -2978,16 +3001,12 @@ let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
   in
   match events with
   | [ Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind; reason = Some actual_reason; raw_bytes = Some actual_bytes; _ };
-      Keeper_chat_events.Event_error { message } ] ->
+        { kind; reason = Some actual_reason; raw_bytes = Some actual_bytes; _ } ] ->
       check string "NDJSON kind" "ndjson_parse_failed"
         (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
       check string "NDJSON reason" reason actual_reason;
-      check int "NDJSON raw bytes" (String.length raw) actual_bytes;
-      check string "NDJSON visible error"
-        ("Provider NDJSON stream parse failed: " ^ reason)
-        message
-  | _ -> fail "expected NDJSON parse failure to remain a typed visible error"
+      check int "NDJSON raw bytes" (String.length raw) actual_bytes
+  | _ -> fail "expected NDJSON parse failure to remain one typed protocol error"
 
 let test_keeper_stream_bridge_preserves_ndjson_provider_error () =
   let open Agent_core.Types in
@@ -3005,18 +3024,14 @@ let test_keeper_stream_bridge_preserves_ndjson_provider_error () =
         ; reason = Some actual_reason
         ; raw_bytes = Some actual_bytes
         ; _
-        }
-    ; Keeper_chat_events.Event_error { message = actual_message } ] ->
+        } ] ->
       check string "NDJSON provider error kind" "ndjson_error"
         (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
       check string "NDJSON provider error type" "rate_limit_exceeded"
         actual_error_type;
       check string "NDJSON provider error reason" message actual_reason;
-      check int "NDJSON provider error raw bytes" (String.length raw) actual_bytes;
-      check string "NDJSON provider visible error"
-        "Provider NDJSON stream error: rate_limit_exceeded: request rejected"
-        actual_message
-  | _ -> fail "expected NDJSON provider error to remain typed and visible"
+      check int "NDJSON provider error raw bytes" (String.length raw) actual_bytes
+  | _ -> fail "expected NDJSON provider error to remain one typed protocol error"
 
 let check_attachment_payload_reference ~base_dir ~raw_media data =
   match Tool_output.decode_from_agent_core data with
@@ -3918,6 +3933,8 @@ let () =
             test_stream_protocol_error_summary_includes_diagnostics;
           test_case "stream bridge surfaces unknown and incomplete events" `Quick
             test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
+          test_case "stream bridge attempt failures are not turn terminals" `Quick
+            test_keeper_stream_bridge_attempt_failures_are_not_turn_terminals;
           test_case "stream bridge surfaces unsupported provider shapes" `Quick
             test_keeper_stream_bridge_surfaces_unsupported_provider_shapes;
           test_case "stream bridge preserves NDJSON parse failure" `Quick

@@ -1,0 +1,8 @@
+{
+  "run_id": 34732183649,
+  "job_id": 103656890097,
+  "artifact_id": 10310365824,
+  "source_commit": "c082d495b1edc03588142b310177712718c36b49",
+  "checksums_verified": true,
+  "scope": "CI-built native host tests with real HTTP/pipes. Does not measure complete MASC server/TUI composition."
+}

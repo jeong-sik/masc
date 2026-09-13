@@ -11123,13 +11123,14 @@ def code_lane_interaction(
         raise AssertionError(
             f"the file search did not move the cursor gutter: {searched!r}"
         )
-    # Enter keeps the query for n/N and closes the prompt; the redrawn
-    # footer (query gone, hints back at the front) is the needle, because
-    # the diff renderer resends only the rows that changed.
-    send_and_wait(
-        process, master_fd, output, b"\r",
-        b"\x1b[2m  j/k:scroll  h/l:pan",
+    # Enter retains the query for n/N and removes its editing cursor.
+    # The settled footer still starts with the retained search, not the
+    # generic hints that were drawn before search began.
+    settled = send_and_wait(
+        process, master_fd, output, b"\r", b"/hi (1) n/N",
     )
+    if "▌".encode() in screen_text(settled):
+        raise AssertionError(f"Enter left the search prompt editing: {settled!r}")
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
     # The added row now arrives lexed, so the wait needle is the keyword

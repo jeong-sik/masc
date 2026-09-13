@@ -2795,7 +2795,7 @@ def send_on_stop_from_the_composer_row_interaction(requests: HttpRequests) -> In
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"i", b"^Y to speak")
+        send_and_wait(process, master_fd, output, b"i", b"Ctrl-Y to speak")
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)
         # A sent message brings the chat pane forward, as Enter on the row does.
@@ -2818,7 +2818,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
 
     The empty draft names the key first, as the composer row does: this pane
-    bound ^Y and ^A and nothing on it said so.
+    bound Ctrl-Y and Ctrl-A and nothing on it said so.
     """
 
     def interact(
@@ -2839,7 +2839,7 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
         )
         wait_for_output(
-            process, master_fd, output, b"(^Y to speak, ^A to keep listening)",
+            process, master_fd, output, b"(Ctrl-Y to speak, Ctrl-A to keep listening)",
             start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
@@ -9195,6 +9195,15 @@ def planning_review_hierarchy_interaction() -> Interaction:
         plain_review = CSI_RE.sub(b"", review)
         if b"MASC Planning" not in plain_review:
             raise AssertionError(f"Task Review lost its Planning parent: {plain_review!r}")
+        # The badge says the queue holds two; a page holding both says
+        # nothing more. It used to read "Task Review·2 (2 of 2)".
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        title = rows.get(screen_row_of(rows, b"\xe2\x96\xb8Task Review"), b"")
+        if b"\xe2\x96\xb8Task Review\xc2\xb72  Task Verdicts" not in title:
+            raise AssertionError(
+                f"the Task Review title repeats the badge's count: {title!r}"
+            )
         verdicts = send_and_wait(
             process,
             master_fd,
@@ -10660,9 +10669,108 @@ def keeper_gate_mode_footer_interaction(
                 "the footer offers Auto and YOLO on the same row: "
                 f"{drawn_rows[footer_row]!r}"
             )
+        # The Info row names the stance with the word the footer offers and
+        # the chat header wears: alpha is in yolo, so the row says so, with
+        # what that does beside it. It used to say "skipped" under a header
+        # saying YOLO.
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        stance_row = rows.get(screen_row_of(rows, b"Tool calls:"), b"")
+        if b"yolo \xc2\xb7 unasked" not in stance_row:
+            raise AssertionError(
+                f"the Info row does not name the stance as the footer does: {stance_row!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
+
+def run_tab_strip_keeps_current_entry_regression(executable: str) -> None:
+    """Beside the acting pane the row is 92 cells; a strip wider than that
+    used to be cut from the right, so the Keeper detail's Runs tab and
+    Config's voice pane drew with no mark on the row at all. The strip now
+    cuts around the current entry."""
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        resize_and_wait(process, master_fd, output, rows=38, columns=150,
+                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        drain_until_quiet(process, master_fd, output)
+        completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
+        if screen_row_of(screen_rows(completed), b"[Recent]") < 0:
+            raise AssertionError(
+                f"the acting pane did not open at 150 columns: {screen_text(completed)!r}"
+            )
+        # Keeper detail: [ from Info wraps to Runs, the last of nine tabs.
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"\xe2\x96\xb8Info")
+        send_and_wait(process, master_fd, output, b"[", b"\xe2\x96\xb8Runs")
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        title = rows[screen_row_of(rows, b"\xe2\x96\xb8Runs")]
+        if b"\xe2\x80\xa6" not in title or b"Info" in title:
+            raise AssertionError(
+                f"the Keeper detail strip did not cut its far end to keep Runs: {title!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        # Config: p walks the panes; voice is the seventh and was the one cut.
+        tab_until(process, master_fd, output, b"MASC Config")
+        for pane in (b"models", b"params", b"prompts", b"presets", b"themes", b"voice"):
+            send_and_wait(process, master_fd, output, b"p", b"\xe2\x96\xb8" + pane)
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="A tab strip keeps its current entry on the row",
+        interact=interact,
+        http_fixtures=keeper_runtime_http_fixtures(),
+    )
+
+
+def run_activity_logs_tab_pane_regression(executable: str) -> None:
+    """The Logs tab is the Activity screen, so the acting pane stays off it.
+
+    The pane exempted the event feed's view alone. Pressing 2 on Activity
+    then opened the pane beside the log table and took 56 of its columns,
+    and 1 closed it again: one screen, two widths, a tab apart.
+    """
+
+    def pane_row(output: bytearray) -> int:
+        completed = bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)])
+        return screen_row_of(screen_rows(completed), b"[Recent]")
+
+    def interact(process: subprocess.Popen[bytes], master_fd: int,
+                 _slave_fd: int, output: bytearray, _base_path: str) -> None:
+        # Wide enough for the pane (its threshold is 132 columns), and the
+        # Overview shows it is there to be kept off: the tab strip is not
+        # the thing that hides it.
+        resize_and_wait(process, master_fd, output, rows=38, columns=150,
+                        needle=b"MASC Overview", final_cursor=b"\x1b[?25l")
+        drain_until_quiet(process, master_fd, output)
+        if pane_row(output) < 0:
+            raise AssertionError(
+                f"the acting pane did not open on Overview at 150 columns: {screen_text(bytes(output))!r}"
+            )
+        tab_until(process, master_fd, output, b"MASC Activity")
+        for key, tab in ((b"2", b"\xe2\x96\xb8Logs"), (b"1", b"\xe2\x96\xb8Events"),
+                         (b"2", b"\xe2\x96\xb8Logs")):
+            send_and_wait(process, master_fd, output, key, tab)
+            drain_until_quiet(process, master_fd, output)
+            if pane_row(output) >= 0:
+                raise AssertionError(
+                    f"the acting pane opened on the Activity tab {tab!r}: {screen_text(bytes(output))!r}"
+                )
+        os.write(master_fd, b"q")
+
+    run_terminal_scenario(
+        executable,
+        description="Activity Logs tab keeps the acting pane off",
+        interact=interact,
+        http_fixtures=keeper_runtime_http_fixtures(),
+    )
+
 
 def enter_outside_changes_interaction(
     process: subprocess.Popen[bytes],
@@ -11111,7 +11219,7 @@ def config_navigation_interaction() -> Interaction:
         master_fd: int,
         _slave_fd: int,
         output: bytearray,
-        _base_path: str,
+        base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Config")
         wait_for_output(
@@ -11122,6 +11230,21 @@ def config_navigation_interaction() -> Interaction:
             start=0,
             timeout=3.0,
         )
+        # The paths row keeps each path's tail and the binary age. Cut from
+        # the right at 28 and 32 cells, the workspace under /var/folders and
+        # its .masc both read as the same "/var/folders/bv/…" prefix.
+        drain_until_quiet(process, master_fd, output)
+        rows = screen_rows(bytes(output[: output.rfind(FRAME_END) + len(FRAME_END)]))
+        paths_row = rows.get(screen_row_of(rows, b"  base "), b"")
+        # The random suffix of the harness directory is what tells two
+        # workspaces apart; a whole basename can be longer than a path's
+        # share of a 100-column row.
+        suffix = os.path.basename(base_path)[-8:].encode()
+        for needle in (suffix + b"   masc ", suffix + b"/.masc", b"binary age"):
+            if needle not in paths_row:
+                raise AssertionError(
+                    f"the Config paths row lost {needle!r}: {paths_row!r}"
+                )
 
         status = send_and_wait(
             process, master_fd, output, b"v", b"Pending restart: keeper.pending"
@@ -12266,7 +12389,9 @@ def fusion_list_detail_interaction(
             # PRESET RUN, and the keeper column took the width the run id used
             # to sit whole in.
             b"RUN",
-            b"Flow: Question",
+            # The selected run's own state under the list; the static
+            # "Flow: Question → …" that opened this row is gone.
+            b"evidence retained",
         ):
             if column not in plain:
                 raise AssertionError(
@@ -12609,6 +12734,15 @@ def run_observer_reconnect_regression(executable: str) -> None:
         try:
             resize_and_wait(process, master_fd, output, rows=38, columns=150, needle=b"MASC Overview")
             wait_for_output(process, master_fd, output, b"feed: live 1", start=0, timeout=10)
+            # The cluster and project names sit two cells apart, not in
+            # 24- and 20-cell columns: the live names are "default" and
+            # "me", and the blank padding cut the transport tail to
+            # "ws …" beside the roster pane.
+            summary = screen_text(bytes(output))
+            if b"Cluster: cluster-a  Project: project-a  " not in summary:
+                raise AssertionError(
+                    f"the Overview pads its cluster and project names: {summary!r}"
+                )
             send_and_wait(process, master_fd, output, b"\t", b"MASC Activity")
             send_and_wait(process, master_fd, output, b"f", b"scope actions")
             send_and_wait(process, master_fd, output, b"\r", b"Tool use ID: before-disconnect")
@@ -13386,6 +13520,8 @@ def run_keyboard_regression(executable: str) -> None:
         interact=enter_outside_changes_interaction,
         http_fixtures=enter_split_fixtures,
     )
+    run_tab_strip_keeps_current_entry_regression(executable)
+    run_activity_logs_tab_pane_regression(executable)
     changes_navigation_fixtures = keeper_runtime_http_fixtures()
     changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
     changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
@@ -14038,7 +14174,8 @@ def run_browser_scene_regression(executable: str) -> None:
     client = "11111111-1111-4111-8111-111111111111"
     target = {"lane": "live", "clientId": client, "tabId": 2}
     url = "https://example.org/scene"
-    scenes, actions = [], []
+    scenes, actions, scrolls, scene_viewports = [], [], [], []
+    scroll_y = [0]
 
     def node(identity, kind, text):
         result = {"nodeId": identity, "kind": kind, "tag": "button" if kind == "control" else "p",
@@ -14062,6 +14199,8 @@ def run_browser_scene_regression(executable: str) -> None:
         view = request.get("view")
         scope = request.get("scope")
         assert view in ("content","regions")
+        if "expectedUrl" in request:
+            assert request["expectedUrl"] == url
         region = dict(node("channel-region","region","Channel messages"),role="main")
         if view == "regions":
             nodes = [region]
@@ -14073,11 +14212,13 @@ def run_browser_scene_regression(executable: str) -> None:
                 node("first-control", "control", "First action"),
                 node("second-control", "control", "Second action"),
                 node("image", "raster", "Scene illustration")]
+        viewport = {"width": 800, "height": 600, "scrollX": 0, "scrollY": scroll_y[0]}
+        scene_viewports.append(viewport)
         return 200, {"ok": True, "data": {"source": "live", "clientId": client,
             "tabId": 2, "elapsed_ms": 13.0, "schema": "masc.browser.scene.v1", "view":view, "scope":scope,
             "documentId": "document-after" if changed else "document-before",
             "url": url, "title": "scene", "truncated": False,
-            "viewport": {"width": 800, "height": 600, "scrollX": 0, "scrollY": 0},
+            "viewport": viewport,
             "nodes": nodes}}
 
     def click(body):
@@ -14091,7 +14232,17 @@ def run_browser_scene_regression(executable: str) -> None:
         "data": {"clients": [{"clientId": client, "browser": "zen"}]}})
     fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
     fixtures["/api/v1/dashboard/browser-lane/scene"] = RequestHttpResponse(scene)
-    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(click)
+    def interact_request(body):
+        request = json.loads(body)
+        if request.get("action") == "scroll":
+            assert request == dict(target, expectedUrl=url, action="scroll", x=0, y=request["y"])
+            assert request["y"] in (600, -600)
+            scrolls.append(request)
+            scroll_y[0] = max(0, scroll_y[0] + request["y"])
+            return 200, {"ok": True, "data": {"scrollY": scroll_y[0]}}
+        return click(body)
+
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(interact_request)
 
     def interact(process, master, _slave, output, _base):
         palette_go(process, master, output, b"go Browser Lane", b"scene reader ready")
@@ -14119,6 +14270,10 @@ def run_browser_scene_regression(executable: str) -> None:
         focused = scenes[-1]
         send_and_wait(process, master, output, b"r", b"SCOPED CHANNEL CONTENT")
         assert scenes[-1] == focused and len(actions)==1, "scoped refresh widened or caused an effect"
+        send_and_wait(process, master, output, b"J", b"SCOPED CHANNEL CONTENT")
+        assert scrolls[-1]["y"] == 600 and scene_viewports[-1]["scrollY"] == 600
+        send_and_wait(process, master, output, b"K", b"SCOPED CHANNEL CONTENT")
+        assert scrolls[-1]["y"] == -600 and scene_viewports[-1]["scrollY"] == 0
         send_and_wait(process, master, output, b"\x1b", b"MASC Overview")
         os.write(master, b"q")
 

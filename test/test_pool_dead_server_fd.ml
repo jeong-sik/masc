@@ -505,6 +505,48 @@ let test_establishment_timeout_during_tls () =
   Alcotest.(check int) "no timed-out client was parked" 0 stats.total_idle;
   Pool.shutdown pool
 
+(* Observe only connections owned by this pool, not unrelated process FDs.
+   Retain Eio handles rather than Unix integers, which can be reused on close. *)
+module Observed_net = struct
+  type tag = [ `Generic | `Unix ]
+  type t = {
+    net : tag Eio.Net.ty Eio.Resource.t;
+    connected : Eio_unix.Fd.t list ref;
+  }
+  let connect t ~sw address =
+    let flow = Eio.Net.connect ~sw t.net address in
+    (match Eio_unix.Resource.fd_opt flow with
+     | Some fd -> t.connected := fd :: !(t.connected)
+     | None -> Alcotest.fail "real pool connection has no Unix FD capability");
+    flow
+  let getaddrinfo t ~service host = Eio.Net.getaddrinfo ~service t.net host
+  let getnameinfo t = Eio.Net.getnameinfo t.net
+  let listen t ~reuse_addr ~reuse_port ~backlog ~sw address =
+    Eio.Net.listen t.net ~reuse_addr ~reuse_port ~backlog ~sw address
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw address =
+    Eio.Net.datagram_socket t.net ~reuse_addr ~reuse_port ~sw address
+end
+
+let env_with_observed_connections (env : Eio_unix.Stdenv.base) connected =
+  let net = Eio.Resource.T
+    ({ Observed_net.net = env#net; connected },
+     Eio.Net.Pi.network (module Observed_net)) in
+  object
+    method net = net
+    method clock = env#clock
+    method stdin = env#stdin
+    method stdout = env#stdout
+    method stderr = env#stderr
+    method domain_mgr = env#domain_mgr
+    method process_mgr = env#process_mgr
+    method mono_clock = env#mono_clock
+    method fs = env#fs
+    method cwd = env#cwd
+    method secure_random = env#secure_random
+    method debug = env#debug
+    method backend_id = env#backend_id
+  end
+
 let test_healthy_reuse_and_scope_shutdown ~explicit () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -526,10 +568,17 @@ let test_healthy_reuse_and_scope_shutdown ~explicit () =
     (try loop () with End_of_file -> ());
     !handled) in
   let url = Printf.sprintf "http://127.0.0.1:%d/" port in
-  let before_ = fd_count () in
+  let connected = ref [] in
+  let pool_env = env_with_observed_connections env connected in
+  (* [is_open] observes the Eio handle's closing state. The peer's EOF and
+     completed pool switch additionally witness actual connection teardown. *)
+  let check_connections_closed label =
+    Alcotest.(check bool) label true
+      (List.for_all (fun fd -> not (Eio_unix.Fd.is_open fd)) !connected)
+  in
   Eio.Time.with_timeout_exn clock 5.0 (fun () ->
     Eio.Switch.run (fun pool_sw ->
-      let pool = Masc_http_client.Pool.create ~sw:pool_sw ~env () in
+      let pool = Masc_http_client.Pool.create ~sw:pool_sw ~env:pool_env () in
       for _ = 1 to 2 do
         match Masc_http_client.Pool.request pool ~method_:`GET ~url () with
         | Error msg -> Alcotest.fail msg
@@ -539,11 +588,22 @@ let test_healthy_reuse_and_scope_shutdown ~explicit () =
       Alcotest.(check int) "one client survived both requests" 1 stats.create_count_total;
       Alcotest.(check int) "second request reused the client" 1 stats.reuse_count_total;
       Alcotest.(check int) "client parked before shutdown" 1 stats.total_idle;
-      if explicit then Masc_http_client.Pool.shutdown pool);
-    Eio.Stream.take completed);
+      (match List.rev !connected with
+       | [probe; client] ->
+         Alcotest.(check bool) "TCP probe is closed while client is parked" false
+           (Eio_unix.Fd.is_open probe);
+         Alcotest.(check bool) "exactly one owned client remains open" true
+           (Eio_unix.Fd.is_open client)
+       | handles -> Alcotest.failf "expected one probe and one client, observed %d connections"
+           (List.length handles));
+      if explicit then begin
+        Masc_http_client.Pool.shutdown pool;
+        Eio.Stream.take completed;
+        check_connections_closed "explicit shutdown closes all owned connections"
+      end);
+    if not explicit then Eio.Stream.take completed);
   Alcotest.(check int) "server handled both requests" 2 !requests;
-  Alcotest.(check int) "shutdown closes the client scope"
-    before_ (fd_count ())
+  check_connections_closed "parent teardown closes all owned connections"
 
 let test_cancelled_pool_before_client_construction () =
   Eio_main.run @@ fun env ->

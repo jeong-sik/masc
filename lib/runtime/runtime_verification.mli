@@ -2,7 +2,13 @@
     The only host-declared tool returns an unpredictable in-memory challenge. A model
     reply is not verified unless it consumed that actual tool result. *)
 type unavailable =
-  | Missing_credential
+  | Missing_credential of string
+      (** The runtime requires an environment credential that is unset.
+          Carries the dispatch check's own account, which names the variable. *)
+  | Invalid_credential of string
+      (** The runtime declares an inline or file credential that resolved to
+          nothing usable. Carries the dispatch check's own account, which names
+          the carrier, so a bad file is not reported as a missing one. *)
   | Unsupported_runtime
   | Tools_not_declared
   | Invalid_configuration of string
@@ -46,6 +52,30 @@ type result =
   }
 
 val to_json : result -> Yojson.Safe.t
+val failure_code : failure -> string
+val failure_detail : failure -> string option
+
+type unmeasured =
+  { runtime_id : string
+  ; code : string
+  ; message : string
+  ; detail : string option
+  }
+(** What [unavailable_to_json] writes: the runtime was never measured, so there
+    is no selected model and the code is the command's own, not a [failure]. *)
+
+type report =
+  | Measured of result
+  | Unmeasured of unmeasured
+
+val of_json : Yojson.Safe.t -> (report, string) Stdlib.result
+(** Read back exactly what [to_json] or [unavailable_to_json] wrote. Refuses,
+    naming the reason, a document with another schema, a missing or extra key,
+    a failure code this module does not write, a detail that the code never
+    carries (or a missing one it always carries), a status that disagrees with
+    the failure, or a roundtrip that disagrees with it. [failure.message] is
+    presentation derived from the code and is required to be a string but not
+    compared, so wording can change without invalidating a report. *)
 val unavailable_to_json
   :  ?detail:string
   -> runtime_id:string

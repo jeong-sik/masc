@@ -317,8 +317,9 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode.skill_catalog_source 
    was left out when the others moved: a bar between names, a space before the
    unmarked ones and the mark without the information colour, so the Tools
    row read "▸호출 범위 | 비동기 작업" under strips spelled two cells apart. *)
-let tools_pane_strip (state : state) =
+let tools_pane_strip ~cols (state : state) =
   tab_strip
+    ~width:(tab_strip_width ~cols ~before:" ")
     (List.map
        (fun (pane, label) -> (label, state.tools_pane = pane))
        [ (Masc_tui_types.Tools_surface, "호출 범위")

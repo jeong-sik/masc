@@ -41,11 +41,6 @@ let listen_key = "\025"
    would claim it by convention. *)
 let continuous_key = "\001"
 
-(* The two keys above, named for a reader looking at an empty draft. One
-   spelling for every row that takes a draft, so the composer row and the chat
-   pane cannot come to describe the same keys two ways. *)
-let voice_keys_hint = "(^Y to speak, ^A to keep listening)"
-
 let prompt composer =
   match composer.target with
   | No_target -> "no keeper selected"

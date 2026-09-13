@@ -1,10 +1,17 @@
 include Keeper_types_profile_toml_parser
 
+(* [Declaration_not_found] carries the keeper name that was asked for and
+   [Unknown_deny_tool] the deny entries no descriptor offers the model. Both
+   used to be silent: a missing declaration loaded as empty defaults and an
+   unnamed deny entry logged a WARN row at turn setup while denying nothing
+   (audit F386, F087). *)
 type keeper_toml_error_kind =
   | Read_error
   | Parse_error
   | Profile_error
   | Invalid_name
+  | Declaration_not_found of string
+  | Unknown_deny_tool of string list
 
 type keeper_toml_load_error =
   { keeper_path : string
@@ -18,6 +25,8 @@ let keeper_toml_error_kind_to_string = function
   | Parse_error -> "parse_error"
   | Profile_error -> "profile_error"
   | Invalid_name -> "invalid_name"
+  | Declaration_not_found _ -> "declaration_not_found"
+  | Unknown_deny_tool _ -> "unknown_deny_tool"
 ;;
 
 let keeper_toml_load_error_to_string error =
@@ -37,6 +46,22 @@ let keeper_toml_load_error_paths error =
   else [ error.keeper_path; error.failing_path ]
 ;;
 
+(* The deny axis is by model-visible name, so the only names a deny entry can
+   mean are the ones the descriptor spine projects to the model. Skipped when
+   the profile denies nothing: the model-visible walk revalidates every
+   descriptor's schema shape and is not free. *)
+let unknown_deny_tools = function
+  | [] -> []
+  | tool_deny ->
+    let model_visible_tool_names =
+      Keeper_tool_descriptor.model_visible_descriptors ()
+      |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+    in
+    List.filter
+      (fun name -> not (List.mem name model_visible_tool_names))
+      tool_deny
+;;
+
 let load_profile_doc_content ~path content =
   let error kind detail =
     Error { keeper_path = path; failing_path = path; kind; detail }
@@ -46,7 +71,15 @@ let load_profile_doc_content ~path content =
   | Ok doc ->
     (match profile_defaults_of_toml doc with
      | Error detail -> error Profile_error detail
-     | Ok defaults -> Ok (doc, defaults))
+     | Ok defaults ->
+       (match unknown_deny_tools defaults.tool_deny with
+        | [] -> Ok (doc, defaults)
+        | unknown ->
+          error
+            (Unknown_deny_tool unknown)
+            (Printf.sprintf
+               "keeper.tools.deny names tools no descriptor offers the model: %s"
+               (String.concat ", " unknown))))
 ;;
 
 let inspect_keeper_toml_content ~(path : string) content

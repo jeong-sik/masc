@@ -141,7 +141,28 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
    the name on the folded line while masc_tui.ml matches the byte. Apart,
    one of them drifts and the line names a key that does nothing. *)
 let expand_turn_key = "\019"
-let expand_turn_label = "^S"
+let expand_turn_label = "Ctrl-S"
+
+(* The control keys a body row names beside a figure or a draft. They are
+   here, beside the bindings that list them, so a row and the footer cannot
+   spell one key two ways: the composer said "^Y" under a footer saying
+   "Ctrl-Y", and the context header "^X" for a key the table did not list. *)
+let voice_speak_key = "Ctrl-Y"
+let voice_listen_key = "Ctrl-A"
+let roster_toggle_key = "Ctrl-B"
+
+(* Ctrl-X opens the context inspector from the chat. It is named on the
+   context header, beside the figure it explains, and nowhere else: the
+   footer has no room for a key whose home is that row. *)
+let context_inspector_key = "\024"
+let context_inspector_label = "Ctrl-X"
+
+(* The two voice keys, named for a reader looking at an empty draft. One
+   spelling for every row that takes a draft, so the composer row and the chat
+   pane cannot come to describe the same keys two ways. *)
+let voice_keys_hint =
+  Printf.sprintf "(%s to speak, %s to keep listening)" voice_speak_key
+    voice_listen_key
 
 
 let keepers_jump =
@@ -160,7 +181,7 @@ let global =
   ; b Meta "&"
       "the MSX screen: the emulator core over the whole terminal (esc: back; \
        also `:` go MSX)"
-  ; b Meta "Ctrl-B" "keeper roster beside the chat — put away until you ask"
+  ; b Meta roster_toggle_key "keeper roster beside the chat — put away until you ask"
       ~help:"the Activity pane (Ctrl-L) answers the same question for every \
              keeper, so the column starts hidden; this brings it back on a \
              terminal wide enough to hold it"
@@ -218,6 +239,12 @@ let approval_decide =
 let approval_retry =
   b Act "R" "retry Auto Judge"
     ~help:"only when the blocked row is safely rearmable"
+
+(* Where a Fusion run's caller and its Board evidence are, on the list and
+   in the detail alike: one binding each, so the two footers cannot name the
+   key two ways. *)
+let fusion_caller_key = b Navigate "K" "calling Keeper"
+let fusion_board_key = b Navigate "B" "Board evidence"
 
 let for_surface = function
   | Overview ->
@@ -307,9 +334,9 @@ let for_surface = function
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
-      ; b Act "Ctrl-Y" "speak"
+      ; b Act voice_speak_key "speak"
           ~help:"record into the draft; again to stop and keep what was said"
-      ; b Act "Ctrl-A" "keep listening"
+      ; b Act voice_listen_key "keep listening"
           ~help:"continuous capture on/off: each sentence starts the next capture"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
@@ -494,8 +521,8 @@ let for_surface = function
       ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next"
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Navigate "K" "calling Keeper"
-      ; b Navigate "B" "Board evidence"
+      ; fusion_caller_key
+      ; fusion_board_key
       ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
@@ -711,6 +738,32 @@ let footer_hints_approval_detail =
     ; b Act "Esc" "back"
     ]
 
+(* The Board draft's two footers were written out in the renderer, and the
+   pane above them then spelled the same key a second way: "Ctrl-E: $EDITOR"
+   over a footer saying "Ctrl-E:$EDITOR", with "Enter: newline" beside it
+   that the footer never named. Both rows project from here, and the pane
+   keeps to what the draft is and where it goes. *)
+let board_compose_writing_bindings =
+  [ b Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
+  ; b Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
+  ; b Meta "Esc" "menu" ~help:"send, discard, or keep writing"
+  ; b Meta "Tab" "surfaces"
+  ]
+
+(* No [q] here: while the draft has the keys, [q] is a printable scalar and
+   goes into the draft like any other letter. Leaving is Esc and then d. *)
+let footer_hints_board_compose_writing =
+  "type to write  " ^ hints_of_bindings board_compose_writing_bindings
+
+let board_compose_armed_bindings ~reply =
+  [ b Act "s" "send" ]
+  @ [ b Act "e" "edit in $EDITOR" ]
+  @ (if reply then [] else [ b Act "h" "cycle hearth" ~help:"a new post's sub-board" ])
+  @ [ b Act "d" "discard"; b Meta "Esc" "keep writing" ]
+
+let footer_hints_board_compose_armed ~reply =
+  hints_of_bindings (board_compose_armed_bindings ~reply)
+
 (* A pane's own keys, then the keys all seven panes share. *)
 let config_pane_bindings pane =
   let own =
@@ -870,12 +923,18 @@ let cancels_two_press ~input_seen ~key ~second_press =
    owns the live scroll numbers it appends after them. ([view] stays
    [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
    [position] is the window the renderer drew ({!Masc_tui_scroll.window_text}),
-   so the footer agrees with what is on screen. *)
+   so the footer agrees with what is on screen.
+
+   [K] and [B] answer in the detail as they do on the list (masc_tui.ml
+   matches them under [Fusion_detail]); the footer left them out, and a body
+   row said "K Keeper · B Board" in its own notation instead. *)
 let footer_hints_fusion_detail ~position =
   Printf.sprintf "%s  %s"
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
         ; b Navigate "PgUp/PgDn" "page"
+        ; fusion_caller_key
+        ; fusion_board_key
         ; b Act "Y" "copy"
         ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
         ]

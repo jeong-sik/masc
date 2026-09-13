@@ -17,10 +17,13 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | --- | --- |
 | `l` / `a` | Live / automation browser |
 | `[` / `]` | Previous / next tab and read its page |
+| `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
+| `J` / `K` | Scroll the observed browser page by one viewport, then refresh the same scene |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover tabs and refresh the page |
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
+| `N` / `P` | Select the next / previous observed `article` region or article ancestor |
 | `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
 | `g` | Enter a URL in automation; Enter opens it, Esc cancels |
 | `o` / `x` | Open / close the automation session |
@@ -105,9 +108,22 @@ control and reads a fresh scene, or reads the selected region. The footer names
 the selected action. `v` lists page regions; the context row distinguishes page
 content from a selected region. `j`/`k` scroll the terminal text, and `r` observes
 the same page or region again.
+`J`/`K` send a guarded top-level page scroll using the observed viewport height,
+then read the same scene again. The result must retain the observed URL and
+document identity; a viewport resize is reported by the fresh scene rather than
+treated as a pre-action lock. Nested panes still require screenshot pointer
+scroll because their scroll container is selected by the observed hit point.
+The scene context row shows the observed page scroll as `x=… y=…`, so a refresh
+makes the page position explicit without confusing it with pointer coordinates
+or claiming that the scene is a complete document.
+In a regions scene, `N`/`P` move between exact observed `article` regions;
+they leave the selection unchanged on content scenes without article roles.
 `Enter` follows an observed same-tab HTTP(S) link directly and reads the
 destination with its follow receipt; the old region scope is never reused for
 the destination. Other enabled controls use the ordinary observed click.
+When `Enter` reads a region, the context row keeps the observed typed role and
+label (for example, `article · Post A`) while the body is scoped. `y` includes
+that same scope context with the document/node identity.
 `m` is the short semantic path for a page's primary reading surface: the first
 press observes `main`/`article` landmarks, and the second focuses the unique
 exact-role match. Role names are classified at the observation boundary;
@@ -118,12 +134,47 @@ If the destination read is still pending or fails, the footer exposes `r`/`s`/`v
 as guarded retries so an old document cannot be accepted as the new page.
 `y` copies the selected element together with its observed region, viewport,
 and truncation flag, so a Keeper can preserve the same reading scope.
+The scene status line also reports the observed composition, such as
+`2 articles · 6 links · 1 image`; these are typed node counts, not guesses from
+page text. Use the article count to choose `N`/`P` before reading the full body.
+After a same-document refresh or guarded page scroll it also shows an observed
+delta such as `Δ +3 new · -1 out · =8 same · 2 changed`. `new`, `out`, and
+`same` count unique observed node IDs; `out` means absent from this observation,
+not deleted from the site. Geometry-only movement from scrolling does not count
+as a content change. A different document, URL, view, or scope starts a fresh
+observation and shows no delta. The delta is a compact progress hint for the
+current viewport, not evidence that a feed is complete.
 Press `s` to return to the text reader or `Ctrl-O` to open the painted image.
 The image viewport retains its browser scrolling controls.
 
 The scene is DOM-order text, controls and image placeholders. CSS geometry is
 available to tools; this first TUI projection does not reproduce CSS layout or
 compose inline raster regions. Use image view for the browser's painted result.
+Text nodes and observed controls with an observed heading ancestor are shown
+with a `#` outline prefix, so article titles and section headings remain
+visible while reading the DOM-order body. The scene records an `h1`–`h6`
+ancestor, including text nested under a span and links whose own control node
+is the observed heading target, plus an explicit `role="heading"` with
+`aria-level` 1–6.
+Missing or invalid ARIA levels stay plain text; the reader does not infer
+headings from text, CSS, font size, or class names.
+Content text, controls, and images also retain the nearest observed semantic
+ancestor region. An `article` wins for feeds and threads, then `main`, then the
+closest other observed landmark. The TUI emits a compact `[article] Label`
+boundary when that context changes, while a scoped article read suppresses the
+duplicate boundary because its scope row already names the article. This is
+observed region identity and label data, not a selector or a guess from page
+text. `y` includes the same ancestor region identity in copied context.
+Adjacent observed text nodes inside the same semantic block are coalesced for
+the reading row when the observed block identity repeats, preserving their
+exact text and each node's selection number. The group closes at that verified
+repeat; an unproven tail stays as separate rows. Crossing a block tag, control,
+raster, heading level, or observed region starts a new row group; the
+projection never merges an action target into prose.
+For eligible observed block-tag nodes, a positive vertical gap from the
+preceding eligible node becomes one blank TUI row. An intervening inline node
+breaks that comparison, zero-gap line fixtures stay compact, and the reader
+does not infer CSS display or invent spacing from a site selector.
 TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
@@ -171,6 +222,18 @@ content, and `r` re-reads the same region. Pressing `v` again returns to the
 region list. A stale reference is rejected once the region is replaced or the
 page reloads. A connector that does not support region reading and returns
 the whole page instead is not treated as success.
+
+`N`/`P` move directly between observed `article` regions. In a content scene,
+they use the first node carrying each typed article ancestor, so a feed can
+jump between posts without opening the region picker first. They use observed
+landmark identity; navigation, suggestions and ordinary text remain available
+through `n`/`p` and `Tab`/`Shift-Tab`. If no article role or article ancestor was
+observed, the shortcut leaves the current selection unchanged. In a content
+scene this selects the first observed node; `Enter` still performs that node's
+observed action, while region scoping remains the explicit `v` → `Enter` path.
+When multiple article ancestors are visible, their compact boundaries include
+the observed ordinal (for example, `[article 2/5]`); this is the current
+viewport's observed count, not a claim that a feed is complete.
 
 Keepers call `mode=scene` the same way, passing the `documentId`/`nodeId`
 observed from `BrowserRead mode=regions` as `scope`. This path selects an

@@ -38,6 +38,10 @@ scope가 null이면 생략한다. 선택 요소와 읽기 범위는 다르므로
 공개 Reddit·X/Twitter형 피드·스레드라면 `browser-public-social`을 사이트 지침으로
 선택하고, 요청한 페이지 계열의 reference 하나만 추가로 읽는다. 로그인·게시·투표·DM은
 이 read-only 지침의 범위가 아니다.
+TUI Browser Lane에 여러 관측 탭이 보이면 `1`–`9`로 표시된 탭을 직접 선택할 수
+있다. 같은 탭을 다시 누르면 현재 관측과 스크롤을 유지하며, 다른 탭을 고르면 그
+탭을 새로 읽는다. 숫자 위치만으로 URL이나 페이지 정체성을 추측하지 말고, 새 읽기의
+제목·URL·본문을 확인한다.
 
 현재 호출 목록의 `keeper_compose_<name>`는 실행 도구다. instruction을 읽었다고
 없는 composition이 생기지는 않는다. 중간 결과에 별도 판단이 필요 없는 이동+관측은
@@ -65,6 +69,14 @@ TUI의 `m`은 semantic shortcut이다. 처음에는 `regions`를 관측하고, �
 읽는다. role 문자열은 관측 경계에서 semantic variant로 분류하며, 알 수 없는 role은
 목록에 남겨도 primary로 추측하지 않는다. 여러 후보는 자동 선택하지 않고 `v` 영역 목록에서
 운영자가 고른다. 텍스트·URL·CSS selector 추측으로 primary 영역을 정하지 않는다.
+scene context row의 `page scroll x=… y=…`는 새로 관측한 실제 page offset이다. 이를
+pointer/nested pane 좌표나 문서 전체 길이, feed completeness로 해석하지 않는다.
+같은 source·client·tab·document·view·scope를 다시 관측하면 status row에
+`Δ +new · -out · =same · changed` 형태의 관측 delta도 붙는다. node ID 중복은
+한 번만 세며, geometry-only scroll은 changed가 아니다. `out`은 이번 viewport
+관측에서 빠진 것이지 사이트에서 삭제됐다는 뜻이 아니다. 문서·URL·view·scope가
+바뀌거나 첫 관측이면 delta를 만들지 않는다. 이는 현재 관측 범위의 진행 힌트일
+뿐이며 feed 전체 수집이나 완전성을 증명하지 않는다.
 
 본문이 충분하면 그 결과로 다음 채널을 이어가거나 답한다. 보이는 내용·scope·truncated를
 확인해 실제 수집 범위와 근거 링크를 남긴다. 잘렸다면 더 작은 관측 영역, 지원되는

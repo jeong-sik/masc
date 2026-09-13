@@ -1683,7 +1683,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          see the letter after Ctrl-V and never Ctrl-V itself. *)
       paste_image ();
       true
-    end else if c = Some 24 then begin
+    end else if c = Some (Char.code Masc_tui_keys.context_inspector_key.[0]) then begin
       (* Ctrl-X: the breakdown behind the figure in the header. The header
          names this key beside the number, so the place that shows how full
          the context is is also the place that opens what filled it. *)
@@ -2016,14 +2016,18 @@ type async_msg =
   | Keeper_gate_settings_loaded of
       (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
-      ((string * string) list, string) result * Approval.Flow.generation
+      ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
+      * Approval.Flow.generation
       (** The stance listing replaces the whole yolo set, so a fetch that
           started before an operator armed a gate would put the pre-press
           answer back. The generation says which flow the answer belongs to
           and a stale one is dropped, the same guard the held-call listing
           already rides. *)
   | Keeper_tool_mode_set of
-      string * string * (unit, string) result * Approval.Flow.generation
+      string
+      * Masc.Keeper_tool_approval_mode.mode
+      * (unit, string) result
+      * Approval.Flow.generation
       (** keeper, tool call id, allow, and whether a wait was released — the
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
@@ -4679,14 +4683,16 @@ let launch_browser_lane state ~mailbox operation =
        | _ -> ())
   | None -> ()
   | Some view when busy view -> ()
-  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
-                   && not (selected_client_available view) ->
+  | Some view when (match operation with Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> true | _ -> false)
+      && not (selected_client_available view) ->
       state.browser_lane <- Some { view with client_picker = Some 0;
-        scene = None; scene_cursor = 0;
+        scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None;
         load = Failed "Choose a connected browser before reading its tabs" }
   | Some view ->
       (* Scene geometry belongs to its observation. Browser effects and explicit
-         reads withdraw it before dispatch; a screenshot may itself observe a
+         reads and effectful gestures withdraw it before dispatch; a scroll
+         keeps the prior observation visible while its replacement is checked;
+         a screenshot may itself observe a
          navigation, so dismissing its overlay must not resurrect old nodes.
          Scene_click and Scene_follow retain their exact reference in
          [operation], and the matching completion can install the newly
@@ -4701,8 +4707,10 @@ let launch_browser_lane state ~mailbox operation =
       let view = match operation with
         | Discover _ | Read_refresh | Scene_refresh _ | Viewport_cadence _ -> view
         | Read | Open_session | Close_session | Goto _ | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
-            { view with scene = None; scene_cursor = 0 }
+        | Scene_read _ | Scene_regions _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
+            { view with scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None }
+        | Scene_scroll _ -> view
+        | Scene_click _ | Scene_focus _ -> { view with scene = None; scene_cursor = 0; scene_delta = None }
       in
       state.browser_lane_generation <- state.browser_lane_generation + 1;
       let generation = state.browser_lane_generation in
@@ -4731,6 +4739,13 @@ let launch_browser_lane state ~mailbox operation =
         | Scene_regions tab_id -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
+        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_lane_scene_loaded
+            (generation, call (fun () -> Result.bind
+              (Masc_tui_http.scroll_browser_scene ~host ~port ~view ~tab_id
+                 ~expected_url ~delta_y)
+              (fun () -> Masc_tui_http.fetch_browser_scene
+                 ?scope ~expected_url ~scene_view
+                 ~host ~port ~view ~tab_id ())))
         | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
               ~host ~port ~view ~tab_id ~scene_view ~scope))
@@ -13124,7 +13139,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              state.keeper_yolo_names <-
                List.filter_map
                  (fun (keeper, mode) ->
-                   if String.equal mode "yolo" then Some keeper else None)
+                   match mode with
+                   | Masc.Keeper_tool_approval_mode.Yolo -> Some keeper
+                   | Masc.Keeper_tool_approval_mode.Auto -> None)
                  overrides
          | Error detail ->
              state.keeper_tool_modes_error <- Some detail)
@@ -13141,16 +13158,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                   (fun name -> not (String.equal name keeper_name))
                   state.keeper_yolo_names
               in
-              if String.equal mode "yolo" then keeper_name :: without
-              else without);
+              match mode with
+              | Masc.Keeper_tool_approval_mode.Yolo -> keeper_name :: without
+              | Masc.Keeper_tool_approval_mode.Auto -> without);
            add_event state "system"
-             (if String.equal mode "yolo" then
-                Printf.sprintf
-                  "%s runs every tool call unasked (YOLO) until restart or g"
-                  keeper_name
-              else
-                Printf.sprintf "%s is back on the approval policy (auto)"
-                  keeper_name)
+             (match mode with
+              | Masc.Keeper_tool_approval_mode.Yolo ->
+                  Printf.sprintf
+                    "%s runs every tool call unasked (%s) until restart or g"
+                    keeper_name
+                    (Masc_tui_types.tool_mode_word Masc.Keeper_tool_approval_mode.Yolo)
+              | Masc.Keeper_tool_approval_mode.Auto ->
+                  Printf.sprintf "%s is back on the approval policy (%s)"
+                    keeper_name
+                    (Masc_tui_types.tool_mode_word Masc.Keeper_tool_approval_mode.Auto))
        | Error detail ->
            add_event state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
@@ -18036,9 +18057,10 @@ and is loaded on demand through keeper_skill.
                 launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
            open_browser_lane state ~mailbox:async_messages
-       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k"
+       | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
+               | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
@@ -18080,6 +18102,11 @@ and is loaded on demand through keeper_skill.
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
+                 | ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key
+                   when not (busy view) ->
+                     let index = Char.code key.[0] - Char.code '1' in
+                     let selected = select_tab_index index view in
+                     if selected.selected_tab <> view.selected_tab then read selected
                  | "v" when not (busy view) ->
                      (match view.selected_tab with
                       | Some tab_id ->
@@ -18100,7 +18127,9 @@ and is loaded on demand through keeper_skill.
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
                       | Primary_focus {tab_id;index;target} ->
-                          state.browser_lane <- Some {view with scene_cursor = index};
+                          let focused = {view with scene_cursor = index;
+                            scene_scope = Browser_lane_view.scene_scope_context_for_index view index} in
+                          state.browser_lane <- Some focused;
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id;target})
                       | Primary_error Browser_lane_view.No_primary_region ->
@@ -18112,7 +18141,7 @@ and is loaded on demand through keeper_skill.
                       | Primary_unavailable -> ())
                  | "s" when not (busy view) ->
                      (match view.scene, view.selected_tab with
-                      | Some _, _ -> read {view with scene = None; scroll = 0}
+                      | Some _, _ -> read {view with scene = None; scene_delta = None; scroll = 0}
                       | None, Some tab_id ->
                           (match view.scene_guard with
                            | Some guard -> launch_browser_lane state ~mailbox:async_messages
@@ -18133,10 +18162,23 @@ and is loaded on demand through keeper_skill.
                             | None, Browser_lane.Content -> Scene_read tab_id in
                           launch_browser_lane state ~mailbox:async_messages operation
                       | None, None | Some _, None -> refresh_browser_lane state ~mailbox:async_messages)
+                 | "J" | "K" when Option.is_some view.scene && not (busy view) ->
+                     (match view.scene, view.selected_tab with
+                      | Some scene, Some tab_id ->
+                          let distance = int_of_float scene.content.height in
+                          let delta_y = if key = "J" then distance else -distance in
+                          launch_browser_lane state ~mailbox:async_messages
+                            (Scene_scroll {tab_id;document_id=scene.content.document_id;
+                              expected_url=scene.content.url;
+                              scene_view=scene.content.view;scope=scene.content.scope;delta_y})
+                      | _ -> ())
                  | "n" | "p" when Option.is_some view.scene && not (busy view) ->
                      let count = List.length (scene_targets view) in
                      if count > 0 then reveal_selection {view with scene_cursor =
                        (view.scene_cursor + (if key = "n" then 1 else count - 1)) mod count}
+                 | "N" | "P" when Option.is_some view.scene
+                                      && scene_has_articles view && not (busy view) ->
+                     reveal_selection (move_scene_article ~backwards:(key = "P") view)
                  | "tab" | "\t" | "shift-tab" when Option.is_some view.scene && not (busy view) ->
                      reveal_selection (move_scene_action ~backwards:(key = "shift-tab") view)
                  | "y" when not (busy view) ->
@@ -18149,6 +18191,8 @@ and is loaded on demand through keeper_skill.
                       | Some scene, Some node ->
                           (match scene_target_action node with
                            | Some Read_region ->
+                          state.browser_lane <- Some {view with
+                            scene_scope = Browser_lane_view.scene_scope_context_for_node view node};
                           launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
                            | Some Follow_link -> launch_browser_lane state ~mailbox:async_messages
@@ -21400,8 +21444,9 @@ and is loaded on demand through keeper_skill.
               what was armed. *)
            let keeper = List.nth state.keepers state.keeper_cursor in
            let mode =
-             if List.mem keeper.k_name state.keeper_yolo_names then "auto"
-             else "yolo"
+             if List.mem keeper.k_name state.keeper_yolo_names then
+               Masc.Keeper_tool_approval_mode.Auto
+             else Masc.Keeper_tool_approval_mode.Yolo
            in
            launch_keeper_tool_mode_set state ~mailbox:async_messages
              ~keeper_name:keeper.k_name ~mode

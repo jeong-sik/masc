@@ -1,18 +1,35 @@
 type revision = Revision of string
 type error = Invalid_selection | Invalid_configuration | Changed_configuration
-  | Configuration_unavailable | Validation_failed | Verification_failed of string
+  | Configuration_unavailable
+  | Child_not_started of Process_eio.spawn_refusal
+  | Validation_failed of { exit : Unix.process_status; stderr : string }
+  | Verification_failed of { runtime_id : string; code : string; detail : string option }
+  | Verification_unreadable of { runtime_id : string; exit : Unix.process_status; stderr : string; reason : string }
   | Write_failed | Rollback_failed | Lock_unavailable
 type readiness = Not_probed | Verified
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
                  readiness:readiness }
 let ( let* ) = Result.bind
+let exit_text status = match Process_eio.exit_reason_of_status status with
+  | Process_eio.Completed code -> Printf.sprintf "exit %d" code
+  | Process_eio.Timed_out -> "timed out"
+  | Process_eio.Signaled signal -> Printf.sprintf "signal %d" signal
+  | Process_eio.Stopped signal -> Printf.sprintf "stopped by signal %d" signal
+let with_detail = function
+  | None -> "" | Some detail -> (match String.trim detail with "" -> "" | detail -> ": " ^ detail)
 let error_message = function
   | Invalid_selection -> "Select a default from the selected runtimes."
   | Invalid_configuration -> "The workspace runtime configuration is invalid."
   | Changed_configuration -> "Configuration changed; refresh the selection before saving."
   | Configuration_unavailable -> "The workspace configuration could not be read."
-  | Validation_failed -> "Selected runtime configuration did not pass validation."
-  | Verification_failed _ -> "A selected runtime did not pass response and tool verification."
+  | Child_not_started refusal ->
+    "The MASC executable could not be started for stage validation: " ^ Process_eio.spawn_refusal_to_string refusal
+  | Validation_failed { exit; stderr } ->
+    Printf.sprintf "Selected runtime configuration did not pass validation (%s)%s" (exit_text exit) (with_detail (Some stderr))
+  | Verification_failed { runtime_id; code; detail } ->
+    Printf.sprintf "Runtime %S did not pass response and tool verification (%s)%s" runtime_id code (with_detail detail)
+  | Verification_unreadable { runtime_id; exit; stderr; reason } ->
+    Printf.sprintf "Runtime %S verification returned no readable report (%s; %s)%s" runtime_id (exit_text exit) reason (with_detail (Some stderr))
   | Write_failed -> "Configuration could not be saved; previous configuration was restored."
   | Rollback_failed -> "Configuration restoration was incomplete; inspect the workspace before retrying."
   | Lock_unavailable -> "Another configuration operation is active; retry after it finishes."
@@ -23,9 +40,6 @@ let revision_of_string value =
 let safe_id value = value <> "" && String.trim value = value
   && not (String.exists (function '\000'..'\031'|'\127' -> true | _ -> false) value)
 let unique values = List.fold_left (fun acc v -> if List.mem v acc then acc else acc @ [v]) [] values
-let json_object = function
-  | `Assoc fields when List.length (unique (List.map fst fields)) = List.length fields -> Some fields
-  | _ -> None
 let paths base =
   let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config" in
   config, Filename.concat config Config_dir_resolver.runtime_toml_filename, Filename.concat config "agent-core-models-overlay.toml"
@@ -61,27 +75,42 @@ let stage_env base =
     let key = match String.index_opt value '=' with None -> value | Some n -> String.sub value 0 n in
     not (List.mem key replaced)) in
   Array.of_list (kept @ ["MASC_BASE_PATH="^base;"MASC_CONFIG_DIR="^config])
+type child = { status : Unix.process_status; stdout : string; stderr : string }
 let run ~binary ~base args =
   match Process_eio.run_argv_with_status_split_or_refusal ~env:(stage_env base)
           (binary :: args) with
-  | Ok (Unix.WEXITED 0,stdout,_) -> Ok stdout
-  | Ok _ | Error _ -> Error Validation_failed
+  | Ok (status,stdout,stderr) -> Ok { status; stdout; stderr }
+  | Error refusal -> Error (Child_not_started refusal)
+let validate ~binary ~base args =
+  let* child = run ~binary ~base args in
+  match child.status with
+  | Unix.WEXITED 0 -> Ok ()
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    Error (Validation_failed { exit = child.status; stderr = child.stderr })
+(* The child's report is the judge, read back through the same module that
+   wrote it; the exit status only has to agree with a verified report. *)
 let verification ~binary ~base id =
-  let* text = match run ~binary ~base ["runtime-verify";"--base-path";base;id] with
-    | Ok value -> Ok value | Error _ -> Error (Verification_failed id) in
-  let valid = try
-    match json_object (Yojson.Safe.from_string text) with
-    | None -> false
-    | Some fields ->
-      let field k = List.assoc_opt k fields in
-      field "schema" = Some (`String "masc.runtime_verification.v1")
-      && field "runtime_id" = Some (`String id) && field "status" = Some (`String "verified")
-      && (match Option.bind (field "checks") json_object with
-          | Some checks -> List.assoc_opt "response" checks = Some (`Bool true)
-                           && List.assoc_opt "tool_roundtrip" checks = Some (`Bool true)
-          | None -> false)
-    with Yojson.Json_error _ -> false in
-  if valid then Ok () else Error (Verification_failed id)
+  let* child = run ~binary ~base ["runtime-verify";"--base-path";base;id] in
+  let unreadable reason =
+    Error (Verification_unreadable { runtime_id = id; exit = child.status; stderr = child.stderr; reason }) in
+  let report = match Yojson.Safe.from_string child.stdout with
+    | json -> Runtime_verification.of_json json
+    | exception Yojson.Json_error reason -> Error ("stdout is not JSON: " ^ reason) in
+  match report with
+  | Error reason -> unreadable reason
+  | Ok (Runtime_verification.Measured result) when not (String.equal result.Runtime_verification.runtime_id id) ->
+    unreadable (Printf.sprintf "the report names runtime %S" result.Runtime_verification.runtime_id)
+  | Ok (Runtime_verification.Unmeasured { Runtime_verification.runtime_id; _ }) when not (String.equal runtime_id id) ->
+    unreadable (Printf.sprintf "the report names runtime %S" runtime_id)
+  | Ok (Runtime_verification.Measured { Runtime_verification.failure = None; _ }) ->
+    (match child.status with
+     | Unix.WEXITED 0 -> Ok ()
+     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> unreadable "a verified report with a failing exit")
+  | Ok (Runtime_verification.Measured { Runtime_verification.failure = Some failure; _ }) ->
+    Error (Verification_failed { runtime_id = id; code = Runtime_verification.failure_code failure;
+                                 detail = Runtime_verification.failure_detail failure })
+  | Ok (Runtime_verification.Unmeasured { Runtime_verification.code; detail; runtime_id = _; message = _ }) ->
+    Error (Verification_failed { runtime_id = id; code; detail })
 let write path mode text =
   Fs_compat.write_file_atomic_strict_staged path ~write:(fun channel ->
     Unix.fchmod (Unix.descr_of_out_channel channel) mode;
@@ -151,7 +180,7 @@ let configure_locked ~pending_credentials ~binary ~base ~expected_revision ~spec
     | primary::fallbacks ->
       let args = ["runtime-default-set";"--base-path";stage;primary;"--setup-lanes";"--setup-imp"]
         @ List.concat_map (fun id -> ["--fallback-runtime";id]) fallbacks in
-      let* _ = run ~binary ~base:stage args in
+      let* () = validate ~binary ~base:stage args in
       let rec probes = function [] -> Ok () | id::tail -> let* () = verification ~binary ~base:stage id in probes tail in
       let* () = if verify then probes selected else Ok () in
       let* files = snapshot stage in Ok (content (fst files))) in

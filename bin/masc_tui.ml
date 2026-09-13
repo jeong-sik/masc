@@ -16588,6 +16588,7 @@ and is loaded on demand through keeper_skill.
                       | _ -> ())
                  | None,None, Some draft ->
                      (match key with
+                      | "3" -> update {view with focus=Addons.Configurations;scroll=0}
                       | "esc" -> update { view with draft = None }
                       | "q" ->
                           (* q always leaves the add-on surface while keeping
@@ -16595,6 +16596,12 @@ and is loaded on demand through keeper_skill.
                           state.lane_addons_cached <- view;
                           state.lane_addons <- None
                       | "r" -> launch_lane_addons state ~mailbox:async_messages Addons.Inspect
+                      | "s" ->
+                          (match Addons.selected_document view with
+                           | None -> update {view with error=Some "Open a TOML declaration before saving"}
+                           | Some session ->
+                               launch_lane_declaration state ~mailbox:async_messages
+                                 ~edit:false (Masc_tui_lane_declaration.Save session))
                       | "\r" | "\n" | "enter" ->
                           if view.naming then
                             (match Masc_tui_lane_declaration.create draft with

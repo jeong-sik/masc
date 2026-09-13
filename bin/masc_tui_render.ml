@@ -4112,6 +4112,7 @@ let render_keeper_list (state : state) =
   let selected_reading =
     Option.map (keeper_reading state) (selected_keeper state)
   in
+  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
   Buffer.add_char buf '\n';
 
@@ -4123,11 +4124,11 @@ let render_keeper_list (state : state) =
   let heading =
     screen_title
       (Printf.sprintf " MASC Keepers %s"
-         (match state.keepers, local_rows_page state ~error:state.keepers_error with
+         (match state.keepers, local_rows_page state ~error:keepers_error with
           | _ :: _, _ | [], Page_empty ->
               Printf.sprintf "(%d)" (List.length state.keepers)
           | [], (Page_unread | Page_failed) ->
-              title_missing_reading ~error:state.keepers_error))
+              title_missing_reading ~error:keepers_error))
     ^ (match state.search with
        | Some query ->
            Printf.sprintf "  %s/%s%s\xe2\x96\x8c%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
@@ -4233,7 +4234,6 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" (Theme.recede ()) (draw_hline (cols - 2)) Ansi.reset);
 
-  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
   (match keepers_error with
    | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());

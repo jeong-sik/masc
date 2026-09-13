@@ -1629,6 +1629,19 @@ def wait_for_stop(
         select.select([master_fd], [], [], min(0.05, remaining))
 
 
+def path_without_masc(path: str) -> str:
+    """PATH with every directory that holds an executable [masc] left out."""
+    return os.pathsep.join(
+        entry
+        for entry in path.split(os.pathsep)
+        if entry
+        and not (
+            os.path.isfile(os.path.join(entry, "masc"))
+            and os.access(os.path.join(entry, "masc"), os.X_OK)
+        )
+    )
+
+
 def run_terminal_scenario(
     executable: str,
     *,
@@ -1680,6 +1693,15 @@ def run_terminal_scenario(
                 # A scenario's own variables (an $EDITOR stub, say) apply
                 # before the fixed set below, so the harness keeps the last
                 # word on the terminal it describes.
+                # A TUI that reaches no server starts one, and it looks for
+                # [masc] beside itself and then on PATH. A developer with an
+                # installed masc had scenarios whose fixture did not answer
+                # start a real server on the temporary workspace, which
+                # outlives the TUI by design and so outlived the test. CI has
+                # no masc on PATH, so only a developer's machine did this.
+                # The inherited PATH is filtered; a PATH a scenario sets below
+                # is that scenario's choice.
+                environment["PATH"] = path_without_masc(environment.get("PATH", ""))
                 if extra_env is not None:
                     environment.update(extra_env)
                 environment.update(

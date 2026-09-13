@@ -18056,7 +18056,8 @@ and is loaded on demand through keeper_skill.
            open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "l" | "a" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
-               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter") as key)
+               | "o" | "x" | "g" | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
+               | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key)
          when state.view = Connectors && Option.is_some (browser_lane_on_screen state)
            && Option.is_none (browser_history_on_screen state)
            && (not (List.mem key ["tab"; "\t"; "shift-tab"])
@@ -18098,6 +18099,11 @@ and is loaded on demand through keeper_skill.
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
+                 | ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key
+                   when not (busy view) ->
+                     let index = Char.code key.[0] - Char.code '1' in
+                     let selected = select_tab_index index view in
+                     if selected.selected_tab <> view.selected_tab then read selected
                  | "v" when not (busy view) ->
                      (match view.selected_tab with
                       | Some tab_id ->

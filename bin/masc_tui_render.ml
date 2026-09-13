@@ -13361,12 +13361,15 @@ let keeper_deletions_viewport (state : state) =
 let render_keeper_deletions (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = keeper_deletions_lines state ~cols in
+  let height =
+    framed_content_height ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
+  in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
       (screen_title " 키퍼 삭제 기록"
        ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
-    ~hints:"j/k:작업  J/K/PgUp/PgDn:원문  r:조회  t:정리 재시도  Esc:닫기"
+    ~hints:(keeper_deletions_hints state ~scrollable:(List.length lines > height))
     ~body:(fun ~budget c ->
       let scroll =
         Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget

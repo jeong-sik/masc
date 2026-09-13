@@ -360,6 +360,11 @@ val context_split_pane_height : content_height:int -> common_len:int -> int
 
 val keeper_deletions_lines : Masc_tui_types.state -> cols:int -> string list
 
+val keeper_deletions_hints : Masc_tui_types.state -> scrollable:bool -> string
+(** The deletion overlay's key row: [j/k] only with two or more records, the
+    record scroll only when [scrollable], and [t] only when the selected
+    record can be retried. *)
+
 val answering_lines : Masc_tui_types.state -> Masc_tui_answering.line list
 
 val answering_preview_rows : int

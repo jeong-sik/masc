@@ -525,12 +525,26 @@ let render_overview (state : state) =
     Rows.of_list ~first:event_window.oew_offset
       ~height:row_budget.attention_rows collapsed_events
   in
+  (* What the panel says when it has no item to draw, the way the Tasks panel
+     below it does. It said nothing: an overview that answered with no items,
+     one not read yet and one that failed all left the panel blank under its
+     title. A failure is already the summary row's to say. *)
+  let attention_empty_note =
+    match empty_page_of ~snapshot:state.overview ~error:overview_error with
+    | Page_empty -> Some "  (nothing needs attention)"
+    | Page_unread -> Some page_unread_note
+    | Page_failed -> None
+  in
   for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
       (* No length guard: the window already answers [None] past the end,
          which is the blank this drew. The guard that stood here counted the
          whole list once per row. *)
       match Rows.at attention_items_window i with
+      | None when i = 0 && attention_count = 0 ->
+          (match attention_empty_note with
+           | Some note -> Ansi.dim ^ note ^ Ansi.reset
+           | None -> "")
       | None -> ""
       | Some a ->
         let severity_badge = attention_severity_badge a.ai_severity in

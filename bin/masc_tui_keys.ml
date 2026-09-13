@@ -896,6 +896,17 @@ let keeper_detail_tab_hint tab =
           (fun binding -> binding.key ^ ":" ^ binding.label)
           (keeper_detail_tab_bindings tab))
 
+(* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
+   [listing_meta] spells them -- is said once, under Global. Repeated under
+   every surface it took three of the dozen rows an 80x24 sheet shows of the
+   reader's own section. A surface that names one of those keys its own way
+   ([r] reload on Config) keeps that row: it says something Global does not.
+   Footers keep the tail, since a footer is all a surface shows. *)
+let sheet_bindings surface =
+  List.filter
+    (fun binding -> not (List.mem binding listing_meta))
+    (for_surface surface)
+
 let help_sections ?current () =
   let sections =
     List.map
@@ -919,7 +930,7 @@ let help_sections ?current () =
                  Masc_tui_types.keeper_detail_tabs
            | _ -> []
          in
-         (surface, (title, entries (for_surface surface) @ tab_entries)))
+         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =

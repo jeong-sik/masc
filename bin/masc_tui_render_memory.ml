@@ -50,8 +50,8 @@ let facts_title ~screen ~keeper ~reading ~timestamp ~badge =
     Printf.sprintf "%s \xe2\x96\xb8 %s  %s  %s  %s" screen keeper reading
       timestamp badge
   | Facts_loaded { total; filter_label; query_label } ->
-    Printf.sprintf "%s \xe2\x96\xb8 %s (%d facts \xc2\xb7 %s%s)  %s  %s" screen
-      keeper total filter_label query_label timestamp badge
+    Printf.sprintf "%s \xe2\x96\xb8 %s (%s \xc2\xb7 %s%s)  %s  %s" screen
+      keeper (Masc_tui_message_layout.count_noun total "fact") filter_label query_label timestamp badge
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each
@@ -425,12 +425,12 @@ let render_memory_body ~cols ~budget (state : state)
   (match state.memory_health with
    | None -> push ("  Total: " ^ missing_reading "waiting for memory snapshots")
    | Some snapshot ->
-       push (Printf.sprintf "  Total %d facts · %d ordinary + %d source · %s · %d keepers"
-         (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+       push (Printf.sprintf "  Total %s · %d ordinary + %d source · %s · %s"
+         (Masc_tui_message_layout.count_noun (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
          snapshot.mhs_total_facts snapshot.mhs_total_source_facts
          (Masc_tui_context_inspector.format_bytes
             (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         (List.length snapshot.mhs_keepers)));
+         (Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")));
   (match state.memory_health with
    | None -> push ("  Librarian: " ^ missing_reading "waiting for health data")
    | Some snapshot ->
@@ -510,7 +510,7 @@ let render_memory_body ~cols ~budget (state : state)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "[%d keepers, scroll %d]" shown scroll)
+        (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun shown "keeper") scroll)
   end;
   (match context_lines with
    | [] -> ()
@@ -703,7 +703,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "[%d facts, scroll %d]" total scroll)
+        (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun total "fact") scroll)
   end;
   (match detail_lines with
    | [] -> ()

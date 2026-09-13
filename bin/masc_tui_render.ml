@@ -1764,14 +1764,14 @@ let render_board_compose (state : state) =
         Printf.sprintf "  first line: title  rest: body  hearth: %s  Enter: newline  Ctrl-E: $EDITOR"
           hearth_label
   in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%d lines, %d chars)%s"
+  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%s, %s)%s"
     (screen_title " MASC Board")
     (Masc_tui_theme.tone Masc_tui_theme.Accent)
     (match state.board_compose_reply_to with
      | Some _ -> "reply" | None -> "new post")
     Ansi.reset
     (connection_badge state)
-    Ansi.dim line_count draft_chars Ansi.reset
+    Ansi.dim (Masc_tui_message_layout.count_noun line_count "line") (Masc_tui_message_layout.count_noun draft_chars "char") Ansi.reset
   in
   let addressing_kind = Board_composer.analyze_addressing draft_content in
   let addressing_line = Board_composer.format_addressing_hint ~max_cells:cols addressing_kind in
@@ -1902,7 +1902,7 @@ let board_hearth_census_line ~cols (state : state) =
       Printf.sprintf "  %shearths%s %s%s%s" Ansi.dim Ansi.reset shown
         (if dropped = 0 then ""
          else Printf.sprintf "%s  \xc2\xb7  +%d%s" Ansi.dim dropped Ansi.reset)
-        (Printf.sprintf "%s   %d posts%s" Ansi.dim total Ansi.reset)
+        (Printf.sprintf "%s   %s%s" Ansi.dim (Masc_tui_message_layout.count_noun total "post") Ansi.reset)
 
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -4208,8 +4208,8 @@ let render_keeper_list (state : state) =
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
          (Printf.sprintf
-            "%s  live status covers %d of %d keepers; the rest read as unknown%s"
-            (Theme.warn ()) (List.length observed) total Ansi.reset)
+            "%s  live status covers %d of %s; the rest read as unknown%s"
+            (Theme.warn ()) (List.length observed) (Masc_tui_message_layout.count_noun total "keeper") Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
@@ -4534,9 +4534,9 @@ let render_lanes_overview (state : state) =
           (screen_title " MASC Lanes · Standalone") (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some snapshot ->
-        Printf.sprintf "%s (%d lanes)  %s  %s"
+        Printf.sprintf "%s (%s)  %s  %s"
           (screen_title " MASC Lanes · Standalone")
-          (List.length snapshot.sls_lanes) timestamp
+          (Masc_tui_message_layout.count_noun (List.length snapshot.sls_lanes) "lane") timestamp
           (connection_badge state)
   in
   box_top buf cols;
@@ -4832,7 +4832,7 @@ let render_lane_run_list (state : state) ~lane_id =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d runs, scroll %d]" shown scroll);
+      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun shown "run") scroll);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -5528,8 +5528,8 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
               | Some (Some false, None) ->
                   (Theme.warn ()) ^ "off" ^ Ansi.reset
               | Some ((Some true | None), None) | None ->
-                  Printf.sprintf "%s%d tools%s" (Theme.ok ())
-                    (List.length names) Ansi.reset)
+                  Printf.sprintf "%s%s%s" (Theme.ok ())
+                    (Masc_tui_message_layout.count_noun (List.length names) "tool") Ansi.reset)
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
@@ -6409,11 +6409,11 @@ let render_keeper_logs (state : state) =
 
     (* Header *)
     let header =
-      Printf.sprintf "%s  (%d entries)"
+      Printf.sprintf "%s  (%s)"
         (screen_title
            (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
               (Terminal_text.single_line k.k_name)))
-        total_entries
+        (Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry")
     in
 
     box_top buf cols;
@@ -6777,7 +6777,7 @@ let render_system_logs (state : state) =
     done;
   if total_entries > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
+      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry") scroll);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -7679,8 +7679,8 @@ let render_fusion_list (state : state) =
         in
         let running_count = Stdlib.max 0 (List.length runs - completed_count - failed_count) in
         let stats_note =
-          Printf.sprintf " (%d runs · %s%d done%s · %s%d run%s%s)"
-            (List.length runs)
+          Printf.sprintf " (%s · %s%d done%s · %s%d run%s%s)"
+            (Masc_tui_message_layout.count_noun (List.length runs) "run")
             (Theme.ok ()) completed_count Ansi.reset
             (Theme.info ()) running_count Ansi.reset
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
@@ -8727,8 +8727,8 @@ let render_memory (state : state) =
           (screen_title " MASC Memory") (title_missing_reading ~error:state.memory_health_error) timestamp
           (connection_badge state)
     | Some s ->
-        Printf.sprintf "%s · %d keepers · %d need memory · read %s (local)  %s"
-          (screen_title " MASC Memory") shown s.mhs_starving_keepers
+        Printf.sprintf "%s · %s · %d need memory · read %s (local)  %s"
+          (screen_title " MASC Memory") (Masc_tui_message_layout.count_noun shown "keeper") s.mhs_starving_keepers
           (let tm = Unix.localtime s.mhs_generated_at in
            Printf.sprintf "%04d-%02d-%02d %02d:%02d"
              (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
@@ -8945,7 +8945,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     done;
   if total > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll)
+      (Printf.sprintf "[%s, scroll %d]  esc closes" (Masc_tui_message_layout.count_noun total "line") scroll)
   else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
@@ -8983,9 +8983,9 @@ let render_changes_list (state : state) =
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
            calls in a window are different facts. *)
-        Printf.sprintf "%s %s (%d in %.0fh of %d calls)  %s  %s"
+        Printf.sprintf "%s %s (%d in %.0fh of %s)  %s  %s"
           (screen_title " MASC Changes") whose shown
-          s.Masc.Tui_decode.fcs_window_hours s.Masc.Tui_decode.fcs_calls_in_window
+          s.Masc.Tui_decode.fcs_window_hours (Masc_tui_message_layout.count_noun s.Masc.Tui_decode.fcs_calls_in_window "call")
           timestamp
           (connection_badge state)
   in
@@ -9345,8 +9345,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                | Content, None -> "Page content" in
              "  " ^ scope ^ " · viewport only · " ^ Terminal_text.single_line scene.content.url
          | None, None -> "  No page content"
-         | None, Some page -> Printf.sprintf "  %s • %d chars%s%s"
-             (Terminal_text.single_line page.url) page.chars
+         | None, Some page -> Printf.sprintf "  %s • %s%s%s"
+             (Terminal_text.single_line page.url) (Masc_tui_message_layout.count_noun page.chars "char")
              (if page.truncated then " • truncated" else "")
              (match view.load with Idle -> "" | No_browser | Loading _ | Failed _ -> " • previous read"));
       (match browser_lane_source_hint view with
@@ -10123,7 +10123,7 @@ let render_tools (state : state) =
   done;
   if drawable > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d rows, scroll %d]" drawable scroll);
+      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun drawable "row") scroll);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -10351,7 +10351,7 @@ let render_keeper_calls (state : state) =
   if scroll > 0 || total_rows > content_height then
     let last_visible = min total_rows (scroll + content_height) in
     let detailed_footer =
-      Printf.sprintf "[%d calls · rows %d-%d of %d]" shown (scroll + 1)
+      Printf.sprintf "[%s · rows %d-%d of %d]" (Masc_tui_message_layout.count_noun shown "call") (scroll + 1)
         last_visible total_rows
     in
     let compact_footer =
@@ -10646,7 +10646,7 @@ let render_acting (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "[%d rows, scroll %d]" shown scroll)
+      (Printf.sprintf "[%s, scroll %d]" (Masc_tui_message_layout.count_noun shown "row") scroll)
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf

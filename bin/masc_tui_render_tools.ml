@@ -716,9 +716,9 @@ let tools_display_lines (state : state) =
                [ Ansi.dim, "     Retained evidence: Enter to load this exact revision" ])
         in
         [ Ansi.bold,
-          Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
+          Printf.sprintf " Effective Keeper Surface — %s (%s)"
             (Terminal_text.single_line ets_keeper_name)
-            (List.length ets_tools);
+            (Masc_tui_message_layout.count_noun (List.length ets_tools) "tool");
           Ansi.dim,
           Printf.sprintf "   runtime=%s  client=%s  native=%s"
             (Terminal_text.single_line ets_runtime_id)
@@ -1028,8 +1028,8 @@ let tools_display_lines (state : state) =
     let registered_rows = Tool_tree.rows registered_tools in
     let heading =
       [ Ansi.bold,
-        Printf.sprintf " Registered Catalog — %d tools"
-          (List.length registered_tools);
+        Printf.sprintf " Registered Catalog — %s"
+          (Masc_tui_message_layout.count_noun (List.length registered_tools) "tool");
         Ansi.dim, Tool_table.catalog_tool_header ]
     in
     heading

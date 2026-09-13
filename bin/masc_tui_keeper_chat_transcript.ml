@@ -444,11 +444,8 @@ let render_activity_rows (activities : tool_activity list) =
                activity.duration))
     activities
 
-let plural count noun =
-  Printf.sprintf "%d %s%s" count noun (if count = 1 then "" else "s")
-
 let omitted_steps_row count =
-  Printf.sprintf "(%s not carried by the transcript)" (plural count "step")
+  Printf.sprintf "(%s not carried by the transcript)" (Masc_tui_message_layout.count_noun count "step")
 
 
 
@@ -763,7 +760,7 @@ let skill_rows ~full (activity : skill_activity) =
       (skill_state_label activity.state)
       activity.skill_name
       (if action_count = 0 then ""
-       else Printf.sprintf " \xc2\xb7 %s" (plural action_count "action"))
+       else Printf.sprintf " \xc2\xb7 %s" (Masc_tui_message_layout.count_noun action_count "action"))
   in
   if not full then [ summary ]
   else
@@ -1081,7 +1078,7 @@ let phase_text ~now t =
       | None -> "waiting for the run to start"
       | Some (Live.Queued, queue_length) ->
           Printf.sprintf "queued \xc2\xb7 %s in the keeper's queue"
-            (plural queue_length "message")
+            (Masc_tui_message_layout.count_noun queue_length "message")
       | Some (Live.Running, _) -> "accepted; the run is starting"
       | Some (Live.Settled, _) ->
           (* The server had already run this operation and replayed its
@@ -1225,7 +1222,7 @@ let phase_text ~now t =
             | None -> ""
           in
           Printf.sprintf "%s%s%s%s · %s"
-            runtime_tag (plural calls "tool") running in_this_call
+            runtime_tag (Masc_tui_message_layout.count_noun calls "tool") running in_this_call
             (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather

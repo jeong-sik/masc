@@ -464,6 +464,7 @@
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
  (libraries
+  masc_tui_message_layout
   masc_tui_image_preview
   ;; The Gate phase is Keeper_chat_store's closed sum, parsed once at decode.
   masc
@@ -1135,7 +1136,7 @@
  (name masc_tui_runtime_config_view)
  (wrapped false)
  (modules masc_tui_runtime_config_view)
- (libraries yojson))
+ (libraries masc_tui_message_layout yojson))
 
 (library
  (name masc_tui_runtime_config_receipt)
@@ -1159,6 +1160,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_message_layout
   masc
   masc_types
   masc_tui_ansi

@@ -2748,10 +2748,14 @@ let act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action =
   let* ok = get boolean "ok" json in
   if ok then Ok () else let* detail = get string "error" json in Error detail
 
+let scroll_browser_scene ~host ~port ~view ~tab_id ~expected_url ~delta_y =
+  act_browser_viewport ~host ~port ~view ~tab_id ~expected_url
+    ~action:(Browser_lane.Scroll {x=0; y=delta_y})
+
 let browser_lane_action ~host ~port operation =
   let open Masc_tui_types.Browser_lane_view in
   let request = match operation with
-    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
+    | Discover _ | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> Error "read/screenshot requires its own browser endpoint"
     | Open_session -> Ok ("session", `Assoc ["action", `String "open"], 65.0)
     | Close_session -> Ok ("session", `Assoc ["action", `String "close"], 65.0)
     | Goto url -> Ok ("goto", `Assoc ["url", `String url], 65.0)

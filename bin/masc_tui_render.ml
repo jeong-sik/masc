@@ -114,7 +114,9 @@ let acting_pane_columns (state : state) ~terminal_cols =
     Option.is_some state.lane_addons || state.palette_open || state.context_inspector_open || state.keeper_deletions_open || state.help_open
     || state.agenda_open || state.answering_open
   in
-  if modal || state.view = Acting || Option.is_some (browser_lane_on_screen state)
+  if modal
+     || Masc_tui_types.on_activity_screen state.view
+     || Option.is_some (browser_lane_on_screen state)
   then 0
   else if Masc_tui_acting_pane.shown ~hidden:state.acting_pane_hidden ~cols:terminal_cols
   then Masc_tui_acting_pane.pane_cols
@@ -442,12 +444,17 @@ let render_overview (state : state) =
                   row; here it would push the count off a narrow row. *)
                Printf.sprintf "  feed: closed after %d" events
          in
+         (* Neither name is padded to a column. Both are fixed for the
+            session, so nothing to their right moves between frames, and
+            the 24 and 20 cells they used to be padded to were blank on
+            the live workspace ("default", "me") while the transport
+            tail behind them was cut to "ws …" beside the roster pane. *)
          let cluster_line =
            Printf.sprintf "  Cluster: %s%s%s  Project: %s%s%s"
              Ansi.dim
-             (fit_width (Terminal_text.single_line o.ov_cluster) 24)
+             (Terminal_text.single_line o.ov_cluster)
              Ansi.reset
-             (fit_width (Terminal_text.single_line o.ov_project) 20)
+             (Terminal_text.single_line o.ov_project)
              transport_summary observer_summary
        in
        box_line buf cols cluster_line);
@@ -9323,9 +9330,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             | Some Follow_link -> "Enter:follow link  "
             | Some Click_control -> "Enter:click  "
             | None -> "" in
-          action ^ "m:main  Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+          action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None, None when Option.is_some view.scene_guard ->
-          "m:main  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
+          "m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
       | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
@@ -9339,6 +9346,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
         | Loading (_, Close_session) -> "Closing automation browser…", Theme.info ()
         | Loading (_, Goto _) -> "Navigating automation browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
+        | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
         | Loading (_, Scene_read _) -> "Reading browser text and controls…", Theme.info ()
         | Loading (_, Scene_refresh _) -> "Refreshing current browser view…", Theme.info ()
@@ -13926,8 +13934,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
 
 let render (state : state) =
   (* Decide the pane before any surface measures the terminal. Modals draw
-     over the whole terminal and the Activity feed already fills its own
-     screen, so neither reserves the columns. *)
+     over the whole terminal and the Activity screen, both its tabs,
+     already fills its own, so neither reserves the columns. *)
   (acting_pane_reserved_cols :=
      let _rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
      acting_pane_columns state ~terminal_cols);

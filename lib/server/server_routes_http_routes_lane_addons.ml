@@ -74,9 +74,13 @@ let get_package_preview request reqd =
       let path = if Filename.is_relative path then Filename.concat config.Workspace.base_path path else path in
       let* package = Eio_unix.run_in_systhread (fun () -> Lane_addon_manifest.load ~path)
           |> Result.map_error Lane_addon_manifest.error_to_string in
-      let image = match Lane_addon_worker.inspect_image ~mgr:state.Mcp_server.proc_mgr ~package () with
+      let inspection = match state.Mcp_server.proc_mgr with
+        | None -> Error "Server process manager unavailable; image inspection was not performed"
+        | Some mgr -> Lane_addon_worker.inspect_image ~mgr ~package ()
+            |> Result.map_error Lane_addon_worker.error_to_string in
+      let image = match inspection with
         | Ok digest -> `Assoc ["state",`String "available";"digest",`String digest]
-        | Error error -> `Assoc ["state",`String "unverified";"detail",`String (Lane_addon_worker.error_to_string error)] in
+        | Error detail -> `Assoc ["state",`String "unverified";"detail",`String detail] in
       Ok (`Assoc ["manifest_path",`String path;"package",Lane_addon_types.package_to_json package;
                   "image",image]) in
     respond request reqd result) request reqd

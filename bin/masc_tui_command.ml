@@ -99,7 +99,7 @@ let catalog =
   ; { word = "burn"
     ; aliases = [ "cost" ]
     ; args = ""
-    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
+    ; summary = "show or hide the fleet cost and each Keeper's token total in the tab row"
     }
   ; { word = "changes"
     ; aliases = []

@@ -259,6 +259,11 @@ val planning_workspace_title :
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
+val burn_hud_text : Masc_tui_types.state -> string option
+(** The tab row's [/burn] reading without styling: the fleet's cost, and each
+    Keeper's token total as a braille bar when any Keeper has spent one.
+    [None] while it is hidden. *)
+
 val keeper_action_hints :
   ?offers_chat:bool ->
   ?offers_back:bool ->

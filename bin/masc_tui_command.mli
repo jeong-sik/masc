@@ -35,7 +35,7 @@ type t =
   | Open_patch_modal
       (** [/patch] or [/review] — open interactive 3D drop-shadow patch review modal. *)
   | Toggle_burn_hud
-      (** [/burn] or [/cost] — toggle token burn velocity and financial telemetry HUD. *)
+      (** [/burn] or [/cost] — show or hide the fleet cost and each Keeper's token total in the tab row. *)
   | Open_link_preview of string option
       (** [/preview [url]] — open 3D drop-shadow OpenGraph preview and rich embed modal for a web link. *)
   | Open_links_list

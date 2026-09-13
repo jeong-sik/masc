@@ -1,0 +1,40 @@
+{
+  "columns": 130,
+  "rows": 35,
+  "input_events": [
+    {
+      "monotonic": 1010099.810386875,
+      "keys_hex": "3a676f2042726f77736572204c616e650d"
+    },
+    {
+      "monotonic": 1010099.85558175,
+      "keys_hex": "76"
+    },
+    {
+      "monotonic": 1010099.878547958,
+      "keys_hex": "79"
+    },
+    {
+      "monotonic": 1010099.883936416,
+      "keys_hex": "73"
+    },
+    {
+      "monotonic": 1010099.899760375,
+      "keys_hex": "73"
+    }
+  ],
+  "refresh_interval": "unmodified product default",
+  "pid": 59757,
+  "started_monotonic": 1010099.316224916,
+  "binary_sha256": "4713063cd0f4d7c707dfea47e361cee3f6017155bdebf746e5fede70949ce8d8",
+  "copied_monotonic": 1010099.883905375,
+  "copy_offset": 19809,
+  "alive_at_copy": true,
+  "display_selected_monotonic": 1010099.94888025,
+  "display_intent": "unscoped content selected before Keeper starts",
+  "keeper_observation_finished_monotonic": 1010166.770104041,
+  "alive_after_keeper_observation": true,
+  "exit": 0,
+  "stopped_monotonic": 1010166.795106583,
+  "capture_errors": []
+}

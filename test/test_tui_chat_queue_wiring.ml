@@ -633,11 +633,42 @@ let test_observed_interrupt_response_identity () =
     [response "successor"; `Assoc ["signalled", `Bool true]; `Null]
 ;;
 
-let test_enter_during_a_turn_queues () =
+let test_stop_ack_releases_only_input_after_that_stop () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.keeper_chat_control_tokens <- ["alpha", "before"; "beta", "other"];
+  let stop = Tui_types.begin_keeper_chat_control state "alpha" in
+  state.keeper_interactive_waiting <- ["alpha", "after-stop", stop, None];
+  check bool "old snapshot is no longer current" true
+    (Tui_types.keeper_chat_control_generation state "alpha" <> 0);
+  check bool "stop acknowledgement settles pending control" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  let acknowledged = Tui_types.keeper_chat_control_generation state "alpha" in
+  check bool "poll started before acknowledgement is stale" true (acknowledged <> stop);
+  check bool "later input follows acknowledged control epoch" true
+    (state.keeper_interactive_waiting = ["alpha", "after-stop", acknowledged, None]);
+  ignore (Tui_types.begin_keeper_chat_control state "alpha");
+  check bool "a newer stop revokes automatic resumption" true (state.keeper_interactive_waiting = []);
+  check bool "older acknowledgement cannot finish newer stop" false
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:stop);
+  check (option string) "unrelated keeper token remains usable" (Some "other")
+    (List.assoc_opt "beta" state.keeper_chat_control_tokens)
+;;
+
+let test_control_receipts_are_scoped_to_each_keeper () =
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let alpha = Tui_types.begin_keeper_chat_control state "alpha" in
+  let beta = Tui_types.begin_keeper_chat_control state "beta" in
+  check bool "beta does not invalidate alpha receipt" true
+    (Tui_types.finish_keeper_chat_control state "alpha" ~generation:alpha);
+  check bool "alpha does not invalidate beta receipt" true
+    (Tui_types.finish_keeper_chat_control state "beta" ~generation:beta)
+;;
+
+let test_enter_stages_the_input_before_submission () =
   let n = calls ~module_path:"bin/masc_tui.ml" ~callee:"queue_keeper_message" in
   if n < 1 then
     failf
-      "bin/masc_tui.ml must queue a message typed while a turn is running; \
+      "bin/masc_tui.ml must stage accepted input before submitting the update; \
        queue_keeper_message is called %d time(s)"
       n
 ;;
@@ -886,7 +917,7 @@ let test_settle_turn_log_commits_holds_and_clears_live () =
 
 let completed ?(outcome = Masc.Keeper_turn_outcome.Visible_reply) reply
     : Keeper_chat.completed_turn =
-  { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0 }
+  { Keeper_chat.acceptance = { Keeper_chat.state = Keeper_chat.Succeeded; queued_count = 0; interactive = None }
   ; reply
   ; turn_outcome = outcome
   ; turn_ref = "trace-1#1"
@@ -1084,7 +1115,7 @@ let test_the_acceptance_is_read_but_not_logged () =
   let log =
     Tui_types.turn_log_create ~keeper_name:"alpha" ~request_id:"req-1" ~started_at:1.
   in
-  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2 } in
+  let accepted = Live.Accepted { admission = Live.Running; queue_length = 2; interactive = None } in
   Tui_types.turn_log_add ~now:1. log ~seq:None accepted;
   Tui_types.turn_log_add ~now:2. log ~seq:None accepted;
   check int "no entries" 0 (List.length (Log.entries log.Tui_types.tl_log));
@@ -2463,8 +2494,12 @@ let () =
         ; test_case "observed interrupt response identity" `Quick test_observed_interrupt_response_identity
         ; test_case "an interrupt receipt is bound to the exact request" `Quick
             test_interrupt_receipt_is_bound_to_the_exact_request
-        ; test_case "Enter during a turn queues" `Quick
-            test_enter_during_a_turn_queues
+        ; test_case "stop acknowledgement releases only later input" `Quick
+            test_stop_ack_releases_only_input_after_that_stop
+        ; test_case "control receipts are per Keeper" `Quick
+            test_control_receipts_are_scoped_to_each_keeper
+        ; test_case "Enter stages input before immediate submission" `Quick
+            test_enter_stages_the_input_before_submission
         ; test_case "a settled turn drains the queue" `Quick
             test_a_settled_turn_drains_the_queue
         ; test_case "steer queues then interrupts through distinct paths" `Quick

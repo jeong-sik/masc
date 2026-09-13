@@ -7125,20 +7125,25 @@ type keeper_turn_state =
 
 type keeper_turn_row = {
   ktr_keeper_name : string;
+  ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
 
 let decode_keeper_turn_row json =
   let* ktr_keeper_name = required_string_field json "keeper_name" in
+  let* ktr_chat_control_token = match Json_util.assoc_member_opt "chat_control_token" json with
+    | Some (`String token) when token <> "" -> Ok (Some token)
+    | Some `Null | None -> Ok None
+    | Some _ -> Error "keeper chat_control_token must be nonempty text or null" in
   let* status = required_string_field json "status" in
   match status with
   | "unavailable" ->
       let* detail = required_string_field json "detail" in
-      Ok { ktr_keeper_name; ktr_state = Keeper_turn_unavailable detail }
+      Ok { ktr_keeper_name; ktr_chat_control_token; ktr_state = Keeper_turn_unavailable detail }
   | "ok" -> (
       match Json_util.assoc_member_opt "turn" json with
       | None -> Error "keeper turn row is missing required field 'turn'"
-      | Some `Null -> Ok { ktr_keeper_name; ktr_state = Keeper_turn_idle }
+      | Some `Null -> Ok { ktr_keeper_name; ktr_chat_control_token; ktr_state = Keeper_turn_idle }
       | Some (`Assoc _ as turn_json) ->
           let* lane_raw = required_string_field turn_json "lane" in
           let* lane =
@@ -7187,6 +7192,7 @@ let decode_keeper_turn_row json =
           Ok
             {
               ktr_keeper_name;
+              ktr_chat_control_token;
               ktr_state = Keeper_turn_running { lane; started_at_unix; preview; interrupt_token };
             }
       | Some other ->

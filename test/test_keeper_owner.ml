@@ -1629,7 +1629,7 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
     ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first; second; third];
   check bool "first started" true (Chat_operation.Operation_id.equal first (Eio.Stream.take started));
-  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Direct_operation first))) with
    | Owner.Operation_interrupt_signalled -> () | _ -> fail "stop was not signalled");
   ignore (await_terminal owner first 1_000);
   check bool "pause persisted before stopping" true
@@ -1640,7 +1640,7 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   (match Owner.run_maintenance_if_idle owner (fun () -> "operator queue control") with
    | Ok (`Ran value) -> check string "paused queue remains controllable" "operator queue control" value
    | _ -> fail "pause blocked operator maintenance");
-  (match owner_ok (Owner.pause_and_interrupt owner (Direct_operation first)) with
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Direct_operation first))) with
    | Owner.Operation_not_current _ -> () | _ -> fail "settled execution was signalled");
   (match owner_ok (Owner.run_next_operation owner ~operation_id:third ~observed:None) with
    | Owner.Run_next_applied { resumed; _ } -> check bool "run-next resumes its chat pause" true resumed
@@ -1656,6 +1656,41 @@ let test_chat_interrupt_pauses_successors_and_run_next_prioritizes () =
   check int "manual pause preserves input" 1 (Owner.operation_projection owner).queued_count
 ;;
 
+let test_interactive_admission_respects_stop_authority () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let owner = owner_ok (start_owner_with_executor ~sw
+    ~store:{replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ())}
+    ~operation_executor:None ~keeper_name:"interactive-admission"
+    ~initial_meta:(Some (make_meta "interactive-admission")) ()) in
+  let original_token = Owner.chat_control_token owner in
+  let pause actor = ignore (owner_ok (Owner.apply_meta owner
+    (Pause {reason = Keeper_latched_reason.Operator_paused {operator_actor = actor}; updated_at = "pause"}))) in
+  let submit name token = owner_ok (Owner.submit_interactive_operation owner
+    ~operation_id:(operation_id name) ~source:operation_source ~input:(operation_input name)
+    ~intent:{control_token = token; target = None}) in
+  pause Chat_interrupt;
+  let stop_token = Owner.chat_control_token owner in
+  check bool "accepted pause invalidates captured Enter" false (String.equal original_token stop_token);
+  let admitted, stale = submit "interactive-before-stop" original_token in
+  check bool "stale Enter is durably queued" false admitted.existing;
+  check bool "stale Enter has no control effect" true (stale.outcome = Owner.Stale_control && not stale.resumed && not stale.signalled);
+  check bool "stop remains paused" true (Option.get (Owner.projection owner).meta).paused;
+  let _, resumed = submit "interactive-after-stop" stop_token in
+  check bool "new Enter resumes chat stop" true (resumed.outcome = Owner.Applied && resumed.resumed);
+  check bool "resume issues new authority" false (String.equal stop_token resumed.chat_control_token);
+  pause Chat_interrupt;
+  let later_stop = Owner.chat_control_token owner in
+  let replay, receipt = submit "interactive-after-stop" later_stop in
+  check bool "reconnect retains durable request" true replay.existing;
+  check bool "reconnect never resumes newer stop" true (receipt.outcome = Owner.Replayed && not receipt.resumed);
+  check bool "replay preserves stop authority" true (String.equal later_stop (Owner.chat_control_token owner));
+  pause Grpc_directive;
+  let _, manual = submit "interactive-manual-pause" (Owner.chat_control_token owner) in
+  check bool "Enter cannot release manual pause" true (manual.outcome = Owner.Paused && not manual.resumed);
+  check bool "manual latch remains paused" true (Option.get (Owner.projection owner).meta).paused
+;;
+
 let test_stale_chat_interrupt_cannot_pause_successor () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1665,7 +1700,7 @@ let test_stale_chat_interrupt_cannot_pause_successor () =
     ~initial_meta:(Some (make_meta "stale-chat-stop")) ()) in
   Eio.Switch.run @@ fun successor ->
   let current = Atomic.make (Some { Keeper_registry_types.interrupt_token = "successor"; switch = successor }) in
-  (match owner_ok (Owner.pause_and_interrupt owner (Observed_turn { current; interrupt_token = "old" })) with
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn { current; interrupt_token = "old" }))) with
    | Owner.Operation_not_current _ -> () | _ -> fail "stale token was accepted");
   check bool "successor remains unpaused" false
     (Option.get (Owner.projection owner).meta).paused
@@ -1731,7 +1766,7 @@ let test_observed_stop_cancels_request_owned_stalled_http () =
     ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first;queued];
   Eio.Promise.await turn_ready;
   Eio.Promise.await body_started;
-  (match owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"})) with
+  (match fst (owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"}))) with
    | Owner.Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
   let cancelled = Eio.Fiber.first
     (fun () -> Eio.Promise.await http_cancelled; true)
@@ -3427,6 +3462,7 @@ let () =
             test_stale_chat_interrupt_cannot_pause_successor
         ; test_case "observed Esc cancels request-owned stalled HTTP" `Quick
             test_observed_stop_cancels_request_owned_stalled_http
+        ; test_case "interactive admission honors stop and replay authority" `Quick test_interactive_admission_respects_stop_authority
         ; test_case
             "is_operator_interrupt unwraps every shape"
             `Quick

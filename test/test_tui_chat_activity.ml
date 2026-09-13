@@ -13,7 +13,7 @@ let state () =
   state
 
 let running ?(keeper_name = "alpha") lane : Decode.keeper_turn_row =
-  { ktr_keeper_name = keeper_name
+  { ktr_chat_control_token = None; ktr_keeper_name = keeper_name
   ; ktr_state = Keeper_turn_running { lane; started_at_unix = 1.; interrupt_token = None; preview = None }
   }
 
@@ -21,7 +21,7 @@ let live ?(keeper_name = "alpha") state admission =
   let live = Tui.turn_log_create ~keeper_name ~request_id:"request-1" ~started_at:2. in
   Option.iter (fun admission ->
     Tui.turn_log_add ~now:3. live ~seq:None
-      (Live.Accepted { admission; queue_length = 3 })) admission;
+      (Live.Accepted { admission; queue_length = 3; interactive = None })) admission;
   state.Tui.msg_live <- Some live;
   live
 
@@ -55,8 +55,8 @@ let test_queue_does_not_invent_a_blocking_turn () =
     ; [running ~keeper_name:"beta" Turn_lane_autonomous], None
     ; [running Turn_lane_chat_operation], None
     ; [running Turn_lane_autonomous], Some "timeout"
-    ; [{ Decode.ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
-    ; [{ Decode.ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
+    ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_idle }], None
+    ; [{ Decode.ktr_chat_control_token = None; ktr_keeper_name = "alpha"; ktr_state = Keeper_turn_unavailable "offline" }], None
     ];
   let state = state () in
   state.keeper_turns <- [running Turn_lane_maintenance];

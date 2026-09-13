@@ -6,7 +6,7 @@ open Masc
    on — so the overlay's promises hold without a terminal. *)
 
 let row name state : Tui_decode.keeper_turn_row =
-  { Tui_decode.ktr_keeper_name = name; ktr_state = state }
+  { Tui_decode.ktr_chat_control_token = None; ktr_keeper_name = name; ktr_state = state }
 ;;
 
 let running ?preview ~lane ~started name =

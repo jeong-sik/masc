@@ -1732,6 +1732,7 @@ type keeper_turn_state =
 
 type keeper_turn_row = {
   ktr_keeper_name : string;
+  ktr_chat_control_token : string option;
   ktr_state : keeper_turn_state;
 }
 

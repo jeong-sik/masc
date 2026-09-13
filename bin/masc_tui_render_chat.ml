@@ -2888,14 +2888,14 @@ let render_keeper_message (state : state) =
         | Some _ -> "Enter:replace the queued line  Ctrl-U:leave it queued"
         | None -> (
             match pending_count with
-            | 0 -> "Enter:queue for next turn"
+            | 0 -> "Enter:send update"
             | waiting ->
                 Printf.sprintf
-                  "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+                  "Enter:send update (%d local)  Ctrl-K:cancel last  Ctrl-P:edit last"
                   waiting)
       in
       match disposition with
-      | Queues_behind _ -> queue_hint ()
+      | Updates _ -> queue_hint ()
       | Sends ->
           if target_registered then "Enter:send"
           else if Option.is_some state.keepers_error then
@@ -3011,11 +3011,11 @@ let render_keeper_message (state : state) =
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with
-          | Queues_behind _ -> (
+          | Updates _ -> (
               match state.msg_recall_replaces with
               | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
               | None ->
-                  Printf.sprintf "Enter:queue(%d)  Ctrl-K:cancel  Ctrl-P:edit"
+                  Printf.sprintf "Enter:send update (%d local)  Ctrl-K:cancel  Ctrl-P:edit"
                     pending_count)
           | Sends -> enter_hint
         in

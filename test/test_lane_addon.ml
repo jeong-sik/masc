@@ -2,7 +2,12 @@
     package supplies barriers; no model response or Docker daemon is involved. *)
 open Alcotest
 open Masc
-module Runtime = Lane_addon_runtime
+module Runtime = struct
+  include Lane_addon_runtime
+  let dispatch ?caller ~config ~operation args =
+    Lane_addon_runtime.dispatch ?caller ~config ~operation args
+    |> Result.map_error Lane_addon_runtime.error_to_string
+end
 module Types = Lane_addon_types
 module Store = Lane_addon_store
 
@@ -236,7 +241,43 @@ let test_evidence_is_optional_retained_and_delivery_is_only_acceptance () =
     detach config id; await_phase clock config id "detached";
     check Alcotest.int "one exact persisted-container recovery" 1 (List.length !(state.recovery)))
 
+let test_request_refusals_preserve_runtime_failure_distinction () =
+  with_fixture (fun _env _sw config dir _state ->
+    let dispatch operation fields = Lane_addon_runtime.dispatch ~config ~operation (`Assoc fields) in
+    let rejected label = function
+      | Error (Lane_addon_runtime.Request_rejected _) -> ()
+      | Error (Runtime_failed detail) -> failf "%s became runtime failure: %s" label detail
+      | Ok _ -> failf "%s was accepted" label in
+    rejected "missing active instance" (dispatch Runtime.Observe ["instance_id", `String "absent"]);
+    rejected "missing retained instance" (dispatch Runtime.Detach ["instance_id", `String "absent"]);
+    rejected "missing evidence instance" (dispatch Runtime.Evidence
+      ["instance_id", `String "absent"; "row_ids", `List []]);
+    rejected "missing action request" (dispatch Runtime.Action_status
+      ["instance_id", `String "absent"; "request_id", `String "absent"]);
+    rejected "missing manifest" (dispatch Runtime.Attach
+      ["manifest_path", `String (Filename.concat dir "missing.toml");
+       "run_id", `String "fixture-run"; "binding", `Assoc []]);
+    rejected "missing action fields" (dispatch Runtime.Act []);
+    let action_fields = ["instance_id", `String "absent";
+      "expected_incarnation", `String "absent"; "request_id", `String "request";
+      "action", `Assoc []] in
+    rejected "missing action target" (Lane_addon_runtime.dispatch ~caller:"fixture-caller"
+      ~config ~operation:Runtime.Act (`Assoc action_fields));
+    rejected "invalid slice timestamp" (dispatch Runtime.Slice ["since", `String "bad"]);
+    rejected "reversed slice range" (dispatch Runtime.Slice ["since", `Int 2; "until", `Int 1]);
+    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    Fs_compat.mkdir_p root;
+    write (Filename.concat root "bindings") "a file cannot be a binding directory";
+    let runtime_failed = function
+      | Error (Lane_addon_runtime.Runtime_failed _) -> ()
+      | Error (Request_rejected detail) -> failf "unreadable store became input refusal: %s" detail
+      | Ok _ -> fail "unreadable store was accepted" in
+    runtime_failed (dispatch Runtime.Detach ["instance_id", `String "absent"]);
+    runtime_failed (dispatch Runtime.Slice []))
+
 let () = run "Lane Add-on runtime" ["optional extension", [
+  test_case "missing targets refuse while storage failures remain faults" `Quick
+    test_request_refusals_preserve_runtime_failure_distinction;
   test_case "hung and failed observers preserve primary progress" `Quick test_hang_error_coalescing_and_primary_progress;
   test_case "startup and cleanup failures stay local" `Quick test_start_and_cleanup_failures_remain_optional;
   test_case "evidence remains optional and durable across detach" `Quick test_evidence_is_optional_retained_and_delivery_is_only_acceptance;

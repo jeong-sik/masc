@@ -80,6 +80,8 @@ type lifecycle_reservation_snapshot =
   ; purpose : lifecycle_transaction_purpose
   }
 
+type turn_switch = { interrupt_token : string; switch : Eio.Switch.t }
+
 type registry_entry =
   { base_path : string
   ; name : string
@@ -109,7 +111,7 @@ type registry_entry =
   ; last_failure_reason : failure_reason option
   ; turn_consecutive_failures : int
   ; turn_attempt_state : turn_attempt_state option Atomic.t
-  ; current_turn_switch : Eio.Switch.t option Atomic.t
+  ; current_turn_switch : turn_switch option Atomic.t
   ; board_cursor_ts : float
   ; board_cursor_post_id : string option
   ; tool_usage : tool_call_entry StringMap.t

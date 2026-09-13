@@ -213,7 +213,13 @@ type error =
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
-  | Process_exited of string
+  | Process_exited of
+      { detail : string
+      ; turn_admitted : bool
+      }
+      (** [turn_admitted] is false when the client died before the turn was
+          admitted, which means no turn was submitted and another candidate may
+          still be tried. *)
   | Timeout of float
 
 val error_to_string : error -> string

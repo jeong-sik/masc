@@ -1788,7 +1788,21 @@ let voice_verify_show heading = function
     print_endline heading;
     print_endline ("  " ^ reason)
 
-let voice_verify_cmd_exit message audio agent as_json =
+let voice_verify_cmd_exit requested_base_path message audio agent as_json =
+  (* The workspace whose configuration is probed, when one is named. The voice
+     loader finds runtime.toml through the environment, so a workspace set up
+     with `voice-local-setup --base-path` and never recorded as the default had
+     no way to be checked from this command: measured 2026-09-13 with only
+     HOME and PATH set, run inside that workspace, it answered "voice config
+     missing" while the section was there. Exported the way the server boot
+     exports it, and the resolver's cache is cleared because the tool registry
+     has already resolved once by the time a subcommand runs. *)
+  Option.iter
+    (fun raw ->
+      Unix.putenv "MASC_BASE_PATH_INPUT" raw;
+      Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
+      Config_dir_resolver.reset ())
+    requested_base_path;
   (* The keeper whose voice is being checked, when one is named. A voice is
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
@@ -1894,7 +1908,7 @@ let voice_verify_cmd =
              "Exit status is 0 when at least one endpoint answered, 1 when none did. A \
               configuration that does not load is reported as the loader's own sentence."
          ])
-    Term.(const voice_verify_cmd_exit $ message $ audio $ agent $ as_json)
+    Term.(const voice_verify_cmd_exit $ run_base_path $ message $ audio $ agent $ as_json)
 (* Turning voice on without a server running.
 
    The setup journey runs before there is anything to talk to over HTTP, and
@@ -1990,7 +2004,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
           let endpoint_voice, section =
-            match Voice_setup.voice_placement ~section_exists:(Option.is_some tts) with
+            match Voice_setup.voice_placement tts with
             | Voice_setup.On_the_endpoint -> Some voice, []
             | Voice_setup.On_the_section ->
               None, [ Voice_setup.Set_tts_default_voice voice ]

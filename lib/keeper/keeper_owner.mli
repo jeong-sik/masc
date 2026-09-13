@@ -314,12 +314,15 @@ val resume_direct_runtime_retry : t -> operation_id:Chat_operation.Operation_id.
   observed:Keeper_semantic_execution.runtime_retry -> (unit, error) result
 
 val pause_and_interrupt : ?expected_control_token:string -> t -> interrupt_target -> (pause_result * string, error) result
-(** Validate the exact current execution, persist the operator pause, then signal.
-    No queued or autonomous successor can start after this command. *)
+(** Persist pause before signalling an exact current target. An unknown or
+    queued direct request can instead pause admission when the supplied control
+    token is current and no other child is active; this never cancels a child.
+    Refused stale targets change neither pause nor token. *)
 val chat_control_token : t -> string
 val submit_interactive_operation : t -> operation_id:Chat_operation.Operation_id.t -> source:Yojson.Safe.t -> input:Yojson.Safe.t -> intent:interactive_intent -> (operation_acceptance * interactive_receipt, error) result
-(** Persist new input before applying its current control authority. Replayed
-    requests do not interrupt, reprioritize, or resume a newer pause. *)
+(** Admit and prioritize compatible queued context in one SQLite transaction,
+    then apply the supplied exact control intent within the same mailbox command.
+    Replayed admissions and stale control tokens perform no control effects. *)
 val run_next_operation : t -> operation_id:Chat_operation.Operation_id.t ->
   observed:interrupt_target option -> (run_next_result, error) result
 (** Prioritize before releasing a chat-interrupt pause. Other pauses remain closed. *)

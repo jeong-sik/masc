@@ -37,6 +37,10 @@ See [TOML installation](../docs/guides/lane-addon-toml.md), the
 [MSX declaration](../docs/examples/lane-addons/msx-frames.toml) and
 [DOS declaration](dos-world/install.toml).
 
+The [TUI package guide](../docs/guides/tui-lane-addons.md) covers `/addons`,
+TOML editing, named connections, Skills, actions, Slice and retained evidence.
+New packages use this common surface without adding domain-specific menus.
+
 [Output composition](../docs/guides/lane-output-composition.md) connects a
 consumer's `binding.sources` to another installation in the same run using
 `kind = "lane_output"` and `selection = "latest_completed"`.

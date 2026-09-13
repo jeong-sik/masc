@@ -1,0 +1,180 @@
+dune build @check	Run the tests this pull request edits	﻿2026-09-12T14:30:01.9871132Z ##[group]Run bash scripts/ci/run-edited-tests.sh \
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9871559Z [36;1mbash scripts/ci/run-edited-tests.sh \[0m
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9871854Z [36;1m  "35515"[0m
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9906505Z shell: /usr/bin/bash -e {0}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9906765Z env:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9906962Z   OPAMCOLOR: always
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9907198Z   OPAMCONFIRMLEVEL: unsafe-yes
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9907642Z   OPAMERRLOGLEN: 0
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9907874Z   OPAMEXTERNALSOLVER: builtin-0install
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9908150Z   OPAMRETRIES: 10
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9908369Z   OPAMSOLVERTIMEOUT: 600
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9908590Z   OPAMYES: 1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9908784Z   OPAMSWITCH: ci-5-5-1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9911669Z   GH_TOKEN: ***
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9911896Z   DUNE_JOBS: 4
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9912104Z   MASC_TEST_ALLOW_REAL_DOCKER: 1
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:01.9912352Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:03.4869383Z -- lib/keeper/keeper_turn.ml: names 16 suites, too broad to attribute
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:03.5473692Z -- lib/runtime/runtime.ml: names 37 suites, too broad to attribute
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7012345Z test sources this pull request edits: 20
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7026610Z   test/test_exact_output_catalog_precedence.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7027001Z   test/test_fusion_decision.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7027272Z   test/test_fusion_wake.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7027538Z   test/test_keeper_codex_current_context.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7028136Z   test/test_keeper_direct_runtime_resume.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7028691Z   test/test_keeper_official_client_host.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7029232Z   test/test_keeper_required_tools.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7029760Z   test/test_keeper_tool_dispatch_runtime.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7030416Z   test/test_keeper_vision_ingest.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7031003Z   test/test_keeper_vision_official_client.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7031303Z   test/test_runtime_claude_code.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7031569Z   test/test_runtime_codex_app_server.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7031867Z   test/test_runtime_official_client_mcp_http.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7032208Z   test/test_runtime_per_keeper_routing.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7033048Z   test/test_sandbox_prerequisites.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7033403Z   test/test_tool_board_coverage.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7033675Z   test/test_tool_unified.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7033994Z   test/test_verification_authority_tools.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7034295Z   test/test_verifier_exact_lane.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7034760Z   test/test_verifier_official_client.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7035382Z DROPPED: more than 12 edited suites, which reads as a wrong list
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7036181Z   name-derived lists go with it; the path-derived guards below do not
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7037161Z this pull request changes managed config assets; adding test/test_managed_assets_sync_from_binary.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7056185Z this pull request changes tool definitions; adding:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7070793Z   test/test_keeper_tool_definition_source.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7071383Z   test/test_keeper_tool_schema_bytes.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7071910Z   test/test_tools_coverage.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.7097647Z this pull request changes prompt assets; adding test/test_keeper_system_prompt_bytes.ml
+dune build @check	Run the tests this pull request edits	2026-09-12T14:30:06.9417322Z == test/test_keeper_system_prompt_bytes
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9756062Z ##[group]{keeper_system_prompt_bytes}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9756523Z Testing `keeper_system_prompt_bytes'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9756924Z This run has ID `NZ649C80'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9757121Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9774479Z   [OK]          golden          0   assembled prompt matches golden bytes.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9805068Z   [OK]          golden          1   assembled prompt carries required anchors.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9805599Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9805984Z Full test results in `~/work/masc/masc/_build/default/test/_build/_tests/keeper_system_prompt_bytes'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9806596Z Test Successful in 0.005s. 2 tests run.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:11.9807201Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:12.1368397Z == test/test_keeper_tool_definition_source
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6172004Z ##[group]{keeper_tool_definition_source}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6172869Z Testing `keeper_tool_definition_source'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6173322Z This run has ID `QIELP9J8'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6173529Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6281343Z   [FAIL]        deferred summary          0   a whole sentence is offered.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6283043Z   [OK]          resolve                   0   shipped tool names its toml.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6284311Z   [OK]          resolve                   1   composition tool names its skill.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6285057Z   [OK]          resolve                   2   builtin names no file.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6285766Z   [OK]          resolve                   3   unknown name names no file.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6286463Z   [OK]          annotate_row              0   adds the path.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6287214Z   [OK]          annotate_row              1   builtin row unchanged.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6287894Z   [OK]          annotate_row              2   row without a tool unchanged.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6290180Z   [OK]          annotate_row              3   non-object unchanged.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6290650Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6291287Z ┌──────────────────────────────────────────────────────────────────────────────┐
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6292134Z │ [FAIL]        deferred summary          0   a whole sentence is offered.     │
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6293236Z └──────────────────────────────────────────────────────────────────────────────┘
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6293984Z ASSERT a deferred tool is chosen from its first line; these are cut:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6295099Z   masc_fusion_status: first line is 81 bytes, offered as "Read Fusion run status and original deliberation evidence without starting a run..."
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6296187Z FAIL a deferred tool is chosen from its first line; these are cut:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6297261Z   masc_fusion_status: first line is 81 bytes, offered as "Read Fusion run status and original deliberation evidence without starting a run..."
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6298590Z Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6299916Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6301276Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6302073Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6302905Z Logs saved to `~/work/masc/masc/_build/default/test/_build/_tests/keeper_tool_definition_source/deferred summary.000.output'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6304191Z  ──────────────────────────────────────────────────────────────────────────────
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6304630Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6305135Z Full test results in `~/work/masc/masc/_build/default/test/_build/_tests/keeper_tool_definition_source'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6305994Z 1 failure! in 0.012s. 9 tests run.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.6306879Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:18.8631078Z == test/test_keeper_tool_schema_bytes
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3033891Z ##[group]{keeper_tool_schema_bytes}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3034472Z Testing `keeper_tool_schema_bytes'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3034928Z This run has ID `RI7DFIFG'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3035203Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3041587Z   [FAIL]        per-turn tool surface          0   stays under the ceiling.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3051532Z   [OK]          per-turn tool surface          1   the ceiling still tracks t...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3058685Z   [OK]          surface golden                 0   the surface is unchanged (...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3059211Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3059850Z ┌──────────────────────────────────────────────────────────────────────────────┐
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3060735Z │ [FAIL]        per-turn tool surface          0   stays under the ceiling.    │
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3061608Z └──────────────────────────────────────────────────────────────────────────────┘
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3062187Z workspace memory reader schema: 776 bytes
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3062883Z ASSERT the surface is non-empty
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3064019Z ASSERT model-visible tool schemas grew to 108131 bytes across 124 tools, over the 107631 ceiling by 500.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3065542Z Every Keeper turn carries this. Trim the schema or the description, or raise ceiling_bytes in this file with the PR that needs the room and say what it bought.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3067079Z FAIL model-visible tool schemas grew to 108131 bytes across 124 tools, over the 107631 ceiling by 500.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3068826Z Every Keeper turn carries this. Trim the schema or the description, or raise ceiling_bytes in this file with the PR that needs the room and say what it bought.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3070319Z Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3071128Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3072218Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3073216Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3073877Z Logs saved to `~/work/masc/masc/_build/default/test/_build/_tests/keeper_tool_schema_bytes/per-turn tool surface.000.output'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3074950Z  ──────────────────────────────────────────────────────────────────────────────
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3075233Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3075510Z Full test results in `~/work/masc/masc/_build/default/test/_build/_tests/keeper_tool_schema_bytes'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3075980Z 1 failure! in 0.002s. 3 tests run.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.3076425Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:25.5307253Z == test/test_managed_assets_sync_from_binary
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.4918070Z ##[group]{managed assets sync from the binary}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.4918761Z Testing `managed assets sync from the binary'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.4919253Z This run has ID `D65FTRGQ'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.4919517Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.5540546Z   [OK]          sync          0   prompts.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.6942006Z   [OK]          sync          1   tools.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.6969180Z   [OK]          sync          2   mcp.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.6969505Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.6970029Z Full test results in `~/work/masc/masc/_build/default/test/_build/_tests/managed assets sync from the binary'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.6970863Z Test Successful in 0.205s. 3 tests run.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.6971753Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:34.8830939Z == test/test_tools_coverage
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8071161Z ##[group]{Tools Coverage}
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8071700Z Testing `Tools Coverage'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8072114Z This run has ID `0TOEXTZR'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8072392Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8072913Z   [OK]          schema_structure                 0   not_empty.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8081517Z   [OK]          schema_structure                 1   required_fields.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8082270Z   [OK]          schema_structure                 2   unique_names.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8087480Z   [OK]          schema_structure                 3   masc_prefix.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8088201Z   [OK]          schema_inventory_lookup          0   existing.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8088864Z   [OK]          schema_inventory_lookup          1   not_found.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8089531Z   [OK]          schema_inventory_lookup          2   case_sensitive.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8090206Z   [OK]          input_schema                     0   type_is_object.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8090905Z   [OK]          input_schema                     1   has_properties.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8091623Z   [OK]          input_schema                     2   required_is_list.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8092311Z   [OK]          core_tools                       0   masc_start.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8093199Z   [OK]          core_tools                       1   masc_status.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8093860Z   [OK]          core_tools                       2   masc_broadcast.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8094560Z   [OK]          core_tools                       3   broadcast cache signal s...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8095595Z   [OK]          core_tools                       4   masc_transition.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8096355Z   [OK]          core_tools                       5   masc_run schemas share S...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8097372Z   [OK]          core_tools                       6   masc_run schemas strict ...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8099808Z   [OK]          core_tools                       7   masc_add_task.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8100820Z   [OK]          core_tools                       8   masc_batch_add_tasks.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8101597Z   [OK]          core_tools                       9   masc_board_post supports...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8102314Z   [OK]          goal_tools                       0   goal_list.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8103201Z   [OK]          goal_tools                       1   goal_upsert.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8103912Z   [OK]          goal_tools                       2   goal_transition.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8104633Z   [OK]          keeper_runtime_tools             0   keeper-up.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8105295Z   [OK]          dashboard_tools                  0   dashboard.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8106031Z   [OK]          dashboard_tools                  1   dashboard scope enum mat...
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8106850Z   [OK]          dashboard_tools                  2   keeper_waiting_inventory.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8107588Z   [OK]          dashboard_tools                  3   agent_fitness.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8108275Z   [OK]          dashboard_tools                  4   get_metrics.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8108923Z   [OK]          dashboard_tools                  5   agent_card.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8114006Z   [OK]          edge_cases                       0   description_not_short.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8119506Z   [OK]          edge_cases                       1   description_not_long.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8125383Z   [OK]          edge_cases                       2   no_duplicate_props.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8140043Z   [OK]          edge_cases                       3   valid_prop_types.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8142167Z   [OK]          keeper_front_door                0   clear_stays_internal.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8142808Z 
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8143236Z Full test results in `~/work/masc/masc/_build/default/test/_build/_tests/Tools Coverage'.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8143980Z Test Successful in 0.007s. 35 tests run.
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8144731Z ##[endgroup]
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8167996Z ran 3, skipped 0
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8168397Z suites that did not pass:
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8168853Z   test/test_keeper_tool_definition_source (run)
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8169285Z test/test_keeper_tool_schema_bytes (run)
+dune build @check	Run the tests this pull request edits	2026-09-12T14:31:41.8179328Z ##[error]Process completed with exit code 1.

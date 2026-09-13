@@ -47,7 +47,10 @@ let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
 ;;
 
-let resumed_turn_result = {|{"id":4,"result":{"turn":{"id":"turn-2"}}}|}
+(* Keeper context is acknowledged before its turn/start request. *)
+let context_injected = {|{"id":4,"result":{}}|}
+let turn_after_context = {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
+let resumed_turn_after_context = {|{"id":5,"result":{"turn":{"id":"turn-2"}}}|}
 
 let resumed_item_completed =
   {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-2","completedAtMs":2,"item":{"type":"agentMessage","id":"message-2","text":"MASC_RESUMED_OK","phase":"final_answer"}}}|}
@@ -3354,11 +3357,12 @@ let test_keeper_resumes_persisted_codex_thread () =
                  | _ -> Continue)
          }
        in
-       with_fixture
+       with_fixture ~inject_items:true
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; resumed_turn_result
+         ; context_injected
+         ; resumed_turn_after_context
          ; resumed_item_completed
          ; resumed_turn_completed
          ]
@@ -3441,12 +3445,13 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
       Sys.remove start_capture;
       Sys.remove resume_capture)
     (fun () ->
-       with_fixture
+       with_fixture ~inject_items:true
          ~capture_path:start_capture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; turn_result
+         ; context_injected
+         ; turn_after_context
          ; item_completed
          ; turn_completed
          ]
@@ -3463,12 +3468,13 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> check int "initial context turn" 1 result.turns);
-       with_fixture
+       with_fixture ~inject_items:true
          ~capture_path:resume_capture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; resumed_turn_result
+         ; context_injected
+         ; resumed_turn_after_context
          ; resumed_item_completed
          ; resumed_turn_completed
          ]
@@ -3497,36 +3503,21 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          "start and resume receive identical developer instructions"
          start_instructions
          resume_instructions;
-       (* Three non-empty instruction sections, in this order: the keeper's
-          composed system prompt, the Native_read posture note, and the typed
-          dynamic-context envelope. [Keeper_codex_runtime] joins them as
-          [system_prompt :: native_posture_note ...], and the host refuses a
-          blank prompt (#33165), so a shape without the first section is one
-          no turn can reach. This case used to assert exactly that shape,
-          which held only while the fixture supplied no prompt (#33862).
-
-          Read from their production owners. Searching for a JSON-looking
-          paragraph would let the posture note disappear or move unnoticed. *)
        let posture_note =
-         match
-           Keeper_codex_runtime.For_testing.native_posture_note
-             Runtime_native_tools.Native_read
-         with
-         | [] -> fail "Native_read posture note disappeared"
-         | sections -> String.concat "\n\n" sections
+         Keeper_codex_runtime.For_testing.native_posture_note
+           Runtime_native_tools.Native_read |> String.concat "\n\n"
        in
-       let instruction_prefix = system_prompt ^ "\n\n" ^ posture_note ^ "\n\n" in
-       let prefix_bytes = String.length instruction_prefix in
-       let context_envelope_text =
-         if String.length start_instructions < prefix_bytes then
-           fail "developer instructions are shorter than the prompt and posture prefix"
-         else (
-           check string
-             "the prompt and the Native_read posture note lead the developer instructions"
-             instruction_prefix
-             (String.sub start_instructions 0 prefix_bytes);
-           String.sub start_instructions prefix_bytes
-             (String.length start_instructions - prefix_bytes))
+       check string "stable instructions retain Keeper prompt and native posture"
+         (system_prompt ^ "\n\n" ^ posture_note) start_instructions;
+       let developer_items capture =
+         request capture "thread/inject_items"
+         |> Yojson.Safe.Util.member "params"
+         |> Yojson.Safe.Util.member "items"
+         |> Yojson.Safe.Util.to_list
+         |> List.map (fun item ->
+           let open Yojson.Safe.Util in
+           check string "context injection role" "developer" (item |> member "role" |> to_string);
+           item |> member "content" |> index 0 |> member "text" |> to_string)
        in
        let expected_context_envelope =
          { (Agent_core.Types.system_msg dynamic_context) with
@@ -3534,10 +3525,11 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          }
          |> Keeper_official_client_host.encode_history_message
        in
-       check string
-         "dynamic context uses the canonical instruction envelope"
-         expected_context_envelope
-         context_envelope_text;
+       check (list string) "start injects current context"
+         [expected_context_envelope] (developer_items start_capture);
+       check (list string) "resume injects current instructions and context"
+         [resume_instructions; expected_context_envelope] (developer_items resume_capture);
+       let context_envelope_text = List.hd (developer_items start_capture) in
        let context_envelope = Yojson.Safe.from_string context_envelope_text in
        let open Yojson.Safe.Util in
        check string
@@ -3650,11 +3642,12 @@ let test_production_keeper_dispatches_codex_runtime () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture
+       with_fixture ~inject_items:true
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; turn_result
+         ; context_injected
+         ; turn_after_context
          ; item_completed
          ; turn_completed
          ]
@@ -3680,11 +3673,12 @@ let test_production_keeper_reports_codex_token_usage () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture
+       with_fixture ~inject_items:true
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; turn_result
+         ; context_injected
+         ; turn_after_context
          ; item_completed
          ; token_usage_updated
          ; turn_completed
@@ -3721,11 +3715,12 @@ let test_production_keeper_resumes_across_trace_rotation () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture
+       with_fixture ~inject_items:true
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; turn_result
+         ; context_injected
+         ; turn_after_context
          ; item_completed
          ; turn_completed
          ]
@@ -3741,11 +3736,12 @@ let test_production_keeper_resumes_across_trace_rotation () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok _ -> ());
-       with_fixture
+       with_fixture ~inject_items:true
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; resumed_turn_result
+         ; context_injected
+         ; resumed_turn_after_context
          ; resumed_item_completed
          ; resumed_turn_completed
          ]
@@ -3796,12 +3792,13 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path; Sys.remove capture)
     (fun () ->
-       with_fixture
+       with_fixture ~inject_items:true
          ~capture_path:capture
          [ init_result
          ; account_chatgpt
          ; thread_result
-         ; turn_result
+         ; context_injected
+         ; turn_after_context
          ; item_completed
          ; turn_completed
          ]
@@ -3818,109 +3815,23 @@ let test_production_dynamic_context_reaches_codex_instruction_wire () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> assert_production_keeper_result result);
-       let developer_instructions =
-         In_channel.with_open_bin capture (fun input ->
-             In_channel.input_lines input
-             |> List.map Yojson.Safe.from_string
-             |> List.find (fun json ->
-                  Yojson.Safe.Util.member "method" json = `String "thread/start")
-             |> Yojson.Safe.Util.member "params"
-             |> Yojson.Safe.Util.member "developerInstructions"
-             |> Yojson.Safe.Util.to_string)
-       in
-       let posture_note =
-         match
-           Keeper_codex_runtime.For_testing.native_posture_note
-             Runtime_native_tools.Native_read
-         with
-         | [] -> fail "Native_read posture note disappeared"
-         | sections -> String.concat "\n\n" sections
-       in
-       ignore posture_note;
-       (* [run_production_keeper_turn] assembles the real keeper system prompt
-          ahead of the posture note (see [Keeper_codex_runtime]: system_prompt ::
-          posture_note @ developer_messages), so unlike the hook-injected sibling
-          test the posture note is NOT the byte prefix of the wire. And the
-          production assembly appends more blocks after the turn instructions —
-          today the temporal summary — so the envelope text itself is not a
-          byte-exact window either. Assert the #28169 invariants instead: the
-          turn instructions appear inside one envelope message on the wire with
-          System role, typed provenance, and the exact instruction text intact.
-          Locate this turn's envelope by scanning for the instruction text and
-          trimming to the enclosing JSON object, which assumes neither a
-          position nor which other blocks share the envelope. *)
-       let find_sub text sub =
-         let n = String.length sub in
-         let rec go i =
-           if i + n > String.length text then None
-           else if String.sub text i n = sub then Some i
-           else go (i + 1)
-         in
-         go 0
-       in
-       let find_sub_from text from sub =
-         let n = String.length sub in
-         let rec go i =
-           if i + n > String.length text then None
-           else if String.sub text i n = sub then Some i
-           else go (i + 1)
-         in
-         go (max from 0)
-       in
        let context_envelope =
-         (* The wire stores developer instructions as JSON strings: newlines in
-            the instruction text arrive escaped as [\n]. Encode the expected
-            text with Yojson so the substring scan compares like with like. *)
-         let encoded_needle =
-           Yojson.Safe.to_string (`String expected_dynamic_context)
-         in
-         let needle =
-           (* Yojson quotes the string but keeps its escaping: this is the
-              exact JSON-escaped form the wire carries inside the envelope. *)
-           let n = String.length encoded_needle in
-           String.sub encoded_needle 1 (n - 2)
-         in
-         match find_sub developer_instructions needle with
-         | None ->
-           fail
-             "production turn instructions are not on the \
-              developer-instruction wire"
-         | Some marker_at ->
-           (* The envelope object opens at the nearest preceding schema object
-              start, not at the nearest open brace of the text block that
-              happens to hold the instructions. *)
-           let envelope_open = "{\"schema\":" in
-           let open_obj =
-             let rec back i =
-               if i < 0 then 0
-               else if
-                 i + String.length envelope_open
-                 <= String.length developer_instructions
-                 && String.sub developer_instructions i
-                      (String.length envelope_open)
-                    = envelope_open
-               then i
-               else back (i - 1)
-             in
-             back marker_at
-           in
-           let marker_end = marker_at + String.length needle in
-           (* The envelope closes after the typed provenance marker; finding
-              that end marker is robust to nested braces inside content_blocks
-              (a plain forward scan for '}' would stop at the text block's own
-              closing brace). *)
-           let provenance_end =
-             "\"agent_core.extra_system_context.v1\":true}}}"
-           in
-           let close_obj =
-             match find_sub_from developer_instructions marker_end provenance_end with
-             | Some i -> i + String.length provenance_end
-             | None -> String.length developer_instructions
-           in
-           let candidate =
-             String.sub developer_instructions open_obj (close_obj - open_obj)
-           in
-           Yojson.Safe.from_string candidate
+         In_channel.with_open_bin capture (fun input ->
+           let open Yojson.Safe.Util in
+           In_channel.input_lines input
+           |> List.map Yojson.Safe.from_string
+           |> List.find (fun row -> member "method" row = `String "thread/inject_items")
+           |> member "params" |> member "items" |> to_list
+           |> List.find_map (fun item ->
+             if member "role" item <> `String "developer" then None
+             else
+               let text = item |> member "content" |> index 0 |> member "text" |> to_string in
+               match Yojson.Safe.from_string text with
+               | envelope when member "schema" envelope = `String Keeper_official_client_context_codec.schema ->
+                 Some envelope
+               | _ -> None
+               | exception Yojson.Json_error _ -> None)
+           |> function Some envelope -> envelope | None -> fail "current developer context was not injected")
        in
        let open Yojson.Safe.Util in
        check string
@@ -4054,11 +3965,12 @@ let test_keeper_projects_typed_tools_and_hooks () =
       ; extra_messages = []
       }
   in
-  with_fixture
+  with_fixture ~inject_items:true
     [ init_result
     ; account_chatgpt
     ; thread_result
-    ; turn_result
+    ; context_injected
+    ; turn_after_context
     ; tool_call_request
     ; item_completed
     ; turn_completed

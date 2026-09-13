@@ -1,0 +1,16 @@
+
+ RUN  v4.1.5 /private/tmp/masc-ide-conversation-source-refresh-20260913/dashboard
+
+(node:8373) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9443) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:10927) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:11462) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  4 passed (4)
+      Tests  318 passed (318)
+   Start at  03:27:51
+   Duration  5.26s (transform 947ms, setup 626ms, import 891ms, tests 2.02s, environment 660ms)

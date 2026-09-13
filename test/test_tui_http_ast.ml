@@ -1617,6 +1617,22 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"keeper_detail_pane"
        ~callee:"Render_schedule.normalize_keeper_detail_scroll");
+  (* The roster pane's key on the detail footer is spelled like its
+     neighbours. It read "h/l pane" beside "j/k:move". *)
+  check int "keeper detail spells the pane key the footer way" 1
+    (Ast_grep.count_exact_string_literals_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_detail" ~needle:"h/l:pane  ");
+  (* And the row goes through the footer the Keepers list uses. Cut with
+     [fit_width] it kept the front and lost [Left / Esc] and [q] at the back:
+     at 80 columns it ended "t:c…". *)
+  let in_detail callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_detail" ~callee
+  in
+  check int "keeper detail draws its row through footer_line" 1
+    (in_detail "footer_line");
+  check int "and does not cut it by hand" 0 (in_detail "Message_layout.fit_width");
   (* #30210 replaced the byte-at-a-time read with a buffered refill, so the
      wait moved with it. The contract did not: whichever binding blocks for
      input owns the deadline, and EINTR has to come back as a retry rather
@@ -1670,6 +1686,11 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "overview renderer consumes one shared layout" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_overview" ~callee:"overview_layout");
+  (* The Attention panel tells an empty answer from an unread one the way
+     every listing does, instead of leaving its rows blank. *)
+  check int "overview's attention panel reads the shared empty page" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_overview" ~callee:"empty_page_of");
   (* The overview reads its bounds off [row_budget], the one value the layout
      above returns. How many times it reads them is how much the surface
      draws, not whether the allocation is shared: #29684 moved the number
@@ -1944,17 +1965,17 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"apply_raw_mode"
        ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
-  check int "raw mode reclaims the key the record cannot carry" 1
+  check int "raw mode reclaims the keys the record cannot carry" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_raw_mode"
-       ~callee:"Masc_tui_termios.disable_literal_next");
-  check int "raw mode reclaims Ctrl-O from VDISCARD" 1
+       ~callee:"Masc_tui_termios.reclaim");
+  check int "the session reads the keys before it reclaims them" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"apply_raw_mode"
-       ~callee:"Masc_tui_termios.disable_discard_output");
-  check int "terminal restoration returns the original discard key" 1
+       ~binding_name:"main"
+       ~callee:"Masc_tui_termios.snapshot");
+  check int "terminal restoration returns the original keys" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.set_discard_output");
+       ~binding_name:"restore_terminal_outcome" ~callee:"Masc_tui_termios.restore");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"restore_terminal_outcome" ~callee:"Frame_presenter.cleanup");
@@ -2352,6 +2373,8 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
   check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
     [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
+  (* The roster's last-seen clock went out as a slice of the wire text. *)
+  check_fields "render_clients" [ "cr_name"; "cr_agent_type"; "cr_last_seen" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
@@ -2528,6 +2551,20 @@ let test_the_board_header_and_rows_share_one_layout () =
   check int "and so is every row" 1 (in_board "Render_schedule.board_row")
 ;;
 
+(* The answering overlay is the contract's as well. A short list closed its
+   box under the preview panel and put the footer mid-screen; the list now
+   fills its height so the panel and the footer keep the bottom rows. *)
+let test_the_answering_overlay_is_the_shared_contract () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_answering" ~callee
+  in
+  check int "the answering overlay draws through the contract" 1
+    (calls "surface_chrome");
+  check int "the answering overlay finishes no frame by hand" 0
+    (calls "finish_surface")
+;;
+
 (* The Board list's frame is the shared contract's, not a count of its own.
 
    It spent [rows - 11] on posts while it drew nine fixed rows: the constant
@@ -2545,6 +2582,117 @@ let test_the_board_list_frame_is_the_shared_contract () =
   check int "the frame is drawn by the contract" 1 (in_board "surface_chrome");
   check int "nothing finishes the frame by hand" 0 (in_board "finish_surface");
   check int "and no row is filled by hand" 0 (in_board "box_empty")
+;;
+
+(* The patch review, link preview, deletion record and command palette overlays
+   are the shared contract's as well: it draws their box and fills the rows
+   under a short body, so the footer stays on the composer's row. Drawn by
+   hand, a short body put the footer mid-screen. *)
+let test_the_overlays_are_the_shared_contract () =
+  List.iter
+    (fun binding_name ->
+      let calls callee =
+        Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+          ~binding_name ~callee
+      in
+      check bool (binding_name ^ " draws through the contract") true
+        (calls "surface_chrome" >= 1);
+      check int (binding_name ^ " finishes no frame by hand") 0
+        (calls "finish_surface");
+      List.iter
+        (fun by_hand ->
+          check int (Printf.sprintf "%s draws no %s" binding_name by_hand) 0
+            (calls by_hand))
+        [ "framed_top"; "framed_bottom" ])
+    [ "render_patch_modal"; "render_link_preview_modal"; "render_keeper_deletions"
+    ; "render_palette"; "render_help"; "render_agenda" ];
+  (* [keeper_deletions_viewport] bounds the record's scroll with
+     [framed_content_height], and the body is drawn against the contract's
+     budget. They agree only while the five rows have one owner. *)
+  check int "the contract's rows are the frame's rows" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render_prim.ml"
+       ~binding_name:"surface_chrome_rows" ~callees:[]
+       ~identifiers:[ "framed_chrome_rows" ]);
+  (* The context inspector is the contract's as well, and its tabs are the
+     shared strip rather than footer-grammar labels told apart by colour. *)
+  let inspector callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_context_inspector" ~callee
+  in
+  check int "the context inspector draws through the contract" 1
+    (inspector "surface_chrome");
+  check int "the context inspector finishes no frame by hand" 0
+    (inspector "finish_surface");
+  check int "its tabs are the shared strip" 1 (inspector "tab_strip")
+;;
+
+(* The runtime.toml pane's frame is the shared contract's too. It subtracted
+   a literal 7 for its fixed rows and drew six, so the footer stood a row above
+   the composer, and the cursor bound read the same 7. Its height is now the
+   contract's rows and the heading it draws, one function for both readers. *)
+let test_the_config_frame_is_the_shared_contract () =
+  let in_config callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_config" ~callee
+  in
+  check int "the frame is drawn by the contract" 1 (in_config "surface_chrome");
+  check int "nothing finishes the frame by hand" 0 (in_config "finish_surface");
+  check int "and no row is filled by hand" 0 (in_config "box_empty");
+  check int "the source height is the one the cursor reads" 1
+    (in_config "config_content_height");
+  (* The panes take their keys from the table. Params, prompts, presets and
+     models spelled their own rows, three of them in Korean on an English
+     screen, and presets offered PgUp/PgDn, which its handler never paged. *)
+  List.iter
+    (fun (binding_name, callee) ->
+      check int (binding_name ^ " takes its keys from the table") 1
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_render.ml" ~binding_name ~callee))
+    [ "render_config", "Masc_tui_keys.footer_hints_config"
+    ; "render_runtime_params", "Masc_tui_keys.footer_hints_config"
+    ; "render_prompt_registry", "Masc_tui_keys.footer_hints_config"
+    ; "render_presets", "Masc_tui_keys.footer_hints_config"
+    ; "render_themes", "Masc_tui_keys.footer_hints_config"
+    ; "render_config_models", "Masc_tui_keys.footer_hints_config"
+    ; "render_voice", "Masc_tui_keys.footer_hints_config"
+    ]
+;;
+
+(* Code and Resources open on a title row -- name, clock, connection badge --
+   like every other surface; they opened on a pane header, so nothing on them
+   said the server was gone. The panes' height gives that row up in one place:
+   Code's list and its key handlers read [code_pane_content_height]. *)
+let test_the_pane_surfaces_open_on_a_title_row () =
+  let calls binding_name callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name ~callee
+  in
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " draws the title row once") 1
+        (calls binding_name "pane_surface_title"))
+    [ "render_code"; "render_resources" ];
+  check bool "Code's list reads the shared pane height" true
+    (calls "render_code" "code_pane_content_height" >= 1);
+  check bool "Code's pane height gives up the title row" true
+    (calls "code_pane_content_height" "pane_surface_content_height" >= 1);
+  check bool "Resources gives up the same title row" true
+    (calls "render_resources" "pane_surface_content_height" >= 1)
+;;
+
+(* The runtime picker is the contract's too: the frame counts its rows, the
+   failure row is the shared one, and the footer is the key table's. *)
+let test_the_runtime_picker_is_the_shared_contract () =
+  let calls callee =
+    Ast_grep.count_calls_in_value_binding ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_runtime_pick" ~callee
+  in
+  check int "the frame is drawn by the contract" 1 (calls "surface_chrome");
+  check int "nothing finishes the frame by hand" 0 (calls "finish_surface");
+  check int "the failure row is the shared one" 1 (calls "data_unreliable_row");
+  check int "the footer is the key table's" 1
+    (calls "Masc_tui_keys.footer_hints")
 ;;
 
 (* Exact lane payloads used to pretty-print JSON and hand its plain lines
@@ -2680,9 +2828,29 @@ let () =
           `Quick
           test_the_board_header_and_rows_share_one_layout;
         test_case
+          "the answering overlay is the shared contract"
+          `Quick
+          test_the_answering_overlay_is_the_shared_contract;
+        test_case
+          "the overlays are the shared contract"
+          `Quick
+          test_the_overlays_are_the_shared_contract;
+        test_case
           "the board list frame is the shared contract"
           `Quick
           test_the_board_list_frame_is_the_shared_contract;
+        test_case
+          "the config frame is the shared contract"
+          `Quick
+          test_the_config_frame_is_the_shared_contract;
+        test_case
+          "the pane surfaces open on a title row"
+          `Quick
+          test_the_pane_surfaces_open_on_a_title_row;
+        test_case
+          "the runtime picker is the shared contract"
+          `Quick
+          test_the_runtime_picker_is_the_shared_contract;
         test_case
           "lane run payload uses the JSON document renderer"
           `Quick

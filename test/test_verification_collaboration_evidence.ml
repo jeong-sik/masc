@@ -58,8 +58,20 @@ let metadata = `Assoc
   ; "panel", `List [ `Assoc ["model", `String "first"; "answer", `String "Keep A"];
                        `Assoc ["model", `String "second"; "answer", `String "B preserves the constraint"] ]
   ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"] ]
-let fusion ~author ~visibility ~source ?(content="Original independent advice") run_id =
-  post ~author ~visibility ~meta_json:metadata
+(* The context the sink captures for a request made for [task]. A decision is
+   recorded only for the Task its run was requested for, so a fixture that
+   records one has to capture that Task. *)
+let metadata_for_task task_id = `Assoc
+  [ "source_context", `Assoc
+      [ "keeper", `String "producer"; "turn_ref", `Null
+      ; "task", `Assoc ["id", `String task_id; "title", `String "Make a decision";
+          "description", `String "Compare the evidence"; "status", `String "claimed"; "contract", `Null]
+      ; "goals", `List []; "question", `String "compare the designs"; "decision_context", `Null ]
+  ; "panel", `List [ `Assoc ["model", `String "first"; "answer", `String "Keep A"];
+                       `Assoc ["model", `String "second"; "answer", `String "B preserves the constraint"] ]
+  ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"] ]
+let fusion ~author ~visibility ~source ?(content="Original independent advice") ?(meta_json=metadata) run_id =
+  post ~author ~visibility ~meta_json
     ~origin:Board.{turn_ref=Some (Ids.Turn_ref.make ~trace_id:"origin-trace" ~absolute_turn:7);
                   source=Some source; fusion_run_id=Some run_id; fusion_producer=Some author}
     content
@@ -146,11 +158,12 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
 
 let test_fusion_original_and_separate_decision () = with_fixture (fun config ->
   let id = "opaque-source-id" in
-  let p = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion" id in
   let goal_record, _ = Goal_store.upsert_goal config ~title:"Compare designs" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
   let work = Task.Goal_assignment.add_task_with_result config ~goal_id:goal_record.id
       ~title:"Make a decision" ~priority:2 ~description:"Compare the evidence" |> require "task" in
   Workspace.claim_task_r config ~agent_name:"producer" ~task_id:work.task_id () |> require "claim" |> ignore;
+  let p = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion"
+      ~meta_json:(metadata_for_task work.task_id) id in
   let proposal = Fusion_decision.parse (`Assoc ["run_id", `String id; "task_id", `String work.task_id;
     "decision", `String "modified"; "choice", `String "Choose B"; "reason", `String "B preserves measured behavior"]) |> require "proposal" in
   let recorded = Fusion_decision.record ~config ~keeper:"producer"
@@ -159,7 +172,8 @@ let test_fusion_original_and_separate_decision () = with_fixture (fun config ->
   List.iter (fun surface ->
     let wire = read surface "masc_fusion_status" (run_args id) in
     let open Yojson.Safe.Util in
-    check bool "full original source metadata" true (wire |> member "post" |> member "meta" = metadata);
+    check bool "full original source metadata" true
+      (wire |> member "post" |> member "meta" = metadata_for_task work.task_id);
     check string "original source ID" (Board.Post_id.to_string p.id)
       (wire |> member "post" |> member "id" |> to_string);
     check string "same evidence hash as decision" (Fusion_decision.evidence_sha256 p)

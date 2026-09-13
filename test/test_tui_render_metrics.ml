@@ -357,12 +357,24 @@ let test_pulse_roster_waits_for_the_local_read () =
 ;;
 
 let test_section_pills_line () =
-  let line_fleet = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_fleet in
-  check bool "fleet line bounded" true (Layout.display_width line_fleet <= 100);
-  let line_res = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_resources in
-  check bool "res line bounded" true (Layout.display_width line_res <= 100);
-  let line_tools = Render_metrics.section_pills_line ~cols:100 ~active:Types.Section_tools in
-  check bool "tools line bounded" true (Layout.display_width line_tools <= 100)
+  let sections = [ Types.Section_fleet; Types.Section_resources; Types.Section_tools ] in
+  List.iter
+    (fun active ->
+      let line = Render_metrics.section_pills_line ~cols:100 ~active in
+      let plain = Masc_tui_theme.strip_sgr line in
+      let label = Types.metrics_section_label active in
+      check bool (label ^ ": line bounded") true (Layout.display_width line <= 100);
+      check bool (label ^ ": the section being read wears the mark") true
+        (contains plain ("\xe2\x96\xb8" ^ label));
+      List.iter
+        (fun other ->
+          check bool (label ^ ": every section is named") true
+            (contains plain (Types.metrics_section_label other)))
+        sections;
+      (* 1-3 and s are the footer's; the strip does not spell them again. *)
+      check bool (label ^ ": no key spelling") false
+        (contains plain "[1-3" || contains plain "Sections"))
+    sections
 ;;
 
 let test_section_fleet_lines () =
@@ -447,6 +459,28 @@ let test_section_tools_populated () =
   let lines = Render_metrics.render_section_tools ~cols:90 state in
   check bool "tools populated produces lines" true (List.length lines > 0);
   List.iter (fun l -> check bool "tool line bounded" true (Layout.display_width l <= 90)) lines
+;;
+
+(* Arriving on Metrics already asks for memory health. The block said "not
+   loaded -- visit Memory surface to fetch" before the answer, after a failed
+   answer, and beside a stale one alike. *)
+let test_memory_block_names_its_reading () =
+  let state = make_state () in
+  let section () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
+  check bool "unread says so" true (contains (section ()) "Memory health: not observed");
+  check bool "and sends nobody elsewhere" false (contains (section ()) "visit Memory");
+  state.memory_health_error <- Some "memory health load failed: HTTP 503";
+  check bool "a failed read carries its reason" true
+    (contains (section ()) "Memory health: unavailable: memory health load failed: HTTP 503");
+  let kh = make_keeper_health ~keeper_id:"alpha" ~facts:25 ~snapshot_bytes:4096 in
+  state.memory_health <- Some (make_memory_health ~total_facts:25 ~source_facts:0 ~keepers:[ kh ]);
+  check bool "a failed refresh over a reading is stale" true
+    (contains (section ()) "Memory health: stale: previous reading, refresh failed");
+  check bool "and keeps the reading" true (contains (section ()) "Ordinary facts: 25");
+  state.memory_health_error <- None;
+  check bool "a current reading draws no status row" false
+    (contains (section ()) "Memory health:");
+  check bool "only the reading" true (contains (section ()) "Ordinary facts: 25")
 ;;
 
 let test_approval_source_observations () =
@@ -607,6 +641,7 @@ let () =
         ; test_case "resources_populated" `Quick test_section_resources_populated
         ; test_case "tools_populated" `Quick test_section_tools_populated
         ; test_case "approval source observations" `Quick test_approval_source_observations
+        ; test_case "memory block names its reading" `Quick test_memory_block_names_its_reading
         ] )
     ; ( "responsiveness"
       , [ test_case "narrow_and_wide" `Quick test_narrow_and_wide_terminals ] )

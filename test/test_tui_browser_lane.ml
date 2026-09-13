@@ -7,7 +7,7 @@ let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
 let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox }
 let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen }
-let pinned () = choose_client firefox { (create ()) with clients = [firefox; zen] }
+let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
 let response ?(source="live") ?(client=firefox.client_id) ?(page_id=2) () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String source; "clientId", (if source = "automation" then `Null else `String client); "elapsed_ms", `Float 12.5;
@@ -103,7 +103,7 @@ let test_operator_reader_context () =
   expect "automation does not invent a browser brand"
     (browser_label (switch_source Automation (create ())) = Some "browser");
   expect "live Zen keeps the normalized server identity"
-    (browser_label (choose_client zen { (create ()) with clients = [zen] }) = Some "Zen");
+    (browser_label (choose_client zen { (create ()) with clients = Some [zen] }) = Some "Zen");
   expect "live with no browser chosen has no browser to name"
     (browser_label (create ()) = None);
   expect "browser context identifies source without keeper prerequisite"
@@ -202,6 +202,23 @@ let test_client_connection_ownership () =
   expect "late discovery cannot replace chosen client"
     (accept_clients ~generation:20 (Ok [firefox]) pending = (pending, false));
   expect "automation sends no native client ID" (request_body (switch_source Automation right) = `Assoc ["lane", `String "automation"])
+
+(* The picker's empty row reads the list, not the failure: a discovery that
+   failed has no list, and an empty one is an answer. *)
+let test_picker_empty_row () =
+  let discover t = { t with load = Loading (30, Discover Choose_client); clients = None } in
+  let row = Masc_tui_types.browser_lane_picker_empty_line in
+  expect "nothing asked yet is unread" (row (create ()) = Some Masc_tui_types.page_unread_note);
+  expect "a discovery in flight waits"
+    (row (discover (create ())) = Some "  Waiting for active connections\xe2\x80\xa6");
+  let failed, _ = accept_clients ~generation:30 (Error "connection refused") (discover (create ())) in
+  expect "a failed discovery holds no list" (failed.clients = None && listed_clients failed = []);
+  expect "a failed discovery is not an empty one" (row failed = Some Masc_tui_types.page_failed_note);
+  let empty, _ = accept_clients ~generation:30 (Ok []) (discover (create ())) in
+  expect "an answered discovery with nothing in it says so"
+    (row empty = Some "  No active native browser connections");
+  let two, _ = accept_clients ~generation:30 (Ok [firefox; zen]) (discover (create ())) in
+  expect "connections to offer need no empty row" (two.clients = Some [firefox; zen] && row two = None)
 
 let test_clients_decode () =
   let row id browser = `Assoc ["clientId", `String id; "browser", `String browser] in
@@ -308,6 +325,7 @@ let () =
      "visual pointer navigation", test_visual_pointer_navigation;
      "visual scroll ownership", test_visual_scroll_ownership;
      "client connection ownership", test_client_connection_ownership;
+     "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
      "read and tab selection", test_read_and_selection;

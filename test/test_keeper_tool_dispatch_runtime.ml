@@ -6652,8 +6652,8 @@ value = {surface="dashboard", content="must not run"}
         Browser_lane.install_automation_executor None; Masc.Keeper_tool_call_log.reset_for_testing ())
       (fun () ->
         let projected = match Masc.Keeper_official_client_host.dynamic_tools
-          ~content_transport:Runtime_official_client_tool.Codex ~accepts_image_input:false
-          ~tool_approval:None ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
+          ~content_transport:Runtime_official_client_tool.Codex ~tool_approval:None
+          ~pre_tool_rejects:(ref []) ~runtime_label:"read-recovery-test"
           ~keeper_name:meta.name ~turn_count:7 ~tools:bundle.tools
           ~hooks:Agent_core.Hooks.empty ~event_bus:None ~context_injector:None
           ~context:(Some (Agent_core.Context.create_sync ()))
@@ -8004,9 +8004,7 @@ default = "official.primary"
       let native_config = match Runtime.get_runtime_by_id "official.gate" with
         | Some {Runtime.execution=Runtime_execution.Codex_app_server config; _} -> config
         | _ -> fail "native Gate fixture runtime missing" in
-      Masc.Keeper_codex_runtime.run
-        ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
-          ~runtime:(Runtime.get_runtime_by_id "official.gate" |> Option.get)) ?official_client_continuation:continuation
+      Masc.Keeper_codex_runtime.run ?official_client_continuation:continuation
         ~runtime_id:"official.gate" ~keeper_name:meta.Masc.Keeper_meta_contract.name
         ~pre_tool_rejects:(ref []) ~base_path:config.base_path ~goal ~goal_blocks
         ~system_prompt:"Inspect the exact Gate result and continue the original operation after its resolution."

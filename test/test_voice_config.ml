@@ -333,7 +333,7 @@ let two_provider_config_with_agent_voices =
     "default_model": "eleven_multilingual_v2",
     "default_voice": "aEO01A4wXwd1O8GPgGlF",
     "default_voice_settings": {},
-    "agent_voices": { "sangsu": "mapped-voice-id" },
+    "agent_voices": { "voice-mapping-fixture": "mapped-voice-id" },
     "endpoints": [
       { "id": "eleven", "kind": "elevenlabs_direct",
         "api_key_env": "ELEVENLABS_API_KEY", "enabled": true },
@@ -375,11 +375,11 @@ let test_endpoint_voice_outranks_a_per_agent_mapping () =
     check string
       "an endpoint without a voice of its own honours the mapping"
       "mapped-voice-id"
-      (Vc.voice_for_agent_at_endpoint tts eleven "sangsu");
+      (Vc.voice_for_agent_at_endpoint tts eleven "voice-mapping-fixture");
     check string
       "an endpoint with one answers for itself instead"
       "alloy"
-      (Vc.voice_for_agent_at_endpoint tts openai "sangsu")
+      (Vc.voice_for_agent_at_endpoint tts openai "voice-mapping-fixture")
 ;;
 
 let test_endpoint_voice_is_absent_when_not_declared () =

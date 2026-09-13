@@ -184,15 +184,17 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
         Alcotest.failf "the draft should be complete: %s"
           (String.concat "; " (List.map Voice_wizard.gap_message gaps))
     in
+    let standalone_path = Filename.concat (Filename.dirname path) "voice_config.json" in
     let revision =
-      match Voice_setup.observe ~runtime_config_path:path with
+      match Voice_setup.observe ~runtime_config_path:path ~standalone_path with
       | Ok (revision, _) -> revision
       | Error error -> Alcotest.fail (Voice_setup.error_message error)
     in
     (match
-       Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes
+       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+         ~expected_revision:revision changes
      with
-     | Ok () -> ()
+     | Ok _revision -> ()
      | Error error -> Alcotest.fail (Voice_setup.error_message error));
     match Voice_config.parse_runtime_toml_text (read path) with
     | Error message -> Alcotest.failf "the wizard wrote something that does not load: %s" message

@@ -27,9 +27,26 @@ val catalogue_voice_json : catalogue_voice -> Yojson.Safe.t
     can be replayed on a machine that has no say. *)
 val say_catalogue_of_output : string -> catalogue_voice list
 
-(** Ask one endpoint which voices it has. [Error] carries why there is nothing
-    to show, in words meant for a reader who will type the name instead. *)
+(** Ask one endpoint which voices it has. ElevenLabs answers over HTTP and
+    [say] answers a command; the resolved endpoint adapter selects its transport.
+    [Error] explains why an endpoint has no catalogue or could not answer. *)
 val list_voices : Voice_config.endpoint -> (catalogue_voice list, string) result
+
+(** Whether a say catalogue has a voice. say does not fail on a name it does
+    not have -- it speaks in another voice and exits 0 -- so this is the only
+    place the difference shows. Names compare without regard to ASCII case, as
+    say matches them; a bare name say prints only with a language is not in the
+    catalogue. *)
+type say_voice =
+  | Say_has_it
+  | Say_lacks_it of { installed : int }  (** how many voices the catalogue has *)
+
+val say_voice_in_catalogue : catalogue_voice list -> voice:string -> say_voice
+
+(** Ask a say endpoint for its catalogue and look [voice] up in it. A blank
+    voice is [Ok]: say then uses its own. [Error] says why the voice will not
+    be the one asked for, or why the catalogue could not be read. *)
+val check_say_voice : Voice_config.endpoint -> voice:string -> (unit, string) result
 
 val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_format
 (** The container a kind's clips are written in. [say] encodes WAVE and has no
@@ -56,7 +73,16 @@ val mcp_call_effect_disposition : mcp_call_error -> effect_disposition
 
 type agent_speak_completion =
   | Spoken
+      (** This host played the clip, or handed it to macOS [open]. *)
+  | Synthesized
+      (** The clip was made and this host did not play it:
+          [local_playback_status] in the payload says whether playback was
+          skipped or failed, and why. A connected dashboard can still play it. *)
   | Dedup_skipped
+      (** The same sentence was played for this agent moments ago. *)
+
+val agent_speak_completion_to_string : agent_speak_completion -> string
+val agent_speak_completion_of_string : string -> agent_speak_completion option
 
 type agent_speak_result =
   { completion : agent_speak_completion
@@ -90,11 +116,12 @@ val probe_outcome_to_string : probe_outcome -> string
 
 val spoke_detail : bytes:int -> voice:string -> string
 (** What an answered TTS probe reports: the byte count and the voice it asked
-    for. The voice is there because [say] does not fail on one it does not
-    have -- it speaks in the system voice and exits 0 -- so the bytes alone
-    cannot tell a keeper's own voice from the fallback. A blank voice reads as
-    the system voice rather than as [""]. *)
+    for. A blank voice reads as the system voice rather than as [""]. *)
 val probe_attempt_json : probe_attempt -> Yojson.Safe.t
+
+(** Parse what an ElevenLabs endpoint answers. Separate from the asking so a
+    recorded answer can be replayed without a network. *)
+val catalogue_voices_of_json : Yojson.Safe.t -> (catalogue_voice list, string) result
 
 val probe_tts
   :  ?agent_id:string
@@ -104,6 +131,12 @@ val probe_tts
 (** Ask every configured TTS endpoint to synthesize [message], and report what
     each one did. The audio is discarded; what is being measured is whether the
     endpoint answers at all, and with how many bytes.
+
+    A voice_mcp endpoint is asked through its [agent_speak] tool, the call a
+    turn makes. That tool plays the sentence where its server plays audio and
+    returns no file, so its answer names the voice without a byte count. The
+    call needs the process's Eio clock and network in {!Eio_context}; without
+    them the endpoint is reported as refused, in those words.
 
     The voice is resolved per endpoint rather than once for the list: a voice id
     is provider vocabulary, so asking one endpoint for another's id probes a
@@ -155,10 +188,12 @@ val agent_speak :
   ?audio_device:string ->
   unit ->
   (agent_speak_result, string) result
-(** Synthesize [message] via the configured TTS endpoint chain and play it
-    locally, blocking the calling fiber until playback finishes. Concurrent
-    callers are serialized by the global playback mutex. Returns a typed
-    [completion] and preserves the provider payload. TTS/endpoint failures or
+(** Synthesize [message] via the configured TTS endpoint chain and, where
+    [\[voice.local_playback\]] allows it for [agent_id], play it on this host,
+    blocking the calling fiber until playback finishes. Concurrent callers are
+    serialized by the global playback mutex. Returns a typed [completion] —
+    [Spoken] when this host played it, [Synthesized] when it did not — and
+    preserves the provider payload. TTS/endpoint failures or
     an invalid provider completion payload return [Error] so the caller — and
     the LLM driving it — sees the failure instead of a fake success.
 

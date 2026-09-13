@@ -567,6 +567,16 @@ let split_at_cells text cells =
    and draws the mark anyway rather than cutting it, so the mark would overrun.
    The marquee would overrun first, since it spends two. A two-cell mark needs
    those four sites decided, not just this value changed. *)
+(* A count and the noun it counts, in the number the count asks for. Four
+   modules each wrote this as a local [plural], and thirty-odd rows wrote
+   "%d lines" with no plural at all, so a single draft line read "1 lines". *)
+let count_noun ?plural count singular =
+  let noun =
+    if count = 1 then singular
+    else match plural with Some word -> word | None -> singular ^ "s"
+  in
+  Printf.sprintf "%d %s" count noun
+
 let cut_mark = "…"
 let cut_mark_cells = display_width cut_mark
 
@@ -1820,8 +1830,15 @@ let last_page_start ~height row_costs =
   end
 
 (* One span, in the largest unit that still carries a remainder. Every reading
-   is at most seven cells wide, so a column sized for the longest span holds
+   is at most six cells wide, so a column sized for the longest span holds
    every shorter one.
+
+   From a hundred days the remainder goes. Days and hours ran to seven cells
+   there ("100d00h"), one past the six-cell columns that hold an age -- Board,
+   the Keeper roster -- and a table cell too narrow keeps a reading's first
+   character and its tail, so the days were what got cut: a Board post with
+   no timestamp, aged from the epoch, drew [2…d10h]. Beside a third digit of
+   days the hours say nothing a reader would act on.
 
    The tiers stopped at minutes here, and the Fusion table drew its ages
    through this: all 28 rows read [12045m~], five figures of minutes cut by
@@ -1840,7 +1857,9 @@ let span_text seconds =
   else if whole < 3600 then Printf.sprintf "%dm%02ds" (whole / 60) (whole mod 60)
   else if whole < 86_400 then
     Printf.sprintf "%dh%02dm" (whole / 3600) (whole mod 3600 / 60)
-  else Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
+  else if whole < 100 * 86_400 then
+    Printf.sprintf "%dd%02dh" (whole / 86_400) (whole mod 86_400 / 3600)
+  else Printf.sprintf "%dd" (whole / 86_400)
 
 let age_text ~now ~since =
   let seconds = now -. since in

@@ -356,18 +356,16 @@ val strip_sgr : string -> string
 
 (** The shared glyph vocabulary. Plain text — callers colour it. *)
 module Glyph : sig
-  val task_done : string       (* ● *)
-  val task_active : string     (* ◐ *)
-  val task_todo : string       (* ○ *)
-  val task_cancelled : string  (* × *)
-
-  val breadcrumb_sep : string  (* ▸ *)
+  val progress_waiting : string  (* ○ *)
+  val progress_active : string   (* ◐ *)
+  val progress_done : string     (* ● *)
+  val progress_ended : string    (* × *)
+  (** How far a piece of work has got. Task rows, the Backlog counts and the
+      Goal counters read these, so one mark means one stage on a screen. *)
 
   val current_entry : string  (* ▸ *)
   (** Where you are, on a strip of places you could be: the surface strip's
-      active surface and the keeper detail screen's active tab. Same shape as
-      {!breadcrumb_sep}, separate name, so a strip can change its mark without
-      moving every breadcrumb with it. *)
+      active surface and the keeper detail screen's active tab. *)
 
   val priority : int -> string
   (** ["!!!"] / ["!!"] / ["!"] / [""] for priorities 1, 2, 3, and lower. *)

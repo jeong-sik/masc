@@ -177,6 +177,16 @@ let health_state ~base_path body =
     fail (Printf.sprintf "Port belongs to workspace %s, not %s. Use --port with an unused port." actual base_path)
   | _ -> fail "The selected port has no workspace identity; use an unused --port."
 
+(* The server setup started is gone before it answered. What it wrote last
+   is the reason -- a base path another server holds, a port that stayed
+   taken -- and part of that is written before the server's own log exists,
+   so pointing at .masc/logs alone sent the operator to a file without it. *)
+let server_exit_message (report : Masc_tui_server_lifecycle.exit_report) =
+  Printf.sprintf "Server exited (%s) before it was ready: %s\n%s\nFix that and rerun setup."
+    report.status
+    (Masc_tui_server_lifecycle.describe_last_line report.last_line)
+    (Masc_tui_server_lifecycle.describe_output report.output)
+
 let prepare_server ~base_path ~port ~owned =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -205,10 +215,9 @@ let prepare_server ~base_path ~port ~owned =
         (* Startup is a bounded resource operation, not a Keeper turn budget. *)
         match Eio.Time.with_timeout clock 60.0 (fun () ->
           let rec wait () =
-            (match !owned with
-             | Some server when not (Masc_tui_server_lifecycle.is_running server) ->
-               fail ("Server exited; inspect " ^ base_path ^ "/.masc/logs and rerun setup.")
-             | _ -> ());
+            (match Option.bind !owned Masc_tui_server_lifecycle.exit_report with
+             | Some report -> fail (server_exit_message report)
+             | None -> ());
             match read () with
             | Ok (200, body) when health_state ~base_path body -> Ok ()
             | Ok (status, _) when status <> 200 ->
@@ -220,7 +229,15 @@ let prepare_server ~base_path ~port ~owned =
            | Error error -> fail (Workspace_connection.error_message error)
            | Ok port -> (match Workspace_connection.save ~base_path ~port with
              | Ok () -> () | Error error -> prerr_endline (Workspace_connection.error_message error)))
-        | Error `Timeout -> fail "Server is not ready yet; inspect its logs and rerun setup.")))
+        | Error `Timeout ->
+          fail
+            (match !owned with
+             | Some server ->
+               "Server is not ready yet; "
+               ^ Masc_tui_server_lifecycle.describe_output
+                   (Masc_tui_server_lifecycle.startup_output server)
+               ^ ". Rerun setup once it is."
+             | None -> "Server is not ready yet; inspect its logs and rerun setup."))))
 
 let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~resume_models
     ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend =

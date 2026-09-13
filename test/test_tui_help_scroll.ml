@@ -132,19 +132,6 @@ let test_help_sections_marks_current_surface_with_here_marker () =
        check_bool "global section has no here_marker" false
          (String.ends_with ~suffix:Masc_tui_keys.here_marker title))
 
-let test_key_bracket_formatting () =
-  let format_key key =
-    let trimmed = String.trim key in
-    if String.starts_with ~prefix:"[" trimmed && String.ends_with ~suffix:"]" trimmed then
-      trimmed
-    else
-      "[" ^ trimmed ^ "]"
-  in
-  check_string "slash search key is bracketed" "[/]" (format_key "/");
-  check_string "plain key is bracketed" "[j/k]" (format_key "j/k");
-  check_string "already bracketed key is preserved" "[Tab]" (format_key "[Tab]");
-  check_string "space bracket key is preserved" "[ ]" (format_key "[ ]")
-
 let () =
   Alcotest.run "tui_help_scroll"
     [ ( "sheet"
@@ -166,8 +153,6 @@ let () =
     ; ( "keys_and_sections"
       , [ Alcotest.test_case "help_sections marks current surface with here_marker" `Quick
             test_help_sections_marks_current_surface_with_here_marker
-        ; Alcotest.test_case "key bracket formatting handles slash and existing brackets" `Quick
-            test_key_bracket_formatting
         ] )
     ; ( "bound"
       , [ Alcotest.test_case "holding j does not bank presses" `Quick

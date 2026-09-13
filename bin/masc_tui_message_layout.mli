@@ -323,6 +323,10 @@ val dress_bare_links :
     a reset alone would strip the row's own dress from everything after the
     link. *)
 
+val count_noun : ?plural:string -> int -> string -> string
+(** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"].
+    [?plural] names an irregular plural: [count_noun ~plural:"entries" 3 "entry"]. *)
+
 val cut_mark : string
 (** What a cut leaves behind in place of the text it dropped.
 
@@ -602,7 +606,8 @@ val last_page_start : height:int -> int list -> int
 
 val span_text : float -> string
 (** A span of seconds in the largest unit that still carries a remainder:
-    [42s], [2m14s], [11h39m], [8d15h]. At most seven cells, so a column sized
+    [42s], [2m14s], [11h39m], [8d15h], and from a hundred days the days alone,
+    [255d]. At most six cells below a hundred thousand days, so a column sized
     for the longest reading holds every shorter one. A negative span reads as
     [0s]; a caller that would rather say nothing checks first.
 

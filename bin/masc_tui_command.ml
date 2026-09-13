@@ -94,12 +94,12 @@ let catalog =
   ; { word = "patch"
     ; aliases = [ "review" ]
     ; args = ""
-    ; summary = "open 3D drop-shadow patch review modal for pending code changes"
+    ; summary = "open the patch review for pending code changes"
     }
   ; { word = "burn"
     ; aliases = [ "cost" ]
     ; args = ""
-    ; summary = "toggle real-time token burn velocity and financial telemetry HUD"
+    ; summary = "show or hide the fleet cost and each Keeper's token total in the tab row"
     }
   ; { word = "changes"
     ; aliases = []
@@ -195,7 +195,7 @@ let catalog =
   ; { word = "preview"
     ; aliases = []
     ; args = "[url]"
-    ; summary = "open 3D drop-shadow OpenGraph preview and rich embed modal for a web link"
+    ; summary = "open the OpenGraph preview for a web link"
     }
   ; { word = "links"
     ; aliases = []

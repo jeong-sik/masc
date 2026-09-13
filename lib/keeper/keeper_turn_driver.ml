@@ -1443,7 +1443,6 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -1575,7 +1574,6 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
@@ -1686,7 +1684,6 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
-            ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
             ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name

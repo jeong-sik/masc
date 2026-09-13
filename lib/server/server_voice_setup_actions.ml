@@ -242,6 +242,10 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      ]
      @ text "base_url" endpoint.Voice_config.base_url
      @ text "mcp_url" endpoint.Voice_config.mcp_url
+     (* The address the transport actually contacts. A client choosing between
+        the two fields above has to know the transport's precedence, and one
+        that guessed showed an address the endpoint is never called at. *)
+     @ text "address" (Voice_runtime_overlay.endpoint_address endpoint)
      @ text "health_url" endpoint.Voice_config.health_url
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
@@ -368,10 +372,27 @@ let tuning_json (tuning : Voice_config.voice_tuning) =
     ; "style", `Float tuning.Voice_config.style
     ]
 
+(* The JSON the loader falls back to for this workspace. The setup routes pass it
+   to every observation and write so they describe, and refuse to shadow, the
+   configuration the speak and transcribe paths actually load. *)
+let standalone_path ~base_path = Voice_config.voice_config_file_in base_path
+
 let observe ~base_path =
-  match Voice_setup.observe ~runtime_config_path:(runtime_config_path ~base_path) with
+  match
+    Voice_setup.observe
+      ~runtime_config_path:(runtime_config_path ~base_path)
+      ~standalone_path:(standalone_path ~base_path)
+  with
   | Error error -> Error (Setup_failed error)
-  | Ok (revision, config) ->
+  | Ok (revision, active) ->
+    let source =
+      match active with
+      | None -> `Null
+      | Some (Voice_setup.Runtime_toml, _) -> `Assoc [ "kind", `String "runtime_toml" ]
+      | Some (Voice_setup.Standalone_json path, _) ->
+        `Assoc [ "kind", `String "standalone_json"; "path", `String path ]
+    in
+    let config = Option.map snd active in
     let tts =
       match config with
       | None -> `Null
@@ -476,6 +497,7 @@ let observe ~base_path =
     Ok
       (`Assoc
          [ "revision", `String revision
+         ; "source", source
          ; "tts", tts
          ; "stt", stt
          ; "session", session
@@ -489,6 +511,7 @@ let preview ~base_path json =
   match
     Voice_setup.preview
       ~runtime_config_path:(runtime_config_path ~base_path)
+      ~standalone_path:(standalone_path ~base_path)
       ~expected_revision:revision
       changes
   with
@@ -498,33 +521,35 @@ let preview ~base_path json =
 let apply ~base_path json =
   let* revision, changes = request_of_json json in
   let path = runtime_config_path ~base_path in
-  match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
+  match
+    Voice_setup.apply
+      ~runtime_config_path:path
+      ~standalone_path:(standalone_path ~base_path)
+      ~expected_revision:revision
+      changes
+  with
   | Error error -> Error (Setup_failed error)
-  | Ok () ->
-    (* The revision after the write, so a caller can keep editing without
-       reading again. *)
-    (match Voice_setup.observe ~runtime_config_path:path with
-     | Error error -> Error (Setup_failed error)
-     | Ok (revision, _) ->
-       Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ]))
+  (* The revision comes out of the write itself, not from reading the file
+     again afterwards: a second read can see someone else's commit and hand
+     the caller a revision its own change is not in. *)
+  | Ok revision -> Ok (`Assoc [ "applied", `Bool true; "revision", `String revision ])
 
 (* The endpoint a catalogue read is taken against. It is not an endpoint anyone
    configured: it is built for one request and thrown away, so it carries only
    what asking needs -- the kind, and the name of the variable holding that
    provider's key.
 
-   The request chooses neither an address nor a command path. A catalogue read
-   uses the kind's own default destination, because a path this route cannot
-   check is not one to take from a caller. *)
+   The request chooses neither an address nor a command path. Catalogue reads
+   use the endpoint kind's default transport destination. *)
 let catalogue_endpoint_of_json json =
   let* fields = fields json in
+  let* () =
+    no_unknown_fields ~what:"a listing" ~allowed:[ "kind"; "api_key_env" ] fields
+  in
   let* kind_text = string_field ~what:"a listing" fields "kind" in
   let* kind = kind_of_string kind_text in
-  let api_key_env =
-    match List.assoc_opt "api_key_env" fields with
-    | Some (`String value) when String.trim value <> "" -> Some (String.trim value)
-    | Some _ | None -> None
-  in
+  let* api_key_env = optional_string ~what:"a listing" fields "api_key_env" in
+  let api_key_env = Option.map String.trim api_key_env in
   Ok
     { Voice_config.id = "voice-catalogue-read"
     ; kind

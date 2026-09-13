@@ -3,6 +3,10 @@ type t
 val keeper : t -> string
 val turn_ref : t -> Ids.Turn_ref.t option
 val question : t -> string
+val task_id : t -> string option
+(** The Task this request was captured for, or [None] for an unscoped or
+    Goal-only request. A decision is recorded in a Task's history, so this is
+    the only Task a decision on the run can name. *)
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 val render : t -> string

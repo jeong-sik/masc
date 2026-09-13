@@ -169,7 +169,8 @@ let respond_voice_setup_error request reqd error =
   let status =
     match error with
     | Server_voice_setup_actions.Invalid_request _ -> `Bad_request
-    | Server_voice_setup_actions.Setup_failed Voice_setup.Configuration_changed ->
+    | Server_voice_setup_actions.Setup_failed
+        (Voice_setup.Configuration_changed | Voice_setup.Standalone_source_active _) ->
       `Conflict
     | Server_voice_setup_actions.Setup_failed
         (Voice_setup.Configuration_unavailable _) -> `Internal_server_error

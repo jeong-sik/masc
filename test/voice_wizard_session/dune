@@ -1,0 +1,7 @@
+; The terminal half of the wizard: step order, what has been typed, and what
+; survives moving between steps. The questions themselves live in
+; test/voice_wizard.
+
+(test
+ (name test_voice_wizard_session)
+ (libraries alcotest masc_tui_types masc.voice_wizard masc.voice_setup))

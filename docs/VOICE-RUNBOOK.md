@@ -799,10 +799,10 @@ until the endpoint in front of it goes away.
 `masc voice-verify` asks every endpoint separately and reports each.
 
 ```sh
-masc voice-verify                          # TTS only
-masc voice-verify --audio utterance.wav    # TTS and STT
-masc voice-verify --json                   # one JSON object instead of the report
-masc voice-verify --message "확인합니다"     # say it in the language you actually use
+masc voice-verify --base-path ~/work                          # TTS only
+masc voice-verify --base-path ~/work --audio utterance.wav    # TTS and STT
+masc voice-verify --base-path ~/work --json                   # one JSON object instead of the report
+masc voice-verify --base-path ~/work --message "확인합니다"     # say it in the language you actually use
 ```
 
 Exit status is 0 when at least one endpoint answered, 1 when none did. A

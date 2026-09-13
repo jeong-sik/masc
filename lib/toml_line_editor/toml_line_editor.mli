@@ -70,6 +70,7 @@ type value =
   | Int of int
   | Float of float
   | Bool of bool
+  | String_map of (string * string) list
 (** A typed entry field. One [\[\[a.b\]\]] entry mixes types — a voice endpoint
     carries [id] and [kind] strings, an [enabled] bool and a [timeout_seconds]
     float in the same table — so a writer that rendered every field as a string

@@ -116,7 +116,7 @@ let test_say_writes_no_model () =
            | Voice_setup.Set_default_model _ -> true
            | Voice_setup.Put_endpoint _ | Voice_setup.Remove_endpoint _
            | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_send_on_stop _
-           | Voice_setup.Set_agent_voice _ -> false)
+           | Voice_setup.Set_agent_voice _ | Voice_setup.Set_endpoint_agent_voice _ -> false)
          changes);
     Alcotest.(check bool) "the voice is written" true
       (List.exists
@@ -124,7 +124,7 @@ let test_say_writes_no_model () =
            | Voice_setup.Put_endpoint (_, endpoint) ->
              endpoint.Voice_config.default_voice = Some "Yuna"
            | Voice_setup.Set_tts_default_voice _ | Voice_setup.Remove_endpoint _
-           | Voice_setup.Set_default_model _ | Voice_setup.Set_send_on_stop _ | Voice_setup.Set_agent_voice _ -> false)
+           | Voice_setup.Set_default_model _ | Voice_setup.Set_send_on_stop _ | Voice_setup.Set_agent_voice _ | Voice_setup.Set_endpoint_agent_voice _ -> false)
          changes)
 
 let test_the_questions_depend_on_the_provider () =
@@ -217,7 +217,7 @@ let test_a_tool_endpoint_carries_its_url_as_mcp_url () =
           | Voice_setup.Put_endpoint (_, endpoint) -> Some endpoint
           | Voice_setup.Remove_endpoint _ | Voice_setup.Set_default_model _
           | Voice_setup.Set_tts_default_voice _ | Voice_setup.Set_send_on_stop _
-          | Voice_setup.Set_agent_voice _ -> None)
+          | Voice_setup.Set_agent_voice _ | Voice_setup.Set_endpoint_agent_voice _ -> None)
         changes
     in
     (match endpoint with
@@ -337,6 +337,26 @@ let test_mixed_stt_models_survive_both_installation_orders () =
     | _ -> Alcotest.fail "mixed STT configuration did not load"))
     [ [local; remote]; [remote; local] ]
 
+let test_wizard_reinstall_preserves_keeper_mapping () =
+  with_config runtime_base (fun path ->
+    let draft = { (Voice_wizard.blank ~section:Voice_setup.Tts ~provider:Voice_wizard.Macos_say) with
+      endpoint_id = "local"; voice = "Yuna" } in
+    let changes = match Voice_wizard.changes draft with Ok changes -> changes | Error _ -> Alcotest.fail "complete draft" in
+    let commit changes =
+      let revision = match Voice_setup.observe ~runtime_config_path:path with
+        | Ok (revision, _) -> revision | Error error -> Alcotest.fail (Voice_setup.error_message error) in
+      match Voice_setup.apply ~runtime_config_path:path ~expected_revision:revision changes with
+      | Ok _ -> () | Error error -> Alcotest.fail (Voice_setup.error_message error) in
+    commit changes;
+    commit [Voice_setup.Set_endpoint_agent_voice ("local", "team.alpha", Some "Sora")];
+    commit changes;
+    match Voice_config.parse_runtime_toml_text (read path) with
+    | Ok (Some { Voice_config.tts = Some tts; _ }) ->
+      let endpoint = List.find (fun (endpoint : Voice_config.endpoint) -> endpoint.id = "local") tts.endpoints in
+      Alcotest.(check string) "wizard reinstall preserves keeper assignment" "Sora"
+        (Voice_config.voice_for_agent_at_endpoint tts endpoint "team.alpha")
+    | _ -> Alcotest.fail "reinstalled voice did not load")
+
 let () =
   Alcotest.run
     "voice_wizard"
@@ -368,7 +388,9 @@ let () =
             test_a_tool_endpoint_carries_its_url_as_mcp_url
         ] )
     ; ( "what it writes"
-      , [ Alcotest.test_case "mixed STT models survive both installation orders" `Quick
+      , [ Alcotest.test_case "wizard reinstall preserves keeper mapping" `Quick
+            test_wizard_reinstall_preserves_keeper_mapping
+        ; Alcotest.test_case "mixed STT models survive both installation orders" `Quick
             test_mixed_stt_models_survive_both_installation_orders
         ; Alcotest.test_case "a complete draft writes a configuration that loads" `Quick
             test_a_complete_draft_writes_a_configuration_that_loads

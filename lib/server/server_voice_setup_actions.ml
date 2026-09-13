@@ -196,6 +196,7 @@ let endpoint_of_json json =
     (* Not taken from the request. A command kind knows the name it is
        installed under, and an override is a path this route cannot check;
        someone who needs one edits the file. *)
+    ; agent_voices = []
     ; model
     ; command = None
     }
@@ -216,6 +217,7 @@ let endpoint_json (endpoint : Voice_config.endpoint) =
      @ text "api_key_env" endpoint.Voice_config.api_key_env
      @ text "default_voice" endpoint.Voice_config.default_voice
      @ text "model" endpoint.Voice_config.model
+     @ [ "agent_voices", `Assoc (List.map (fun (agent, voice) -> agent, `String voice) endpoint.Voice_config.agent_voices) ]
      (* Which program a command kind actually runs. Omitted, the observation
         described an endpoint by a default it may have overridden. The request
         still does not take it -- a path this route cannot check is not one to
@@ -282,6 +284,16 @@ let change_of_json json =
      | Some _ | None ->
        Error
          (Invalid_request "set_send_on_stop needs \"send\" to be true or false"))
+  | "set_endpoint_agent_voice" ->
+    let what = "set_endpoint_agent_voice" in
+    let* () = only ~what [ "endpoint_id"; "agent"; "voice" ] in
+    let* id = string_field ~what fields "endpoint_id" in
+    let* agent = string_field ~what fields "agent" in
+    (match List.assoc_opt "voice" fields with
+     | Some `Null -> Ok (Voice_setup.Set_endpoint_agent_voice (id, agent, None))
+     | Some (`String voice) when String.trim voice <> "" ->
+       Ok (Voice_setup.Set_endpoint_agent_voice (id, agent, Some (String.trim voice)))
+     | Some _ | None -> Error (Invalid_request "set_endpoint_agent_voice needs a non-empty voice or explicit null"))
   | "set_agent_voice" ->
     let what = "set_agent_voice" in
     let* () = only ~what [ "agent"; "voice" ] in
@@ -502,7 +514,28 @@ let catalogue_endpoint_of_json json =
     ; enabled = true
     ; timeout_seconds = None
     ; default_voice = None
+    ; agent_voices = []
     ; model = None
-  ; command = None
+    ; command = None
     }
 ;;
+
+let catalogue_endpoint_for_request ~base_path json =
+  let* request = fields json in
+  match List.assoc_opt "endpoint_id" request with
+  | None -> catalogue_endpoint_of_json json
+  | Some _ ->
+    let what = "a configured endpoint listing" in
+    let* () = no_unknown_fields ~what ~allowed:["endpoint_id"; "expected_revision"] request in
+    let* id = string_field ~what request "endpoint_id" in
+    let* expected_revision = string_field ~what request "expected_revision" in
+    match Voice_setup.observe ~runtime_config_path:(runtime_config_path ~base_path) with
+    | Error error -> Error (Setup_failed error)
+    | Ok (revision, _) when not (String.equal revision expected_revision) ->
+      Error (Setup_failed Voice_setup.Configuration_changed)
+    | Ok (_, Some { Voice_config.tts = Some tts; _ }) ->
+      (match List.find_opt (fun (endpoint : Voice_config.endpoint) ->
+          String.equal endpoint.id id && endpoint.enabled) tts.endpoints with
+       | Some endpoint -> Ok endpoint
+       | None -> Error (Invalid_request ("enabled TTS endpoint does not exist: " ^ id)))
+    | Ok (_, _) -> Error (Invalid_request "TTS is not configured")

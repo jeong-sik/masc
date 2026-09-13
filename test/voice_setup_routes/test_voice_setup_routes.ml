@@ -789,10 +789,44 @@ let test_the_answered_revision_is_the_one_this_write_made () =
       Alcotest.failf "editing again with the answered revision was refused: %s"
         (Actions.error_message error)
     | Ok _ -> ignore (read path))
+let test_configured_catalogue_uses_exact_endpoint_and_revision () =
+  with_workspace (fun ~base_path ~path ->
+    Out_channel.with_open_bin path (fun out -> output_string out
+      (runtime_toml ^ {|
+[voice.tts]
+default_voice = "fallback"
+[[voice.tts.endpoints]]
+id = "remote.custom"
+kind = "elevenlabs_direct"
+base_url = "http://fixture.invalid/custom/v1"
+api_key_env = "CUSTOM_VOICE_CREDENTIAL"
+model = "remote-model"
+[[voice.tts.endpoints]]
+id = "local"
+kind = "macos_say"
+command = "/fixture/bin/say"
+|}));
+    let revision = revision ~base_path in
+    let payload id = `Assoc ["endpoint_id", `String id; "expected_revision", `String revision] in
+    let endpoint id = match Actions.catalogue_endpoint_for_request ~base_path (payload id) with
+      | Ok endpoint -> endpoint | Error error -> Alcotest.fail (Actions.error_message error) in
+    let remote = endpoint "remote.custom" in
+    Alcotest.(check (option string)) "actual configured URL" (Some "http://fixture.invalid/custom/v1") remote.Voice_config.base_url;
+    Alcotest.(check (option string)) "actual configured credential" (Some "CUSTOM_VOICE_CREDENTIAL") remote.api_key_env;
+    Alcotest.(check (option string)) "actual command override" (Some "/fixture/bin/say") (endpoint "local").command;
+    (match Actions.catalogue_endpoint_for_request ~base_path (payload "elevenlabs_direct") with
+     | Error (Actions.Invalid_request _) -> () | _ -> Alcotest.fail "kind alias cannot select a stored endpoint");
+    Out_channel.with_open_gen [Open_append; Open_text] 0o600 path (fun out -> output_string out "\n# changed\n");
+    (match Actions.catalogue_endpoint_for_request ~base_path (payload "remote.custom") with
+     | Error (Actions.Setup_failed Voice_setup.Configuration_changed) -> ()
+     | _ -> Alcotest.fail "stale catalogue revision must be refused"))
+
 let () =
   Alcotest.run
     "voice_setup_routes"
-    [ ( "reading"
+    [ ( "configured catalogue ownership",
+        [ Alcotest.test_case "exact endpoint and revision" `Quick test_configured_catalogue_uses_exact_endpoint_and_revision ] )
+    ; ( "reading"
       , [ Alcotest.test_case "observe names the endpoints" `Quick
             test_observe_names_the_endpoints
         ] )

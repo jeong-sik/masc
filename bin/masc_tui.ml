@@ -2724,81 +2724,52 @@ let voice_wizard_voice_rows json =
   | _ -> []
 ;;
 
-(* The voices to choose from when assigning one to a keeper. Asked of the
-   section's own first endpoint: the assignment is stored per keeper but read
-   per endpoint, so the ids have to be the ones that endpoint answers to. *)
-(* Use the first enabled endpoint, matching runtime fallback selection.
-   A fixed endpoint voice takes precedence over keeper assignments. *)
-let voice_setup_first_tts_endpoint state =
-  let member path json =
-    List.fold_left
-      (fun acc key ->
-        match acc with
-        | Some (`Assoc fields) -> List.assoc_opt key fields
-        | Some _ | None -> None)
-      (Some json) path
-  in
+(* Keep exact endpoint IDs: a kind does not identify the configured URL,
+   executable override, credential or provider-specific voice vocabulary. *)
+let voice_setup_tts_endpoint_ids state =
   match state.voice_setup with
-  | Some json ->
-    (match member [ "tts"; "endpoints" ] json with
-     | Some (`List entries) ->
-       let active =
-         List.find_opt
-           (function
-             | `Assoc fields -> List.assoc_opt "enabled" fields = Some (`Bool true)
-             | _ -> false)
-           entries
-       in
-       (match active with
-       | Some (`Assoc entry) ->
-       let text key =
-         match List.assoc_opt key entry with
-         | Some (`String value) when String.trim value <> "" -> Some value
-         | Some _ | None -> None
-       in
-       (match text "kind" with
-        | Some kind -> Some (kind, text "api_key_env", text "default_voice")
-        | None -> None)
-       | Some _ | None -> None)
-     | Some _ | None -> None)
-  | None -> None
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "tts" fields with
+     | Some (`Assoc tts) ->
+       (match List.assoc_opt "endpoints" tts with
+        | Some (`List entries) -> List.filter_map (function
+            | `Assoc endpoint when List.assoc_opt "enabled" endpoint = Some (`Bool true) ->
+              (match List.assoc_opt "id" endpoint with Some (`String id) -> Some id | _ -> None)
+            | _ -> None) entries
+        | _ -> [])
+     | _ -> [])
+  | _ -> []
 ;;
 
-let launch_voice_agent_voices state ~mailbox ~identity ~kind ~api_key_env =
-  let host = server_peer_host in
-  let port = state.port in
-  let payload =
-    Yojson.Safe.to_string
-      (`Assoc
-        ([ "kind", `String kind ]
-         @
-         match api_key_env with
-         | Some variable when String.trim variable <> "" ->
-           [ "api_key_env", `String variable ]
-         | Some _ | None -> []))
-  in
-  let run () =
-    let result =
-      Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/voices" ~body:payload
+let launch_voice_agent_voices state ~mailbox (session : Masc_tui_types.voice_agent_session) =
+  match Masc_tui_types.voice_agent_endpoint session with
+  | None -> ()
+  | Some endpoint_id ->
+    let host = server_peer_host in
+    let port = state.port in
+    let payload = Yojson.Safe.to_string (`Assoc
+      [ "endpoint_id", `String endpoint_id;
+        "expected_revision", `String session.vas_revision ]) in
+    let run () =
+      let result = Masc_tui_http.post_json ~host ~port ~path:"/api/v1/voice/voices" ~body:payload in
+      enqueue_async mailbox (Voice_agent_voices_loaded (session.vas_identity, result))
     in
-    enqueue_async mailbox (Voice_agent_voices_loaded (identity, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None ->
-    enqueue_async mailbox (Voice_agent_voices_loaded (identity, Error "Eio switch is unavailable"))
+    match Eio_context.get_switch_opt () with
+    | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
+    | None -> enqueue_async mailbox
+        (Voice_agent_voices_loaded (session.vas_identity, Error "Eio switch is unavailable"))
 ;;
 
 let launch_voice_agent_voice_save state ~mailbox
     (session : Masc_tui_types.voice_agent_session) =
-  match Masc_tui_types.voice_agent_selected session with
-  | None ->
+  match Masc_tui_types.voice_agent_endpoint session, Masc_tui_types.voice_agent_selected session with
+  | None, _ | _, None ->
     state.voice_agent_voices
       <- Some
            { session with
              vas_status = Some "pick a keeper and a voice first"
            }
-  | Some (agent, voice) ->
+  | Some endpoint_id, Some (agent, voice) ->
     state.voice_agent_voices
       <- Some { session with vas_saving = true; vas_status = Some "saving…" };
     let host = server_peer_host in
@@ -2810,7 +2781,8 @@ let launch_voice_agent_voice_save state ~mailbox
           ; ( "changes"
             , `List
                 [ `Assoc
-                    [ "change", `String "set_agent_voice"
+                    [ "change", `String "set_endpoint_agent_voice"
+                    ; "endpoint_id", `String endpoint_id
                     ; "agent", `String agent
                     ; "voice", `String voice
                     ]
@@ -11586,19 +11558,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                (Result.map voice_wizard_voice_rows result)))
         state.voice_wizard
   | Voice_agent_voices_loaded (identity, result) ->
-      (match (state.voice_agent_voices, result) with
-       | None, _ -> ()
-       | Some session, _ when session.vas_identity != identity -> ()
-       | Some session, Error message ->
-           state.voice_agent_voices
-             <- Some { session with vas_voices = []; vas_status = Some (message ^ "; type a voice ID") }
-       | Some session, Ok json ->
-           state.voice_agent_voices
-             <- Some
-                  { session with
-                    vas_voices = voice_wizard_voice_rows json
-                  ; vas_voice_cursor = 0
-                  })
+      Option.iter (fun session ->
+        state.voice_agent_voices <- Some
+          (Masc_tui_types.voice_agent_catalogue_result session ~identity
+             (Result.map voice_wizard_voice_rows result))) state.voice_agent_voices
   | Voice_agent_voice_saved (identity, result) ->
       (match (state.voice_agent_voices, result) with
        | None, _ -> ()
@@ -16759,6 +16722,10 @@ and is loaded on demand through keeper_skill.
               else (
                 match k with
                 | "esc" -> state.voice_agent_voices <- None
+                | "tab" | "\t" ->
+                  let next = Masc_tui_types.voice_agent_walk_endpoints session in
+                  set next;
+                  launch_voice_agent_voices state ~mailbox:async_messages next
                 | "up" -> set (Masc_tui_types.voice_agent_walk_agents session ~ahead:false)
                 | "down" -> set (Masc_tui_types.voice_agent_walk_agents session ~ahead:true)
                 | "left" ->
@@ -21920,26 +21887,13 @@ and is loaded on demand through keeper_skill.
                  if agents = []
                  then report_action state "error" "배정할 키퍼가 없습니다"
                  else (
-                   let session = Masc_tui_types.voice_agent_open ~agents ~revision in
+                   let endpoints = voice_setup_tts_endpoint_ids state in
+                   let session = Masc_tui_types.voice_agent_open ~endpoints ~agents ~revision in
                    state.voice_agent_voices <- Some session;
-                   (* The ids have to be the ones the section's own endpoint
-                      answers to, so its kind is what is asked. *)
-                   match voice_setup_first_tts_endpoint state with
-                   | None ->
-                     state.voice_agent_voices
-                       <- Some
-                            { session with
-                              vas_status =
-                                Some "[voice.tts] has no endpoint to ask for voices"
-                            }
-                   | Some (_, _, Some _) ->
-                     state.voice_agent_voices <- None;
-                     report_action state "error"
-                       "The active endpoint has a fixed default_voice; remove it before assigning keeper voices."
-                   | Some (kind, api_key_env, None) ->
-                     launch_voice_agent_voices state ~mailbox:async_messages
-                       ~identity:session.vas_identity ~kind
-                       ~api_key_env)
+                   match endpoints with
+                   | [] -> state.voice_agent_voices <- Some
+                       { session with vas_status = Some "[voice.tts] has no enabled endpoint" }
+                   | _ :: _ -> launch_voice_agent_voices state ~mailbox:async_messages session)
                | Some _ | None -> ())
             | Some _ | None -> ())
        | Some "i" | Some "I"

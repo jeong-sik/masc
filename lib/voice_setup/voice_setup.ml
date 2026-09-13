@@ -9,6 +9,7 @@ type change =
   | Set_tts_default_voice of string
   | Set_send_on_stop of bool
   | Set_agent_voice of string * string option
+  | Set_endpoint_agent_voice of string * string * string option
 
 type error =
   | Configuration_unavailable of string
@@ -48,9 +49,8 @@ let string_field key = function
 
 (* Destructured rather than read field by field so that a field added to
    Voice_config.endpoint fails to compile here instead of being quietly left out
-   of what the writer emits. The loader's whitelist and this list are the same
-   nine names, and a tenth that only one side knows is how a section stops
-   loading. *)
+   of what the writer emits. The loader and writer share the endpoint fields;
+   command overrides stay in the file; Keeper mappings have a dedicated change. *)
 let endpoint_fields (endpoint : Voice_config.endpoint) =
   let { Voice_config.id = _
       ; kind
@@ -63,6 +63,7 @@ let endpoint_fields (endpoint : Voice_config.endpoint) =
       ; default_voice
       ; command = _
       ; model
+      ; agent_voices = _
       }
     =
     endpoint
@@ -122,6 +123,23 @@ let apply_change contents = function
       ~path:"voice.stt"
       ~key:"send_on_stop"
       ~value:send
+  | Set_endpoint_agent_voice (id, agent, voice) ->
+    let endpoint =
+      match Voice_config.parse_runtime_toml_text contents with
+      | Ok (Some { Voice_config.tts = Some tts; _ }) ->
+        (match List.find_opt (fun (endpoint : Voice_config.endpoint) -> String.equal endpoint.id id) tts.endpoints with
+         | Some endpoint -> endpoint
+         | None -> raise (Voice_invalid ("TTS endpoint does not exist: " ^ id)))
+      | Ok _ -> raise (Voice_invalid "TTS is not configured")
+      | Error message -> raise (Voice_invalid message)
+    in
+    let remaining = List.remove_assoc agent endpoint.agent_voices in
+    let voices = match voice with None -> remaining | Some voice -> (agent, voice) :: remaining in
+    (match Toml_line_editor.upsert_table_array_entry contents
+       ~path:(endpoints_path Tts) ~id_key:"id" ~id
+       ~fields:[ "agent_voices", Some (Toml_line_editor.String_map voices) ] with
+     | Ok updated -> updated
+     | Error error -> raise (Entry_refused error))
   | Set_agent_voice (agent, voice) ->
     Toml_line_editor.edit_table_scalar
       contents
@@ -146,7 +164,8 @@ let checked contents changes =
           (function
             | Put_endpoint (Tts, endpoint) -> endpoint.Voice_config.default_voice
             | Put_endpoint (Stt, _) | Remove_endpoint _ | Set_default_model _
-            | Set_tts_default_voice _ | Set_send_on_stop _ | Set_agent_voice _ -> None)
+            | Set_tts_default_voice _ | Set_send_on_stop _ | Set_agent_voice _
+            | Set_endpoint_agent_voice _ -> None)
           changes
       in
       (match initial_voice with

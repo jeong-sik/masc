@@ -42,11 +42,15 @@ type endpoint = {
   default_voice : string option;
   command : string option;
   model : string option;
+  agent_voices : (string * string) list;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the
     credential itself).  [base_url] / [mcp_url] / [health_url]
     are populated based on [kind].
+
+    [agent_voices] maps Keeper names to this endpoint's voice vocabulary and
+    takes precedence over its [default_voice].
 
     [default_voice] is the voice name this endpoint answers to. A voice id is
     provider-specific vocabulary -- an ElevenLabs [voice_id] is 20-64
@@ -294,8 +298,8 @@ val voice_for_agent : tts_config -> string -> string
     speaking through a specific endpoint wants {!voice_for_agent_at_endpoint}. *)
 
 val voice_for_agent_at_endpoint : tts_config -> endpoint -> string -> string
-(** The voice to ask [endpoint] for on [agent_id]'s behalf: the endpoint's own
-    [default_voice] when it declares one, otherwise {!voice_for_agent}. The
+(** The voice to ask [endpoint] for on [agent_id]'s behalf: its [agent_voices]
+    mapping, then its [default_voice], then {!voice_for_agent}. The
     fallback chain resolves this per endpoint rather than once, so switching
     endpoints does not carry the previous provider's voice vocabulary along. *)
 
@@ -335,6 +339,6 @@ val public_json : t -> Yojson.Safe.t
     An absent [tts] or [stt] section renders as [null], so a reader finds
     no model there rather than a model named [""]. *)
 
-(** Resolve an endpoint's own model before a section fallback. Parsed mixed
-    command/HTTP chains always carry explicit endpoint models. *)
+(** Resolve an endpoint's own model before a section fallback. A parsed
+    shared fallback is never consumed as both a file and a remote model ID. *)
 val model_at_endpoint : default_model:string option -> endpoint -> string option

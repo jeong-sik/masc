@@ -172,6 +172,7 @@ let endpoint_of_draft draft : Voice_config.endpoint =
        | Voice_setup.Stt -> None)
   (* Command providers use their installed names. This wizard does not accept
      an executable path override. *)
+  ; agent_voices = []
   ; model = optional draft.model
   ; command = None
   }
@@ -306,6 +307,9 @@ let change_json = function
     `Assoc [ "change", `String "set_tts_default_voice"; "voice", `String voice ]
   | Voice_setup.Set_send_on_stop send ->
     `Assoc [ "change", `String "set_send_on_stop"; "send", `Bool send ]
+  | Voice_setup.Set_endpoint_agent_voice (endpoint_id, agent, voice) ->
+    `Assoc [ "change", `String "set_endpoint_agent_voice"; "endpoint_id", `String endpoint_id;
+             "agent", `String agent; "voice", (match voice with Some voice -> `String voice | None -> `Null) ]
   | Voice_setup.Set_agent_voice (agent, voice) ->
     `Assoc
       [ "change", `String "set_agent_voice"

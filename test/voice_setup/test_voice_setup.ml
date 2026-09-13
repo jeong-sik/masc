@@ -94,6 +94,7 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ~id ~kind () : Voice_config
   ; enabled = true
   ; timeout_seconds
   ; default_voice = None
+  ; agent_voices = []
   ; model = None
   ; command = None
   }
@@ -445,6 +446,41 @@ let test_a_local_voice_goes_on_the_section_until_one_exists () =
     (Voice_setup.voice_placement ~section_exists:true = Voice_setup.On_the_endpoint)
 ;;
 
+let test_endpoint_keeper_voices_are_independent () =
+  with_config runtime_base (fun path ->
+    let local = { (endpoint ~id:"local.one" ~kind:Voice_config.Macos_say ()) with default_voice = Some "Yuna" } in
+    let remote = { (endpoint ~id:"remote" ~kind:Voice_config.Elevenlabs_direct ()) with default_voice = Some "remote-default"; model = Some "remote-model" } in
+    let commit changes = match apply path changes with
+      | Ok _ -> () | Error error -> Alcotest.fail (Voice_setup.error_message error) in
+    commit [Voice_setup.Put_endpoint (Voice_setup.Tts, local); Voice_setup.Put_endpoint (Voice_setup.Tts, remote)];
+    let loaded () = match Voice_config.parse_runtime_toml_text (read path) with
+      | Ok (Some { Voice_config.tts = Some tts; _ }) -> tts
+      | _ -> Alcotest.fail "scoped mapping did not roundtrip" in
+    let selected id agent =
+      let tts = loaded () in
+      let endpoint = List.find (fun (endpoint : Voice_config.endpoint) -> endpoint.id = id) tts.endpoints in
+      Voice_config.voice_for_agent_at_endpoint tts endpoint agent in
+    commit [Voice_setup.Set_endpoint_agent_voice ("local.one", "team.alpha", Some "Eddy (한국어(한국))")];
+    commit [Voice_setup.Set_endpoint_agent_voice ("remote", "team.alpha", Some "remote-id")];
+    Alcotest.(check string) "local keeper vocabulary" "Eddy (한국어(한국))" (selected "local.one" "team.alpha");
+    Alcotest.(check string) "remote keeper vocabulary" "remote-id" (selected "remote" "team.alpha");
+    Alcotest.(check string) "other keeper retains endpoint default" "Yuna" (selected "local.one" "other");
+    commit [Voice_setup.Put_endpoint (Voice_setup.Tts,
+      { remote with model = Some "new-model"; base_url = Some "http://fixture.invalid/new" })];
+    commit [Voice_setup.Put_endpoint (Voice_setup.Tts, local)];
+    Alcotest.(check string) "provider model/url edit preserves its keeper mapping" "remote-id" (selected "remote" "team.alpha");
+    Alcotest.(check string) "endpoint reinstall preserves local mapping" "Eddy (한국어(한국))" (selected "local.one" "team.alpha");
+    commit [Voice_setup.Set_endpoint_agent_voice ("local.one", "team.alpha", Some "Sora")];
+    Alcotest.(check string) "replace" "Sora" (selected "local.one" "team.alpha");
+    commit [Voice_setup.Set_endpoint_agent_voice ("local.one", "team.alpha", None)];
+    Alcotest.(check string) "clear returns endpoint default" "Yuna" (selected "local.one" "team.alpha");
+    Alcotest.(check string) "clear cannot change sibling mapping" "remote-id" (selected "remote" "team.alpha");
+    let before = read path in
+    (match apply path [Voice_setup.Set_endpoint_agent_voice ("missing", "team.alpha", Some "bad")] with
+     | Error (Voice_setup.Voice_section_invalid _) -> ()
+     | _ -> Alcotest.fail "unknown endpoint must be refused");
+    Alcotest.(check string) "unknown endpoint writes nothing" before (read path))
+
 let () =
   Alcotest.run
     "voice_setup"
@@ -463,7 +499,9 @@ let () =
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
         ] )
     ; ( "changes"
-      , [ Alcotest.test_case "an endpoint is added and the notes survive" `Quick
+      , [ Alcotest.test_case "endpoint keeper voices are independent" `Quick
+            test_endpoint_keeper_voices_are_independent
+        ; Alcotest.test_case "an endpoint is added and the notes survive" `Quick
             test_an_endpoint_is_added_and_the_notes_survive
         ; Alcotest.test_case "dependent changes land together" `Quick
             test_changes_that_depend_on_each_other_land_together

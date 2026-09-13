@@ -2716,7 +2716,9 @@ type voice_wizard_session =
    tell them apart by ear, and because say ships nine Korean voices for free --
    the reason to give each keeper its own is no longer a purchase. *)
 type voice_agent_session =
-  { vas_agents : string list
+  { vas_endpoints : string list
+  ; vas_endpoint_cursor : int
+  ; vas_agents : string list
   ; vas_agent_cursor : int
   ; vas_voices : (string * string) list
   ; vas_voice_cursor : int
@@ -2729,8 +2731,10 @@ type voice_agent_session =
   ; vas_manual_voice : string
   }
 
-let voice_agent_open ~agents ~revision =
-  { vas_agents = agents
+let voice_agent_open ~endpoints ~agents ~revision =
+  { vas_endpoints = endpoints
+  ; vas_endpoint_cursor = 0
+  ; vas_agents = agents
   ; vas_agent_cursor = 0
   ; vas_voices = []
   ; vas_voice_cursor = 0
@@ -2743,6 +2747,21 @@ let voice_agent_open ~agents ~revision =
 
 let walk_cursor cursor ~count ~ahead =
   if count = 0 then 0 else ((cursor + if ahead then 1 else -1) + count) mod count
+
+let voice_agent_endpoint session =
+  List.nth_opt session.vas_endpoints session.vas_endpoint_cursor
+
+let voice_agent_walk_endpoints session =
+  { session with
+    vas_endpoint_cursor = walk_cursor session.vas_endpoint_cursor ~count:(List.length session.vas_endpoints) ~ahead:true;
+    vas_voices = []; vas_voice_cursor = 0; vas_manual_voice = "";
+    vas_identity = ref (); vas_status = None }
+
+let voice_agent_catalogue_result session ~identity result =
+  if session.vas_identity != identity then session
+  else match result with
+  | Error message -> { session with vas_voices = []; vas_status = Some (message ^ "; type a voice ID") }
+  | Ok voices -> { session with vas_voices = voices; vas_voice_cursor = 0 }
 
 let voice_agent_walk_agents session ~ahead =
   { session with

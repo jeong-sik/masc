@@ -388,6 +388,7 @@ type value =
   | Int of int
   | Float of float
   | Bool of bool
+  | String_map of (string * string) list
 
 (* The shortest spelling that reads back as the same float. [%.17g] round-trips
    every double but renders 0.1 as 0.10000000000000001, so precision climbs
@@ -417,6 +418,9 @@ let value_line ~key ~value =
   | Int v -> Printf.sprintf "%s = %d" (render_key key) v
   | Float v -> Printf.sprintf "%s = %s" (render_key key) (float_text v)
   | Bool v -> Printf.sprintf "%s = %b" (render_key key) v
+  | String_map pairs ->
+    Printf.sprintf "%s = { %s }" (render_key key)
+      (String.concat ", " (List.map (fun (key, value) -> scalar_line ~key ~value) pairs))
 ;;
 
 (* ── section-scoped edits ───────────────────────────────────────────────── *)

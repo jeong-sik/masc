@@ -210,13 +210,13 @@ let handle_probe_stt request reqd body =
 let catalogue_failed request reqd reason =
   respond_json ~status:`Bad_request ~request reqd (`Assoc [ "error", `String reason ])
 
-let handle_voice_catalogue request reqd body =
+let handle_voice_catalogue ~base_path request reqd body =
   match Yojson.Safe.from_string body with
   (* Narrowed to what the parser throws, for the reason the probes are. *)
   | exception Yojson.Json_error _ ->
     catalogue_failed request reqd "the request body is not JSON"
   | json ->
-    (match Server_voice_setup_actions.catalogue_endpoint_of_json json with
+    (match Server_voice_setup_actions.catalogue_endpoint_for_request ~base_path json with
      | Error error ->
        catalogue_failed request reqd (Server_voice_setup_actions.error_message error)
      | Ok endpoint ->
@@ -296,9 +296,10 @@ let add_routes router =
      the operator's credential, so it is gated like the rest of setup. *)
   |> Http.Router.post "/api/v1/voice/voices" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name _req reqd ->
+         (fun state _agent_name _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Request.read_body_async reqd (fun body ->
-             handle_voice_catalogue request reqd body))
+             handle_voice_catalogue ~base_path request reqd body))
          request reqd)
   (* Voice setup: read what is configured, see what a change would do, commit
      it. All three are CanAdmin -- they read and rewrite the workspace's

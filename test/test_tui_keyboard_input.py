@@ -7280,7 +7280,6 @@ def chat_visibility_modes_interaction(
             )
         initial += bytes(output[pane_start:])
         initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
         # The presenter may leave unchanged identity rows out of the frame
         # that first draws attribution. Reconstruct the current terminal to
         # check adjacency rather than requiring unrelated rows to be redrawn.
@@ -14779,6 +14778,25 @@ def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
         expect(opened, b"keeper voices", "a did not open the assignment")
         expect(opened, b"alpha", "the keepers did not draw")
         expect(opened, b"Korean Bright Voice", "the voices did not draw")
+        listing = json.loads(wait_for_http_request(
+            process, master_fd, output, requests, path="/api/v1/voice/voices"
+        ))
+        if listing != {"endpoint_id": "fixture-elevenlabs", "expected_revision": "fixture-voice-revision"}:
+            raise AssertionError(f"the catalogue is not bound to the stored endpoint: {listing!r}")
+        switched = press_and_settle(process, master_fd, output, b"\t")
+        expect(switched, b"Local Fixture Voice", "Tab did not load the other endpoint")
+        compact_assignment = resize_and_wait(
+            process, master_fd, output, rows=24, columns=100,
+            needle=b"esc:back", controls=(FULL_REDRAW,),
+        )
+        current_assignment_rows = screen_rows(compact_assignment)
+        for visible in (b"endpoint (Tab): fixture-local", "▸ alpha".encode(),
+                        "▸ Local Fixture Voice".encode(), b"enter:assign", b"esc:back"):
+            row = screen_row_of(current_assignment_rows, visible)
+            if not 1 <= row <= 24:
+                raise AssertionError(f"24-row assignment lost {visible!r}: {current_assignment_rows!r}")
+        restored_provider = press_and_settle(process, master_fd, output, b"\t")
+        expect(restored_provider, b"Korean Bright Voice", "Tab did not restore the first endpoint")
 
         # The hidden assignment must not edit or save while the viewport only
         # shows its size warning. Restore it before exercising ordinary keys.
@@ -14819,10 +14837,12 @@ def voice_agent_voice_interaction(requests: HttpRequests) -> Interaction:
         if body.get("expected_revision") != "fixture-voice-revision":
             raise AssertionError(f"the assignment lost the revision: {body!r}")
         changes = body.get("changes", [])
-        if len(changes) != 1 or changes[0].get("change") != "set_agent_voice":
+        if len(changes) != 1 or changes[0].get("change") != "set_endpoint_agent_voice":
             raise AssertionError(f"the assignment wrote more than one line: {body!r}")
         if changes[0].get("voice") != "RR11BBccDDeeFFggHHii":
             raise AssertionError(f"the walked voice did not reach the save: {changes!r}")
+        if changes[0].get("endpoint_id") != "fixture-elevenlabs":
+            raise AssertionError(f"the selected provider did not reach the save: {changes!r}")
         if changes[0].get("agent") != "beta":
             raise AssertionError(f"the keeper axis did not reach the save: {changes!r}")
 
@@ -14877,7 +14897,7 @@ def run_voice_terminal_text_regression(executable: str) -> None:
                 process, master_fd, output, requests, path="/api/v1/voice/setup"
             ))
             changes = {change["change"]: change for change in body["changes"]}
-            saved = (changes["set_agent_voice"]["voice"] if kind == "assignment"
+            saved = (changes["set_endpoint_agent_voice"]["voice"] if kind == "assignment"
                      else changes["put_endpoint"]["endpoint"]["default_voice"])
             if saved != voice_id:
                 raise AssertionError(f"display sanitization changed the saved ID: {saved!r}")
@@ -14931,11 +14951,25 @@ def run_voice_wizard_regression(executable: str) -> None:
         http_requests=requests,
     )
     agent_requests: HttpRequests = []
+    agent_fixtures = voice_wizard_http_fixtures()
+    agent_setup = json.loads(json.dumps(VOICE_SETUP_FIXTURE))
+    agent_setup["tts"]["endpoints"].append({
+        "id": "fixture-local", "kind": "macos_say", "enabled": True,
+        "default_voice": "Local Default",
+    })
+    agent_fixtures["/api/v1/voice/setup"] = RequestHttpResponse(
+        lambda body: (200, {"revision": "fixture-voice-revision-2"}) if body else (200, agent_setup)
+    )
+    agent_fixtures["/api/v1/voice/voices"] = RequestHttpResponse(
+        lambda body: (200, {"voices": [{"id": "Local Voice", "name": "Local Fixture Voice"}]})
+        if body and json.loads(body).get("endpoint_id") == "fixture-local"
+        else (200, VOICE_CATALOGUE_FIXTURE)
+    )
     run_terminal_scenario(
         executable,
         description="A keeper is given its own voice from the voice pane",
         interact=voice_agent_voice_interaction(agent_requests),
-        http_fixtures=voice_wizard_http_fixtures(),
+        http_fixtures=agent_fixtures,
         http_requests=agent_requests,
     )
     say_requests: HttpRequests = []

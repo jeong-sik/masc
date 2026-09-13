@@ -1914,6 +1914,7 @@ let voice_local_endpoint ~id ~kind =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; model = None
   ; command = None
   }

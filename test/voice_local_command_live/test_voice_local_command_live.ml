@@ -26,6 +26,7 @@ let endpoint =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; model = None
   ; command = None
   }

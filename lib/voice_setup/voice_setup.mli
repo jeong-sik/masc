@@ -27,6 +27,8 @@ type section =
 type change =
   | Put_endpoint of section * Voice_config.endpoint
       (** Add the endpoint, or update the one already carrying its [id].
+          Existing command overrides and Keeper mappings are preserved;
+          scoped mapping writes belong to [Set_endpoint_agent_voice].
           Fields left [None] in the record are removed from an existing entry:
           moving an endpoint from a hosted provider to a local one has to drop
           [api_key_env], which would otherwise send an Authorization header the
@@ -45,6 +47,9 @@ type change =
   | Set_agent_voice of string * string option
       (** [(agent_id, voice)] in [\[voice.tts.agent_voices\]]. [None] drops the
           mapping, so the agent falls back to [tts.default_voice]. *)
+  | Set_endpoint_agent_voice of string * string * string option
+      (** [(endpoint_id, agent_id, voice)] updates only that endpoint's mapping.
+          [None] restores its endpoint default or the explicit section fallback. *)
 
 type error =
   | Configuration_unavailable of string

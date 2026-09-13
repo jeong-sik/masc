@@ -172,18 +172,32 @@ let test_catalogue_reply_preserves_typing_and_rejects_old_requests () =
     [] failed.T.vws_voices
 
 let test_assignment_accepts_a_manual_voice_without_a_catalogue () =
-  let opened = T.voice_agent_open ~agents:[ "team.alpha" ] ~revision:"r" in
+  let opened = T.voice_agent_open ~endpoints:[ "provider" ] ~agents:[ "team.alpha" ] ~revision:"r" in
   let typed = T.voice_agent_append opened "manual-voice" in
   Alcotest.(check (option (pair string string))) "manual IDs can be saved"
     (Some ("team.alpha", "manual-voice")) (T.voice_agent_selected typed);
   let deleted = T.voice_agent_backspace (T.voice_agent_append opened "음성") in
   Alcotest.(check string) "backspace removes a full scalar" "음" deleted.T.vas_manual_voice
 
+let test_endpoint_switch_rejects_the_previous_catalogue () =
+  let opened = T.voice_agent_open ~endpoints:["local"; "remote"] ~agents:["keeper"] ~revision:"r" in
+  let loaded = T.voice_agent_catalogue_result opened ~identity:opened.T.vas_identity (Ok ["local-voice", "Local"]) in
+  let moved = T.voice_agent_walk_endpoints (T.voice_agent_append loaded "typed-local") in
+  Alcotest.(check (option string)) "selected endpoint" (Some "remote") (T.voice_agent_endpoint moved);
+  Alcotest.(check (option (pair string string))) "old voice cannot be saved on new provider" None (T.voice_agent_selected moved);
+  let stale = T.voice_agent_catalogue_result moved ~identity:opened.T.vas_identity (Ok ["wrong", "Wrong"]) in
+  Alcotest.(check (list (pair string string))) "late old reply ignored" [] stale.T.vas_voices;
+  let current = T.voice_agent_catalogue_result stale ~identity:moved.T.vas_identity (Ok ["remote-id", "Remote"]) in
+  Alcotest.(check (option (pair string string))) "current provider result can be saved"
+    (Some ("keeper", "remote-id")) (T.voice_agent_selected current)
+
 let () =
   Alcotest.run
     "voice_wizard_session"
     [ ( "opening"
-      , [ Alcotest.test_case "a session opens on the first question" `Quick
+      , [ Alcotest.test_case "endpoint switches reject previous catalogues" `Quick
+            test_endpoint_switch_rejects_the_previous_catalogue
+        ; Alcotest.test_case "a session opens on the first question" `Quick
             test_a_session_opens_on_the_first_question
         ; Alcotest.test_case "the last step is review and next stays there" `Quick
             test_the_last_step_is_review_and_next_stays_there

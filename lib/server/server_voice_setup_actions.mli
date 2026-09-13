@@ -50,3 +50,9 @@ val catalogue_endpoint_of_json
     made for one request and thrown away, so it carries no address and no
     command path -- a destination this route cannot check is not one to take
     from a caller. *)
+
+val catalogue_endpoint_for_request
+  : base_path:string -> Yojson.Safe.t -> (Voice_config.endpoint, error) result
+(** Resolve configured endpoint ID and exact configuration revision, or the
+    wizard's unsaved provider descriptor. Caller-supplied transport overrides
+    cannot accompany a configured endpoint request. *)

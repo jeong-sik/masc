@@ -36,6 +36,7 @@ let endpoint ?command ~kind id =
   ; enabled = true
   ; timeout_seconds = None
   ; default_voice = None
+  ; agent_voices = []
   ; model = None
   ; command
   }

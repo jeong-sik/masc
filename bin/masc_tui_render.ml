@@ -12738,7 +12738,12 @@ let render_voice_wizard (state : state) (session : voice_wizard_session) =
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
-  let window = 6 in
+  (* Border/title/spacing, endpoint/manual rows, two list labels/counts and
+     footer consume twelve rows; a status adds its spacer and message. Keep
+     both selected rows inside the same body budget used by finish_surface. *)
+  let chrome_rows = 12 + (match session.vas_status with None -> 0 | Some _ -> 2) in
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let window = max 1 (min 6 ((body_rows - chrome_rows) / 2)) in
   let rows label items cursor draw =
     box_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold label Ansi.reset);
     let count = List.length items in
@@ -12766,6 +12771,10 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
        (config_pane_strip state)
        (connection_badge state));
   box_line buf cols "";
+  box_line buf cols
+    (Printf.sprintf "  endpoint (Tab): %s"
+       (match voice_agent_endpoint session with
+        | Some id -> Terminal_text.single_line id | None -> "—"));
   rows "keeper  (up/down)" session.vas_agents session.vas_agent_cursor (fun agent -> agent);
   box_line buf cols "";
   rows "voice  (left/right)" session.vas_voices session.vas_voice_cursor snd;
@@ -12780,7 +12789,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
        (Printf.sprintf "  %s" (Terminal_text.single_line status)));
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"enter:assign  esc:back");
+    (footer_line state ~max_cells:cols ~hints:"Tab:endpoint  enter:assign  esc:back");
   finish_surface state ~surface_key:"voice" ~rows:terminal_rows ~cols buf
 ;;
 

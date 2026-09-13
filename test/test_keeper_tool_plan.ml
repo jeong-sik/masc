@@ -979,7 +979,8 @@ let test_composable_output_registry_is_closed () =
   check
     (list string)
     "explicit JSON-producing tools"
-    [ "BrowserInteract"
+    [ "BrowserGoto"
+    ; "BrowserInteract"
     ; "BrowserRead"
     ; "Edit"
     ; "Execute"

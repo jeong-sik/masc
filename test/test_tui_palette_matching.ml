@@ -336,6 +336,26 @@ let test_a_label_starting_with_the_query_leads () =
 (* The [&] key opens the MSX screen, but a key is found only by someone who
    already knows it. The palette is where an operator looks for a screen by
    name, so "msx" typed there must reach the action the key reaches. *)
+(* Task Review and Task Verdicts are one reading split in two and sit one [v]
+   apart. The palette offered the first and not the second, so typing the name
+   of the half that holds the rulings found nothing that goes there. *)
+let test_the_palette_goes_to_both_halves_of_task_review () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let goes_to label surface =
+    state.palette_query <- label;
+    List.exists
+      (fun (offered, action) ->
+        String.equal offered label && action = Palette_goto surface)
+      (palette_matches state)
+  in
+  check_bool "the queue of tasks waiting for a ruling" true
+    (goes_to "go Task Review" Verification);
+  check_bool "and the rulings themselves" true
+    (goes_to "go Task Verdicts" Harness)
+;;
+
 let test_msx_is_reached_by_its_name () =
   let state =
     create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
@@ -389,6 +409,8 @@ let () =
             test_a_choice_lists_the_names_and_nothing_else
         ; Alcotest.test_case "friendly runtime parameter editing" `Quick
             test_friendly_runtime_param_editing
+        ; Alcotest.test_case "both halves of Task Review are reachable" `Quick
+            test_the_palette_goes_to_both_halves_of_task_review
         ; Alcotest.test_case "msx is reached by its name" `Quick
             test_msx_is_reached_by_its_name
         ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick

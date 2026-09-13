@@ -1,0 +1,12 @@
+2026-09-12T16:06:59.1006708Z Test Successful in 0.072s. 3 tests run.
+2026-09-12T16:06:59.1061262Z [targeted] test/test_server_dashboard_http_keeper_tool_lookup: OK in 1s
+2026-09-12T16:06:59.2237820Z Test Successful in 0.027s. 18 tests run.
+2026-09-12T16:06:59.2294968Z [targeted] test/test_keeper_autonomous_turn_source: OK in 0s
+2026-09-12T16:06:59.6313958Z Test Successful in 0.304s. 65 tests run.
+2026-09-12T16:06:59.6410244Z [targeted] test/test_keeper_tool_call_log: OK in 0s
+2026-09-12T16:06:59.7611015Z Test Successful in 0.009s. 14 tests run.
+2026-09-12T16:06:59.7654630Z [targeted] test/test_server_dashboard_http_keeper_api_trace: OK in 0s
+2026-09-12T16:06:59.8166991Z Test Successful in 0.000s. 16 tests run.
+2026-09-12T16:06:59.8167623Z [targeted] packages/agent_core/test/test_trajectory: OK in 0s
+2026-09-12T16:06:59.8616804Z Test Successful in 0.000s. 33 tests run.
+2026-09-12T16:06:59.8618931Z [targeted] packages/agent_core/test/test_trajectory_unit: OK in 0s

@@ -3589,7 +3589,10 @@ let test_tools_routes_serve_prepared_http_representations () =
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
     let h2_handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
-      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. () in
+      (* A real client address: the handler charges the per-client-IP bucket
+         with it, which is the limit H2 was missing. *)
+      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
     let request_headers = [ "origin", "http://localhost:8935";
       "authorization", "Bearer " ^ token ] in
     let path = "/api/v1/dashboard/tools" in
@@ -3648,7 +3651,25 @@ let test_tools_routes_serve_prepared_http_representations () =
         Yojson.Safe.Util.(json |> member "effective_keeper_surface" |> member "reason" |> to_string);
       check bool (protocol ^ " exact Keeper does not receive default snapshot decoration") false
         (String_util.contains_substring body "final-decoration"))
-      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ])
+      [ "H1", tools_h1_wire_response ~router; "H2", tools_h2_wire_response ~handler:h2_handler ];
+    (* Start from fresh address keys: a previously used bucket may refill during
+       the request, so comparing consecutive reads of it is timing-dependent. *)
+    let check_first_h2_charge label headers target expected_status =
+      let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
+      let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw
+        ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
+      let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
+      let before = Masc.Rate_limit.remaining_global ~key:rl_key in
+      let status, _, _ = tools_h2_wire_response ~handler ~headers target in
+      check int (label ^ " response") expected_status status;
+      check int (label ^ " charges exactly one client token") (before - 1)
+        (Masc.Rate_limit.remaining_global ~key:rl_key)
+    in
+    check_first_h2_charge "observation" request_headers path 200;
+    check_first_h2_charge "origin-refusal"
+      [ "origin", "https://disallowed.example"; "authorization", "Bearer " ^ token ]
+      "/mcp" 403)
+
 
 let test_execution_routes_serve_prepared_http_representations () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -3678,7 +3699,7 @@ let test_execution_routes_serve_prepared_http_representations () =
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
   let handler = Server_h2_gateway.make_request_handler ~trust_policy ~sw ~clock
-    ~server_start_time:0. () in
+    ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
       let headers = ("accept-encoding", encoding) :: request_headers in

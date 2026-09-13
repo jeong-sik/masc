@@ -40,8 +40,16 @@ let source ~keeper ~run_id =
     (match post.origin with
      | Some {source=Some "fusion"; fusion_run_id=Some actual; _} when actual=run_id -> Ok post
      | _ -> Error (Rejected "source is not exact Fusion evidence"))
-  | Some _ -> Error (Rejected "Fusion run belongs to another Keeper")
-  | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
+  (* A run owned by another Keeper and a run that does not exist answer with the
+     same sentence. Two sentences let a Keeper walk run ids and learn which ones
+     exist under someone else; neither case is this caller's evidence, so
+     neither needs a word of its own. The mismatch inside the owned branch above
+     keeps its own message -- that post is the caller's already. *)
+  | Some _ | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
+
+let evidence_sha256 (post : Board.post) =
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string
+    (`Assoc ["body", `String post.body; "meta", (match post.meta_json with Some json -> json | None -> `Null)])) |> to_hex)
 
 let validate_event json =
   let names = ["type"; "decision_id"; "fusion_run_id"; "fusion_post_id"; "fusion_evidence_sha256"; "task";
@@ -103,8 +111,7 @@ let record ~config ~keeper ~turn_ref proposal = protect (fun () ->
   let identity = `Assoc ["fusion_run_id", `String proposal.run_id; "task", `String proposal.task_id;
     "agent", `String keeper; "turn_ref", Ids.Turn_ref.to_yojson turn_ref] in
   let decision_id = Digestif.SHA256.(digest_string (Yojson.Safe.to_string identity) |> to_hex) in
-  let evidence_sha256 = Digestif.SHA256.(digest_string (Yojson.Safe.to_string
-    (`Assoc ["body", `String post.body; "meta", (match post.meta_json with Some json -> json | None -> `Null)])) |> to_hex) in
+  let evidence_sha256 = evidence_sha256 post in
   let fields = ["fusion_evidence_sha256", `String evidence_sha256; "type", `String "fusion_decision"; "decision_id", `String decision_id;
     "fusion_run_id", `String proposal.run_id; "fusion_post_id", `String (Board.Post_id.to_string post.id);
     "task", `String proposal.task_id; "goal_ids", `List (List.map (fun id -> `String id) goal_ids);

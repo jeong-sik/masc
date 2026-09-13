@@ -205,9 +205,10 @@ let omission_order =
    ~current] puts the reader's own surface at the top of it, so what was
    dropped is the first thing on the screen that follows.
 
-   The key travels alone where something else already marked the cut.
-   Cell truncation ends in [~], and [~...?] marks one cut twice -- a row that
-   was cut is cut, and saying so in two alphabets is noise. *)
+   The key travels alone where something else already marked the cut. Cell
+   truncation ends in the same […], so a row cut by the cell budget and a row
+   cut by dropping items both end […?] -- one mark for the cut, one key for
+   what it hid, and never the mark twice. *)
 let more_key = "?"
 let cut_marker = "\xe2\x80\xa6" ^ more_key
 

@@ -107,12 +107,14 @@ type post_kind =
     it and through which channel.  [source] is the channel's
     [Surface_ref.lane_label] string (not the typed [Surface_ref.t], which lives
     in the [masc] umbrella that depends on [masc_board]).  [turn_ref] and
-    [fusion_run_id] are distinct (RFC §7.6 guard #5).  All sub-fields optional;
+    [fusion_run_id] are distinct (RFC §7.6 guard #5).  Fusion run identity requires its original producer; other sub-fields are optional;
     an all-[None] origin is represented as [origin = None]. *)
 type post_origin = {
   turn_ref : Ids.Turn_ref.t option;
   source : string option;
   fusion_run_id : string option;
+  fusion_producer : string option;
+  (** Actual Fusion caller, immutable with the origin even when post.author changes. *)
 }
 
 val keeper_authored_origin :
@@ -272,6 +274,14 @@ type flusher_msg =
   | Sweep
 
 type store = {
+  mutable posts_load_result : (unit, string) result;
+  mutable comments_load_result : (unit, string) result;
+  (** Derived last full-load outcome; never persisted as another authority. *)
+  workspace_masc_dir : string option;
+  (** Canonical workspace directory captured before the global store is loaded.
+      Unlike environment-derived path helpers, this identity does not change
+      when a later config resolution selects another workspace. [None] denotes
+      a standalone in-memory store with no workspace review authority. *)
   posts : (string, post) Hashtbl.t;
   comments : (string, comment) Hashtbl.t;
   vote_log : (string, vote_direction * float) Hashtbl.t;

@@ -38,8 +38,8 @@ let test_original_presentation () =
   Fs_compat.mkdir_p root;
   List.iter (fun name -> write (Filename.concat root name) (read (Filename.concat inputs name)))
     ["presentation.pptx";"broken.pptx";"external.pptx"];
-  let task = VAT.create ~config ~producer |> Result.get_ok in
-  let goal = VAT.create_goal_proof ~config |> Result.get_ok in
+  let task = VAT.create ~config ~producer ~submitted_evidence:[] |> Result.get_ok in
+  let goal = VAT.create_goal_proof ~config ~submitted_evidence:[] |> Result.get_ok in
   let dispatch surface path extra = VAT.dispatch surface ~name:"tool_read_file"
     ~args:(`Assoc (("file_path",`String path) :: extra)) in
   List.iter (fun (surface,prefix) ->

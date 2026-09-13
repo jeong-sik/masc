@@ -278,6 +278,7 @@ let evidence_posture_of_snapshot
            | Workspace_verification_store.Evidence_artifact
                { reference = _; content = _; bytes = _; truncated = false } ->
              true
+           | Workspace_verification_store.Evidence_collaboration _
            | Workspace_verification_store.Evidence_artifact_binary _ ->
              (* A binary item is judgeable on its own terms: the hash, the
                 size, and the filed body are the facts the verdict can rest
@@ -322,6 +323,7 @@ let evidence_images_of_snapshot ~base_path
                     ; image_media_type = media_type
                     ; image_body_base64 = body_base64
                     }))
+         | Store.Evidence_collaboration _ -> None
          | Store.Evidence_note _ -> None
          | Store.Evidence_artifact _ -> None
          | Store.Evidence_invalid_reference -> None
@@ -793,9 +795,12 @@ let process_task_once
         ~detail:reason
     | Ok prepared ->
       (match
-         Verification_authority_tools.create
-           ~config:runtime.config
-           ~producer:assignee
+         (match prepared.evidence_access with
+          | Workspace_verification_store.Evidence_available {items; _} ->
+              Verification_authority_tools.create ~config:runtime.config
+                ~producer:assignee ~submitted_evidence:items
+          | Workspace_verification_store.Evidence_unavailable {request_id; reason} ->
+              Error (Workspace_verification_store.evidence_access_failure_to_string ~request_id reason))
        with
        | Error reason ->
          defer_unavailable

@@ -284,8 +284,13 @@ On a directory that was never initialized, measured 2026-09-13:
 | after | exit 1, `No masc workspace at …: …/runtime.toml does not exist. Run masc init --base-path '…' first, then this again.` |
 
 Either way nothing is created. Following the second message — `masc init`, then
-the same command — answered `voice is configured`, exit 0. `--list-voices`
-reads `say` and not the workspace, so it answers before `init` too.
+the same command — answered `voice is configured`, exit 0.
+
+`--list-voices` reads `say` and nothing under the workspace, so a directory
+that was never initialized is enough. It still needs *a* base path, like every
+masc command: with no `--base-path`, no `MASC_BASE_PATH` and no recorded
+default it exits 1 with an empty stdout. Measured the same day — `--base-path`
+at an uninitialized directory answered 14,420 bytes.
 
 ### What the configuration then says
 

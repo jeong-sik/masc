@@ -9294,7 +9294,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       in
       (* The global coordinator status is not the result of the browser HTTP
          request. Keep it labeled, including the existing workspace warning. *)
-      c.push_styled ~style ("  coordinator " ^ connection_badge state ^ "  " ^ status);
+      c.push (coordinator_status_row state ~style status);
       match view.client_picker with
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose a connected browser";

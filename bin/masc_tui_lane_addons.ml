@@ -536,7 +536,14 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ~width view =
                  @ (if config.declarations=[] then ["No installations. Press n to create a TOML declaration."] else [])
                  @ [""; "Installation details"]
                  @ configuration_lines {view with configuration_cursor=0}
-                     {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}})
+                     {snapshot with configuration=Some {config with declarations=Option.to_list (selected_declaration view)}}
+                 @ (match selected_declaration view with
+                    | Some declaration -> (match declaration.instance_id with
+                        | Some id -> (match List.find_opt (fun (item : instance) -> item.id=id) snapshot.instances with
+                            | Some item -> instance_lines {view with instance_cursor=0} [item]
+                            | None -> [])
+                        | None -> [])
+                    | None -> []))
         | Instances ->
             window view.instance_cursor (fun (item : instance) ->
               item.title ^ " · " ^ phase_label item.phase ^ Printf.sprintf " · %d rows" item.rows_count) snapshot.instances
@@ -630,7 +637,9 @@ let action_target view =
 let open_actions ~request_id view =
   let* instance = match action_target view with
     | Some instance -> Ok instance
-    | None -> Error "Select an installed Add-on first (Tab:instances)." in
+    | None -> (match Option.bind view.snapshot (fun snapshot -> List.hd_opt snapshot.instances) with
+        | Some instance -> Ok instance
+        | None -> Error "Select an installed Add-on first (Tab:instances).") in
   let* schema = match instance.action_schema with
     | Some schema -> Ok schema
     | None -> Error "This Add-on provides observations only. Press o to observe." in

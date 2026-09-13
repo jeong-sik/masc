@@ -10694,10 +10694,15 @@ let render_metrics (state : state) =
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
     is choosing for and where that keeper points today in the header. *)
+(* Through the surface contract. Drawn by hand, the frame spent [rows - 7] on
+   its rows and did not count the failure or loading row above the options, so
+   the footer stood one row above the composer, or two once the list filled.
+   Its failure row was a seventh spelling of [data_unreliable_row] with its own
+   width, which padded the error and then cut the closing bracket off. Its
+   footer named the keys "assign", "back to default" and "cancel" where the key
+   table and the help sheet say "choose", "use the default" and "back". *)
 let render_runtime_pick (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
   let keeper_name =
     Terminal_text.single_line_or ~default:"?" state.runtime_pick_keeper
   in
@@ -10728,57 +10733,48 @@ let render_runtime_pick (state : state) =
       state.runtime_catalog
   in
   let count = List.length options in
-  box_top buf cols;
-  box_line buf cols
-    (Printf.sprintf "%s  %scurrent: %s%s"
-       (screen_title
-         (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
-       Ansi.dim current Ansi.reset);
-  box_divider buf cols;
-  (match Terminal_text.optional_single_line state.runtime_catalog_error with
-   | Some err ->
-       box_line buf cols
-         ((Theme.bad ()) ^ "  (catalogue unreliable: "
-         ^ fit_width err (max 8 (cols - 28))
-         ^ ")" ^ Ansi.reset)
-   | None ->
-       if count = 0 then
-         box_line buf cols
-           (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset));
-  let content_height = max 0 (rows - 7) in
-  let scroll_offset =
-    if content_height > 0 && state.runtime_pick_cursor >= content_height then
-      state.runtime_pick_cursor - content_height + 1
-    else 0
-  in
-  let options_window = Rows.of_list ~first:scroll_offset ~height:content_height options in
-  for i = 0 to content_height - 1 do
-    let idx = i + scroll_offset in
-    match Rows.at options_window idx with
-    | Some option ->
-        let is_selected = idx = state.runtime_pick_cursor in
-        let line =
-          Printf.sprintf "  %s  %s%s"
-            (fit_width (Terminal_text.single_line option.ro_id) 44)
-            (fit_width
-               (Terminal_text.single_line
-                  (option.ro_provider ^ " / " ^ option.ro_model))
-               (max 8 (cols - 56)))
-            (if option.ro_is_default then " [default]" else "")
-        in
-        box_line buf cols
-          (if is_selected then Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-           else "  " ^ line)
-    | None -> box_empty buf cols
-  done;
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Printf.sprintf "%sj/k%s move  %senter%s assign  %sd%s back to default  esc cancel"
-            (Masc_tui_theme.tone Masc_tui_theme.Accent) Ansi.reset (Masc_tui_theme.tone Masc_tui_theme.Accent) Ansi.reset (Masc_tui_theme.tone Masc_tui_theme.Accent) Ansi.reset));
-  finish_surface state ~surface_key:"runtime-pick" ~rows:terminal_rows ~cols
-    buf
+  surface_chrome state ~terminal_rows ~cols ~surface_key:"runtime-pick"
+    ~title:
+      (Printf.sprintf "%s  %scurrent: %s%s"
+         (screen_title
+            (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
+         Ansi.dim current Ansi.reset)
+    ~hints:(Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick))
+    ~body:(fun ~budget c ->
+      let status_rows =
+        match state.runtime_catalog_error with
+        | Some err ->
+            c.push (data_unreliable_row ~cols err);
+            1
+        | None when count = 0 ->
+            c.push (Ansi.dim ^ "  (loading runtime catalogue\xe2\x80\xa6)" ^ Ansi.reset);
+            1
+        | None -> 0
+      in
+      let height = max 0 (budget - status_rows) in
+      let scroll_offset =
+        if height > 0 && state.runtime_pick_cursor >= height then
+          state.runtime_pick_cursor - height + 1
+        else 0
+      in
+      List.iteri
+        (fun idx (option : Tui_decode.runtime_option) ->
+          if idx >= scroll_offset && idx < scroll_offset + height then begin
+            let line =
+              Printf.sprintf "  %s  %s%s"
+                (fit_width (Terminal_text.single_line option.ro_id) 44)
+                (fit_width
+                   (Terminal_text.single_line
+                      (option.ro_provider ^ " / " ^ option.ro_model))
+                   (max 8 (cols - 56)))
+                (if option.ro_is_default then " [default]" else "")
+            in
+            c.push
+              (if idx = state.runtime_pick_cursor then
+                 Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+               else "  " ^ line)
+          end)
+        options)
 
 (* The Resources surface: the MCP resource inventory on the left, the
    selected read on the right. Wide terminals show both; narrow ones show

@@ -30,13 +30,8 @@ let transcriber_of_kind = function
 
 (* What an answered TTS probe says.
 
-   The voice, not only the bytes. say does not fail on a voice it does not
-   have -- it speaks in the system voice and exits 0 -- so a byte count alone
-   cannot tell a keeper's own voice from the fallback. Measured 2026-09-13 on
-   one workstation: a keeper mapped to a voice that exists answered 124,690
-   bytes, one mapped to a name that does not answered 79,758, and so did the
-   section default. Only the name separates them, and a reader can check that
-   name against the catalogue.
+   The voice, not only the bytes: the answer is read by someone confirming
+   which voice a keeper got, and two voices can come back the same size.
 
    Quoted by hand rather than with %S: that escapes UTF-8 into byte numbers,
    and a Korean voice name is then unreadable. A blank voice is the system
@@ -120,6 +115,55 @@ let list_voices_via_command_endpoint endpoint =
   match Voice_bridge_transport.list_voices_via_command endpoint with
   | Error message -> Error message
   | Ok output -> Ok (say_catalogue_of_output output)
+;;
+
+(* Whether say has a voice by this name. say does not refuse one it does not
+   have: it exits 0 and speaks in another voice. Measured 2026-09-13 on macOS 26
+   whose first language is Korean, writing WAVE files only: [-v NoSuchVoice]
+   wrote the same bytes as [-v Yuna] for a Korean sentence and for an English
+   one, and neither matched the voice say uses with no [-v]. So the audio cannot
+   tell a mapping that took from one that did not; the catalogue can.
+
+   say matched [yuna] and [YUNA] to Yuna, so the comparison ignores ASCII case.
+   A bare name say prints only with a language is not one of its labels: [-v
+   Eddy] read a Korean sentence in an English voice, 4.8KB against 147KB for
+   [-v "Eddy (한국어(한국))"]. *)
+type say_voice =
+  | Say_has_it
+  | Say_lacks_it of { installed : int }
+
+let say_voice_in_catalogue voices ~voice =
+  let wanted = String.lowercase_ascii (String.trim voice) in
+  if
+    List.exists
+      (fun (listed : catalogue_voice) ->
+        String.equal (String.lowercase_ascii listed.voice_id) wanted)
+      voices
+  then Say_has_it
+  else Say_lacks_it { installed = List.length voices }
+;;
+
+(* A blank voice asks for no name, and say then uses its own; there is nothing
+   to look up. *)
+let check_say_voice endpoint ~voice =
+  let voice = String.trim voice in
+  if String.equal voice ""
+  then Ok ()
+  else (
+    match list_voices endpoint with
+    | Error message ->
+      Error
+        (Printf.sprintf "the voices say has could not be listed to check \"%s\": %s"
+           voice message)
+    | Ok voices ->
+      (match say_voice_in_catalogue voices ~voice with
+       | Say_has_it -> Ok ()
+       | Say_lacks_it { installed } ->
+         Error
+           (Printf.sprintf
+              "say has no voice named \"%s\", and would speak in another one without \
+               failing; masc voice-local-setup --list-voices prints the %d it has"
+              voice installed)))
 ;;
 
 (* The container each kind writes. say encodes WAVE and cannot encode MP3
@@ -775,15 +819,10 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   Voice_config.voice_for_agent_at_endpoint tts endpoint agent_id
                 in
                 (* The voice that was asked for, not only the bytes that came
-                   back. say does not fail on a voice it does not have -- it
-                   speaks in the system voice and exits 0 -- so the byte count
-                   alone cannot tell a keeper's own voice from the fallback.
-                   Measured: a keeper mapped to a voice that exists answered
-                   114,810 bytes and one mapped to a name that does not
-                   answered 73,614, the same as the section default. Naming
-                   the voice is what lets a reader check it against the
-                   catalogue. A blank one is the system voice, said as such
-                   rather than as "". *)
+                   back. A say voice that is not installed was refused before
+                   the clip, so an answer here is in the voice it names. A
+                   blank one is the system voice, said as such rather than
+                   as "". *)
                 let answer = function
                   | Ok detail -> Answered detail
                   | Error reason -> Refused reason
@@ -807,9 +846,16 @@ let probe_tts ?(agent_id = "probe") ~message () =
                   | Voice_runtime_overlay.Does_not_speak ->
                     Skipped "this endpoint kind does not synthesize"
                   | Voice_runtime_overlay.By_command ->
-                    clip (fun ~voice ~output_file ->
-                      Voice_bridge_transport.speak_via_command_to_file
-                        endpoint ~message ~voice ~output_file)
+                    (* Checked here and not before every speak: listing
+                       took 0.56-0.59s per call on the mac that measured
+                       it, which a keeper's every sentence would wait for.
+                       This probe is where a mapping is confirmed. *)
+                    (match check_say_voice endpoint ~voice:(voice ()) with
+                     | Error reason -> Refused reason
+                     | Ok () ->
+                       clip (fun ~voice ~output_file ->
+                         Voice_bridge_transport.speak_via_command_to_file
+                           endpoint ~message ~voice ~output_file))
                   | Voice_runtime_overlay.Over_http ->
                     clip (fun ~voice ~output_file ->
                       match tts.Voice_config.default_model with

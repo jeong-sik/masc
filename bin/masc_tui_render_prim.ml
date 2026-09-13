@@ -527,7 +527,7 @@ let composer_line state ~cols =
       when state.voice_capture = None
            && state.voice_continuous = None
            && Buffer.length state.msg_input = 0 ->
-        "  (^Y to speak, ^A to keep listening)"
+        "  " ^ Composer.voice_keys_hint
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
         Printf.sprintf "  (%s to write)" Composer.focus_key
@@ -576,6 +576,19 @@ let composer_cursor state ~rows ~cols =
    highlighted. Wider terminals see the whole ring; narrower ones see a
    window around the active entry with how many entries hide past each edge,
    so position in the cycle stays readable at any width. *)
+(* What [/burn] puts at the right of the tab row: the fleet's cost, then one
+   braille bar per Keeper for its token total when any Keeper has spent one.
+   It read "[HUD $0.00   ]": a word naming the widget rather than what it shows,
+   and, with nothing spent, bars of blank cells inside the brackets. The bars
+   are each Keeper's running total, not a rate over time. *)
+let burn_hud_text (state : state) =
+  if not state.burn_hud_visible then None
+  else
+    let cost = Printf.sprintf "$%.2f" (Masc_tui_types.fleet_total_cost_usd state) in
+    if List.exists (fun (k : keeper) -> k.k_total_tokens > 0) state.keepers then
+      Some (cost ^ " " ^ Masc_tui_types.fleet_token_sparkline state)
+    else Some cost
+
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
@@ -667,22 +680,17 @@ let surface_strip (state : state) ~cols =
   if hi < n - 1 then
     Buffer.add_string parts
       (Printf.sprintf " %s%d\xe2\x80\xba%s" Ansi.dim (n - 1 - hi) Ansi.reset);
-  if state.burn_hud_visible then begin
-    let total_cost = Masc_tui_types.fleet_total_cost_usd state in
-    let spark = Masc_tui_types.fleet_token_sparkline state in
-    let hud =
-      Printf.sprintf "%s[HUD $%.2f %s%s%s]%s"
-        (Theme.recede ()) total_cost (Theme.info ()) spark (Theme.recede ()) Ansi.reset
-    in
-    let hud_raw = Printf.sprintf "[HUD $%.2f %s]" total_cost spark in
-    let hud_cells = Message_layout.display_width hud_raw in
-    let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
-    if cols >= used_cells + hud_cells + 2 then begin
-      let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
-      Buffer.add_string parts gap;
-      Buffer.add_string parts hud
-    end
-  end;
+  (match burn_hud_text state with
+   | None -> ()
+   | Some hud_raw ->
+       let hud = Theme.recede () ^ hud_raw ^ Ansi.reset in
+       let hud_cells = Message_layout.display_width hud_raw in
+       let used_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr (Buffer.contents parts)) in
+       if cols >= used_cells + hud_cells + 2 then begin
+         let gap = String.make (max 1 (cols - used_cells - hud_cells - 1)) ' ' in
+         Buffer.add_string parts gap;
+         Buffer.add_string parts hud
+       end);
   Buffer.contents parts
 
 
@@ -1026,8 +1034,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 (* ── the A-family surface chrome contract ─────────────────────────────
-   One owner for a borderless surface's fixed rows: top gap, title row,
-   divider, height fill, bottom gap, and the status-tail footer. The body
+   One owner for the fixed rows of a surface, or of an overlay drawn over
+   one: top, title row, divider, height fill, bottom, and the status-tail
+   footer. The body
    pushes its rows through the record and the contract counts them, so the
    hand-tallied chrome_rows constants (the fixed-chrome-row trap: add a row,
    forget the count, lose a body line) cannot drift — there is nothing left
@@ -1043,16 +1052,42 @@ type chrome_body = {
 }
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
-   itself. Everything else is the body's budget. *)
-let surface_chrome_rows = 5
+   itself. Everything else is the body's budget. The framed panels count the
+   same five rows, and a key handler bounding an overlay's scroll with
+   [framed_content_height] must agree with what this draws, so the number has
+   one owner. *)
+let surface_chrome_rows = framed_chrome_rows
 
-let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
-    ~title ~hints ~(body : budget:int -> chrome_body -> unit) =
+(* Which frame the contract draws. A surface is the terminal's whole screen and
+   its edge is already the frame, so it draws rules and no box. An overlay is
+   opened over a surface and keeps its box, which is how a reader tells the two
+   apart. The rows around the body are five either way, so the budget is the
+   same. *)
+type chrome_frame = Chrome_screen | Chrome_overlay
+
+let surface_chrome ?clamped ?(frame = Chrome_screen) (state : state)
+    ~terminal_rows ~cols ~surface_key ~title ~hints
+    ~(body : budget:int -> chrome_body -> unit) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  box_top buf cols;
-  box_line buf cols title;
-  box_divider buf cols;
+  let top, line, line_styled, line_selected, divider, empty, bottom =
+    match frame with
+    | Chrome_screen ->
+        ( box_top, box_line, box_line_styled, box_line_selected, box_divider
+        , box_empty, box_bottom )
+    | Chrome_overlay ->
+        ( framed_top
+        , framed_line
+        , framed_line_styled
+        , (fun buf cols content ->
+            framed_line_styled buf cols ~style:Masc_tui_theme.selection content)
+        , framed_divider
+        , framed_empty
+        , framed_bottom )
+  in
+  top buf cols;
+  line buf cols title;
+  divider buf cols;
   let budget = max 1 (rows - surface_chrome_rows) in
   let used = ref 0 in
   (* A push past the budget draws nothing. The alternative — drawing it —
@@ -1065,20 +1100,20 @@ let surface_chrome ?clamped (state : state) ~terminal_rows ~cols ~surface_key
     if !used < budget then begin incr used; draw arg end
   in
   let body_pushers =
-    { push = counted (fun line -> box_line buf cols line)
+    { push = counted (fun text -> line buf cols text)
     ; push_styled =
-        (fun ~style line ->
-          counted (fun line -> box_line_styled buf cols ~style line) line)
-    ; push_selected = counted (fun line -> box_line_selected buf cols line)
-    ; push_divider = counted (fun () -> box_divider buf cols)
-    ; push_empty = counted (fun () -> box_empty buf cols)
+        (fun ~style text ->
+          counted (fun text -> line_styled buf cols ~style text) text)
+    ; push_selected = counted (fun text -> line_selected buf cols text)
+    ; push_divider = counted (fun () -> divider buf cols)
+    ; push_empty = counted (fun () -> empty buf cols)
     }
   in
   body ~budget body_pushers;
   for _ = !used + 1 to budget do
-    box_empty buf cols
+    empty buf cols
   done;
-  box_bottom buf cols;
+  bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   (* Read after the body, because that is the only moment the value exists:
      a surface whose rows the drawing counts cannot say what it clamped to
@@ -1116,6 +1151,14 @@ let connection_badge (state : state) =
       connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
+
+(* The coordinator's badge beside a reading of the surface's own. The badge
+   brings its colour and its reset, so a style laid over the whole row painted
+   only the words in front of it -- "coordinator HTTP" went red beside a green
+   [connected] when a browser read failed -- and the reset left the failure
+   itself uncoloured. Each part wears its colour where it stands. *)
+let coordinator_status_row (state : state) ~style status =
+  "  coordinator " ^ connection_badge state ^ "  " ^ style ^ status ^ Ansi.reset
 
 
 let count_frame_lines buf =
@@ -1807,6 +1850,61 @@ let planning_phase_color = function
 
 ;;
 
+(* The goal count, the completed share and one counter per phase. With no goals
+   the row read the count, a sentence saying the count, and five zero counters
+   over a list that says "(no goals)" itself. The count is the whole reading
+   there.
+
+   Executing, Completed and Dropped wear the {!Masc_tui_theme.Glyph} progress
+   marks the Backlog row under them wears for running, done and cancelled.
+   Verifying and awaiting confirmation are stages only a Goal has, so their
+   diamonds are theirs. *)
+let planning_rollup_row ~cols (rollup : planning_rollup) =
+  let total_goals =
+    (* Every phase counts, or the denominator drops the goals waiting on a
+       human and reports a completion share higher than the truth. *)
+    rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
+    + rollup.pr_done + rollup.pr_dropped
+  in
+  let count = Printf.sprintf "  Goals: %s%d%s" Ansi.bold total_goals Ansi.reset in
+  if total_goals = 0 then count
+  else
+    let bar_width = if cols < 90 then 8 else 12 in
+    let progress_bar =
+      Printf.sprintf "[%s] %2d%% (%d/%d)"
+        (Masc_tui_context_bars.ratio_bar ~width:bar_width
+           ~numerator:rollup.pr_done ~denominator:total_goals)
+        (rollup.pr_done * 100 / total_goals) rollup.pr_done total_goals
+    in
+    let counter phase glyph name value =
+      Printf.sprintf "%s%s %s: %d%s" (planning_phase_color phase) glyph name value
+        Ansi.reset
+    in
+    Printf.sprintf "%s %s  %s│%s  %s" count progress_bar (Theme.recede ()) Ansi.reset
+      (String.concat "  "
+         [ counter Goal_phase.Executing Masc_tui_theme.Glyph.progress_active
+             "Exec" rollup.pr_active
+         ; counter Goal_phase.Verifying "◆" "Ver" rollup.pr_verifying
+         ; counter Goal_phase.Awaiting_confirmation "◇" "Conf"
+             rollup.pr_awaiting_confirmation
+         ; counter Goal_phase.Completed Masc_tui_theme.Glyph.progress_done
+             "Done" rollup.pr_done
+         ; counter Goal_phase.Dropped Masc_tui_theme.Glyph.progress_ended
+             "Drop" rollup.pr_dropped
+         ])
+
+(* The Backlog counts, each with the mark its Task rows wear. Claimed had no
+   mark here while a claimed Task row draws the half circle, so the one count a
+   reader could match to a row was the one left bare. *)
+let planning_backlog_counts (backlog : planning_backlog) =
+  let open Masc_tui_theme.Glyph in
+  [ ("todo", backlog.pb_todo, progress_waiting ^ " todo")
+  ; ("claimed", backlog.pb_claimed, progress_active ^ " claimed")
+  ; ("running", backlog.pb_running, progress_active ^ " running")
+  ; ("done", backlog.pb_done, progress_done ^ " done")
+  ; ("cancelled", backlog.pb_cancelled, progress_ended ^ " cancelled")
+  ]
+
 (* Planning is one operator workspace with three authorities behind it: Goal
    lifecycle, the Task verdict queue, and the verdicts the judge recorded.
    Keep their APIs separate, but make the hierarchy visible in the title
@@ -1865,7 +1963,31 @@ let planning_proof_mark proof =
    because which action the toggle sends depends on that keeper's state. A key
    with nothing behind it is dimmed rather than dropped, so the row of keys
    does not shift as the cursor travels. *)
-let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state reading =
+(* A destructive action armed, or one already running. Status rather than a hint:
+   [?] cannot recover "press d again to delete analyst", and the next unrelated
+   key cancels the arm, so a footer that gives this up to fit something else
+   gives up the only notice of a state the operator is standing in. The keys stay
+   on the row beside it now instead of being replaced by it. *)
+let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  match (state.keeper_action_inflight, state.keeper_action_pending) with
+  | Some (keeper_name, action), _ ->
+    [ Masc_tui_footer.Keeper_action_running
+        { gerund = Keeper_control.action_gerund action
+        ; keeper = Terminal_text.single_line keeper_name
+        }
+    ]
+  | None, Some pending ->
+    [ Masc_tui_footer.Keeper_action_armed
+        { key = Keeper_control.action_key pending.Keeper_control.pending_action
+        ; action =
+            Keeper_control.action_label pending.Keeper_control.pending_action
+        ; keeper =
+            Terminal_text.single_line pending.Keeper_control.pending_keeper
+        }
+    ]
+  | None, None -> []
+
+let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) state reading =
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
@@ -1894,28 +2016,14 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
         (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
-  match (state.keeper_action_inflight, state.keeper_action_pending) with
-  | Some (keeper_name, action), _ ->
-      Printf.sprintf "  %s%s %s\xe2\x80\xa6%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
-        (Keeper_control.action_gerund action)
-        (Terminal_text.single_line keeper_name)
-        Ansi.reset
-  | None, Some pending ->
-      Printf.sprintf "  %s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
-        (Keeper_control.action_key pending.Keeper_control.pending_action)
-        (Keeper_control.action_label pending.Keeper_control.pending_action)
-        (Terminal_text.single_line pending.Keeper_control.pending_keeper)
-        Ansi.reset
-  | None, None ->
-      (* [key:label] items, two spaces apart: the shape every other footer
-         uses, so Masc_tui_footer can split the row, drop the lowest priority
-         item when the row is tight, and keep the keys it never drops. Written
-         "key label" and joined with a middle dot, the whole legend was one
-         item nothing could split -- at 60 columns the row cut mid-word and
-         "q quit", last in the list, went first. The two keys the footer pins
-         lead with a plain key so it can read them past the colour. *)
-      "  "
-      ^ String.concat "  "
+  (* [key:label] items, two spaces apart: the shape every other footer
+     uses, so Masc_tui_footer can split the row, drop the lowest priority
+     item when the row is tight, and keep the keys it never drops. Written
+     "key label" and joined with a middle dot, the whole legend was one
+     item nothing could split -- at 60 columns the row cut mid-word and
+     "q quit", last in the list, went first. The two keys the footer pins
+     lead with a plain key so it can read them past the colour. *)
+      String.concat "  "
           [ Ansi.dim ^ "j/k:move" ^ Ansi.reset
           ; toggle
           ; hint Keeper_control.Wakeup "wake"
@@ -1958,6 +2066,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
 (* One colour per level so an operator scanning the column sees severity before
    reading the text. A level this build does not name keeps its own text and
    renders unstyled rather than borrowing another level's colour. *)
+
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
   | System_info -> Ansi.reset
@@ -2366,7 +2475,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
-       Printf.sprintf "[%d lines, scroll %d]  %s" total scroll ds.ds_esc_hint
+       Printf.sprintf "[%s, scroll %d]  %s" (Masc_tui_message_layout.count_noun total "line") scroll ds.ds_esc_hint
      else "  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -2507,11 +2616,41 @@ let help_masthead (_state : state) =
   ]
 
 
+(* The rows one help entry takes in [width] cells: [lead] (its key or usage,
+   [lead_cells] wide) with the start of [text], and the rest of [text] on rows
+   that start at [column], where every entry's text starts.
+
+   The sheet cut each entry to its column. Two columns at 120 cells are 57
+   each, and 23 of the 29 slash-command rows and 16 of the 20 Config rows ran
+   past that, so a summary ended in an ellipsis where it said what the key
+   does. A usage too long to leave [help_text_minimum_cells] beside it puts the
+   text on the rows under it, rather than one word to a row. *)
+let help_text_minimum_cells = 20
+
+(* The key column: two cells of indent, the key padded to this, and a space. *)
+let help_key_cells = 16
+
+let help_entry_rows ~width ~lead ~lead_cells ~column text =
+  let indent = String.make column ' ' in
+  let under words =
+    List.map
+      (fun piece -> indent ^ piece)
+      (Message_layout.wrap_words ~max_cells:(max 1 (width - column)) words)
+  in
+  let beside = width - lead_cells in
+  if lead_cells > column && beside < help_text_minimum_cells then
+    lead :: under text
+  else
+    match Message_layout.wrap_words ~max_cells:(max 1 beside) text with
+    | [] -> [ lead ]
+    | [ first ] -> [ lead ^ first ]
+    | first :: rest -> (lead ^ first) :: under (String.concat " " rest)
+
 (* The [?] help screen: every binding, grouped by the surface that answers
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
-let help_lines (state : state) =
+let help_lines ~width (state : state) =
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -2537,29 +2676,31 @@ let help_lines (state : state) =
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
     header_line
-    :: List.map
+    :: List.concat_map
          (fun (key, action) ->
-           Printf.sprintf "  %s%-16s%s %s"
-             (Masc_tui_theme.tone Masc_tui_theme.Accent)
-             (String.trim key)
-             Ansi.reset
-             action)
+           let key_cell = Printf.sprintf "%-*s" help_key_cells (String.trim key) in
+           help_entry_rows ~width
+             ~lead:
+               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  key_cell Ansi.reset)
+             ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
+             ~column:(2 + help_key_cells + 1) action)
          entries
     @ [ "" ]
   in
   let slash_commands =
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
-    :: List.map
+    :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
               [/help] list reads through the same two functions: the sheet
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
-           Printf.sprintf "  %s%s%s%s%s"
-             (Theme.warn ())
-             text
-             Ansi.reset
-             (Masc_tui_command.help_summary_padding text)
+           let padding = Masc_tui_command.help_summary_padding text in
+           help_entry_rows ~width
+             ~lead:(Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
+             ~lead_cells:(2 + Message_layout.display_width (text ^ padding))
+             ~column:(2 + Masc_tui_command.help_summary_column)
              cmd.summary)
          Masc_tui_command.catalog
     @ [ "" ]
@@ -3115,7 +3256,7 @@ let context_exact_input_summary ~width
   ( [ "  "
       ^ Context_bars.band ~width ~title:"BY KIND"
           ~caption:
-            (Printf.sprintf "%d items, %s retained" (List.length items)
+            (Printf.sprintf "%s, %s retained" (Masc_tui_message_layout.count_noun (List.length items) "item")
                (Masc_tui_context_inspector.format_bytes total))
     ]
     @ bar @ rows
@@ -3674,7 +3815,7 @@ let context_split_pane_height ~content_height ~common_len =
 let keeper_deletions_lines (state : state) ~cols =
   let lines = match state.keeper_deletions with
     | None -> ["삭제 기록을 불러오는 중입니다."]
-    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail; "r: 다시 조회"]
+    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
     | Some (Ok inventory) ->
       let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
@@ -3700,15 +3841,37 @@ let keeper_deletions_lines (state : state) ~cols =
               | _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row) status;
-           (if row.can_retry then "t: 같은 작업의 남은 정리 재시도" else "이 단계는 정리 재시도 대상이 아닙니다.");
-           "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+             (Keeper_control.deletion_keeper_name row) status]
+          @ (if row.can_retry then [] else ["이 단계는 정리 재시도 대상이 아닙니다."])
+          @ ["종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
           @ String.split_on_char '\n'
               (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
   in
   List.concat_map (fun line ->
     Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
       (Terminal_text.single_line line)) lines
+
+(* The deletion overlay's keys for what it shows. [j/k] steps between records
+   and [t] retries the selected record only when it can be retried
+   (masc_tui.ml); the row named both on a failed read and on a single record,
+   where neither does anything. The body said [r] and [t] a second time under
+   the record, so those lines are gone and the row is the one place. *)
+let keeper_deletions_hints (state : state) ~scrollable =
+  let operations, can_retry =
+    match state.keeper_deletions with
+    | Some (Ok inventory) ->
+      ( List.length inventory.operations
+      , match List.nth_opt inventory.operations state.keeper_deletions_cursor with
+        | Some row -> row.Keeper_control.can_retry
+        | None -> false )
+    | Some (Error _) | None -> (0, false)
+  in
+  String.concat "  "
+    ((if operations > 1 then [ "j/k:작업" ] else [])
+     @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
+     @ [ "r:조회" ]
+     @ (if can_retry then [ "t:정리 재시도" ] else [])
+     @ [ "Esc:닫기" ])
 
 ;;
 

@@ -1807,7 +1807,9 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      resolved per keeper and per endpoint, so "does this configuration work"
      and "does this keeper have the voice I gave it" are different questions
      -- and for say only the second one can catch a wrong name, because say
-     speaks in the system voice rather than failing on one it does not have. *)
+     speaks in another voice rather than failing on one it does not have. The
+     probe looks the name up in say's own list and refuses one that is not
+     there. *)
   (* Under an event loop, because a voice_mcp endpoint is asked over the same
      MCP HTTP client a turn uses, and that client needs a switch, a clock and
      a connection pool. The HTTP and command kinds run a process and do not
@@ -2011,6 +2013,21 @@ let voice_local_setup_exit base_path speak_voice hear_model =
            tts then
       refuse "The endpoint macos-say already names another provider; nothing was written."
     else
+      (* The name is typed here, and say does not fail on one it does not
+         have: it speaks in another voice and exits 0. Measured 2026-09-13,
+         -v NoSuchVoice wrote the same bytes as -v Yuna. Written unchecked, the
+         mistake surfaced only as a keeper with the wrong voice. The endpoint
+         this writes runs plain say, so that is the catalogue asked. *)
+      match
+        match speak_voice with
+        | None -> Ok ()
+        | Some voice ->
+          Masc.Voice_bridge.check_say_voice
+            (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
+            ~voice
+      with
+      | Error reason -> refuse (reason ^ ". Nothing was written.")
+      | Ok () ->
       let speaking =
         match speak_voice with
         | None -> []
@@ -2065,8 +2082,10 @@ let voice_local_setup_cmd =
           ~docv:"NAME"
           ~doc:
             "Speak with this system voice. The name is the whole label say prints, \
-             parentheses included: say does not fail on a name it does not have, and a \
-             bare name that exists in several languages selects one of them silently.")
+             parentheses included, compared without regard to case. A name say does not \
+             list is refused and nothing is written: say itself would speak it in another \
+             voice without failing, and a bare name that exists in several languages \
+             selects one of them silently.")
   in
   let model =
     Arg.(

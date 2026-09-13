@@ -558,7 +558,7 @@ let tts_command_for_endpoint (endpoint : Voice_config.endpoint) ~voice ~message 
 
    say publishes its own catalogue, and a fresh mac needs it more than a hosted
    provider does: say does not fail on a voice it does not have. It exits 0 and
-   speaks in the system voice, so a mistyped name is silent -- measured
+   speaks in another voice, so a mistyped name is silent -- measured
    2026-09-12, where "Eddy" alone gave an English voice reading Korean and
    "Eddy (한국어(한국))" gave the Korean one. A name typed from memory is a
    coin flip; a name picked from this list is not. *)

@@ -81,13 +81,14 @@ let test_a_key_is_spelled_one_way_across_every_surface () =
         1 (List.length seen))
     spellings
 
-(* The handler pages the Config body in both panes (masc_tui.ml walks
-   [Config when config_pane = Config_prompts] and [= Config_runtime]), and the
-   footer advertised the keys while the table did not -- so the help sheet,
-   which projects from the table, could not answer what PgUp does here. *)
+(* The handler pages the Config body in three panes (masc_tui.ml walks
+   [Config when config_pane = Config_prompts || = Config_presets] and
+   [= Config_runtime]), and the footer advertised the keys while the table did
+   not -- so the help sheet, which projects from the table, could not answer
+   what PgUp does here. *)
 let test_config_declares_the_page_keys_it_handles () =
   (* [for_surface] takes a surface, not a pane, so the sheet cannot narrow this
-     to the two panes the dispatcher pages. The help text is where the sheet
+     to the three panes the dispatcher pages. The help text is where the sheet
      says so -- without it the key reads as working on all seven. *)
   match
     List.find_opt
@@ -108,7 +109,8 @@ let test_config_declares_the_page_keys_it_handles () =
       in
       Alcotest.(check bool) "and says it pages the runtime.toml pane" true
         (names "runtime.toml");
-      Alcotest.(check bool) "and the prompts pane" true (names "prompts")
+      Alcotest.(check bool) "and the prompts pane" true (names "prompts");
+      Alcotest.(check bool) "and the presets pane" true (names "presets")
 
 let test_chat_help_names_memory_cycle () =
   let bindings = Masc_tui_keys.for_surface (Keepers Keeper_message) in
@@ -122,6 +124,20 @@ let test_chat_help_names_memory_cycle () =
       check (Alcotest.option str) "Memory cycle help"
         (Some "cycle Memory journal summary / full / hidden")
         binding.help
+
+(* The chat pane binds the capture keys (masc_tui.ml, the arms beside
+   [submit_chat_draft]) and is the surface an operator speaks from. The help
+   sheet for it named neither, so the only place they were written down was the
+   composer row on other surfaces. *)
+let test_chat_help_names_the_voice_keys () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface (Keepers Keeper_message))
+  in
+  Alcotest.(check bool) "Ctrl-Y starts a capture" true (List.mem "Ctrl-Y" keys);
+  Alcotest.(check bool) "Ctrl-A turns continuous capture on" true
+    (List.mem "Ctrl-A" keys)
 
 let test_plain_listing_footer_shape () =
   (* Connectors answers the row search, so its footer carries the two Search
@@ -610,12 +626,34 @@ let test_board_and_planning_explain_their_order () =
     (planning_sort_explanation Planning_sort_due)
 ;;
 
+(* Where the strip puts the highlight for a view, read through the index the
+   strip draws with. These tests used to read a second copy of the mapping
+   that nothing on screen called. The Browser Lane arm lived only in the drawn
+   one, so the two could disagree and the tests would not see it. *)
+let ring_stop surface =
+  visible_surface_ring_index
+    (create_state ~workspace:"" ~port:0 ~refresh_interval:0. ())
+    surface
+
+(* Every view lands on a stop the ring holds. The index cannot say this: a
+   family missing from the ring comes back as 0, Overview's position, and a
+   comparison against Overview would pass. *)
+let test_every_view_has_a_ring_stop () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  List.iter
+    (fun surface ->
+      Alcotest.(check bool) "the view's family is a ring stop" true
+        (List.exists
+           (fun (stop, _) -> stop = surface_ring_family state surface)
+           surface_ring))
+    every_surface
+
 let test_task_review_is_a_planning_child () =
   Alcotest.(check bool) "Task Review is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Verification) surface_ring);
   Alcotest.(check int) "Task Review highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Verification)
+    (ring_stop Planning)
+    (ring_stop Verification)
 
 (* Verdicts is the far half of Task Review -- one lists what is waiting for a
    ruling, the other what was ruled -- and it stood on the top-level ring under
@@ -625,8 +663,8 @@ let test_verdicts_is_a_planning_child () =
   Alcotest.(check bool) "Verdicts is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Harness) surface_ring);
   Alcotest.(check int) "Verdicts highlights Planning"
-    (surface_ring_index Planning)
-    (surface_ring_index Harness);
+    (ring_stop Planning)
+    (ring_stop Harness);
   Alcotest.(check bool) "and the help sheet files it under Planning" true
     (List.exists
        (fun (label, _) -> String.equal label "Planning / Task Verdicts")
@@ -639,8 +677,8 @@ let test_changes_is_a_keeper_child () =
   Alcotest.(check bool) "Changes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Changes) surface_ring);
   Alcotest.(check int) "Changes highlights Keepers"
-    (surface_ring_index (Keepers Keeper_list))
-    (surface_ring_index Changes)
+    (ring_stop (Keepers Keeper_list))
+    (ring_stop Changes)
 
 let test_keeper_operations_are_not_top_level_tabs () =
   List.iter
@@ -648,8 +686,8 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check bool) (label ^ " is not a top-level ring entry") false
          (List.exists (fun (entry, _) -> entry = surface) surface_ring);
        Alcotest.(check int) (label ^ " highlights Keepers")
-         (surface_ring_index (Keepers Keeper_list))
-         (surface_ring_index surface))
+         (ring_stop (Keepers Keeper_list))
+         (ring_stop surface))
     [ Connectors, "Channels"; Schedules, "Automation" ];
   Alcotest.(check (list string)) "Keeper operation tab labels"
     [ "Channels"; "Automation"; "Runs" ]
@@ -669,8 +707,8 @@ let test_lanes_is_a_runtime_child () =
   Alcotest.(check bool) "Lanes is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
   (* No ring assertion here on purpose. Runtime left the ring when it moved
-     under Config, so [surface_ring_index Runtime] and [surface_ring_index
-     Lanes] are now the same match arm resolving to Config -- comparing them
+     under Config, so [ring_stop Runtime] and [ring_stop Lanes] are now the
+     same match arm resolving to Config -- comparing them
      cannot fail, and would keep passing if Lanes were moved to hang off
      Resources instead. What Lanes highlights is claimed with teeth in
      [test_logs_is_an_activity_child], against Config's own index. The label
@@ -695,8 +733,8 @@ let test_code_is_a_workspace_child () =
   Alcotest.(check bool) "Code is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Code) surface_ring);
   Alcotest.(check int) "Code highlights Workspace"
-    (surface_ring_index Repositories)
-    (surface_ring_index Code);
+    (ring_stop Repositories)
+    (ring_stop Code);
   Alcotest.(check bool) "and the help sheet files it under Workspace" true
     (List.exists
        (fun (label, _) -> String.equal label "Workspace / Code")
@@ -714,8 +752,8 @@ let test_resources_is_a_config_child () =
   Alcotest.(check bool) "Resources is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Resources) surface_ring);
   Alcotest.(check int) "Resources highlights Config"
-    (surface_ring_index Config)
-    (surface_ring_index Resources);
+    (ring_stop Config)
+    (ring_stop Resources);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Resources")
@@ -732,8 +770,8 @@ let test_tools_is_a_config_child () =
   Alcotest.(check bool) "Tools is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Tools) surface_ring);
   Alcotest.(check int) "Tools highlights Config"
-    (surface_ring_index Config)
-    (surface_ring_index Tools);
+    (ring_stop Config)
+    (ring_stop Tools);
   Alcotest.(check bool) "and the help sheet files it under Config" true
     (List.exists
        (fun (label, _) -> String.equal label "Config / Tools")
@@ -748,19 +786,19 @@ let test_tools_is_a_config_child () =
 
 (* Tool calls settling and the server's own log lines are two readings of
    one fleet timeline, so Logs hangs off Activity (the Acting surface)
-   under [l] instead of holding a Tab stop of its own. *)
+   under its [1 / 2] tabs instead of holding a Tab stop of its own. *)
 let test_logs_is_an_activity_child () =
   Alcotest.(check bool) "Runtime is inside Config" false
     (List.exists (fun (surface, _) -> surface = Runtime) surface_ring);
   List.iter (fun surface ->
       Alcotest.(check int) "runtime children highlight Config"
-        (surface_ring_index Config) (surface_ring_index surface))
+        (ring_stop Config) (ring_stop surface))
     [Runtime; Lanes; Clients];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights Activity"
-    (surface_ring_index Acting)
-    (surface_ring_index System_logs);
+    (ring_stop Acting)
+    (ring_stop System_logs);
   Alcotest.(check bool) "and the help sheet files it under Activity" true
     (List.exists
        (fun (label, _) -> String.equal label "Activity / Logs")
@@ -775,8 +813,8 @@ let test_logs_is_an_activity_child () =
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Acting)
   in
-  Alcotest.(check bool) "Activity documents the [l] hop" true
-    (List.mem "l" acting_keys)
+  Alcotest.(check bool) "Activity documents the way to Logs" true
+    (List.mem "1 / 2" acting_keys)
 
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
@@ -784,8 +822,8 @@ let test_metrics_is_an_overview_child () =
   Alcotest.(check bool) "Metrics is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
   Alcotest.(check int) "Metrics highlights Overview"
-    (surface_ring_index Overview)
-    (surface_ring_index Metrics);
+    (ring_stop Overview)
+    (ring_stop Metrics);
   let overview_keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -937,8 +975,8 @@ let test_config_footer_names_child_hops () =
     [ "9:Runtime"; "s:resources"; "t:tools" ]
 
 let test_system_logs_owns_only_its_real_filter_keys () =
-  (* g/G/f still belong to Acting. Logs owns the server level floor, direct
-     verbose toggle, and category cycle under l/v/c. *)
+  (* The newest/oldest ends and f still belong to Acting. Logs owns the server
+     level floor, direct verbose toggle, and category cycle under l/v/c. *)
   let keys =
     List.map
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
@@ -954,7 +992,7 @@ let test_system_logs_owns_only_its_real_filter_keys () =
       (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
       (Masc_tui_keys.for_surface Acting)
   in
-  Alcotest.(check bool) "g/G stays on Acting" true (List.mem "g / G" acting);
+  Alcotest.(check bool) "the ends stay on Acting" true (List.mem "Home/End" acting);
   Alcotest.(check bool) "f stays on Acting" true (List.mem "f" acting)
 
 let footer_has_key key row =
@@ -977,7 +1015,7 @@ let test_config_pane_footer_actions () =
       Alcotest.(check bool) ("pane availability of " ^ key) expected
         (footer_has_key key hints)
     in
-    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts ]);
+    enabled "PgUp/PgDn" (List.mem pane [ Config_runtime; Config_prompts; Config_presets ]);
     enabled "v" (pane = Config_runtime);
     enabled "E" (pane = Config_params);
     enabled "Enter" (List.mem pane [ Config_params; Config_themes ]);
@@ -990,6 +1028,35 @@ let test_config_pane_footer_actions () =
     List.iter (fun key -> enabled key (pane = Config_prompts)) [ "i"; "a"; "o" ];
     List.iter (fun key -> enabled key true) [ "p"; "9"; "s"; "t"; "Esc"; "q" ])
     panes;
+  (* The prompts pane's read-only assets: the registry's edit keys only answer
+     with a notice there, so the row does not offer them, and [o] goes back. *)
+  let assets = Masc_tui_keys.footer_hints_prompt_assets in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the assets row leaves out " ^ key) false
+        (footer_has_key key assets))
+    [ "a"; "i"; "e"; "x" ];
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("the assets row keeps " ^ key) true
+        (footer_has_key key assets))
+    [ "j/k"; "PgUp/PgDn"; "p"; "9"; "Esc"; "q" ];
+  Alcotest.(check bool) "and o names the way back" true
+    (List.exists (String.equal "o:registry") (String.split_on_char ' ' assets));
+  (* A cut row keeps the pane's own keys over the ones every pane shares. *)
+  let at_120 hints = fitted_footer ~cols:120 hints in
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("presets keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_presets))))
+    [ "n"; "u"; "PgUp/PgDn" ];
+  Alcotest.(check bool) "the runtime assets keep their way back at 120 columns" true
+    (footer_has_key "o" (at_120 assets));
+  List.iter
+    (fun key ->
+      Alcotest.(check bool) ("params keeps " ^ key ^ " at 120 columns") true
+        (footer_has_key key (at_120 (Masc_tui_keys.footer_hints_config ~pane:Config_params))))
+    [ "Enter"; "E"; "x" ];
   List.iter (fun pane ->
     List.iter (fun cols ->
       let row = fitted_footer ~cols (Masc_tui_keys.footer_hints_config ~pane) in
@@ -1016,10 +1083,22 @@ let test_activity_footer_keeps_filter_before_evidence () =
       (Masc_tui_message_layout.display_width row <= cols);
     Alcotest.(check bool) "evidence never outlives its filter prerequisite" true
       (not (footer_has_key "Enter" row) || footer_has_key "f" row);
-    if cols >= 120 then
+    if cols >= 120 then begin
       Alcotest.(check bool) "filter remains visible at affected widths" true
-        (footer_has_key "f" row)
-  done
+        (footer_has_key "f" row);
+      Alcotest.(check bool) "the key that opens an event is visible" true
+        (footer_has_key "Enter" row)
+    end
+  done;
+  (* One row per action: a second spelling of an action already on the row
+     takes a place the fitter then takes from a key that does something else. *)
+  let labels =
+    List.map (fun (binding : Masc_tui_keys.binding) -> binding.label)
+      (Masc_tui_keys.for_surface Acting)
+  in
+  Alcotest.(check int) "no two Activity rows name the same action"
+    (List.length labels)
+    (List.length (List.sort_uniq String.compare labels))
 
 let section name =
   match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
@@ -1267,7 +1346,7 @@ let board_post ?(author = "alpha") id title =
   ; bp_votes = 0
   ; bp_comment_count = 0
   ; bp_created_at = "2026-09-04T00:00:00Z"
-  ; bp_updated_at = 0.
+  ; bp_updated_at = None
   ; bp_hearth = None
   ; bp_kind = None
   }
@@ -1849,6 +1928,8 @@ let () =
             test_config_declares_the_page_keys_it_handles
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
+        ; Alcotest.test_case "chat help names the voice keys" `Quick
+            test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
             test_a_searchable_surface_does_not_also_bind_n
         ; Alcotest.test_case "Code separates blame from the definition walk"
@@ -1935,6 +2016,8 @@ let () =
             `Quick test_board_footer_names_reversible_hearth_navigation
         ; Alcotest.test_case "Board and Planning explain order" `Quick
             test_board_and_planning_explain_their_order
+        ; Alcotest.test_case "every view has a ring stop" `Quick
+            test_every_view_has_a_ring_stop
         ; Alcotest.test_case "Task Review is a Planning child" `Quick
             test_task_review_is_a_planning_child
         ; Alcotest.test_case "Verdicts is a Planning child" `Quick

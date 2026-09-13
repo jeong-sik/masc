@@ -1,5 +1,5 @@
 (** Masc_tui_link_preview — Web link previews, OpenGraph extraction,
-    rich embed cards, and 3D drop-shadow inspection modal. *)
+    rich embed cards, and the preview overlay. *)
 
 type link_kind =
   | Github of {

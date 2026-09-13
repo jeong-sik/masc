@@ -376,11 +376,14 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
         self.assertEqual(capture.selected_keeper_from_screen(screen), "keeper-one")
 
     def test_loading_placeholder_is_not_a_keeper(self):
-        self.assertIsNone(
-            capture.selected_keeper_from_screen(
-                "│ Effective Keeper Surface — not loaded │"
+        # The TUI draws an unread and a failed inventory as a parenthesised
+        # title, which the "— " heading never matches.
+        for placeholder in ("(not loaded)", "(load failed)"):
+            self.assertIsNone(
+                capture.selected_keeper_from_screen(
+                    f"│ Effective Keeper Surface {placeholder} │"
+                )
             )
-        )
         self.assertIsNone(
             capture.selected_keeper_from_screen(
                 "│ Effective Keeper Surface — no Keeper selected │"

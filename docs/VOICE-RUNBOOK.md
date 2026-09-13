@@ -171,6 +171,22 @@ base path:
 The writer is the one the HTTP setup route uses: the same revision guard, and
 the same refusal to publish a section the loader would reject.
 
+`--voice` is looked up in the list `--list-voices` prints before anything is
+written, ignoring ASCII case as `say` does. `say` would speak a name it does not
+print in another voice and exit 0, so a name that is not in the list is
+refused, exit 1, with `runtime.toml` left as it was. Measured 2026-09-13 on an initialized workspace:
+
+| `--voice` | exit | `runtime.toml` | stderr |
+|---|---|---|---|
+| `NoSuchVoice` | 1 | unchanged | `say has no voice named "NoSuchVoice", and would speak in another one without failing; masc voice-local-setup --list-voices prints the 184 it has. Nothing was written.` |
+| `Eddy` | 1 | unchanged | `say has no voice named "Eddy", …` |
+| `eddy (한국어(한국))` | 0 | written | |
+| `Yuna` | 0 | written | |
+| `Yuna`, with no `say` on `PATH` | 1 | unchanged | `the voices say has could not be listed to check "Yuna": say is not installed. Nothing was written.` |
+
+Before the lookup, `--voice NoSuchVoice` exited 0 and wrote
+`default_voice = "NoSuchVoice"`.
+
 ### What the configuration says
 
 After a voice, a model, and one keeper mapped by hand:
@@ -236,17 +252,41 @@ On a section shared by two providers, `agent_voices` therefore does not reach
 the `say` endpoint. There is no per-provider keeper mapping.
 
 `--agent` is the check for a mapping. `say` answers a name it does not have by
-speaking in the system voice, so a mapping to a missing voice still reads
-`answered`, with the same byte count as the default. The voice name in the
-report is what tells them apart:
+speaking in another voice and exiting 0, so the audio cannot show that a
+mapping never took. The probe looks the name up in `say -v '?'` first, ignoring
+ASCII case as `say` does, and refuses a name that is not there without asking
+`say` to speak. Measured 2026-09-13 on a workspace set up with
+`voice-local-setup --voice Yuna` and these mappings:
 
-| Probe | Answer |
-|---|---|
-| (no `--agent`) | `79758 bytes of audio in "Yuna"` |
-| `--agent sangsu` (mapped to an installed voice) | `124690 bytes of audio in "Flo (한국어(한국))"` |
-| `--agent nowhere` (mapped to `NoSuchVoice`) | `79758 bytes of audio in "NoSuchVoice"` |
+```toml
+[voice.tts.agent_voices]
+sangsu = "Flo (한국어(한국))"
+nowhere = "NoSuchVoice"
+lower = "yuna"
+bare = "Eddy"
+```
 
-A name that is not in `say -v '?'` is a mapping that never took.
+| Probe | Answer | Exit |
+|---|---|---|
+| (no `--agent`) | `answered: 79758 bytes of audio in "Yuna"` | 0 |
+| `--agent sangsu` | `answered: 124690 bytes of audio in "Flo (한국어(한국))"` | 0 |
+| `--agent lower` | `answered: 79758 bytes of audio in "yuna"` | 0 |
+| `--agent nowhere` | `refused: say has no voice named "NoSuchVoice", and would speak in another one without failing; masc voice-local-setup --list-voices prints the 184 it has` | 1 |
+| `--agent bare` | `refused: say has no voice named "Eddy", …` | 1 |
+
+Before the lookup, the same binary without it answered `nowhere` with
+`79758 bytes of audio in "NoSuchVoice"` — Yuna's size — and `bare` with
+`4800 bytes of audio in "Eddy"`, an English voice reading the Korean sentence.
+Both exited 0.
+
+`say -v Eddy` picks one of the fourteen `Eddy (…)` voices. Only the whole label
+is in the list, so only the whole label passes.
+
+The lookup runs in this probe and in `voice-local-setup --voice`, not when a
+keeper speaks. Listing took 0.56–0.59 s per call, and a keeper would wait that
+long before every sentence. A keeper mapped
+to a missing voice still speaks, in another voice, with nothing logged, until
+`voice-verify --agent` is run for it.
 
 ### The whole loop, measured
 
@@ -397,14 +437,21 @@ between transcripts.
 ### The traps
 
 **A wrong voice name is silent.** `say` exits 0 on a voice it does not have
-and speaks in the system voice. A name that exists in several languages picks
-one of them without saying which:
+and speaks in another voice. A name that exists in several languages picks one
+of them without saying which. Measured 2026-09-13 on macOS 26 whose first
+language is Korean, each written to a WAVE file:
 
-| Command | Result on a Korean sentence |
-|---|---|
-| `say -v NoSuchVoice` | exits 0, 91,028 bytes in the system voice |
-| `say -v Eddy` | 4.7KB — an English voice reading Korean |
-| `say -v "Eddy (한국어(한국))"` | 72KB — the Korean voice |
+| Command | `안녕하세요, 목소리 확인입니다.` | `Hello, this is a voice check.` |
+|---|---|---|
+| `say -v NoSuchVoice` | exit 0, 108,948 bytes, the same bytes as `-v Yuna` | exit 0, 112,404 bytes, the same bytes as `-v Yuna` |
+| `say` with no `-v` | 109,522 bytes, not Yuna | 120,560 bytes, not Yuna |
+| `say -v yuna` | the same bytes as `-v Yuna` | |
+| `say -v Eddy` | 4,800 bytes — an English voice reading Korean | |
+| `say -v "Eddy (한국어(한국))"` | 147,268 bytes — the Korean voice | |
+
+So the voice a missing name falls back to is not the one `say` uses when given
+no name. `masc voice-verify --agent` refuses a mapped name that is not in
+`say -v '?'` — see [Which voice a keeper speaks in](#which-voice-a-keeper-speaks-in).
 
 Take the name from `say -v '?'`. Its columns are space-padded, and the locale
 is not always two letters and two letters — `ar_001` is in the list.
@@ -731,6 +778,21 @@ separates them.
 
 The binding is a control code because every printable key in a focused row is
 draft text.
+
+The chat pane binds the same keys, and an empty draft there names them the way
+the composer row does. Measured 2026-09-13 on imp's chat in a 120-column pty,
+the last rows of the pane, with the footer's build-location notice left out:
+
+```
+    >   (^Y to speak, ^A to keep listening)
+
+  Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Esc:detail  …?
+```
+
+The hint goes once a character is typed, and while a capture or continuous mode
+runs, when the footer shows the meter instead. The footer's own key list has no
+room for the voice keys; the help sheet for the chat names `Ctrl-Y` and
+`Ctrl-A`.
 
 On macOS the terminal claims Ctrl-Y for itself as the delayed-suspend key
 (`stty -a` shows `dsusp = ^Y`). The TUI turns that off while it owns the

@@ -1164,12 +1164,13 @@ type board_post = {
   bp_votes: int;
   bp_comment_count: int;
   bp_created_at: string;
-  bp_updated_at: float;
+  bp_updated_at: float option;
       (** Unix seconds of the last move on the post or its comments. The server
           has always sent it; the list drew neither timestamp, so the one
           question a board answers -- what is still alive -- had no column, and
           two of the sort orders ([recent], [updated]) ranked by a number the
-          reader could not see. *)
+          reader could not see. [None] when the post carried neither this nor a
+          numeric [created_at]: there is no time to measure an age from. *)
   bp_hearth: string option;
       (** The sub-board it lives in. 24 of them here, and 1550 of 2171 posts
           sit in [verification] alone — a flat list is 71% one topic with
@@ -2203,38 +2204,6 @@ let surface_ring : (surface * string) list =
     (Repositories, "Workspace");
     (Config, "Config");
   ]
-
-(* Ring position of the family a view belongs to. Keeper sub-modes collapse
-   onto Keepers, Task Review and Verdicts collapse onto Planning, Changes
-   collapses onto Keepers -- its rows are one keeper's file writes, chosen by
-   the roster cursor, so it was never a destination of its own. Channels,
-   Automation, and Runs are selected-Keeper detail tabs; standalone Lanes
-   remain Runtime observation, and Code remains a Workspace child.
-   Resources and Tools collapse onto Config: an MCP resource catalog and
-   the tool catalog with its receipts and usage are both answers to "what
-   is registered here", read rarely and never raced against. System logs
-   collapse onto Activity (the Acting surface): tool calls settling and the
-   server's own log lines are two readings of the same fleet timeline, and
-   the ring stop that answers "what happened" is one. Metrics is a deep-dive
-   telemetry surface that collapses onto Overview, off the Tab ring. *)
-let surface_ring_index (view : surface) =
-  let family =
-    match view with
-    | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness -> Planning
-    | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Runtime | Lanes | Clients -> Config
-    | Code -> Repositories
-    | Resources | Tools -> Config
-    | System_logs -> Acting
-    | Metrics -> Overview
-    | v -> v
-  in
-  let rec find i = function
-    | [] -> 0
-    | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
-  in
-  find 0 surface_ring
 
 (** What a surface needs loaded to draw itself.
 
@@ -4636,8 +4605,8 @@ type state = {
   mutable repository_changes_diff_path: string option;
   mutable repository_changes_diff_scroll: int;
   mutable repository_changes_return_chat: bool;
-  (* Interactive patch review modal: 3D drop-shadow overlay for reviewing
-     and resolving pending code changes, git diffs, and approval gates. *)
+  (* The patch review overlay: the pending diff to scroll, and [e] to open it
+     in $EDITOR. *)
   mutable patch_modal_open: bool;
   mutable patch_modal_scroll: int;
   mutable patch_modal_path: string option;
@@ -7509,21 +7478,49 @@ let visible_surface_ring (state : state) : (surface * string) list =
   List.filter (fun (s, _) -> is_surface_active state s) surface_ring
 ;;
 
+(* The ring stop a view belongs to. Keeper sub-modes collapse onto Keepers,
+   Task Review and Verdicts collapse onto Planning, Changes collapses onto
+   Keepers -- its rows are one keeper's file writes, chosen by the roster
+   cursor, so it was never a destination of its own. Channels, Automation, and
+   Runs are selected-Keeper detail tabs; standalone Lanes remain Runtime
+   observation, and Code remains a Workspace child. Resources and Tools
+   collapse onto Config: an MCP resource catalog and the tool catalog with its
+   receipts and usage are both answers to "what is registered here", read
+   rarely and never raced against. System logs collapse onto Activity (the
+   Acting surface): tool calls settling and the server's own log lines are two
+   readings of the same fleet timeline, and the ring stop that answers "what
+   happened" is one. Metrics is a deep-dive telemetry surface that collapses
+   onto Overview, off the Tab ring. Connectors is under Config while the
+   Browser Lane reader is on screen, and under Keepers otherwise.
+
+   One mapping. There were two, one per ring index, and only the tests read
+   the one without the Browser Lane arm, so they checked a mapping the strip
+   never drew with. Every surface is named, so a new one has to be given a
+   stop here rather than falling through to itself. *)
+let surface_ring_family (state : state) (view : surface) =
+  match view with
+  | Keepers _ -> Keepers Keeper_list
+  | Verification | Harness -> Planning
+  | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
+  | Changes | Connectors | Schedules -> Keepers Keeper_list
+  | Runtime | Lanes | Clients -> Config
+  | Code -> Repositories
+  | Resources | Tools -> Config
+  | System_logs -> Acting
+  | Metrics -> Overview
+  | Overview -> Overview
+  | Acting -> Acting
+  | Memory -> Memory
+  | Approvals -> Approvals
+  | Board -> Board
+  | Planning -> Planning
+  | Fusion -> Fusion
+  | Repositories -> Repositories
+  | Config -> Config
+
 let visible_surface_ring_index (state : state) (view : surface) =
   let ring = visible_surface_ring state in
-  let family =
-    match view with
-    | Keepers _ -> Keepers Keeper_list
-    | Verification | Harness -> Planning
-    | Connectors when Option.is_some (browser_lane_on_screen state) -> Config
-    | Changes | Connectors | Schedules -> Keepers Keeper_list
-    | Runtime | Lanes | Clients -> Config
-    | Code -> Repositories
-    | Resources | Tools -> Config
-    | System_logs -> Acting
-    | Metrics -> Overview
-    | v -> v
-  in
+  let family = surface_ring_family state view in
   let rec find i = function
     | [] -> 0
     | (surface, _) :: rest -> if surface = family then i else find (i + 1) rest
@@ -8324,7 +8321,7 @@ let palette_entries (state : state) =
       state.tasks
   @ [ "hearth all", Palette_board_hearth None ]
   @ List.map (fun (name, count) ->
-      (Printf.sprintf "hearth %s (%d posts)" name count, Palette_board_hearth (Some name)))
+      (Printf.sprintf "hearth %s (%s)" name (Masc_tui_message_layout.count_noun count "post"), Palette_board_hearth (Some name)))
       state.board_hearths
   @ List.map
       (fun (p : board_post) ->

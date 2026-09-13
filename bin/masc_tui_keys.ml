@@ -27,9 +27,9 @@ let config_bindings =
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"
-      ~help:"pages the runtime.toml and prompts panes; the other five \
-             panes take the key and do nothing with it",
-      Some [ Config_runtime; Config_prompts ]
+      ~help:"pages runtime.toml, and the detail of prompts and presets; the \
+             other four panes take the key and do nothing with it",
+      Some [ Config_runtime; Config_prompts; Config_presets ]
   ; b Navigate "v" "read status"
       ~help:"runtime.toml: source revision, validation issues, and application/restart details",
       Some [ Config_runtime ]
@@ -170,6 +170,7 @@ let for_surface = function
       @ listing_meta
   | Acting ->
       [ b Navigate "1 / 2" "Events / Logs"
+          ~help:"Events, or the server's own log lines; l opens Logs as well"
       ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       ; b Act "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       ; b Act "Enter" "event evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
@@ -178,13 +179,14 @@ let for_surface = function
          leaves the surface, so two rows read as two bindings. *)
       ; b Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Overview"
-      ; b Navigate "g / G" "newest / oldest"
+      (* One row per action. g and G reach the ends Home and End reach, and
+         l the tab 2 opens; a row for each spent two of the footer's places
+         on actions it already showed, and at 120 columns the fitter dropped
+         Enter -- the key that opens an event -- to keep them. The rows are
+         the spellings every other reader shares; the extras are in help. *)
       ; b Navigate "Home/End" "newest / oldest"
-          ~help:"the same two ends as g and G, under the keys every other \
-                 reader uses; the ring counts back from the newest, so its \
-                 top is now"
-      ; b Navigate "l" "logs"
-          ~help:"the server's own log lines, off the ring under Activity"
+          ~help:"g and G as well; the ring counts back from the newest, so \
+                 its top is now"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -241,6 +243,10 @@ let for_surface = function
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
+      ; b Act "Ctrl-Y" "speak"
+          ~help:"record into the draft; again to stop and keep what was said"
+      ; b Act "Ctrl-A" "keep listening"
+          ~help:"continuous capture on/off: each sentence starts the next capture"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
@@ -644,13 +650,55 @@ let hints_of_bindings bindings =
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
 
+(* A pane's own keys, then the keys all seven panes share. *)
+let config_pane_bindings pane =
+  let own =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with
+        | Some panes when List.mem pane panes -> Some binding
+        | Some _ | None -> None)
+      config_bindings
+  in
+  let shared =
+    List.filter_map
+      (fun (binding, panes) ->
+        match panes with None -> Some binding | Some _ -> None)
+      config_bindings
+  in
+  (own, shared)
+
+(* The pane's own keys lead the row and the shared ones follow. A cut row
+   gives up its back first, and the shared keys are the ones a reader already
+   met on the pane before -- the reason r, Tab and q close every row. Sorted
+   as one list, the hops to Runtime, Resources and Tools outlived every key a
+   pane answers itself: at 120 columns presets lost n and u, and the runtime
+   assets lost o, their only way back to the registry. *)
+let config_row ~own ~shared =
+  String.concat "  "
+    (List.filter
+       (fun row -> not (String.equal row ""))
+       [ hints_of_bindings own; hints_of_bindings shared ])
+
 let footer_hints_config ~pane =
-  config_bindings
-  |> List.filter_map (fun (binding, panes) ->
-       match panes with
-       | None -> Some binding
-       | Some panes -> if List.mem pane panes then Some binding else None)
-  |> hints_of_bindings
+  let own, shared = config_pane_bindings pane in
+  config_row ~own ~shared
+
+(* The prompts pane's read-only half. [o] swaps the registry for the assets
+   shipped with the binary, and there [a], [i], [e] and [x] answer with a
+   notice rather than acting (masc_tui.ml), so the row leaves them out and
+   names where [o] goes back to. *)
+let footer_hints_prompt_assets =
+  let registry_only = [ "a"; "i"; "e"; "x" ] in
+  let own, shared = config_pane_bindings Config_prompts in
+  let own =
+    own
+    |> List.filter (fun binding -> not (List.mem binding.key registry_only))
+    |> List.map (fun binding ->
+           if String.equal binding.key "o" then { binding with label = "registry" }
+           else binding)
+  in
+  config_row ~own ~shared
 
 (* The Overview footer is the same table plus one runtime fact the renderer
    owns: whether j/k currently drives the task list (task_focus) or the

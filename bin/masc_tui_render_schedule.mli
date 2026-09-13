@@ -456,6 +456,10 @@ val board_no_styles : board_row_styles
 (** Every reading undressed. A caller drawing the row plain -- a test, or a
     surface that dresses the whole line -- has nothing to spell out. *)
 
+val board_age_text : now:float -> float option -> string
+(** The AGE cell: the span since the post last moved, or ["—"] when the post
+    carried no time. *)
+
 val board_title_width : inner_width:int -> int
 (** What the title has after the named columns, never below a floor. [inner_width]
     is what the row has left of the frame, the four cells of lead ahead of the

@@ -43,7 +43,7 @@ let test_sections_share_one_heading_style () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Overview;
   let drawn =
-    List.map Masc_tui_theme.strip_sgr (Masc_tui_render_prim.help_lines state)
+    List.map Masc_tui_theme.strip_sgr (Masc_tui_render_prim.help_lines ~width:200 state)
   in
   let starts prefix line = String.starts_with ~prefix line in
   let filled = List.filter (starts "\xe2\x97\x86 ") drawn in
@@ -65,7 +65,7 @@ let test_keys_are_not_wrapped_in_brackets () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Board;
   let rows =
-    List.map Masc_tui_theme.strip_sgr (Masc_tui_render_prim.help_lines state)
+    List.map Masc_tui_theme.strip_sgr (Masc_tui_render_prim.help_lines ~width:200 state)
   in
   let has_row prefix =
     List.exists (fun row -> String.starts_with ~prefix row) rows
@@ -79,6 +79,58 @@ let test_keys_are_not_wrapped_in_brackets () =
         (List.exists (fun row -> contains wrapped row) rows))
     [ "[j/k]"; "[/]"; "[Tab]"; "[q]" ]
 
+(* An entry's text wraps under the column every entry's text starts at. Cut to
+   the column, 23 of the 29 slash-command summaries at 120 cells ended in an
+   ellipsis where they said what the command does. *)
+let test_an_entry_wraps_under_its_text () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  state.view <- Overview;
+  let width = 40 in
+  let drawn =
+    List.map Masc_tui_theme.strip_sgr
+      (Masc_tui_render_prim.help_lines ~width state)
+  in
+  let joined = String.concat " " (List.map String.trim drawn) in
+  let squeeze text =
+    String.concat " "
+      (List.filter (fun word -> word <> "") (String.split_on_char ' ' text))
+  in
+  (match Masc_tui_keys.help_sections ~current:Overview () with
+   | [] -> Alcotest.fail "no help sections"
+   | (_, entries) :: _ ->
+       List.iter
+         (fun (_, action) ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%S is drawn whole" action)
+             true
+             (contains (squeeze action) (squeeze joined)))
+         entries);
+  List.iter
+    (fun (cmd : Masc_tui_command.command_help) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%S is drawn whole" cmd.summary)
+        true
+        (contains (squeeze cmd.summary) (squeeze joined)))
+    Masc_tui_command.catalog;
+  let continued =
+    List.filter
+      (fun row ->
+        String.length row > 19
+        && String.sub row 0 19 = String.make 19 ' '
+        && row.[19] <> ' ')
+      drawn
+  in
+  Alcotest.(check bool) "a key's text continues under the text column" true
+    (continued <> []);
+  List.iter
+    (fun row ->
+      if not (String.starts_with ~prefix:"  /" row) then
+        Alcotest.(check bool)
+          (Printf.sprintf "%S fits %d cells" row width)
+          true
+          (Masc_tui_message_layout.display_width row <= width))
+    drawn
+
 let () =
   Alcotest.run "masc_tui_help_banner"
     [ ( "masthead"
@@ -90,5 +142,7 @@ let () =
             test_keys_are_not_wrapped_in_brackets
         ; Alcotest.test_case "sections share one heading style" `Quick
             test_sections_share_one_heading_style
+        ; Alcotest.test_case "an entry wraps under its text" `Quick
+            test_an_entry_wraps_under_its_text
         ] )
     ]

@@ -33,11 +33,11 @@ type t =
   | Open_diff
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
   | Open_patch_modal
-      (** [/patch] or [/review] — open interactive 3D drop-shadow patch review modal. *)
+      (** [/patch] or [/review] — open the patch review overlay. *)
   | Toggle_burn_hud
-      (** [/burn] or [/cost] — toggle token burn velocity and financial telemetry HUD. *)
+      (** [/burn] or [/cost] — show or hide the fleet cost and each Keeper's token total in the tab row. *)
   | Open_link_preview of string option
-      (** [/preview [url]] — open 3D drop-shadow OpenGraph preview and rich embed modal for a web link. *)
+      (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
   | Open_links_list
       (** [/links] — browse and inspect all web links mentioned in the conversation. *)
   | Set_embeds of [ `On | `Compact | `Off ]
@@ -154,6 +154,9 @@ val usage : command_help -> string
 val help_usage : command_help -> string
 (** {!usage} plus the command's other spellings in parentheses. The column both
     the [/help] list and the cheat sheet draw. *)
+
+val help_summary_column : int
+(** Where a help row's summary starts, counted from the usage's first cell. *)
 
 val help_summary_padding : string -> string
 (** The spaces between a {!help_usage} column and its summary, so the two

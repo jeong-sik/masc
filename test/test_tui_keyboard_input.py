@@ -6550,7 +6550,7 @@ def memory_facts_interaction() -> Interaction:
         # Badges use uppercase display labels. At this height the selected
         # dropped row is visible; the source row is below the initial window.
         for needle in (
-            b"[DROPPED   ]",
+            b"[DROPPED]",
             b"docs/old.md",
             b"source_changed",
             b"(2 ord \xc2\xb7 1 src \xc2\xb7 1 drop)",
@@ -6567,10 +6567,10 @@ def memory_facts_interaction() -> Interaction:
         # Visit every category through its filter so each row is visible even
         # when the selected detail panel leaves a short list viewport.
         for category, badge, text in (
-            (b"blocker", b"[BLOCKER   ]", b"port 8935 is already claimed"),
-            (b"lesson", b"[LESSON    ]", b"the deploy needs assets"),
-            (b"source", b"[SOURCE    ]", b"docs/config.md"),
-            (b"dropped", b"[DROPPED   ]", b"docs/old.md"),
+            (b"blocker", b"[BLOCKER]", b"port 8935 is already claimed"),
+            (b"lesson", b"[LESSON]", b"the deploy needs assets"),
+            (b"source", b"[SOURCE]", b"docs/config.md"),
+            (b"dropped", b"[DROPPED]", b"docs/old.md"),
         ):
             filtered = send_and_wait(
                 process, master_fd, output, b"c", b"\xe2\x97\x8f " + category

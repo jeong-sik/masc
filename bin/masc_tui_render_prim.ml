@@ -2029,7 +2029,7 @@ type planning_tab = Render_schedule.planning_tab =
    happens to be last: the verdict page count read as a Fusion count for as
    long as Schedules and Fusion were named here. Surfaces with nothing to
    count pass "". *)
-let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : string) =
+let planning_workspace_title (state : state) ~cols ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
   let verifying_count =
     Option.map
@@ -2042,7 +2042,9 @@ let planning_workspace_title (state : state) ~(tab : planning_tab) ~(window : st
   in
   let stops = [ Planning_goals; Planning_task_review; Planning_verdicts ] in
   screen_title " MASC Planning" ^ "  "
-  ^ tab_strip (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
+  ^ tab_strip
+      ~width:(tab_strip_width ~cols ~before:(screen_title " MASC Planning" ^ "  "))
+      (List.map2 (fun stop label -> (label, stop = tab)) stops labels)
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -2681,10 +2683,12 @@ let tools_scrolled_for_lines state display_lines =
    between them. This used to appear on Themes alone, as a list of names with
    no mark on it: it said the key exists and not where pressing it lands, and
    a reader on runtime.toml was told neither. *)
-let config_pane_strip (state : state) =
+let config_pane_strip ~cols ~before (state : state) =
   let name pane label = (label, state.config_pane = pane) in
-  Ansi.dim ^ "9:Runtime  p:next  " ^ Ansi.reset
+  let keys = "9:Runtime  p:next  " in
+  Ansi.dim ^ keys ^ Ansi.reset
   ^ tab_strip
+      ~width:(tab_strip_width ~cols ~before:(before ^ tab_strip_gap ^ keys))
       [ name Config_runtime "runtime.toml"
       ; name Config_models "models"
       ; name Config_params "params"

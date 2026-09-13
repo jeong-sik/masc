@@ -143,7 +143,9 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
   let tab section = (metrics_section_label section, active = section) in
   let line =
     "  "
-    ^ tab_strip (List.map tab [ Section_fleet; Section_resources; Section_tools ])
+    ^ tab_strip
+        ~width:(tab_strip_width ~cols ~before:"  ")
+        (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
   if Layout.display_width line > inner_width then
     Layout.take_cells line inner_width ^ Ansi.reset

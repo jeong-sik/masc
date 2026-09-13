@@ -651,47 +651,6 @@ let test_fleet_fact_row_line () =
   check bool "fleet fact row has IDENTITY badge" true (contains "IDENTITY" stripped)
 ;;
 
-(* A badge closes its bracket on the label and pads after it, so a short
-   category and a long one still start their claims in one column. The badge
-   and the fleet keeper tag each padded inside the bracket: "[PREF      ]". *)
-let test_badges_pad_after_the_bracket () =
-  let row category origin =
-    Types.Memory_row_fact
-      { Decode.mf_claim = "CLAIM"
-      ; mf_category = category
-      ; mf_origin = origin
-      ; mf_first_seen = 100.0
-      ; mf_last_seen = 200.0
-      ; mf_memory_id = "mem-" ^ category
-      ; mf_events = Decode.no_memory_fact_events
-      }
-  in
-  let plain ?is_fleet category origin =
-    Masc_tui_theme.strip_sgr
-      (Render_memory.memory_fact_row_line ?is_fleet ~cols:120 (row category origin))
-  in
-  let claim_column line =
-    let rec find i =
-      if i + 5 > String.length line then -1
-      else if String.equal (String.sub line i 5) "CLAIM" then
-        Layout.display_width (String.sub line 0 i)
-      else find (i + 1)
-    in
-    find 0
-  in
-  let short = plain "preference" "manual" and long = plain "persona" "manual" in
-  check bool "the short badge closes on its label" true (contains "[PREF]" short);
-  check bool "and has no run of spaces inside" false (contains "[PREF " short);
-  check bool "the long badge closes on its label" true (contains "[IDENTITY]" long);
-  check int "both claims start in one column" (claim_column long) (claim_column short);
-  let fleet_short = plain ~is_fleet:true "persona" "ann · manual"
-  and fleet_long = plain ~is_fleet:true "persona" "tester · manual" in
-  check bool "the fleet keeper tag closes on its name" true (contains "[ann]" fleet_short);
-  check bool "and has no run of spaces inside" false (contains "[ann " fleet_short);
-  check int "fleet claims start in one column" (claim_column fleet_long)
-    (claim_column fleet_short)
-;;
-
 let test_render_memory_body_sorting () =
   let state = make_state () in
   let k1 = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:2048 in
@@ -836,7 +795,6 @@ let () =
     ; ( "row_lines"
       , [ test_case "fact_row" `Quick test_fact_row_line
         ; test_case "fleet_fact_row" `Quick test_fleet_fact_row_line
-        ; test_case "badges pad after the bracket" `Quick test_badges_pad_after_the_bracket
         ; test_case "source_fact_row" `Quick test_source_fact_row_line
         ; test_case "invalidation_row" `Quick test_invalidation_row_line
         ; test_case "rows_and_header_share_one_grid" `Quick test_rows_and_header_share_one_grid

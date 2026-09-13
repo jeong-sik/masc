@@ -227,10 +227,8 @@ let format_cat_badge cat =
       Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
     else label
   in
-  (* The column lines up after the bracket, as every bracketed value does:
-     "[PREF]      ", not "[PREF      ]". *)
   let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
-  Printf.sprintf "%s%s[%s]%s%s" Ansi.bold cat_style cat_str Ansi.reset pad
+  Printf.sprintf "%s%s[%s%s]%s" Ansi.bold cat_style cat_str pad Ansi.reset
 
 let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
   let inner_width = max 10 (framed_inner_width cols) in
@@ -259,7 +257,7 @@ let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
         else clean
       in
       let pad = String.make (max 0 (8 - Message_layout.display_width truncated)) ' ' in
-      Printf.sprintf "%s[%s]%s%s " (Theme.info ()) truncated Ansi.reset pad
+      Printf.sprintf "%s[%s%s]%s " (Theme.info ()) truncated pad Ansi.reset
   in
   let keeper_cells = if is_fleet then 11 else 0 in
   match row with

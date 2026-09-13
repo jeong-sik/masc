@@ -44,6 +44,7 @@ type output_contract = Provider_default | Tool_verdict
     not suppress arbitrary provider transforms or validate tool arguments; the
     caller owns the typed verdict protocol. *)
 
+
 type deferred_runtime_lane = private
   { assignment_id : string
   ; failed_runtime_id : string
@@ -142,6 +143,7 @@ val run_named :
   ?tools:Agent_core.Tool.t list ->
   agent_core_tools:Agent_core.Tool.t list ->
   ?tool_requirement:Keeper_required_tools.t ->
+  ?required_native_posture:Runtime_native_tools.posture ->
   ?initial_messages:Agent_core.Types.message list ->
   ?model_input_projection:Agent_core.Agent.model_input_projection ->
   ?recovery_view:Keeper_recovery_transmission.t ->

@@ -303,7 +303,7 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw:_ ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path:_ ?sw ~evaluator_runtime ~prompt ?goal_blocks ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
@@ -383,39 +383,56 @@ let install () =
       Error (Agent_core.Error.Config
         (Agent_core.Error.InvalidConfig { field = "verification.system"; detail }))
     | Ok system_prompt ->
-    (* The client session belongs to this attempt, not the producer workspace.
-       Its tools retain the original lookup closure, while all client-owned
-       files live in a private root reclaimed on success, failure or cancel. *)
-    Eio.Switch.run @@ fun review_sw ->
+    (* The authority-tool closures retain the submitted evidence root. A review
+       owns only this disposable session tree, never a producer's configuration. *)
     let keeper_name = "completion-review-" ^ Random_id.uuid_v7 () in
-    let review_base = Filename.concat (Filename.get_temp_dir_name ()) keeper_name in
-    Unix.mkdir review_base 0o700;
-    Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_base);
+    let selected_runtime_id = ref None in
     match
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
-        Keeper_turn_driver_wrappers.run_named_with_masc_tools
-          ~runtime_id:evaluator_runtime
-          ~base_path:review_base
-          ~goal:prompt
-          ?goal_blocks
-          ~keeper_name
-          ~system_prompt
-          ~masc_tools:(report_tool_schema :: lookup_schemas)
-          ~tool_requirement:Keeper_required_tools.Required
-          ~dispatch
-          ~context:(Agent_core.Context.create ())
-          ~output_contract:Keeper_turn_driver.Tool_verdict
-          ~on_runtime_attempt_error
-          ~sw:review_sw
-          ())
+        match Runtime.verifier_exact_slot_admission ~runtime_id:evaluator_runtime with
+        | Error detail ->
+          Error (Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig {field="verifier_exact.cli_slots"; detail}))
+        | Ok () ->
+        Option.iter Eio.Switch.check sw;
+        Eio.Switch.run (fun review_sw ->
+          let review_root = Filename.temp_file "masc-completion-review-" "" in
+          Unix.unlink review_root;
+          Unix.mkdir review_root 0o700;
+          Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree review_root);
+          Keeper_turn_driver_wrappers.run_named_with_masc_tools
+            ~runtime_id:evaluator_runtime
+            ~on_selected_runtime:(fun runtime_id -> selected_runtime_id := Some runtime_id)
+            ~base_path:review_root
+            ~goal:prompt
+            ?goal_blocks
+            ~keeper_name
+            ~system_prompt
+            ~masc_tools:(report_tool_schema :: lookup_schemas)
+            ~dispatch
+            ~context:(Agent_core.Context.create ())
+            ~output_contract:Keeper_turn_driver.Tool_verdict
+            ~tool_requirement:Keeper_required_tools.Required
+            ~required_native_posture:Runtime_native_tools.Native_none
+            (* These bounded authority results have no reader for a disposable
+               session blob. Keep their text on the wire, or fail explicitly
+               at the existing evidence ceiling instead of emitting a marker. *)
+            ~tool_result_projection:(Tool_output.Inline_up_to
+              {maximum_bytes=Tool_shard_limits.verification_evidence_max_bytes})
+            ~on_runtime_attempt_error
+            ~sw:review_sw
+            ()))
     with
-    | Ok result ->
+    | Ok _ ->
       (match !protocol_error_ref with
        | Some detail ->
          Error
            (Agent_core.Error.Internal
               ("task completion verdict protocol violation: " ^ detail))
-       | None -> Ok !verdict_ref)
+       | None ->
+         (match !selected_runtime_id with
+          | Some selected_runtime_id -> Ok {Task.Anti_rationalization.selected_runtime_id;verdict= !verdict_ref}
+          | None -> Error (Agent_core.Error.Internal "verifier dispatch omitted its selected runtime")))
     | Error err ->
       Error err);
 

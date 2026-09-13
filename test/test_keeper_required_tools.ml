@@ -134,7 +134,45 @@ candidates = ["native.no_tools", "binding.sample"]
   let body = Exact_output_fixture.request_bodies supported |> List.rev |> List.hd
     |> Yojson.Safe.from_string in
   check bool "tool verdict contract clears preset format on actual API wire" true
-    (Yojson.Safe.Util.member "response_format" body = `Null)
+    (Yojson.Safe.Util.member "response_format" body = `Null);
+  (* The completion verifier reaches the driver through this wrapper
+     (workspace_metric_hooks.ml), so a requirement the wrapper drops is a
+     requirement the verdict tool never had. The turn itself may still succeed:
+     Required refuses the candidate before dispatch and the driver walks on,
+     which is the point -- left Optional this runtime is dispatched with its
+     tools replaced by [] and no channel left to report a verdict on. *)
+  let wrapper_attempts = ref [] in
+  ignore
+    (Keeper_turn_driver_wrappers.run_named_with_masc_tools
+       ~runtime_id:"native.no_tools" ~keeper_name:"required-tools-wrapper"
+       ~base_path:root ~system_prompt:"Wrapper requirement fixture."
+       ~goal:"Answer the request."
+       ~masc_tools:
+         [ { Masc_domain.name = "fixture_tool"
+           ; description = "Offered callable tool."
+           ; input_schema = `Assoc [ "type", `String "object" ]
+           } ]
+       ~dispatch:(fun ~name ~args:_ ->
+         Tool_result.ok ~tool_name:name ~start_time:(Time_compat.now ()) "wrapper fixture")
+       ~tool_requirement:Required.Required
+       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch error ->
+         wrapper_attempts := (runtime_id, dispatch, error) :: !wrapper_attempts)
+       ~sw ~net:env#net ());
+  (match List.rev !wrapper_attempts with
+   | (runtime_id, dispatch, error) :: _ ->
+     check string "the wrapper carries the requirement to the refused runtime"
+       "native.no_tools" runtime_id;
+     check bool "wrapper refusal is reported before dispatch" true
+       (dispatch = Keeper_attempt_dispatch.Rejected_before_dispatch);
+     (match Required.of_core_error error with
+      | Some failure ->
+        check bool "typed tool reason survives the wrapper" true
+          (failure.Required.reason = Required.Model_tools_disabled)
+      | None -> fail "wrapper refusal lost its typed tool reason")
+   | [] ->
+     fail "the wrapper dropped tool_requirement: a tools-disabled runtime was admitted");
+  check bool "wrapper refusal never launched the native client" false
+    (Sys.file_exists native_marker)
 
 let () = Alcotest.run "Required tool delivery across runtime candidates"
   ["actual-dispatch",[test_case "skip unsupported owners and bindings before dispatch" `Quick test_required_candidate_delivery]]

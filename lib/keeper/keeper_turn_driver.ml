@@ -52,6 +52,7 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 
 type output_contract = Provider_default | Tool_verdict
 
+
 type provider_run_result =
   (Runtime_agent.run_result, Agent_core.Error.t) result
 
@@ -973,6 +974,7 @@ let run_named
     ?(tools = [])
     ~agent_core_tools
     ?(tool_requirement = Keeper_required_tools.Optional)
+    ?required_native_posture
     ?(initial_messages = [])
     ?model_input_projection
     ?recovery_view
@@ -1026,9 +1028,11 @@ let run_named
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
     | Provider_default -> tool_requirement in
-  if output_contract = Tool_verdict && Option.is_some (Runtime.get_lane_by_id runtime_id) then
+  if output_contract = Tool_verdict
+     && (Option.is_none (Runtime.get_runtime_by_id runtime_id)
+         || Option.is_some deferred_runtime_lane) then
     Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig
-      { field = "verifier.runtime"; detail = "A verifier slot must name a direct runtime, not a lane" }))
+      { field = "verifier.runtime"; detail = "A verifier slot requires a direct runtime binding without a deferred lane" }))
   else
   if continue_from_checkpoint && Option.is_none agent_core_checkpoint then
     Error
@@ -1109,10 +1113,11 @@ let run_named
       candidates
   in
   let* lane_id_opt, lane_candidate_ids =
-    match deferred_runtime_lane with
-    | Some hint ->
+    match output_contract, deferred_runtime_lane with
+    | Tool_verdict, _ -> Ok (None, [runtime_id])
+    | Provider_default, Some hint ->
       Ok (Some hint.assignment_id, deferred_runtime_ids hint)
-    | None ->
+    | Provider_default, None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> Ok (None, [])
        | `Unavailable missing ->
@@ -1177,7 +1182,7 @@ let run_named
      (#33034 fixed the deferred head; the tail still received the head's view). *)
   let reroute_candidates =
     match output_contract with
-    | Tool_verdict -> [] (* A verdict must stay with its explicitly admitted slot. *)
+    | Tool_verdict -> []
     | Provider_default -> modality_reroute_candidates
       (* NDT-OK: quota windows compare a stored expiry with wall clock; the
          ordering read receives one explicit [now], as the lane's does above. *)
@@ -1253,11 +1258,18 @@ let run_named
      walk is doing anyway. Fixing it here keeps the walk's [run_attempt]
      signature and its mutable state out of the delegation. *)
   let project_images =
-    Keeper_vision_ingest.fallback_projector
+    let project = Keeper_vision_ingest.fallback_projector
       ~base_path
       ~exclude_runtime_ids:lane_candidate_ids
       ~keeper_name
-      ()
+      () in
+    fun ~mode blocks ->
+      (* Exact-lane admission also owns provider selection for image evidence:
+         retain unread artifacts, but never dispatch an out-of-lane vision call. *)
+      let mode = match output_contract with
+        | Provider_default -> mode
+        | Tool_verdict -> Keeper_vision_ingest.Store_only in
+      project ~mode blocks
   in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return.
@@ -1326,7 +1338,12 @@ let run_named
         | Runtime_execution.Agent_core _, Some agent_cell -> Keeper_agent_tool_surface.on_the_wire
             ~agent_cell ~built:agent_core_tools
         | _ -> agent_core_tools in
-      let source_reader_ready = match official_client_continuation with
+      let source_reader_ready =
+        if required_native_posture = Some Runtime_native_tools.Native_none
+           && not (Runtime_execution.supports_native_none runtime.Runtime.execution) then
+          Error (Keeper_required_tools.to_core_error
+            {runtime_id=attempt_runtime_id;reason=Native_tools_cannot_be_disabled})
+        else match official_client_continuation with
         | Some checkpoint when attempt_runtime_id <> checkpoint.Keeper_semantic_execution.runtime_id
             || Runtime_execution.checkpoint_owner runtime.Runtime.execution <> Runtime_execution.Official_client ->
           Error (Agent_core.Error.Internal "Gate continuation must resume its original official-client runtime")
@@ -1426,6 +1443,7 @@ let run_named
               on_request_attribution
           in
           Keeper_codex_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects
@@ -1556,6 +1574,7 @@ let run_named
               on_request_attribution
           in
           Keeper_antigravity_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             (* Antigravity's CLI assembles the wire, so the shape masc can
@@ -1665,6 +1684,7 @@ let run_named
               on_request_attribution
           in
           Keeper_claude_code_runtime.run
+            ?required_native_posture
             ~runtime_id:attempt_runtime_id
             ~keeper_name
             ~pre_tool_rejects

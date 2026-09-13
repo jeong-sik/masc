@@ -671,11 +671,6 @@ let validate_lanes
          })
 ;;
 
-(* [runtime].default is required, so every lane can end somewhere. Without this
-   a lane walk stops at its last declared candidate and the turn dies there —
-   failover would exist only where an operator remembered to type a second
-   candidate. Appended rather than substituted: declared order is the
-   operator's, this only says where the walk terminates. *)
 let with_terminal_default ~default_runtime_id candidates =
   if List.exists (String.equal default_runtime_id) candidates
   then candidates
@@ -1792,9 +1787,11 @@ let verifier_runtime_admission (runtime : t) =
 
 let verifier_cli_slot_admission ~runtime_id =
   let state = runtime_state () in
-  if List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes
-  then Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
-  else match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
+  (* Verifier slots name direct bindings even when ordinary Keeper routing
+     declares a same-named failover lane. Never resolve that lane here. *)
+  match List.find_opt (fun (runtime : t) -> String.equal runtime.id runtime_id) state.runtimes with
+  | None when List.exists (fun (lane : Runtime_lane.t) -> String.equal lane.id runtime_id) state.lanes ->
+    Error (runtime_id ^ ": verifier CLI slot must be a direct runtime, not a lane")
   | None -> Error (runtime_id ^ ": verifier CLI runtime is not configured")
   | Some runtime ->
     (match runtime.execution with
@@ -1829,6 +1826,69 @@ let verifier_exact_lane_slot_ids () =
        Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
 ;;
 
+(* Readiness uses the same configured direct-runtime admission as dispatch. *)
+let verifier_cli_slot_rejection slot_id =
+  match verifier_cli_slot_admission ~runtime_id:slot_id with
+  | Ok () -> None | Error detail -> Some detail
+;;
+
+let verifier_api_slot_ready slot_id =
+  let state = runtime_state () in
+  let candidates = [slot_id] in
+  List.exists (fun id ->
+    match List.find_opt (fun (runtime : t) -> runtime.id = id) state.runtimes with
+    | None -> false
+    | Some runtime ->
+      match runtime.execution with
+      | Runtime_execution.Agent_core provider ->
+        (* The review always sends the managed verification.system prompt, and
+           an exact-output request carrying a system prompt to a model that
+           does not take one is refused as Unsupported_system_prompt. *)
+        Provider_tool_support.provider_supports_inline_tools provider
+        && (Provider_tool_support.agent_core_capabilities_of_config provider)
+             .Llm_provider.Capabilities.supports_system_prompt
+      | Runtime_execution.Claude_code _
+      | Runtime_execution.Codex_app_server _
+      | Runtime_execution.Antigravity_cli _ ->
+        Runtime_execution.supports_native_none runtime.execution && runtime.model.tools_support)
+    candidates
+;;
+
+let verifier_exact_lane_readiness () =
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match
+       Runtime_exact_output_registry.resolve_lane
+         registry
+         ~lane_id:verifier_exact_lane_id
+     with
+     | Error error ->
+       Error (Runtime_exact_output_registry.lane_resolution_error_to_string error)
+     | Ok { selected_slots; cli_slots } ->
+       let dispatchable, rejected =
+         List.fold_left
+           (fun (dispatchable, rejected) slot_id ->
+              match verifier_cli_slot_rejection slot_id with
+              | None -> dispatchable + 1, rejected
+              | Some detail -> dispatchable, detail :: rejected)
+           (0, [])
+           cli_slots
+       in
+       if List.exists (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+            verifier_api_slot_ready slot.slot_id) selected_slots || dispatchable > 0
+       then Ok ()
+       else
+         Error
+           (Printf.sprintf
+              "verifier_exact has no dispatchable slot: %s"
+              (String.concat "; "
+                (List.map (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+                   Printf.sprintf "%S has no materialized candidate with required tools and a system prompt" slot.slot_id)
+                   selected_slots @ List.rev rejected))))
+;;
+
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
    reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
    Atomic ref set by [init_default]. *)
@@ -1860,6 +1920,19 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
+;;
+
+let verifier_exact_slot_admission ~runtime_id =
+  let direct () = match get_runtime_by_id runtime_id with
+    | Some runtime -> verifier_runtime_admission runtime
+    | None -> Error (runtime_id ^ ": verifier requires a configured direct runtime") in
+  match Runtime_exact_output_registry.current () with
+  | Error Runtime_exact_output_registry.Registry_not_published -> direct ()
+  | Error error -> Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match Runtime_exact_output_registry.resolve_lane registry ~lane_id:verifier_exact_lane_id with
+     | Ok {cli_slots; _} when List.mem runtime_id cli_slots -> verifier_cli_slot_admission ~runtime_id
+     | Ok _ | Error _ -> direct ())
 ;;
 
 let is_local_runtime_id (id : string) : bool option =

@@ -377,7 +377,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
     }
 ;;
 
-let run_without_lifecycle ~on_session_settled ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~on_session_settled ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection
@@ -433,11 +433,12 @@ let run_without_lifecycle ~on_session_settled ~official_client_continuation ~run
        just what the store writes. *)
     let* native_posture =
       Host.resolve_native_posture
+        ~required:required_native_posture
         ~base_path
         ~keeper_name
         ~client_label:"Antigravity"
         ~default:Runtime_native_tools.antigravity_default
-        ~none_supported:false
+        ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
     in
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~native_posture tools
@@ -1086,7 +1087,7 @@ let run_without_lifecycle ~on_session_settled ~official_client_continuation ~run
                   recovery_detail))))
 ;;
 
-let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1107,6 +1108,7 @@ let run ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle ~on_session_settled ~official_client_continuation
+        ~required_native_posture
         ~runtime_id
         ~keeper_name
         ~on_model_input_window_observation

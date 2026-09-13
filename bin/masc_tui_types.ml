@@ -2896,6 +2896,7 @@ module Browser_lane_view = struct
     | Scene_focus of { tab_id : int; target : Browser_lane.node_ref }
     | Scene_click of { tab_id : int; document_id : string; node_id : string; expected_url : string; scope : Browser_lane.node_ref option }
     | Viewport_refresh of { tab_id : int; expected_url : string }
+    | Viewport_cadence of int
     | Viewport_pointer of { tab_id : int; expected_url : string; action : Browser_lane.interaction }
   type load = Idle | No_browser | Loading of int * operation | Failed of string
   type read_continuation = No_read_continuation | Deferred_read
@@ -2949,7 +2950,7 @@ module Browser_lane_view = struct
     | No_browser, _ -> Browser_missing
     | Idle, None -> Unread
     | Idle, Some _ -> Read_ok
-    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _)), _ -> Reading
+    | Loading (_, (Read | Read_refresh | Scene_read _ | Scene_regions _ | Scene_focus _ | Scene_refresh _ | Viewport_cadence _)), _ -> Reading
     | Loading (_, (Discover _ | Open_session | Close_session | Goto _ | Screenshot _ | Scene_click _ | Viewport_refresh _ | Viewport_pointer _)), _ -> Operating
     | Failed _, _ -> Read_failed
   (* The badge in the Browser Lane title. Five of these six name the read the
@@ -2979,17 +2980,22 @@ module Browser_lane_view = struct
     | Automation, _ -> true
     | Live, None -> false
     | Live, Some selected -> List.exists (fun (client : client) -> client = selected) t.clients
-  let cadence_operation t =
+  let cadence_operation ?(viewport : screenshot option) t =
     if busy t || Option.is_some t.refresh_pending || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
-    else match t.selected_tab, t.read_view with
+    else match viewport with
+      | Some shot when shot.source = t.source && shot.client_id = client_id t
+          && t.selected_tab = Some shot.tab_id ->
+          Some (Viewport_cadence shot.tab_id)
+      | Some _ -> None
+      | None -> match t.selected_tab, t.read_view with
       | None, _ -> None
       | Some tab_id, Scene_view {scene_view;scope} ->
           Some (Scene_refresh {tab_id;scene_view;scope})
       | Some _, Text_view -> Some Read_refresh
   let yield_refresh_to_input t =
     match t.load with
-    | Loading (_, (Read_refresh | Scene_refresh _)) -> {t with load = Idle}
+    | Loading (_, (Read_refresh | Scene_refresh _ | Viewport_cadence _)) -> {t with load = Idle}
     | Loading _ | Idle | No_browser | Failed _ -> t
   let read_view_for_operation operation previous =
     match operation with
@@ -2999,7 +3005,7 @@ module Browser_lane_view = struct
     | Scene_focus {target;_} -> Scene_view {scene_view = Browser_lane.Content; scope = Some target}
     | Scene_click {scope;_} -> Scene_view {scene_view = Browser_lane.Content; scope}
     | Scene_refresh {scene_view;scope;_} -> Scene_view {scene_view;scope}
-    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_pointer _ -> previous
+    | Discover _ | Screenshot _ | Viewport_refresh _ | Viewport_cadence _ | Viewport_pointer _ -> previous
   let choose_client client t =
     { t with selected_client = Some client; selected_tab = None;
       reading = None; scene = None; scene_cursor = 0; scroll = 0; load = Idle; client_picker = None; read_view = Text_view }
@@ -3293,11 +3299,15 @@ module Browser_lane_view = struct
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))
 
-  (* Settle the browser operation even when a later key cancelled opening the
-     image. The caller separately checks image intent before drawing. *)
+  (* A cadence observes the selected tab, including navigation by another
+     actor. Its self-contained PNG and document/URL/viewport are accepted
+     together; the next gesture uses that displayed snapshot. Explicit refresh
+     and scroll retain their expected URL checks. Settle even when a later key
+     cancelled opening the image; the caller separately checks image intent. *)
   let accept_screenshot ~generation (result : (screenshot, string) result) t =
+    let t = if t.refresh_pending = Some generation then {t with refresh_pending = None} else t in
     match t.load with
-    | Loading (current, (Screenshot requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
+    | Loading (current, (Screenshot requested_tab | Viewport_cadence requested_tab | Viewport_refresh {tab_id=requested_tab;_} | Viewport_pointer {tab_id=requested_tab;_}))
       when current = generation ->
         (match result with
          | Ok screenshot when screenshot.source = t.source

@@ -7278,21 +7278,25 @@ def chat_visibility_modes_interaction(
                 start=pane_start,
                 timeout=5.0,
             )
-        initial += bytes(output[pane_start:])
-        initial_frame = frame_containing(initial, b"ci-red-attribution")
-        plain_initial_frame = CSI_RE.sub(b"", initial_frame)
-        # frame_row_of reads the absolute row addresses, which are CSI
-        # sequences -- strip them and there is no address left to read.
-        # Search the raw frame; the census showed both needles contiguous
-        # there, and the plain copy stays for the text assertions below.
-        title_row = frame_row_of(
-            initial_frame, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        wait_for_output(
+            process, master_fd, output, FRAME_END,
+            start=end_of_needle(output, b"gate:auto_judge", pane_start),
+            timeout=5.0,
         )
-        identity_row = frame_row_of(initial_frame, b"gate:auto_judge")
-        if identity_row != title_row + 1:
+        initial += bytes(output[pane_start:])
+        # The Skill can arrive before the gate identity. Reconstruct the
+        # accumulated screen at the completed observation barrier instead of
+        # selecting the first frame that happened to contain the Skill name.
+        completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+        observed_rows = screen_rows(completed)
+        title_row = screen_row_of(
+            observed_rows, b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        identity_row = screen_row_of(observed_rows, b"gate:auto_judge")
+        if title_row < 0 or identity_row != title_row + 1:
             raise AssertionError(
                 "chat navigation and operational identity did not occupy "
-                f"adjacent dedicated rows: {initial_frame!r}"
+                f"adjacent dedicated rows: {observed_rows!r}"
             )
         if b"2 reasoning steps \xc2\xb7 text not recorded" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
@@ -9309,6 +9313,10 @@ def standalone_lane_fixture(
             "Selects the next Memory OS snapshot from immutable Keeper history.",
             False,
         ),
+        "workspace_curator_exact": (
+            "Synthesizes attributed proposals after committed workspace memory changes; semantic verification is not performed.",
+            False,
+        ),
         "verifier_exact": (
             "Reviews Task completion and Goal proof evidence.",
             False,
@@ -9363,6 +9371,7 @@ def standalone_lanes_response() -> HttpResponse:
                 ),
                 standalone_lane_fixture("hitl_auto_judge", "HITL Auto Judge"),
                 standalone_lane_fixture("librarian_exact", "Librarian"),
+                standalone_lane_fixture("workspace_curator_exact", "Workspace Curator"),
                 standalone_lane_fixture("verifier_exact", "Verifier"),
             ],
         },
@@ -10013,9 +10022,11 @@ def keeper_lanes_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
-        # One k walks the band from Verifier to Librarian, whose run list is
+        # Walk past Workspace Curator from Verifier to Librarian, whose run list is
         # the exact-output summary.
         banded_librarian = re.compile(rb"\x1b\[7m[^\x1b\n]*Librarian")
+        send_and_wait(process, master_fd, output, b"k",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         # PgDn moves the run cursor by a page and the window must follow
         # (#31290): before the follow, the selected row walked off the frame
@@ -10286,6 +10297,10 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
+        # The surface heading can precede the asynchronously loaded roster.
+        # Wait for the target row before asking the cursor to move to it.
+        wait_for_output(process, master_fd, output, b"beta", start=0, timeout=3.0)
+
         send_and_wait(
             process,
             master_fd,
@@ -10363,6 +10378,8 @@ def keeper_lanes_ia_interaction(
         banded_board = re.compile(rb"\x1b\[7m[^\x1b\n]*Board Attention")
         send_and_wait(process, master_fd, output, b"j", banded_hitl)
         send_and_wait(process, master_fd, output, b"j", banded_librarian)
+        send_and_wait(process, master_fd, output, b"j",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"j", banded_verifier)
         verifier_runs = send_and_wait(
             process, master_fd, output, b"\r", b"task task-9"
@@ -10416,6 +10433,8 @@ def keeper_lanes_ia_interaction(
         )
         send_and_wait(process, master_fd, output, b"\x1b", b"rejected")
         send_and_wait(process, master_fd, output, b"\x1b", banded_verifier)
+        send_and_wait(process, master_fd, output, b"k",
+                      re.compile(rb"\x1b\[7m[^\x1b\n]*Workspace Curator"))
         send_and_wait(process, master_fd, output, b"k", banded_librarian)
         send_and_wait(process, master_fd, output, b"k", banded_hitl)
         send_and_wait(process, master_fd, output, b"\r", b"succeeded")
@@ -14278,7 +14297,116 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
+def run_browser_viewport_cadence_regression(executable: str, *, follow_navigation: bool = False) -> None:
+    fixtures = overview_event_http_fixtures()
+    client = "11111111-1111-4111-8111-111111111111"
+    url = "https://example.org/"
+    viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    observed_url = url + "next" if follow_navigation else url
+    observed_viewport = dict(viewport, documentId="next-document") if follow_navigation else viewport
+    captures, actions, png = [], [], [""]
+    stale_started, stale_release = threading.Event(), threading.Event()
+    closing_started, closing_release = threading.Event(), threading.Event()
+    resumed_read = threading.Event()
+
+    def prepare(base):
+        seed_image_workspace(base)
+        png[0] = base64.b64encode(Path(base, IMAGE_NAME).read_bytes()).decode()
+
+    def read(body):
+        request = json.loads(body)
+        current_url = observed_url if len(captures) >= 2 else url
+        text = "cadence fixture"
+        if closing_release.is_set():
+            # Ordinary cadence is blocked by refresh_pending until the delayed
+            # screenshot completion is consumed by the UI mailbox.
+            resumed_read.set()
+            text = "CADENCE RESUMED AFTER DISMISSAL"
+        return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":current_url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":current_url,"text":text,"chars":len(text),"truncated":False}}}
+
+    def screenshot(body):
+        request = json.loads(body)
+        assert request == {"lane":"automation","tabId":2}
+        captures.append(request)
+        number = len(captures)
+        title = {1:"INITIAL FRAME",2:"AUTOMATIC FRAME",3:"STALE FRAME",4:"DRAG FRAME"}.get(number,"CLOSED FRAME")
+        if number == 3:
+            stale_started.set()
+            if not stale_release.wait(timeout=10):
+                return 504, {"ok":False,"error":"stale fixture was not released"}
+        elif number >= 5:
+            closing_started.set()
+            if not closing_release.wait(timeout=10):
+                return 504, {"ok":False,"error":"closing fixture was not released"}
+        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url if number == 1 else observed_url,
+            "mimeType":"image/png","data":png[0],"viewport":viewport if number == 1 else observed_viewport,"elapsed_ms":0}}
+
+    def act(body):
+        request = json.loads(body)
+        assert request == {"lane":"automation","tabId":2,"expectedUrl":observed_url,"action":"drag",
+            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":observed_viewport}
+        actions.append(request)
+        return 200, {"ok":True,"data":{}}
+
+    fixtures["/api/v1/dashboard/browser-lane/clients"] = (200,{"ok":True,"data":{"clients":[{"clientId":client,"browser":"firefox"}]}})
+    fixtures["/api/v1/dashboard/browser-lane/read"] = RequestHttpResponse(read)
+    fixtures["/api/v1/dashboard/browser-lane/screenshot"] = RequestHttpResponse(screenshot)
+    fixtures["/api/v1/dashboard/browser-lane/interact"] = RequestHttpResponse(act)
+
+    def interact(process, master, slave, output, _base):
+        def image_after(start, title):
+            wait_for_output(process, master, output, title, start=start, timeout=5)
+            wait_for_output(process, master, output, b"j/k:center", start=end_of_needle(output,title,start), timeout=3)
+
+        palette_go(process, master, output, b"go Browser Lane", b"cadence fixture")
+        send_and_wait(process, master, output, b"a", b"cadence fixture")
+        start = len(output)
+        os.write(master,b"\x0f")
+        image_after(start,b"INITIAL FRAME")
+        # No refresh key: cadence follows a same-tab navigation by another actor
+        # as well as an image change. The drag must use the displayed new URL
+        # and document, while its pending predecessor cannot replace the frame.
+        image_after(start,b"AUTOMATIC FRAME")
+        assert wait_for_fixture_event(process,master,output,stale_started,timeout=5)
+        start = len(output)
+        os.write(master,b"\x1b[<0;2;5M\x1b[<0;5;8m")
+        image_after(start,b"DRAG FRAME")
+        assert len(actions)==1, "background observation blocked or replayed the gesture"
+        # The old request settles after the effect-owned image. It must neither
+        # replace that frame nor close the overlay, and must release single-flight.
+        stale_release.set()
+        assert wait_for_fixture_event(process,master,output,closing_started,timeout=5)
+        assert b"STALE FRAME" not in output[start:]
+        send_and_wait(process,master,output,b"\x1b",b"cadence fixture")
+        start = len(output)
+        closing_release.set()
+        assert wait_for_fixture_event(process,master,output,resumed_read,timeout=5), \
+            "ordinary cadence did not resume after consuming the delayed screenshot"
+        wait_for_output(process,master,output,b"CADENCE RESUMED AFTER DISMISSAL",start=start,timeout=5)
+        wait_for_output(process,master,output,FRAME_END,
+            start=end_of_needle(output,b"CADENCE RESUMED AFTER DISMISSAL",start),timeout=3)
+        # Stay on Browser Lane until the post-completion read is rendered:
+        # leaving the surface would independently suppress a stale overlay.
+        assert b"CLOSED FRAME" not in output[start:], "late cadence reopened the overlay"
+        assert len(actions)==1 and len(captures)==5
+        send_and_wait(process,master,output,b"\x1b",b"MASC Overview")
+        os.write(master,b"q")
+
+    try:
+        run_terminal_scenario(executable,description=("Browser viewport follows same-tab navigation" if follow_navigation
+                else "Open browser viewport cadence yields to drag and dismissal"),
+            interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,refresh=0.5,
+            preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
+    finally:
+        stale_release.set()
+        closing_release.set()
+
+
 def run_browser_screenshot_regression(executable: str) -> None:
+    run_browser_viewport_cadence_regression(executable)
+    run_browser_viewport_cadence_regression(executable, follow_navigation=True)
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)

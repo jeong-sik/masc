@@ -5370,7 +5370,9 @@ let render_lanes (state : state) =
    whose projection says [absent]: the first means the producer has not
    answered for this Keeper yet, the second means it answered that no root is
    configured. Saying "none" for both would report a fact the server did not
-   send. *)
+   send. [None] here is the first; the tab decides what to say about it from
+   the Lanes reading the list rides on, because a list that is empty after a
+   failed read and one that is empty before any read are the same list. *)
 let secret_lines (state : state) (k : keeper) =
   let dim line = Ansi.dim ^ line ^ Ansi.reset in
   match
@@ -5379,7 +5381,7 @@ let secret_lines (state : state) (k : keeper) =
         String.equal p.Masc.Tui_decode.ksp_keeper k.k_name)
       state.keeper_secrets
   with
-  | None -> [ dim "  (no projection reported for this Keeper)" ]
+  | None -> None
   | Some p ->
       let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
       let status_line =
@@ -5419,6 +5421,7 @@ let secret_lines (state : state) (k : keeper) =
                "  Values were read and validated. They are never sent here."
              else "  Values were not validated on the last read.")
         ]
+      |> Option.some
 
 (* The Identity tab's body. Numbering comes from
    [Masc_tui_types.identity_connectable], which is also what the key handler
@@ -6208,7 +6211,20 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
           status @ logs
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
-      | Detail_secrets -> secret_lines state k
+      | Detail_secrets -> (
+          match secret_lines state k with
+          | Some lines -> lines
+          | None -> (
+              (* The projection rides the Lanes reading. Before that reading
+                 has answered, and after one that failed, the list is empty
+                 for every Keeper, and this tab said "no projection reported"
+                 -- an answer the server had not given. *)
+              match state.lanes, state.lanes_error with
+              | None, Some detail ->
+                  [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ]
+              | None, None -> [ tab_loading_row "loading" ]
+              | Some _, _ ->
+                  [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]))
       | Detail_github ->
           stamped_or state.github_identity_view
             state.github_identity_view_error

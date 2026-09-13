@@ -3926,6 +3926,75 @@ def planning_resize_budget_interaction(
     os.write(master_fd, b"q")
 
 
+def clients_row(
+    name: str, agent_type: str, status: str, keeper: str | None, task: str | None
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "agent_type": agent_type,
+        "keeper_name": keeper,
+        "status": status,
+        "current_task": task,
+        "session_bound_at": "2026-09-13T01:00:00Z",
+        "last_seen": "2026-09-13T01:20:00Z",
+        "capabilities": ["chat"],
+    }
+
+
+def clients_http_fixtures(*, extra_clients: int = 0) -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/clients"] = (
+        200,
+        {
+            "schema": "masc.dashboard.clients.v1",
+            "generated_at": "2026-09-13T01:21:00Z",
+            "observation_only": True,
+            "clients": [
+                clients_row("codex-mcp-client", "codex", "active", None, None),
+                clients_row("analyst-agent", "keeper", "busy", "analyst", "task-845"),
+            ] + [
+                clients_row(f"client-{index:02d}", "codex", "active", None, None)
+                for index in range(extra_clients)
+            ],
+        },
+    )
+    return fixtures
+
+
+def clients_footer_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Clients draws the footer row its listing frame counts.
+
+    The key table declares j/k, p, Esc, / and n for Clients, and an armed
+    search shows its query at the front of that row. Clients drew neither: the
+    row stayed blank, and a typed search had nowhere on screen to appear."""
+    # Landing on a row first: a search arms over rows, not over a roster that
+    # has not loaded. Each step below changes the footer row itself, so the
+    # presenter has to draw it again -- an unchanged row can be skipped.
+    palette_go(process, master_fd, output, b"go Clients", b"analyst-agent")
+    # A query being typed ends in the caret search_marker draws, and carries
+    # the count of rows it reaches when the surface can count them.
+    send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  j/k:move")
+    typed_query = re.compile(rb"/analyst(?: \((?:\d+|none)\))?\xe2\x96\x8c  ")
+    send_and_wait(process, master_fd, output, b"analyst", typed_query)
+    # Resizing keeps the armed query on screen even when the roster scrolls.
+    for rows, columns in ((16, 80), (30, 100)):
+        frame = resize_and_wait(
+            process, master_fd, output, rows=rows, columns=columns,
+            needle=typed_query, controls=(FULL_REDRAW,),
+        )
+        if b"j/k:move" not in CSI_RE.sub(b"", frame):
+            raise AssertionError(f"Clients resize lost its key hints: {frame!r}")
+    # Esc drops the query and stays on Clients; the row goes back to the keys.
+    send_and_wait(process, master_fd, output, b"\x1b", b"j/k:move")
+    os.write(master_fd, b"q")
+
+
 def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -10933,10 +11002,10 @@ def enter_outside_changes_interaction(
     if b"MASC Activity" not in acting:
         raise AssertionError(f"did not reach Activity: {acting!r}")
     # System logs hang off Activity under [l]; Esc walks back to the parent.
-    send_and_wait(process, master_fd, output, b"l", b"[1 Events | 2 Logs*]")
-    send_and_wait(process, master_fd, output, b"1", b"[1 Events* | 2 Logs]")
-    send_and_wait(process, master_fd, output, b"2", b"[1 Events | 2 Logs*]")
-    send_and_wait(process, master_fd, output, b"\x1b", b"[1 Events* | 2 Logs]")
+    send_and_wait(process, master_fd, output, b"l", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"1", b"\xe2\x96\xb8Events")
+    send_and_wait(process, master_fd, output, b"2", b"\xe2\x96\xb8Logs")
+    send_and_wait(process, master_fd, output, b"\x1b", b"\xe2\x96\xb8Events")
     os.write(master_fd, b"\r")
     back = open_changes(process, master_fd, output)
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
@@ -13807,6 +13876,18 @@ def run_keyboard_regression(executable: str) -> None:
         interact=planning_missing_detail_interaction(planning_missing_fixtures),
         http_fixtures=planning_missing_fixtures,
     )
+    run_terminal_scenario(
+        executable,
+        description="Clients draws its footer and an armed search",
+        interact=clients_footer_interaction,
+        http_fixtures=clients_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Clients keeps its footer while a crowded roster resizes",
+        interact=clients_footer_interaction,
+        http_fixtures=clients_http_fixtures(extra_clients=40),
+    )
     board_reference_fixtures = board_reference_http_fixtures()
     keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
     keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
@@ -14423,11 +14504,13 @@ def run_browser_pointer_regression(executable: str) -> None:
         preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
 
 
-def run_browser_viewport_cadence_regression(executable: str) -> None:
+def run_browser_viewport_cadence_regression(executable: str, *, follow_navigation: bool = False) -> None:
     fixtures = overview_event_http_fixtures()
     client = "11111111-1111-4111-8111-111111111111"
     url = "https://example.org/"
     viewport = {"documentId":"fixture","width":800,"height":600,"scrollX":0,"scrollY":0}
+    observed_url = url + "next" if follow_navigation else url
+    observed_viewport = dict(viewport, documentId="next-document") if follow_navigation else viewport
     captures, actions, png = [], [], [""]
     stale_started, stale_release = threading.Event(), threading.Event()
     closing_started, closing_release = threading.Event(), threading.Event()
@@ -14439,6 +14522,7 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
 
     def read(body):
         request = json.loads(body)
+        current_url = observed_url if len(captures) >= 2 else url
         text = "cadence fixture"
         if closing_release.is_set():
             # Ordinary cadence is blocked by refresh_pending until the delayed
@@ -14446,8 +14530,8 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
             resumed_read.set()
             text = "CADENCE RESUMED AFTER DISMISSAL"
         return 200, {"ok":True,"data":{"source":request["lane"],"clientId":request.get("clientId"),
-            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":url,"active":True}],
-            "page":{"tabId":2,"title":"owned","url":url,"text":text,"chars":len(text),"truncated":False}}}
+            "elapsed_ms":0,"tabs":[{"id":2,"title":"owned","url":current_url,"active":True}],
+            "page":{"tabId":2,"title":"owned","url":current_url,"text":text,"chars":len(text),"truncated":False}}}
 
     def screenshot(body):
         request = json.loads(body)
@@ -14463,13 +14547,13 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
             closing_started.set()
             if not closing_release.wait(timeout=10):
                 return 504, {"ok":False,"error":"closing fixture was not released"}
-        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url,
-            "mimeType":"image/png","data":png[0],"viewport":viewport,"elapsed_ms":0}}
+        return 200, {"ok":True,"data":{"source":"automation","clientId":None,"tabId":2,"title":title,"url":url if number == 1 else observed_url,
+            "mimeType":"image/png","data":png[0],"viewport":viewport if number == 1 else observed_viewport,"elapsed_ms":0}}
 
     def act(body):
         request = json.loads(body)
-        assert request == {"lane":"automation","tabId":2,"expectedUrl":url,"action":"drag",
-            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":viewport}
+        assert request == {"lane":"automation","tabId":2,"expectedUrl":observed_url,"action":"drag",
+            "from":{"x":0.03,"y":0.06},"to":{"x":0.09,"y":0.18},"viewport":observed_viewport}
         actions.append(request)
         return 200, {"ok":True,"data":{}}
 
@@ -14488,7 +14572,9 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
         start = len(output)
         os.write(master,b"\x0f")
         image_after(start,b"INITIAL FRAME")
-        # No refresh key: the normal cadence updates an open screenshot.
+        # No refresh key: cadence follows a same-tab navigation by another actor
+        # as well as an image change. The drag must use the displayed new URL
+        # and document, while its pending predecessor cannot replace the frame.
         image_after(start,b"AUTOMATIC FRAME")
         assert wait_for_fixture_event(process,master,output,stale_started,timeout=5)
         start = len(output)
@@ -14516,7 +14602,8 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
         os.write(master,b"q")
 
     try:
-        run_terminal_scenario(executable,description="Open browser viewport cadence yields to drag and dismissal",
+        run_terminal_scenario(executable,description=("Browser viewport follows same-tab navigation" if follow_navigation
+                else "Open browser viewport cadence yields to drag and dismissal"),
             interact=interact,http_fixtures=fixtures,prepare_workspace=prepare,refresh=0.5,
             preload_input=b"\x1b[6;20;10t"+GRAPHICS_SUPPORTED_REPLY)
     finally:
@@ -14526,6 +14613,7 @@ def run_browser_viewport_cadence_regression(executable: str) -> None:
 
 def run_browser_screenshot_regression(executable: str) -> None:
     run_browser_viewport_cadence_regression(executable)
+    run_browser_viewport_cadence_regression(executable, follow_navigation=True)
     run_browser_pointer_regression(executable)
     run_browser_viewport_regression(executable)
     run_browser_viewport_regression(executable, cell_geometry=False)
@@ -14935,6 +15023,54 @@ def run_schedule_source_status_regression(executable: str) -> None:
 # The Board draft is written in the default keyboard lane, which stops at an
 # earlier scenario's exit step (#34125). This lane runs the one thing: the
 # footer's offer and what the key it offered actually does.
+def run_board_list_footer_regression(executable: str) -> None:
+    """Measure completed native frames, including the bottom of a long list."""
+    for state in ("populated", "empty", "unread", "failed"):
+        fixtures = overview_event_http_fixtures()
+        posts = [board_selection_post(str(i), f"footer-post-{i:02d}",
+                                      f"footer-body-{i:02d}") for i in range(70)]
+        response: HttpResponse = (200, {"posts": posts if state == "populated" else []})
+        gate = GatedHttpResponse(response, hold_seconds=60.0)
+        fixtures["/api/v1/board?sort_by=hot"] = (
+            gate if state == "unread" else
+            (503, {"error": "board-footer-unavailable"}) if state == "failed" else response
+        )
+        fixtures["/api/v1/board/post-69?format=flat"] = (
+            200, {"post": posts[-1], "comments": []})
+        marker = {"populated": b"footer-post-00", "empty": b"(no board posts)",
+                  "unread": b"not loaded yet", "failed": b"board-footer-unavailable"}[state]
+
+        def interact(process: subprocess.Popen[bytes], master_fd: int,
+                     _slave_fd: int, output: bytearray, _base_path: str) -> None:
+            try:
+                palette_go(process, master_fd, output, b"go board", b"MASC Board")
+                wait_for_output(process, master_fd, output, marker, start=0, timeout=10.0)
+                for height in (30, 44, 60):
+                    resize_and_wait(process, master_fd, output, rows=height, columns=140,
+                                    needle=marker, final_cursor=b"\x1b[?25l")
+                    drain_until_quiet(process, master_fd, output)
+                    completed = bytes(output[:output.rfind(FRAME_END) + len(FRAME_END)])
+                    rows = screen_rows(completed)
+                    footer = screen_row_of(rows, b"j/k:move")
+                    composer = screen_row_of(rows, "›".encode())
+                    if footer < 1 or composer != footer + 1:
+                        raise AssertionError(
+                            f"Board {state} at {height}: footer={footer}, composer={composer}: {rows!r}")
+                    if screen_row_of(rows, marker) < 1:
+                        raise AssertionError(f"Board {state} lost its current state: {rows!r}")
+                    if state == "populated":
+                        send_and_wait(process, master_fd, output, b"j" * 69, b"footer-post-69")
+                        send_and_wait(process, master_fd, output, b"\r", b"footer-body-69")
+                        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+                        send_and_wait(process, master_fd, output, b"k" * 69, b"footer-post-00")
+                os.write(master_fd, b"q")
+            finally:
+                gate.release.set()
+
+        run_terminal_scenario(executable, description=f"Board list footer: {state}",
+                              interact=interact, http_fixtures=fixtures)
+
+
 def run_board_compose_footer_regression(executable: str) -> None:
     def interact(
         process: subprocess.Popen[bytes],
@@ -16119,6 +16255,7 @@ def main() -> None:
         print("tui MSX size regression: PASS")
         return
     if len(sys.argv) == 3 and sys.argv[2] == "board-compose-footer":
+        run_board_list_footer_regression(os.path.abspath(sys.argv[1]))
         run_board_compose_footer_regression(os.path.abspath(sys.argv[1]))
         print("tui board compose footer regression: PASS")
         return

@@ -4453,7 +4453,7 @@ let launch_browser_lane state ~mailbox operation =
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
               (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence {tab_id;_} -> Browser_lane_screenshot_ready {
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
@@ -8791,6 +8791,7 @@ let apply_board_hearths_load state = function
 let apply_board_list_load state = function
   | Ok posts ->
       replace_board_posts state posts;
+      state.board_list_reading <- Board_list_read;
       (* A sorted/filtered page cannot establish that an exact-ID target
          disappeared. Its own detail request owns loading and failure, even
          when the recent page is empty or excludes this historical post. *)

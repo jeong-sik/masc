@@ -11,6 +11,7 @@ import { currentDashboardActor } from '../../api/core'
 import { callMcpTool } from '../../api/mcp'
 import { route } from '../../router'
 import {
+  goalStoreUnavailable as storeUnavailable,
   goalTreeData as treeData,
   goalTreeError as treeError,
   goalTreeLoading as treeLoading,
@@ -55,6 +56,7 @@ import {
   goalTaskSummaryForNode,
 } from './goal-task-summary'
 import { DECK_CHIP, DECK_LABEL } from './deck-classes'
+import { GoalStoreUnavailableAlert } from './goal-store-unavailable'
 import { errorToString } from '../../lib/format-string'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
@@ -1038,6 +1040,7 @@ export function GoalTree() {
   const data = treeData.value
   const loading = treeLoading.value
   const error = treeError.value
+  const unavailable = storeUnavailable.value
   const query = filterQuery.value
   const activePhaseFilter = treePhaseFilter.value
   const selectedId = selectedGoalId.value
@@ -1179,7 +1182,9 @@ export function GoalTree() {
           </div>
         ` : null}
 
-        ${error ? html`<${ErrorState} message=${error} />` : null}
+        ${unavailable
+          ? html`<${GoalStoreUnavailableAlert} unavailable=${unavailable} />`
+          : error ? html`<${ErrorState} message=${error} />` : null}
 
         ${loading && data ? html`
           <div class="text-3xs text-text-dim" data-testid="goal-tree-loading">목표 트리 갱신 중...</div>

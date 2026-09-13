@@ -6,6 +6,7 @@ export * from './types/error'
 export * from './types/gate'
 export * from './types/dashboard-execution'
 export * from './types/dashboard-mission'
+export * from './types/goal-store-unavailable'
 export * from './types/sse'
 export * from './types/agent-core'
 

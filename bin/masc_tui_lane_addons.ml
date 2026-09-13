@@ -637,7 +637,7 @@ let action_target view =
 let open_actions ~request_id view =
   let* instance = match action_target view with
     | Some instance -> Ok instance
-    | None -> (match Option.bind view.snapshot (fun snapshot -> List.hd_opt snapshot.instances) with
+    | None -> (match Option.bind view.snapshot (fun snapshot -> match snapshot.instances with first :: _ -> Some first | [] -> None) with
         | Some instance -> Ok instance
         | None -> Error "Select an installed Add-on first (Tab:instances).") in
   let* schema = match instance.action_schema with

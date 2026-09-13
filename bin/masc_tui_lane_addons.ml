@@ -364,15 +364,16 @@ let action_target view =
   | Rows -> None
 
 let can_observe (instance : instance) = match instance.phase with
-  | Row.Attached | Row.Observing -> true
-  | Row.Detaching | Row.Detached | Row.Failed _ -> false
+  | Row.Attached | Row.Observing | Row.Failed _ -> true
+  | Row.Detaching | Row.Detached -> false
 
 let instance_controls (instance : instance) = match instance.phase with
   | Row.Attached | Row.Observing ->
       "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:remove"
   | Row.Detaching -> "removal pending"
   | Row.Detached -> "retained history · D:details"
-  | Row.Failed _ -> "D:failure details  d:cleanup"
+  | Row.Failed _ -> "o:retry observation" ^
+      (if Option.is_some instance.action_schema then "  a:actions" else "") ^ "  d:cleanup"
 
 let overview_hints view =
   "i:install  j/k:select  Tab:focus  " ^
@@ -508,7 +509,7 @@ let compact_lines ~width view =
           | [] -> [] | items -> [title] @ List.concat_map render_instance items in
         let instances = if snapshot.instances=[] then
           ["No Add-ons installed. Press i to inspect a package and connect its inputs."]
-          else group "Active workers" can_observe
+          else group "Active workers" (fun instance -> match instance.phase with Row.Attached | Row.Observing -> true | _ -> false)
             @ group "Needs attention" (fun instance -> match instance.phase with Row.Detaching | Row.Failed _ -> true | _ -> false)
             @ group "Retained history" (fun instance -> instance.phase=Row.Detached) in
         let configurations = if view.focus<>Configurations then [] else

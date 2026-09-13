@@ -212,6 +212,15 @@ let guided_actions () =
     | Some instance -> instance.id | None -> fail "missing selection") in
   check (list string) "navigation follows the same active, attention, retained order as rendering"
     ["worker";"second-worker";"failed-worker";"retained-worker"] selected;
+  let failed = {instance with id="retry-worker";phase=UI.Row.Failed "source capture failed"} in
+  let retry = {UI.initial with snapshot=Some {snapshot with instances=[failed]}} in
+  check bool "failed worker can request observation retry" true (UI.can_observe failed);
+  check bool "failed worker exposes retry and retains attention grouping" true
+    (UI.overview_hints retry="i:install  j/k:select  Tab:focus  o:retry observation  a:actions  d:cleanup  f:flow  D:details  J/K:scroll  Esc:back"
+     && List.mem "Needs attention" (UI.lines ~width:240 retry)
+     && not (List.mem "Active workers" (UI.lines ~width:240 retry)));
+  check bool "failed worker can request its advertised action without forced cleanup" true
+    (Result.is_ok (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" retry));
   let lines = UI.lines ~width:240 overview in
   check bool "active workers and retained history are distinct" true
     (List.mem "Active workers" lines && List.mem "Retained history" lines);

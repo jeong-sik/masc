@@ -680,6 +680,59 @@ let test_openrouter_rows_declare_their_measured_effort_ladder () =
     openrouter_effort_ladders
 ;;
 
+(* F422: the six single-value capability vocab parsers answered [""] with
+   [Some <default>], so an empty string was the one unknown value that never
+   failed closed. The [_of_string] assertions below fail on origin/main
+   (they return [Some Default_reasoning_replay], [Some Assistant_tool_content_null],
+   [Some Chat_max_tokens], [Some Rich_json_schema], [Some No_reasoning_output_format],
+   [Some No_content_inline_reasoning]) and pass once the arms are deleted.
+
+   The catalog half pins the boundary that already refuses an empty value:
+   [parse_entry] checks the raw string against [Capability_vocab.*_values]
+   before it is stored, so an overlay row with [tool_schema_conformance = ""]
+   is excluded with the key named, on the strict loader as an [Error] and on
+   the lenient loader as a [skipped_entry]. Together the two halves say that
+   an empty vocab value is unknown at every layer, not "the default" at one of
+   them. *)
+let test_empty_capability_vocab_value_is_rejected () =
+  let rejects name parse =
+    check bool (name ^ " rejects \"\"") true (Option.is_none (parse ""));
+    check bool (name ^ " rejects whitespace") true (Option.is_none (parse "  "))
+  in
+  rejects "reasoning_replay" Capability_vocab.reasoning_replay_override_of_string;
+  rejects
+    "assistant_tool_content_format"
+    Capability_vocab.assistant_tool_content_format_of_string;
+  rejects "chat_output_budget_field" Capability_vocab.chat_output_budget_field_of_string;
+  rejects "tool_schema_conformance" Capability_vocab.tool_schema_conformance_of_string;
+  rejects "reasoning_output_format" Capability_vocab.reasoning_output_format_of_string;
+  rejects "content_inline_reasoning" Capability_vocab.content_inline_reasoning_of_string;
+  let toml =
+    "[[models]]\nid_prefix = \"vocab-model\"\ntool_schema_conformance = \"\"\n"
+  in
+  let expected_reason =
+    "model entry \"vocab-model\" field \"tool_schema_conformance\" has unknown value \
+     \"\" (canonical: rich, conformant)"
+  in
+  (match Model_catalog.of_toml_string ~source:"empty vocab value" toml with
+   | Error message -> check string "strict loader names the key" expected_reason message
+   | Ok _ -> fail "strict loader accepted tool_schema_conformance = \"\"");
+  match Model_catalog.of_toml_string_lenient ~source:"empty vocab value" toml with
+  | Ok (catalog, [ { Model_catalog.entry_label; skip_reason } ]) ->
+    check
+      int
+      "lenient loader keeps no row for the rejected entry"
+      0
+      (List.length (Model_catalog.model_entries catalog));
+    check string "lenient loader labels the rejected entry" "vocab-model" entry_label;
+    check string "lenient loader names the key" expected_reason skip_reason
+  | Ok (_, skipped) ->
+    failf
+      "lenient loader should skip exactly one entry, skipped %d"
+      (List.length skipped)
+  | Error message -> failf "lenient loader failed the whole load: %s" message
+;;
+
 let () =
   run
     "model catalog default"
@@ -753,6 +806,10 @@ let () =
             "OpenRouter rows declare their measured effort ladder"
             `Quick
             test_openrouter_rows_declare_their_measured_effort_ladder
+        ; test_case
+            "empty capability vocab value is rejected"
+            `Quick
+            test_empty_capability_vocab_value_is_rejected
         ] )
     ]
 ;;

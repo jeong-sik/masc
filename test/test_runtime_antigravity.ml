@@ -70,7 +70,7 @@ let fixture_script
     ?(close_stdin = false)
     ?line_delay_s
     ?after_first_line_delay_s
-    ?stdout_holder_s
+    ?pipe_holder_s
     ?exit_delay_s
     ?(exit_code = 0)
     lines
@@ -120,14 +120,19 @@ let fixture_script
            (fun seconds ->
               output_string output (Printf.sprintf "sleep %.3f\n" seconds))
            after_first_line_delay_s;
+       (* The first #28912 shutdown shape: a background child inheriting
+          stdout and stderr, so EOF never arrives on either pipe even though
+          the CLI exits. It starts before the last line so the race with the
+          runtime's termination cannot skip it. *)
+       if index = List.length lines - 1
+       then
+         Option.iter
+           (fun seconds ->
+              output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
+           pipe_holder_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     lines;
-  (* The two #28912 shutdown shapes: a background child inheriting stdout
-     (so EOF never arrives even though the CLI exits), and the CLI itself
-     stalling before exit. *)
-  Option.iter
-    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
-    stdout_holder_s;
+  (* The second #28912 shutdown shape: the CLI itself stalling before exit. *)
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     exit_delay_s;
@@ -138,7 +143,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_stdin ?line_delay_s
-    ?after_first_line_delay_s ?stdout_holder_s ?exit_delay_s ?exit_code lines f =
+    ?after_first_line_delay_s ?pipe_holder_s ?exit_delay_s ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -148,7 +153,7 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?capture_prompt ?close_
       ?close_stdin
       ?line_delay_s
       ?after_first_line_delay_s
-      ?stdout_holder_s
+      ?pipe_holder_s
       ?exit_delay_s
       ?exit_code
       lines
@@ -769,7 +774,7 @@ let test_wall_clock_ceiling_bounds_a_turn_without_idle_deadline () =
   (* [no_turn_deadline] leaves the idle timeout at [None]; the ceiling is
      still a deadline, so a silently held stdout cannot outlive it. *)
   with_fixture
-    ~stdout_holder_s:5.0
+    ~pipe_holder_s:5.0
     [ init () ]
     (fun path ->
        match
@@ -829,7 +834,7 @@ let test_wall_clock_ceiling_hang_duration_distribution () =
   (* silent, no idle deadline: the ceiling is the only deadline *)
   let silent = Array.init runs (fun _ ->
       with_fixture
-        ~stdout_holder_s:5.0
+        ~pipe_holder_s:5.0
         [ init () ]
         (fun path ->
            measure_one ~no_turn_deadline:true ~timeout_s:2.0 ~ceiling_s:0.3 path)) in
@@ -965,11 +970,35 @@ let test_live_start_and_resume () =
    child inherited stdout, so EOF never arrives. Completion must come from
    the parsed result event, not from EOF. *)
 let test_result_completes_even_when_stdout_stays_open () =
-  with_fixture ~stdout_holder_s:10.0 [ init (); result () ] (fun path ->
+  with_fixture ~pipe_holder_s:10.0 [ init (); result () ] (fun path ->
     match run_fixture ~timeout_s:2.0 path with
     | Error error -> fail (Runtime_antigravity.error_to_string error)
     | Ok turn ->
       check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text)
+;;
+
+(* The first shape, measured. The stderr drain used to be an ordinary fiber
+   of the process switch, so a served turn waited for the background child to
+   release stderr: 10 s in the test above, unbounded for an orphaned MCP
+   server in production. [turn_return_window_s] bounds the whole measured
+   run (Eio_main start, spawn, protocol, exit): spawning the shell measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, and the
+   regression it guards against takes the holder's full 20 s. *)
+let turn_return_window_s = 5.0
+let pipe_holder_outliving_the_turn_s = 20.0
+
+let test_result_returns_before_a_background_child_releases_the_pipes () =
+  with_fixture ~pipe_holder_s:pipe_holder_outliving_the_turn_s [ init (); result () ] (fun path ->
+    let started = Unix.gettimeofday () in
+    match run_fixture ~timeout_s:2.0 path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      let elapsed = Unix.gettimeofday () -. started in
+      check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text;
+      check bool
+        (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
+        true
+        (elapsed < turn_return_window_s))
 ;;
 
 (* #28912 second shape: the CLI itself never exits after the result
@@ -1071,6 +1100,10 @@ let () =
             "result completes despite an open stdout holder"
             `Quick
             test_result_completes_even_when_stdout_stays_open
+        ; test_case
+            "result returns before a background child releases the pipes"
+            `Quick
+            test_result_returns_before_a_background_child_releases_the_pipes
         ; test_case
             "result completes despite a shutdown hang"
             `Quick

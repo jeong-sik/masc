@@ -314,7 +314,7 @@ val planning_backlog_counts :
     mark its Task rows wear. *)
 
 val planning_workspace_title :
-  Masc_tui_types.state -> tab:planning_tab -> window:string -> string
+  Masc_tui_types.state -> cols:int -> tab:planning_tab -> window:string -> string
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
@@ -383,7 +383,7 @@ val runtime_all_rows :
 val tools_scrolled_for_lines :
   Masc_tui_types.state -> 'a list -> Masc_tui_types.scrolled
 
-val config_pane_strip : Masc_tui_types.state -> string
+val config_pane_strip : cols:int -> before:string -> Masc_tui_types.state -> string
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

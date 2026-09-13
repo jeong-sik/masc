@@ -449,6 +449,20 @@ let test_git_diff_footer_names_scroll_code_and_files () =
     "j/k:scroll  v:open in code  p:open PR  t/g:task / goal  Left / Esc:back to files  r:refresh  Tab:next  q:quit"
     Masc_tui_keys.footer_hints_git_diff
 
+(* The Board draft's footers were literals in the renderer, so the pane above
+   them spelled Ctrl-E a second way and named Enter where the footer did not.
+   Pinned as display data the way the other projected footers are. *)
+let test_board_compose_footers_are_projected () =
+  check str "writing names the letters' exceptions and no q"
+    "type to write  Enter:newline  Ctrl-E:$EDITOR  Esc:menu  Tab:surfaces"
+    Masc_tui_keys.footer_hints_board_compose_writing;
+  check str "a new post's menu cycles the hearth"
+    "s:send  e:edit in $EDITOR  h:cycle hearth  d:discard  Esc:keep writing"
+    (Masc_tui_keys.footer_hints_board_compose_armed ~reply:false);
+  check str "a reply's menu has no hearth to cycle"
+    "s:send  e:edit in $EDITOR  d:discard  Esc:keep writing"
+    (Masc_tui_keys.footer_hints_board_compose_armed ~reply:true)
+
 let test_verification_footer_carries_the_verdict_keys () =
   (* Verification is a list/detail surface: Enter explains the request before
      the two-press approve or the $EDITOR reject reason changes it. *)
@@ -462,6 +476,21 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   check str "fusion names its list keys"
     "j/k:move  PgUp/PgDn:page  [ / ]:previous / next  K:calling Keeper  B:Board evidence  Home/End:top/bottom  Enter:open  Y:copy  Esc:back  /:find  n / N:next / previous match  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
+
+(* K and B answer in the detail as on the list; the detail footer named
+   neither, and a body row named them in its own notation. Both footers now
+   read the same two bindings. *)
+let test_fusion_detail_footer_names_the_caller_and_board_keys () =
+  let detail = Masc_tui_keys.footer_hints_fusion_detail ~position:"1-40/47" in
+  let holds needle haystack =
+    let n = String.length needle and h = String.length haystack in
+    let rec scan i = i + n <= h && (String.equal (String.sub haystack i n) needle || scan (i + 1)) in
+    scan 0
+  in
+  Alcotest.(check bool) "the detail names the calling Keeper" true (holds "K:calling Keeper" detail);
+  Alcotest.(check bool) "the detail names the Board evidence" true (holds "B:Board evidence" detail);
+  Alcotest.(check bool) "spelled as the list spells them" true
+    (holds "K:calling Keeper  B:Board evidence" (Masc_tui_keys.footer_hints Fusion))
 
 let test_fusion_historical_evidence_is_a_selectable_board_reference () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -1999,6 +2028,8 @@ let () =
     [ ( "table"
       , [ Alcotest.test_case "detail tab bindings cover the live keys" `Quick
             test_detail_tab_bindings_cover_the_live_keys
+        ; Alcotest.test_case "board compose footers are projected" `Quick
+            test_board_compose_footers_are_projected
         ; Alcotest.test_case "key atoms read the table notation" `Quick
             test_key_atoms_read_the_table_notation
         ; Alcotest.test_case "detail tab strip projects the table" `Quick
@@ -2087,6 +2118,8 @@ let () =
             test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Fusion pins the shared list projection" `Quick
             test_fusion_footer_pins_the_shared_list_projection
+        ; Alcotest.test_case "fusion detail footer names the caller and board keys" `Quick
+            test_fusion_detail_footer_names_the_caller_and_board_keys
         ; Alcotest.test_case "Fusion history is selectable without a retained run" `Quick
             test_fusion_historical_evidence_is_a_selectable_board_reference
         ; Alcotest.test_case "Keeper Runs clamps selection after list changes" `Quick

@@ -600,7 +600,10 @@ let rec finite_values = function
   | _ -> None
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
-  visual_text_lines ~failed_note ~height ~width view
+  match visual_lines ~failed_note ~height ~width view with
+  | Some lines ->
+      List.map (fun line -> String.concat "" (List.map snd line.cells)) lines
+  | None -> []
 
 let pending_action view =
   match view.last_action, view.action_receipt with
@@ -616,7 +619,7 @@ let action_target view =
           Option.bind view.snapshot (fun snapshot ->
             List.find_opt (fun instance -> String.equal instance.id id) snapshot.instances)))
   | Rows -> None
-  | Timeline | Connections -> selected_instance view
+  | Timeline | Connections -> None
 
 let open_actions ~request_id view =
   let* instance = match action_target view with

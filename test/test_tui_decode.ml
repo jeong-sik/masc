@@ -8703,8 +8703,54 @@ let test_required_display_keeps_rfc3339_string_verbatim () =
     Alcotest.(check string) "a present ISO twin is kept verbatim"
       "2026-08-29T10:40:00Z" rendered
 
+(* The stance used to reach the TUI as its wire word and was compared to
+   "yolo" in four places. Read through the mode's own reader, a listing is
+   a list of modes, and a word the build does not know is a wire error
+   naming the keeper rather than a keeper silently on auto. *)
+let test_tool_approval_mode_overrides_are_typed () =
+  let json =
+    `Assoc
+      [ ( "overrides"
+        , `List
+            [ `Assoc [ ("keeper", `String "alpha"); ("mode", `String "yolo") ]
+            ; `Assoc [ ("keeper", `String "beta"); ("mode", `String "auto") ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_tool_approval_mode_overrides json with
+  | Ok overrides ->
+      Alcotest.(check bool) "alpha is yolo" true
+        (List.assoc "alpha" overrides = Keeper_tool_approval_mode.Yolo);
+      Alcotest.(check bool) "beta is auto" true
+        (List.assoc "beta" overrides = Keeper_tool_approval_mode.Auto)
+  | Error err -> Alcotest.fail err
+
+let test_tool_approval_mode_unknown_word_fails () =
+  let json =
+    `Assoc
+      [ ( "overrides"
+        , `List [ `Assoc [ ("keeper", `String "alpha"); ("mode", `String "manual") ] ] )
+      ]
+  in
+  match Tui_decode.decode_tool_approval_mode_overrides json with
+  | Ok _ -> Alcotest.fail "an unknown mode word was accepted"
+  | Error err ->
+      Alcotest.(check bool) "the error names the keeper and the word" true
+        (let contains needle =
+           let n = String.length needle and h = String.length err in
+           let rec scan i = i + n <= h && (String.sub err i n = needle || scan (i + 1)) in
+           scan 0
+         in
+         contains "alpha" && contains "manual")
+
 let () =
   Alcotest.run "tui_decode" [
+    ( "decode_tool_approval_mode_overrides",
+      [ Alcotest.test_case "the wire word becomes the mode" `Quick
+          test_tool_approval_mode_overrides_are_typed
+      ; Alcotest.test_case "a word the mode does not know fails the read" `Quick
+          test_tool_approval_mode_unknown_word_fails
+      ] );
     ( "decode_verification_evidence",
       [ Alcotest.test_case "decodes the three item kinds" `Quick
           test_verification_evidence_decodes_items

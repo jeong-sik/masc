@@ -1613,9 +1613,11 @@ val decode_runtime_params :
     and purpose before an operator changes it. *)
 
 val decode_tool_approval_mode_overrides :
-  Yojson.Safe.t -> ((string * string) list, string) result
+  Yojson.Safe.t -> ((string * Keeper_tool_approval_mode.mode) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s
-    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+    [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. The mode is
+    read through {!Keeper_tool_approval_mode.mode_of_string}; a word it does
+    not know fails the read. *)
 
 type gate_pending_phase =
   | Gate_queued

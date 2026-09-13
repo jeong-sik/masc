@@ -5730,10 +5730,22 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        Keeper is attached to -- is actually decided under. An operator reading
        one for the other is how a call gets made that nobody meant to allow. *)
     add_section "Gate";
-    add_row "Chat asks (YOLO):"
-      (if List.mem k.k_name state.keeper_yolo_names then
-         (Theme.bad ()) ^ "skipped" ^ Ansi.reset
-       else Ansi.dim ^ "asked" ^ Ansi.reset);
+    (* The same word the chat header wears in capitals and the footer offers
+       after g, with what it does beside it. This row said "asked" under a
+       header saying AUTO. *)
+    add_row "Tool calls:"
+      (let mode =
+         if List.mem k.k_name state.keeper_yolo_names then
+           Masc.Keeper_tool_approval_mode.Yolo
+         else Masc.Keeper_tool_approval_mode.Auto
+       in
+       let tone =
+         match mode with
+         | Masc.Keeper_tool_approval_mode.Yolo -> Theme.bad ()
+         | Masc.Keeper_tool_approval_mode.Auto -> Ansi.dim
+       in
+       tone ^ Masc_tui_types.tool_mode_word mode ^ " \xc2\xb7 "
+       ^ Masc_tui_types.tool_mode_effect mode ^ Ansi.reset);
     (* "workspace" is where the stance comes from, not what it is. The chat
        header resolves the same inheritance before drawing it; this row left
        the reader to go and look it up. *)

@@ -32,12 +32,16 @@ let skill_source_id = function
   | Instance id -> "lane-" ^ Digestif.SHA256.(to_hex (digest_string ("instance\x00" ^ id)))
 let skill_export_handler = ref None
 let register_skill_export_handler handler = skill_export_handler := Some handler
+type observation_request = Idle | Refresh_sources | Observe_now
 type entry = {
   instance_id : string; run_id : string; package : package; binding : Yojson.Safe.t;
   mutable phase : phase; mutable seq : int; mutable output : output;
   mutable connection : connection option; mutable stopping : bool;
   mutable cleanup_running : bool; mutable wake : unit Eio.Promise.t;
-  mutable resolver : unit Eio.Promise.u; mutable pending : bool;
+  mutable resolver : unit Eio.Promise.u; mutable pending : observation_request;
+  refresh_interest : Lane_addon_sources.refresh_interest;
+  mutable last_committed_sources : string option;
+  mutable unchanged_source_refreshes : int;
   mutable running : bool; persistence_mutex : Eio.Mutex.t;
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
@@ -77,7 +81,8 @@ let entry_json e =
     "addon_id", `String e.package.id; "title", `String e.package.title;
     "revision", `String e.package.revision; "phase", phase_to_json e.phase;
     "observation_seq", `Int e.seq; "rows_count", `Int (List.length e.output.rows);
-    "observation_pending", `Bool e.pending; "coalesced_wakes", `Int e.coalesced_wakes;
+    "observation_pending", `Bool (e.pending<>Idle); "coalesced_wakes", `Int e.coalesced_wakes;
+    "unchanged_source_refreshes", `Int e.unchanged_source_refreshes;
     "binding", e.binding; "package", package_to_json e.package;
     "configuration", Option.fold ~none:`Null ~some:configuration_json e.configuration;
     "container_id", (match e.connection with None -> `Null | Some c -> `String c.container_id)]
@@ -86,12 +91,17 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
      The I/O thread sees only the immutable snapshot. *)
   let json = entry_json e in
   offload (fun () -> Lane_addon_store.save_binding m.store ~instance_id:e.instance_id json))
-let wake e =
-  if e.pending then e.coalesced_wakes <- e.coalesced_wakes + 1
-  else (e.pending <- true; Eio.Promise.resolve e.resolver ())
+let wake ?(request=Observe_now) e =
+  let previous = e.pending in
+  e.pending <- (match previous,request with
+    | Observe_now,_ | _,Observe_now -> Observe_now
+    | Refresh_sources,_ | _,Refresh_sources -> Refresh_sources
+    | Idle,Idle -> Idle);
+  if previous<>Idle then e.coalesced_wakes <- e.coalesced_wakes + 1
+  else if e.pending<>Idle then Eio.Promise.resolve e.resolver ()
 let clear_wake e =
   let promise, resolver = Eio.Promise.create () in
-  e.wake <- promise; e.resolver <- resolver; e.pending <- false
+  e.wake <- promise; e.resolver <- resolver; e.pending <- Idle
 let entries m = Hashtbl.to_seq_values m.entries |> List.of_seq
   |> List.sort (fun a b -> String.compare a.instance_id b.instance_id)
 let status_coverage e = {
@@ -314,6 +324,7 @@ let run ~sw backend m e =
               else (
                 let pending = e.wake in
                 Eio.Promise.await pending;
+                let request = e.pending in
                 clear_wake e;
                 if e.stopping then loop () else (
                   if not (Queue.is_empty e.action_queue) then (
@@ -323,12 +334,28 @@ let run ~sw backend m e =
                        on this worker; no Keeper turn waits on this queue. *)
                     wake e)
                   else (
-                    e.phase <- Observing;
+                    let previous_phase = e.phase in
+                    if request=Observe_now then e.phase <- Observing;
                     let result =
                       let* sources = backend.acquire ~store:m.store ~package:e.package ~binding:e.binding
                         ~resolve_lane_output:(resolve_lane_output m ~run_id:e.run_id) in
-                      let* output = c.observe ~binding:e.binding ~sources in
-                      commit_output m e ~sources output in
+                      if e.stopping then Ok () else
+                      let fingerprint =
+                        if e.package.refresh_policy=Source_changes
+                          && Lane_addon_sources.snapshot_files_only e.refresh_interest
+                        then Some (Lane_addon_store.digest (Yojson.Safe.to_string sources))
+                        else None in
+                      if request=Refresh_sources && previous_phase=Attached
+                        && Option.is_some fingerprint && fingerprint=e.last_committed_sources
+                      then (
+                        e.unchanged_source_refreshes <- e.unchanged_source_refreshes + 1;
+                        Ok ())
+                      else (
+                        e.phase <- Observing;
+                        let* output = c.observe ~binding:e.binding ~sources in
+                        let* () = commit_output m e ~sources output in
+                        e.last_committed_sources <- fingerprint;
+                        Ok ()) in
                     match result with Ok () -> () | Error message -> failed m e message);
                   loop ()))
             in loop ());
@@ -374,13 +401,15 @@ let manager config =
                      action_mutex = Eio.Mutex.create ();
                      configuration_status = `Null; configuration_nudge = (fun () -> ()) } in
       Hashtbl.add managers root m; m
-let notify_activity ~config =
+let notify_activity ~config ~activity =
   if Eio_context.root_switch_on_current_domain () then
     let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
     match Hashtbl.find_opt managers root with
     | None -> ()
     | Some m -> Hashtbl.iter (fun _ e ->
-        if e.running && not e.stopping then wake e) m.entries
+        if e.running && not e.stopping
+          && Lane_addon_sources.interested e.refresh_interest activity
+        then wake ~request:Refresh_sources e) m.entries
 let find m args = let* id = text args "instance_id" in
   match Hashtbl.find_opt m.entries id with Some e -> Ok e | None -> Error "unknown active instance"
 let historical m =
@@ -539,13 +568,15 @@ let validate_connection m ~run_id ~configuration_id ~binding =
   Ok input_installations
 
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration =
+  let* refresh_interest = Lane_addon_sources.refresh_interest binding in
   let* input_installations = match configuration with
     | None -> Lane_addon_sources.dependencies binding
     | Some owner -> validate_connection m ~run_id ~configuration_id:owner.id ~binding in
   let promise, resolver = Eio.Promise.create () in
   let e = { instance_id = Random_id.uuid_v7 (); run_id; package; binding;
     phase = Attached; seq = 0; output = {rows=[];coverage=[]}; connection = None;
-    stopping = false; cleanup_running = false; wake = promise; resolver; pending = false;
+    stopping = false; cleanup_running = false; wake = promise; resolver; pending = Idle;
+    refresh_interest; last_committed_sources=None; unchanged_source_refreshes=0;
     running = true; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     cancel_worker = None; configuration; input_installations } in

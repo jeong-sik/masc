@@ -23,7 +23,7 @@ let with_store f =
 let package dir max_bytes : Types.package = {
   id="source-test";revision="1";title="Source capture fixture";
   contributions=[Types.Observe];image="unused";command=["unused"];
-  directory=dir;skills_directory=None;action_tool=None;outputs=[];
+  directory=dir;skills_directory=None;action_tool=None;outputs=[];refresh_policy=Types.Every_hint;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   resources={cpus=0.5;memory_bytes=134217728L;pids=16;max_reply_bytes=max_bytes}}
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
@@ -210,7 +210,31 @@ let test_native_input_history_is_frozen_with_capture () = with_store (fun dir st
     ignore (msx (Msx_lane.eject ()));
     check string "machine removal preserves input evidence" expected (require (Store.read_jsonl store ref))))
 
+let test_source_activity_does_not_infer_ownership () =
+  let interest sources = Sources.refresh_interest (binding sources) |> require in
+  let msx = interest [`Assoc ["source_id",`String "screen";"kind",`String "msx_capture"]] in
+  let browser = interest [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
+    "lane",`String "automation";"tab_id",`Int 1;"target_id",`String "project";
+    "environment",`String "preview";"request_id",`String "capture"]] in
+  let dependent = interest [`Assoc ["source_id",`String "metric";"kind",`String "lane_output";
+    "installation_id",`String "producer";"selection",`String "latest_completed"]] in
+  check bool "MSX changes refresh only the declared native MSX source" true
+    (Sources.interested msx Sources.Msx_changed);
+  check bool "browser changes refresh only the declared browser source" true
+    (Sources.interested browser Sources.Browser_changed);
+  List.iter (fun activity ->
+    check bool "producer output dependencies do not subscribe to tool completions" false
+      (Sources.interested dependent activity);
+    check bool "owned environment has no invented external source" false
+      (Sources.interested (interest []) activity))
+    [Sources.Tool_completed;Sources.Msx_changed;Sources.Browser_changed];
+  check bool "unrelated completion does not refresh browser capture" false
+    (Sources.interested browser Sources.Tool_completed);
+  check bool "browser completion does not refresh MSX capture" false
+    (Sources.interested msx Sources.Browser_changed)
+
 let () = run "Lane source provenance" ["acquisition", [
+  test_case "activity follows declared typed sources" `Quick test_source_activity_does_not_infer_ownership;
   test_case "native input ledger is captured and retained with frame identity" `Quick test_native_input_history_is_frozen_with_capture;
   test_case "named ports select exact instance lanes and retain whole coverage" `Quick test_named_port_uses_exact_instance_and_keeps_coverage;
   test_case "file rotation keeps original bytes" `Quick test_file_rotation_keeps_exact_original_bytes;

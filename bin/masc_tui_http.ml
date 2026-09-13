@@ -1226,15 +1226,15 @@ let post_keeper_tool_approval ~(host : string) ~(port : int)
           | _ -> Error "approval response has no settled/remembered flags")
       | _ -> Error "approval response was not a JSON object")
 
-let post_keeper_turn_interrupt ~on_control_token ~(host : string) ~(port : int)
+let post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(request_id : string) :
     (Masc_tui_interrupt_signal.interrupt_signal, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
-         [ ("name", `String keeper_name)
+         ([ ("name", `String keeper_name)
          ; ("request_id", `String request_id)
-         ])
+         ] @ Option.fold ~none:[] ~some:(fun token -> ["expected_control_token", `String token]) expected_control_token))
   in
   match
     post_json ~host ~port ~path:keeper_turn_interrupt_path ~body

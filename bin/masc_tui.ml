@@ -6779,6 +6779,7 @@ let msg_entries_of_history_rows state keeper_name rows =
 ;;
 
 let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
+  let expected_control_token = List.assoc_opt request.keeper_name state.keeper_chat_control_tokens in
   let generation = begin_keeper_chat_control state request.keeper_name in
   let on_control_token token = enqueue_async mailbox
     (Keeper_chat_control_received (request.keeper_name, generation, token)) in
@@ -6789,7 +6790,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
   let run () =
     let result =
       try
-        Masc_tui_http.post_keeper_turn_interrupt ~on_control_token ~host ~port ~keeper_name
+        Masc_tui_http.post_keeper_turn_interrupt ~expected_control_token ~on_control_token ~host ~port ~keeper_name
           ~request_id
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -13433,6 +13434,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item
         else { item with oi_status = match result with
           | Ok (Masc_tui_interrupt_signal.Signalled _) -> Interrupt_signalled
+          | Ok Pending_admission_paused -> Interrupt_declined "Pending input paused; no active turn signalled"
           | Ok (Not_signalled { reason; detail }) ->
             Interrupt_declined (Option.value ~default:reason detail)
           | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
@@ -13450,6 +13452,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              | Ok (Masc_tui_interrupt_signal.Signalled { turn_id }) ->
                  Keeper_chat_transcript.Signal_sent
                    { turn_id; signalled_at_ns = Mtime_clock.elapsed_ns () }
+             | Ok Masc_tui_interrupt_signal.Pending_admission_paused -> Keeper_chat_transcript.Admission_paused
              | Ok (Masc_tui_interrupt_signal.Not_signalled { reason; detail }) ->
                  Keeper_chat_transcript.Signal_declined
                    (match detail with

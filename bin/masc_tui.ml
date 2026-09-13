@@ -3546,10 +3546,17 @@ let launch_resources_list state ~mailbox =
       enqueue_async mailbox (Resources_listed (Error "Eio switch is unavailable"))
 
 let launch_resource_read state ~mailbox ~uri =
+  let same_resource =
+    match state.resource_content with
+    | Some (current, _) -> String.equal current uri
+    | None -> false
+  in
   state.resource_pending_uri <- Some uri;
-  state.resource_content <- None;
-  state.resource_content_error <- None;
-  state.resource_scroll <- 0;
+  if not same_resource then begin
+    state.resource_content <- None;
+    state.resource_content_error <- None;
+    state.resource_scroll <- 0
+  end;
   let host = server_peer_host in
   let port = state.port in
   let request_id = Printf.sprintf "tui-res-%.6f" (Unix.gettimeofday ()) in
@@ -4153,8 +4160,15 @@ let selected_prompt_for_state state =
 let launch_librarian_input_load state ~mailbox ~prompt_key =
   let host = server_peer_host in
   let port = state.port in
-  state.prompts_librarian_input <- None;
-  state.prompts_librarian_input_error <- None;
+  let same_prompt =
+    match state.prompts_librarian_input with
+    | Some (key, _) -> String.equal key prompt_key
+    | None -> false
+  in
+  if not same_prompt then begin
+    state.prompts_librarian_input <- None;
+    state.prompts_librarian_input_error <- None
+  end;
   state.prompts_librarian_input_loading <- true;
   let run () =
     let result =
@@ -5047,12 +5061,8 @@ let refresh_repository_changes state ~mailbox =
   | Some scope ->
       (match state.repository_changes_diff_path with
        | Some path ->
-           state.repository_changes_diff <- None;
-           state.repository_changes_diff_error <- None;
            launch_repository_changes_diff_load state ~mailbox ~scope ~path
        | None ->
-           state.repository_changes <- None;
-           state.repository_changes_error <- None;
            launch_repository_changes_load state ~mailbox ~scope)
 
 let open_repository_change_in_code state ~mailbox ~scope
@@ -12188,7 +12198,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       in
       if still_selected then begin
         state.prompts_librarian_input_loading <- false;
-        state.config_scroll <- 0;
+        (match state.prompts_librarian_input with
+         | Some (key, _) when String.equal key prompt_key -> ()
+         | Some _ | None -> state.config_scroll <- 0);
         match result with
         | Ok lines ->
             state.prompts_librarian_input <- Some (prompt_key, lines);
@@ -12493,8 +12505,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                    contents
                in
                state.resource_content <- Some (uri, contents);
-               state.resource_content_error <- None;
-               state.resource_scroll <- 0
+               state.resource_content_error <- None
            | Error detail ->
                state.resource_content_error <- Some (uri, detail))
       | Some _ | None -> ())
@@ -21511,6 +21522,9 @@ and is loaded on demand through keeper_skill.
                           ~mailbox:async_messages;
                         launch_code_file_load state ~mailbox:async_messages
                           ~path)))
+       | Some "o" | Some "O" when state.view = Lanes ->
+           launch_lane_addons state ~mailbox:async_messages
+             Masc_tui_lane_addons.Inspect
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
               the one the list marks, which the arrow keys move. *)

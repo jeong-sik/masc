@@ -317,7 +317,7 @@
  (name masc_tui_server_lifecycle)
  (wrapped false)
  (modules masc_tui_server_lifecycle)
- (libraries masc.masc_process unix))
+ (libraries masc.masc_core masc.fs_compat masc.masc_process unix))
 
 ;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
 ;; Own library, no dependencies, so the rule runs under a test without a TTY,

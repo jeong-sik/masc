@@ -2312,6 +2312,26 @@ let find_executable_in_path name =
                let candidate = Filename.concat dir name in
                if Sys.file_exists candidate then Some candidate else None)
 
+(* Why a server this TUI started is gone, as three events. The events pane
+   is half the screen and cuts each line at its width, so the exit status
+   leads the headline and the reason and the file each start a line of their
+   own. The file is named from the base path, which the header already
+   shows; the absolute path spent the pane on a prefix the reader knows.
+   Events are drawn newest first, so they are added last-to-first to read
+   top down: how it ended, what it said, where the rest is. *)
+let server_output_location ~port (output : Masc_tui_server_lifecycle.startup_output) =
+  match output with
+  | Masc_tui_server_lifecycle.Written_to _ ->
+    "full output: " ^ Masc_tui_server_lifecycle.startup_output_file ~port
+  | Masc_tui_server_lifecycle.Not_kept _ ->
+    Masc_tui_server_lifecycle.describe_output output
+
+let note_server_exit ~note ~port (report : Masc_tui_server_lifecycle.exit_report) =
+  note (server_output_location ~port report.output);
+  note (Masc_tui_server_lifecycle.describe_last_line report.last_line);
+  note
+    (Printf.sprintf "masc server exited (%s) before it was ready" report.status)
+
 (* Start a background server on demand and report readiness without blocking
    rendering. The handle prevents duplicate starts while the child is alive. *)
 let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
@@ -2359,8 +2379,8 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
                       in
                       let outcome =
                         Masc_tui_server_lifecycle.wait_healthy ~health_ok
-                          ~child_alive:(fun () ->
-                            Masc_tui_server_lifecycle.is_running owned)
+                          ~child_exit:(fun () ->
+                            Masc_tui_server_lifecycle.exit_report owned)
                           ~attempts:60 ~sleep
                       in
                       (* A new start may replace an exited child while this
@@ -2375,10 +2395,13 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
                                   "masc background server is up (PID %d); it stays running when the TUI closes"
                                   (Masc_tui_server_lifecycle.owned_pgid owned));
                           on_ready ()
-                      | Masc_tui_server_lifecycle.Server_exited ->
+                      | Masc_tui_server_lifecycle.Server_exited report ->
                           tui_owned_server := None;
-                          note "masc server exited before it was ready"
+                          note_server_exit ~note ~port report
                       | Masc_tui_server_lifecycle.Timed_out _ ->
+                          note
+                            (server_output_location ~port
+                               (Masc_tui_server_lifecycle.startup_output owned));
                           note "masc server did not answer /health in time")))
       )
 

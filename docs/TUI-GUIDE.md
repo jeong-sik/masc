@@ -106,6 +106,46 @@ lands in Recent Events:
 A count of `0` next to `data unreliable` means the read failed. It does not
 mean the board is empty.
 
+### When nothing answers
+
+When every read fails because nothing listens on the port, the TUI starts a
+server once per session: `masc start --base-path <base> --host 127.0.0.1
+--port <port>`, with the `masc` beside the TUI binary, or else the one on
+`PATH`. The server keeps running after the TUI closes. While the header says
+`[disconnected]`, `s` on the Keepers list starts one by hand.
+
+The server's stdout and stderr go to `.masc/logs/masc-server-<port>.log` under
+the base path, emptied at each start. When a server refuses to start before its
+own log exists, that file is the only place the reason is written. The TUI
+reads its last line back when the server exits before `/health` answers.
+
+Measured on 2026-09-13 with the base path already held by a server on port
+8976 and the TUI pointed at port 8977. The TUI added these four events, newest
+first:
+
+```
+masc server exited (exit 1) before it was ready
+[FATAL] Base path <base> is locked. The lease records PID 15310; its namespace and current holder are unverified. Lock file: '…'. …
+full output: .masc/logs/masc-server-8977.log
+starting masc server here...
+```
+
+The events pane is half the screen. At 120 columns it cut each event at 57
+cells, timestamp included: the headline lost its last word and the lock line
+was cut inside the base path, so open the file for the whole line. The file held 961 bytes: one `[INFO]` line
+and the `[FATAL]` line. If the server is still not answering after 30 seconds,
+the TUI says `masc server did not answer /health in time` and names the same
+file.
+
+`masc setup` starts its server the same way. When that server exits first,
+setup stops with the exit status, the last line and the absolute path of the
+file.
+
+A server that does start keeps writing its console log into this file until it
+stops. Three runs of 18 to 44 minutes with one keeper booted wrote about 13 KB
+while booting, then 5 to 35 KB an hour. The file is not rotated; the next start
+on that port empties it.
+
 ## Navigation
 
 Every surface draws the Tab ring on its top row with the active surface

@@ -134,6 +134,60 @@ and the journey goes on to the sandbox, exit 0, `runtime.toml` untouched. An
 optional step cannot fail the thing it is optional to — and by this point the
 workspace and the model connection are already saved.
 
+### Where the chosen voice is written, and why it matters
+
+Walked on a fresh workspace 2026-09-13, `masc init` then
+`masc voice-local-setup --voice Yuna`, then one keeper mapped by hand:
+
+```toml
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+
+[voice.tts]
+default_voice = "Yuna"
+
+[voice.tts.agent_voices]
+alpha = "Eddy (한국어(한국))"
+```
+
+```
+masc voice-verify --agent alpha  →  119044 bytes of audio in "Eddy (한국어(한국))"
+masc voice-verify --agent beta   →   85908 bytes of audio in "Yuna"
+```
+
+The mapped keeper gets its own voice; an unmapped one gets the workspace
+default. That is the order a reader expects, and it is not free — it depends
+on the chosen voice being written to `[voice.tts]` and **not** to the
+endpoint.
+
+A voice on the endpoint outranks `agent_voices`. Measured on the same
+workspace with the one line `default_voice = "Yuna"` added under
+`[[voice.tts.endpoints]]`:
+
+| Endpoint line | keeper `alpha` (mapped to Eddy) | keeper `beta` (unmapped) |
+|---|---|---|
+| present | **Yuna**, 85,908 bytes — the mapping is ignored | Yuna |
+| absent | **Eddy**, 119,044 bytes | Yuna, 85,908 bytes |
+
+Nothing is logged in the first row. The keeper speaks, the bytes are real, and
+the voice is simply not the one that was assigned.
+
+The field exists for a reason and is not going away: a voice name is
+provider-shaped — `say` takes a label, ElevenLabs a 20-character `voice_id` —
+so a workspace that already has a `[voice.tts]` section has a default that
+belongs to the other provider, and adding `say` alongside it has to carry its
+own. So `voice-local-setup` writes the endpoint voice only in that case
+(`Voice_setup.voice_placement`), and a fresh mac — one provider, no section
+yet — gets the section default with per-keeper voices layered over it.
+
+The cost of the remaining case is worth stating plainly: on a workspace with
+two TTS providers, `agent_voices` does not reach the second one. There is no
+per-provider agent mapping. A keeper mapped to an ElevenLabs `voice_id` would
+otherwise have that id handed to `say`, which does not fail on a name it does
+not have — it speaks in the system voice.
+
 ### Outside the journey
 
 ```

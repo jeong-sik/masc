@@ -6595,7 +6595,7 @@ let activity_tab_strip ~on_logs =
 
 (* The title: the strip, then what the reading on screen holds, after a dot.
    The count used to follow the strip directly, so on Events it sat against
-   the tab that is not open -- "▸Events  Logs (0 of 0 held, turns)" -- and read
+   the tab that is not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read
    as that tab's count. It stays after the strip rather than moving before it,
    so the tabs do not shift sideways when the count grows a digit. *)
 let activity_title ~on_logs reading =
@@ -10501,11 +10501,17 @@ let render_acting (state : state) =
         Printf.sprintf "feed: closed after %d (%s)" events
           (Terminal_text.single_line reason)
   in
+  (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
+     but under Turns a row is a folded turn and the held count is events, so
+     "3 of 120" compared two different things as if one were part of the
+     other. The scope name left with it: the row under the feed says it,
+     "scope turns · …", one line down. *)
   let header =
     Printf.sprintf "%s  %s  %s"
       (activity_title ~on_logs:false
-         (Printf.sprintf "(%d of %d held, %s)" shown held
-            (Acting.filter_label state.acting_filter)))
+         (Printf.sprintf "(%s \xc2\xb7 %s held)"
+            (Message_layout.count_noun shown "row")
+            (Message_layout.count_noun held "event")))
       timestamp
       (connection_badge state)
   in

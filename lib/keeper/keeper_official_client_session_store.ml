@@ -682,12 +682,16 @@ let to_yojson binding =
 
 let of_yojson = function
   | `Assoc fields ->
-    (* Absence is explicitly unbound, never fabricated imported history. *)
-    let fields = if List.mem_assoc "context_frontier" fields then fields
-      else ("context_frontier", `Null) :: fields in
+    (* Optional new evidence is independent of the existing session identity.
+       Absence is unrecorded provenance, never an acknowledged frontier. *)
+    let frontier_fields, fields = List.partition (fun (name, _) ->
+      String.equal name "context_frontier") fields in
+    let* context_frontier = match frontier_fields with
+      | [] -> Ok None
+      | [(_, json)] -> context_frontier_of_yojson json
+      | _ -> Error "duplicate context frontier proof" in
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
      | [ "client_kind", `String client_kind_json
-       ; "context_frontier", context_frontier_json
        ; "last_recovery_resolution", last_resolution_json
        ; "last_transient_release", last_transient_release_json
        ; "phase", phase_json
@@ -702,7 +706,6 @@ let of_yojson = function
        else
          let* client_kind = client_kind_of_string client_kind_json in
          let* phase = phase_of_yojson phase_json in
-         let* context_frontier = context_frontier_of_yojson context_frontier_json in
          let* last_recovery_resolution =
            recovery_resolution_record_opt_of_yojson last_resolution_json
          in

@@ -66,7 +66,7 @@ let apply (operation : Operation.t) command =
   if is_member then Error (Invalid_input "message belongs to a shared execution; operate on batch_execution_id")
   else if Option.is_some operation.batch_membership && (match command with
     | Edit_queued _ -> true
-    | Start _ | Requeue_runtime_retry | Move_queued _ | Cancel_queued _
+    | Start _ | Requeue_continuation | Move_queued _ | Cancel_queued _
     | Succeed_running _ | Fail_running _ -> false)
   then Error (Invalid_input "shared execution input is already frozen")
   else match command, operation.state with

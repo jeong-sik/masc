@@ -639,9 +639,11 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
     (* Full canonical context is data, not a guessed unseen suffix. Resume
        replaces this configuration on the existing vendor thread; it never
        appends native tool calls into the vendor execution stream. *)
-    let snapshot_messages = match thread_mode with
-      | Runtime_codex_app_server.Start -> prepared.messages
-      | Runtime_codex_app_server.Resume _ -> initial_messages in
+    let snapshot_messages = List.filter (fun (message : Agent_core.Types.message) ->
+      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
+      <> Agent_core.Types.Extra_system_context_provenance.Present) prepared.messages in
+    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
+      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
     let canonical_snapshot =
       `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
     let snapshot_sha256 = canonical_snapshot |> Yojson.Safe.to_string
@@ -667,6 +669,9 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
         ; Yojson.Safe.to_string (`Assoc
             ["schema", `String "masc.official-client-canonical-context.v1";
              "snapshot_sha256", `String snapshot_sha256;
+             "source_snapshot_sha256", `String source_snapshot_sha256;
+             "source_message_count", `Int (List.length initial_messages);
+             "projection", `String "prepared_model_input";
              "messages", canonical_snapshot;
              "admission_vendor_turn", encode_turn official_client_continuation;
              "original_vendor_turn", encode_turn official_client_original_turn]) ]
@@ -706,9 +711,7 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
           (match thread_mode with
            | Runtime_codex_app_server.Start -> Host.Whole_input_transmitted prepared.messages
            | Runtime_codex_app_server.Resume _ ->
-             Host.Whole_input_transmitted
-               (initial_messages @ List.filter (fun (message : Agent_core.Types.message) ->
-                  message.role = System) prepared.messages))
+             Host.Whole_input_transmitted prepared.messages)
       with
       | () -> ()
       | exception exn ->

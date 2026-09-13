@@ -9,15 +9,16 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context =
+let fixture root ~reject_context ~overflow_resume =
   let capture = Filename.concat root "requests.jsonl" in
   let command = Filename.concat root "codex-fixture" in
   write command (Printf.sprintf {|#!/usr/bin/env python3
-import json, sys
+import json, sys, os
 if '--masc-warmup' in sys.argv:
     sys.exit(0)
 capture = %S
 reject_context = %s
+overflow_resume = %s
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -41,14 +42,19 @@ for line in sys.stdin:
             emit({'id':ident,'result':{}})
     elif method == 'turn/start':
         emit({'id':ident,'result':{'turn':{'id':turn_id}}})
+        if overflow_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.overflowed'):
+            with open(capture+'.overflowed', 'w') as out:
+                out.write('rejected before effects')
+            emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[],'status':'failed','error':{'message':'context is full','codexErrorInfo':'contextWindowExceeded'}}}})
+            continue
         item = {'type':'agentMessage','id':'answer','text':'CONTEXT_RECEIVED','phase':'final_answer'}
         emit({'method':'item/completed','params':{'threadId':'context-thread','turnId':turn_id,'completedAtMs':1,'item':item}})
         emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[item],'status':'completed'}}})
-|} capture (if reject_context then "True" else "False"));
+|} capture (if reject_context then "True" else "False") (if overflow_resume then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(reject_context = false) test =
+let with_fixture ?(reject_context = false) ?(overflow_resume = false) test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Eio_context.set_env env;
   Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw @@ fun () ->
@@ -59,7 +65,7 @@ let with_fixture ?(reject_context = false) test =
   Unix.mkdir root 0o700;
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context in
+  let command, capture = fixture root ~reject_context ~overflow_resume in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path (Printf.sprintf {|
 [providers.codex]
@@ -78,7 +84,7 @@ default = "codex.context"
     | Some {execution=Runtime_execution.Codex_app_server config;_} -> config
     | Some _ | None -> fail "fixture runtime missing" in
   let reports = ref [] in
-  let run ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
+  let run ?(initial_messages=[Agent_core.Types.user_msg "Previous completed work"]) ?official_client_continuation ?official_client_original_turn ?(goal="Continue from current World State.") ~instructions ~world () =
     let hooks = { Agent_core.Hooks.empty with before_turn_params = Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         Agent_core.Hooks.AdjustParams {current_params with extra_system_context=Some world}
@@ -88,7 +94,7 @@ default = "codex.context"
           ~runtime:(Runtime.get_runtime_by_id "codex.context" |> Option.get)) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
       ~pre_tool_rejects:(ref []) ~base_path:root ~goal ?official_client_continuation ?official_client_original_turn
       ~goal_blocks:None ~system_prompt:instructions ~tools:[]
-      ~initial_messages:[Agent_core.Types.user_msg "Previous completed work"]
+      ~initial_messages
       ~model_input_projection:None ~on_transmitted_model_input:(fun report -> reports := report :: !reports)
       ~hooks:(Some hooks) ~context_injector:None ~context:(Some (Agent_core.Context.create ()))
       ~event_bus:None ~raw_trace:None ~on_event:None ~config ()
@@ -198,7 +204,43 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let sent = params |> member "input" |> items |> List.hd |> member "text" |> text in
   check string "the model receives only continuation intent" goal sent
 
+let test_resumed_context_overflow_shrinks_configuration () =
+  with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
+  let first = run ~instructions:"Keeper instructions" ~world:"world" () in
+  successful first;
+  let settled = Option.get first.Keeper_codex_runtime.settled_session in
+  let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
+    | Settled turn -> turn.session_id, turn.turn_id | _ -> fail "initial turn not settled" in
+  let operation_id = Keeper_chat_operation.Operation_id.of_string "context-shrink-original" |> require in
+  let seed = match Keeper_semantic_execution.create
+      ~id:(Keeper_execution_scope_id.direct_operation operation_id)
+      ~input:(`String "original operation") ~sources:[] ~now:1. with
+    | Ok value -> value | Error error -> fail (Keeper_semantic_execution.error_to_string error) in
+  let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+    {client_kind=settled.client_kind;runtime_id=settled.runtime_id;session_id;turn_id;
+     tool_surface_sha256=settled.tool_surface_sha256;frame=seed.frame} in
+  let initial_messages = List.init 64 (fun index -> Agent_core.Types.user_msg
+    (Printf.sprintf "%d:%s" index (String.make 4096 'x'))) in
+  successful (run ~initial_messages ~official_client_continuation:checkpoint
+    ~official_client_original_turn:checkpoint ~instructions:"Keeper instructions" ~world:"world" ());
+  let resumes = read_requests capture |> List.filter (fun row -> member "method" row = `String "thread/resume") in
+  match resumes with
+  | [first; second] ->
+    let wire row = row |> member "params" |> member "developerInstructions" |> text in
+    check bool "retry sends smaller replacement configuration" true
+      (String.length (wire second) < String.length (wire first));
+    List.iter (fun row ->
+      check string "both attempts retain original vendor session" session_id
+        (row |> member "params" |> member "threadId" |> text);
+      let snapshot = wire row |> String.split_on_char '\n' |> List.rev |> List.hd |> Yojson.Safe.from_string in
+      check int "source provenance remains whole even when projection shrinks" 64
+        (snapshot |> member "source_message_count" |> Yojson.Safe.Util.to_int);
+      check string "original operation turn survives capacity retry" turn_id
+        (snapshot |> member "original_vendor_turn" |> member "turn_id" |> text)) resumes
+  | _ -> fail "expected exactly one context-capacity retry on the same vendor thread"
+
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "resumed context overflow shrinks replacement configuration" `Quick test_resumed_context_overflow_shrinks_configuration;
   test_case "cooperative native resume does not replay original input" `Quick test_cooperative_resume_sends_only_remaining_work_instruction;
   test_case "a resumed native thread is not written to per turn" `Quick test_resume_persists_no_per_turn_context;
   test_case "context injection must be acknowledged before model turn" `Quick test_rejected_context_never_submits_turn]]

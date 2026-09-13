@@ -51,7 +51,13 @@ let read_ack_and_restart () = with_workspace (fun config ->
   check int "named output excludes other rows" 1 (List.length (member "output" first |> member "rows" |> Yojson.Safe.Util.to_list));
   let repeated=call config "researcher" (args "read") |> ok in
   check bool "lost response can be read again" true (receipt first=receipt repeated);
+  let manager_state () = call config "operator" (`Assoc ["operation",`String "inspect"])
+    |> ok |> member "reader_states" |> Yojson.Safe.Util.to_list |> List.hd in
+  check int "manager inspection does not turn reading into acknowledgment" 0
+    (manager_state () |> member "after_sequence" |> Yojson.Safe.Util.to_int);
   ignore(ack config (receipt first) |> ok);
+  check int "manager sees acknowledged position without impersonating reader" 1
+    (manager_state () |> member "after_sequence" |> Yojson.Safe.Util.to_int);
   let second=call config "researcher" (args "read") |> ok in
   check int "new store handle resumes durable sequence" 2 (receipt second |> member "sequence" |> Yojson.Safe.Util.to_int);
   check bool "old receipt cannot acknowledge a new observation" true (Result.is_error (ack config (receipt first)));

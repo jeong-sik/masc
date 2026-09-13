@@ -1049,7 +1049,7 @@ let test_batch_preserves_original_user_history_once () =
   Fun.protect ~finally:(fun () -> ignore (Store.close store)) (fun () ->
     let continuation_channel = Keeper_continuation_channel.dashboard ~thread_id:"keeper:batch-history" |> ok in
     let source = Payload.source_to_json ~submitted_by:"operator" ~thread_id:"keeper:batch-history"
-      ~continuation_channel ~surface:(Surface_ref.Dashboard {session_id=None})
+      ~continuation_channel ~surface:(Masc.Surface_ref.Dashboard {session_id=None})
       ~channel:"" ~channel_user_id:"" ~channel_user_name:"" ~channel_workspace_id:""
       ~conversation_id:None ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
       ~user_row_origin:History.Needs_append |> ok in
@@ -1086,8 +1086,11 @@ let test_batch_member_events_pass_request_bound_stream_decode () =
   let module Projection = Server_keeper_chat_agui_projection in
   let member_id = match Keeper_chat_operation.Operation_id.of_string request.request_id with
     | Ok id -> id | Error detail -> fail detail in
+  let owner_id = match Keeper_chat_operation.Operation_id.of_string "batch-owner" with
+    | Ok id -> id | Error detail -> fail detail in
   let events =
     [ Events.Run_started {run_id="keeper-operation-run-batch-owner"; thread_id}
+    ; Events.Batch_bound {operation_id=owner_id; execution_id=owner_id}
     ; Events.Text_message_start {message_id="keeper-operation-message-batch-owner"; role=Events.Assistant}
     ; Events.Text_delta "hello"
     ; Events.Reply_details {reply="hello"; turn_outcome=Masc.Keeper_turn_outcome.Visible_reply;

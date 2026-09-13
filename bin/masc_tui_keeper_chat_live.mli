@@ -51,6 +51,7 @@ type tool_occurrence =
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
+  | Batch_bound of Masc_tui_keeper_chat_projection.batch_binding
   | Runtime_attempt_started of
       { runtime_id : string option
       ; attempt_index : int option

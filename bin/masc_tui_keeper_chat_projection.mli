@@ -164,6 +164,9 @@ val known_custom_names : string list
 (** Decode the acceptance payload for both the strict whole-stream reader
     and the incremental live reader. [expected_request_id] additionally binds
     the strict response to the request that opened it. *)
+type batch_binding = { operation_id : string; execution_id : string }
+val decode_batch_binding : ?expected_request_id:string -> Yojson.Safe.t -> (batch_binding, stream_error) result
+
 val decode_acceptance
   :  ?expected_request_id:string
   -> Yojson.Safe.t

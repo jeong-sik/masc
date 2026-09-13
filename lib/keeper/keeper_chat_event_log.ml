@@ -149,6 +149,9 @@ let stream_protocol_error_of_json json =
 
 let keeper_chat_event_to_json event =
   match event with
+  | Batch_bound { operation_id; execution_id } ->
+    type_tag "batch_bound" ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
+      "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]
   | Run_started { run_id; thread_id } ->
     type_tag "run_started" [ "run_id", `String run_id; "thread_id", `String thread_id ]
   | Text_message_start { message_id; role } ->
@@ -351,6 +354,10 @@ let keeper_chat_event_of_json json =
       Ok
         (Reply_details
            { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref })
+    | "batch_bound" ->
+      let* operation_id = Keeper_chat_operation.Operation_id.of_string (json |> member "operation_id" |> to_string) in
+      let* execution_id = Keeper_chat_operation.Operation_id.of_string (json |> member "execution_id" |> to_string) in
+      Ok (Batch_bound {operation_id; execution_id})
     | "continuation_checkpoint" ->
       Ok
         (Continuation_checkpoint

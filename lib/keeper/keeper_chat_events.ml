@@ -59,6 +59,7 @@ type continuation_checkpoint =
 
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
+  | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end

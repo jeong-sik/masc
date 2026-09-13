@@ -64,6 +64,7 @@ let select head candidates =
 let event_for_member ~operation_id event =
   let id = Operation.Operation_id.to_string operation_id in
   match event with
+  | Keeper_chat_events.Batch_bound binding -> Keeper_chat_events.Batch_bound {binding with operation_id}
   | Keeper_chat_events.Run_started { thread_id; _ } ->
     Keeper_chat_events.Run_started { thread_id; run_id = "keeper-operation-run-" ^ id }
   | Keeper_chat_events.Run_finished _ ->

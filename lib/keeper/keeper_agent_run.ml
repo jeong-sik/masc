@@ -781,8 +781,8 @@ let run_turn
       ?deferred_runtime_lane
       ?on_runtime_retry_deferred
       ?on_runtime_attempt_failed
-      ?on_runtime_lane_terminal_error
       ?on_produced_checkpoint
+      ?on_runtime_lane_terminal_error
       ?on_deferred_runtime_consumed
       ?(is_retry = false)
       ?shared_context

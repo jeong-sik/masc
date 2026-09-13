@@ -16,9 +16,18 @@ The operator must explicitly configure
 existing admitted catalog targets. General runtime provisioning does not enable
 this lane or choose a model. CLI tails have no workspace-owned execution
 adapter in this unit and produce an explicit configuration/execution error;
-they are not silently ignored. After changing configuration, the next committed
-memory change or server startup observes it. This unit does not claim an
-immediate configuration-change wake.
+they are not silently ignored. Runtime slot changes, preset batch changes and
+file edits are observed on the next memory commit or server startup.
+
+Successful HTTP `POST /api/v1/prompts` Set/Clear of the exact
+`workspace_memory_curator` key persists first, then queues a reevaluation on the
+existing canonical workspace owner. The response and Dashboard distinguish
+`queued`, `no_owner`, and `unavailable`; persistence success does not mean a
+model was called or completed. A disabled lane may accept a wake without
+executing. The current execution keeps its captured prompt; pending work resolves
+the latest persisted override after that execution. The same request identity
+still reuses a prior successful result. Invalid templates and failed writes do
+not wake the owner. Other prompt keys do not notify this lane.
 
 `workspace_memory_curator` is a normal Prompt Registry Markdown asset with the
 `workspace_memory_inventory` template variable. File/override resolution occurs

@@ -59,6 +59,23 @@ let runtime = {js|function browserScene(args) {
     state.nodes.set(id,new WeakRef(element));
     return id;
   };
+  const regionContexts = new WeakMap();
+  // Region context is an observed semantic ancestor, not a site selector.
+  // Prefer the nearest article for feeds and threads, then the nearest main;
+  // otherwise retain the closest standard landmark that was actually exposed.
+  const attribute = (element, name) =>
+    typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
+  const regionRole = element => attribute(element,'role') || element.localName || '';
+  const regionTokens = new Set(['main','navigation','complementary','region','log',
+    'banner','contentinfo','search','form','article','header','footer','section']);
+  const semanticRegion = element => {
+    if (!element || element.nodeType !== 1) return false;
+    const tag = element.localName || '', role = attribute(element,'role') || '';
+    if (['main','nav','aside','section','article','header','footer','search'].includes(tag)) return true;
+    if (role.split(/\s+/).some(token => regionTokens.has(token))) return true;
+    return tag === 'form' && (attribute(element,'aria-label') !== null
+      || attribute(element,'aria-labelledby') !== null);
+  };
   const maxChars = args.maxChars;
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
     throw new Error('invalid_scene_max_chars');
@@ -103,6 +120,50 @@ let runtime = {js|function browserScene(args) {
         width:Math.min(right,r.right)-Math.max(left,r.x),
         height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
       .filter(r => r.width>0 && r.height>0);
+  };
+  const visibleText = element => {
+    const pending=Array.from(element.childNodes || []).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
+  const regionLabel = element => {
+    const labelledBy = (attribute(element,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+    const heading = typeof element.querySelector === 'function'
+      ? element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]') : null;
+    const headingText = heading && visible(heading) ? visibleText(heading) : '';
+    const candidates = [attribute(element,'aria-label'), labelledBy, headingText];
+    if (semanticRegion(element)) candidates.push(regionRole(element));
+    for (const candidate of candidates) {
+      const label = typeof candidate === 'string' ? candidate.trim() : '';
+      if (label) return label;
+    }
+    return semanticRegion(element) ? regionRole(element) : '';
+  };
+  const ancestorRegion = element => {
+    let first = null, article = null, main = null;
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      if (!semanticRegion(ancestor) || !visible(ancestor)) continue;
+      let candidate = regionContexts.get(ancestor);
+      if (!candidate) {
+        candidate = {nodeId:nodeId(ancestor),role:regionRole(ancestor),label:regionLabel(ancestor)};
+        regionContexts.set(ancestor,candidate);
+      }
+      if (!first) first = candidate;
+      if (!article && candidate.role === 'article') article = candidate;
+      if (!main && candidate.role === 'main') main = candidate;
+    }
+    return article || main || first;
   };
   const svgVisibleText = element => {
     if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
@@ -150,6 +211,7 @@ let runtime = {js|function browserScene(args) {
     if (text.length !== rawText.length) truncated=true;
     chars+=Array.from(text).length;
     nodes.push({kind,nodeId:nodeId(element),tag:element.localName,text,rects,sourceContext:sourceContext(element),
+      ancestorRegion:kind === 'region' ? null : ancestorRegion(element),
       color:style.color,fontSize:Number.parseFloat(style.fontSize),
       fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra});
   };
@@ -163,10 +225,7 @@ let runtime = {js|function browserScene(args) {
       if (truncated) break;
       if (!visible(region)) continue;
       const role = region.getAttribute('role') || region.localName;
-      const labelledBy = (region.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean)
-        .map(id => document.getElementById(id)?.textContent || '').join(' ').trim();
-      const heading = region.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]');
-      const name = region.getAttribute('aria-label') || labelledBy || heading?.textContent || role;
+      const name = regionLabel(region);
       describe('region',region,name,boxes(region.getClientRects(),region),{role});
     }
   }
@@ -185,9 +244,7 @@ let runtime = {js|function browserScene(args) {
       if (!scrollsY && !scrollsX) continue;
       const rects = boxes(element.getClientRects(),element);
       if (!rects.length) continue;
-      const heading = element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]');
-      const name = element.getAttribute('aria-label') || heading?.textContent
-        || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
+      const name = regionLabel(element) || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
       // The same element may already be a landmark: keep one reference.
       const existing = nodes.find(node => node.nodeId === state.ids.get(element));
       if (!existing) describe('region',element,name,rects,{role:'scroll-area'});

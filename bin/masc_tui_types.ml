@@ -3830,6 +3830,12 @@ module Browser_lane_view = struct
           "truncated",`Bool scene.content.truncated;
           "tag",`String node.tag;"text",`String node.text;
           "headingLevel",(match node.heading_level with None -> `Null | Some level -> `Int level);
+          "ancestorRegion",(match node.ancestor_region with
+            | None -> `Null
+            | Some region -> `Assoc ["documentId",`String scene.content.document_id;
+                "nodeId",`String region.node_id;
+                "role",`String (Masc.Browser_scene.region_role_to_string region.role);
+                "label",`String region.label]);
           "href",(match node.kind with
             | Control {href = Some href; _} -> `String href
             | Region _ | Control _ | Text | Raster -> `Null);
@@ -4016,8 +4022,8 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
          if not (Hashtbl.mem target_index node.node_id)
          then Hashtbl.add target_index node.node_id i)
       (Browser_lane_view.scene_targets view);
-    let reversed, _, selected, _ = List.fold_left
-      (fun (reversed, offset, selected, previous_block_bottom)
+    let reversed, _, selected, _, _ = List.fold_left
+      (fun (reversed, offset, selected, previous_block_bottom, previous_region)
         (node : Masc.Browser_scene.node) ->
       let index = Hashtbl.find_opt target_index node.node_id in
       (* Text is the reading surface. DOM tags do not help read a paragraph,
@@ -4047,18 +4053,28 @@ let browser_lane_page_layout ~cols (view : Browser_lane_view.t) =
       let separator = match geometry, previous_block_bottom with
         | Some (top, _), Some bottom when top > bottom -> [""]
         | _ -> [] in
+      let region_header = match node.ancestor_region, previous_region with
+        | Some region, Some previous when region.node_id = previous.node_id -> []
+        | Some region, _ ->
+            (match scene.content.scope with
+             | Some target when target.node_id = region.node_id -> []
+             | Some _ | None ->
+                 wrap ("[" ^ Masc.Browser_scene.region_role_to_string region.role
+                       ^ "] " ^ region.label))
+        | None, _ -> [] in
+      let boundary = separator @ region_header in
       let lines = wrap (prefix ^ text) in
       let selected = match selected, index with
         | None, Some i when i = view.scene_cursor ->
-            Some (offset + List.length separator)
+            Some (offset + List.length boundary)
         | _ -> selected in
       let previous_block_bottom = match geometry with
         | Some (_, bottom) -> Some bottom
         | None -> None in
-      List.rev_append lines (List.rev_append separator reversed),
-      offset + List.length separator + List.length lines, selected,
-      previous_block_bottom)
-      ([], 0, None, None) scene.content.nodes in
+      List.rev_append lines (List.rev_append boundary reversed),
+      offset + List.length boundary + List.length lines, selected,
+      previous_block_bottom, node.ancestor_region)
+      ([], 0, None, None, None) scene.content.nodes in
     List.rev reversed, selected
   | None -> match view.reading with
   | None -> [], None

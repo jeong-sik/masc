@@ -147,6 +147,13 @@ is the observed heading target, plus an explicit `role="heading"` with
 `aria-level` 1–6.
 Missing or invalid ARIA levels stay plain text; the reader does not infer
 headings from text, CSS, font size, or class names.
+Content text, controls, and images also retain the nearest observed semantic
+ancestor region. An `article` wins for feeds and threads, then `main`, then the
+closest other observed landmark. The TUI emits a compact `[article] Label`
+boundary when that context changes, while a scoped article read suppresses the
+duplicate boundary because its scope row already names the article. This is
+observed region identity and label data, not a selector or a guess from page
+text. `y` includes the same ancestor region identity in copied context.
 For eligible observed block-tag nodes, a positive vertical gap from the
 preceding eligible node becomes one blank TUI row. An intervening inline node
 breaks that comparison, zero-gap line fixtures stay compact, and the reader

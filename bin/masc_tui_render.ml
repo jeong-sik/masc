@@ -12977,8 +12977,12 @@ let render_voice (state : state) =
   box_line buf cols
     (Printf.sprintf "  %s%s declares this; the server says what loaded%s"
        Ansi.dim declared_by Ansi.reset);
+  (* The keys are the table's, as on every other Config pane. The row was
+     written here and left out Esc and q, which the fitter keeps only when
+     the hints name them, so the voice pane was the one Config pane that
+     named no way out. *)
   finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
-    ~hints:"j/k:scroll  p:next pane  r:refresh  e:set up"
+    ~hints:(Masc_tui_keys.footer_hints_config ~pane:Config_voice)
 ;;
 
 let render_config (state : state) =

@@ -23,7 +23,7 @@ let b ?help group key label = { key; label; help; group }
 let config_bindings =
   [ b Navigate "j/k" "select / scroll", Some
       [ Config_runtime; Config_models; Config_params; Config_prompts
-      ; Config_presets; Config_themes ]
+      ; Config_presets; Config_themes; Config_voice ]
   ; b Navigate "p" "next pane"
       ~help:"runtime.toml / models / params / prompts / presets / themes / voice", None
   ; b Navigate "PgUp/PgDn" "page"

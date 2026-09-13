@@ -6056,3 +6056,5 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_browser_bidi_peer.inc)
+
+(include stanzas/test_operator_media_inspection.inc)

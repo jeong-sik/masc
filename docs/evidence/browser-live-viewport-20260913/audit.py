@@ -21,10 +21,21 @@ actions=[x for x in t['receipts'] if x['path'].endswith('/interact')]
 assert [x['input']['action'] for x in actions]==['click_at','scroll_at','scroll_at']
 assert all(x['status']==200 and x['response']['ok'] and x['input']['lane']=='live' and x['input']['clientId']==client for x in actions)
 assert len({x['input']['tabId'] for x in actions})==1
+captures=[x for x in t['receipts'] if x['path'].endswith('/screenshot') and x['status']==200 and x['response']['ok']]
+assert captures
+for captured in captures:
+ data=captured['response']['data']
+ assert data['source']=='live' and data['clientId']==client
+ assert data['tabId']==actions[0]['input']['tabId']
+for action in actions:
+ assert any(c['completed_monotonic']<action['completed_monotonic']
+            and c['response']['data']['viewport']==action['input']['viewport']
+            and c['response']['data']['url']==action['input']['expectedUrl'] for c in captures)
 raw=(p/'tui-gestures.pty').read_bytes();start=0
 for image in t['images']:
  data=(p/('tui-image-'+image['name']+'.png')).read_bytes()
  assert hashlib.sha256(data).hexdigest()==image['png_sha256'] and png(raw[start:image['pty_prefix_bytes']])==data
+ assert any(c['response']['data']['data']['sha256']==image['png_sha256'] for c in captures)
  start=image['pty_prefix_bytes']
 for name,text in [('click-observed-1.json','Details opened by link click'),('scroll-observed-2.json','Gesture Lab; Pane scroll=120'),('new-document-scroll-observed-5.json','Gesture Lab; Pane scroll=120')]:
  scene=load(name)['data'];assert any(n['text']==text for n in scene['nodes'])

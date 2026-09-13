@@ -114,7 +114,7 @@ let configuration_and_ports () =
     "rows":[],"coverage":[]
   }|} in
   let snapshot = UI.decode json |> ok in
-  let view = {UI.initial with technical_details=true;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
   check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
     (Option.get (UI.selected_declaration view)).source_path;
   check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")
@@ -146,7 +146,7 @@ let action_identity_and_uncertainty () =
     request_id=request.request_id;requester="operator";executor=None;input_sha256=Action.input_digest input;
     action=request.action;state=Action.Outcome_unknown;result=None;detail=Some "worker disconnected after dispatch"} in
   let received = UI.action_receipt request (Action.to_json receipt) |> ok in
-  let lines = UI.lines ~width:100 {UI.initial with technical_details=true;last_action=Some request;action_receipt=Some received} in
+  let lines = UI.lines ~width:100 {UI.initial with presentation=UI.Technical;last_action=Some request;action_receipt=Some received} in
   check bool "unknown outcome is never displayed as a confirmed effect" true (List.mem "  state outcome_unknown" lines);
   check bool "missing executor stays unknown" true (List.mem "  requester operator · executor unknown" lines);
   check bool "different request cannot satisfy status read" true
@@ -168,7 +168,7 @@ let metric_fields_and_receipts_remain_readable () =
     evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
   let snapshot : UI.snapshot = {instances=[];configuration=None;
     output={rows=[row];coverage=[]};complete=Some true} in
-  let view = {UI.initial with technical_details=true;snapshot=Some snapshot;
+  let view = {UI.initial with presentation=UI.Technical;snapshot=Some snapshot;
     receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
   List.iter (fun width ->
     let lines = UI.lines ~width view in
@@ -217,8 +217,8 @@ let guided_actions () =
     (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with snapshot=Some
       {snapshot with instances=[{instance with action_schema=None}]}}));
   let technical = UI.open_actions ~request_id:first.request_id
-    {UI.initial with technical_details=true;snapshot=Some snapshot} |> ok in
-  check bool "opening actions exposes the choice even from technical mode" false technical.technical_details;
+    {UI.initial with presentation=UI.Technical;snapshot=Some snapshot} |> ok in
+  check bool "opening actions exposes the choice even from technical mode" true (technical.presentation=UI.Summary);
   List.iter (fun width -> check int "refresh does not move compact content"
     (List.length (UI.lines ~width {UI.initial with snapshot=Some snapshot}))
     (List.length (UI.lines ~width {UI.initial with loading=true;snapshot=Some snapshot}))) [10;40;100];
@@ -252,7 +252,37 @@ let guided_actions () =
   check bool "technical action schema is folded by default" false
     (List.exists (fun line -> String.contains line '{') compact)
 
+let context_flow_uses_declared_connections () =
+  let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
+    addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
+    observation_seq=1;rows_count=0;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;action_schema=None} in
+  let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
+    binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
+      "installation_id":"project-observer","output_id":"events","selection":"latest_completed"}]}|}} in
+  let declaration installation_id instance_id : UI.declaration =
+    {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
+      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[]} in
+  let configuration : UI.configuration = {directory="/config";complete=true;
+    declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
+  let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
+    output={rows=[];coverage=[]};complete=None} in
+  let view = {UI.initial with presentation=UI.Flow;snapshot=Some snapshot} in
+  check bool "flow names the actual configured dependency" true
+    (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
+  let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
+  let partial_view = {view with snapshot=Some partial;error=Some "network failure"} in
+  let partial_lines = UI.lines ~width:160 partial_view in
+  check bool "failed read remains visible in flow" true
+    (List.mem "Refresh failed; graph may be stale: network failure" partial_lines);
+  check bool "partial inventory cannot establish producer absence" true
+    (List.mem "  project-observer -> project-metric · producer unresolved; inventory incomplete" partial_lines);
+  check bool "missing producer stays visible" true
+    (List.mem "  project-observer -> project-metric · producer absent in this run"
+      (UI.lines ~width:160 {view with snapshot=Some {snapshot with instances=[consumer]}}))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
   test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;

@@ -2270,8 +2270,9 @@ def wheel_scrolls_and_clicks_do_not(
     # every surface shares (footer_line). What follows it is the surface's
     # own hint text -- Keepers spells its first hint "j/k move", and at 100
     # columns the strip is elided anyway. The prefix is what says the
-    # search is armed.
-    send_and_wait(process, master_fd, output, b"/", b"/  ")
+    # search is armed. An empty query draws the input cursor after the slash
+    # (#35410), so the armed prefix is "/" followed by that block.
+    send_and_wait(process, master_fd, output, b"/", b"/\xe2\x96\x8c  ")
     resize_and_wait(
         process,
         master_fd,
@@ -11199,12 +11200,14 @@ def code_lane_interaction(
         raise AssertionError(
             f"the file search did not move the cursor gutter: {searched!r}"
         )
-    # Enter keeps the query for n/N and closes the prompt; the redrawn
-    # footer (query gone, hints back at the front) is the needle, because
-    # the diff renderer resends only the rows that changed.
+    # Enter closes the prompt and keeps the query for n/N. The footer keeps
+    # saying so -- the query, how many rows it matched and the keys that walk
+    # them -- ahead of the surface's own hints (#35410); before, the query left
+    # the footer while n/N went on hunting it. The diff renderer resends only
+    # the rows that changed, so the redrawn footer row is the needle.
     send_and_wait(
         process, master_fd, output, b"\r",
-        b"\x1b[2m  j/k:scroll  h/l:pan",
+        b"\x1b[2m  /hi (1) n/N  j/k:scroll  h/l:pan",
     )
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.

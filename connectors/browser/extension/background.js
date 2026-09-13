@@ -259,11 +259,13 @@ function createNavigationReadiness() {
   function forget(tabId, record) {
     if (records.get(tabId) === record) records.delete(tabId);
   }
-  async function begin(args, deadlineMs) {
+  async function begin(args, deadlineMs, signal) {
+    signal?.throwIfAborted();
     const source = await browser.webNavigation.getFrame({tabId:args.tabId,frameId:0});
     if (!source || typeof source.documentId !== 'string' || !source.documentId)
       throw new Error('navigation_document_identity_unavailable');
     if (source.url !== args.expectedUrl) throw new Error('page_url_changed');
+    signal?.throwIfAborted();
     records.get(args.tabId)?.cancel('navigation_observation_superseded');
     let resolve, receipt = null, candidate = null, settled = false;
     const ready = new Promise(done => { resolve = done; });
@@ -673,7 +675,7 @@ function interactInPage(args) {
 }
 
 
-async function pageInteract(args, deadlineMs) {
+async function pageInteract(args, deadlineMs, signal) {
   if (args?.action === 'activate_tab') {
     let effectStarted = false;
     try {
@@ -681,6 +683,7 @@ async function pageInteract(args, deadlineMs) {
       if (typeof args.expectedUrl !== 'string' || !args.expectedUrl.trim()) throw new Error('activate_tab_requires_expected_url');
       const before = await browser.tabs.get(args.tabId);
       if (before.url !== args.expectedUrl) throw new Error('page_url_changed');
+      signal?.throwIfAborted();
       effectStarted = true;
       await browser.tabs.update(args.tabId, {active:true});
       const after = await browser.tabs.get(args.tabId);
@@ -700,15 +703,23 @@ async function pageInteract(args, deadlineMs) {
     if (!Number.isSafeInteger(args?.tabId) || args.tabId < 0) throw new Error("tab_id_required");
     if (!['click', 'follow_link', 'fill', 'scroll', 'click_at', 'scroll_at', 'drag'].includes(args.action)) throw new Error("unknown_interaction_action");
     const tab = await browser.tabs.get(args.tabId);
+    signal?.throwIfAborted();
     if (args.expectedUrl !== undefined && tab.url !== args.expectedUrl) throw new Error('page_url_changed');
-    if (args.action === 'follow_link') navigation = await navigationReadiness.begin(args, deadlineMs);
+    if (args.action === 'follow_link') navigation = await navigationReadiness.begin(args, deadlineMs, signal);
+    signal?.throwIfAborted();
   } catch (cause) {
+    navigation?.cancel('follow_observation_unavailable');
     const error = new Error(String(cause?.message ?? cause));
     error.effectStarted = false;
     throw error;
   }
   try {
     // JSON encoding keeps selectors and text out of executable source syntax.
+    if (signal?.aborted) {
+      const error = new Error('browser_command_aborted');
+      error.effectStarted = false;
+      throw error;
+    }
     const [result] = await browser.tabs.executeScript(args.tabId, {
       runAt: "document_end",
       code: `(() => { const browserScene = ${browserScene.toString()}; return (${interactInPage.toString()})(${JSON.stringify(args)}); })()`,
@@ -763,7 +774,7 @@ async function onHostMessage(msg, connection = port) {
         reply.ok = true;
         break;
       case "page.interact":
-        reply.data = await pageInteract(msg.args, msg.deadlineMs);
+        reply.data = await pageInteract(msg.args, msg.deadlineMs, controller.signal);
         reply.ok = true;
         break;
       case "page.capture":

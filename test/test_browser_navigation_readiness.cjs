@@ -18,9 +18,9 @@ function fixture() {
   const port = {onMessage:event(),onDisconnect:disconnected,postMessage:r=>replies.push(JSON.parse(JSON.stringify(r)))};
   const browser = {
     runtime:{connectNative:()=>port},
-    webNavigation:{getFrame:async()=>({documentId:'native-source',url}),
+    webNavigation:{getFrame:async()=>{ if(f.frameGate) await f.frameGate; return {documentId:'native-source',url}; },
       onCommitted:committed,onReferenceFragmentUpdated:fragment},
-    tabs:{onRemoved:removed, get:async()=>({url}), async executeScript(tabId, options) {
+    tabs:{onRemoved:removed, get:async()=>{ if(f.tabGate) await f.tabGate; return {url}; }, async executeScript(tabId, options) {
       assert.equal(tabId, 7);
       assert.equal(options.runAt, 'document_end');
       const follow = options.code.startsWith('(() => { const browserScene');
@@ -131,3 +131,20 @@ test('an expired native command cannot start an interaction',async()=>{
   assert.deepEqual(f.injections,[]); assert.equal(f.replies[0].effectPhase,'not_started');
   assert.equal(f.replies[0].error,'browser_command_expired');
 });
+
+for (const gate of ['tabGate','frameGate']) for (const cancellation of ['deadline','disconnect']) {
+  test(`late ${gate} cannot inject after ${cancellation}`,async()=>{
+    const f=fixture(); let release;
+    f[gate]=new Promise(resolve=>{release=resolve;});
+    const pending=f.follow(); await entered();
+    if(cancellation==='deadline') f.advance(20001); else f.disconnect();
+    release(); await pending;
+    assert.deepEqual(f.injections,[]);
+    assert.equal(f.listeners,0);
+    assert.equal(f.timers.size,cancellation==='disconnect' ? 1 : 0); // reconnect timer only
+    if(cancellation==='deadline') {
+      assert.equal(f.replies[0].ok,false);
+      assert.equal(f.replies[0].effectPhase,'not_started');
+    }
+  });
+}

@@ -469,6 +469,11 @@ let test_publisher_is_not_wedged_behind_the_settled_adapter () =
     ~on_send_result:(fun result -> outcomes := result :: !outcomes)
     ();
   check int "delivery settles exactly once" 1 (List.length !outcomes);
+  (* The adapter returns once it has taken the sentinel. A [close] that parked
+     on the full bus was handed over inside that take and is runnable again
+     with no suspension point left, so one yield lets it set the flag. A
+     publisher still parked in [add] stays parked and the flag stays false. *)
+  Eio.Fiber.yield ();
   check bool "the publisher drained past the terminal and closed" true
     !publisher_finished
 

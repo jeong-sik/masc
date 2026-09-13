@@ -601,7 +601,7 @@ let test_full_bus_hook_runs_before_add () =
     "every publish up to the capacity reached the hook"
     Masc.Keeper_chat_events.bus_capacity
     !hook_calls;
-  (* The 513th publish cannot complete normally: Eio.Stream.add on a full
+  (* The publish past the capacity cannot complete normally: Eio.Stream.add on a full
      stream suspends the writer, and with no scheduler running (this test is
      a plain Alcotest function) the Suspend effect raises unhandled. Either
      way the hook has already run by then — that hook-before-add ordering is
@@ -609,8 +609,10 @@ let test_full_bus_hook_runs_before_add () =
   (match Masc.Keeper_chat_events.publish bus (E.Text_delta "overflow") with
    | () -> Alcotest.fail "publish on a full bus must not silently succeed"
    | exception _ -> ());
-  Alcotest.(check int) "hook observed the overflowing publish" 513 !hook_calls;
-  Alcotest.(check int) "hook saw seq = 512 for the overflowing publish" 512 !last_seq
+  Alcotest.(check int) "hook observed the overflowing publish"
+    (Masc.Keeper_chat_events.bus_capacity + 1) !hook_calls;
+  Alcotest.(check int) "hook saw seq = capacity for the overflowing publish"
+    Masc.Keeper_chat_events.bus_capacity !last_seq
 
 let test_bus_journal_integration_records_all_events () =
   let base_dir = temp_base_path "keeper-chat-event-log-bus" in

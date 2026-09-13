@@ -257,7 +257,10 @@ let image_delivery_note =
   "Image files are delivered as visual input with byte count and SHA-256; \
    read them without line offset/limit. PDF files are inspected whole with Poppler; \
    the result contains the source SHA-256/bytes, parsed page count and text, \
-   and every rendered page as visual input."
+   and every rendered page as visual input. MP4 files are inspected whole with \
+   FFprobe and FFmpeg: original source SHA-256/bytes, stream metadata and direct \
+   complete audio/video decode results are returned. That decode is not a visual \
+   frame inspection or an accessibility verdict."
 
 let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.tool_schema =
   { Types_core.name = tool_name tool
@@ -375,6 +378,45 @@ let is_pdf path bytes =
   String.equal (String.lowercase_ascii (Filename.extension path)) ".pdf"
   || String.starts_with ~prefix:"%PDF-" bytes
 
+(* An MP4 announces itself by extension or by the ISO base media file type box,
+   which sits at offset 4 right after the box length. Reading the signature too
+   keeps an extensionless or .m4v capture from falling through to the ordinary
+   text Read, which would project its bytes as characters. This mirrors what
+   [is_pdf] already does with the %PDF- header. *)
+let is_mp4 path bytes =
+  String.equal (String.lowercase_ascii (Filename.extension path)) ".mp4"
+  || (String.length bytes >= 12 && String.equal (String.sub bytes 4 4) "ftyp")
+
+(* The probe read is bounded, but the whole-file escalation below is what the
+   inspectors hash, copy to disk and decode. Without a ceiling the size is the
+   submitter's choice: the read returns one OCaml string, [inspect] writes it
+   back out and reads it again, so a single oversized artifact costs several
+   times its own length in resident memory before any verdict exists. Reading
+   one byte past the ceiling is what separates "this is the whole file" from
+   "this file is over the limit" without loading the rest of it. Sits above the
+   image byte limit, which stays the binding number for images. *)
+(* One ceiling for every whole-media escalation on this surface. The number is
+   the PDF inspection's, because that is where it was first needed and main now
+   carries it; MP4 escalates through the same read and must not grow a second
+   copy that can drift away from it. The name says media because both formats
+   are bounded here. *)
+let max_media_source_bytes = Verification_pdf_inspection.max_source_bytes
+
+let video_result t ~name ~path ~bytes ~start_time =
+  match Verification_video_inspection.inspect ~base_path:t.config.base_path ~bytes with
+  | Error error ->
+    let failure_class = match error with
+      | Verification_video_inspection.Dependency_unavailable _ -> Tool_result.Dependency_unavailable
+      (* A decoder deadline does not establish that the submitted media is
+         invalid. Keep runtime failure distinct from an input policy refusal. *)
+      | Command_timed_out _ | Command_failed _ | Invalid_output _ | Storage_failed _ ->
+        Tool_result.Runtime_failure in
+    Tool_result.error ~failure_class
+      ~tool_name:name ~start_time (Verification_video_inspection.error_to_string error)
+  | Ok inspection ->
+    let data = `Assoc ["path",`String path; "inspection",Verification_video_inspection.to_yojson inspection] in
+    Tool_result.make_ok ~tool_name:name ~start_time ~data ()
+
 let pdf_result t ~name ~path ~bytes ~start_time ~max_image_bytes =
   match Verification_pdf_inspection.inspect
     ~base_path:t.config.base_path ~max_image_bytes ~bytes () with
@@ -422,34 +464,47 @@ let media_result t tool ~name ~args ~start_time =
        let bytes =
          match t.producer_scope with
          | Keeper_producer meta ->
-           (* The bounded probe identifies the format only. Its potentially
-              text-projected body never becomes image input or hash evidence. *)
+           (* Probe exact bytes so non-UTF-8 box sizes cannot shift the
+              signature before format detection. *)
            (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                     ~config:t.config ~meta ~path ?cwd
                     ~max_bytes:(min (limit + 1) Tool_shard_limits.read_file_default_max_bytes) () with
             | Error _ as error -> error
             | Ok probe ->
-              (match is_pdf path probe, Keeper_vision_tool.sniff_image_media_type probe with
+              (match (is_pdf path probe || is_mp4 path probe), Keeper_vision_tool.sniff_image_media_type probe with
                | false, Error _ -> Ok probe
                | true, _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                    ~config:t.config ~meta ~path ?cwd
-                   ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
+                   ~max_bytes:(max_media_source_bytes + 1) ()
                | false, Ok _ -> Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix
                    ~config:t.config ~meta ~path ?cwd ~max_bytes:(limit + 1) ()))
          | Workspace_producer ->
            (match Keeper_tool_filesystem_runtime.read_owned_bytes
              ~ownership_root:t.ownership_root ~path ?cwd ~max_bytes:(limit + 1) () with
-            | Ok probe when is_pdf path probe ->
+            | Ok probe when is_pdf path probe || is_mp4 path probe ->
               Keeper_tool_filesystem_runtime.read_owned_bytes
                 ~ownership_root:t.ownership_root ~path ?cwd
-                ~max_bytes:(Verification_pdf_inspection.max_source_bytes + 1) ()
+                ~max_bytes:(max_media_source_bytes + 1) ()
             | result -> result)
        in
        (match bytes with
-        | Error detail when is_pdf path "" ->
+        | Error detail when is_pdf path "" || is_mp4 path "" ->
           Some (Tool_result.error ~failure_class:Tool_result.Runtime_failure
             ~tool_name:name ~start_time detail)
         | Error _ -> None (* The ordinary Read preserves its own error contract. *)
+        (* Only an escalated whole-file read can reach this length: every other
+           path here is already capped at the image byte limit or below. *)
+        | Ok bytes when String.length bytes > max_media_source_bytes ->
+          Some (Tool_result.error ~failure_class:Tool_result.Policy_rejection
+            ~tool_name:name ~start_time
+            (Printf.sprintf
+               "media_source_too_large: this verifier inspects at most %d bytes whole"
+               max_media_source_bytes))
+        | Ok bytes when is_mp4 path bytes ->
+          if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
+            Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection
+              ~tool_name:name ~start_time "MP4 files are inspected whole; omit line offset and limit")
+          else Some (video_result t ~name ~path ~bytes ~start_time)
         | Ok bytes when is_pdf path bytes ->
           if List.mem_assoc "offset" fields || List.mem_assoc "limit" fields then
             Some (Tool_result.error ~failure_class:Tool_result.Workflow_rejection

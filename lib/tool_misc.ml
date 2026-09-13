@@ -302,7 +302,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 
 let is_read_only = function
   | Tool_schemas_misc.Misc_lane_declaration_read -> true
-  | Tool_schemas_misc.Misc_lane_declaration_save -> false
+  | Tool_schemas_misc.Misc_lane_declaration_save
+  | Tool_schemas_misc.Misc_lane_updates -> false
   | Tool_schemas_misc.Misc_lane_action_status
   | Tool_schemas_misc.Misc_lane_inspect
   | Tool_schemas_misc.Misc_lane_slice -> true

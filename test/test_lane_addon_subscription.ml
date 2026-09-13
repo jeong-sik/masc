@@ -42,8 +42,11 @@ let read_ack_and_restart () = with_workspace (fun config ->
   check bool "unsubscribed Keeper receives no context" true
     (S.observe ~config ~keeper_name:"other"=Ok (`List []));
   let notice=S.observe ~config ~keeper_name:"researcher" |> ok in
-  check bool "notice contains only references" false
-    (String_util.contains_substring (Yojson.Safe.to_string notice) "private source body");
+  let expected_notice=`List [`Assoc ["subscription",subscription;
+    "instance_id",`String "instance-1";"after_sequence",`Int 0;
+    "latest_sequence",`Int 2;"new_observations",`Bool true;"replaced",`Bool false]] in
+  check bool "notice contains only exact references and sequence metadata" true
+    (Yojson.Safe.sort notice=Yojson.Safe.sort expected_notice);
   let first=call config "researcher" (args "read") |> ok in
   check int "named output excludes other rows" 1 (List.length (member "output" first |> member "rows" |> Yojson.Safe.Util.to_list));
   let repeated=call config "researcher" (args "read") |> ok in

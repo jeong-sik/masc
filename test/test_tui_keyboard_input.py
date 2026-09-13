@@ -10290,6 +10290,10 @@ def keeper_lanes_ia_interaction(
         _base_path: str,
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Keepers")
+        # The surface heading can precede the asynchronously loaded roster.
+        # Wait for the target row before asking the cursor to move to it.
+        wait_for_output(process, master_fd, output, b"beta", start=0, timeout=3.0)
+
         send_and_wait(
             process,
             master_fd,

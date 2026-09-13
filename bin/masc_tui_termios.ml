@@ -34,12 +34,16 @@ let per_key f =
 let restore_one fd key char =
   (* [-1]: the key did not exist or the descriptor was not a terminal when
      the snapshot was taken, so there is nothing to give back. *)
+  (* See [restore] in the mli: a refusal is a terminal already gone, which
+     cannot receive the character back. *)
   if char >= 0 then ignore (set_key_char fd key char : bool)
 
 type snapshot = int per_key
 
 let snapshot fd = per_key (key_char fd)
 
+(* See [disable_key] in the mli: false is a key this platform lacks or a
+   hangup, and the session goes on with the terminal it has either way. *)
 let reclaim fd = ignore (per_key (fun key -> disable_key fd key) : bool per_key)
 
 let restore fd (snapshot : snapshot) =

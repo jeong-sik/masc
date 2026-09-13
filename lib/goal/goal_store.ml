@@ -1,5 +1,12 @@
 (* Goal store — shared planning goals with a dedicated lifecycle phase.
-   [phase] is the only persisted lifecycle representation. *)
+   [phase] is the only persisted lifecycle representation.
+
+   RFC-0444: the store is read through one closed sum, [source]. A store this
+   build cannot read is [Unavailable], carrying the reason, the state of the
+   .last-good mirror and the operator's next step; it never reads as an empty
+   state. The only empty state is [Uninitialized]: neither goals.json nor its
+   mirror exists. 2026-09-08 (#34459) 97 goals read as 0 for 7h29m because
+   the reader folded a decode failure into a default state (B1). *)
 
 let ( let* ) = Result.bind
 
@@ -73,15 +80,7 @@ type state = {
   goals : goal list;
 }
 
-let rec state_to_yojson (state : state) =
-  `Assoc
-    [
-      ("version", `Int state.version);
-      ("updated_at", `String state.updated_at);
-      ("goals", `List (List.map (fun goal -> goal_to_yojson goal) state.goals));
-    ]
-
-and goal_to_yojson (goal : goal) =
+let goal_to_yojson (goal : goal) =
   `Assoc
     [
       ("id", `String goal.id);
@@ -98,118 +97,166 @@ and goal_to_yojson (goal : goal) =
       ("updated_at", `String goal.updated_at);
     ]
 
-and state_of_yojson = function
-  | `Assoc _ as json ->
-      begin
-        match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "goals" json with
-        | Some (`Int version), Some (`String updated_at), Some (`List goals_json) ->
-            let rec collect acc = function
-              | [] -> Ok (List.rev acc)
-              | row :: rest -> (
-                  match goal_of_yojson row with
-                  | Ok goal -> collect (goal :: acc) rest
-                  | Error msg -> Error msg)
-            in
-            Result.map
-              (fun goals -> { version; updated_at; goals })
-              (collect [] goals_json)
-        | _ -> Error "state_of_yojson: invalid state"
-      end
-  | json ->
-      Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
+let state_to_yojson (state : state) =
+  `Assoc
+    [
+      ("version", `Int state.version);
+      ("updated_at", `String state.updated_at);
+      ("goals", `List (List.map goal_to_yojson state.goals));
+    ]
 
-and goal_of_yojson = function
+(* {1 Decoder}
+
+   A rejection names the member this build's decoder refused. The name is
+   data, so [Schema_rejected] below carries it without reading it back out of
+   a sentence. *)
+
+type schema_rejection = { field : string; detail : string }
+
+(* JSONPath spelling of the document root: the member to name when the whole
+   document is not an object and no member of it exists to point at. *)
+let document_root_field = "$"
+
+let rejected ~field detail : ('a, schema_rejection) result =
+  Error { field; detail }
+
+let accepted_goal_fields =
+  [ "id"
+  ; "criterion_revision"
+  ; "title"
+  ; "metric"
+  ; "target_value"
+  ; "due_date"
+  ; "priority"
+  ; "phase"
+  ; "last_review_note"
+  ; "last_review_at"
+  ; "created_at"
+  ; "updated_at"
+  ]
+
+let goal_of_yojson : Yojson.Safe.t -> (goal, schema_rejection) result = function
   | `Assoc fields as json ->
-      let accepted_fields =
-        [ "id"
-        ; "criterion_revision"
-        ; "title"
-        ; "metric"
-        ; "target_value"
-        ; "due_date"
-        ; "priority"
-        ; "phase"
-        ; "last_review_note"
-        ; "last_review_at"
-        ; "created_at"
-        ; "updated_at"
-        ]
-      in
       let unknown_field =
         List.find_map
           (fun (field, _) ->
-            if List.mem field accepted_fields then None else Some field)
+            if List.mem field accepted_goal_fields then None else Some field)
           fields
       in
       let id_opt = Json_util.assoc_member_opt "id" json in
       let title_opt = Json_util.assoc_member_opt "title" json in
       (match unknown_field, id_opt, title_opt with
       | Some field, _, _ ->
-          Error
-            (Printf.sprintf
-               "goal_of_yojson: unknown Goal field %S is not accepted"
-               field)
+          rejected ~field
+            (Printf.sprintf "unknown Goal field %S is not accepted" field)
       | None, Some (`String id), Some (`String title) ->
           let* criterion_revision =
             match List.filter (fun (key, _) -> String.equal key "criterion_revision") fields with
             | [ _, `String revision ] when String.trim revision <> "" -> Ok revision
-            | _ -> Error "goal_of_yojson: criterion_revision must be a non-blank string"
+            | _ ->
+                rejected ~field:"criterion_revision"
+                  (Printf.sprintf
+                     "goal %S: criterion_revision must be a non-blank string" id)
           in
-          let phase =
-            (* Phase is required: a row without [phase] is a decode error, not
-               a silent Active default. The silent default caused main red
-               #23901 once. *)
+          (* Phase is required: a row without [phase] is a decode error, not
+             a silent Active default. The silent default caused main red
+             #23901 once. *)
+          let* phase =
             match Json_util.assoc_member_opt "phase" json with
             | None | Some `Null ->
-                Error
-                  (Printf.sprintf "goal_of_yojson: goal %S has no phase field" id)
-            | Some phase_json -> Goal_phase.of_yojson phase_json
+                rejected ~field:"phase"
+                  (Printf.sprintf "goal %S has no phase field" id)
+            | Some phase_json ->
+                (match Goal_phase.of_yojson phase_json with
+                 | Ok phase -> Ok phase
+                 | Error detail ->
+                     rejected ~field:"phase"
+                       (Printf.sprintf "goal %S: %s" id detail))
           in
-          let created_at =
+          let* created_at =
             match Json_util.assoc_member_opt "created_at" json with
             | Some (`String value) -> Ok value
-            | _ -> Error "goal_of_yojson: created_at missing"
+            | _ ->
+                rejected ~field:"created_at"
+                  (Printf.sprintf "goal %S: created_at missing" id)
           in
-          let updated_at =
+          let* updated_at =
             match Json_util.assoc_member_opt "updated_at" json with
             | Some (`String value) -> Ok value
-            | _ -> Error "goal_of_yojson: updated_at missing"
+            | _ ->
+                rejected ~field:"updated_at"
+                  (Printf.sprintf "goal %S: updated_at missing" id)
           in
-          let priority =
-            (* Required with the same force as phase (#23901): a missing or
-               non-int priority resurfacing as a silent 3 hides a corrupt row
-               behind a plausible value. Live stores measured zero such rows
-               (2026-09-02, 79 goals). *)
+          (* Required with the same force as phase (#23901): a missing or
+             non-int priority resurfacing as a silent 3 hides a corrupt row
+             behind a plausible value. Live stores measured zero such rows
+             (2026-09-02, 79 goals). *)
+          let* priority =
             match Json_util.assoc_member_opt "priority" json with
             | Some (`Int value) -> Ok (clamp_priority value)
-            | _ -> Error "goal_of_yojson: priority must be an int 1-5"
+            | _ ->
+                rejected ~field:"priority"
+                  (Printf.sprintf "goal %S: priority must be an int 1-5" id)
           in
-          (match (phase, created_at, updated_at, priority) with
-           | Ok phase, Ok created_at, Ok updated_at, Ok priority ->
-             Ok
-               {
-                    id;
-                    criterion_revision;
-                    title;
-                    metric = Json_util.get_string json "metric";
-                    target_value = Json_util.get_string json "target_value";
-                    due_date = Json_util.get_string json "due_date";
-                    priority;
-                    phase;
-                    last_review_note = Json_util.get_string json "last_review_note";
-                    last_review_at = Json_util.get_string json "last_review_at";
-                    created_at;
-                    updated_at;
-                  }
-           | Error msg, _, _, _ -> Error msg
-           | _, Error msg, _, _ -> Error msg
-           | _, _, Error msg, _ -> Error msg
-           | _, _, _, Error msg -> Error msg)
-      | None, _, _ -> Error "goal_of_yojson: invalid goal")
+          Ok
+            {
+              id;
+              criterion_revision;
+              title;
+              metric = Json_util.get_string json "metric";
+              target_value = Json_util.get_string json "target_value";
+              due_date = Json_util.get_string json "due_date";
+              priority;
+              phase;
+              last_review_note = Json_util.get_string json "last_review_note";
+              last_review_at = Json_util.get_string json "last_review_at";
+              created_at;
+              updated_at;
+            }
+      | None, Some (`String id), _ ->
+          rejected ~field:"title"
+            (Printf.sprintf "goal %S: title must be a string" id)
+      | None, _, _ -> rejected ~field:"id" "goal id must be a string")
   | other_json ->
-      Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
+      rejected ~field:"goals"
+        ("goal row is not an object: " ^ Yojson.Safe.to_string other_json)
 
-let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
+let state_of_yojson : Yojson.Safe.t -> (state, schema_rejection) result = function
+  | `Assoc _ as json ->
+      let* version =
+        match Json_util.assoc_member_opt "version" json with
+        | Some (`Int version) -> Ok version
+        | _ -> rejected ~field:"version" "version must be an int"
+      in
+      let* updated_at =
+        match Json_util.assoc_member_opt "updated_at" json with
+        | Some (`String updated_at) -> Ok updated_at
+        | _ -> rejected ~field:"updated_at" "updated_at must be a string"
+      in
+      let* rows =
+        match Json_util.assoc_member_opt "goals" json with
+        | Some (`List rows) -> Ok rows
+        | _ -> rejected ~field:"goals" "goals must be a list"
+      in
+      let rec collect acc = function
+        | [] -> Ok (List.rev acc)
+        | row :: rest ->
+            let* goal = goal_of_yojson row in
+            collect (goal :: acc) rest
+      in
+      let* goals = collect [] rows in
+      Ok { version; updated_at; goals }
+  | json ->
+      rejected ~field:document_root_field
+        ("state is not an object: " ^ Yojson.Safe.to_string json)
+
+let schema_rejection_to_string { field; detail } =
+  Printf.sprintf "%s (field %s)" detail field
+
+let validate_state_json json =
+  match state_of_yojson json with
+  | Ok _ -> Ok ()
+  | Error rejection -> Error (schema_rejection_to_string rejection)
 
 type rollup = {
   active_count : int;
@@ -233,123 +280,179 @@ let goals_recovery_path config =
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
-let default_state () =
+(* The one empty state this module constructs. Its only call is the first
+   write on an [Uninitialized] store (RFC-0444 §2.2, criterion 2); no reader
+   builds it. *)
+let default_state : unit -> state = fun () ->
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
 
-(* Recovery snapshots support historical reads. Every read-modify-write uses
-   [load_primary_state] under the Goal lock; a mirror never authorizes mutation. *)
-type load_outcome =
-  | Loaded of state
-  | Undecodable of string
+(* {1 Source (RFC-0444 §2.1)} *)
 
-let load_state config : load_outcome =
-  ensure_dirs config;
-  let path = goals_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Ok json ->
-        (match state_of_yojson json with
-         | Ok state -> Loaded state
-         | Error primary_msg ->
-             let recovery = goals_recovery_path config in
-             if Workspace_utils.path_exists config recovery then
-               match Workspace_utils.read_json_result config recovery with
-               | Ok recovery_json ->
-                   (match state_of_yojson recovery_json with
-                    | Ok state ->
-                        Log.Misc.warn
-                          "goal_store: primary goals.json corrupt (%s), recovered from %s"
-                          primary_msg recovery;
-                        Loaded state
-                    | Error recovery_msg ->
-                        Log.Misc.error
-                          "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
-                          primary_msg recovery_msg;
-                        Undecodable
-                          (Printf.sprintf
-                             "primary: %s; recovery: %s" primary_msg recovery_msg))
-               | Error recovery_read_msg ->
-                   Log.Misc.warn
-                     "goal_store: goals.json corrupt (%s), recovery read failed: %s"
-                     primary_msg recovery_read_msg;
-                   Undecodable
-                     (Printf.sprintf
-                        "primary: %s; recovery unreadable: %s"
-                        primary_msg recovery_read_msg)
-             else
-               (Log.Misc.warn
-                  "goal_store: goals.json corrupt (%s), no .last-good available"
-                  primary_msg;
-                Undecodable primary_msg))
-    | Error primary_msg ->
-        let recovery = goals_recovery_path config in
-        if Workspace_utils.path_exists config recovery then
-          match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json ->
-              (match state_of_yojson recovery_json with
-               | Ok state ->
-                   Log.Misc.warn
-                     "goal_store: primary goals.json unreadable (%s), recovered from %s"
-                     primary_msg recovery;
-                   Loaded state
-               | Error recovery_msg ->
-                   Log.Misc.error
-                     "goal_store: primary unreadable (%s), recovery corrupt (%s)"
-                     primary_msg recovery_msg;
-                   Undecodable
-                     (Printf.sprintf
-                        "primary unreadable: %s; recovery: %s" primary_msg recovery_msg))
-          | Error recovery_msg ->
-              Log.Misc.error
-                "goal_store: primary unreadable (%s), recovery unreadable (%s)"
-                primary_msg recovery_msg;
-              Undecodable
-                (Printf.sprintf
-                   "primary unreadable: %s; recovery unreadable: %s"
-                   primary_msg recovery_msg)
-        else
-          (Log.Misc.warn
-             "goal_store: goals.json unreadable (%s), no .last-good available"
-             primary_msg;
-           Undecodable primary_msg)
-  else
-    Loaded (default_state ())
+type source =
+  | Uninitialized
+  | Available of state
+  | Unavailable of unavailable
 
-(* Read-only view: an undecodable store reads as empty, unchanged from before.
-   Only the locked write paths escalate it to an error. *)
-let read_state config =
-  match load_state config with
-  | Loaded state -> state
-  | Undecodable _ -> default_state ()
+and unavailable =
+  { file : string
+  ; reason : reason
+  ; mirror : mirror_status
+  ; reset_step : reset_step
+  }
 
-let undecodable_store_error config detail =
-  Printf.sprintf
-    "goal_store: refusing to write over a store that did not decode (%s); reset or \
-     repair %s before writing"
-    detail
-    (goals_path config)
+and reason =
+  | Missing_after_init
+  | Unreadable of Unix.error
+  | Not_json of string
+  | Schema_rejected of { field : string; detail : string }
 
-(* The read side had no counterpart, so a caller was handed the decoder's own
-   sentence and nothing else: "goal_of_yojson: criterion_revision must be a
-   non-blank string" names no file and no next move, and an operator holding
-   97 unreadable goals had to find goals.json themselves (#34603). Same shape
-   as Goal_verification.undecodable_load_error, which did say both. *)
-let undecodable_load_error config detail =
-  Printf.sprintf
-    "goal_store: store did not decode (%s); repair or reset %s"
-    detail
-    (goals_path config)
+and mirror_status =
+  | Mirror_absent
+  | Mirror_unreadable of Unix.error
+  | Mirror_decodes of { goal_count : int; updated_at : string }
+  | Mirror_rejected of reason
 
-let decode_state_result config json =
-  match state_of_yojson json with
-  | Ok state -> Ok state
-  | Error detail -> Error (undecodable_load_error config detail)
+and reset_step =
+  | Repair_field of string
+  | Reset_goal_store
+  | Restore_permission
 
-let undecodable_read_error config detail =
-  Printf.sprintf
-    "goal_store: store did not decode (%s); reset or repair %s"
-    detail
-    (goals_path config)
+type lookup =
+  | Goal_found of goal
+  | Goal_absent
+  | Store_unavailable of unavailable
+
+(* [Unix.error] is the kernel's sum, not this module's; only [EACCES] names a
+   step other than a reset, so the remaining errnos share one arm. *)
+let reset_step_of_reason = function
+  | Schema_rejected { field; _ } -> Repair_field field
+  | Unreadable Unix.EACCES -> Restore_permission
+  | Unreadable _ -> Reset_goal_store
+  | Missing_after_init -> Reset_goal_store
+  | Not_json _ -> Reset_goal_store
+
+let reason_to_string = function
+  | Missing_after_init ->
+      "missing_after_init (goals.json is absent while its .last-good mirror exists)"
+  | Unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
+  | Not_json detail -> "not_json (" ^ detail ^ ")"
+  | Schema_rejected { field; detail } ->
+      Printf.sprintf "schema_rejected field=%s (%s)" field detail
+
+let mirror_status_to_string = function
+  | Mirror_absent -> "absent"
+  | Mirror_unreadable error -> "unreadable (" ^ Unix.error_message error ^ ")"
+  | Mirror_decodes { goal_count; updated_at } ->
+      Printf.sprintf "decodes goal_count=%d updated_at=%s" goal_count updated_at
+  | Mirror_rejected reason -> "rejected " ^ reason_to_string reason
+
+let reset_step_to_string = function
+  | Repair_field field -> "repair field " ^ field
+  | Reset_goal_store -> "reset the goal store"
+  | Restore_permission -> "restore read permission on the file"
+
+let unavailable_to_string { file; reason; mirror; reset_step } =
+  Printf.sprintf "goal_store: unavailable reason=%s file=%s mirror=%s reset=%s"
+    (reason_to_string reason)
+    file
+    (mirror_status_to_string mirror)
+    (reset_step_to_string reset_step)
+
+(* {2 Reading a file with its errno}
+
+   The shared read chain ([Workspace_utils.read_json_result] →
+   [Safe_ops.read_file_safe] → [Fs_compat.load_file]) renders every failure
+   to a sentence and reads a missing or blank file as [`Assoc []], so neither
+   [Unreadable of Unix.error] nor the absent/blank split can come out of it.
+   The store opens the file itself. The read is inline on the calling
+   fiber: goals.json holds the current set only (97 rows ≈ 40 KB on
+   2026-09-08), well under the reads that measured on the main domain
+   (RFC main-domain-scheduler-latency §8.8). *)
+
+type file_read =
+  | File_absent
+  | File_unreadable of Unix.error
+  | File_bytes of string
+
+let read_chunk_bytes = 65536
+
+let read_file path : file_read =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> File_absent
+  | exception Unix.Unix_error (error, _, _) -> File_unreadable error
+  | fd ->
+      let buffer = Buffer.create read_chunk_bytes in
+      let chunk = Bytes.create read_chunk_bytes in
+      (* A directory opens read-only and fails on the first [read] with
+         EISDIR, which is why the loop classifies its own errno. *)
+      let rec drain () =
+        match Unix.read fd chunk 0 read_chunk_bytes with
+        | 0 -> File_bytes (Buffer.contents buffer)
+        | count ->
+            Buffer.add_subbytes buffer chunk 0 count;
+            drain ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain ()
+        | exception Unix.Unix_error (error, _, _) -> File_unreadable error
+      in
+      Fun.protect
+        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+        drain
+
+let decode_bytes bytes : (state, reason) result =
+  match Yojson.Safe.from_string bytes with
+  | exception Yojson.Json_error detail -> Error (Not_json detail)
+  | json ->
+      (match state_of_yojson json with
+       | Ok state -> Ok state
+       | Error { field; detail } -> Error (Schema_rejected { field; detail }))
+
+(* The mirror is evidence of how far the primary drifted, never state: a
+   mirror that decodes is reported with its size and stamp and is not served
+   (RFC-0444 §5, "보여주되 서빙하지 않는다"). *)
+let mirror_status_of_read = function
+  | File_absent -> Mirror_absent
+  | File_unreadable error -> Mirror_unreadable error
+  | File_bytes bytes ->
+      (match decode_bytes bytes with
+       | Ok state ->
+           Mirror_decodes
+             { goal_count = List.length state.goals; updated_at = state.updated_at }
+       | Error reason -> Mirror_rejected reason)
+
+let make_unavailable config ~reason ~mirror =
+  { file = goals_path config; reason; mirror; reset_step = reset_step_of_reason reason }
+
+(* Only opens and reads: no directory creation, rename, write, delete or log
+   line. A primary that decodes is [Available] without the mirror being
+   opened at all. *)
+let load_source config : source =
+  let read_mirror () = mirror_status_of_read (read_file (goals_recovery_path config)) in
+  match read_file (goals_path config) with
+  | File_absent ->
+      (match read_mirror () with
+       | Mirror_absent -> Uninitialized
+       | (Mirror_unreadable _ | Mirror_decodes _ | Mirror_rejected _) as mirror ->
+           Unavailable (make_unavailable config ~reason:Missing_after_init ~mirror))
+  | File_unreadable error ->
+      Unavailable (make_unavailable config ~reason:(Unreadable error) ~mirror:(read_mirror ()))
+  | File_bytes bytes ->
+      (match decode_bytes bytes with
+       | Ok state -> Available state
+       | Error reason -> Unavailable (make_unavailable config ~reason ~mirror:(read_mirror ())))
+
+let find_goal_in goals id =
+  List.find_opt (fun goal -> String.equal goal.id id) goals
+
+let find_goal config ~goal_id : lookup =
+  match load_source config with
+  | Uninitialized -> Goal_absent
+  | Unavailable u -> Store_unavailable u
+  | Available state ->
+      (match find_goal_in state.goals goal_id with
+       | Some goal -> Goal_found goal
+       | None -> Goal_absent)
+
+(* {1 Writing} *)
 
 let write_state_result config state =
   ensure_dirs config;
@@ -383,91 +486,124 @@ let now_ms () =
 let gen_goal_id () =
   Printf.sprintf "goal-%d-%s" (now_ms ()) (Random_id.hex ~bytes:4)
 
-let find_goal goals id =
-  List.find_opt (fun goal -> String.equal goal.id id) goals
-
 let replace_goal goals updated =
   List.map (fun goal -> if String.equal goal.id updated.id then updated else goal) goals
 
-let load_primary_state config =
-  ensure_dirs config;
-  let path = goals_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Error detail -> Undecodable detail
-    | Ok json -> (match state_of_yojson json with
-        | Ok state -> Loaded state | Error detail -> Undecodable detail)
-  else if Workspace_utils.path_exists config (goals_recovery_path config) then
-    Undecodable "primary Goal store is missing while its recovery mirror exists"
-  else Loaded (default_state ())
+type delete_goal_outcome =
+  | Deleted
+  | Deleted_with_orphaned_links of string
+
+type delete_goal_error =
+  | Unknown_goal of string
+  | Store_unavailable of unavailable
+  | Persistence_failed of string
+
+let delete_goal_error_to_string = function
+  | Unknown_goal msg -> msg
+  | Store_unavailable u -> unavailable_to_string u
+  | Persistence_failed msg -> "goal persistence failed: " ^ msg
 
 type goal_reference_error =
-  | Goal_source_unavailable of string
+  | Goal_source_unavailable of unavailable
+  | Goal_lock_failed of Masc_domain.masc_error
   | Goal_missing of string
+
+(* Defined after [lookup] and [delete_goal_error] on purpose: a bare
+   [Store_unavailable] resolves to this type, and the two functions that
+   build the other two annotate their result. *)
+type write_error =
+  | Store_unavailable of unavailable
+  | Goal_not_found of string
+  | Rejected of string
+  | Persist_failed of string
+
+let write_error_to_string = function
+  | Store_unavailable u -> unavailable_to_string u
+  | Goal_not_found goal_id -> "goal not found: " ^ goal_id
+  | Rejected detail -> detail
+  | Persist_failed detail -> "goal persistence failed: " ^ detail
 
 (* Goal membership and the dependent commit share the Goal lock. Callbacks
    may acquire backlog then link locks, never re-enter the Goal store. *)
 let with_existing_goals config ~goal_ids f =
   match goal_ids with
   | [] -> Ok (f ())
-  | _ ->
+  | first_id :: _ ->
     (match Workspace_utils.with_file_lock_r config (goals_path config) (fun () ->
-      match load_primary_state config with
-      | Undecodable detail ->
-        Error (Goal_source_unavailable detail)
-      | Loaded state ->
+      match load_source config with
+      | Unavailable u -> Error (Goal_source_unavailable u)
+      | Uninitialized -> Error (Goal_missing first_id)
+      | Available state ->
         match List.find_opt
           (fun id -> not (List.exists (fun (goal : goal) -> String.equal goal.id id) state.goals))
           goal_ids with
         | Some id -> Error (Goal_missing id)
         | None -> Ok (f ())) with
      | Ok result -> result
-     | Error error ->
-       Error (Goal_source_unavailable (Masc_domain.masc_error_to_string error)))
+     | Error error -> Error (Goal_lock_failed error))
 
-let update_state config f =
-  let lock_path = goals_path config in
-  Workspace_utils.with_file_lock config lock_path (fun () ->
-      match load_primary_state config with
-      | Undecodable detail -> Error (undecodable_store_error config detail)
-      | Loaded state ->
-        let next_state = f state in
-        let* () = write_state_result config next_state in
-        Ok next_state)
+let update_state config f : (state, write_error) result =
+  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+      let current : (state, write_error) result =
+        match load_source config with
+        | Unavailable u -> Error (Store_unavailable u)
+        (* The first write creates the store; nothing writes an empty state
+           ahead of it (RFC-0444 §2.2). *)
+        | Uninitialized -> Ok (default_state ())
+        | Available state -> Ok state
+      in
+      let* state = current in
+      let next_state = f state in
+      (* A closure that hands back the very state it received has nothing to
+         commit: on an [Uninitialized] store this is what keeps a refused
+         first upsert from pre-writing an empty goals.json. *)
+      if next_state == state then Ok state
+      else
+        match write_state_result config next_state with
+        | Ok () -> Ok next_state
+        | Error detail -> Error (Persist_failed detail))
 
-let get_goal config ~goal_id =
-  read_state config |> fun state -> find_goal state.goals goal_id
 let transact_goal config ~goal_id f =
   Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      let* json = Workspace_utils.read_json_result config (goals_path config) in
-      let* state = decode_state_result config json in
-      match find_goal state.goals goal_id with
-      | None -> Error "goal not found"
-      | Some current ->
-          let* updated, result = f current in
-          if not (String.equal updated.id current.id) then
-            Error "goal transaction cannot replace goal identity"
-          else if updated = current then Ok (current, result)
-          else
-            let now = Masc_domain.now_iso () in
-            let updated = { updated with updated_at = now } in
-            let next = { version = state.version + 1; updated_at = now;
-                         goals = replace_goal state.goals updated } in
-            let* () = write_state_result config next in
-            Ok (updated, result))
+      let loaded : (goal * state, write_error) result =
+        match load_source config with
+        | Unavailable u -> Error (Store_unavailable u)
+        | Uninitialized -> Error (Goal_not_found goal_id)
+        | Available state ->
+          (match find_goal_in state.goals goal_id with
+           | None -> Error (Goal_not_found goal_id)
+           | Some goal -> Ok (goal, state))
+      in
+      let* current, state = loaded in
+      match f current with
+      | Error detail -> Error (Rejected detail)
+      | Ok (updated, result) ->
+        if not (String.equal updated.id current.id) then
+          Error (Rejected "goal transaction cannot replace goal identity")
+        else if updated = current then Ok (current, result)
+        else
+          let now = Masc_domain.now_iso () in
+          let updated = { updated with updated_at = now } in
+          let next = { version = state.version + 1; updated_at = now;
+                       goals = replace_goal state.goals updated } in
+          (match write_state_result config next with
+           | Ok () -> Ok (updated, result)
+           | Error detail -> Error (Persist_failed detail)))
 
 type conditional_update =
   | Goal_updated of goal
   | Goal_phase_mismatch of Goal_phase.t
 
-let update_goal_if_phase config ~goal_id ~expected_phase f =
-  let lock_path = goals_path config in
-  Workspace_utils.with_file_lock config lock_path (fun () ->
-      match load_primary_state config with
-      | Undecodable detail -> Error (undecodable_store_error config detail)
-      | Loaded state ->
-        (match find_goal state.goals goal_id with
-         | None -> Error "goal not found"
+let update_goal_if_phase config ~goal_id ~expected_phase f
+    : (conditional_update, write_error) result =
+  Workspace_utils.with_file_lock config (goals_path config)
+    (fun () : (conditional_update, write_error) result ->
+      match load_source config with
+      | Unavailable u -> Error (Store_unavailable u)
+      | Uninitialized -> Error (Goal_not_found goal_id)
+      | Available state ->
+        (match find_goal_in state.goals goal_id with
+         | None -> Error (Goal_not_found goal_id)
          | Some goal when goal.phase <> expected_phase ->
            Ok (Goal_phase_mismatch goal.phase)
          | Some goal ->
@@ -479,63 +615,54 @@ let update_goal_if_phase config ~goal_id ~expected_phase f =
              ; goals = replace_goal state.goals updated_goal
              }
            in
-           let* () = write_state_result config next_state in
-           Ok (Goal_updated updated_goal)))
+           (match write_state_result config next_state with
+            | Ok () -> Ok (Goal_updated updated_goal)
+            | Error detail -> Error (Persist_failed detail))))
 
-type delete_goal_outcome =
-  | Deleted
-  | Deleted_with_orphaned_links of string
-
-type delete_goal_error =
-  | Unknown_goal of string
-  | Persistence_failed of string
-
-let delete_goal_error_to_string = function
-  | Unknown_goal msg -> msg
-  | Persistence_failed msg -> "goal persistence failed: " ^ msg
-
-let delete_goal config ~goal_id =
-  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      let deleted = match load_primary_state config with
-      | Undecodable detail ->
-        Error (Persistence_failed (undecodable_store_error config detail))
-      | Loaded state ->
-      if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
-        Error (Unknown_goal "Goal not found")
-      else (
-        match
-          write_state_result
-            config
-            { version = state.version + 1
-            ; goals =
-                List.filter
-                  (fun goal -> not (String.equal goal.id goal_id))
-                  state.goals
-            ; updated_at = Masc_domain.now_iso ()
-            }
-        with
-        | Ok () -> Ok ()
-        | Error msg -> Error (Persistence_failed msg))
-  in
-  match deleted with
-  | Error _ as error -> error
-  | Ok () ->
-    (* Keep membership removal and link cleanup in the same Goal lock.
-       Persistence remains two stores; a cleanup failure is reported explicitly. *)
-    (match Workspace_goal_index.prune_links_for_goal_result config ~goal_id with
-     | Ok () -> Ok Deleted
-     | Error detail ->
-       Log.Misc.warn
-         "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
-         goal_id
-         detail;
-       let warning =
-         Printf.sprintf
-           "goal deleted but failed to prune goal_task_links for %s: %s"
-           goal_id
-           detail
-       in
-       Ok (Deleted_with_orphaned_links warning)))
+let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) result =
+  Workspace_utils.with_file_lock config (goals_path config)
+    (fun () : (delete_goal_outcome, delete_goal_error) result ->
+      let deleted : (unit, delete_goal_error) result =
+        match load_source config with
+        | Unavailable u -> Error (Store_unavailable u)
+        | Uninitialized -> Error (Unknown_goal "Goal not found")
+        | Available state ->
+          if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
+            Error (Unknown_goal "Goal not found")
+          else (
+            match
+              write_state_result
+                config
+                { version = state.version + 1
+                ; goals =
+                    List.filter
+                      (fun goal -> not (String.equal goal.id goal_id))
+                      state.goals
+                ; updated_at = Masc_domain.now_iso ()
+                }
+            with
+            | Ok () -> Ok ()
+            | Error msg -> Error (Persistence_failed msg))
+      in
+      match deleted with
+      | Error _ as error -> error
+      | Ok () ->
+        (* Keep membership removal and link cleanup in the same Goal lock.
+           Persistence remains two stores; a cleanup failure is reported explicitly. *)
+        (match Workspace_goal_index.prune_links_for_goal_result config ~goal_id with
+         | Ok () -> Ok Deleted
+         | Error detail ->
+           Log.Misc.warn
+             "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
+             goal_id
+             detail;
+           let warning =
+             Printf.sprintf
+               "goal deleted but failed to prune goal_task_links for %s: %s"
+               goal_id
+               detail
+           in
+           Ok (Deleted_with_orphaned_links warning)))
 
 let sort_goals goals =
   (* Sort key is [(priority asc, updated_at desc)]. *)
@@ -548,19 +675,11 @@ let sort_goals goals =
         String.compare right.updated_at left.updated_at)
     goals
 
-let list_goals config ?phase () =
-  read_state config
-  |> fun state -> state.goals
-  |> List.filter (fun goal ->
-         match phase with
-         | None -> true
-         | Some phase -> goal.phase = phase)
-  |> sort_goals
-
-let list_goals_result config ?phase () =
-  match load_primary_state config with
-  | Undecodable detail -> Error (undecodable_read_error config detail)
-  | Loaded state ->
+let list_goals_result config ?phase () : (goal list, unavailable) result =
+  match load_source config with
+  | Unavailable u -> Error u
+  | Uninitialized -> Ok []
+  | Available state ->
       Ok (state.goals
           |> List.filter (fun goal -> match phase with
               | None -> true
@@ -575,7 +694,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
     ?priority ?phase () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
-    Error "title required for new goal"
+    Error (Rejected "title required for new goal")
   else
     (* DET-OK: typed optional API param (not parsed input) — a new goal
        without an explicit phase starts Executing, same as the removed match. *)
@@ -586,7 +705,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
         let refusal = ref None in
         let state_result =
           update_state config (fun state ->
-              match find_goal state.goals resolved_id with
+              match find_goal_in state.goals resolved_id with
               | Some existing ->
                   (* DET-OK: typed optional param — omitted phase preserves
                      the stored phase (same arm the removed match had). *)
@@ -642,8 +761,8 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                      this closure runs, so the B1 refusal below can only ever
                      fire against a store that was actually read and found
                      not to hold the row. On refusal the closure returns the
-                     state unchanged and [update_state] rewrites the same
-                     bytes; the error is carried out via [refusal]. *)
+                     state it received and [update_state] writes nothing; the
+                     error is carried out via [refusal]. *)
                   if blank_opt metric || blank_opt target_value then (
                     refusal :=
                       Some
@@ -676,16 +795,16 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                   }))
         in
         (match state_result with
-        | Error msg -> Error msg
+        | Error error -> Error error
         | Ok state ->
           (match !refusal with
-           | Some msg -> Error msg
+           | Some msg -> Error (Rejected msg)
            | None ->
-          (match find_goal state.goals resolved_id with
+          (match find_goal_in state.goals resolved_id with
           | Some goal ->
               Ok (goal, if !was_created then `created else `updated)
           | None ->
-              Error "failed to save goal")))
+              Error (Rejected "failed to save goal"))))
 
 let compute_rollup goals =
   let count predicate =

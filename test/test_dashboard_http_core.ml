@@ -2100,7 +2100,7 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
   (match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
    | Ok _ -> ()
-   | Error msg -> fail msg);
+   | Error error -> fail (Goal_store.write_error_to_string error));
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
@@ -2117,7 +2117,7 @@ let test_goal_source_failure_is_not_empty () =
     (tree () |> member "tree" |> to_list |> List.length);
   let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
       ~metric:"visible goals" ~target_value:"1" () with
-    | Ok goal -> goal | Error detail -> fail detail
+    | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let primary = Goal_store.goals_path config in
   let mirror = primary ^ ".last-good" in
@@ -2172,8 +2172,9 @@ let test_goal_link_source_failure_preserves_unrelated_planning () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let get_ok = function Ok value -> value | Error detail -> fail detail in
-  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Linked source"
-      ~metric:"tasks" ~target_value:"1" ()) in
+  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal config ~title:"Linked source"
+         ~metric:"tasks" ~target_value:"1" ())) in
   let created = match Workspace.add_task_with_result ~goal_id:goal.id config
       ~title:"Linked task" ~priority:3 ~description:"evidence" with
     | Ok created -> created
@@ -2222,8 +2223,9 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let get_ok = function Ok value -> value | Error detail -> fail detail in
-  let goal, _ = get_ok (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
-      ~metric:"passing cases" ~target_value:"10" ()) in
+  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
+         ~metric:"passing cases" ~target_value:"10" ())) in
   let goal_id = goal.Goal_store.id in
   let open Yojson.Safe.Util in
   let find_goal nodes =
@@ -2238,7 +2240,8 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     let detail_goal = member "goal" detail in
     (* The Keeper detail assembles its own forest and uses this exact callback.
        Exercise that caller shape against the same persisted source too. *)
-    let goals = Goal_store.list_goals config () in
+    let goals = get_ok (Result.map_error Goal_store.unavailable_to_string
+      (Goal_store.list_goals_result config ())) in
     let projection = Dashboard_goals.verification_projection ~config in
     let keeper_goal =
       Dashboard_goals.build_forest ~config ~goals ~tasks:[] ~pending_approvals:[]
@@ -2283,8 +2286,9 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     ~verification_run_id:"dashboard-proof-run"
     ~criterion_revision:goal.criterion_revision));
   let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
-  ignore (get_ok (Goal_store.upsert_goal config ~id:goal_id
-    ~title:"Measured dashboard Goal" ~target_value:"20" ()));
+  ignore (get_ok (Result.map_error Goal_store.write_error_to_string
+    (Goal_store.upsert_goal config ~id:goal_id
+       ~title:"Measured dashboard Goal" ~target_value:"20" ())));
   let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
   check string "stale projection preserves the original proof"
     (Yojson.Safe.to_string (member "completion" proven))

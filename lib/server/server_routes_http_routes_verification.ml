@@ -181,7 +181,8 @@ let add_routes router =
                  |> Result.map (fun record -> goal, `Assoc ["goal", Goal_store.goal_to_yojson goal;
                      "verification", (match record with None -> `Null | Some record ->
                        Goal_verification.record_to_yojson_for_goal ~goal record)]))
-                 |> Result.map snd in
+                 |> Result.map snd
+                 |> Result.map_error Goal_store.write_error_to_string in
            match result with
            | Ok result -> respond_json_value_with_cors request reqd result
            | Error detail -> respond_json_value_with_cors ~status:`Bad_request request reqd (error_json detail))

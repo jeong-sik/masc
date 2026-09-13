@@ -5658,10 +5658,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       (if List.mem k.k_name state.keeper_yolo_names then
          (Theme.bad ()) ^ "skipped" ^ Ansi.reset
        else Ansi.dim ^ "asked" ^ Ansi.reset);
+    (* "workspace" is where the stance comes from, not what it is. The chat
+       header resolves the same inheritance before drawing it; this row left
+       the reader to go and look it up. *)
     add_row "Effects (Gate mode):"
-      (match List.assoc_opt k.k_name state.keeper_gate_modes with
-       | Some mode -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line mode ^ Ansi.reset
-       | None -> Ansi.dim ^ "workspace" ^ Ansi.reset);
+      (let inherited =
+         Option.map
+           (fun (modes : Tui_decode.gate_lane_modes) ->
+             gate_mode_word_of_wire modes.Tui_decode.glm_workspace)
+           state.gate_modes
+       in
+       match List.assoc_opt k.k_name state.keeper_gate_modes with
+       | Some mode when not (String.equal mode "workspace") ->
+           (Masc_tui_theme.tone Masc_tui_theme.Accent)
+           ^ Terminal_text.single_line (gate_mode_word_of_wire mode)
+           ^ Ansi.reset
+       | Some _ | None ->
+           Ansi.dim ^ "workspace"
+           ^ (match inherited with
+              | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
+              | None -> "")
+           ^ Ansi.reset);
     add_row "Judge first:"
       (match List.assoc_opt k.k_name state.keeper_gate_judges with
        | Some slot -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ Terminal_text.single_line slot ^ Ansi.reset

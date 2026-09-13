@@ -545,7 +545,13 @@ let keeper_message_identity ~max_cells state keeper_name =
         Printf.sprintf " %s%s%s %s\xc2\xb7 gate:%s%s"
           (if yolo then (Theme.bad ()) else (Theme.info ()))
           chat_mode Ansi.reset Ansi.dim
-          (Terminal_text.single_line gate_mode) Ansi.reset
+          (* Nothing observed is said in the words every other surface uses
+             for it. "?" beside a stance that decides what a send can do left
+             the reader to guess whether it meant manual or unread. *)
+          (match gate_mode with
+           | Some word -> Terminal_text.single_line word
+           | None -> Masc_tui_types.title_unread)
+          Ansi.reset
       in
       let status =
         String.concat ""

@@ -897,6 +897,46 @@ KEEPER_ROW_SCAN_BOUND = 24
 KEEPER_ROW_STEP_TIMEOUT_S = 1.0
 
 
+# The Keepers header carries its own row count, so the surface says when its
+# list can take a row key.
+KEEPERS_LIST_POPULATED = re.compile(rb"MASC Keepers \([1-9]")
+
+# The list is filled from the keeper metadata the fixture serves, so this is a
+# round trip, not a repaint. The longest wait in this file for a fixture to
+# answer is the same ten seconds.
+KEEPERS_LIST_TIMEOUT_S = 10.0
+
+
+def tab_to_keepers_list(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+) -> None:
+    """Tab to Keepers and wait until the list has rows to move through.
+
+    ``MASC Keepers (0)`` is a real frame: the surface draws its header before
+    the keeper metadata arrives. A walk that stops at the title lands on it,
+    and a row key sent then moves nothing because there is no row. When the
+    rows do arrive the cursor sits on the first one, so the step waiting for
+    the second row waits out its whole timeout and reports a selection that
+    never moved rather than the press that was swallowed.
+
+    Only the two walks that arrive here by tab need this. The other row steps
+    return to a list that is already filled, and pressing into that is not the
+    same act.
+    """
+    start = len(output)
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        KEEPERS_LIST_POPULATED,
+        start=start,
+        timeout=KEEPERS_LIST_TIMEOUT_S,
+    )
+
+
 def keeper_row_selected(name: bytes) -> re.Pattern[bytes]:
     """A needle that matches only while ``name`` is the selected keeper row.
 
@@ -9648,7 +9688,7 @@ def keeper_lanes_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_to_keepers_list(process, master_fd, output)
         send_and_wait(
             process,
             master_fd,
@@ -10285,7 +10325,7 @@ def keeper_lanes_ia_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_to_keepers_list(process, master_fd, output)
         send_and_wait(
             process,
             master_fd,

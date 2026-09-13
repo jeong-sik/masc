@@ -557,7 +557,8 @@ let visual_text_lines ?(height=24) ?(failed_note = "") ?(visual=true) ~width vie
                             | None -> [])
                         | None -> [])
                     | None -> [])
-                 @ (if selected_declaration view |> Option.exists (fun declaration -> declaration.instance_id=None)
+                 @ (if Option.fold ~none:false ~some:(fun (declaration : declaration) ->
+                          Option.is_none declaration.instance_id) (selected_declaration view)
                     then List.concat_map (fun item -> instance_lines {view with instance_cursor=0} [item]) snapshot.instances
                     else []))
         | Instances ->

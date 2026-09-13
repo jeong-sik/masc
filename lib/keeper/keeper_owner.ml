@@ -988,7 +988,13 @@ let start
           | Observed_turn { current; interrupt_token } ->
             (match Atomic.get current with
              | Some turn when String.equal turn.interrupt_token interrupt_token ->
-               Some (fun () -> Eio.Switch.fail turn.switch Keeper_registry_types.Operator_interrupt)
+               (* The token identifies the observed execution, but its inner
+                  agent switch does not own all request/delivery fibers. The
+                  stream boundary can catch that inner interruption as a typed
+                  result while an HTTP sibling still belongs to the Owner child.
+                  Cancel the owning child, exactly as request-id interruption
+                  does, and let its real teardown release the slot. *)
+               Option.map (fun cancel -> cancel.interrupt) (Atomic.get t.child_cancel)
              | Some _ | None -> None)
           | Direct_operation expected ->
             (match (Atomic.get t.operation_projection).running_operation_id, Atomic.get t.child_cancel with

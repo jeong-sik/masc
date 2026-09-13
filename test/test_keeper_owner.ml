@@ -1671,6 +1671,80 @@ let test_stale_chat_interrupt_cannot_pause_successor () =
     (Option.get (Owner.projection owner).meta).paused
 ;;
 
+let test_observed_stop_cancels_request_owned_stalled_http () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun outer ->
+  let socket = Eio.Net.listen env#net ~sw:outer ~reuse_addr:false ~backlog:1
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+  let port = match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port | `Unix _ -> fail "expected TCP listener" in
+  let release_server, unblock_server = Eio.Promise.create () in
+  Eio.Fiber.fork_daemon ~sw:outer (fun () ->
+    Eio.Switch.run (fun sw ->
+      let flow, _ = Eio.Net.accept ~sw socket in
+      let reader = Eio.Buf_read.of_flow ~max_size:8192 flow in
+      let rec headers () = match Eio.Buf_read.line reader with
+        | "" | "\r" -> () | _ -> headers () in
+      headers ();
+      Eio.Flow.copy_string
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n" flow;
+      Eio.Promise.await release_server);
+    `Stop_daemon);
+  let body_started, mark_body_started = Eio.Promise.create () in
+  let http_cancelled, mark_http_cancelled = Eio.Promise.create () in
+  let turn_ready, mark_turn_ready = Eio.Promise.create () in
+  let current = Atomic.make None in
+  let first = operation_id "observed-stop-http" in
+  let queued = operation_id "observed-stop-queued" in
+  let operation_executor ~sw ~keeper_name:_ ~claim =
+    let operation : Chat_operation.t = match owner_ok (claim ()) with Some value -> value | None -> fail "no claim" in
+    if not (Chat_operation.Operation_id.equal operation.operation_id first)
+    then fail "paused successor ran";
+    (* This HTTP task belongs to the enclosing request, not the inner model
+       switch. The fixture stalls on an actual body read, not a timer in f. *)
+    Eio.Fiber.fork ~sw (fun () ->
+      try
+        ignore (Llm_provider.Http_client.with_post_stream ~net:env#net
+          ~url:(Printf.sprintf "http://127.0.0.1:%d/stream" port)
+          ~headers:[] ~body:"" ~f:(fun reader ->
+            Eio.Promise.resolve mark_body_started ();
+            ignore (Eio.Buf_read.line reader)) ())
+      with Eio.Cancel.Cancelled _ as exn ->
+        Eio.Promise.resolve mark_http_cancelled ();
+        raise exn);
+    (try Eio.Switch.run (fun inner ->
+      Atomic.set current (Some {Keeper_registry_types.interrupt_token="observed";switch=inner});
+      Eio.Switch.on_release inner (fun () -> Atomic.set current None);
+      Eio.Promise.resolve mark_turn_ready ();
+      Eio.Fiber.await_cancel ())
+     with exn when Keeper_registry_types.is_operator_interrupt exn -> ());
+    (* Mirror execute_keeper_stream_tool_streaming: an inner interruption can
+       become a returned failure while the outer request waits for children. *)
+    Owner.Operation_failed {kind=Chat_operation.Turn_cancelled;
+      detail=Keeper_registry_types.operator_interrupt_detail;outcome_ref=None}
+  in
+  let owner = owner_ok (start_owner_with_executor ~sw:outer
+    ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
+    ~operation_executor:(Some operation_executor) ~keeper_name:"observed-http"
+    ~initial_meta:(Some (make_meta "observed-http")) ()) in
+  List.iter (fun operation_id -> ignore (owner_ok (Owner.submit_operation owner
+    ~operation_id ~source:operation_source ~input:(operation_input "wait")))) [first;queued];
+  Eio.Promise.await turn_ready;
+  Eio.Promise.await body_started;
+  (match owner_ok (Owner.pause_and_interrupt owner (Observed_turn {current;interrupt_token="observed"})) with
+   | Owner.Operation_interrupt_signalled -> () | _ -> fail "observed turn was not stopped");
+  let cancelled = Eio.Fiber.first
+    (fun () -> Eio.Promise.await http_cancelled; true)
+    (fun () -> Eio.Time.sleep env#clock 2.0; false) in
+  (* Always release the peer on regression, so a failed assertion cannot hang
+     switch teardown. This deadline is fixture-only, never runtime policy. *)
+  Eio.Promise.resolve unblock_server ();
+  ignore (await_terminal owner first 1_000);
+  check bool "observed Esc reaches request-owned HTTP read" true cancelled;
+  check bool "real teardown releases owner slot" true (Owner.turn_in_flight owner = None);
+  check int "queued input remains paused" 1 (Owner.operation_projection owner).queued_count
+;;
+
 let test_is_operator_interrupt_unwraps_every_shape () =
   let interrupt = Keeper_registry_types.Operator_interrupt in
   let bt = Printexc.get_callstack 0 in
@@ -3351,6 +3425,8 @@ let () =
             test_chat_interrupt_pauses_successors_and_run_next_prioritizes
         ; test_case "stale chat stop cannot pause a successor" `Quick
             test_stale_chat_interrupt_cannot_pause_successor
+        ; test_case "observed Esc cancels request-owned stalled HTTP" `Quick
+            test_observed_stop_cancels_request_owned_stalled_http
         ; test_case
             "is_operator_interrupt unwraps every shape"
             `Quick

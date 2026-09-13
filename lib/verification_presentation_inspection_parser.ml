@@ -35,7 +35,17 @@ def inspect(source, environment):
     }
     hyperlink_count = 0
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = archive.namelist()
+        entries = archive.infolist()
+        # Input safety limits apply before any decompression, including the CRC
+        # pass testzip() makes over every member. The central directory names
+        # each member's expanded size, so a small deck whose one member expands
+        # without bound is refused here instead of exhausting the verifier.
+        if len(entries) > 4096 or sum(entry.file_size for entry in entries) > 128 * 1024 * 1024:
+            raise PolicyError("package expansion exceeds inspection limits")
+        for entry in entries:
+            if entry.file_size > 16 * 1024 * 1024 or entry.file_size > max(1, entry.compress_size) * 1000:
+                raise PolicyError("package member expansion exceeds inspection limits")
+        names = [entry.filename for entry in entries]
         if len(names) != len(set(names)):
             raise ValueError("duplicate package member names")
         corrupt = archive.testzip()

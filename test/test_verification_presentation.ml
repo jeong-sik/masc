@@ -37,7 +37,7 @@ let test_original_presentation () =
     (Playground_paths.bundle_root producer) in
   Fs_compat.mkdir_p root;
   List.iter (fun name -> write (Filename.concat root name) (read (Filename.concat inputs name)))
-    ["presentation.pptx";"broken.pptx";"external.pptx"];
+    ["presentation.pptx";"broken.pptx";"external.pptx";"expanded.pptx"];
   let task = VAT.create ~config ~producer |> Result.get_ok in
   let goal = VAT.create_goal_proof ~config |> Result.get_ok in
   let dispatch surface path extra = VAT.dispatch surface ~name:"tool_read_file"
@@ -83,6 +83,8 @@ let test_original_presentation () =
       (Tool_result.is_failed (dispatch surface (prefix ^ "broken.pptx") []));
     Alcotest.(check bool) "external auto-loaded media is refused" true
       (Tool_result.failure_class (dispatch surface (prefix ^ "external.pptx") []) = Some Tool_result.Policy_rejection);
+    Alcotest.(check bool) "a member that expands past the limit is refused before expansion" true
+      (Tool_result.failure_class (dispatch surface (prefix ^ "expanded.pptx") []) = Some Tool_result.Policy_rejection);
     Alcotest.(check bool) "line windows cannot claim complete presentation" true
       (Tool_result.failure_class (dispatch surface (prefix ^ "presentation.pptx") ["limit",`Int 1])
        = Some Tool_result.Workflow_rejection)) [task,"";goal,producer ^ "/"];
@@ -104,6 +106,27 @@ let test_original_presentation () =
   Alcotest.(check string) "original source remains byte-for-byte unchanged" original
     (read (Filename.concat root "presentation.pptx"))
 
-let () = Alcotest.run "independent presentation verification"
-  ["Task and Goal",[Alcotest.test_case "parse original slides and notes, render every slide, preserve authority"
-    `Quick test_original_presentation]]
+(* The case reads inputs only scripts/ci/prepare-presentation-verifier.py
+   creates, a managed parser venv it installs, and LibreOffice. Registered
+   unconditionally, every run outside that lane -- a local dune test, the
+   coverage and feedback scripts -- failed at the first read with ENOENT, which
+   says nothing about the inspector. Declaring the inputs as dune deps would
+   only move the failure to the missing venv and renderer. So the case is
+   registered where all three exist, and the skip is said before the runner,
+   which captures per-case output. *)
+let () =
+  let temporary = Option.value ~default:(Filename.get_temp_dir_name ()) (Sys.getenv_opt "RUNNER_TEMP") in
+  let base = Filename.concat temporary "masc-presentation-verifier" in
+  let ready =
+    List.for_all Sys.file_exists
+      (List.map (Filename.concat (Filename.concat base "inputs"))
+         ["presentation.pptx"; "expected.json"; "broken.pptx"; "external.pptx"; "expanded.pptx"])
+    && Executable_path.command_available "soffice"
+    && Sys.file_exists (Presentation_runtime_dependencies.parser_python ~base_path:base) in
+  if not ready then
+    Printf.eprintf "SKIP presentation integration: run scripts/ci/prepare-presentation-verifier.py and install LibreOffice\n%!";
+  Alcotest.run "independent presentation verification"
+    (if ready then
+       ["Task and Goal",[Alcotest.test_case "parse original slides and notes, render every slide, preserve authority"
+         `Quick test_original_presentation]]
+     else [])

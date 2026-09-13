@@ -12,4 +12,6 @@ val observe : base_path:string -> unit -> t
 val available : t -> bool
 val parser_available : t -> bool
 val renderer_available : t -> bool
+val pdf_available : t -> bool
+(** Both Poppler commands start. Every inspection reads its rendered PDF with them. *)
 val to_json : t -> Yojson.Safe.t

@@ -45,12 +45,20 @@ def named_spec(model_id, provider='openrouter', endpoint='https://openrouter.ai/
     return result
 
 
-def presentation_readiness(base='/tmp/workspace', parser='started', renderer='missing'):
+def pdf_readiness(status='started'):
+    return dict(schema='masc.pdf_tools_readiness.v1', scope='current_process_environment',
+                pdf_inspection='not_run',
+                status='tools_available' if status == 'started' else 'unavailable',
+                checks=[dict(command='pdftotext', status=status), dict(command='pdftoppm', status=status)])
+
+
+def presentation_readiness(base='/tmp/workspace', parser='started', renderer='missing', pdf='started'):
     return dict(schema='masc.presentation_tools_readiness.v1', scope='workspace_host_runtime',
                 base_path=base, presentation_inspection='not_run',
-                status='tools_available' if parser == renderer == 'started' else 'unavailable',
+                status='tools_available' if parser == renderer == pdf == 'started' else 'unavailable',
                 checks=[dict(component='python_pptx', command=base + '/.masc/runtime-tools/presentation/bin/python3', status=parser),
-                        dict(component='libreoffice', command='soffice', status=renderer)])
+                        dict(component='libreoffice', command='soffice', status=renderer)],
+                pdf_tools=pdf_readiness(pdf))
 
 
 class PresentationPrerequisites(unittest.TestCase):
@@ -76,6 +84,21 @@ class PresentationPrerequisites(unittest.TestCase):
         readiness['status'] = 'tools_available'
         with self.assertRaises(SETUP.SetupError):
             SETUP.decode_presentation_tools_readiness(readiness)
+
+    def test_presentation_tools_need_poppler_too(self):
+        # Every inspection reads its rendered PDF with Poppler, so a host with
+        # the parser and LibreOffice but no pdftotext/pdftoppm is not ready.
+        without_poppler = presentation_readiness(renderer='started', pdf='missing')
+        self.assertEqual(without_poppler['status'], 'unavailable')
+        SETUP.decode_presentation_tools_readiness(without_poppler)
+        claimed = presentation_readiness(renderer='started', pdf='missing')
+        claimed['status'] = 'tools_available'
+        with self.assertRaisesRegex(SETUP.SetupError, 'inconsistent'):
+            SETUP.decode_presentation_tools_readiness(claimed)
+        unchecked = presentation_readiness(renderer='started')
+        del unchecked['pdf_tools']
+        with self.assertRaisesRegex(SETUP.SetupError, 'PDF tool readiness'):
+            SETUP.decode_presentation_tools_readiness(unchecked)
 
     def test_ready_other_workspace_does_not_enable_the_selected_workspace(self):
         with self.assertRaisesRegex(SETUP.SetupError, 'another workspace'):

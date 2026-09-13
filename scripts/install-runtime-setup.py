@@ -785,7 +785,13 @@ def decode_presentation_tools_readiness(value, base_path=None):
                    or not isinstance(row.get('command'), str) for row in checks)
             or {row.get('component') for row in checks} != {'python_pptx', 'libreoffice'}):
         raise SetupError('MASC did not check both presentation dependencies')
-    if all(row['status'] == 'started' for row in checks) != (value['status'] == 'tools_available'):
+    # Poppler rides beside the two presentation checks rather than as a third
+    # row: every inspection reads its rendered PDF with pdftotext and pdftoppm,
+    # so the presentation tools are available only when those start too.
+    pdf = decode_pdf_tools_readiness(value.get('pdf_tools'))
+    available = (all(row['status'] == 'started' for row in checks)
+                 and pdf['status'] == 'tools_available')
+    if available != (value['status'] == 'tools_available'):
         raise SetupError('MASC returned inconsistent presentation readiness')
     return value
 

@@ -64,6 +64,13 @@ def main():
                     Target="https://example.invalid/image.png", TargetMode="External")
                 data = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
             dst.writestr(entry, data)
+    # One member whose central-directory size is 20 MiB of zeros: tens of
+    # kilobytes on disk, over the per-member expansion limit. The inspector must
+    # refuse it from the directory before testzip() or read() expands it.
+    with zipfile.ZipFile(source) as src, zipfile.ZipFile(fixture / "expanded.pptx", "w", zipfile.ZIP_DEFLATED) as dst:
+        for entry in src.infolist():
+            dst.writestr(entry, src.read(entry))
+        dst.writestr("ppt/media/expanded.xml", b"\0" * (20 * 1024 * 1024))
     print(json.dumps({"base_path": str(base), "fixture_sha256": hashlib.sha256(original).hexdigest()}))
 
 

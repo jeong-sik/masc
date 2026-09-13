@@ -2191,6 +2191,20 @@ type surface =
   | Tools
   | System_logs
 
+(** The Activity screen is two surfaces under one tab strip: the event
+    feed and the system logs, reached from each other with 1 and 2. A
+    rule about "the Activity screen" reads this rather than [Acting]
+    alone -- the pane that stays off that screen was keyed to the one
+    constructor, so pressing 2 opened it and narrowed the table by 56
+    cells, and 1 closed it again. *)
+let on_activity_screen = function
+  | Acting | System_logs -> true
+  | Overview | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+  | Approvals | Planning | Schedules | Verification | Harness | Fusion
+  | Repositories | Code | Changes | Connectors | Runtime | Config
+  | Resources | Tools ->
+      false
+
 type browser_lane_visibility =
   | Browser_lane_hidden
   | Browser_lane_shown of {

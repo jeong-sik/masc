@@ -320,10 +320,15 @@ let apply ~now action current =
            | Running | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _ -> reject ())
       | Resume_official_checkpoint checkpoint ->
           (match current.phase with
-           | Recovering { origin = Official_checkpointed expected; _ }
-             when equal_gate_checkpoint (Official_client expected) (Official_client checkpoint) -> unchanged Running
+           | Recovering recovery ->
+             (match recovery.origin with
+              | Official_checkpointed expected ->
+                if equal_gate_checkpoint (Official_client expected) (Official_client checkpoint)
+                then unchanged Running else reject ()
+              | Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+              | Interrupted_execution | Runtime_retry _ | Gate_wait _ | Gate_binding _ -> reject ())
            | Preparing | Ready | Running | Resuming_runtime_retry _ | Resuming_gate _
-           | Recovering _ | Suspended _ | Settled _ -> reject ())
+           | Suspended _ | Settled _ -> reject ())
       | Resume_checkpoint checkpoint ->
           let resume expected =
             if Keeper_checkpoint_ref.equal expected checkpoint then unchanged Running

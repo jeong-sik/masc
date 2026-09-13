@@ -122,7 +122,7 @@ type transient_release_record =
   ; released_at : float
   }
 
-type context_delivery = Prepared_start_context | Replaced_configuration
+type context_delivery = Prepared_start_context | Replaced_configuration | Canonical_source_guard
 
 type context_frontier =
   { snapshot_sha256 : string
@@ -142,6 +142,8 @@ type t =
   ; last_transient_release : transient_release_record option
   ; updated_at : float
   }
+
+type context_admission_error = Context_frontier_missing | Canonical_context_changed
 
 type claim_plan =
   { previous_settlement : settlement option
@@ -639,7 +641,8 @@ let context_frontier_to_yojson = function
       ; "message_count", `Int frontier.message_count
       ; "delivery", `String (match frontier.delivery with
           | Prepared_start_context -> "prepared_start_context"
-          | Replaced_configuration -> "replaced_configuration")
+          | Replaced_configuration -> "replaced_configuration"
+          | Canonical_source_guard -> "canonical_source_guard")
       ; "acknowledged_turn", settlement_opt_to_yojson frontier.acknowledged_turn ]
 
 let context_frontier_of_yojson = function
@@ -652,6 +655,7 @@ let context_frontier_of_yojson = function
        let* delivery = match delivery with
          | "prepared_start_context" -> Ok Prepared_start_context
          | "replaced_configuration" -> Ok Replaced_configuration
+         | "canonical_source_guard" -> Ok Canonical_source_guard
          | _ -> Error "invalid context frontier delivery" in
        let* acknowledged_turn = settlement_opt_of_yojson acknowledged in
        Ok (Some {snapshot_sha256; message_count; delivery; acknowledged_turn})
@@ -678,12 +682,16 @@ let to_yojson binding =
 
 let of_yojson = function
   | `Assoc fields ->
-    (* Absence is explicitly unbound, never fabricated imported history. *)
-    let fields = if List.mem_assoc "context_frontier" fields then fields
-      else ("context_frontier", `Null) :: fields in
+    (* Optional new evidence is independent of the existing session identity.
+       Absence is unrecorded provenance, never an acknowledged frontier. *)
+    let frontier_fields, fields = List.partition (fun (name, _) ->
+      String.equal name "context_frontier") fields in
+    let* context_frontier = match frontier_fields with
+      | [] -> Ok None
+      | [(_, json)] -> context_frontier_of_yojson json
+      | _ -> Error "duplicate context frontier proof" in
     (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
      | [ "client_kind", `String client_kind_json
-       ; "context_frontier", context_frontier_json
        ; "last_recovery_resolution", last_resolution_json
        ; "last_transient_release", last_transient_release_json
        ; "phase", phase_json
@@ -698,7 +706,6 @@ let of_yojson = function
        else
          let* client_kind = client_kind_of_string client_kind_json in
          let* phase = phase_of_yojson phase_json in
-         let* context_frontier = context_frontier_of_yojson context_frontier_json in
          let* last_recovery_resolution =
            recovery_resolution_record_opt_of_yojson last_resolution_json
          in
@@ -915,6 +922,20 @@ let validate_completed_continuation
       && tool_surface_sha256 = checkpoint.tool_surface_sha256 -> Ok ()
   | Some _ | None -> Error "official-client Gate input has not settled in a later turn of its original session"
 
+let validate_unchanged_context ~expected ~snapshot_sha256 =
+  match expected with
+  | Some {phase=Settled settled; context_frontier=Some ({acknowledged_turn=Some receipt; _} as frontier); _}
+      when settled = receipt ->
+    if String.equal frontier.snapshot_sha256 snapshot_sha256 then Ok ()
+    else Error Canonical_context_changed
+  | Some _ | None -> Error Context_frontier_missing
+
+let context_admission_error_to_string = function
+  | Context_frontier_missing ->
+    "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"
+  | Canonical_context_changed ->
+    "canonical_context_changed: retained vendor conversation cannot replace its canonical history or core instructions; original session and effects remain preserved"
+
 let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expected ~client_kind ~owner_epoch ~runtime_id
     ~tool_surface_sha256 ~updated_at =
   let context_frontier = Option.map (fun frontier ->
@@ -922,6 +943,14 @@ let claim_with_context_frontier ~context_frontier ~base_path ~keeper_name ~expec
   let* () = validate_uuid "owner_epoch" owner_epoch in
   let* plan = plan_claim ~expected ~client_kind ~runtime_id in
   let plan = reconcile_tool_surface plan ~tool_surface_sha256 in
+  let* () = match context_frontier, plan.previous_settlement with
+    | Some {delivery=Canonical_source_guard; snapshot_sha256; _}, Some _ ->
+      validate_unchanged_context ~expected ~snapshot_sha256
+      |> Result.map_error context_admission_error_to_string
+    | Some {delivery=(Prepared_start_context | Replaced_configuration | Canonical_source_guard); _}, None
+    | Some {delivery=(Prepared_start_context | Replaced_configuration); _}, Some _
+    | None, _ -> Ok ()
+  in
   let last_recovery_resolution =
     Option.bind expected (fun binding -> binding.last_recovery_resolution)
   in
@@ -1128,6 +1157,9 @@ let release_transient ~base_path ~keeper_name ~expected ~failure ~released_at =
       ~expected:(Some expected)
       { expected with
         phase = restored_phase previous_settlement
+      ; context_frontier = Option.map (fun frontier -> match frontier.delivery with
+          | Canonical_source_guard -> {frontier with acknowledged_turn=previous_settlement}
+          | Prepared_start_context | Replaced_configuration -> frontier) expected.context_frontier
       ; turn_count
       ; last_transient_release = Some { failure; owner_epoch; released_at }
       ; updated_at = released_at

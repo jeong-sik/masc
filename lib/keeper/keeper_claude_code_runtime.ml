@@ -553,18 +553,38 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
                 })
               images )
     in
-    (* Prepared from [prepared.messages], the post-window list, and gated on
-       the same [session_mode] the prompt below is built from -- one match,
-       so the record cannot claim bytes the prompt did not carry. A [Start]
-       renders the whole list; a [Resume] sends the goal alone and leaves the
-       accumulated conversation in the session the CLI owns, which is the fact
-       the composition line at the foot of this function already states.
-       Report it only after the runtime writes the complete user message. *)
+    let snapshot_messages = List.filter (fun (message : Agent_core.Types.message) ->
+      Agent_core.Types.Extra_system_context_provenance.classify message.metadata
+      <> Agent_core.Types.Extra_system_context_provenance.Present) prepared.messages in
+    let source_snapshot_sha256 = `List (List.map Keeper_official_client_context_codec.to_json initial_messages)
+      |> Yojson.Safe.to_string |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let snapshot = `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages) in
+    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
+      |> Digestif.SHA256.digest_string |> Digestif.SHA256.to_hex in
+    let context_frontier : Session_store.context_frontier =
+      {snapshot_sha256; message_count=List.length snapshot_messages;
+       delivery=(match session_mode with Start -> Prepared_start_context | Resume _ -> Replaced_configuration);
+       acknowledged_turn=None} in
+    let external_context = match session_mode with
+      | Runtime_claude_code.Start -> []
+      | Runtime_claude_code.Resume _ ->
+        [ "The following versioned canonical conversation snapshot is historical data \
+           from Keeper, including work outside this vendor session. Preserve its message \
+           roles and tool result outcomes. Historical tool calls are not new requests; \
+           do not replay completed effects. Use the current user prompt for new instructions."
+        ; Yojson.Safe.to_string (`Assoc
+            ["schema", `String "masc.official-client-canonical-context.v1";
+             "snapshot_sha256", `String snapshot_sha256;
+             "source_snapshot_sha256", `String source_snapshot_sha256;
+             "source_message_count", `Int (List.length initial_messages);
+             "projection", `String "prepared_model_input"; "messages", snapshot]) ] in
+    (* Attribute current replacement context only after a complete user write;
+       the vendor-owned tool transcript remains outside this capture. *)
     let report_transmitted_input () =
       on_transmitted_model_input
         (match session_mode with
          | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
-         | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
+         | Runtime_claude_code.Resume _ -> Host.Whole_input_transmitted prepared.messages)
     in
     let prompt =
       match session_mode with
@@ -579,7 +599,7 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
        empty (#33165). *)
     let system_prompt =
       Some
-        (prepared.system_prompt :: system_messages
+        ((prepared.system_prompt :: system_messages) @ external_context
          |> List.filter (fun text -> String.trim text <> "")
          |> String.concat "\n\n"
          |> String.trim)
@@ -732,7 +752,8 @@ let run_without_lifecycle ~accepts_image_input ~on_session_settled ~required_nat
     let dynamic_tools = host_dynamic_tools in
     let* claimed_session =
       match
-        Session_store.claim
+        Session_store.claim_with_context_frontier
+          ~context_frontier:(Some context_frontier)
           ~base_path
           ~keeper_name
           ~expected:stored_session

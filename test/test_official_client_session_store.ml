@@ -1253,14 +1253,36 @@ let test_context_frontier_is_acknowledged_only_by_settlement () =
       ~session_id:"session" ~turn_id:"turn" ~updated_at:5. |> Result.get_ok in
     check bool "terminal settlement records exact vendor identity" true
       ((observed settled).acknowledged_turn = Some {session_id="session";turn_id="turn"});
+    check bool "unchanged canonical context is admitted" true
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
+    check bool "changed canonical context is a typed rejection" true
+      (validate_unchanged_context ~expected:(Some settled) ~snapshot_sha256:(String.make 64 'b') = Error Canonical_context_changed);
+    check bool "inflight intent is never accepted as prior context proof" true
+      (validate_unchanged_context ~expected:(Some started) ~snapshot_sha256:frontier.snapshot_sha256 = Error Context_frontier_missing);
     check bool "acknowledged frontier survives reopen" true
       (load ~base_path ~keeper_name = Ok (Some settled));
+    let guarded = claim_with_context_frontier
+      ~context_frontier:(Some {frontier with delivery=Canonical_source_guard; acknowledged_turn=None})
+      ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Codex ~owner_epoch
+      ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.
+      |> Result.get_ok in
+    let released = release_transient ~base_path ~keeper_name ~expected:guarded
+      ~failure:Transient_spawn_failed ~released_at:7. |> Result.get_ok in
+    check bool "transient spawn failure preserves verified unchanged source"
+      true (validate_unchanged_context ~expected:(Some released)
+        ~snapshot_sha256:frontier.snapshot_sha256 = Ok ());
+    check bool "changed source cannot claim the unchanged-source channel" true
+      (Result.is_error (claim_with_context_frontier
+        ~context_frontier:(Some {frontier with delivery=Canonical_source_guard;
+          snapshot_sha256=String.make 64 'b'; acknowledged_turn=None})
+        ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Codex ~owner_epoch
+        ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:8.));
     let unbound_json = match to_yojson settled with
       | `Assoc fields -> `Assoc (List.remove_assoc "context_frontier" fields)
       | _ -> fail "binding encoding is not an object" in
     match of_yojson unbound_json with
-    | Ok binding -> check bool "absent frontier never fabricates import proof" true
-        (binding.context_frontier = None)
+    | Ok binding -> check bool "absent optional proof preserves session without fabricating acknowledgement" true
+        (binding.context_frontier = None && binding.phase = settled.phase)
     | Error detail -> fail detail)
 ;;
 

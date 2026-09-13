@@ -65,7 +65,8 @@ let runtime = {js|function browserScene(args) {
   // otherwise retain the closest standard landmark that was actually exposed.
   const attribute = (element, name) =>
     typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
-  const regionRole = element => attribute(element,'role') || element.localName || '';
+  const regionRole = element => String(attribute(element,'role') || element.localName || '')
+    .trim().toLowerCase();
   const regionTokens = new Set(['main','navigation','complementary','region','log',
     'banner','contentinfo','search','form','article','header','footer','section']);
   const semanticRegion = element => {

@@ -251,8 +251,12 @@ let test_subscription_turn_and_env_scrub () =
 (* The stderr drain used to be an ordinary fiber of the process switch, so a
    served turn waited for a background child to release stderr: unbounded for
    an orphaned MCP server. The holder starts before the result so the race
-   with the CLI's termination cannot skip it. *)
+   with the CLI's termination cannot skip it. [turn_return_window_s] bounds
+   the whole measured run, not a fixture deadline like
+   [window_outlasting_process_start_s]; the regression it guards against
+   takes the holder's full 20 s. *)
 let pipe_holder_outliving_the_turn_s = 20.0
+let turn_return_window_s = 5.0
 
 let test_result_returns_before_a_background_child_releases_the_pipes () =
   with_fixture
@@ -267,7 +271,7 @@ let test_result_returns_before_a_background_child_releases_the_pipes () =
          check bool
            (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
            true
-           (elapsed < window_outlasting_process_start_s))
+           (elapsed < turn_return_window_s))
 ;;
 
 let test_routed_credentials_reach_probe_and_turn () =

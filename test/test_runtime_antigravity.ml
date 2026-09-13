@@ -120,14 +120,19 @@ let fixture_script
            (fun seconds ->
               output_string output (Printf.sprintf "sleep %.3f\n" seconds))
            after_first_line_delay_s;
+       (* The first #28912 shutdown shape: a background child inheriting
+          stdout and stderr, so EOF never arrives on either pipe even though
+          the CLI exits. It starts before the last line so the race with the
+          runtime's termination cannot skip it. *)
+       if index = List.length lines - 1
+       then
+         Option.iter
+           (fun seconds ->
+              output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
+           pipe_holder_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     lines;
-  (* The two #28912 shutdown shapes: a background child inheriting stdout
-     and stderr (so EOF never arrives on either pipe even though the CLI
-     exits), and the CLI itself stalling before exit. *)
-  Option.iter
-    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
-    pipe_holder_s;
+  (* The second #28912 shutdown shape: the CLI itself stalling before exit. *)
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     exit_delay_s;
@@ -972,17 +977,14 @@ let test_result_completes_even_when_stdout_stays_open () =
       check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text)
 ;;
 
-(* #28912 second shape: the CLI itself never exits after the result
-   ("Waiting for migrations to complete"). The bounded exit grace reaps it
-   and the already-served turn still succeeds even though the process ends
-   by signal. *)
 (* The first shape, measured. The stderr drain used to be an ordinary fiber
    of the process switch, so a served turn waited for the background child to
    release stderr: 10 s in the test above, unbounded for an orphaned MCP
-   server in production. The bound covers spawn and the protocol; spawning
-   the shell measured p50 12 ms with a 409 ms tail under load on this repo's
-   machine (see test_runtime_claude_code.ml). *)
-let window_outlasting_process_start_s = 5.0
+   server in production. [turn_return_window_s] bounds the whole measured
+   run (Eio_main start, spawn, protocol, exit): spawning the shell measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, and the
+   regression it guards against takes the holder's full 20 s. *)
+let turn_return_window_s = 5.0
 let pipe_holder_outliving_the_turn_s = 20.0
 
 let test_result_returns_before_a_background_child_releases_the_pipes () =
@@ -996,9 +998,13 @@ let test_result_returns_before_a_background_child_releases_the_pipes () =
       check bool
         (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
         true
-        (elapsed < window_outlasting_process_start_s))
+        (elapsed < turn_return_window_s))
 ;;
 
+(* #28912 second shape: the CLI itself never exits after the result
+   ("Waiting for migrations to complete"). The bounded exit grace reaps it
+   and the already-served turn still succeeds even though the process ends
+   by signal. *)
 let test_result_completes_when_the_cli_hangs_in_shutdown () =
   with_fixture ~exit_delay_s:15.0 [ init (); result () ] (fun path ->
     match run_fixture ~timeout_s:2.0 path with

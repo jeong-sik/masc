@@ -436,10 +436,11 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
 
 (* The stderr drain used to be an ordinary fiber of the process switch, so a
    served turn waited for a background child to release stderr: unbounded for
-   an orphaned MCP server. The bound covers spawn and the protocol; spawning
-   the shell measured p50 12 ms with a 409 ms tail under load on this repo's
-   machine (see test_runtime_claude_code.ml). *)
-let window_outlasting_process_start_s = 5.0
+   an orphaned MCP server. [turn_return_window_s] bounds the whole measured
+   run (Eio_main start, spawn, protocol, exit): spawning the shell measured
+   p50 12 ms with a 409 ms tail under load on this repo's machine, and the
+   regression it guards against takes the holder's full 20 s. *)
+let turn_return_window_s = 5.0
 let pipe_holder_outliving_the_turn_s = 20.0
 
 let test_turn_returns_before_a_background_child_releases_the_pipes () =
@@ -463,7 +464,7 @@ let test_turn_returns_before_a_background_child_releases_the_pipes () =
          check bool
            (Printf.sprintf "turn returned in %.3fs, before the holder released the pipes" elapsed)
            true
-           (elapsed < window_outlasting_process_start_s))
+           (elapsed < turn_return_window_s))
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =

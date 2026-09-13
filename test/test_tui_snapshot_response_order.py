@@ -174,7 +174,11 @@ def slow_poll(binary, binary_sha, source):
             # obsolete/owning arrival requests can be counted as timer polls.
             _, primed = fixtures_and_reading(source, 1)
             fixtures[path] = primed
-            h.send_and_wait(process, master, output, b"r", label(source, 1))
+            # A timer can publish the primed value before the queued r is
+            # consumed. The following help key is an ordered input witness:
+            # its frame proves r ran; opening/closing help launches no reads.
+            h.send_and_wait(process, master, output, b"r?", b"MASC Cheat Sheet")
+            h.send_and_wait(process, master, output, b"\x1b", label(source, 1))
             fixtures[path] = source_read
             # No key starts this read: it comes from the actual TUI timer.
             assert h.wait_for_fixture_event(process, master, output, slow.requested, timeout=5.0)

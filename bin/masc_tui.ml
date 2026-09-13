@@ -9457,55 +9457,68 @@ let load_keeper_logs_if_safe state base_path limit keeper =
   | Masc_tui_types.Workspace_identity_mismatch _ -> ()
 ;;
 
+(* What a detail tab reads on the way in, for the Keeper it is opened on.
+   Three entry paths -- Enter from the roster, a cursor move with a tab held
+   open, and [ / ] between tabs -- each carried a copy of this table, and the
+   copies drifted: Automation's copy fetched the fleet list instead of the
+   Keeper's schedules until a comment said to mirror the other, and Secrets
+   fetched nothing in all three. One table, called from all three. *)
+let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
+  match state.detail_tab with
+  | Detail_info -> ()
+  | Detail_sandbox ->
+      state.keeper_sandbox_view <- None;
+      state.keeper_sandbox_view_error <- None;
+      launch_keeper_sandbox_view state ~mailbox keeper.k_name;
+      (* Container logs that were open for this Keeper come back with the
+         status they hang under. *)
+      let logs_were_open =
+        match state.keeper_sandbox_logs, state.keeper_sandbox_logs_error with
+        | Some (stamp, _), _ | _, Some (stamp, _) ->
+            String.equal stamp keeper.k_name
+        | None, None -> false
+      in
+      if logs_were_open then launch_keeper_sandbox_logs state ~mailbox keeper.k_name
+  | Detail_instructions ->
+      state.keeper_config_view <- None;
+      state.keeper_config_view_error <- None;
+      launch_keeper_config_view state ~mailbox keeper.k_name
+  | Detail_secrets ->
+      (* The projection arrives with the composite body the Keeper lanes read
+         carries. Ask for it when none has answered: the roster opens with
+         that read, but a read that failed leaves nothing behind, and the tab
+         drew that as "no projection reported". *)
+      if Option.is_none state.lanes then launch_keeper_lanes_load state ~mailbox
+  | Detail_github ->
+      state.github_identity_view <- None;
+      state.github_identity_view_error <- None;
+      launch_github_identity_view state ~mailbox keeper.k_name
+  | Detail_identity ->
+      state.identity_view <- None;
+      state.identity_view_error <- None;
+      (* The tab opens at the top of its own list rather than at whichever
+         row the last Keeper's was left on. *)
+      state.identity_cursor <- 0;
+      state.identity_attempt_error <- None;
+      state.identity_filter <- None;
+      launch_identity_view state ~mailbox keeper.k_name
+  | Detail_channels -> launch_connectors_load state ~mailbox
+  | Detail_automation ->
+      (* This Keeper's schedules (state.keeper_schedules, what the tab reads),
+         not the fleet list. *)
+      state.keeper_schedules <- None;
+      state.keeper_schedules_error <- None;
+      launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
+  | Detail_runs -> launch_fusion_runs_load state ~mailbox
+;;
+
 let refresh_keeper_detail_selection state ~base_path ~mailbox =
   state.keeper_run_cursor <- 0;
   match selected_keeper state with
   | None -> ()
   | Some keeper ->
       load_live_context_if_safe state base_path keeper;
-      (match state.detail_tab with
-       | Detail_info -> ()
-       | Detail_sandbox ->
-           state.keeper_sandbox_view <- None;
-           state.keeper_sandbox_view_error <- None;
-           launch_keeper_sandbox_view state ~mailbox keeper.k_name;
-           let logs_were_open =
-             match
-               state.keeper_sandbox_logs, state.keeper_sandbox_logs_error
-             with
-             | Some (stamp, _), _ | _, Some (stamp, _) ->
-               String.equal stamp keeper.k_name
-             | None, None -> false
-           in
-           if logs_were_open then
-             launch_keeper_sandbox_logs state ~mailbox keeper.k_name
-       | Detail_instructions ->
-           state.keeper_config_view <- None;
-           state.keeper_config_view_error <- None;
-           launch_keeper_config_view state ~mailbox keeper.k_name
-       | Detail_secrets ->
-           (* Nothing to fetch: the projection arrives with the composite
-              body the Lanes refresh already reads. *)
-           ()
-       | Detail_github ->
-           state.github_identity_view <- None;
-           state.github_identity_view_error <- None;
-           launch_github_identity_view state ~mailbox keeper.k_name
-       | Detail_identity ->
-           state.identity_view <- None;
-           state.identity_view_error <- None;
-           (* Another keeper's tab opens at the top of its own list rather
-              than at whichever row the last one was left on. *)
-           state.identity_cursor <- 0;
-           state.identity_attempt_error <- None;
-           state.identity_filter <- None;
-           launch_identity_view state ~mailbox keeper.k_name
-       | Detail_channels -> launch_connectors_load state ~mailbox
-       | Detail_automation ->
-           state.keeper_schedules <- None;
-           state.keeper_schedules_error <- None;
-           launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
-       | Detail_runs -> launch_fusion_runs_load state ~mailbox)
+      launch_detail_tab_reading state ~mailbox keeper
 ;;
 
 let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
@@ -9518,34 +9531,7 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
   (* A sticky non-Info tab re-reads for the keeper the cursor now names;
      without this the pane shows "(loading)" forever after a cursor move,
      because the stamped answer names the previous keeper. *)
-  match state.detail_tab with
-  | Detail_info -> ()
-  | Detail_sandbox ->
-      state.keeper_sandbox_view <- None;
-      state.keeper_sandbox_view_error <- None;
-      launch_keeper_sandbox_view state ~mailbox keeper.k_name
-  | Detail_instructions ->
-      state.keeper_config_view <- None;
-      state.keeper_config_view_error <- None;
-      launch_keeper_config_view state ~mailbox keeper.k_name
-  | Detail_secrets ->
-      (* Arrives with the composite body; nothing to fetch on entering the
-         tab. *)
-      ()
-  | Detail_github ->
-      state.github_identity_view <- None;
-      state.github_identity_view_error <- None;
-      launch_github_identity_view state ~mailbox keeper.k_name
-  | Detail_identity ->
-      state.identity_view <- None;
-      state.identity_view_error <- None;
-      launch_identity_view state ~mailbox keeper.k_name
-  | Detail_channels -> launch_connectors_load state ~mailbox
-  | Detail_automation ->
-      state.keeper_schedules <- None;
-      state.keeper_schedules_error <- None;
-      launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
-  | Detail_runs -> launch_fusion_runs_load state ~mailbox
+  launch_detail_tab_reading state ~mailbox keeper
 ;;
 
 (* Enter on a Lanes overview row, shared with the mouse: a press on the row
@@ -18233,41 +18219,10 @@ and is loaded on demand through keeper_skill.
            let step = if bracket = "]" then 1 else count - 1 in
            state.detail_tab <- List.nth tabs ((index + step) mod count);
            state.detail_scroll <- 0;
-           (match selected_keeper state, state.detail_tab with
-            | Some keeper, Detail_sandbox ->
-                state.keeper_sandbox_view <- None;
-                state.keeper_sandbox_view_error <- None;
-                launch_keeper_sandbox_view state ~mailbox:async_messages
-                  keeper.k_name
-            | Some keeper, Detail_instructions ->
-                state.keeper_config_view <- None;
-                state.keeper_config_view_error <- None;
-                launch_keeper_config_view state ~mailbox:async_messages
-                  keeper.k_name
-            | Some keeper, Detail_github ->
-                state.github_identity_view <- None;
-                state.github_identity_view_error <- None;
-                launch_github_identity_view state ~mailbox:async_messages
-                  keeper.k_name
-            | Some keeper, Detail_identity ->
-                state.identity_view <- None;
-                state.identity_view_error <- None;
-                launch_identity_view state ~mailbox:async_messages keeper.k_name
-            | Some _, Detail_channels ->
-                launch_connectors_load state ~mailbox:async_messages
-            | Some keeper, Detail_automation ->
-                (* Bracket-switching into Automation must fetch THIS keeper's
-                   schedules (state.keeper_schedules, what automation_lines
-                   reads), not the fleet list. The old launch_schedules_load
-                   wrote state.schedules, which this tab never reads, so the
-                   panel stayed stuck on "(loading…)". Mirror open_keeper_detail. *)
-                state.keeper_schedules <- None;
-                state.keeper_schedules_error <- None;
-                launch_keeper_schedules_load state ~mailbox:async_messages
-                  ~keeper_name:keeper.k_name
-            | Some _, Detail_runs ->
-                launch_fusion_runs_load state ~mailbox:async_messages
-            | _, Detail_info | _, Detail_secrets | None, _ -> ())
+           (match selected_keeper state with
+            | Some keeper ->
+                launch_detail_tab_reading state ~mailbox:async_messages keeper
+            | None -> ())
        (* One step through the list a detail was opened from, on every surface
           that has one. Each reuses the same open the Enter arm uses, so a
           step cannot fetch less than an open does. Guarded on the detail
@@ -22400,7 +22355,13 @@ and is loaded on demand through keeper_skill.
              launch_keeper_lanes_load state ~mailbox:async_messages
          | Keepers (Keeper_logs | Keeper_detail) ->
              load_keeper_logs_if_safe state base_path 200
-               (List.nth_opt state.keepers state.keeper_cursor)
+               (List.nth_opt state.keepers state.keeper_cursor);
+             (* The Secrets tab reads through the Keeper lanes body, which
+                only the list refreshed; r on the tab had no way to retry a
+                failed read. *)
+             if state.view = Keepers Keeper_detail
+                && state.detail_tab = Detail_secrets
+             then launch_keeper_lanes_load state ~mailbox:async_messages
          | Keepers Keeper_calls ->
              (match selected_keeper state with
               | Some keeper ->

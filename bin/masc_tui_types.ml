@@ -94,6 +94,15 @@ type workspace_identity =
       ; server_base_path : string
       }
 
+(* Whether the rows kept from this workspace's own directory -- agents, tasks,
+   keepers, their logs -- were read from it. They are read only once the server
+   says it serves this workspace, and cleared again when it serves another, and
+   both leave the lists empty with no error beside them. An empty roster alone
+   therefore cannot say "no keepers"; this says whether it may. *)
+type local_workspace_reading =
+  | Local_workspace_unread
+  | Local_workspace_read
+
 let canonical_path path =
   if String.equal path ""
   then ""
@@ -3930,7 +3939,7 @@ type state = {
   mutable fleet_safety: fleet_safety option;
   mutable fleet_safety_error: string option;
   mutable connection_status: connection_status;
-  mutable last_refresh: float;
+  mutable local_workspace: local_workspace_reading;
   mutable view: surface;
   (* Where Esc goes back to after following a reference, and what was open
      there. The surfaces print [masc://] references beside the thing they
@@ -5530,7 +5539,7 @@ let create_state
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;
-  last_refresh = 0.0;
+  local_workspace = Local_workspace_unread;
   view = Overview;
   followed_from = None;
   keeper_cursor = 0;
@@ -5923,6 +5932,33 @@ let visible_system_log_entries (state : state) =
    stable producer order; each turn is Input -> Progress -> Tool -> Output.
    Pending requests are withheld for the separate NEXT lane. Wall clocks never
    decide conversation order. *)
+(* What a page says when it holds nothing, in one place: the words for
+   {!empty_page}'s [Page_unread] and [Page_failed]. They sit beside the type so
+   a module below the renderer -- Memory's body is one -- draws the same words.
+
+   These were spelled at every surface that draws a page -- nine copies of the
+   failure line and nine of the unread one -- and the unread copies said only
+   that nothing had loaded. [r] is what loads it, and the reader was left to
+   find that out somewhere else. Two surfaces did name the key, which is how a
+   reader on the others learned there was nothing to learn. *)
+let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+
+let page_failed_note = "  (load failed; nothing here is a reading)"
+
+(* What a title says where its counts would go. A read nobody has asked for and a
+   read that failed both leave the snapshot empty, and the title is the row on
+   top, so it is the answer that gets read: "not loaded" after a failure sends
+   the operator to [r] while the server's reason sits in red two rows below.
+
+   The same distinction the body makes with {!page_unread_note} and
+   {!page_failed_note}, in the words a title has room for. The Memory header was
+   taught it in #35457; every other surface still said "not loaded" for both. *)
+let title_unread = "(not loaded)"
+let title_failed = "(load failed)"
+
+let title_missing_reading ~error =
+  if Option.is_some error then title_failed else title_unread
+
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back
    with nothing. The first was drawn as the third -- "nothing waiting on a
@@ -5938,6 +5974,15 @@ let empty_page_of ~snapshot ~error =
   | _, Some _ -> Page_failed
   | None, None -> Page_unread
   | Some _, None -> Page_empty
+
+(* The page for a list kept from this workspace's directory, which carries no
+   snapshot of its own: the list is empty both before the read and after it. *)
+let local_rows_page (state : state) ~error =
+  empty_page_of ~error
+    ~snapshot:
+      (match state.local_workspace with
+       | Local_workspace_unread -> None
+       | Local_workspace_read -> Some ())
 
 let compute_chat_rows_for (state : state) keeper_name ~promoted_request_id
     ~queued_request_ids =

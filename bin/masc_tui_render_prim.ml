@@ -221,32 +221,6 @@ let document_markdown ~width body =
   markdown_with_closing ~closing:Ansi.reset ~width body
 
 
-(* What a page says when it holds nothing, in one place.
-
-   These were spelled at every surface that draws a page -- nine copies of the
-   failure line and nine of the unread one -- and the unread copies said only
-   that nothing had loaded. [r] is what loads it, and the reader was left to
-   find that out somewhere else. Two surfaces did name the key, which is how a
-   reader on the others learned there was nothing to learn. *)
-let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
-
-let page_failed_note = "  (load failed; nothing here is a reading)"
-
-(* What a title says where its counts would go. A read nobody has asked for and a
-   read that failed both leave the snapshot empty, and the title is the row on
-   top, so it is the answer that gets read: "not loaded" after a failure sends
-   the operator to [r] while the server's reason sits in red two rows below.
-
-   The same distinction the body makes with {!page_unread_note} and
-   {!page_failed_note}, in the words a title has room for. The Memory header was
-   taught it in #35457; every other surface still said "not loaded" for both. *)
-let title_unread = "(not loaded)"
-let title_failed = "(load failed)"
-
-let title_missing_reading ~error =
-  if Option.is_some error then title_failed else title_unread
-
-
 (* A level meter, only while a capture is running.
 
    A dead input device and a quiet room both end the same way — an empty draft
@@ -875,29 +849,31 @@ let recent_chunk_projection (state : state) =
 
 let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
   let module Pane = Masc_tui_acting_pane in
+  let pane_keeper (keeper : keeper) : Pane.keeper =
+    let reading = keeper_reading state keeper in
+    let health = Keeper_control.health reading in
+    let paused = reading.Keeper_control.paused in
+    let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
+    let mark_tone =
+      if paused then Pane.Dim
+      else
+        match reading_of_health with
+        | Some Tui_decode.Health_running -> Pane.Ok
+        | Some Tui_decode.Health_idle -> Pane.Dim
+        | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
+        | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
+        | None -> Pane.Dim
+    in
+    { Pane.name = keeper.k_name
+    ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
+    ; mark_tone
+    ; health = reading_of_health
+    }
+  in
   let keepers =
-    List.map
-      (fun (keeper : keeper) ->
-        let reading = keeper_reading state keeper in
-        let health = Keeper_control.health reading in
-        let paused = reading.Keeper_control.paused in
-        let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
-        let mark_tone =
-          if paused then Pane.Dim
-          else
-            match reading_of_health with
-            | Some Tui_decode.Health_running -> Pane.Ok
-            | Some Tui_decode.Health_idle -> Pane.Dim
-            | Some (Tui_decode.Health_stale | Tui_decode.Health_degraded) -> Pane.Warn
-            | Some (Tui_decode.Health_offline | Tui_decode.Health_zombie) -> Pane.Bad
-            | None -> Pane.Dim
-        in
-        { Pane.name = keeper.k_name
-        ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health
-        ; mark_tone
-        ; health = reading_of_health
-        })
-      state.keepers
+    match state.local_workspace with
+    | Local_workspace_unread -> None
+    | Local_workspace_read -> Some (List.map pane_keeper state.keepers)
   in
   let feed =
     match state.observer with
@@ -928,6 +904,7 @@ let acting_pane_input (state : state) : Masc_tui_acting_pane.input =
            Pane.Whole_fleet)
   ; feed
   ; keepers
+  ; keepers_error = state.keepers_error
   ; selected =
       Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
   ; approvals =

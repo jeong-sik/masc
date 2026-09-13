@@ -10799,10 +10799,13 @@ def keeper_gate_mode_footer_interaction(
         output,
         rows=30,
         columns=200,
-        needle=re.compile(rb"g\x1b\[0m auto"),
+        needle=re.compile(rb"g\x1b\[0m:auto"),
         final_cursor=b"\x1b[?25l",
     )
-    if b"g yolo" in CSI_RE.sub(b"", footer):
+    # The hint above it moved to key:label, and this guard did not: the footer
+    # spells the off state "g:yolo", so looking for "g yolo" matched nothing and
+    # the check passed whatever the footer said.
+    if b"g:yolo" in CSI_RE.sub(b"", footer):
         raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
     os.write(master_fd, b"q")
 
@@ -12267,10 +12270,22 @@ def fusion_list_detail_interaction(
             output,
             b"masc://overview/tasks/task-linked-501",
         )
-        verdict = send_and_wait(
-            process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
+        verdict_start = len(output)
+        send_and_wait(process, master_fd, output, b"\r", b"EVALUATOR VERDICT")
+        # The pane opens on "HTTP [loading...]" and the linked goal lands in a
+        # later frame, so the frame that first carries the heading need not
+        # carry the goal. Wait for the slowest piece, then read every needle
+        # from this verdict's own frames rather than from the one that opened
+        # it.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"masc://planning/goal-ssim-501",
+            start=verdict_start,
+            timeout=10.0,
         )
-        verdict_plain = CSI_RE.sub(b"", verdict)
+        verdict_plain = CSI_RE.sub(b"", bytes(output[verdict_start:]))
         # The verdict names a task; the task names its goals; a goal declares
         # the metric it is measured by. All three were present and none of them
         # met on a screen, so a verdict said "approve" without saying what it

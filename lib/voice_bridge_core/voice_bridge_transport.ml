@@ -86,7 +86,12 @@ let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
     argv
 ;;
 
-let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
+let endpoint_timeout_seconds (endpoint : Voice_config.endpoint) =
+  match endpoint.timeout_seconds with
+  | Some seconds -> seconds
+  | None -> Env_config_runtime.Voice.http_request_timeout_sec
+
+let run_audio_http_request_to_file ~timeout_sec ~url ~headers ~body_json ~output_file =
   let body_file = Filename.temp_file "masc_voice_request" ".json" in
   Eio_guard.protect
     ~finally:(fun () ->
@@ -100,13 +105,13 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
            headers
        in
        let argv =
-         [ "curl"; "-sS"; "--max-time"; "30"; "-X"; "POST"; url ]
+         [ "curl"; "-sS"; "--max-time"; string_of_float timeout_sec; "-X"; "POST"; url ]
          @ header_args
          @ [ "--data-binary"; "@" ^ body_file; "-o"; output_file; "-w"; "%{http_code}" ]
        in
        let status, http_code_str =
          run_voice_status
-           ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+           ~timeout_sec
            argv
        in
        match status with
@@ -169,6 +174,7 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
       ~tuning
   in
   run_audio_http_request_to_file
+    ~timeout_sec:(endpoint_timeout_seconds endpoint)
     ~url:request.url
     ~headers:request.headers
     ~body_json:request.body_json
@@ -181,9 +187,6 @@ let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output
    caller told "spoke" about an empty file has been told the wrong thing. *)
 let smallest_believable_audio_bytes = 100
 
-let command_timeout_seconds (endpoint : Voice_config.endpoint) =
-  Option.value endpoint.timeout_seconds
-    ~default:Env_config_runtime.Voice.http_request_timeout_sec
 
 let run_audio_command_to_file ~timeout_sec (req : Voice_runtime_overlay.command_request) ~output_file =
   let status, output =
@@ -230,7 +233,7 @@ let speak_via_command_to_file endpoint ~message ~voice ~output_file =
   let* request =
     Voice_runtime_overlay.tts_command_for_endpoint endpoint ~voice ~message ~output_file
   in
-  run_audio_command_to_file ~timeout_sec:(command_timeout_seconds endpoint) request ~output_file
+  run_audio_command_to_file ~timeout_sec:(endpoint_timeout_seconds endpoint) request ~output_file
 ;;
 
 (* Transcribing by running a command. The transcript is the command's own
@@ -242,7 +245,7 @@ let transcribe_via_command endpoint ~audio_file ~model =
   in
   let status, output =
     run_voice_status
-      ~timeout_sec:(command_timeout_seconds endpoint)
+      ~timeout_sec:(endpoint_timeout_seconds endpoint)
       request.Voice_runtime_overlay.argv
   in
   let command =
@@ -274,7 +277,7 @@ let list_voices_via_command endpoint =
   in
   let status, output =
     run_voice_status
-      ~timeout_sec:(command_timeout_seconds endpoint)
+      ~timeout_sec:(endpoint_timeout_seconds endpoint)
       request.Voice_runtime_overlay.argv
   in
   match status with
@@ -290,7 +293,7 @@ let list_voices_via_command endpoint =
     Error (Printf.sprintf "%s stopped by signal %d" command sig_num)
 ;;
 
-let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
+let run_stt_multipart_request ~timeout_sec (req : Voice_runtime_overlay.stt_request) =
   let header_args =
     List.concat_map
       (fun (key, value) -> [ "-H"; Printf.sprintf "%s: %s" key value ])
@@ -304,13 +307,13 @@ let run_stt_multipart_request (req : Voice_runtime_overlay.stt_request) =
   let field_name, file_path = req.file_field in
   let file_arg = [ "-F"; Printf.sprintf "%s=@%s" field_name file_path ] in
   let argv =
-    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; "30"; "-X"; "POST"; req.url ]
+    [ "curl"; "-sS"; "--fail-with-body"; "--max-time"; string_of_float timeout_sec; "-X"; "POST"; req.url ]
     @ header_args
     @ form_args
     @ file_arg
   in
   let status, body =
-    run_voice_status ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec argv
+    run_voice_status ~timeout_sec argv
   in
   match status with
   | Unix.WEXITED 0 ->
@@ -443,7 +446,7 @@ let collect_voice_catalogue ~remaining_seconds ~fetch_page
 
 let list_voices_via_http endpoint =
   let deadline =
-    Monotonic_deadline.after ~seconds:Env_config_runtime.Voice.http_request_timeout_sec
+    Monotonic_deadline.after ~seconds:(endpoint_timeout_seconds endpoint)
   in
   let* api_key = resolve_api_key endpoint in
   let* request = Voice_runtime_overlay.voice_listing_request_for_endpoint endpoint ~api_key in
@@ -457,5 +460,5 @@ let transcribe_via_http_stt endpoint ~audio_file ~model =
   let* request =
     Voice_runtime_overlay.stt_request_for_endpoint endpoint ~api_key ~audio_file ~model
   in
-  run_stt_multipart_request request
+  run_stt_multipart_request ~timeout_sec:(endpoint_timeout_seconds endpoint) request
 ;;

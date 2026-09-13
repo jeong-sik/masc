@@ -231,6 +231,22 @@ let with_catalogue_processes f =
         {|#!/bin/sh
 printf '%s\n' "$@" > "$MASC_TEST_CATALOGUE_DIR/argv"
 /bin/cat > "$MASC_TEST_CATALOGUE_DIR/stdin"
+if [ -f "$MASC_TEST_CATALOGUE_DIR/delay-http" ]; then
+  /bin/sleep 0.05
+fi
+output_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then
+    output_file="$2"
+    shift
+  fi
+  shift
+done
+if [ -n "$output_file" ]; then
+  printf '%0128d' 0 > "$output_file"
+  printf '200'
+  exit 0
+fi
 if [ -f "$MASC_TEST_CATALOGUE_DIR/stt-response" ]; then
   /bin/cat "$MASC_TEST_CATALOGUE_DIR/stt-response"
   exit 0
@@ -608,6 +624,71 @@ let test_catalogue_deadline_stops_the_whole_scan () =
            ~remaining_seconds:(fun () -> 0.) ~fetch_page catalogue_request with
    | Error _ -> Alcotest.(check int) "an expired deadline dispatches nothing" 1 !calls
    | Ok _ -> Alcotest.fail "an expired deadline must not dispatch")
+let timeout_from_curl read =
+  let rec find = function
+    | "--max-time" :: value :: _ -> float_of_string value
+    | _ :: rest -> find rest
+    | [] -> Alcotest.fail "curl deadline missing"
+  in find (String.split_on_char '\n' (read "argv"))
+
+let test_http_transports_use_each_endpoint_timeout () =
+  with_catalogue_processes (fun ~read ~root ->
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    let remote = { (endpoint ~kind:Voice_config.Elevenlabs_direct ~base_url:None) with
+      api_key_env = Some "MASC_TEST_CATALOGUE_KEY" } in
+    List.iter (fun seconds ->
+      let configured = { remote with timeout_seconds = Some seconds } in
+      (match Voice_bridge_transport.speak_via_http_tts_to_file configured
+          ~agent_id:"fixture" ~message:"hello" ~voice:"provider-voice" ~model:"provider-model"
+          ~output_file:(Filename.concat root "audio.mp3") with
+       | Ok size -> Alcotest.(check int) "fake HTTP audio was received" 128 size
+       | Error message -> Alcotest.fail message);
+      Alcotest.(check (float 0.000001)) "TTS curl has this endpoint's deadline" seconds (timeout_from_curl read);
+      Out_channel.with_open_bin (Filename.concat root "stt-response") (fun out -> output_string out {|{"text":"heard"}|});
+      (match Voice_bridge_transport.transcribe_via_http_stt configured ~audio_file:"/fixture/audio.wav" ~model:"provider-model" with
+       | Ok _ -> () | Error message -> Alcotest.fail message);
+      Alcotest.(check (float 0.000001)) "STT curl has this endpoint's deadline" seconds (timeout_from_curl read);
+      Sys.remove (Filename.concat root "stt-response");
+      ignore (listed_id configured);
+      let remaining = timeout_from_curl read in
+      Alcotest.(check bool) "catalogue uses remaining endpoint budget" true (remaining > 0. && remaining <= seconds)) [1.25; 2.5];
+    Out_channel.with_open_bin (Filename.concat root "stt-response") (fun out -> output_string out {|{"text":"heard"}|});
+    (match Voice_bridge_transport.transcribe_via_http_stt remote ~audio_file:"/fixture/audio.wav" ~model:"provider-model" with
+     | Ok _ -> () | Error message -> Alcotest.fail message);
+    Alcotest.(check (float 0.000001)) "unset endpoint uses the global setting"
+      Env_config_runtime.Voice.http_request_timeout_sec (timeout_from_curl read))
+
+let test_http_failover_uses_fresh_endpoint_budget () =
+  with_catalogue_processes (fun ~read ~root ->
+    Out_channel.with_open_bin (Filename.concat root "runtime.toml") (fun out -> output_string out
+      {|[voice.stt]
+default_model = "remote-model"
+[[voice.stt.endpoints]]
+id = "short"
+kind = "openai_compat"
+base_url = "http://fixture.invalid/v1"
+timeout_seconds = 0.001
+[[voice.stt.endpoints]]
+id = "long"
+kind = "openai_compat"
+base_url = "http://fixture.invalid/v1"
+timeout_seconds = 0.5
+|});
+    Out_channel.with_open_bin (Filename.concat root "delay-http") (fun _ -> ());
+    Out_channel.with_open_bin (Filename.concat root "stt-response") (fun out -> output_string out {|{"text":"heard"}|});
+    Unix.putenv "MASC_CONFIG_DIR" root;
+    Unix.putenv "MASC_BASE_PATH" root;
+    Unix.putenv "MASC_BASE_PATH_INPUT" root;
+    match Voice.transcribe_audio ~audio_file:"/fixture/audio.wav" () with
+    | Ok (`Assoc fields) ->
+      Alcotest.(check bool) "short endpoint timed out; second endpoint answered" true
+        (List.assoc_opt "endpoint_id" fields = Some (`String "long"));
+      Alcotest.(check (float 0.000001)) "second endpoint's budget reaches curl" 0.5 (timeout_from_curl read)
+    | Ok _ -> Alcotest.fail "transcription result missing endpoint evidence"
+    | Error message -> Alcotest.fail message)
+
 let () =
   Alcotest.run
     "voice_catalog"
@@ -624,6 +705,10 @@ let () =
             test_normal_transcription_uses_the_command_transport
         ; Alcotest.test_case "HTTP transcription distinguishes malformed and empty" `Quick
             test_http_transcription_distinguishes_malformed_and_empty
+        ; Alcotest.test_case "HTTP transports use each endpoint timeout" `Quick
+            test_http_transports_use_each_endpoint_timeout
+        ; Alcotest.test_case "HTTP failover uses a fresh endpoint budget" `Quick
+            test_http_failover_uses_fresh_endpoint_budget
         ; Alcotest.test_case "command transcription honors endpoint timeout" `Quick
             test_command_transcription_honors_endpoint_timeout
         ; Alcotest.test_case "audio capabilities keep the generated format" `Quick

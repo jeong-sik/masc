@@ -2784,6 +2784,9 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
     the composer row is never focused there. A transcript that was handed to
     the row's send key from this pane stayed in the draft and nothing was
     sent -- measured 2026-09-13 against a live keeper with send_on_stop on.
+
+    The empty draft names the key first, as the composer row does: this pane
+    bound ^Y and ^A and nothing on it said so.
     """
 
     def interact(
@@ -2798,8 +2801,14 @@ def send_on_stop_from_the_chat_pane_interaction(requests: HttpRequests) -> Inter
         send_and_wait(
             process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
         )
+        read_available(master_fd, output)
+        chat_opened_at = len(output)
         send_and_wait(
             process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat"
+        )
+        wait_for_output(
+            process, master_fd, output, b"(^Y to speak, ^A to keep listening)",
+            start=chat_opened_at, timeout=3.0,
         )
         os.write(master_fd, b"\x19")
         wait_for_spoken_send(process, master_fd, output, requests)

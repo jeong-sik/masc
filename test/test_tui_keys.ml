@@ -123,6 +123,20 @@ let test_chat_help_names_memory_cycle () =
         (Some "cycle Memory journal summary / full / hidden")
         binding.help
 
+(* The chat pane binds the capture keys (masc_tui.ml, the arms beside
+   [submit_chat_draft]) and is the surface an operator speaks from. The help
+   sheet for it named neither, so the only place they were written down was the
+   composer row on other surfaces. *)
+let test_chat_help_names_the_voice_keys () =
+  let keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface (Keepers Keeper_message))
+  in
+  Alcotest.(check bool) "Ctrl-Y starts a capture" true (List.mem "Ctrl-Y" keys);
+  Alcotest.(check bool) "Ctrl-A turns continuous capture on" true
+    (List.mem "Ctrl-A" keys)
+
 let test_plain_listing_footer_shape () =
   (* Connectors answers the row search, so its footer carries the two Search
      hints between its own keys and the shared meta tail. That order is the
@@ -1863,6 +1877,8 @@ let () =
             test_config_declares_the_page_keys_it_handles
         ; Alcotest.test_case "chat help names the Memory cycle" `Quick
             test_chat_help_names_memory_cycle
+        ; Alcotest.test_case "chat help names the voice keys" `Quick
+            test_chat_help_names_the_voice_keys
         ; Alcotest.test_case "a searchable surface does not also bind n" `Quick
             test_a_searchable_surface_does_not_also_bind_n
         ; Alcotest.test_case "Code separates blame from the definition walk"

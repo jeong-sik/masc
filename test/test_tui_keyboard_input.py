@@ -12329,6 +12329,7 @@ def fusion_list_detail_interaction(
         # whereas v selects the three Planning tabs without skipping coverage.
         palette_go(process, master_fd, output, b"go planning", b"MASC Planning")
         send_and_wait(process, master_fd, output, b"v", b"Task Review")
+        verdicts_start = len(output)
         send_and_wait(process, master_fd, output, b"v", b"automatic Gate rulings")
         # One full repaint, because the pane redraws only the rows that change
         # and the column headers are written once. The assertions below are
@@ -12359,15 +12360,38 @@ def fusion_list_detail_interaction(
         # was reading a region this frame does not carry. The Enter below opens
         # the verdict, which proves the key works rather than that it is
         # spelled on screen.
+        # EVALUATOR is a column heading, drawn with zero rows as readily as
+        # with one. The verdict itself arrives over HTTP afterwards, and Y
+        # copies the reference of the selected verdict -- with the snapshot
+        # still in flight there is none, so the copy was "nothing on this
+        # surface has a link" and no OSC 52 ever came. The failing screen had
+        # the row by the time the wait gave up, which is what made it look like
+        # a dropped key (#35754). Wait for the row, then press.
+        wait_for_output(
+            process, master_fd, output, b"inked-501", start=verdicts_start,
+            timeout=5.0,
+        )
         copy_reference(
             process,
             master_fd,
             output,
             b"masc://overview/tasks/task-linked-501",
         )
-        verdict = send_and_wait(
+        verdict_start = len(output)
+        send_and_wait(
             process, master_fd, output, b"\r", b"EVALUATOR VERDICT"
         )
+        # The detail arrives in pieces and send_and_wait returns the moment the
+        # header does, so the bytes it hands back stop wherever the header
+        # landed. The rows below it -- the goal link, the footer -- were the
+        # ones missing, and a different one each time: one CI run lacked the
+        # footer, the next the goal link, with every row above both present.
+        # Wait for the last of them before reading anything.
+        for tail in (b"masc://planning/goal-ssim-501", b"Left/Esc:list"):
+            wait_for_output(
+                process, master_fd, output, tail, start=verdict_start, timeout=5.0
+            )
+        verdict = bytes(output[verdict_start:])
         verdict_plain = CSI_RE.sub(b"", verdict)
         # The verdict names a task; the task names its goals; a goal declares
         # the metric it is measured by. All three were present and none of them

@@ -589,7 +589,22 @@ let cleanup_old_audio_files () =
 
 type agent_speak_completion =
   | Spoken
+  | Synthesized
   | Dedup_skipped
+
+(* The [status] a speak result carries, and the reading of it back. One pair so
+   the value written for a local endpoint and the value decoded from a Voice
+   MCP server's answer are the same three words. *)
+let agent_speak_completion_to_string = function
+  | Spoken -> "spoken"
+  | Synthesized -> "synthesized"
+  | Dedup_skipped -> "dedup_skipped"
+
+let agent_speak_completion_of_string = function
+  | "spoken" -> Some Spoken
+  | "synthesized" -> Some Synthesized
+  | "dedup_skipped" -> Some Dedup_skipped
+  | _ -> None
 
 type agent_speak_result =
   { completion : agent_speak_completion
@@ -798,7 +813,7 @@ let attempt_tts_endpoint
            | Sys_error _ -> ());
           Ok
             (`Assoc
-                [ "status", `String "dedup_skipped"
+                [ "status", `String (agent_speak_completion_to_string Dedup_skipped)
                 ; "agent_id", `String agent_id
                 ; "reason", `String "identical message was played recently (mutex)"
                 ])
@@ -808,10 +823,13 @@ let attempt_tts_endpoint
             | `Failed _ -> "failed"
             | `Skipped _ -> "skipped"
           in
+          (* The clip exists and nothing on this host played it. A keeper reads
+             [status] to tell the operator what happened, so this is not
+             [Spoken]. *)
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Synthesized)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -825,7 +843,7 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Spoken)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -841,7 +859,7 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   ([ "status", `String "spoken"
+                   ([ "status", `String (agent_speak_completion_to_string Spoken)
                     ; "agent_id", `String agent_id
                     ; "voice", `String voice
                     ; "audio_file", `String audio_file
@@ -1030,7 +1048,7 @@ let agent_speak_json
            playback_dedup_window_sec);
       Ok
         (`Assoc
-            [ "status", `String "dedup_skipped"
+            [ "status", `String (agent_speak_completion_to_string Dedup_skipped)
             ; "agent_id", `String agent_id
             ; "reason", `String "identical message was played recently"
             ]))
@@ -1125,10 +1143,10 @@ let agent_speak_json
 
 let decode_agent_speak_result payload =
   match Json_util.get_string payload "status" with
-  | Some "spoken" -> Ok { completion = Spoken; payload }
-  | Some "dedup_skipped" -> Ok { completion = Dedup_skipped; payload }
   | Some status ->
-    Error (Printf.sprintf "voice speak returned unsupported status=%S" status)
+    (match agent_speak_completion_of_string status with
+     | Some completion -> Ok { completion; payload }
+     | None -> Error (Printf.sprintf "voice speak returned unsupported status=%S" status))
   | None -> Error "voice speak result is missing required status"
 ;;
 

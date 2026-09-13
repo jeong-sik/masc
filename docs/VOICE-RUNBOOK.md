@@ -341,8 +341,8 @@ made three calls:
 |---|---|---|
 | 45.7s | `keeper_tool_search` for `keeper_voice_speak` | `now callable: keeper_voice_speak` |
 | 259.6s | `keeper_skill` for a `voice-speak` skill | error — no such skill; the model guessed the name |
-| 290.1s | `keeper_voice_speak` with the sentence | `spoken` in 3.2s |
-| 308.0s | reply | `자기소개를 음성으로 말해 드렸습니다.` |
+| 290.1s | `keeper_voice_speak` with the sentence | a 14.2s clip in 3.2s |
+| 308.0s | reply | text |
 
 No approval was asked for; the log line is
 `external effect authorized operation=keeper_voice_speak source=local_output`.
@@ -357,18 +357,23 @@ on the chat line:
 ```
 
 `GET` on that URL with no token answered `200 audio/wav`, 632,212 bytes. The
-same call's result said
+call's result says
 
 ```
-"local_playback_status":"skipped","local_playback_reason":"local playback disabled for agent"
+"status":"synthesized","local_playback_status":"skipped","local_playback_reason":"local playback disabled for agent"
 ```
 
-because `[voice.local_playback]` is absent and absent means off. The dashboard
-draws the clip as `<audio controls>` with no autoplay, and the TUI does not
-play clips at all, so until someone presses play in the dashboard the reply is
-silent. imp's text said the clip was synthesized and *played*
-(`Yuna 음성으로 합성되어 재생되었습니다`): that sentence is the model's, not the
-tool's. `local_playback_status` is what happened.
+because `[voice.local_playback]` is absent and absent means off. `spoken` is
+the status only when this host played the clip. The dashboard draws the clip
+as `<audio controls>` with no autoplay, and the TUI does not play clips at all,
+so until someone presses play in the dashboard the reply is silent.
+
+imp relays that. Asked to say `오늘 음성 설정을 마쳤습니다` aloud, it called
+`keeper_voice_speak` at 168.9s and replied at 203.6s:
+
+```
+"오늘 음성 설정을 마쳤습니다"라는 음성을 합성해 채팅에 첨부했습니다. 다만 이 호스트에서는 에이전트의 로컬 재생이 꺼져 있어 실제로 소리 내어 재생되지는 않았으니, 첨부된 오디오 파일을 확인해 주세요.
+```
 
 ### What the commands cost
 

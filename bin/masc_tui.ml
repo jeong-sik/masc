@@ -1790,7 +1790,7 @@ let msx_pending_poll = ref Poll_idle
 let invalidate_msx_poll () = msx_poll_view := ref ()
 
 type async_msg =
-  | Keeper_queue_loaded of string * (string list, string) result
+  | Keeper_queue_loaded of string * int option * (string list, string) result
   | Lane_addons_loaded of int * ((Masc_tui_lane_addons.snapshot option * Yojson.Safe.t option * Masc.Lane_addon_action.receipt option), string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool
       * (Masc_tui_lane_declaration.response, string) result
@@ -1852,9 +1852,9 @@ type async_msg =
   | Keeper_chat_stream_unavailable of Keeper_chat.request * string
   | Keeper_run_next_done of Keeper_chat.request * (string, string) result
   | Keeper_observed_interrupt_done of
-      string * string * (Masc_tui_interrupt_signal.interrupt_signal, string) result
+      string * string * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_interrupt_done of
-      Keeper_chat.request * (Masc_tui_interrupt_signal.interrupt_signal, string) result
+      Keeper_chat.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
       int
       * string
@@ -6795,7 +6795,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Keeper_chat_interrupt_done (request, result))
+    enqueue_async mailbox (Keeper_chat_interrupt_done (request, generation, result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -6804,7 +6804,7 @@ let launch_keeper_interrupt state ~mailbox (request : Keeper_chat.request) =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Keeper_chat_interrupt_done (request, Error "Eio switch is unavailable"))
+        (Keeper_chat_interrupt_done (request, generation, Error "Eio switch is unavailable"))
 
 let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token =
   match keeper_observed_interrupt state keeper_name started_at with
@@ -6825,12 +6825,12 @@ let launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~in
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      enqueue_async mailbox (Keeper_observed_interrupt_done (keeper_name, interrupt_token, result))
+      enqueue_async mailbox (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
      | None -> enqueue_async mailbox
-         (Keeper_observed_interrupt_done (keeper_name, interrupt_token, Error "Eio switch is unavailable")));
+         (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, Error "Eio switch is unavailable")));
     true
 ;;
 
@@ -7024,7 +7024,10 @@ let take_pending_attachments state =
 
 let launch_keeper_request ?promoted ?(admission_intent = Keeper_chat.Queue_only) state ~mailbox request =
   let control_generation = match admission_intent with
-    | Keeper_chat.Interactive _ -> advance_keeper_chat_control state request.Keeper_chat.keeper_name
+    | Keeper_chat.Interactive _ ->
+      state.keeper_observed_interrupts <- List.filter (fun item ->
+        item.oi_keeper <> request.Keeper_chat.keeper_name) state.keeper_observed_interrupts;
+      advance_keeper_chat_control state request.Keeper_chat.keeper_name
     | Keeper_chat.Queue_only -> keeper_chat_control_generation state request.Keeper_chat.keeper_name in
   let submitted_at, origin =
     match promoted with
@@ -7167,6 +7170,35 @@ let queue_keeper_steer state ~causal_parent_request_id request =
       state.msg_queued <- queue;
       append_user_history_once ~submitted_at state request;
       Ok waiting
+;;
+
+let interactive_target_for state keeper_name =
+  match keeper_observed_turn state keeper_name with
+  | Some (_, token) -> Some (Keeper_chat.Observed_turn_token token)
+  | None -> List.find_map (fun entry ->
+      if String.equal entry.sent_request.keeper_name keeper_name
+         && Keeper_chat_transcript.phase entry.log.tl_transcript = Working
+      then Some (Keeper_chat.Direct_operation_id entry.sent_request.request_id)
+      else None) state.msg_inflight
+
+let launch_waiting_interactive state ~mailbox ~keeper_name =
+  match List.assoc_opt keeper_name state.keeper_chat_control_tokens with
+  | None -> ()
+  | Some control_token ->
+    let ready = List.filter (fun (name, _, generation, _) ->
+      String.equal name keeper_name
+      && generation = keeper_chat_control_generation state keeper_name)
+      state.keeper_interactive_waiting in
+    List.iter (fun (_, request_id, _, target) ->
+      state.keeper_interactive_waiting <- List.filter (fun (_, id, _, _) -> id <> request_id)
+        state.keeper_interactive_waiting;
+      match Chat_queue.take state.msg_queued ~request_id with
+      | None -> ()
+      | Some (item, rest) ->
+        state.msg_queued <- rest;
+        launch_keeper_request ~promoted:item
+          ~admission_intent:(Keeper_chat.Interactive {control_token;target})
+          state ~mailbox item.request) ready
 ;;
 
 let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
@@ -7314,39 +7346,40 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
           let attachments, references = take_pending_attachments state in
           Keeper_chat.create_request ~attachments ~references ~keeper_name:target
             ~message:text () in
-        let admission_intent =
-          match List.assoc_opt target state.keeper_chat_control_tokens with
-          | None ->
-            add_event state "info"
-              "Message submitted without interruption: current chat controls are unavailable";
-            launch_keeper_turns_load state ~mailbox;
-            Keeper_chat.Queue_only
-          | Some control_token ->
-            let observed = match keeper_observed_turn state target with
-              | Some (_, token) -> Some (Keeper_chat.Observed_turn_token token)
-              | None ->
-                List.find_map (fun entry ->
-                  if String.equal entry.sent_request.keeper_name target
-                     && Keeper_chat_transcript.phase entry.log.tl_transcript = Working
-                  then Some (Keeper_chat.Direct_operation_id entry.sent_request.request_id)
-                  else None) state.msg_inflight in
-            Keeper_chat.Interactive {control_token;target=observed} in
-        (* The server owns admission, cohort ordering and exact interruption in
-           one command. A reconnect repeats this immutable intent with the same
-           request ID and is read-only for an already accepted operation. *)
+        let observed_target = interactive_target_for state target in
+        (* Staging keeps the accepted text and attachments together. A control
+           receipt can arrive after Enter; hold only until that receipt, never
+           until the previous model turn finishes. A later Esc revokes this
+           pending intervention while retaining the queued message itself. *)
         (match queue_keeper_message state request with
          | Error detail -> add_event state "error" detail
          | Ok _ ->
            let queued = match Chat_queue.find state.msg_queued ~request_id:request.request_id with
              | Some _ as item -> item
              | None -> Chat_queue.join_target state.msg_queued ~keeper_name:target in
-           (match Option.bind queued (fun item -> Chat_queue.take state.msg_queued
-               ~request_id:item.Chat_queue.request.request_id) with
+           (match queued with
             | None -> add_event state "error" "Message staging changed before submission"
-            | Some (item, rest) ->
-              state.msg_queued <- rest;
+            | Some item ->
+              let request_id = item.Chat_queue.request.request_id in
+              state.keeper_interactive_waiting <-
+                (target, request_id, keeper_chat_control_generation state target, observed_target) ::
+                List.filter (fun (_, id, _, _) -> id <> request_id) state.keeper_interactive_waiting;
               clear_current_message_draft state;
-              launch_keeper_request ~promoted:item ~admission_intent state ~mailbox item.request)))
+              (match List.assoc_opt target state.keeper_chat_control_tokens with
+               | Some _ -> launch_waiting_interactive state ~mailbox ~keeper_name:target
+               | None when List.mem target state.keeper_chat_control_pending ->
+                 add_event state "info" "Input retained; waiting for the stop or resume acknowledgement";
+                 launch_keeper_turns_load state ~mailbox
+               | None ->
+                 state.keeper_interactive_waiting <- List.filter (fun (_, id, _, _) -> id <> request_id)
+                   state.keeper_interactive_waiting;
+                 (match Chat_queue.take state.msg_queued ~request_id with
+                  | None -> ()
+                  | Some (item, rest) ->
+                    state.msg_queued <- rest;
+                    launch_keeper_request ~promoted:item state ~mailbox item.request);
+                 add_event state "info" "Message submitted without interruption; refreshing chat controls";
+                 launch_keeper_turns_load state ~mailbox))))
 
 ;;
 
@@ -7366,6 +7399,8 @@ let drain_queued_message state ~base_path ~mailbox =
     match
       Chat_queue.take_first_sendable state.msg_queued ~sendable:(fun keeper_name ->
         Option.is_none (inflight_for state keeper_name)
+        && not (List.exists (fun (name, _, _, _) -> String.equal name keeper_name)
+          state.keeper_interactive_waiting)
         && not (composing_for_keeper state keeper_name)
         &&
         match state.msg_recall_replaces with
@@ -7535,6 +7570,9 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       "A queue request is pending; wait for its result before the next change"
   else begin
   state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
+  let control_generation = match action with
+    | Inbox.Pause | Inbox.Resume -> Some (begin_keeper_chat_control state keeper_name)
+    | _ -> None in
   let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
   let host = server_peer_host and port = state.port in
   let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
@@ -7605,12 +7643,12 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
     let result = try perform () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
-    enqueue_async mailbox (Keeper_queue_loaded (keeper_name, result)) in
+    enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, result)) in
   chat_notice state ~keeper_name:(Some keeper_name) ~role:Message_local
     (String.concat "\n" (local_lines () @ ["Reading server queue…"]));
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-  | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, Error "Eio switch is unavailable"))
+  | None -> enqueue_async mailbox (Keeper_queue_loaded (keeper_name, control_generation, Error "Eio switch is unavailable"))
   end
 ;;
 
@@ -11617,8 +11655,10 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
 let apply_async_message state ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   function
-  | Keeper_queue_loaded (keeper_name, result) ->
+  | Keeper_queue_loaded (keeper_name, control_generation, result) ->
+      Option.iter (fun generation -> ignore (finish_keeper_chat_control state keeper_name ~generation)) control_generation;
       state.keeper_queue_inflight <- List.filter ((<>) keeper_name) state.keeper_queue_inflight;
+      launch_keeper_turns_load state ~mailbox;
       let role, lines = match result with
         | Error detail -> Message_error, [detail]
         | Ok lines -> Message_local,
@@ -12999,6 +13039,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
              (fun (seq, delta) -> turn_log_add ~now entry.log ~seq delta)
              deltas;
            List.iter (fun (_, delta) -> match delta with
+             | Keeper_chat_live.Accepted {interactive=None;_} ->
+               launch_keeper_turns_load state ~mailbox
              | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
                let notice = match receipt.outcome with
                  | Keeper_chat.Applied ->
@@ -13166,17 +13208,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                 end)
        | Poll_pending _ | Poll_idle | Poll_failed -> ())
   | Keeper_chat_control_received (keeper_name, generation, token) ->
-      if generation = keeper_chat_control_generation state keeper_name then
+      if generation = keeper_chat_control_generation state keeper_name then begin
+        ignore (finish_keeper_chat_control state keeper_name ~generation);
         state.keeper_chat_control_tokens <- (keeper_name, token) ::
-          List.remove_assoc keeper_name state.keeper_chat_control_tokens
-      else launch_keeper_turns_load state ~mailbox
+          List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+        launch_waiting_interactive state ~mailbox ~keeper_name
+      end else launch_keeper_turns_load state ~mailbox
   | Keeper_turns_loaded (generation, result) ->
       state.keeper_turns_inflight <- false;
       (match result with
        | Ok rows ->
            let current row =
              Option.value ~default:0 (List.assoc_opt row.Tui_decode.ktr_keeper_name generation)
-             = keeper_chat_control_generation state row.Tui_decode.ktr_keeper_name in
+             = keeper_chat_control_generation state row.Tui_decode.ktr_keeper_name
+             && not (List.mem row.Tui_decode.ktr_keeper_name state.keeper_chat_control_pending) in
            let fresh, stale = List.partition current rows in
            List.iter (fun row ->
              state.keeper_chat_control_tokens <- List.remove_assoc row.Tui_decode.ktr_keeper_name
@@ -13187,7 +13232,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
            let rows = fresh @ List.filter (fun previous -> List.exists (fun row ->
              String.equal row.Tui_decode.ktr_keeper_name previous.Tui_decode.ktr_keeper_name) stale)
              state.keeper_turns in
-           if stale <> [] then launch_keeper_turns_load state ~mailbox;
+           if List.exists (fun row -> not (List.mem row.Tui_decode.ktr_keeper_name
+             state.keeper_chat_control_pending)) stale then launch_keeper_turns_load state ~mailbox;
            let observed_at = Unix.gettimeofday () in
            (* Two consecutive polls are what "just finished" is made of:
               running in the previous, idle in this one. The glow list is
@@ -13200,7 +13246,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
                state.keeper_turn_finishes;
            state.keeper_turns <- rows;
            state.keeper_turns_observed_at <- Some observed_at;
-           state.keeper_turns_error <- None
+           state.keeper_turns_error <- None;
+           List.iter (fun row -> launch_waiting_interactive state ~mailbox
+             ~keeper_name:row.Tui_decode.ktr_keeper_name) fresh
        | Error detail ->
            (* Keep the last known rows: a fetch that failed says nothing
               about the turns themselves, and blanking every badge on one
@@ -13379,7 +13427,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight
         append_chat_history state request Message_status
           (match result with Ok detail -> detail | Error detail -> "Could not prioritize this message: " ^ detail)
       end
-  | Keeper_observed_interrupt_done (keeper_name, interrupt_token, result) ->
+  | Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result) ->
+      if finish_keeper_chat_control state keeper_name ~generation then launch_keeper_turns_load state ~mailbox;
       state.keeper_observed_interrupts <- List.map (fun item ->
         if item.oi_keeper <> keeper_name || item.oi_token <> interrupt_token then item
         else { item with oi_status = match result with
@@ -13387,7 +13436,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight
           | Ok (Not_signalled { reason; detail }) ->
             Interrupt_declined (Option.value ~default:reason detail)
           | Error detail -> Interrupt_failed detail }) state.keeper_observed_interrupts
-  | Keeper_chat_interrupt_done (request, result) ->
+  | Keeper_chat_interrupt_done (request, generation, result) ->
+      if finish_keeper_chat_control state request.Keeper_chat.keeper_name ~generation then
+        launch_keeper_turns_load state ~mailbox;
       (match
          inflight_entry_by_request_id state request.Keeper_chat.request_id
        with

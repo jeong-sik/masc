@@ -3898,6 +3898,8 @@ type state = {
   mutable coalesce_queued_input: bool;
   mutable keeper_chat_control_generations : (string * int) list;
   mutable keeper_chat_control_tokens : (string * string) list;
+  mutable keeper_chat_control_pending : string list;
+  mutable keeper_interactive_waiting : (string * string * int * Masc_tui_keeper_chat_projection.interactive_target option) list;
   mutable keeper_queue_inflight : string list;
   mutable keeper_run_next_pending : (Masc_tui_keeper_chat_projection.request * string option) option;
   (* Whether ^Y ending a voice capture also sends what was heard
@@ -5406,8 +5408,23 @@ let advance_keeper_chat_control state keeper_name =
 
 let begin_keeper_chat_control state keeper_name =
   let generation = advance_keeper_chat_control state keeper_name in
+  state.keeper_chat_control_pending <- keeper_name :: List.filter ((<>) keeper_name) state.keeper_chat_control_pending;
   state.keeper_chat_control_tokens <- List.remove_assoc keeper_name state.keeper_chat_control_tokens;
+  state.keeper_interactive_waiting <- List.filter (fun (name, _, _, _) -> name <> keeper_name)
+    state.keeper_interactive_waiting;
   generation
+
+let finish_keeper_chat_control state keeper_name ~generation =
+  if generation <> keeper_chat_control_generation state keeper_name
+     || not (List.mem keeper_name state.keeper_chat_control_pending) then false
+  else begin
+    let next = advance_keeper_chat_control state keeper_name in
+    state.keeper_chat_control_pending <- List.filter ((<>) keeper_name) state.keeper_chat_control_pending;
+    state.keeper_interactive_waiting <- List.map (fun (name, id, held, target) ->
+      if name = keeper_name && held = generation then name, id, next, target
+      else name, id, held, target) state.keeper_interactive_waiting;
+    true
+  end
 
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
@@ -5765,6 +5782,8 @@ let create_state
   coalesce_queued_input = true;
   keeper_chat_control_generations = [];
   keeper_chat_control_tokens = [];
+  keeper_chat_control_pending = [];
+  keeper_interactive_waiting = [];
   keeper_queue_inflight = [];
   keeper_run_next_pending = None;
   voice_send_on_stop = false;

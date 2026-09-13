@@ -62,6 +62,7 @@ type delta =
   | Accepted of
       { admission : admission
       ; queue_length : int
+      ; interactive : Masc_tui_keeper_chat_projection.interactive_receipt option
       }
   | Checkpoint
   | External_effect_completed
@@ -182,7 +183,7 @@ let custom_deltas_unvalidated fields =
                 | Projection.Cancelled -> Settled
               in
               [ Accepted
-                  { admission; queue_length = acceptance.Projection.queued_count }
+                  { admission; queue_length = acceptance.Projection.queued_count; interactive = acceptance.interactive }
               ]))
   | Some "KEEPER_CHAT_BATCH_BOUND" ->
     (match List.assoc_opt "value" fields with

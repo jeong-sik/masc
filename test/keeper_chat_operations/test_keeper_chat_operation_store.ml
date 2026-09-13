@@ -522,11 +522,38 @@ let test_batch_restart_and_commit_failure () =
     check int "restart does not replay follower" 0 (store_ok (Store.inventory reopened)).queued_count)
 ;;
 
+let test_interactive_admission_prioritizes_cohort_atomically () =
+  with_store "interactive-cohort" @@ fun _path store ->
+  let submit ?priority name actor = store_ok (Store.submit ?priority store ~now:1.
+    ~operation_id:(id name) ~source:(source actor) ~input:(input name)) in
+  ignore (submit "other-first" "other");
+  ignore (submit "older-message" "actor");
+  ignore (submit "other-last" "other");
+  let calls = ref 0 in
+  let select (incoming : Operation.t) candidates =
+    incr calls;
+    let members = List.filter (fun (row : Operation.t) -> row.source = incoming.source) candidates in
+    Ok (Some {Store.members = List.map (fun (row : Operation.t) -> row.operation_id) members; input = input "unused until claim"}) in
+  ignore (submit ~priority:select "new-message" "actor");
+  ignore (submit ~priority:(fun _ _ -> fail "idempotent replay reprioritized queue") "new-message" "actor");
+  check int "selector ran for first admission only" 1 !calls;
+  let queued = store_ok (Store.list_queued store ~after_sequence:None ~limit:10) in
+  check (list string) "old-to-new messages move together ahead of other channels"
+    ["older-message"; "new-message"; "other-first"; "other-last"]
+    (List.map (fun (row : Operation.t) -> Id.to_string row.operation_id) queued);
+  (match Store.submit ~priority:(fun _ _ -> Error "cohort rejected") store ~now:2.
+      ~operation_id:(id "rejected-message") ~source:(source "actor") ~input:(input "reject") with
+   | Error (Store.Invalid_input _) -> () | _ -> fail "invalid cohort was admitted");
+  check bool "cohort rejection rolls back insertion" true
+    (store_ok (Store.get store (id "rejected-message")) = None)
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
     [ ( "store"
-      , [ test_case "batch atomic dispatch and identity settlement" `Quick test_batch_claim_freezes_inputs_and_settles_members
+      , [ test_case "interactive admission preserves cohort order atomically" `Quick test_interactive_admission_prioritizes_cohort_atomically
+        ; test_case "batch atomic dispatch and identity settlement" `Quick test_batch_claim_freezes_inputs_and_settles_members
         ; test_case "batch restart and failed commit" `Quick test_batch_restart_and_commit_failure
         ; test_case "priority preserves other producers, replay and running boundary" `Quick
           test_priority_keeps_other_producers_and_survives_reopen

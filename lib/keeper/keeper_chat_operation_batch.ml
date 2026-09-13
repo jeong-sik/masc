@@ -38,9 +38,7 @@ let select head candidates =
   | Ok (source, first) ->
     let members, inputs, attachments = List.fold_left
       (fun (members, inputs, attachments) (operation : Operation.t) ->
-        if Operation.Operation_id.equal operation.operation_id head.Operation.operation_id
-        then members, inputs, attachments
-        else match decode operation with
+        match decode operation with
         | Error _ -> members, inputs, attachments
         | Ok (candidate_source, input)
           when same_context source candidate_source
@@ -50,7 +48,7 @@ let select head candidates =
            | None -> members, inputs, attachments
            | Some attachments -> operation.operation_id :: members, input :: inputs, attachments)
         | Ok _ -> members, inputs, attachments)
-      ([head.Operation.operation_id], [first], first.attachments) candidates in
+      ([], [], first.attachments) candidates in
     match members with
     | [] | [_] -> Ok None
     | _ ->
